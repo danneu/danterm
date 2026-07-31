@@ -46,7 +46,8 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D2 -- whether to mine Ghostty and windows-terminal as case sources
 
-- Status: recommended for scoping; adopt/decline not yet decided.
+- Status: decided; adopt windows-terminal narrowly and decline Ghostty as a
+  maintained corpus for this scope.
 - Evidence used: F5 (1689 `test` blocks under `.ghostty-src/src/terminal/`, MIT,
   never in doc 1's candidate table), F8 (windows-terminal's ~183 `TEST_METHOD`
   conformance suite, MIT, also never surveyed), F8's third inference (xterm
@@ -77,11 +78,26 @@ review obligations before copying or translating GPL/LGPL test code.
   contract, never against the source engine's behavior. Start with
   windows-terminal's three named files, because they map onto gaps this doc
   already found rather than onto a size signal.
-- Direction review: pending.
-- Selected direction: pending.
-- Behavioral verification: any adopted case lands as a neutral fixture with a
-  manifest entry and license notice matching the libvterm and Alacritty pattern.
-- Decision and rationale: pending.
+- Direction review: accepted by the owner on 2026-07-31 by continuing the Phase
+  3 mine and confirming DanTerm's existing stricter malformed-SGR policy.
+- Selected direction: option 2. Adopt the two non-ASCII OSC 52 decode cases
+  shared by `Base64Test.cpp#DecodeUTF8` and
+  `OutputEngineTest.cpp#TestSetClipboard`. Decline the rest of the three scoped
+  windows-terminal files and all three scoped Ghostty files as already covered,
+  unsupported, or implementation-coupled.
+- Behavioral verification: `Fixtures/windows-terminal/osc52-unicode.json`
+  replays both adopted payloads through the public clipboard-write channel
+  whole, bytewise, and at every split point. The complete 71-method ledger is
+  `windows-terminal-manifest.json`; its notice is
+  `LICENSE.windows-terminal.txt`.
+- Decision and rationale: F9 found two novel supported expectations in 4,315
+  windows-terminal lines and none in 10,777 Ghostty test-section lines. The
+  selected payloads test OSC 52's valid Base64-to-UTF-8 boundary without changing
+  DanTerm's canonical padding, strict UTF-8, write-only, or size policies.
+  Ghostty's portable cases are already covered through stronger public
+  projections; its remaining cases describe pages, pins, caches, style maps, or
+  unsupported features. Maintaining a Ghostty-derived corpus for zero new
+  behavior would add neutrality and license overhead without coverage.
 
 ### D3 -- close the Unicode and decoder fixture gaps
 

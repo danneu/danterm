@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "pinnedCommit": "1cea42d433253d95c4487a3037db48197b5e72f4",
+  "recordedDeviations": [
+    "DanTerm requires canonical padded Base64 where windows-terminal also accepts omitted padding.",
+    "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005 or alternate-scroll 1007.",
+    "DanTerm treats raw C1 bytes as UTF-8 input and does not expose parser states or dispatch callbacks."
+  ],
+  "files": [
+    {
+      "path": "src/terminal/parser/ut_parser/Base64Test.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "DecodeFuzz", "disposition": "superseded", "rationale": "Native OSC 52 tests cover canonical padded decoding, malformed inputs, strict UTF-8, exact decoded bounds, deterministic fuzz recovery, and chunk splits; omitted padding is deliberately rejected." },
+        { "name": "DecodeUTF8", "disposition": "adopted", "rationale": "osc52-unicode.json pins the two previously uncovered valid non-ASCII UTF-8 payloads through the public clipboard-write channel." }
+      ]
+    },
+    {
+      "path": "src/terminal/adapter/ut_adapter/MouseInputTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "DefaultModeTests", "disposition": "superseded", "rationale": "TerminalMouseEncodingTests covers X10 buttons, releases, modifiers, motion gating, wheels, and xterm-compatible coordinate bounds without Windows WM event translation." },
+        { "name": "Utf8ModeTests", "disposition": "out-of-scope", "rationale": "UTF-8 mouse encoding 1005 is deliberately unsupported in favor of SGR 1006." },
+        { "name": "SgrModeTests", "disposition": "superseded", "rationale": "TerminalMouseEncodingTests covers SGR button identity, releases, modifiers, motion modes, and large coordinates." },
+        { "name": "ScrollWheelTests", "disposition": "superseded", "rationale": "TerminalMouseEncodingTests covers vertical and horizontal wheel codes in X10 and SGR encodings." },
+        { "name": "AlternateScrollModeTests", "disposition": "out-of-scope", "rationale": "Alternate-scroll mode 1007 is not part of TerminalCore's input-mode contract." }
+      ]
+    },
+    {
+      "path": "src/terminal/parser/ut_parser/OutputEngineTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TestEscapePath", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers ESC restart and control-string cancellation through public actions rather than private parser states." },
+        { "name": "TestEscapeImmediatePath", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers escape intermediates and final dispatch through public stream actions." },
+        { "name": "TestEscapeThenC0Path", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers C0 execution without interrupting ESC and CSI collection." },
+        { "name": "TestGroundPrint", "disposition": "superseded", "rationale": "TerminalInputStreamTests and TerminalTests cover printable scalar actions and grid mutation." },
+        { "name": "TestCsiEntry", "disposition": "superseded", "rationale": "CSIParserTests covers zero-parameter dispatch through public CSISequence values." },
+        { "name": "TestC1CsiEntry", "disposition": "out-of-scope", "rationale": "DanTerm treats raw ground-state C1 bytes as malformed UTF-8 and does not expose a C1 parser mode." },
+        { "name": "TestCsiImmediate", "disposition": "superseded", "rationale": "CSIParserTests covers ordered intermediate collection and unsupported public-state no-ops." },
+        { "name": "TestCsiParam", "disposition": "superseded", "rationale": "CSIParserTests covers empty and positional CSI parameters through public CSISequence values." },
+        { "name": "TestCsiMaxParamCount", "disposition": "out-of-scope", "rationale": "The 32-parameter storage limit is a windows-terminal implementation choice; DanTerm pins its own bounded 24-parameter contract." },
+        { "name": "TestLeadingZeroCsiParam", "disposition": "superseded", "rationale": "The adopted libvterm parser fixture covers leading-zero normalization through a public cursor result." },
+        { "name": "TestCsiSubParam", "disposition": "superseded", "rationale": "CSIParserTests covers colon separators, empty subparameters, and mixed SGR groups through public CSISequence values." },
+        { "name": "TestCsiMaxSubParamCount", "disposition": "out-of-scope", "rationale": "The per-parameter subparameter storage layout and limit are windows-terminal internals; DanTerm pins a flat bounded representation." },
+        { "name": "TestLeadingZeroCsiSubParam", "disposition": "superseded", "rationale": "CSIParserTests and TerminalStyleTests cover numeric normalization inside colon-separated SGR groups." },
+        { "name": "TestCsiIgnore", "disposition": "superseded", "rationale": "CSIParserTests covers invalid parameter/intermediate transitions dropping dispatch without poisoning later CSI." },
+        { "name": "TestC1Osc", "disposition": "out-of-scope", "rationale": "Raw C1 OSC is deliberately unsupported in DanTerm's UTF-8 input mode." },
+        { "name": "TestOscStringSimple", "disposition": "superseded", "rationale": "TerminalOSC52Tests and TerminalInputStreamTests cover OSC collection and BEL termination through public actions." },
+        { "name": "TestLongOscString", "disposition": "superseded", "rationale": "DanTerm's native tests cover its stronger 2 MiB encoded-string and per-value retention bounds." },
+        { "name": "NormalTestOscParam", "disposition": "superseded", "rationale": "Native semantic-event and query tests exercise ordinary OSC selector parsing through public outcomes." },
+        { "name": "TestLeadingZeroOscParam", "disposition": "superseded", "rationale": "Native OSC dispatch normalizes numeric selectors and safely ignores unsupported values through public state." },
+        { "name": "TestLongOscParam", "disposition": "superseded", "rationale": "Native OSC parsing bounds selector accumulation and recovers to later valid input without exposing parser storage." },
+        { "name": "TestOscStringInvalidTermination", "disposition": "superseded", "rationale": "TerminalOSC52Tests and TerminalInputStreamTests cover invalid ESC termination canceling OSC and restarting escape recognition." },
+        { "name": "TestDcsEntry", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers DCS absorption and 7-bit ST recovery through public actions." },
+        { "name": "TestC1DcsEntry", "disposition": "out-of-scope", "rationale": "Raw C1 DCS is deliberately unsupported in DanTerm's UTF-8 input mode." },
+        { "name": "TestDcsImmediate", "disposition": "superseded", "rationale": "CSIParserTests and TerminalInputStreamTests cover bounded DCS collection and recovery without exposing private states." },
+        { "name": "TestDcsIgnore", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers unsupported DCS absorption and later printable recovery." },
+        { "name": "TestDcsParam", "disposition": "superseded", "rationale": "CSIParserTests covers DCS parameter overflow, discard, and recovery through public actions." },
+        { "name": "TestDcsIntermediateAndPassThrough", "disposition": "out-of-scope", "rationale": "DanTerm intentionally exposes no DCS pass-through callback; unsupported DCS is bounded and absorbed." },
+        { "name": "TestDcsLongStringPassThrough", "disposition": "out-of-scope", "rationale": "DCS handler callback topology is not part of TerminalCore's public contract." },
+        { "name": "TestDcsInvalidTermination", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers ESC restart from DCS into a later sequence through public actions." },
+        { "name": "TestSosPmApcString", "disposition": "superseded", "rationale": "TerminalInputStreamTests covers bounded SOS, PM, and APC absorption plus 7-bit ST recovery." },
+        { "name": "TestC1StringTerminator", "disposition": "out-of-scope", "rationale": "DanTerm deliberately supports only 7-bit ST; raw 0x9c remains opaque inside UTF-8 control strings." },
+        { "name": "TestCsiCursorMovementWithValues", "disposition": "superseded", "rationale": "CSICursorMovementTests covers supported cursor commands, bounds, and origin mode through public geometry." },
+        { "name": "TestCsiCursorMovementWithoutValues", "disposition": "superseded", "rationale": "CSICursorMovementTests covers omitted and zero cursor parameters defaulting to one." },
+        { "name": "TestCsiCursorPosition", "disposition": "superseded", "rationale": "CSICursorMovementTests covers CUP and HVP positioning through public cursor geometry." },
+        { "name": "TestCsiCursorPositionWithOnlyRow", "disposition": "superseded", "rationale": "CSICursorMovementTests covers partial CUP parameters and default columns." },
+        { "name": "TestCursorSaveLoad", "disposition": "superseded", "rationale": "TerminalSavedCursorTests covers ANSI and DEC aliases plus full saved-state round trips." },
+        { "name": "TestAnsiMode", "disposition": "out-of-scope", "rationale": "VT52 parser mode is explicitly outside the initial TerminalCore contract." },
+        { "name": "TestPrivateModes", "disposition": "superseded", "rationale": "TerminalModeTests and TerminalMouseModeTests cover every implemented private mode through public state." },
+        { "name": "TestMultipleModes", "disposition": "superseded", "rationale": "TerminalModeTests covers left-to-right multi-parameter mode application and inert unknown modes." },
+        { "name": "TestErase", "disposition": "superseded", "rationale": "CSIEraseTests covers ED and EL defaults, explicit modes, geometry, BCE, and wrap effects." },
+        { "name": "TestMultipleErase", "disposition": "superseded", "rationale": "CSIEraseTests covers supported erase operations in sequence through public cells." },
+        { "name": "TestSetGraphicsRendition", "disposition": "superseded", "rationale": "TerminalStyleTests covers supported SGR attributes, colors, empty parameters, malformed recovery, and chunk splits." },
+        { "name": "TestDeviceStatusReport", "disposition": "superseded", "rationale": "TerminalQueryTests covers supported status and cursor reports and explicitly pins unsupported forms as no-ops." },
+        { "name": "TestDeviceAttributes", "disposition": "superseded", "rationale": "TerminalQueryTests covers primary DA defaults, exact replies, and malformed forms." },
+        { "name": "TestSecondaryDeviceAttributes", "disposition": "out-of-scope", "rationale": "DA2 remains deliberately unsupported in TerminalCore." },
+        { "name": "TestTertiaryDeviceAttributes", "disposition": "out-of-scope", "rationale": "Tertiary device attributes are not part of TerminalCore's advertised query contract." },
+        { "name": "TestRequestTerminalParameters", "disposition": "out-of-scope", "rationale": "DECREQTPARM is not part of TerminalCore's advertised query contract." },
+        { "name": "TestStrings", "disposition": "superseded", "rationale": "TerminalTests and fixture replay cover multiple sequences, intervening text, chunk splits, and mixed feed boundaries." },
+        { "name": "TestLineFeed", "disposition": "superseded", "rationale": "TerminalTests and scroll-region fixtures cover IND, NEL, LF, VT, and FF through public geometry and history." },
+        { "name": "TestControlCharacters", "disposition": "superseded", "rationale": "TerminalTests and semantic-event tests cover BEL, BS, CR, and HT public effects." },
+        { "name": "TestTabClear", "disposition": "superseded", "rationale": "TerminalTabStopTests covers valid and invalid TBC forms through tab-stop behavior." },
+        { "name": "TestVt52Sequences", "disposition": "out-of-scope", "rationale": "VT52 emulation is explicitly outside the initial TerminalCore contract." },
+        { "name": "TestIdentifyDeviceReport", "disposition": "out-of-scope", "rationale": "The VT52/ANSI parser-mode split is unsupported; primary ANSI DA is covered natively." },
+        { "name": "TestOscSetDefaultForeground", "disposition": "out-of-scope", "rationale": "TerminalCore reports injected OSC 10 defaults but does not let terminal output mutate theme defaults." },
+        { "name": "TestOscSetDefaultBackground", "disposition": "out-of-scope", "rationale": "TerminalCore reports injected OSC 11 defaults but does not let terminal output mutate theme defaults." },
+        { "name": "TestOscSetColorTableEntry", "disposition": "out-of-scope", "rationale": "OSC 4 palette mutation is not part of TerminalCore's semantic color contract." },
+        { "name": "TestOscGetColorTableEntry", "disposition": "out-of-scope", "rationale": "OSC 4 palette queries are not part of TerminalCore's query contract." },
+        { "name": "TestOscXtermResourceReport", "disposition": "superseded", "rationale": "TerminalQueryTests covers supported OSC 10 and 11 queries, ordering, exact replies, and invalid forms." },
+        { "name": "TestOscXtermResourceReset", "disposition": "out-of-scope", "rationale": "OSC 110-119 resource reset is not part of TerminalCore's fixed default-color contract." },
+        { "name": "TestOscColorTableReset", "disposition": "out-of-scope", "rationale": "OSC 104 palette reset is not part of TerminalCore's semantic color contract." },
+        { "name": "TestOscSetWindowTitle", "disposition": "superseded", "rationale": "TerminalSemanticEventTests covers supported OSC 0 and 2 titles, empty values, UTF-8, bounds, ordering, and chunking; OSC 1 and 21 remain unsupported." },
+        { "name": "TestSetClipboard", "disposition": "adopted", "rationale": "osc52-unicode.json adopts the previously uncovered multilingual and emoji UTF-8 payloads; native tests supersede its ASCII and malformed cases." },
+        { "name": "TestAddHyperlink", "disposition": "superseded", "rationale": "TerminalHyperlinkTests covers OSC 8 open/close, IDs, unknown parameters, semicolons, URI validation, bounds, and chunking." },
+        { "name": "TestC1ParserMode", "disposition": "out-of-scope", "rationale": "DanTerm has no raw-C1 parser mode and treats ground-state C1 bytes according to its UTF-8 contract." }
+      ]
+    }
+  ]
+}

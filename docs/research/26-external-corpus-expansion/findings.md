@@ -174,7 +174,7 @@ script edit). No finding depends on the uncommitted files.
 
 ### F5 -- Ghostty's own test suite is the largest corpus doc 1 never surveyed
 
-- Status: complete as a census; novelty unmeasured.
+- Status: complete; Phase 3 measured novelty in F9.
 - Date and investigator: 2026-07-31, Claude.
 - Commit and worktree state: `593ce4a`; `.ghostty-src/` at its pinned checkout.
 - Commands, inputs, or reproduction:
@@ -201,9 +201,10 @@ script edit). No finding depends on the uncommitted files.
   be small. Separately, Milestone 8's Slice 18 adjudication found no unique
   support-matrix behavior in the other researched sources, which is weak
   evidence the same could hold here.
-- Uncertainty: high on value, low on availability and license.
-- Next action: read `Selection.zig`, `PageList.zig`, and `sgr.zig` and split
-  their cases into publicly-assertable versus internals-coupled (Phase 3).
+- Uncertainty: resolved for the three scoped files; the other 1,438 terminal
+  test blocks remain a size signal only.
+- Next action: none for this scoped mine. D2 declines Ghostty as a maintained
+  external corpus because F9 found no novel public behavior in the three files.
 
 ### F6 -- two Unicode fixture gaps sit outside doc 1's table
 
@@ -267,7 +268,7 @@ script edit). No finding depends on the uncommitted files.
 
 ### F8 -- eight terminal source trees were pinned mid-investigation; two carry test corpora doc 1 never surveyed
 
-- Status: complete as a census; novelty unmeasured.
+- Status: complete as a census; Phase 3 measured the scoped novelty in F9.
 - Date and investigator: 2026-07-31, Claude. Recorded after F1-F7, during the
   same session.
 - Commit and worktree state: observed at `593ce4a` plus a then-uncommitted
@@ -322,9 +323,80 @@ script edit). No finding depends on the uncommitted files.
   trees were pinned to be *read* for how other emulators solve a problem; that
   they also contain corpora is an opportunity this doc noticed, not the stated
   purpose of the pins.
-- Uncertainty: high on value, low on availability. No file has been read for
-  content yet -- only counted.
-- Next action: fold windows-terminal into the Phase 3 mine as a peer of Ghostty,
-  starting with `Base64Test.cpp`, `MouseInputTest.cpp`, and `OutputEngineTest.cpp`;
-  route vte through a license review before any translation; use `ctlseqs.txt`
-  as the adjudication instrument throughout.
+- Uncertainty: resolved for windows-terminal's three scoped files; the other
+  files and trees remain census-only.
+- Next action: windows-terminal is complete in F9; route vte through a license
+  review before any translation.
+
+### F9 -- windows-terminal paid as a narrow OSC 52 mine; Ghostty did not
+
+- Status: complete; selected fixture work landed.
+- Date and investigator: 2026-07-31, Codex.
+- Commit and worktree state: `5cbac16`; unrelated research changes were present
+  outside this doc and were not read or modified.
+- Commands, inputs, or reproduction:
+  - read `references/windows-terminal/src/terminal/parser/ut_parser/Base64Test.cpp`,
+    `references/windows-terminal/src/terminal/adapter/ut_adapter/MouseInputTest.cpp`,
+    and `references/windows-terminal/src/terminal/parser/ut_parser/OutputEngineTest.cpp`
+  - read `.ghostty-src/src/terminal/Selection.zig`,
+    `.ghostty-src/src/terminal/PageList.zig`, and
+    `.ghostty-src/src/terminal/sgr.zig` test blocks
+  - cross-checked `TerminalOSC52Tests`, `TerminalMouseEncodingTests`,
+    `TerminalMouseModeTests`, `TerminalInputStreamTests`, `CSIParserTests`,
+    `TerminalStyleTests`, `TerminalSelectionTests`,
+    `TerminalSelectionUnitTests`, `TerminalViewportTests`, and the resize,
+    scrollback, hyperlink, and cell-style suites
+  - adjudicated protocol expectations against
+    `references/xterm/ctlseqs.txt#OSC Ps ; Pt ST`,
+    `references/xterm/ctlseqs.txt#Extended coordinates`, and
+    `references/xterm/ctlseqs.txt#CSI Pm m`, plus DanTerm's recorded contracts
+- Measurements or examples: the windows-terminal files contain 71 methods over
+  4,315 lines (2 Base64, 5 mouse, 64 output/parser). Ghostty's three files
+  contain 251 test blocks; their test sections occupy 10,777 lines (18
+  selection, 202 page-list, 31 SGR). The novelty result was two cases versus
+  zero: about 0.46 novel cases per 1,000 lines for windows-terminal and zero for
+  Ghostty.
+- windows-terminal classification:
+
+  | File | Portable and reachable through TerminalCore | Already covered natively | Coupled or outside DanTerm's contract | Novel shortlist |
+  | --- | --- | --- | --- | --- |
+  | `Base64Test.cpp` | padded RFC 4648 data decoded to strict UTF-8 through OSC 52 | ASCII payloads, malformed encodings, invalid UTF-8, decoded-size bounds, and chunk splits | the fuzz harness uses Windows CryptoAPI as its encoder; accepting omitted padding conflicts with DanTerm's canonical-Base64 policy | `DecodeUTF8`'s multilingual BMP payload and non-BMP emoji-plus-modifier payload |
+  | `MouseInputTest.cpp` | X10/SGR buttons, releases, modifiers, motion modes, wheels, and coordinate encoding | the native mouse encoding/mode matrices plus the adopted redundant-1002 recording | `WM_*` event translation is a Windows input seam; 1005 and alternate-scroll mode are deliberately unsupported; Windows' X10 cutoff is not DanTerm's xterm-compatible bound | none |
+  | `OutputEngineTest.cpp` | ESC/CSI/OSC/DCS/string recovery and the supported cursor, erase, SGR, query, title, OSC 8, and OSC 52 dispatch families | native parser, terminal, query, semantic-event, hyperlink, style, and chunk-invariance suites | private `_state`, `DummyDispatch`, parameter limits, and callback topology are implementation details; VT52, raw-C1 mode, palette mutation, printer/locator reports, and other unsupported families are outside the contract | the same two OSC 52 Unicode payloads; no additional case |
+
+- Ghostty classification:
+
+  | File | Publicly analogous behavior | Already covered natively | Ghostty-coupled or unsupported behavior | Novel shortlist |
+  | --- | --- | --- | --- | --- |
+  | `Selection.zig` | linear endpoint ordering, clamping, and containment | projection serialization, reversed endpoints, wide/grapheme atomicity, stream-edge clamping, select-all, reflow, and eviction | page pins and directional adjustment are private API shapes; rectangular selection is unsupported | none |
+  | `PageList.zig` | viewport clamping/stickiness, history clearing, resize/reflow text and cursor preservation, and whole grapheme/style/link movement | viewport, scrollback, resize, selection, cell-style, hyperlink, wide-cell, and history-budget suites | page allocation, capacities, caches, iterators, tracked pins, clone/compact/split, style maps, and string arenas are private; prompt jumping/highlighting and Kitty placeholders are not public TerminalCore features | none |
+  | `sgr.zig` | supported attributes, underline styles/colors, indexed/direct colors, and malformed-group recovery | the native style and CSI parser matrices include the two Kakoune sequences, missing color components, optional color-space forms, later-parameter recovery, and stricter effect-free malformed groups | `Attribute.C` and parser-union shape are private; blink is deliberately unsupported | none |
+
+- Observation: the only uncovered supported path is OSC 52 converting valid
+  Base64 bytes into non-ASCII Swift text. The multilingual BMP and
+  emoji-plus-modifier payloads exercise distinct UTF-8 widths even though both
+  occur in `Base64Test.cpp#DecodeUTF8` and are repeated by
+  `OutputEngineTest.cpp#TestSetClipboard`.
+- Inference: H3's sharp form is confirmed for this scope. The conformance suite
+  produced a small actionable shortlist; the much larger incumbent-engine mine
+  mostly restated DanTerm's stronger public tests or Ghostty's storage design.
+- Competing interpretations: Ghostty's `sgr.zig#test "sgr: underline colon with
+  trailing separator and short slice"` is a useful parser-crash seed, but it is
+  not a new DanTerm expectation: DanTerm already requires malformed SGR groups
+  to be effect-free, later valid groups to recover, arbitrary input not to trap,
+  and parsing to resume after cancellation. Importing the exact seed would add
+  implementation history rather than a missing behavior claim.
+- Neutrality justification: xterm defines OSC 52 data as RFC 4648 Base64, while
+  DanTerm's contract requires canonical padded Base64, strict decoded UTF-8,
+  atomic rejection, and a 1 MiB decoded limit. The selected cases assert valid
+  UTF-8 under that existing contract. Unpadded Base64, raw C1 parsing, and
+  malformed-SGR interpretations were declined where the sources differ from or
+  merely duplicate DanTerm's contract.
+- Uncertainty: low for the scoped files. This is not an exhaustive decision on
+  every Ghostty or windows-terminal test file.
+- Implementation result: `Fixtures/windows-terminal/osc52-unicode.json` carries
+  both selected payloads, `windows-terminal-manifest.json` classifies all 71
+  scoped methods, and `LICENSE.windows-terminal.txt` carries the MIT notice.
+  The shared fixture runner validates provenance and replays the fixture whole,
+  bytewise, and at every split point.
+- Next action: none for Phase 3.

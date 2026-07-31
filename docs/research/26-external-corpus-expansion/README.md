@@ -108,9 +108,10 @@ parser-conformance coverage that is hardest to get elsewhere.
 
 The sharpest version of H3 is that a **conformance suite is a safer mine than an
 engine's own unit tests**, because it is organized around the specification
-rather than around one implementation's choices. That predicts windows-terminal
-yields more portable cases per unit of reading than Ghostty does, despite being
-an order of magnitude smaller. Phase 3 tests both.
+rather than around one implementation's choices. Phase 3 confirmed that
+prediction: windows-terminal yielded two novel OSC 52 expectations from 4,315
+lines, while the 10,777 lines containing Ghostty's 251 selected test blocks
+yielded no behavior absent from DanTerm's native contract and suite (F9).
 
 ## Candidate direction, pending evidence
 
@@ -166,27 +167,28 @@ DanTerm contract, never against the source engine's behavior.
 - [x] Decide whether manifest re-adjudication becomes a standing milestone-exit
   step. Destination: D4.
 
-### Phase 3 -- scope the Ghostty and windows-terminal mines
+### Phase 3 -- scope the Ghostty and windows-terminal mines (complete)
 
-- [ ] Read windows-terminal's `Base64Test.cpp`, `MouseInputTest.cpp`, and
+- [x] Read windows-terminal's `Base64Test.cpp`, `MouseInputTest.cpp`, and
   `OutputEngineTest.cpp` first -- they map onto the OSC 52 decode path, the
   mouse-mode hole F3 found, and parser conformance respectively. Record which
-  cases assert spec behavior versus console-host specifics.
-- [ ] Read Ghostty's `Selection.zig`, `PageList.zig`, and `sgr.zig` tests and
+  cases assert spec behavior versus console-host specifics. Result in F9.
+- [x] Read Ghostty's `Selection.zig`, `PageList.zig`, and `sgr.zig` tests and
   list which assert behavior reachable through DanTerm's public projections
-  versus which are coupled to page/style internals. Destination: F5 follow-up.
-- [ ] Cross-check both shortlists against the native suite for genuine novelty.
+  versus which are coupled to page/style internals. Result in F9.
+- [x] Cross-check both shortlists against the native suite for genuine novelty.
   Milestone 8's Slice 18 adjudication found no unique support-matrix behavior in
   the *other* researched sources; F8 rates that analogy as weak for a
   conformance suite, so it must be checked rather than assumed.
-- [ ] Test H3's sharp form: measure portable cases per unit of reading for the
-  conformance suite versus the engine unit tests, and record which mine paid.
-- [ ] Decide adopt/decline per source, with a manifest and license notice
-  matching the libvterm and Alacritty pattern. Destination: D2.
-- [ ] Record how each imported expectation is justified against
+- [x] Test H3's sharp form: measure novel portable cases per unit of test-file
+  reading for the conformance suite versus the engine unit tests. Result in F9.
+- [x] Decide adopt/decline per source. D2 selects windows-terminal's two
+  non-ASCII OSC 52 cases and declines Ghostty as a maintained corpus.
+- [x] Land the selected windows-terminal cases with a manifest and license
+  notice matching the libvterm and Alacritty pattern.
+- [x] Record how each shortlisted expectation is justified against
   `references/xterm/ctlseqs.txt` or the DanTerm contract rather than against the
-  source engine's behavior. This is the neutrality rule's hardest case, and it
-  is hardest for Ghostty specifically.
+  source engine's behavior. Result in F9 and D2.
 - [ ] Route vte's `utf8-test.cc` and `unicode-width-test.cc` through a
   license review before any translation -- LGPL-3.0/GPL-3.0 triggers doc 1's
   review rule, the same constraint that shelved pyte. Feeds D3.
@@ -278,7 +280,10 @@ rationales, and the unsurveyed corpora are recorded in F1-F8, with recommended
 directions in D1-D5. Phase 2 is complete: `92lp1640917` and the seven supported
 `90vttest_*` sessions are adopted, `90vttest_01-movement-1` remains
 out-of-scope on DECALN, all nine stale rationales are rewritten, and D4 is
-decided. Phases 3-5 are open.
+decided. Phase 3 is complete: the scoped sources are classified, Ghostty is
+declined, and windows-terminal's two novel OSC 52 cases replay from a neutral
+fixture under a complete manifest and bundled license notice. Phases 4-5 are
+open.
 
 The one-line answer Phase 1 produced, for a reader who goes no further: the
 pinned corpora are fully classified, ~81 of the 89 out-of-scope cases are

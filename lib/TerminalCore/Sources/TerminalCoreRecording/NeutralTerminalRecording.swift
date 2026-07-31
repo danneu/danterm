@@ -91,6 +91,15 @@ public struct NeutralTerminalProvenance: Codable, Equatable, Sendable {
             else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)
             }
+        case "windows-terminal":
+            guard url?.hasPrefix("https://github.com/microsoft/terminal/") == true,
+                  pinnedCommit?.isEmpty == false,
+                  upstreamCase?.isEmpty == false,
+                  license == "MIT",
+                  licenseNotice?.isEmpty == false
+            else {
+                throw NeutralTerminalRecordingError.invalidProvenance(source)
+            }
         case "danterm":
             guard author == "DanTerm", test?.isEmpty == false else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)

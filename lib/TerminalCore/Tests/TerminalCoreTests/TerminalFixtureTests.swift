@@ -227,10 +227,50 @@ struct TerminalFixtureTests {
         }
     }
 
+    @Test("windows-terminal manifest classifies the scoped conformance files")
+    func windowsTerminalManifestCoverage() throws {
+        // Intent: pin every method in the three Phase 3 source files to an explicit
+        //   disposition and keep the selected fixture tied to the pinned source.
+        // Why it exists: a two-case fixture alone would hide the 69 methods declined
+        //   as covered, unsupported, or coupled to Windows implementation details.
+        // Scenario: the reference pin or neutral fixture changes and the Phase 3
+        //   adoption ledger must remain complete and provenance-bearing.
+        let url = try #require(Bundle.module.url(
+            forResource: "windows-terminal-manifest",
+            withExtension: "json",
+            subdirectory: "Fixtures"
+        ))
+        let manifest = try JSONDecoder().decode(
+            FixtureManifest.self,
+            from: Data(contentsOf: url)
+        )
+
+        #expect(manifest.version == 1)
+        #expect(manifest.pinnedCommit == "1cea42d433253d95c4487a3037db48197b5e72f4")
+        #expect(manifest.recordedDeviations == [
+            "DanTerm requires canonical padded Base64 where windows-terminal also accepts omitted padding.",
+            "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005 or alternate-scroll 1007.",
+            "DanTerm treats raw C1 bytes as UTF-8 input and does not expose parser states or dispatch callbacks.",
+        ])
+        #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedWindowsTerminalCases.keys))
+        #expect(manifest.files.flatMap(\.cases).count == 71)
+        #expect(Set(manifest.files.flatMap(\.cases).filter { $0.disposition == "adopted" }.map(\.name)) == [
+            "DecodeUTF8", "TestSetClipboard",
+        ])
+        for file in manifest.files {
+            #expect(file.licenseNotice == "LICENSE.windows-terminal.txt")
+            #expect(Set(file.cases.map(\.name)) == Self.expectedWindowsTerminalCases[file.path])
+            #expect(file.cases.allSatisfy { entry in
+                ["adopted", "adapted", "superseded", "out-of-scope"].contains(entry.disposition)
+                    && entry.rationale.isEmpty == false
+            })
+        }
+    }
+
     private func fixtureURLs() throws -> [URL] {
         let root = try #require(Bundle.module.resourceURL)
             .appending(path: "Fixtures", directoryHint: .isDirectory)
-        return try ["libvterm", "alacritty"].flatMap { directory in
+        return try ["libvterm", "alacritty", "windows-terminal"].flatMap { directory in
             try FileManager.default.contentsOfDirectory(
                 at: root.appending(path: directory, directoryHint: .isDirectory),
                 includingPropertiesForKeys: nil
@@ -243,7 +283,7 @@ struct TerminalFixtureTests {
     private func recordingFixtureURLs() throws -> [URL] {
         let root = try #require(Bundle.module.resourceURL)
             .appending(path: "Fixtures", directoryHint: .isDirectory)
-        return try ["libvterm", "alacritty", "danterm"].flatMap { directory in
+        return try ["libvterm", "alacritty", "danterm", "windows-terminal"].flatMap { directory in
             try FileManager.default.contentsOfDirectory(
                 at: root.appending(path: directory, directoryHint: .isDirectory),
                 includingPropertiesForKeys: nil
@@ -282,6 +322,15 @@ struct TerminalFixtureTests {
             #expect(Self.adoptedAlacrittyRecordings.contains(provenance.upstreamCase ?? ""))
             #expect(provenance.license == "Apache-2.0")
             #expect(provenance.licenseNotice == "LICENSE.alacritty.txt")
+        case "windows-terminal":
+            #expect(provenance.url?.hasPrefix("https://github.com/microsoft/terminal/") == true)
+            #expect(provenance.pinnedCommit == "1cea42d433253d95c4487a3037db48197b5e72f4")
+            #expect(
+                provenance.upstreamCase
+                    == "Base64Test.cpp#DecodeUTF8 and OutputEngineTest.cpp#TestSetClipboard"
+            )
+            #expect(provenance.license == "MIT")
+            #expect(provenance.licenseNotice == "LICENSE.windows-terminal.txt")
         default:
             Issue.record("Unexpected external fixture source: \(provenance.source)")
         }
@@ -293,7 +342,7 @@ struct TerminalFixtureTests {
         return fixture.events.enumerated().flatMap { eventIndex, event -> [ChunkStrategy] in
             guard case .feed(let bytes) = event else { return [] }
             let offsets: [Int]
-            if bytes.count <= exhaustiveThreshold {
+            if fixture.provenance.source == "windows-terminal" || bytes.count <= exhaustiveThreshold {
                 offsets = Array(0...bytes.count)
             } else {
                 offsets = [0, bytes.count / 4, bytes.count / 2, bytes.count * 3 / 4, bytes.count]
@@ -334,6 +383,38 @@ struct TerminalFixtureTests {
         "tmux_git_log", "tmux_htop", "underline", "vim_24bitcolors_bce", "vim_large_window_scroll",
         "vim_simple_edit", "vttest_cursor_movement_1", "vttest_insert", "vttest_origin_mode_1", "vttest_origin_mode_2",
         "vttest_scroll", "vttest_tab_clear_set", "wrapline_alt_toggle", "zerowidth", "zsh_tab_completion",
+    ]
+
+    private static let expectedWindowsTerminalCases: [String: Set<String>] = [
+        "src/terminal/parser/ut_parser/Base64Test.cpp": [
+            "DecodeFuzz", "DecodeUTF8",
+        ],
+        "src/terminal/adapter/ut_adapter/MouseInputTest.cpp": [
+            "DefaultModeTests", "Utf8ModeTests", "SgrModeTests", "ScrollWheelTests",
+            "AlternateScrollModeTests",
+        ],
+        "src/terminal/parser/ut_parser/OutputEngineTest.cpp": [
+            "TestEscapePath", "TestEscapeImmediatePath", "TestEscapeThenC0Path", "TestGroundPrint",
+            "TestCsiEntry", "TestC1CsiEntry", "TestCsiImmediate", "TestCsiParam",
+            "TestCsiMaxParamCount", "TestLeadingZeroCsiParam", "TestCsiSubParam",
+            "TestCsiMaxSubParamCount", "TestLeadingZeroCsiSubParam", "TestCsiIgnore",
+            "TestC1Osc", "TestOscStringSimple", "TestLongOscString", "NormalTestOscParam",
+            "TestLeadingZeroOscParam", "TestLongOscParam", "TestOscStringInvalidTermination",
+            "TestDcsEntry", "TestC1DcsEntry", "TestDcsImmediate", "TestDcsIgnore", "TestDcsParam",
+            "TestDcsIntermediateAndPassThrough", "TestDcsLongStringPassThrough",
+            "TestDcsInvalidTermination", "TestSosPmApcString", "TestC1StringTerminator",
+            "TestCsiCursorMovementWithValues", "TestCsiCursorMovementWithoutValues",
+            "TestCsiCursorPosition", "TestCsiCursorPositionWithOnlyRow", "TestCursorSaveLoad",
+            "TestAnsiMode", "TestPrivateModes", "TestMultipleModes", "TestErase",
+            "TestMultipleErase", "TestSetGraphicsRendition", "TestDeviceStatusReport",
+            "TestDeviceAttributes", "TestSecondaryDeviceAttributes", "TestTertiaryDeviceAttributes",
+            "TestRequestTerminalParameters", "TestStrings", "TestLineFeed", "TestControlCharacters",
+            "TestTabClear", "TestVt52Sequences", "TestIdentifyDeviceReport",
+            "TestOscSetDefaultForeground", "TestOscSetDefaultBackground", "TestOscSetColorTableEntry",
+            "TestOscGetColorTableEntry", "TestOscXtermResourceReport", "TestOscXtermResourceReset",
+            "TestOscColorTableReset", "TestOscSetWindowTitle", "TestSetClipboard", "TestAddHyperlink",
+            "TestC1ParserMode",
+        ],
     ]
 
     private static let alacrittyEvidence: Set<String> = [
