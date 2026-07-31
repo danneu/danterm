@@ -10,6 +10,7 @@ struct DanTermConfigTests {
 
         #expect(config.resolvedDefaultTheme == "Monokai Remastered")
         #expect(config.remoteTheme == "Purplepeter")
+        #expect(config.fontFamily == nil)
         #expect(config.resolvedFontSize == 13)
         #expect(config.alertClearMode == .focus)
     }

@@ -11,6 +11,8 @@ struct DanTermConfig: Equatable {
     var defaultTheme: String? = nil
     /// Theme applied to panes during SSH/remote sessions.
     var remoteTheme: String = "Purplepeter"
+    /// Explicit terminal font family, or nil when system monospace applies.
+    var fontFamily: String? = nil
     /// Explicit terminal font size, or nil when the engine default applies.
     var fontSize: Double? = nil
     /// When alerts are cleared: on pane focus (.focus) or only via Cmd+./Cmd+Shift+. (.manual).

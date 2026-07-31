@@ -45,6 +45,11 @@ struct DanTermConfigDocument: Equatable {
         setNestedValue(.string(theme), parent: "theme", key: "remote")
     }
 
+    /// Sets or clears the explicit font family while preserving unmodeled font siblings.
+    mutating func setFontFamily(_ family: String?) {
+        setNestedValue(family.map(ConfigJSONValue.string), parent: "font", key: "family")
+    }
+
     /// Sets or clears the explicit font size without rewriting an equivalent number token.
     mutating func setFontSize(_ size: Double?) {
         if let size {
@@ -68,6 +73,7 @@ struct DanTermConfigDocument: Equatable {
     mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)
         setRemoteTheme(config.remoteTheme)
+        setFontFamily(config.fontFamily)
         setFontSize(config.fontSize)
         setAlertClearMode(config.alertClearMode)
     }
@@ -116,11 +122,15 @@ struct DanTermConfigDocument: Equatable {
                 config.remoteTheme = name
             }
         }
-        if case .object(let font)? = rootObject["font"],
-           case .number(let token)? = font["size"],
-           let size = Double(token), size.isFinite, size > 0
-        {
-            config.fontSize = size
+        if case .object(let font)? = rootObject["font"] {
+            if case .string(let family)? = font["family"], family.isEmpty == false {
+                config.fontFamily = family
+            }
+            if case .number(let token)? = font["size"],
+               let size = Double(token), size.isFinite, size > 0
+            {
+                config.fontSize = size
+            }
         }
         if case .object(let ui)? = rootObject["ui"],
            case .string(let rawMode)? = ui["alertClearMode"],

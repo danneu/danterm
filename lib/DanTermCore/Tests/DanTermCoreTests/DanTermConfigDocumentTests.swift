@@ -10,7 +10,7 @@ struct DanTermConfigDocumentTests {
         let document = try #require(DanTermConfigDocument.decode(data("""
         {
           "schemaVersion": 1,
-          "font": { "size": 15.5 },
+          "font": { "family": "Menlo", "size": 15.5 },
           "theme": { "default": "Solarized Light", "remote": "Grape" },
           "ui": { "alertClearMode": "manual" }
         }
@@ -18,6 +18,7 @@ struct DanTermConfigDocumentTests {
 
         #expect(document.config.defaultTheme == "Solarized Light")
         #expect(document.config.remoteTheme == "Grape")
+        #expect(document.config.fontFamily == "Menlo")
         #expect(document.config.fontSize == 15.5)
         #expect(document.config.alertClearMode == .manual)
     }
@@ -39,6 +40,24 @@ struct DanTermConfigDocumentTests {
 
         #expect(document.config.fontSize == nil)
         #expect(document.config.defaultTheme == "Dracula")
+    }
+
+    @Test("a valid font family projects onto the config")
+    func validFontFamilyProjectsOntoConfig() throws {
+        let document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"font":{"family":"Menlo"}}"#)))
+
+        #expect(document.config.fontFamily == "Menlo")
+    }
+
+    @Test("an invalid font family falls back without discarding a valid font size", arguments: [
+        #"{"schemaVersion":1,"font":{"family":"","size":15.5}}"#,
+        #"{"schemaVersion":1,"font":{"family":42,"size":15.5}}"#,
+    ])
+    func invalidFontFamilyDegradesPerField(_ source: String) throws {
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.fontFamily == nil)
+        #expect(document.config.fontSize == 15.5)
     }
 
     @Test("an empty theme falls back without discarding valid fields")
@@ -63,12 +82,13 @@ struct DanTermConfigDocumentTests {
         //   values, including number spellings Foundation numeric trees cannot preserve.
         // Why it exists: this is the losslessness requirement that rules out decoding
         //   through Double-backed JSONValue or re-encoding JSONSerialization numbers.
-        // Scenario: Preferences changes all four settings in a hand-authored document
+        // Scenario: Preferences changes all five settings in a hand-authored document
         //   that also carries future fields and exact large-integer/fraction tokens.
         var document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"font":{"size":13,"future":9007199254740993},"theme":{"default":"Old","remote":"Old Remote","contrast":0.1},"ui":{"alertClearMode":"focus","density":"compact"},"plugin":{"enabled":true,"values":[null,"kept"]}}"#)))
 
         document.setDefaultTheme("New")
         document.setRemoteTheme("New Remote")
+        document.setFontFamily("Menlo")
         document.setFontSize(16)
         document.setAlertClearMode(.manual)
         let output = String(decoding: document.encoded(), as: UTF8.self)
@@ -82,6 +102,7 @@ struct DanTermConfigDocumentTests {
         let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
         #expect(roundTrip.config.defaultTheme == "New")
         #expect(roundTrip.config.remoteTheme == "New Remote")
+        #expect(roundTrip.config.fontFamily == "Menlo")
         #expect(roundTrip.config.fontSize == 16)
         #expect(roundTrip.config.alertClearMode == .manual)
     }
@@ -90,11 +111,12 @@ struct DanTermConfigDocumentTests {
     func unchangedSaveIsByteIdentical() throws {
         let original = data("""
         { "theme": { "remote": "Grape" }, "schemaVersion": 1,
-          "font": { "size": 13.0 } }
+          "font": { "family": "Menlo", "size": 13.0 } }
         """)
         var document = try #require(DanTermConfigDocument.decode(original))
 
         document.setRemoteTheme("Grape")
+        document.setFontFamily("Menlo")
         document.setFontSize(13)
 
         #expect(document.encoded() == original)
@@ -116,6 +138,31 @@ struct DanTermConfigDocumentTests {
         #expect(roundTrip.config.fontSize == nil)
         #expect(roundTrip.config.resolvedDefaultTheme == "Monokai Remastered")
         #expect(roundTrip.config.resolvedFontSize == 13)
+    }
+
+    @Test("clearing a font family removes its key and preserves unknown font siblings")
+    func clearingFontFamilyRemovesKey() throws {
+        var document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"font":{"family":"Menlo","future":true}}"#)))
+
+        document.setFontFamily(nil)
+        let output = String(decoding: document.encoded(), as: UTF8.self)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(output.contains(#""future": true"#))
+        #expect(output.contains(#""family""#) == false)
+        #expect(roundTrip.config.fontFamily == nil)
+    }
+
+    @Test("a font family round-trips through document encoding")
+    func fontFamilyRoundTrips() throws {
+        var document = try #require(DanTermConfigDocument.decode(DanTermConfigDocument.seedData))
+        var config = DanTermConfig.default
+        config.fontFamily = "JetBrains Mono"
+
+        document.apply(config)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(roundTrip.config.fontFamily == "JetBrains Mono")
     }
 
     @Test("a changed document reaches a deterministic fixed point")

@@ -124,6 +124,7 @@ AppModel(
   config: DanTermConfig(
     defaultTheme: nil,
     remoteTheme: "Purplepeter",
+    fontFamily: nil,
     fontSize: nil,
     alertClearMode: .focus
   ),
