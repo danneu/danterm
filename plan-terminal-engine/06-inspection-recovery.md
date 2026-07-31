@@ -39,8 +39,8 @@ logical lines, and never splits a grapheme cluster or wide cell. Search is a
 literal search over the same full-history projection. It is ASCII
 case-insensitive and otherwise Unicode-exact initially, can span soft wraps but
 not an unrequested hard newline, selects the newest match first, navigates
-toward older matches with Next and newer matches with Previous, and stops at
-either end rather than wrapping.
+toward older matches with Next and newer matches with Previous, and wraps
+around at either end.
 
 Export and enriched recovery checkpoints capture primary-screen full history;
 alternate-screen content is transient and is not replayed into a new shell.
