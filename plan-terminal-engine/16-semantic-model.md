@@ -29,6 +29,16 @@ no partial tiers, no inference, and no tolerance parsing of foreign
 dialects. Strictness is the simplification lever that keeps every transition
 table and assumption in this document small.
 
+Strictness has a structural twin, inherited from the engine redesign's core
+goals: impossible states are unrepresentable. Strictness governs what enters
+the model; the types govern what the model can hold. Every invariant a type
+can carry moves out of runtime checks and into structure: at most one open
+record, always the newest; an outcome that is closed-with-status or
+sealed-at-a-time, never a hybrid; honest emptiness as a distinct journal
+state rather than a flag beside an empty list; the command facet as a
+projection of the journal, so current state and history cannot disagree by
+construction.
+
 ### Orthogonal pane facets, one semantic stream
 
 Pane semantic state is a set of small independent facets, not one machine:
@@ -93,8 +103,9 @@ A record carries the reported command text, cwd, and identity (user and
 host) -- all required, all carried on command-start; a record missing any
 of them cannot exist -- plus stream order, injected wall-clock timestamps
 (stamped at the owner boundary under the existing save/send/assert
-injection rule), exit status when reported (absent only when the record was
-sealed rather than closed), and an output span.
+injection rule), an outcome -- closed with the reported exit status and end
+time, or sealed when the pane tore down or a new command-start arrived
+first -- and an output span.
 
 A record stores no output text. Its output span is a reflow-attached logical
 range into primary history under the same anchor contract selection and
@@ -121,7 +132,9 @@ corrupting a neighboring one.
 
 Names, nesting, and storage here are implementation discretion; the
 contract is the invariants below, not this sketch. It exists so readers
-share one concrete picture of the stream, the facets, and a record:
+share one concrete picture of the stream, the facets, the journal, and a
+record -- and of the types carrying the invariants instead of runtime
+checks:
 
 ```swift
 /// The single vocabulary the journal consumes. Envelope and pane-scoped
@@ -134,26 +147,55 @@ enum CommandJournalEvent {
 }
 
 /// Facets snapshot for one pane. Every field derives from declared
-/// sources; rendered cells are never an input.
+/// sources; rendered cells are never an input. `command` is not stored
+/// state: it projects the journal (running iff an open record exists),
+/// so facet and history cannot disagree.
 struct PaneSemanticState {
-    var command: CommandFacet        // .idle | .running(CommandRecordId)
+    var command: CommandFacet        // derived: .running(open.id) | .idle
     var connection: ConnectionFacet  // .local | .remote(user:host:)
     var agent: AgentFacet            // .none | .attached(kind:sessionId:)
 }
 
-/// One executed command in the bounded per-pane journal. Never stores
-/// output text; `output` resolves through the logical projection.
-struct CommandRecord {
+/// The bounded per-pane journal. The case split carries the invariants:
+/// records cannot exist under .neverReported, at most one record is
+/// open, and the open record is always the newest.
+enum CommandJournal {
+    case neverReported  // honest emptiness: the integration has never spoken here
+    case reporting(completed: [CompletedRecord], open: OpenRecord?)
+}
+
+/// The facts every record is born with -- all required, all carried on
+/// command-start. No partial records exist.
+struct CommandIdentity {
     let id: CommandRecordId
-    var text: String                  // required; no partial records exist
-    var cwd: String                   // required; reported on command-start
-    var user: String                  // required; reported on command-start
-    var host: String                  // required; reported on command-start
-    var exitStatus: Int32?            // nil only when sealed, not closed
-    var startedAt: Date               // injected at the owner boundary
-    var endedAt: Date?
-    var agent: AgentProvenance?       // attached session and/or launch requester
+    let text: String
+    let cwd: String
+    let user: String
+    let host: String
+    let startedAt: Date               // injected at the owner boundary
+    let agent: AgentProvenance?       // attached session and/or launch requester
+}
+
+/// The at-most-one running command. No outcome fields exist to be wrong;
+/// its output is start-anchored and still growing.
+struct OpenRecord {
+    let identity: CommandIdentity
+    var outputStart: SpanAnchor
+}
+
+/// A finished command. Never stores output text; `output` resolves
+/// through the logical projection.
+struct CompletedRecord {
+    let identity: CommandIdentity
+    let outcome: Outcome
     var output: OutputSpan            // reflow-attached; clamps under eviction
+}
+
+/// Closed or sealed -- an exit status without an end time, or the
+/// reverse, cannot be represented.
+enum Outcome {
+    case closed(exitStatus: Int32, endedAt: Date)  // envelope command-end
+    case sealed(at: Date)                          // teardown, or a new start arrived first
 }
 ```
 
@@ -393,7 +435,9 @@ introducing a new subsystem.
 ## Implementation discretion
 
 - Journal and span representation, exact count and byte bounds, and eviction
-  batching, provided the bounds are explicit and tested.
+  batching, provided the bounds are explicit and tested and the chosen types
+  keep the pinned impossible states unrepresentable (one open record,
+  complete outcomes, honest emptiness) rather than runtime-checked.
 - Retaining less of a command's text in the journal than the 64 KiB event
   limit, provided truncation is flagged.
 - The internal stream representation that lowers envelope and IPC inputs
