@@ -28,6 +28,28 @@ The following pinned source trees are materialized under `references/`:
   scrollback, and resize/reflow behavior for neutral fixtures.
 - [`references/alacritty/`](../references/alacritty/) -- Terminal recordings
   and replay-runner cases for neutral fixtures.
+- [`references/kitty/`](../references/kitty/) -- The graphics, keyboard, and
+  shell-integration protocols kitty authored (`docs/`), beside the C parser
+  and screen that implement them.
+- [`references/wezterm/`](../references/wezterm/) -- Escape parsing
+  (`vtparse`, `wezterm-escape-parser`), the cell/surface model, and reflow in
+  an engine split from its renderer the way DanTerm's is.
+- [`references/iterm2/`](../references/iterm2/) -- The other macOS terminal:
+  AppKit surface, PTY handling, and the OSC 133/1337 dialects iTerm2
+  originated.
+- [`references/vte/`](../references/vte/) -- GNOME's terminal widget, the most
+  conformance-driven of the set: sequence tables, ring buffer, test corpus.
+- [`references/foot/`](../references/foot/) -- A small, fast C terminal whose
+  grid, scrollback, and damage tracking are readable end to end.
+- [`references/tmux/`](../references/tmux/) -- Screen model, resize/reflow, and
+  capability negotiation from the layer that both drives and emulates a
+  terminal.
+- [`references/xterm/`](../references/xterm/) -- `ctlseqs.ms`, the de facto
+  sequence specification, beside the implementation everything else is
+  measured against.
+- [`references/windows-terminal/`](../references/windows-terminal/) -- A
+  state-machine VT parser with an unusually complete conformance suite
+  (`src/terminal/parser`, `src/terminal/adapter`) and written specs in `doc/`.
 - [`references/xnu/`](../references/xnu/) -- Darwin kernel process, signal,
   tty, and Mach behavior.
 - [`references/libdispatch/`](../references/libdispatch/) -- Dispatch queue,
@@ -69,8 +91,18 @@ version that a citation describes.
 
 ## Other terminals
 
+Nine terminal emulators are pinned above (`kitty`, `wezterm`, `iterm2`, `vte`,
+`foot`, `xterm`, `tmux`, `windows-terminal`, `alacritty`) alongside `libvterm`
+and `.ghostty-src/`. Reach for them when the question is "how does a real
+terminal handle this" -- an ambiguous sequence, a resize/reflow corner, a
+protocol DanTerm has not implemented yet. Two or three independent
+implementations agreeing is the closest thing to a spec for behavior `ctlseqs`
+leaves undefined; where they disagree, that disagreement is itself the finding.
+
+Not checked out, but worth a web lookup for feature work:
+
 - `github:manaflow-ai/cmux` -- another macOS terminal built on libghostty
-  (vertical tabs, AI agent notifications). Useful reference for feature work.
+  (vertical tabs, AI agent notifications).
 
 ## Don't-guess rule
 

@@ -41,7 +41,9 @@ pinned revisions. Read it. Grepping a real implementation beats reasoning from
 memory about what a terminal, a shell, or Darwin does, and it costs one command:
 
 - **Terminals** -- `libvterm` (parser, reflow), `alacritty` (recordings and
-  replay cases), plus `.ghostty-src/` for the libghostty C API.
+  replay cases), `kitty`, `wezterm`, `iterm2`, `vte`, `foot`, `xterm`, `tmux`,
+  and `windows-terminal` for how other emulators solve a problem or handle an
+  edge case, plus `.ghostty-src/` for the libghostty C API.
 - **Shells** -- `fish-shell`, `zsh`, `bash` (readline). Pinned at the versions
   the shell-integration research measured.
 - **Darwin** -- `xnu` (process, signal, tty, Mach), `Libc`, `libdispatch`,
