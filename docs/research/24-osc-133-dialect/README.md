@@ -76,6 +76,11 @@ independently ruled out: a 69-column prompt forced to 60 columns still emitted
 nothing under `-N`, and a harness control (zsh through the identical resize path)
 repainted normally, so the signal was always being delivered.
 
+F8 measured this with a synthetic `DanTerm(1.0)` XTVERSION identity, which left
+open whether the real one lands in the same branch. F12 confirms it does: fish
+sees `DanTerm <bundle version>`, matches none of its alternatives, and auto-sets
+`fish_handle_reflow 1`. The refutation holds on the shipping identity.
+
 ### H2 -- REFUTED: `fish_handle_reflow` is live in fish 4.7.1
 
 Hypothesis was that the variable is a fish-3.x fossil. **Refuted by F9.** It is
@@ -141,10 +146,11 @@ F10/F11 -- fish prompts never wrap, so blanking has nothing to fix). No integrat
   replay: all three configurations are observationally identical (F11), because
   fish prompts never wrap (F10). D3 closed on `redraw=0`; the fish emitter is
   unblocked.
-- [ ] RESEARCH: confirm what XTVERSION identity DanTerm actually reports to
-  fish. F8 used a synthetic `DanTerm(1.0)`; fish's auto-detection keys on that
-  string and on `TERM`, so the real reply decides which branch a fish pane lands
-  in when the integration is absent (F9).
+- [x] RESEARCH: confirm what XTVERSION identity DanTerm actually reports to
+  fish. It is `DanTerm <bundle version>`, which matches none of fish's
+  alternatives, so an unintegrated fish pane auto-sets `fish_handle_reflow 1`
+  and repaints. F8's conclusion survives the switch from its synthetic identity
+  to the real one. Recorded in F12.
 
 ### Phase 3 -- ship the emitters
 
@@ -224,8 +230,9 @@ an `aid=`.
   Panes launched by the app export the right `DANTERM_SOCK` themselves
   (`TerminalLaunchEnvironment`), so this only bites when driving one app's pane
   from another app's shell, which is the normal case when probing.
-- Nothing here has been observed in a real DanTerm pane. Every mark is checked
-  against `TerminalCore.Terminal` directly.
+- Only the fish question (F11) was observed in a real DanTerm pane. Every
+  authored mark is checked against `TerminalCore.Terminal` directly, so the zsh
+  and Bash dialects have never been rendered by the app that will consume them.
 
 ## Outcome
 
@@ -239,5 +246,13 @@ truncates its prompt rather than wrapping it, so the staircase this protocol
 exists to prevent cannot occur in a fish pane. `redraw=0` is a risk choice, not
 a behavior choice.
 
+Phase 2 is closed: its last open item -- which XTVERSION identity fish actually
+sees -- resolved to `DanTerm <bundle version>`, which matches none of fish's
+special cases, so an unintegrated fish pane repaints (F12). The answer changes
+no decision; it confirms F8 was not an artifact of its synthetic identity.
+
 Remaining work is Phase 3 -- writing the emitters -- which is now unblocked for
-all three shells.
+all three shells. The one design question R1 deliberately did not answer is
+waiting there: D1 puts marks inside zsh's `PS1`, and a prompt framework that
+rebuilds `PS1` asynchronously can strip them. Decide that before writing the
+zsh emitter, not during.

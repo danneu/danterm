@@ -392,3 +392,46 @@ Evidence for the OSC 133 dialect. Parser probes feed
   shown unnecessary, not shown harmful. A pathological case (resize mid-output,
   wrapped pending input) was not exercised.
 - Next action: D3.
+
+### F12 -- DanTerm's real XTVERSION identity puts fish in the repainting branch
+
+- Status: settled.
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: `c2ec7a4`, working tree clean of engine changes.
+- Commands, inputs, or reproduction: `scratchpad/xtversion_probe.py` -- interactive
+  fish 4.7.1 (`fish -i`, config loaded; **not** `-N`, the F6 artifact) over a
+  `pty.fork()` PTY with `XDG_CONFIG_HOME` pointed at a nonexistent directory and
+  `VTE_VERSION`/`KONSOLE_VERSION` cleared. The harness answers fish's startup
+  handshake with a caller-chosen XTVERSION reply, then asks fish itself:
+  `echo "ZZ|$(status terminal)|$fish_handle_reflow|ZZ"`.
+  DanTerm's real reply string was read from the engine, not invented:
+  `Terminal.swift#dispatchCSI` emits `DCS >|DanTerm <programVersion> ST`, and
+  `SwiftTerminalBackend.swift#launchFacts` injects `CFBundleShortVersionString`
+  (falling back to `dev`), so the wire form is `DanTerm 0.1.0`.
+- Measurements or examples:
+
+  | XTVERSION reply | `TERM` | `status terminal` | `fish_handle_reflow` |
+  | --- | --- | --- | --- |
+  | `DanTerm 0.1.0` (real) | `xterm-256color` | `DanTerm 0.1.0` | `1` |
+  | `DanTerm(1.0)` (F8's synthetic) | `xterm-256color` | `DanTerm(1.0)` | `1` |
+  | none | `xterm-256color` | `` (empty) | `1` |
+  | `WezTerm 20240203` (control) | `xterm-256color` | `WezTerm 20240203` | `0` |
+  | `DanTerm 0.1.0` (control) | `alacritty` | `DanTerm 0.1.0` | `0` |
+- Observation: fish reports `status terminal` as the XTVERSION payload verbatim.
+  DanTerm's identity matches none of the `^(?:VTE\b|Konsole |WezTerm )`
+  alternatives in `__fish_config_interactive.fish` (F9), so auto-detection takes
+  the `else` branch and sets `fish_handle_reflow 1`.
+- Inference: an unintegrated fish pane in DanTerm repaints its whole prompt on
+  SIGWINCH. F8's conclusion holds on the real identity, not just the synthetic
+  one it was measured with -- the open question that motivated this probe is
+  closed with the same answer.
+- Competing interpretations: none the controls leave open. Both control rows flip
+  the variable to `0` -- one through the terminal-name regex, one through the
+  `$TERM` check -- so the detection is live and the DanTerm rows are genuine
+  misses rather than a dead code path.
+- Uncertainty: `0.1.0` is whatever the dev bundle carries today. Nothing in
+  fish's detection is version-sensitive, and the empty-reply row shows even a
+  total absence of XTVERSION lands in the same branch, so no plausible version
+  string changes this. Renaming the terminal to start with `VTE`, `Konsole `, or
+  `WezTerm ` would -- a constraint worth remembering, not one worth guarding.
+- Next action: none. D3 stands unchanged; the ledger item is closed.
