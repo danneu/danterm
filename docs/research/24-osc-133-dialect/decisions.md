@@ -74,63 +74,51 @@ The authored dialect, decision by decision. The bytes themselves are in
   repaint. Bash promises one line, so DanTerm may blank one line. `P` rather than
   `A` inside `PS1` because readline redisplays mid-line (README, rejected ideas).
 
-### D3 -- fish: declare `redraw=0`, emit nothing else
+### D3 -- fish: declare `redraw=1`, emit nothing else
 
-- Status: selected. **The value is unchanged from the original draft, but every
-  reason for it has been replaced.** The first version argued `redraw=0` because
-  fish supposedly never repaints (H1) and had no lever to make it (H2). F8 and
-  F9 refuted both: fish repaints its whole prompt on SIGWINCH whenever
-  `fish_handle_reflow` is `1`, which is what a DanTerm-identified terminal
-  auto-detects, and that variable is live and settable. D3 was reopened, and H3
-  re-decided it on new evidence. Do not cite the old reasoning.
-- Evidence used: F5 (fish emits `A`/`B`/`C`/`D` itself), F8/F9 (fish *does*
-  repaint; `fish_handle_reflow` is the lever), F10 (fish left-truncates its
-  prompt, so a fish prompt row never soft-wraps), F11 (all three configurations
-  are observationally identical in a real pane). ~~F6~~ retracted.
-- Candidate solutions: (a) `fish_handle_reflow 1` + `redraw=1` -- fish repaints,
-  DanTerm blanks the block first; (b) `redraw=0` -- nobody blanks; (c) emit
-  nothing and inherit the parser default (`full`).
-- Tradeoffs and correctness risks: F11 measured all three as indistinguishable,
-  so this is not a choice between outcomes -- it is a choice between mechanisms
-  that produce the same outcome. F10 says why: a fish prompt row never wraps, so
-  it never re-wraps on resize, so there is no stale-prompt staircase for blanking
-  to fix. That makes (a) a destructive operation with nothing to act on -- if
-  fish's repaint is ever incomplete, blanking upgrades a cosmetic artifact into
-  an erased prompt. (c) has (a)'s risk and additionally leaves the mode at
-  whatever a nested shell last set (D0).
-- Selected direction: (b). Emit `A;redraw=0` from a `fish_prompt` event handler,
-  once per prompt. **Do not set `fish_handle_reflow`** -- leave fish's own
-  detection alone; F11 shows its value does not matter to the rendered result,
-  and not touching it is one less thing to keep correct.
-- Behavioral verification: F11 (real pane, three configurations, both resize
-  directions, re-wrapping content). F7 case 3 shows what `full` mode would do to
-  a multi-row prompt, which is the failure `redraw=0` forecloses.
-- Decision and rationale: prefer the mechanism that cannot destroy the user's
-  prompt when the outcome is otherwise identical. The declaration still earns its
-  bytes even though blanking is unnecessary -- it is what stops a nested shell's
-  `redraw=1` from persisting into the fish pane and blanking a prompt block that
-  nothing needs blanked (D0).
-- Candidate solutions: (a) `redraw=1`, matching zsh; (b) `redraw=0`; (c) emit
-  nothing at all and inherit the parser default.
-- Tradeoffs and correctness risks: (a) and (c) are the same outcome, since the
-  parser's default is `full` -- and on F6's evidence that outcome is a blanked
-  prompt that never comes back, which is strictly worse than the stale prompt
-  DanTerm has today. (b) reproduces today's behavior exactly (no blanking) while
-  making it an explicit, pane-scoped declaration rather than an accident, and it
-  cannot be flipped by a nested shell (D0). Its cost: fish panes get no prompt
-  redraw benefit.
-- Selected direction: (b), emitted as `A;redraw=0` from a `fish_prompt` event
-  handler. DanTerm adds no other mark for fish; `A`/`B`/`C`/`D` are fish's own.
-  Emitting a second `A` at column 0 is idempotent for the row stamp and its fresh
-  line is a no-op, so ordering against fish's native mark does not matter -- only
-  DanTerm's carries a `redraw` option, and an option-less `A` never clears the
-  mode (F1).
-- Behavioral verification: F7 case 3 demonstrates the failure `redraw=0` avoids.
-  A positive verification of fish under `redraw=0` is trivial (nothing is
-  blanked) and is the same code path as a pane with no marks at all.
-- Decision and rationale: prefer the degradation that loses a feature over the
-  one that erases the user's prompt. Reopen the moment H1 shows fish repaints:
-  the change is one option value, and the rest of the fish entry is unaffected.
+- Status: selected. **Reversed on 2026-07-31 by F13; the previous value
+  (`redraw=0`) was wrong.** This decision has now been decided three times. The
+  first version chose `redraw=0` because fish supposedly never repaints (H1) and
+  had no lever to make it (H2); F8/F9 refuted both. The second kept `redraw=0` on
+  F10/F11, reasoning that fish prompts never wrap so blanking has nothing to fix.
+  F13 refutes that too: replaying a real fish + Starship prompt through a
+  one-column-at-a-time width sweep reproduces the original staircase under
+  `redraw=0` (31 prompt copies in history, 10 on screen) and stays clean under
+  `redraw=1`. Do not cite either earlier version.
+- Evidence used: F13 (the decisive replay), F8/F12 (fish repaints on SIGWINCH,
+  and DanTerm's real XTVERSION identity is what puts it in that branch), F5
+  (fish emits `A`/`B`/`C`/`D` itself), F1 and F7 case 5 (the mode is sticky
+  per-pane state). ~~F6~~ retracted; F10 stands but its inference does not; F11
+  stands only for prompts narrower than the pane.
+- Candidate solutions: (a) `redraw=1` -- fish repaints, DanTerm blanks the block
+  first; (b) `redraw=0` -- nobody blanks; (c) emit nothing and inherit the parser
+  default (`full`).
+- Tradeoffs and correctness risks: (b) is now measured as defective -- it ships
+  the exact staircase the OSC 133 consumer was built to fix, in the maintainer's
+  own daily fish + Starship configuration. (a) and (c) both render correctly
+  today, because the parser default is already `full`; they differ only in what
+  happens after a nested shell sets a different mode, which is sticky for the
+  life of the pane and unrecoverable without a restatement (D0). (a) additionally
+  costs a handful of bytes per prompt.
+- Selected direction: (a). Emit `A;redraw=1` from a `fish_prompt` event handler,
+  once per prompt. DanTerm adds no other mark; `A`/`B`/`C`/`D` are fish's own.
+  **Do not set `fish_handle_reflow`** -- fish's auto-detection already resolves
+  to `1` for DanTerm's terminal identity (F12), and F13 confirms it repaints on
+  every resize step, so there is nothing to force.
+- Behavioral verification: F13's three-variant replay -- `redraw=1` and the
+  unmarked control both leave exactly one prompt after a 30-step sweep, while
+  `redraw=0` leaves ten on screen. F7 case 1 is the equivalent proof for zsh.
+- Decision and rationale: fish repaints its whole prompt, so fish can safely ask
+  for the whole prompt to be blanked -- the same reasoning D1 applies to zsh, and
+  the same reasoning the first two versions of this decision talked themselves
+  out of. The declaration earns its bytes by pinning the mode against a nested
+  shell that sets `redraw=0` or `redraw=last` and exits (D0); without it, fish
+  panes inherit whatever the last shell left behind.
+- What would change my mind: a prompt that fish repaints only partially after
+  SIGWINCH. Blanking is scoped to what the shell promises to rewrite, so a
+  partial repaint under `redraw=1` erases the difference permanently. F13
+  exercised one prompt shape (two rows, right-aligned, full width); a prompt
+  whose upper rows fish leaves untouched would be the counterexample.
 
 ### D4 -- what the dialect does not emit
 

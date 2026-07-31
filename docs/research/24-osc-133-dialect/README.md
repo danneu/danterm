@@ -40,6 +40,11 @@ reflow or how the prompt block is treated on resize.
   record it here and stop, rather than authoring bytes nothing consumes.
 - R1 authors and records the dialect. It does not ship script changes; the
   emitters are a separate implementation task (see the ledger).
+- **A null result must argue that its stimulus could have produced a positive
+  one.** Added after F13: F11 measured no difference between three redraw modes
+  and was wrong, because its prompt was narrower than the pane and so no row
+  could re-wrap. A probe that reports "no effect" states what shape the effect
+  would have taken and why the stimulus would have exhibited it.
 
 ## Trigger and current evidence
 
@@ -52,11 +57,20 @@ appears anywhere in the repo outside `Terminal.swift`, its tests, and prose (F2)
 Meanwhile the engine has a complete OSC 133 consumer: prompt/continuation row
 stamping, three redraw modes, and prompt-block blanking before reflow, shipped
 by `plans/impl/2026-07-22-1422-osc-133-prompt-redraw.md` and pinned by
-`TerminalOSC133Tests`. It exists because a real zsh -- the user's, not
+`TerminalOSC133Tests`. It exists because a real shell -- the maintainer's, not
 DanTerm's -- emits marks, and split-open resizes were leaving a staircase of
-stale prompts. That capture is still in the gate as
-`Fixtures/danterm/zsh-osc133-width-sweep.json`, and it emits bare `133;A` and
-`133;B` with a BEL terminator (F2).
+stale prompts.
+
+That incident is worth naming precisely, because this doc got it wrong twice.
+The shell was **fish**, not zsh: the maintainer's `~/.zshrc` exec'd fish on its
+third line, so every pane ran fish under a zsh-shaped `$SHELL` (removed
+2026-07-31, in favor of fish as the account shell). The marks were fish's own
+native `133;A;click_events=1` / `133;B` (F5), and the prompt was Starship's --
+two rows, right-aligned segment padded to the full pane width. The in-gate
+fixture `Fixtures/danterm/zsh-osc133-width-sweep.json` is **not** that capture:
+its provenance records `author: DanTerm, source: danterm`, and it is a 12-column
+synthetic minimization emitting bare `133;A` (F2). The real bytes were used to
+diagnose and were not committed; F13 re-captures them.
 
 So the consumer's behavior on a DanTerm-integrated pane is currently decided
 entirely by whatever the user's own prompt framework emits: everything from
@@ -90,24 +104,27 @@ shipped in `__fish_config_interactive.fish`, documented in `completions/set.fish
 unset for the same `-N` reason. Ghostty's `fish_handle_reflow 1` is the supported
 lever, and it works by pre-setting the variable so fish's auto-detection skips.
 
-### H3 -- SETTLED: neither branch is observably different; `redraw=0` wins on risk
+### H3 -- SETTLED, then REOPENED and RE-SETTLED: fish needs `redraw=1`
 
-Asked whether DanTerm should ask fish to repaint (`reflow 1` + `redraw=1`) or
-reflow fish's prompt itself (`reflow 0` + `redraw=0`). **Answered by F10 and
-F11: the question was smaller than it looked.**
+Asked whether DanTerm should ask fish to repaint (`redraw=1`) or leave the
+prompt alone (`redraw=0`).
 
-F10 found that fish left-truncates any prompt wider than the pane, so a fish
-prompt row never soft-wraps -- and a row that never wraps never *re*-wraps on
-resize. There is therefore no stale-prompt staircase in a fish pane for blanking
-to fix. F11 confirmed it in a real pane: `redraw=1`, `redraw=0`, and no
-declaration at all are observationally identical across both resize directions
-with re-wrapping content on screen.
+The first answer was `redraw=0`, on F10 and F11: fish left-truncates an
+over-wide prompt, so a fish prompt row never soft-wraps, so there is no
+staircase for blanking to fix -- and F11 measured all three configurations as
+observationally identical in a real pane.
 
-D3 selects `redraw=0` -- not because it behaves better, but because when the
-outcome is identical it is the mechanism that cannot erase a prompt if fish's
-repaint is ever incomplete. This also explains the asymmetry with zsh (D1): zsh
-does not truncate, so a wide zsh prompt genuinely wraps and staircases, which is
-the incident the OSC 133 consumer was built for.
+**F13 refutes that.** F11's prompt was far narrower than the pane, so no row was
+ever full width and nothing re-wrapped; it could not have observed the failure.
+F10 is true but was over-applied: fish truncates at *draw* time, which says
+nothing about a row already drawn at full width when the grid reflows beneath
+it. A right-aligned segment padded to the terminal width -- Starship's default --
+is exactly such a row. Replaying a real fish + Starship prompt through a
+one-column-at-a-time sweep leaves 31 prompt copies in history and 10 on screen
+under `redraw=0`, and exactly one under `redraw=1`.
+
+So fish gets the same answer as zsh, for the same reason: it repaints its whole
+prompt (F8, F12), so the whole block may be blanked. D3 now selects `redraw=1`.
 
 ## The dialect, in one paragraph
 
@@ -116,8 +133,9 @@ declares its own redraw mode on every prompt rather than inheriting the parser
 default, because the mode is sticky per-pane and a nested foreign shell can leave
 it wrong (F7). zsh declares `redraw=1` and marks continuation lines; Bash
 declares `redraw=last` because readline repaints only the final prompt line (F4);
-fish declares `redraw=0` and does not touch `fish_handle_reflow` (D3, settled by
-F10/F11 -- fish prompts never wrap, so blanking has nothing to fix). No integration emits `D`, `L`, `I`, or `N`.
+fish declares `redraw=1` and does not touch `fish_handle_reflow` (D3, settled by
+F13 -- fish repaints its whole prompt, and a full-width fish prompt row does
+re-wrap). No integration emits `D`, `L`, `I`, or `N`.
 
 ## Task ledger
 
@@ -142,10 +160,10 @@ F10/F11 -- fish prompts never wrap, so blanking has nothing to fix). No integrat
 - [x] RESEARCH: settle H2 -- whether any fish 4.x lever forces a prompt repaint
   on SIGWINCH. Refuted -- `fish_handle_reflow` is that lever and is live.
   Recorded in F9.
-- [x] RESEARCH: settle H3. Done in a real Dev.app pane rather than by byte
-  replay: all three configurations are observationally identical (F11), because
-  fish prompts never wrap (F10). D3 closed on `redraw=0`; the fish emitter is
-  unblocked.
+- [x] RESEARCH: settle H3. First closed on `redraw=0` from a real-pane sweep
+  (F10, F11), then **reopened and reversed**: F13 replayed a real fish + Starship
+  prompt and reproduced the original staircase under `redraw=0`. D3 now selects
+  `redraw=1`. F11's prompt was too narrow to expose it.
 - [x] RESEARCH: confirm what XTVERSION identity DanTerm actually reports to
   fish. It is `DanTerm <bundle version>`, which matches none of fish's
   alternatives, so an unintegrated fish pane auto-sets `fish_handle_reflow 1`
@@ -237,14 +255,21 @@ an `aid=`.
 ## Outcome
 
 Dialect authored, parser-checked, and settled: D1 (zsh), D2 (Bash), D3 (fish),
-D4 (what is not emitted) all stand, and every hypothesis is closed. D3 kept its
-original value (`redraw=0`) but none of its original reasoning -- H1 and H2 were
-refuted by F8/F9, and H3 re-decided it on F10/F11.
+D4 (what is not emitted) all stand, and every hypothesis is closed.
 
-The net finding for fish is that the dialect barely matters there: fish
-truncates its prompt rather than wrapping it, so the staircase this protocol
-exists to prevent cannot occur in a fish pane. `redraw=0` is a risk choice, not
-a behavior choice.
+D3 was decided three times and is the cautionary tale of this doc. It chose
+`redraw=0` twice -- first on H1/H2, which F8/F9 refuted, then on F10/F11, which
+F13 refuted -- before landing on `redraw=1`. Each wrong version was internally
+consistent with the evidence available; what broke both was a probe whose
+stimulus could not exhibit the failure. F11 in particular ran in a real pane,
+in both resize directions, against a do-nothing control, and still measured
+nothing, because its prompt was narrower than the pane. **A null result is only
+as strong as the stimulus that produced it**, and this doc's investigation rules
+did not require a probe to argue that its stimulus could have shown the effect.
+
+The net finding for fish is the opposite of what this section said for most of
+the doc's life: fish is the shell where the protocol matters most for the
+maintainer, because it is the shell the original incident occurred in.
 
 Phase 2 is closed: its last open item -- which XTVERSION identity fish actually
 sees -- resolved to `DanTerm <bundle version>`, which matches none of fish's

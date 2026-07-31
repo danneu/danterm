@@ -22,7 +22,7 @@ redraw, and revised without touching the semantic model.
 | `133;A;redraw=1` | zsh, once per `PS1` render | fresh line, stamp row `prompt`, set mode `full` |
 | `133;A;k=s` | zsh, per continuation line and per `PS2` render | stamp row `continuation` |
 | `133;A;redraw=last` | Bash, once per prompt from precmd | fresh line, stamp row `prompt`, set mode `last` |
-| `133;A;redraw=0` | fish, once per `fish_prompt` event | stamp row `prompt` (fresh line is a no-op at column 0), set mode `disabled` |
+| `133;A;redraw=1` | fish, once per `fish_prompt` event | stamp row `prompt` (fresh line is a no-op at column 0), set mode `full` |
 | `133;P;k=i` | Bash, opening `PS1` | stamp row `prompt` with no fresh line |
 | `133;P;k=s` | Bash, opening `PS2` and each continuation line | stamp row `continuation` with no fresh line |
 | `133;B` | zsh and Bash, closing `PS1`/`PS2` | end prompt, begin input |
@@ -85,20 +85,24 @@ and `133;D;<status>` with no integration loaded, and all of them parse cleanly
 under DanTerm's grammar (`F5`). DanTerm adds exactly one mark:
 
 ```
---on-event fish_prompt:  printf 'ESC]133;A;redraw=0 BEL'
+--on-event fish_prompt:  printf 'ESC]133;A;redraw=1 BEL'
 ```
 
-`redraw=0` disables prompt blanking for the pane. DanTerm does **not** set
-`fish_handle_reflow`; fish's own detection is left alone (`D3`).
+`redraw=1` blanks the whole prompt block before reflow. DanTerm does **not** set
+`fish_handle_reflow`; fish's auto-detection already resolves to `1` for DanTerm's
+terminal identity (`F12`), so there is nothing to force (`D3`).
 
-Why blanking is switched off here, when zsh asks for the opposite (`D1`): fish
-left-truncates any prompt too wide for the pane (`F10`), so a fish prompt row
-never soft-wraps, never re-wraps on resize, and therefore never leaves the stale
-prompt that blanking exists to clear. A real-pane sweep found `redraw=0`,
-`redraw=1`, and no declaration at all to be observationally identical (`F11`);
-`redraw=0` is chosen because it is the one that cannot erase a prompt if fish's
-repaint is ever incomplete. The declaration is still emitted every prompt so a
-nested shell's `redraw=1` cannot persist into the fish pane (`D0`).
+fish gets the same mode as zsh for the same reason: it repaints its whole prompt
+on SIGWINCH (`F8`, `F12`), so blanking the block is safe and necessary. It is
+necessary because a fish prompt row *can* be full width -- a right-aligned
+segment padded to the terminal width is Starship's default -- and a full-width
+row re-wraps when the grid reflows beneath it, stranding the old head above
+fish's repaint window. Replaying a real fish + Starship sweep under `redraw=0`
+reproduces the original staircase exactly (`F13`). fish's draw-time truncation
+(`F10`) does not prevent this; it applies to prompts too wide to draw, not to
+rows already drawn at full width. The declaration is emitted every prompt so a
+nested shell's `redraw=0` or `redraw=last` cannot persist into the fish pane
+(`D0`).
 
 Ordering against fish's own `A` does not matter: a second `A` at column 0 is an
 idempotent re-stamp with a no-op fresh line, and an option-less `A` never clears

@@ -435,3 +435,48 @@ Evidence for the OSC 133 dialect. Parser probes feed
   string changes this. Renaming the terminal to start with `VTE`, `Konsole `, or
   `WezTerm ` would -- a constraint worth remembering, not one worth guarding.
 - Next action: none. D3 stands unchanged; the ledger item is closed.
+
+### F13 -- `redraw=0` reproduces the original staircase in a real fish prompt
+
+- Status: settled. **Refutes the inference F11 drew, and reopens D3.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: `c4434ff`, scratch replay harness deleted after use.
+- Commands, inputs, or reproduction: two stages, both in
+  `scratchpad/capture_fish_sweep.py` and a temporary `TerminalCore` test.
+  1. Capture: real interactive fish 4.7.1 with the user's own config (Starship
+     prompt, two rows, right-aligned segment) in a `pty.fork()` PTY, cwd set to
+     this repo so the prompt renders its real content. Gradual one-column shrink
+     from 100 to 70 columns, draining fish's repaint after each step -- the
+     stimulus a split open/close produces (one resize per AppKit layout pass).
+  2. Replay: the captured bytes and resizes fed to `TerminalCore.Terminal` in
+     three variants, differing only in the option appended to fish's own `A`.
+- Measurements or examples: occurrences of the prompt's `repo:` token after the
+  sweep.
+
+  | variant | in full history | on screen | result |
+  | --- | --- | --- | --- |
+  | as captured (fish's marks, parser default `full`) | 1 | 1 | clean |
+  | `A;click_events=1;redraw=1` | 1 | 1 | clean |
+  | `A;click_events=1;redraw=0` | 31 | 10 | **staircase** |
+
+  The `redraw=0` screen is the incident verbatim: ten stale prompt copies, each
+  shifted one further column, the live prompt driven to the last row.
+- Observation: fish repainted on **all 30** resize steps, re-emitting
+  `133;A;click_events=1` and `133;B` every time (0 steps produced no bytes),
+  which independently reconfirms F8/F12 on the user's real configuration.
+  Prompt blanking is what keeps that repaint from stranding its predecessor.
+- Inference: **D3's selected value is wrong.** `redraw=0` would ship the exact
+  defect the OSC 133 consumer exists to fix, in the maintainer's daily
+  configuration. Today's unmarked behavior is already correct because the parser
+  default is `full`.
+- Competing interpretations: none survive the two clean variants. The only
+  difference between the staircase and the clean runs is the `redraw` option;
+  bytes, widths, and order are byte-identical.
+- Uncertainty: why F11 saw no difference is now explained, not mysterious -- its
+  prompt (`TOP1`/`MID2`/`BOT3> `) was far narrower than the pane, so no row was
+  ever full-width and nothing re-wrapped. F10 stands as written but its
+  inference was over-generalized: fish truncates at **draw** time, which says
+  nothing about a row already drawn at full width when the grid reflows beneath
+  it. A right-aligned segment padded to the terminal width -- Starship's default,
+  and common in fish prompts -- produces exactly such a row.
+- Next action: reopen D3 and re-decide between `redraw=1` and emitting nothing.
