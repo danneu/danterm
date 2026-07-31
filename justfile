@@ -34,59 +34,14 @@ build-icons:
     ./icon/build-icns.sh AppIcon
     ./icon/build-icns.sh AppIcon-dev
 
-# Run all tests
-test:
-    swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
-    swift test --package-path lib/DanTermCore
-    swift test --package-path lib/TerminalCore
-    ./scripts/test-terminal-pty.sh
-    swift test --package-path lib/DanTermSupport
-    ./scripts/core-purity-lint.sh
-    ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore
-    ./scripts/core-purity-lint.sh --forbid-imports lib/TerminalCore/Sources/TerminalCore
-    ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalRenderPlanning
-    ./scripts/core-purity-lint.sh --allow-imports TerminalCore lib/TerminalCore/Sources/TerminalRenderPlanning
-    ./scripts/core-purity-lint.sh lib/TerminalPTY/Sources/PaneLifecycle
-    ./scripts/core-purity-lint.sh --forbid-imports lib/TerminalPTY/Sources/PaneLifecycle
-    ./scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport
-    ./scripts/tests/core-purity-lint_test.sh
-    ./scripts/terminal-backend-boundary-lint.sh
-    ./scripts/tests/terminal-backend-boundary-lint_test.sh
-    ./scripts/terminal-exit-concurrency-lint.sh
-    ./scripts/tests/terminal-exit-concurrency-lint_test.sh
-    ./scripts/terminal-fence-accounting-lint.sh
-    ./scripts/tests/terminal-fence-accounting-lint_test.sh
-    ./scripts/research-index-lint.sh
-    ./scripts/tests/research-index-lint_test.sh
-    ./scripts/tests/terminal-capture-api-gate_test.sh
-    ./scripts/tests/load-ghostty-version_test.sh
-    ./scripts/tests/build-lib-stale-guard_test.sh
-    ./scripts/tests/build-lib-fetch_test.sh
-    ./scripts/tests/build-lib-contract_test.sh
-    ./scripts/tests/dev-build-configuration-contract_test.sh
-    ./scripts/tests/danterm-cli-connect-errors_test.sh
-    ./scripts/tests/terminal-characterization-harness_test.sh
-    ./scripts/tests/terminal-viability-harness_test.sh
-    ./scripts/tests/terminal-benchmark-harness_test.sh
-    ./scripts/tests/terminal-benchmark-commands_test.sh
-    python3 ./scripts/tests/terminal_benchmark_snapshot_test.py
-    python3 ./scripts/tests/terminal_benchmark_calibration_test.py
-    python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py
-    python3 ./scripts/tests/terminal_benchmark_validation_test.py
-    python3 ./scripts/tests/terminal_benchmark_compare_test.py
-    python3 ./scripts/tests/terminal_benchmark_producer_test.py
-    python3 ./scripts/tests/terminal_benchmark_fixtures_test.py
-    python3 ./scripts/tests/terminal_benchmark_workloads_test.py
-    python3 ./scripts/tests/terminal_draw_acceptance_test.py
-    python3 ./scripts/tests/terminal_headless_draw_compare_test.py
-    python3 ./scripts/tests/terminal_profile_report_test.py
-    python3 ./scripts/tests/terminal_memory_profile_test.py
-    python3 ./scripts/tests/fetch_references_test.py
-    python3 ./scripts/tests/import_ghostty_themes_test.py
-    python3 ./scripts/tests/pack_theme_catalog_test.py
-    ./scripts/tests/test-terminal-pty_test.sh
-    ./scripts/tests/shell-integration_test.sh
-    ./scripts/tests/agent-notifications-live_test.py
+# Run all tests. Steps run as a bounded parallel pool; the step list lives in
+# scripts/run-test-suite.sh. Pass a job count to override (default: half the cores).
+test jobs="":
+    ./scripts/run-test-suite.sh {{jobs}}
+
+# Run all tests one at a time, for when parallel output or scheduling is in the way.
+test-serial:
+    JOBS=1 ./scripts/run-test-suite.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
