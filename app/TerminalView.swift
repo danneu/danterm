@@ -1017,15 +1017,7 @@ extension TerminalView {
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        let pb = sender.draggingPasteboard
-
-        // Extract pasteboard values into plain strings for the pure helper
-        let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
-        let filePaths = urls.map { $0.isFileURL ? $0.path : $0.absoluteString }
-        let urlString = pb.string(forType: .URL)
-        let plainString = pb.string(forType: .string)
-
-        guard let content = DragDropInput.buildContent(filePaths: filePaths, urlString: urlString, plainString: plainString),
+        guard let content = dragDropContent(from: sender.draggingPasteboard),
               let surface = surface else { return false }
         content.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(content.utf8.count))

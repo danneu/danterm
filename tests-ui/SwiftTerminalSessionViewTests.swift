@@ -8,6 +8,104 @@ import CoreGraphics
 func swiftTerminalSessionViewTests() {
     print("SwiftTerminalSessionView")
 
+    uiTest("pane registers and accepts only supported drag types") {
+        // Intent: the Swift pane participates in AppKit dragging for file URLs, URLs, and strings.
+        // Why it exists: destination callbacks are never sent unless the view registers its types.
+        // Scenario: supported and unrelated pasteboards enter a mounted Swift-engine pane.
+        let pane = makeMountedPane(controller: TerminalPaneSessionController())
+        try uiExpect(
+            Set(pane.registeredDraggedTypes) == [.fileURL, .URL, .string],
+            "pane registered unexpected drag types: \(pane.registeredDraggedTypes)"
+        )
+
+        for type in [NSPasteboard.PasteboardType.fileURL, .URL, .string] {
+            let accepted = makePasteboard()
+            accepted.setString("accepted", forType: type)
+            try uiExpect(
+                pane.draggingEntered(DraggingInfoStub(pasteboard: accepted)) == .copy,
+                "supported \(type.rawValue) drag was refused"
+            )
+        }
+
+        let refused = makePasteboard()
+        refused.setString("ignored", forType: .init("com.example.unrelated"))
+        try uiExpect(
+            pane.draggingEntered(DraggingInfoStub(pasteboard: refused)).isEmpty,
+            "unrelated drag was accepted"
+        )
+    }
+
+    uiTest("file drop sends shell-quoted content through bracketed paste") {
+        // Intent: dropped file paths use shared drag quoting and owner-side paste policy.
+        // Why it exists: a raw write would permit control injection and omit DEC 2004 markers.
+        // Scenario: Finder drops a path containing a space onto a bracketed-paste pane.
+        let controller = TerminalPaneSessionController()
+        controller.inputModes.bracketedPaste = true
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = makePasteboard()
+        pasteboard.writeObjects([NSURL(fileURLWithPath: "/tmp/wiggly adleman.png")])
+
+        let performed = pane.performDragOperation(DraggingInfoStub(pasteboard: pasteboard))
+
+        let expected = Array("\u{1B}[200~'/tmp/wiggly adleman.png'\u{1B}[201~".utf8)
+        try uiExpect(performed, "file drop was not performed")
+        try uiExpect(controller.inputBytes == [expected],
+                     "file drop bypassed quoted bracketed paste: \(controller.inputBytes)")
+        try uiExpect(controller.textInputs.isEmpty, "file drop used the raw text path")
+    }
+
+    uiTest("browser URL drop takes priority over its plain string") {
+        // Intent: a non-file URL is shell-quoted instead of falling through to plain text.
+        // Why it exists: browser drags commonly advertise both URL and string representations.
+        // Scenario: a link with shell metacharacters is dragged from a browser into the pane.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = makePasteboard()
+        let item = NSPasteboardItem()
+        item.setString("https://example.com/a?x=1&y=2", forType: .URL)
+        item.setString("Example link", forType: .string)
+        pasteboard.writeObjects([item])
+
+        let performed = pane.performDragOperation(DraggingInfoStub(pasteboard: pasteboard))
+
+        try uiExpect(performed, "URL drop was not performed")
+        try uiExpect(
+            controller.inputBytes == [Array("'https://example.com/a?x=1&y=2'".utf8)],
+            "URL drop did not retain URL priority: \(controller.inputBytes)"
+        )
+    }
+
+    uiTest("unbracketed multiline drop converts newlines and filters controls") {
+        // Intent: drag input inherits unbracketed paste encoding and control filtering.
+        // Why it exists: the residual auto-execute behavior must be explicit without admitting
+        //   escape-sequence injection through a raw terminal write.
+        // Scenario: a plain-text drag contains two lines and an embedded escape character.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = makePasteboard()
+        pasteboard.setString("one\u{1B}\ntwo", forType: .string)
+
+        let performed = pane.performDragOperation(DraggingInfoStub(pasteboard: pasteboard))
+
+        try uiExpect(performed, "multiline string drop was not performed")
+        try uiExpect(controller.inputBytes == [Array("one\rtwo".utf8)],
+                     "unbracketed paste encoding diverged: \(controller.inputBytes)")
+    }
+
+    uiTest("empty drop writes nothing") {
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = makePasteboard()
+        pasteboard.setString("  \n", forType: .string)
+
+        try uiExpect(
+            pane.performDragOperation(DraggingInfoStub(pasteboard: pasteboard)) == false,
+            "empty drop reported success"
+        )
+        try uiExpect(controller.inputBytes.isEmpty, "empty drop wrote terminal bytes")
+        try uiExpect(controller.textInputs.isEmpty, "empty drop wrote raw text")
+    }
+
     uiTest("partial terminal damage includes a bounded one-row glyph halo") {
         try uiExpect(
             terminalDamageRowsWithGlyphHalo([0], rowCount: 4) == [0, 1],
@@ -694,6 +792,48 @@ private final class SwiftPaneStateObserver: TerminalSessionStateObserver {
     func terminalSessionStateDidChange(_ state: TerminalSessionState) {
         states.append(state)
     }
+}
+
+@MainActor
+private final class DraggingInfoStub: NSObject, @preconcurrency NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 0 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 0
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    init(pasteboard: NSPasteboard) {
+        draggingPasteboard = pasteboard
+    }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+
+    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions = [],
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
+
+    func resetSpringLoading() {}
+}
+
+@MainActor
+private func makePasteboard() -> NSPasteboard {
+    let name = NSPasteboard.Name("danterm-ui-drag-\(UUID().uuidString)")
+    let pasteboard = NSPasteboard(name: name)
+    pasteboard.clearContents()
+    return pasteboard
 }
 
 private func makeScrollWheelEvent(

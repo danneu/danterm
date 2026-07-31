@@ -101,6 +101,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Self.cgColor(RenderTheme.dark.defaultBackground)
+        registerForDraggedTypes([.fileURL, .URL, .string])
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.attachFenceMetricsController(controller)
         #endif
@@ -1024,5 +1025,21 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         if modifiers.contains(.alt) { result.insert(.alt) }
         if modifiers.contains(.shift) { result.insert(.shift) }
         return result
+    }
+}
+
+// MARK: - Drag and Drop
+
+extension SwiftTerminalSessionView {
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let types = sender.draggingPasteboard.types else { return [] }
+        let accepted: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .string]
+        return Set(types).isDisjoint(with: accepted) ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let content = dragDropContent(from: sender.draggingPasteboard) else { return false }
+        controller.sendPaste(content)
+        return true
     }
 }
