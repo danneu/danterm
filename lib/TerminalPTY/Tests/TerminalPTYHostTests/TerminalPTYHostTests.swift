@@ -1778,6 +1778,32 @@ struct TerminalPTYHostTests {
         #expect(closed != nil)
         #expect((await host.resourceSnapshot()).isReleased)
     }
+
+    @Test("waiting on output a quiesced host already produced never reports absence", .timeLimit(.minutes(1)))
+    func waitForOutputAfterQuiescenceSeesRetainedEvidence() async throws {
+        // Intent: `waitForOutput(containing:)` answers from retained evidence when the
+        //   bytes arrived before the wait started, even though the host has already
+        //   torn down and can never deliver another output callback.
+        // Why it exists: the helper registered its quiescence fallback before consulting
+        //   the evidence it was handed, so the two raced on the host queue. A child that
+        //   prints and immediately exits -- the common shape -- made every such wait a
+        //   coin flip, surfacing as an unexplained `#expect` failure at the wait line.
+        // Scenario: `just test` runs its steps as a parallel pool; under that load the
+        //   host queue won the race often enough to fail the gate roughly one run in five.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "\(printMarker("SETTLED")); exit 0"))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        await host.close()
+
+        // Re-asking a torn-down host is the whole point: each call reinstalls the
+        // handler that teardown refuses, so only the evidence check can answer. One
+        // call would pass by luck often enough to hide the race; the loop does not.
+        var absences = 0
+        for _ in 0..<200 where await host.waitForOutput(containing: Array("__SETTLED__".utf8)) == false {
+            absences += 1
+        }
+        #expect(absences == 0)
+    }
 }
 
 /// Awaits the task's value but gives up after the bound, returning nil on

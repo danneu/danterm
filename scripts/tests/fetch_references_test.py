@@ -232,11 +232,14 @@ class FetchReferencesTests(unittest.TestCase):
             time.sleep(0.01)
         if not marker.exists():
             process.kill()
-            output = process.communicate(timeout=5)
+            output = process.communicate(timeout=60)
             self.fail(f"fetch subprocess never entered transfer: {output}")
 
         os.killpg(process.pid, signal.SIGINT)
-        process.communicate(timeout=5)
+        # Same liveness-bound reasoning as the marker poll above. Unwinding the
+        # interrupt means the child restores the previous tree before exiting, and
+        # under the parallel gate that cleanup is not guaranteed a prompt slice.
+        process.communicate(timeout=60)
 
         self.assertNotEqual(process.returncode, 0)
         self.assertEqual((checkout / "cone-a/inside.txt").read_text(), "pinned\n")

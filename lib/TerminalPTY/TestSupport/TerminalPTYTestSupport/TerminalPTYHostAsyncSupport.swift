@@ -28,11 +28,15 @@ public extension TerminalPTYHost {
                 waiter.complete(with: result)
             }
         }
-        whenQuiescent {
-            waiter.complete(with: nil)
-        }
+        // Evidence first, fallback second. `whenQuiescent` runs its observer on the host
+        // queue -- immediately, when teardown already finished -- so arming it before
+        // consulting `initial` races the fallback against the answer we were just handed
+        // and can report absence for a result the host has already reported.
         if let result = initial.result {
             waiter.complete(with: result)
+        }
+        whenQuiescent {
+            waiter.complete(with: nil)
         }
         return await withTaskCancellationHandler {
             await withCheckedContinuation {
@@ -52,11 +56,15 @@ public extension TerminalPTYHost {
                 waiter.complete(with: true)
             }
         }
-        whenQuiescent {
-            waiter.complete(with: false)
-        }
+        // Evidence first, fallback second -- see `waitForResult`. A child that prints and
+        // immediately exits routinely quiesces the host before the wait even starts, so
+        // retained output is the only answer available and must be read before the
+        // quiescence fallback can claim the bytes never arrived.
         if initial.containsSubsequence(bytes) {
             waiter.complete(with: true)
+        }
+        whenQuiescent {
+            waiter.complete(with: false)
         }
         return await withTaskCancellationHandler {
             await withCheckedContinuation {
