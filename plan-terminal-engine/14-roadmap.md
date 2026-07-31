@@ -359,7 +359,7 @@ mean.
     [wraptest coverage comparison](../docs/research/2-wraptest-coverage.md), and
     [slice plan](../plans/impl/2026-07-21-2326-real-pane-protocol-probes.md).
 
-- [ ] **8. Reach tmux, editor, and advanced TUI compatibility**
+- [x] **8. Reach tmux, editor, and advanced TUI compatibility**
   - [x] **Slice 1: Alacritty tmux and Vim recording adoption.** Replays the
     five pinned `tmux_git_log`, `tmux_htop`, and Vim application captures at
     their authored dimensions and chunking through public terminal
@@ -368,18 +368,49 @@ mean.
     vttest ledger entries against native behavioral evidence without treating
     the imported headless captures as live workflow proof. See the
     [slice plan](../plans/impl/2026-07-22-0103-alacritty-tmux-vim-recordings.md).
-  - [ ] tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
+  - [x] tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
     DanTerm-owned minimum workflows in
     [Testing and conformance](12-testing-conformance.md).
-  - [ ] Relevant workflows pass both directly and through tmux or ssh where those
+    Milestone 8 probe judgment: closed by interactive live-pane probes on the
+    Swift backend (2026-07-31) covering each application's minimum task,
+    including mouse, copy-mode, resize, and clean exit/restore legs; scripted
+    workflow automation and a dated evidence record were intentionally waived
+    for this criterion by owner decision. vim was not probed separately;
+    neovim stands in for it. One adjudicated deviation: tmux splits
+    regional-indicator flag-emoji pairs during partial redraws under both the
+    Swift and Ghostty backends (a full redraw restores them), so flag
+    corruption inside tmux is tmux-layer behavior outside DanTerm's contract.
+  - [x] Relevant workflows pass both directly and through tmux or ssh where those
     layers materially change terminal behavior.
-  - [ ] External and DanTerm-owned recordings identified in
+    Milestone 8 probe judgment: closed by owner decision on interactive
+    live-pane probes (2026-07-31). The tmux leg ran during the application
+    probes themselves: neovim, lazygit, and Claude Code executed nested
+    inside tmux, and tmux was probed directly. The ssh leg ran htop and an
+    editor over a live ssh hop, including window-resize propagation to the
+    remote application and clean disconnect with local prompt restoration.
+    Scripted variant automation was intentionally waived.
+  - [x] External and DanTerm-owned recordings identified in
     [External terminal test research](../docs/research/1-external-tests.md)
     cover the supported tmux, editor, and advanced-TUI behaviors without making
     another emulator's output normative.
-  - [ ] Live-pane evidence covers the PTY, input, renderer, teardown, and
+    Milestone 8 probe judgment: the external leg was closed by Slice 1's five
+    pinned Alacritty tmux/htop/Vim replays. Capturing DanTerm-owned workflow
+    recordings via `DANTERM_PTY_RECORDING_DIR` was intentionally waived by
+    owner decision; the 2026-07-31 interactive probes stand as the live
+    workflow evidence without replayable captures. Kitty mining for supported
+    protocols is adjudicated as already covered: Kitty keyboard encoding has
+    native deterministic coverage from Milestone 6 Slice 6, and the Slice 18
+    adjudication found no support-matrix behavior unique to the remaining
+    researched sources.
+  - [x] Live-pane evidence covers the PTY, input, renderer, teardown, and
     recording boundaries exercised by those workflows; headless core replay
     alone does not close this criterion.
+    Milestone 8 probe judgment: closed by owner decision on the same
+    2026-07-31 interactive live-pane session as the workflow criterion --
+    real PTYs (including one ssh hop), live keyboard/mouse/copy-mode input,
+    the real renderer, and observed teardown with prompt restoration. The
+    recording boundary was not exercised; that leg inherits the waiver
+    recorded on the recordings criterion above.
 
 - [ ] **9. Pass the replacement quality gates**
   - [ ] Every required component invariant has the behavioral proof required by
@@ -402,6 +433,11 @@ mean.
 
 ## Deferred post-milestone work
 
+- [ ] **Lone regional-indicator glyph fallback.** An unpaired regional
+  indicator (e.g. half of a flag emoji split by tmux's partial redraws)
+  renders as a solid black square; Ghostty and Apple text rendering show a
+  legible letter-in-a-box instead. Cosmetic font-fallback polish observed
+  during the 2026-07-31 Milestone 8 probes; does not gate replacement.
 - [ ] **Application-requested cursor blinking.** Blink-capable DECSCUSR variants
   currently retain their semantic blink preference but render steadily. Add
   timed presentation after the replacement milestones, covering focus,
