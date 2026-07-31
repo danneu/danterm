@@ -598,3 +598,110 @@ Evidence for the OSC 133 dialect. Parser probes feed
   `PROMPT_COMMAND` has the same ordering hazard and was not probed.
 - Next action: amend D1 with the mechanism; carry the hook-ordering hazard into
   Phase 3 as an emitter requirement, not a dialect change.
+
+### F15 -- the hook-order hazard is defensible in zsh and only half-defensible in Bash
+
+- Status: settled. **Closes F14's open hazard for zsh; adds a Bash requirement
+  D2 did not state.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: `2f13e0b`, scratch `TerminalCore` test deleted
+  after use (its case table is reproduced below).
+- Result or artifact paths: [probe-hook-order.py](probe-hook-order.py), two
+  stages (`zsh-defense`, `bash-order`), expected numbers in its docstring.
+- Commands, inputs, or reproduction: real zsh 5.9.1 and Bash 5.3.9 under
+  `pty.fork()`, plus two zsh source facts that pick the candidates rather than
+  guessing at them.
+  1. `references/zsh/Src/utils.c#callhookfunc` copies the hook array
+     (`arrptr = arrdup(arrptr)`) before iterating it, so re-ordering
+     `precmd_functions` from inside a hook cannot affect the cycle in progress.
+  2. `references/zsh/Src/Zle/zle_main.c#zleread` expands the prompt on entry,
+     before `zle-line-init` runs; `reset-prompt` re-expands from the saved
+     `raw_lp`, which is the live `PS1` slot (`Src/input.c#ingetc` passes
+     `&prompt`). So a `zle-line-init` wrap lands only if it also resets.
+  3. `zsh-defense`: five emitters against no framework, against F14's
+     rebuild-every-precmd framework registered **after** ours, and against real
+     Starship. Four `true` cycles then a SIGWINCH; startup counted separately
+     because it is the one prompt drawn before any hook can re-order itself.
+  4. `bash-order`: real `starship init bash` crossed with four emitters and both
+     source orders.
+  5. Parser: a doubled `A` fed to `TerminalCore.Terminal` over a 20 -> 12 sweep,
+     under both repaint shapes.
+- Measurements or examples:
+
+  Stage 1, zsh. Marks per prompt; 2 is correct, 0 is the silent loss:
+
+  | defense | fw=none | fw=hostile | fw=starship |
+  | --- | --- | --- | --- |
+  | guarded precmd (F14's) | 2 startup, 2/cycle | **0 startup, 0/cycle** | 2, 2/cycle |
+  | + re-tail each run | 2, 2/cycle | **0 startup**, 2/cycle | 2, 2/cycle |
+  | `zle-line-init` + `reset-prompt` | 2, **4/cycle** | 2, 2/cycle | 2, **4/cycle** |
+  | `zle-line-init`, no reset | **0**, 2/cycle | 0, 0/cycle | 0, 2/cycle |
+  | **re-tail + heal** | 2, 2/cycle | 2, 2/cycle | 2, 2/cycle |
+
+  The no-reset row is the discriminator for source fact 2: its wrap lands one
+  prompt late (0 at startup, 2 thereafter) and never lands at all when the
+  framework rewrites `PS1` each cycle. The `reset-prompt` row works but paints
+  every prompt twice -- 4 marks and two visible copies of the prompt per cycle,
+  even with no framework present. "Heal" is that same widget made conditional:
+  it repaints only when it finds `PS1` unmarked, which after the re-tail has
+  taken effect is only the very first prompt.
+
+  Stage 2, Bash. Marks per prompt, `A` + `P;k=i` + `B`; the second `B` is
+  readline redrawing the final prompt row:
+
+  | emitter | ours sourced first | ours sourced last |
+  | --- | --- | --- |
+  | `PS1=` at source time | 1 (`A` only) | **1 (`A` only)** |
+  | re-wrap from `PROMPT_COMMAND`, unguarded | 1 (`A` only) | 4 |
+  | re-wrap, guarded | 1 (`A` only) | 4 |
+  | guarded + re-tail | 1 startup, then 5 | 4 |
+
+  Stage 3, parser. Prompt copies surviving the sweep, by repaint shape:
+
+  | opener | zsh shape (whole prompt repainted) | readline shape (last row only) |
+  | --- | --- | --- |
+  | `A;redraw=last` | 9 | **1** |
+  | `A;redraw=last` twice | 9 | **1** |
+  | `A;redraw=1` | 1 | **0** |
+  | nothing (parser default `full`) | 1 | **0** |
+
+- Observation: zsh has a defense and Bash has half of one. In zsh, re-appending
+  the hook to `precmd_functions` on every run recovers every prompt but the
+  first -- exactly what the `arrdup` snapshot predicts -- and a conditional
+  `zle-line-init` repaint recovers that first prompt too, at the cost of one
+  extra paint per pane rather than one per prompt. In Bash, `A` is immune to
+  ordering because it is *printed*, not stored in `PS1`; the `P`/`B` pair is
+  not, and Starship's bash init is the async-rebuild shape D1 originally
+  feared -- `PS1="$(starship prompt ...)"` on every `starship_precmd` -- so a
+  source-time `PS1=` assignment fails in **both** orders, not just ours-first.
+  Bash's re-tail works from cycle 2 but costs a doubled `A`, because Starship
+  swallows a pre-existing `PROMPT_COMMAND` into `STARSHIP_PROMPT_COMMAND` and
+  runs it before its own assignment, so the re-tailed emitter runs twice per
+  prompt. Stage 3 says that doubling is inert: a doubled `A` is byte-for-byte
+  equivalent to one in every regime measured, including the one that strands.
+- Inference: adopt re-tail + heal for zsh; D1's known gap closes. For Bash,
+  adopt guarded + re-tail and accept both the doubled `A` and one unmarked first
+  prompt, which has no `zle-line-init` analogue to heal it -- Bash offers no
+  hook that runs after `PROMPT_COMMAND`. Stage 3 also sharpens D2: under
+  readline's real repaint shape, `redraw=1` and emitting *nothing* both destroy
+  the prompt's upper row (0 copies survive), because the parser default is
+  `full` and readline never rewrites that row. For Bash the declaration is
+  load-bearing, not merely a hedge against a nested shell -- the opposite of
+  fish, where D3's declaration only pins the mode.
+- Competing interpretations: that the 9 under the zsh repaint shape indicts
+  `redraw=last` for Bash. It does not -- that stimulus repaints the whole
+  two-row prompt, which is zsh's behavior (F3), not readline's (F4). Under the
+  readline shape the same opener is the only one of the four that survives. That
+  the zsh startup zeros are a probe artifact is ruled out by the fw=none column
+  of the same table, where the identical rc file yields 2 at startup.
+- Uncertainty: the doubled `A` was measured as inert at the parser and as
+  adjacent bytes at column 0 on the wire, but never rendered in a real DanTerm
+  pane. Powerlevel10k is still not installed and still not measured; its
+  instant-prompt path re-enters prompt drawing before `~/.zshrc` finishes and
+  may defeat a `zle-line-init` heal that assumes one line-init per prompt.
+  Neither defense was measured against a framework that *also* re-tails itself,
+  which would be an unbounded ordering fight; nothing in either shell detects
+  that, and this probe would not have shown it.
+- Next action: amend D1 with the re-tail + heal mechanism and D2 with the
+  `PROMPT_COMMAND` requirement and its residual first-prompt gap; drop the
+  Phase 3 blocker to an emitter task.

@@ -137,10 +137,12 @@ Recorded in full in [dialect.md](dialect.md): each shell
 declares its own redraw mode on every prompt rather than inheriting the parser
 default, because the mode is sticky per-pane and a nested foreign shell can leave
 it wrong (F7, measured as a staircase in F14). zsh declares `redraw=1` and marks
-continuation lines -- wrapping `PS1` from an idempotent `precmd` hook, never by
-assignment at source time, which a prompt framework's later init silently
-overwrites (F14); Bash
-declares `redraw=last` because readline repaints only the final prompt line (F4);
+continuation lines -- wrapping `PS1` from an idempotent `precmd` hook that keeps
+itself last in `precmd_functions`, never by assignment at source time, which a
+prompt framework's later init silently overwrites (F14, F15); Bash
+declares `redraw=last` because readline repaints only the final prompt line (F4),
+and wraps `PS1` from a self-re-appending `PROMPT_COMMAND` because Starship's bash
+init rebuilds `PS1` on every prompt (F15);
 fish declares `redraw=1` and does not touch `fish_handle_reflow` (D3, settled by
 F13 -- fish repaints its whole prompt, and a full-width fish prompt row does
 re-wrap). No integration emits `D`, `L`, `I`, or `N`.
@@ -183,19 +185,29 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   `PROMPT` once at init rather than rebuilding it, so the hazard is source order,
   not async rebuilding, and the emitter must wrap `PS1` from an idempotent
   `precmd` hook. Recorded in F14.
+- [x] RESEARCH: settle how an emitter survives a prompt framework that hooks
+  *after* it, in both zsh and Bash. zsh is defensible -- re-appending the hook to
+  the tail of `precmd_functions` recovers every prompt but the first, and a
+  `zle-line-init` widget that repaints only when it finds `PS1` unmarked recovers
+  that one too. Bash has no post-`PROMPT_COMMAND` hook, so its first prompt
+  cannot be healed. Recorded in F15, which also measures that Bash's declaration
+  is load-bearing rather than a hedge.
 
 ### Phase 3 -- ship the emitters
 
 - [ ] TODO: implement the dialect in `danterm.zsh`, `danterm.bash`, and
   `danterm.fish`, preserving the existing prompt hooks the integrations already
   promise not to disturb. For zsh this means an idempotent `precmd` wrapper over
-  a pristine `PS1` copy, per D1 as amended by F14 -- not a `PS1=` assignment.
-- [ ] TODO: decide how the zsh emitter survives a prompt framework whose
-  `precmd` hook is registered *after* DanTerm's. F14 stage 3 measures that case
-  as a total silent loss (0 marks, no diagnostic); the guarded wrapper only holds
-  when DanTerm's hook runs last. Options not yet evaluated: re-appending the hook
-  each cycle, moving it to the end of `precmd_functions`, or detecting the loss
-  and warning. `PROMPT_COMMAND` has the same hazard for Bash and was not probed.
+  a pristine `PS1` copy that re-appends itself to `precmd_functions` and heals
+  the first prompt from `zle-line-init`, per D1 as amended by F14 and F15 -- not
+  a `PS1=` assignment. For Bash it means the same guarded wrap driven from a
+  self-re-appending `PROMPT_COMMAND`, per D2 as amended by F15, and accepting
+  that the session's first prompt carries `A` with no row stamp.
+- [ ] TODO: decide whether the Bash first-prompt gap is worth closing by other
+  means, or is acceptable as measured. It costs one unstamped prompt row per
+  session, only when a framework rebuilds `PS1` after DanTerm's hook. F15 found
+  no hook that runs after `PROMPT_COMMAND`, so any fix would be a different
+  mechanism (e.g. re-printing the prompt once at install time), not a reordering.
 - [ ] TODO: cover the emitted dialect behaviorally -- a resize over each shell's
   authored byte stream leaves exactly one prompt, and a resize during command
   output leaves the output intact. `TerminalOSC133Tests` covers the parser side;
@@ -253,9 +265,12 @@ an `aid=`.
   synthetic prompts. F14 re-ran the *framework* question against the real
   `~/.zshrc` and found the assumption stated here backwards: Starship-zsh does
   not rewrite `PS1` asynchronously at all, it assigns `PROMPT` once at init, so
-  what strips a source-time assignment is ordinary source order. Powerlevel10k
-  and Pure remain unprobed and are the plausible homes of the async shape;
-  F14's `hostile` stage stands in for them synthetically.
+  what strips a source-time assignment is ordinary source order. F15 then found
+  the async shape for real, in the other shell: Starship's *bash* init does
+  rebuild `PS1` on every prompt, so a source-time assignment there fails in both
+  source orders. Powerlevel10k and Pure remain unprobed as zsh instances of the
+  shape; F14's `hostile` stage stands in for them synthetically, and F15 notes
+  that p10k's instant-prompt path could still defeat the `zle-line-init` heal.
 - A user's own framework may already emit OSC 133. Probed in F14 stage 4: **the
   last `A` on the prompt wins**, and an optionless neighbor -- a bare `A`, or
   fish's native `A;click_events=1` -- inherits rather than resets, in either
@@ -291,7 +306,9 @@ an `aid=`.
   and Bash dialects have never been rendered by the app that will consume them.
   F14 narrows this for zsh but does not close it: it drove a real zsh with the
   real prompt framework and captured the bytes, but the consumer under test was
-  still `TerminalCore.Terminal`, not a pane.
+  still `TerminalCore.Terminal`, not a pane. F15 adds a real Bash to the same
+  arrangement, and one artifact of its Bash emitter -- a doubled `A` on every
+  prompt -- has been measured as inert at the parser but never seen rendered.
 
 ## Outcome
 
@@ -327,10 +344,23 @@ an idempotent `precmd` wrapper over a pristine copy -- the unguarded version of
 which grows two marks per prompt forever. D1's marks and `redraw=1` are
 unchanged; only its mechanism moved.
 
-That leaves one live hazard, carried into Phase 3 as an emitter requirement
-rather than a dialect question: a framework whose `precmd` hook is registered
-after DanTerm's wins, and the dialect disappears with no diagnostic. Nothing in
-the marks can detect that; the emitter has to.
+F15 closes the hazard F14 left behind -- a framework whose hook is registered
+after DanTerm's, which wins and takes the dialect with it, silently. zsh is
+defensible because two of its mechanics are on the emitter's side: hook arrays
+are snapshotted per cycle, so a hook that re-appends itself to
+`precmd_functions` is last from the next prompt onward, and `reset-prompt`
+re-expands from the live `PS1`, so a `zle-line-init` widget can heal the one
+prompt the re-append cannot reach. Made conditional on finding `PS1` unmarked,
+that heal costs one extra paint per pane instead of one per prompt. Bash gets
+the same re-append and no heal, because nothing runs after `PROMPT_COMMAND`; its
+session's first prompt ships with `A` and no row stamp.
+
+F15's other result is one D2 asserted but had never measured against readline's
+actual repaint shape: emitting *nothing* for Bash is not neutral. The parser
+default is `full`, readline rewrites only the last row, and the difference is
+erased permanently -- the upper prompt row does not survive at all. For Bash the
+declaration is what protects the prompt, not what tunes it.
 
 Remaining work is Phase 3 -- writing the emitters -- which is unblocked for all
-three shells.
+three shells, with one open judgment call: whether Bash's first-prompt gap is
+worth a different mechanism or is acceptable as measured.

@@ -64,16 +64,31 @@ The authored dialect, decision by decision. The bytes themselves are in
   confirms the need as well as the safety: the maintainer's real zsh prompt has a
   right-aligned segment padded to the full width, the same re-wrapping row shape
   that produced fish's staircase in F13.
-- Known gap carried to Phase 3: the guarded hook is only proven against
-  framework hooks registered *before* it. A framework whose `precmd` is
-  registered after DanTerm's overwrites the wrapped `PS1` and the dialect goes
-  silent -- 0 marks, no diagnostic (F14 stage 3). Emitter-level problem, not a
-  dialect change.
+- Hook ordering, closed by F15: the guarded hook alone loses everything to a
+  framework whose `precmd` is registered *after* DanTerm's (0 marks, no
+  diagnostic, F14 stage 3). The emitter therefore does two more things, both
+  measured in F15 stage 1 as 2 marks on every prompt against no framework, a
+  rebuild-every-precmd framework, and real Starship alike:
+  1. **Re-append itself to the tail of `precmd_functions` on every run.** zsh
+     snapshots the hook array before iterating it
+     (`references/zsh/Src/utils.c#callhookfunc`), so this takes effect from the
+     next prompt, never the current one -- which is why it alone still loses the
+     first prompt.
+  2. **Wrap and `zle reset-prompt` from a `zle-line-init` widget, but only when
+     `PS1` is found unmarked.** `zleread` expands the prompt before line-init
+     runs, so the wrap lands only if it also resets
+     (`references/zsh/Src/Zle/zle_main.c#zleread`); making it conditional keeps
+     the extra paint to the first prompt instead of every prompt. The
+     unconditional form costs two paints per prompt forever (F15: 4 marks and
+     two visible prompts per cycle, framework or no framework).
 
 ### D2 -- Bash: `A;redraw=last` from precmd, `P` inside `PS1`/`PS2`
 
-- Status: selected.
-- Evidence used: F4 (readline repaints only the final prompt line), F1, F7 case 2.
+- Status: selected. **Mechanism amended by F15; marks and redraw value
+  unchanged, and F15 strengthens the case for the redraw value.**
+- Evidence used: F4 (readline repaints only the final prompt line), F1, F7 case
+  2, F15 (how the marks get into `PS1` and survive a framework, and what the
+  alternatives to `redraw=last` actually cost).
 - Candidate solutions: (a) `redraw=1` like zsh; (b) `redraw=last`; (c) no marks
   for Bash.
 - Tradeoffs and correctness risks: (a) blanks the whole prompt block and readline
@@ -81,13 +96,30 @@ The authored dialect, decision by decision. The bytes themselves are in
   a data-destroying default, and it is destructive in exactly the multi-line-prompt
   case users are most likely to have. (b) blanks the one row readline is about to
   rewrite, which is the row-for-row match to the measured behavior. (c) forfeits
-  the resize fix for Bash entirely.
+  the resize fix for Bash entirely -- and F15 measures that it forfeits more than
+  that: replaying readline's real repaint shape, an unmarked prompt loses its
+  upper row outright (0 copies survive), because the parser default is `full`
+  and readline never rewrites what was blanked. For Bash the declaration is
+  load-bearing, not a hedge.
 - Selected direction: (b). `A;redraw=last` printed once per prompt from the
   precmd hook (fresh line + mode declaration + row stamp); `P;k=i` opening `PS1`
   and `P;k=s` opening `PS2` and each continuation line, each closed by `B`; `C`
-  from preexec.
+  from preexec. **The `PS1` wrap happens in the `PROMPT_COMMAND` hook, not at
+  source time, and the hook re-appends itself to the end of `PROMPT_COMMAND` on
+  every run** (F15) -- Starship's bash init rebuilds `PS1` on *every* prompt
+  (`PS1="$(starship prompt ...)"` in `starship_precmd`), so a source-time
+  assignment is destroyed in either source order, unlike zsh's.
 - Behavioral verification: F7 case 2 -- after a resize the top prompt line
-  survives and only the cursor row is blanked.
+  survives and only the cursor row is blanked. F15 stage 3 -- under readline's
+  repaint shape `redraw=last` is the only opener of the four measured that
+  leaves exactly one prompt; `redraw=1` and no marks both leave none.
+- Known gap: Bash offers no hook that runs after `PROMPT_COMMAND`, so it has no
+  analogue of zsh's `zle-line-init` heal. The re-tail recovers every prompt from
+  the second onward; the **first prompt of a session ships with `A` only**, no
+  row stamp (F15 stage 2). The re-tail also makes the emitter run twice per
+  prompt when a framework swallows the prior `PROMPT_COMMAND` and runs it before
+  its own assignment (Starship does), so `A` is printed twice. F15 stage 3
+  measures a doubled `A` as byte-for-byte equivalent to one.
 - Decision and rationale: the redraw mode is a promise about what the shell will
   repaint. Bash promises one line, so DanTerm may blank one line. `P` rather than
   `A` inside `PS1` because readline redisplays mid-line (README, rejected ideas).
