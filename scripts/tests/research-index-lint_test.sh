@@ -46,7 +46,12 @@ cat > "$BASE_INDEX" <<'EOF'
 | 2 | [Wraptest coverage](2-wraptest-coverage.md) | Whether wraptest belongs here | Declined -- redundant |
 | 24 | [Later topic](24-later-topic/README.md) | Some later topic | Shipped -- a thing |
 
-## Contract
+## Project notes
+
+- The contract lives in [FORMAT.md](FORMAT.md).
+EOF
+cat > "$BASE/docs/research/FORMAT.md" <<'EOF'
+# Research doc format
 
 - Files are numbered and never renumbered; see the placeholder [N-topic.md](N-topic.md).
 - Claims cite the benchmark and commit that produced them.
@@ -133,7 +138,9 @@ while IFS= read -r frozen_doc; do
     echo "| ${frozen_doc%%-*} | [Doc](${frozen_doc}) | A thing | Shipped -- a thing |" \
         >> "$FROZEN/docs/research/README.md"
 done < <("$LINT" --print-flat-allowlist)
-printf '\n## Contract\n\n- Portable prose only.\n' >> "$FROZEN/docs/research/README.md"
+printf '\n## Project notes\n\n- The contract lives in [FORMAT.md](FORMAT.md).\n' \
+    >> "$FROZEN/docs/research/README.md"
+printf '# Research doc format\n\n- Portable prose only.\n' > "$FROZEN/docs/research/FORMAT.md"
 expect_pass "$FROZEN" "every doc in the frozen flat set should pass as a flat file"
 
 CASE="$TMP/po4-new-flat"
@@ -175,24 +182,37 @@ edit_file "$CASE/docs/research/24-later-topic/README.md" \
     's|^- \[decisions\.md\]\(decisions\.md\).*$|- [decisions.md](decisions.md)|'
 expect_fail "$CASE" "a supporting file linked with no blurb should fail"
 
-# --- PO6: the portable/project seam is defined by outbound links only. ---
+# --- PO6: the seam is a file boundary -- FORMAT.md carries no outbound link,
+# README.md may carry any. The third case is what proves the rule is about the
+# file and not about links in general. ---
 CASE="$TMP/po6-outbound"
 cp -R "$BASE" "$CASE"
 printf -- '- See [the perf doc](../../agent-docs/terminal-performance.md).\n' \
-    >> "$CASE/docs/research/README.md"
-expect_fail "$CASE" "an outbound link below the ## Contract seam should fail"
+    >> "$CASE/docs/research/FORMAT.md"
+expect_fail "$CASE" "an outbound link in FORMAT.md should fail"
 
 CASE="$TMP/po6-portable-prose"
 cp -R "$BASE" "$CASE"
 # shellcheck disable=SC2016  # the backticks are literal markdown, not a subshell
 printf -- '- Cite `9/F3`, name the benchmark, and link [N-topic.md](N-topic.md).\n' \
-    >> "$CASE/docs/research/README.md"
-expect_pass "$CASE" "portable prose and placeholder links below the seam should pass"
+    >> "$CASE/docs/research/FORMAT.md"
+expect_pass "$CASE" "portable prose and placeholder links in FORMAT.md should pass"
 
-CASE="$TMP/po6-above-seam"
+CASE="$TMP/po6-index-link"
 cp -R "$BASE" "$CASE"
-awk '/^## Contract/ { print "See [the perf doc](../../agent-docs/terminal-performance.md)."; print "" } { print }' \
-    "$BASE_INDEX" > "$CASE/docs/research/README.md"
-expect_pass "$CASE" "a project link above the ## Contract seam should pass"
+printf -- '- See [the perf doc](../../agent-docs/terminal-performance.md).\n' \
+    >> "$CASE/docs/research/README.md"
+expect_pass "$CASE" "a project link in README.md should pass"
+
+# --- PO7: the contract file exists and the index reaches it. ---
+CASE="$TMP/po7-missing-format"
+cp -R "$BASE" "$CASE"
+rm "$CASE/docs/research/FORMAT.md"
+expect_fail "$CASE" "a tree with no FORMAT.md should fail"
+
+CASE="$TMP/po7-unlinked-format"
+cp -R "$BASE" "$CASE"
+edit_index "$CASE" 's|\[FORMAT\.md\]\(FORMAT\.md\)|FORMAT.md|'
+expect_fail "$CASE" "a FORMAT.md nothing links should fail"
 
 echo "research index lint self-test passed"

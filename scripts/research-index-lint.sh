@@ -22,11 +22,15 @@
 #       (there is no doc 5), and a range would silently admit `5-topic.md`.
 #   I6  Every markdown file in a doc folder other than `README.md` is linked from
 #       that `README.md` with a one-line blurb.
-#   I7  The portable/project seam: below the `## Contract` heading no markdown
-#       link resolves outside `docs/research/`. Everything below that heading is
-#       generic research prose destined for a portable skill, so a project-local
-#       link there is what makes the skill unextractable. Vocabulary is not
-#       policed -- only outbound links.
+#   I7  The portable/project seam: no markdown link in `FORMAT.md` resolves
+#       outside `docs/research/`. That whole file is generic research prose
+#       destined for a portable skill, so a project-local link in it is what
+#       makes the skill unextractable. Vocabulary is not policed -- only
+#       outbound links.
+#   I8  `FORMAT.md` exists and `README.md` links it. The seam is a file boundary
+#       rather than a heading, which means the contract is now reachable only by
+#       that link -- an unreachable contract is the same failure I6 refuses for
+#       a folder doc's supporting files.
 #
 # What it deliberately does not check: row *quality* (a short uninformative row
 # passes), and which number a new doc claims (`5-topic/` passes -- I5 governs
@@ -71,6 +75,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${1:-$SCRIPT_DIR/..}"
 DIR="$ROOT/docs/research"
 INDEX="$DIR/README.md"
+FORMAT="$DIR/FORMAT.md"
 
 BAD=0
 violation() {
@@ -85,6 +90,14 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 DOCS="$TMP/docs.tsv"
 : > "$DOCS"
+
+# --- I8 (existence half). A missing contract is a violation, not a usage error,
+# so it reports beside the others; the awk pass still needs a file to read. ---
+if [[ ! -f "$FORMAT" ]]; then
+    violation "docs/research/FORMAT.md is missing; the contract lives there, not in README.md"
+    FORMAT="$TMP/empty-format.md"
+    : > "$FORMAT"
+fi
 
 # --- Inventory the docs, and check I5 (storage form) while we are here. ---
 for entry in "$DIR"/*; do
@@ -135,11 +148,11 @@ fi
 # The awk program is single-quoted on purpose: $0/FNR/NR are awk's, not the
 # shell's (SC2016 is expected here). ---
 # shellcheck disable=SC2016
-awk -v index_label="docs/research/README.md" '
+awk -v index_label="docs/research/README.md" -v format_label="docs/research/FORMAT.md" '
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 function err(ln, msg) {
-    if (ln > 0) printf("research-index-lint: %s:%d: %s\n", index_label, ln, msg) > "/dev/stderr"
-    else        printf("research-index-lint: %s: %s\n", index_label, msg) > "/dev/stderr"
+    if (ln > 0) printf("research-index-lint: %s:%d: %s\n", label, ln, msg) > "/dev/stderr"
+    else        printf("research-index-lint: %s: %s\n", label, msg) > "/dev/stderr"
     bad = 1
 }
 # A link target escapes docs/research/ if it names a scheme, is absolute, or
@@ -162,24 +175,30 @@ BEGIN {
     bad = 0
     nvocab = split("Shipped,No change,Rejected,Declined,Superseded,Tooling", vocab, ",")
 }
-FNR == NR { split($0, f, "\t"); canonical[f[1]] = f[2]; next }
+# Three inputs in order: the doc inventory, the index, the contract.
+FNR == 1 { pass++ }
+pass == 1 { split($0, f, "\t"); canonical[f[1]] = f[2]; next }
+# --- I7: the whole contract file is the portable side of the seam. ---
+pass == 3 {
+    label = format_label
+    rest = $0
+    while (match(rest, /\]\([^)]*\)/)) {
+        target = substr(rest, RSTART + 2, RLENGTH - 3)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (escapes(target))
+            err(FNR, "link `" target "` resolves outside docs/research/; FORMAT.md must stay portable")
+    }
+    next
+}
 {
+    label = index_label
     line = $0
     if (line ~ /^## /) {
         section = trim(substr(line, 4))
-        if (section == "Contract") below_seam = 1
         if (section == "Live") seen_live++
         if (section == "Closed") seen_closed++
     }
-    if (below_seam) {
-        rest = line
-        while (match(rest, /\]\([^)]*\)/)) {
-            target = substr(rest, RSTART + 2, RLENGTH - 3)
-            rest = substr(rest, RSTART + RLENGTH)
-            if (escapes(target))
-                err(FNR, "link `" target "` below the ## Contract seam resolves outside docs/research/")
-        }
-    }
+    if (index(line, "](FORMAT.md)") > 0) seen_format_link = 1
     if (line !~ /^\|/) next
 
     known = (section == "Live" || section == "Closed")
@@ -250,6 +269,9 @@ FNR == NR { split($0, f, "\t"); canonical[f[1]] = f[2]; next }
     }
 }
 END {
+    label = index_label
+    # I8 (reachability half): the contract is only findable from here now.
+    if (!seen_format_link) err(0, "nothing links `FORMAT.md`; the contract must be reachable from the index")
     if (!seen_live) err(0, "missing the `## Live` table")
     if (!seen_closed) err(0, "missing the `## Closed` table")
     if (count["Live"] < 2) err(0, "the ## Live table has no header and separator")
@@ -262,7 +284,7 @@ END {
                 err(0, "doc " n " (`" canonical[n] "`) has no index row")
     exit (bad ? 1 : 0)
 }
-' "$DOCS" "$INDEX" || BAD=1
+' "$DOCS" "$INDEX" "$FORMAT" || BAD=1
 
 if [[ "$BAD" -ne 0 ]]; then
     cat >&2 <<'EOF'
@@ -281,8 +303,8 @@ tables over a doc set that is folders from doc 24 onward:
     plus findings.md and decisions.md, with anything else that grows
     promoted to its own file and linked from the README with a blurb.
 
-  Link below the ## Contract seam -- everything under `## Contract` is
-    portable research prose. Project-local links belong above it.
+  Link inside FORMAT.md -- that whole file is portable research prose.
+    Project-local links belong in README.md, which is the index.
 =======================================================================
 EOF
     exit 1

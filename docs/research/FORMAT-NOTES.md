@@ -131,6 +131,43 @@ and this trim are one change made twice; if a third container starts absorbing
 prose -- the framing paragraphs, most likely -- that is this same failure, not a
 new one.
 
+## 2026-07-31 -- the seam was a heading inside a file with two edit cadences
+
+**Observation.** `README.md` was 389 lines. 301 of them -- the contract, the
+required shape, and how to run a doc -- had not changed since they were written
+and change only when the format itself does. The other 88 are the index, which
+changes every time a doc opens, closes, or lands a result. The portable seam
+between them was a heading, `## Contract`, with the lint policing outbound links
+below it.
+
+**Cost.** Two failure shapes, one small and one structural. The small one: every
+status edit rewrote a line a quarter of the way down a 390-line file, and every
+contract edit sat in the same file as an index nobody editing the contract cares
+about. The structural one: a seam defined as "everything below this heading"
+moves whenever a section is inserted, so the boundary the portable skill would
+be cut along was maintained by nothing but the lint's ability to find one
+heading.
+
+**Rule changed.** The seam is a file boundary. `FORMAT.md` holds the contract,
+the required shape, and how to run a doc; `README.md` holds the index and the
+project-local pointers. `I7` becomes "no outbound link anywhere in `FORMAT.md`",
+which is the same rule with a predicate that cannot drift, and extraction of the
+portable skill becomes a copy of one file. A new `I8` requires `FORMAT.md` to
+exist and to be linked from the index -- splitting a file out is exactly how a
+document becomes unreachable, which is the failure `I6` already refuses for a
+folder doc's supporting files.
+
+**Rejected: reordering inside one file.** Putting the evergreen sections above
+the tables so the index becomes an append-only trailer fixes the churn position
+and nothing else. It leaves the seam a heading, and it puts 300 lines of
+contract in front of the thing most readers open the file for.
+
+**Not fixed, and worth stating plainly.** `## Closed` still is not append-only.
+Rows are ascending and membership encodes status, so closing doc 18 inserts it
+above 20 and 22. At most two of {append-only writes, ascending order,
+status-by-membership} are available at once; the entry above chose the last two
+deliberately, and this split does not change that.
+
 ## Rules still under watch
 
 These three are load-bearing in the contract but supported only by performance
