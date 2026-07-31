@@ -69,6 +69,15 @@ always local and never emits terminal mouse input.
 Copy-on-select is not part of the initial engine. Explicit copy uses the current
 selection.
 
+Local click granularity cycles through character, terminal token, and trimmed
+logical line. A terminal token is a maximal run of either separators or
+non-separators. Separators are every Unicode whitespace scalar plus apostrophe,
+double quote, U+2502, backtick, pipe, colon, semicolon, comma, parentheses,
+brackets, braces, angle brackets, and dollar sign. Period, slash, hyphen,
+underscore, and equals remain token characters so paths, flags, identifiers,
+and assignments select as whole runs. Terminal tokens cross soft wraps but not
+hard line boundaries, and classification never splits a grapheme or wide cell.
+
 ### Paste and clipboard
 
 Paste preserves text, tabs, and newlines, removes unsafe control bytes, and uses
@@ -92,6 +101,8 @@ source-location navigation are deferred.
   text without an extra Option/Alt encoding.
 - Key encodings agree with active terminal modes and advertised protocols.
 - Local selection never emits mouse-report bytes to the child application.
+- Double-click selection follows DanTerm's terminal-token separators rather
+  than default Unicode word-boundary rules.
 - A locally scrolled viewport remains attached to the same retained logical
   content across output and reflow until that content is evicted.
 - Mouse-report capture and its Shift override cannot both consume one wheel or

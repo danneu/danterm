@@ -91,7 +91,7 @@ struct TerminalInteractionPolicyTests {
         #expect(reportMove.selectionMutation == nil)
     }
 
-    @Test("click counts cycle through character cluster and line units")
+    @Test("click counts cycle through character terminal-token and line units")
     func selectionGranularity() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
         terminal.feed(Array("a.b c.d".utf8))
@@ -122,12 +122,12 @@ struct TerminalInteractionPolicyTests {
             .move(column: 3, row: 0), terminal: terminal, state: &character
         ).selectionMutation == .set(range(0, 1, 0, 4)))
 
-        var cluster = TerminalInteractionState()
+        var terminalToken = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &cluster
+            .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &terminalToken
         )
         #expect(decideTerminalPointer(
-            .move(column: 5, row: 0), terminal: terminal, state: &cluster
+            .move(column: 5, row: 0), terminal: terminal, state: &terminalToken
         ).selectionMutation == .set(range(0, 0, 0, 7)))
 
         var hardLines = try #require(Terminal(columns: 8, rows: 3))
@@ -143,7 +143,7 @@ struct TerminalInteractionPolicyTests {
         ).selectionMutation == .set(range(0, 0, 1, 6)))
 
         #expect(decideTerminalPointer(
-            .up(.left, column: 1, row: 0), terminal: terminal, state: &cluster
+            .up(.left, column: 1, row: 0), terminal: terminal, state: &terminalToken
         ).consumption == .selection)
     }
 

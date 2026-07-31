@@ -208,7 +208,7 @@ script edit). No finding depends on the uncommitted files.
 
 ### F6 -- two Unicode fixture gaps sit outside doc 1's table
 
-- Status: complete.
+- Status: complete; Phase 4 audited and closed the gaps in D3.
 - Date and investigator: 2026-07-31, Claude.
 - Commit and worktree state: `593ce4a`.
 - Commands, inputs, or reproduction:
@@ -234,8 +234,15 @@ script edit). No finding depends on the uncommitted files.
 - Competing interpretations: native decoder tests may already cover the boundary
   space; F6 counted imported cases, not native ones. The gap could be smaller
   than it looks.
-- Uncertainty: moderate. Confirm native decoder coverage before adopting.
-- Next action: audit native `UTF8Decoder` coverage, then decide (Phase 4, D3).
+- Resolution: an all-source-byte probe over the pinned 22,781-byte Kuhn file
+  matched Swift's maximal-subpart decoding. The maintained fixture compactly
+  covers its valid boundaries, every continuation and legacy lead class,
+  incomplete sequences, impossible bytes, overlong forms, surrogate forms,
+  out-of-range encodings, and valid noncharacters. The selection audit found
+  DanTerm's existing terminal-oriented separator policy, not UAX #29 word
+  boundaries; D3 records why `WordBreakTest.txt` and vte's cases are declined.
+- Uncertainty: resolved for the decoder and double-click selection contracts.
+- Next action: none for Phase 4.
 
 ### F7 -- Milestone 9's two named external legs are unstarted
 

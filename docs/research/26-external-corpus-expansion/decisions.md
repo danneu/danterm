@@ -101,7 +101,7 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D3 -- close the Unicode and decoder fixture gaps
 
-- Status: recommended; blocked on one audit and one contract question.
+- Status: selected and implemented.
 - Evidence used: F6 (nine imported decoder cases against a hand-rolled
   `UTF8Decoder.swift`; `GraphemeBreakTest` 17.0.0 pinned, no `WordBreakTest`),
   F8 (vte's `utf8-test.cc` and `unicode-width-test.cc` sit on the same gap but
@@ -124,9 +124,24 @@ review obligations before copying or translating GPL/LGPL test code.
   coverage so the corpus is not adopted to duplicate tests that exist. Treat
   the `WordBreakTest` half as a contract question first: pin it only if
   double-click word selection is meant to claim UAX #29 word semantics.
-- Direction review: pending.
-- Selected direction: pending.
-- Decision and rationale: pending.
+- Direction review: accepted by the owner on 2026-07-31.
+- Selected direction: option 1 for decoder coverage, without `WordBreakTest`.
+- Decision and rationale: adopt a compact neutral fixture derived from every
+  Kuhn category under CC-BY-4.0 and retain DanTerm's modern maximal-subpart
+  expectations. Double-click selection is terminal-oriented: every Unicode
+  whitespace scalar and a fixed punctuation set are separators, while period,
+  slash, hyphen, underscore, and equals keep paths, flags, identifiers, and
+  assignments intact. It therefore does not claim default UAX #29 word
+  boundaries, so `WordBreakTest.txt` is declined. vte's decoder and width cases
+  are also declined because the neutral fixture closes the decoder gap and the
+  generated native suite already exhaustively covers the width policy without
+  importing LGPL-3.0/GPL-3.0-derived cases.
+- Implementation result: `utf8-decoder-corpus.json` records source version,
+  SHA-256, license, every Kuhn category, modern replacement counts, printable
+  recovery, U+10FFFF, and all Unicode noncharacters; its attribution is
+  `LICENSE.UTF-8-test.txt`. `Terminal.terminalTokenRange(at:)` owns the
+  hard-coded double-click contract and classifies projected units by their
+  leading scalar.
 
 ### D4 -- whether manifest re-adjudication becomes a standing milestone-exit step
 

@@ -2200,28 +2200,28 @@ public struct Terminal: Equatable, Sendable {
         recordDamage(since: before)
     }
 
-    /// Returns the maximal Ghostty-compatible boundary or non-boundary run used by
-    /// native double-click selection. Classification uses the leading scalar so a
-    /// combining mark cannot move its base cell across the boundary.
-    public func clusterRange(at position: TerminalTextPosition) -> TerminalTextRange {
+    /// Returns the maximal separator or non-separator run used by DanTerm's
+    /// terminal-oriented double-click selection. Classification uses the leading
+    /// scalar so a combining mark cannot move its base cell across the boundary.
+    public func terminalTokenRange(at position: TerminalTextPosition) -> TerminalTextRange {
         let units = projectionUnits()
         guard let target = nearestTextUnitIndex(to: position, in: units) else {
             return emptyRange(at: position)
         }
-        let targetIsBoundary = isSelectionBoundaryUnit(units[target])
+        let targetIsBoundary = isTerminalTokenSeparator(units[target])
         var lower = target
         var upper = target
         while lower > units.startIndex {
             let candidate = units.index(before: lower)
             guard units[candidate].isHardBoundary == false,
-                  isSelectionBoundaryUnit(units[candidate]) == targetIsBoundary
+                  isTerminalTokenSeparator(units[candidate]) == targetIsBoundary
             else { break }
             lower = candidate
         }
         while upper < units.index(before: units.endIndex) {
             let candidate = units.index(after: upper)
             guard units[candidate].isHardBoundary == false,
-                  isSelectionBoundaryUnit(units[candidate]) == targetIsBoundary
+                  isTerminalTokenSeparator(units[candidate]) == targetIsBoundary
             else { break }
             upper = candidate
         }
@@ -2931,16 +2931,19 @@ public struct Terminal: Equatable, Sendable {
         return TerminalTextRange(start: publicPosition, end: publicPosition)
     }
 
-    /// Classifies by the leading scalar, like `isSelectionBoundaryUnit`, so a combining mark
+    /// Classifies by the leading scalar, like `isTerminalTokenSeparator`, so a combining mark
     /// cannot pull its base cell across the trimming decision.
     private func isWhitespaceUnit(_ unit: ProjectionUnit) -> Bool {
         unit.scalars.first?.properties.isWhitespace ?? false
     }
 
-    private func isSelectionBoundaryUnit(_ unit: ProjectionUnit) -> Bool {
+    private func isTerminalTokenSeparator(_ unit: ProjectionUnit) -> Bool {
         guard let leadingScalar = unit.scalars.first else { return false }
+        if leadingScalar.properties.isWhitespace {
+            return true
+        }
         switch leadingScalar.value {
-        case 0x09, 0x20, 0x22, 0x24, 0x27, 0x28, 0x29, 0x2C, 0x3A, 0x3B,
+        case 0x22, 0x24, 0x27, 0x28, 0x29, 0x2C, 0x3A, 0x3B,
              0x3C, 0x3E, 0x5B, 0x5D, 0x60, 0x7B, 0x7C, 0x7D, 0x2502:
             return true
         default:

@@ -1,15 +1,15 @@
-// Cluster and logical-line range queries used by local multi-click selection.
+// Terminal-token and logical-line range queries used by local multi-click selection.
 import Testing
 
 @testable import TerminalCore
 
 /// Pins selection units to the terminal's logical projection rather than visual rows.
 struct TerminalSelectionUnitTests {
-    @Test("cluster ranges use Ghostty's default boundary set")
-    func clusterBoundarySet() throws {
-        // Intent: every renderable default boundary scalar separates the
-        //   non-boundary characters on either side.
-        // Why it exists: the fixed set is the selection contract, so omitting
+    @Test("terminal-token ranges use DanTerm's fixed punctuation separators")
+    func terminalTokenPunctuationSeparators() throws {
+        // Intent: every fixed punctuation separator splits the terminal tokens
+        //   on either side.
+        // Why it exists: the fixed set is DanTerm's selection contract, so omitting
         //   one scalar silently changes what double-click selects.
         // Scenario: a user double-clicks beside each kind of shell punctuation
         //   in otherwise path-like text.
@@ -19,33 +19,52 @@ struct TerminalSelectionUnitTests {
             terminal.feed(Array("x/\(boundary).-_\u{00E9}".utf8))
 
             #expect(
-                terminal.clusterRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 2),
+                terminal.terminalTokenRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 2),
                 "boundary \(boundary) must stop the left run"
             )
             #expect(
-                terminal.clusterRange(at: .init(row: 0, column: 3)) == range(0, 3, 0, 7),
+                terminal.terminalTokenRange(at: .init(row: 0, column: 3)) == range(0, 3, 0, 7),
                 "boundary \(boundary) must stop the right run"
             )
         }
     }
 
-    @Test("cluster ranges select paths and bare identifiers")
-    func clusterSelectsPathsAndIdentifiers() throws {
-        var terminal = try #require(Terminal(columns: 32, rows: 2))
-        terminal.feed(Array("(/foo/bar.txt) bare_name".utf8))
+    @Test("terminal-token ranges treat Unicode whitespace as adjacent separators")
+    func terminalTokenUnicodeWhitespaceSeparators() throws {
+        // Intent: double-click selection classifies non-ASCII whitespace with
+        //   ASCII space and keeps a heterogeneous separator run contiguous.
+        // Why it exists: terminal-token selection previously recognized only
+        //   literal space and tab, despite line trimming using Unicode whitespace.
+        // Scenario: output aligns two shell tokens with no-break and ideographic
+        //   spaces, and the user double-clicks either the padding or a token.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("left\u{00A0}\u{3000}right".utf8))
 
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 7)))
-        #expect(terminal.selectedText == "/foo/bar.txt")
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 20)))
-        #expect(terminal.selectedText == "bare_name")
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 4)))
+        #expect(terminal.selectedText == "\u{00A0}\u{3000}")
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 7)))
+        #expect(terminal.selectedText == "right")
     }
 
-    @Test("cluster and line ranges cross soft wraps but stop at hard lines")
+    @Test("terminal-token ranges select shell-oriented non-separators")
+    func terminalTokenSelectsShellRuns() throws {
+        var terminal = try #require(Terminal(columns: 32, rows: 2))
+        terminal.feed(Array("(/foo/bar.txt) --flag a_b=c".utf8))
+
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 7)))
+        #expect(terminal.selectedText == "/foo/bar.txt")
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 18)))
+        #expect(terminal.selectedText == "--flag")
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 25)))
+        #expect(terminal.selectedText == "a_b=c")
+    }
+
+    @Test("terminal-token and line ranges cross soft wraps but stop at hard lines")
     func logicalWrapRanges() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 4))
         terminal.feed(Array("abcdef\r\nXY".utf8))
 
-        #expect(terminal.clusterRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
+        #expect(terminal.terminalTokenRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
         #expect(terminal.logicalLineRange(at: .init(row: 1, column: 0)) == range(0, 0, 1, 2))
         #expect(terminal.logicalLineRange(at: .init(row: 2, column: 1)) == range(2, 0, 2, 2))
 
@@ -58,41 +77,41 @@ struct TerminalSelectionUnitTests {
         #expect(terminal.selectedText == "abcdef")
     }
 
-    @Test("heterogeneous adjacent boundary characters form one cluster")
-    func heterogeneousBoundaryRun() throws {
+    @Test("heterogeneous adjacent separators form one terminal-token unit")
+    func heterogeneousSeparatorRun() throws {
         var terminal = try #require(Terminal(columns: 24, rows: 2))
         terminal.feed(Array("a;,(b x (y".utf8))
 
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 2)))
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 2)))
         #expect(terminal.selectedText == ";,(")
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 7)))
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 7)))
         #expect(terminal.selectedText == " (")
     }
 
-    @Test("cluster classification uses each cell's leading scalar")
+    @Test("terminal-token classification uses each cell's leading scalar")
     func leadingScalarClassification() throws {
         var terminal = try #require(Terminal(columns: 24, rows: 2))
         terminal.feed(Array("x'\u{0301}y e\u{0301}.z".utf8))
 
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 1)))
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 1)))
         #expect(terminal.selectedText == "'\u{0301}")
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 4)))
+        terminal.setSelection(terminal.terminalTokenRange(at: .init(row: 0, column: 4)))
         #expect(terminal.selectedText == "e\u{0301}.z")
     }
 
-    @Test("cluster ranges fall back past retained content and clamp at stream edges")
+    @Test("terminal-token ranges fall back past retained content and clamp at stream edges")
     func fallbackAndClamping() throws {
         var terminal = try #require(Terminal(columns: 24, rows: 2))
         terminal.feed(Array("ab   cd".utf8))
 
-        #expect(terminal.clusterRange(at: .init(row: 0, column: 3)) == range(0, 2, 0, 5))
-        #expect(terminal.clusterRange(at: .init(row: 0, column: 20)) == range(0, 5, 0, 7))
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 3)) == range(0, 2, 0, 5))
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 20)) == range(0, 5, 0, 7))
 
         var retained = try #require(Terminal(columns: 4, rows: 2))
         retained.feed(Array("old\r\nnew\r\nend".utf8))
-        #expect(retained.clusterRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 3))
-        #expect(retained.clusterRange(at: .init(row: -20, column: -20)) == range(0, 0, 0, 3))
-        #expect(retained.clusterRange(at: .init(row: 200, column: 200)) == range(2, 0, 2, 3))
+        #expect(retained.terminalTokenRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 3))
+        #expect(retained.terminalTokenRange(at: .init(row: -20, column: -20)) == range(0, 0, 0, 3))
+        #expect(retained.terminalTokenRange(at: .init(row: 200, column: 200)) == range(2, 0, 2, 3))
         #expect(retained.logicalLineRange(at: .init(row: 200, column: 200))
             == range(2, 0, 2, 3))
     }

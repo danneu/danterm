@@ -1,0 +1,301 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Markus Kuhn UTF-8 decoder capability and stress test",
+    "version": "2015-08-28",
+    "sha256": "b51cfe9a8d2689c90b10a13a3624092d546e0837c6ff835b6e5d713c5749c8c6",
+    "license": "CC-BY-4.0",
+    "licenseNotice": "LICENSE.UTF-8-test.txt"
+  },
+  "cases": [
+    {
+      "name": "Greek sample text",
+      "section": "1",
+      "hex": "CE BA E1 BD B9 CF 83 CE BC CE B5 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        954,
+        8057,
+        963,
+        956,
+        949,
+        34
+      ]
+    },
+    {
+      "name": "first one-byte scalar U+0000",
+      "section": "2",
+      "hex": "00 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        0,
+        34
+      ]
+    },
+    {
+      "name": "last one-byte scalar U+007F",
+      "section": "2",
+      "hex": "7F 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        127,
+        34
+      ]
+    },
+    {
+      "name": "first two-byte scalar U+0080",
+      "section": "2",
+      "hex": "C2 80 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        128,
+        34
+      ]
+    },
+    {
+      "name": "last two-byte scalar U+07FF",
+      "section": "2",
+      "hex": "DF BF 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        2047,
+        34
+      ]
+    },
+    {
+      "name": "first three-byte scalar U+0800",
+      "section": "2",
+      "hex": "E0 A0 80 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        2048,
+        34
+      ]
+    },
+    {
+      "name": "last scalar before surrogates U+D7FF",
+      "section": "2",
+      "hex": "ED 9F BF 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        55295,
+        34
+      ]
+    },
+    {
+      "name": "first scalar after surrogates U+E000",
+      "section": "2",
+      "hex": "EE 80 80 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        57344,
+        34
+      ]
+    },
+    {
+      "name": "valid replacement scalar U+FFFD",
+      "section": "2",
+      "hex": "EF BF BD 22",
+      "expectedFFFDCount": 1,
+      "expectedScalarValues": [
+        65533,
+        34
+      ]
+    },
+    {
+      "name": "last three-byte scalar U+FFFF",
+      "section": "2",
+      "hex": "EF BF BF 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        65535,
+        34
+      ]
+    },
+    {
+      "name": "first four-byte scalar U+10000",
+      "section": "2",
+      "hex": "F0 90 80 80 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        65536,
+        34
+      ]
+    },
+    {
+      "name": "last Unicode scalar U+10FFFF",
+      "section": "2",
+      "hex": "F4 8F BF BF 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        1114111,
+        34
+      ]
+    },
+    {
+      "name": "first out-of-range encoding U+110000",
+      "section": "2",
+      "hex": "F4 90 80 80 22",
+      "expectedFFFDCount": 4
+    },
+    {
+      "name": "obsolete five-byte boundary encoding",
+      "section": "2",
+      "hex": "F8 88 80 80 80 22",
+      "expectedFFFDCount": 5
+    },
+    {
+      "name": "obsolete six-byte boundary encoding",
+      "section": "2",
+      "hex": "FC 84 80 80 80 80 22",
+      "expectedFFFDCount": 6
+    },
+    {
+      "name": "all continuation byte values",
+      "section": "3.1",
+      "hex": "80 81 82 83 84 85 86 87 88 89 8A 8B 8C 8D 8E 8F 90 91 92 93 94 95 96 97 98 99 9A 9B 9C 9D 9E 9F A0 A1 A2 A3 A4 A5 A6 A7 A8 A9 AA AB AC AD AE AF B0 B1 B2 B3 B4 B5 B6 B7 B8 B9 BA BB BC BD BE BF 22",
+      "expectedFFFDCount": 64
+    },
+    {
+      "name": "every two-byte lead value interrupted by space",
+      "section": "3.2",
+      "hex": "C0 20 C1 20 C2 20 C3 20 C4 20 C5 20 C6 20 C7 20 C8 20 C9 20 CA 20 CB 20 CC 20 CD 20 CE 20 CF 20 D0 20 D1 20 D2 20 D3 20 D4 20 D5 20 D6 20 D7 20 D8 20 D9 20 DA 20 DB 20 DC 20 DD 20 DE 20 DF 20 22",
+      "expectedFFFDCount": 32
+    },
+    {
+      "name": "every three-byte lead value interrupted by space",
+      "section": "3.2",
+      "hex": "E0 20 E1 20 E2 20 E3 20 E4 20 E5 20 E6 20 E7 20 E8 20 E9 20 EA 20 EB 20 EC 20 ED 20 EE 20 EF 20 22",
+      "expectedFFFDCount": 16
+    },
+    {
+      "name": "every four-byte lead value interrupted by space",
+      "section": "3.2",
+      "hex": "F0 20 F1 20 F2 20 F3 20 F4 20 F5 20 F6 20 F7 20 22",
+      "expectedFFFDCount": 8
+    },
+    {
+      "name": "every obsolete five-byte lead value interrupted by space",
+      "section": "3.2",
+      "hex": "F8 20 F9 20 FA 20 FB 20 22",
+      "expectedFFFDCount": 4
+    },
+    {
+      "name": "every obsolete six-byte lead value interrupted by space",
+      "section": "3.2",
+      "hex": "FC 20 FD 20 22",
+      "expectedFFFDCount": 2
+    },
+    {
+      "name": "incomplete minimum and maximum prefixes concatenate and recover",
+      "section": "3.3-3.4",
+      "hex": "C2 E0 A0 F0 90 80 DF EF BF F4 8F BF 22",
+      "expectedFFFDCount": 6
+    },
+    {
+      "name": "impossible FE and FF bytes",
+      "section": "3.5",
+      "hex": "FE FF FE FE FF FF 22",
+      "expectedFFFDCount": 6
+    },
+    {
+      "name": "overlong slash encodings from two through six bytes",
+      "section": "4",
+      "hex": "C0 AF 20 E0 80 AF 20 F0 80 80 AF 20 F8 80 80 80 AF 20 FC 80 80 80 80 AF 22",
+      "expectedFFFDCount": 20
+    },
+    {
+      "name": "maximum overlong encodings from two through six bytes",
+      "section": "4",
+      "hex": "C1 BF 20 E0 9F BF 20 F0 8F BF BF 20 F8 87 BF BF BF 20 FC 83 BF BF BF BF 22",
+      "expectedFFFDCount": 20
+    },
+    {
+      "name": "overlong NUL encodings from two through six bytes",
+      "section": "4",
+      "hex": "C0 80 20 E0 80 80 20 F0 80 80 80 20 F8 80 80 80 80 20 FC 80 80 80 80 80 22",
+      "expectedFFFDCount": 20
+    },
+    {
+      "name": "single and paired UTF-16 surrogate encodings",
+      "section": "5.1-5.2",
+      "hex": "ED A0 80 20 ED AD BF 20 ED AE 80 20 ED AF BF 20 ED B0 80 20 ED BE 80 20 ED BF BF 20 ED A0 80 ED B0 80 20 ED AF BF ED BF BF 22",
+      "expectedFFFDCount": 33
+    },
+    {
+      "name": "all Unicode noncharacters remain valid scalars",
+      "section": "5.3",
+      "hex": "EF BF BE EF BF BF EF B7 90 EF B7 91 EF B7 92 EF B7 93 EF B7 94 EF B7 95 EF B7 96 EF B7 97 EF B7 98 EF B7 99 EF B7 9A EF B7 9B EF B7 9C EF B7 9D EF B7 9E EF B7 9F EF B7 A0 EF B7 A1 EF B7 A2 EF B7 A3 EF B7 A4 EF B7 A5 EF B7 A6 EF B7 A7 EF B7 A8 EF B7 A9 EF B7 AA EF B7 AB EF B7 AC EF B7 AD EF B7 AE EF B7 AF F0 9F BF BE F0 9F BF BF F0 AF BF BE F0 AF BF BF F0 BF BF BE F0 BF BF BF F1 8F BF BE F1 8F BF BF F1 9F BF BE F1 9F BF BF F1 AF BF BE F1 AF BF BF F1 BF BF BE F1 BF BF BF F2 8F BF BE F2 8F BF BF F2 9F BF BE F2 9F BF BF F2 AF BF BE F2 AF BF BF F2 BF BF BE F2 BF BF BF F3 8F BF BE F3 8F BF BF F3 9F BF BE F3 9F BF BF F3 AF BF BE F3 AF BF BF F3 BF BF BE F3 BF BF BF F4 8F BF BE F4 8F BF BF 22",
+      "expectedFFFDCount": 0,
+      "expectedScalarValues": [
+        65534,
+        65535,
+        64976,
+        64977,
+        64978,
+        64979,
+        64980,
+        64981,
+        64982,
+        64983,
+        64984,
+        64985,
+        64986,
+        64987,
+        64988,
+        64989,
+        64990,
+        64991,
+        64992,
+        64993,
+        64994,
+        64995,
+        64996,
+        64997,
+        64998,
+        64999,
+        65000,
+        65001,
+        65002,
+        65003,
+        65004,
+        65005,
+        65006,
+        65007,
+        131070,
+        131071,
+        196606,
+        196607,
+        262142,
+        262143,
+        327678,
+        327679,
+        393214,
+        393215,
+        458750,
+        458751,
+        524286,
+        524287,
+        589822,
+        589823,
+        655358,
+        655359,
+        720894,
+        720895,
+        786430,
+        786431,
+        851966,
+        851967,
+        917502,
+        917503,
+        983038,
+        983039,
+        1048574,
+        1048575,
+        1114110,
+        1114111,
+        34
+      ]
+    }
+  ]
+}

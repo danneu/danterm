@@ -189,17 +189,18 @@ DanTerm contract, never against the source engine's behavior.
 - [x] Record how each shortlisted expectation is justified against
   `references/xterm/ctlseqs.txt` or the DanTerm contract rather than against the
   source engine's behavior. Result in F9 and D2.
-- [ ] Route vte's `utf8-test.cc` and `unicode-width-test.cc` through a
-  license review before any translation -- LGPL-3.0/GPL-3.0 triggers doc 1's
-  review rule, the same constraint that shelved pyte. Feeds D3.
+- [x] Decline vte's `utf8-test.cc` and `unicode-width-test.cc`: the
+  CC-BY-4.0 Kuhn-derived fixture closes the decoder gap without translating
+  LGPL-3.0/GPL-3.0 cases, and the generated native suite already exhaustively
+  covers DanTerm's Unicode width policy. Result in D3.
 
 ### Phase 4 -- close the Unicode data gaps
 
-- [ ] Add Markus Kuhn's UTF-8 decoder stress corpus (`UTF-8-test.txt`), pinned
+- [x] Add Markus Kuhn's UTF-8 decoder stress corpus (`UTF-8-test.txt`), pinned
   to an explicit version, as boundary coverage for `UTF8Decoder.swift`'s
   maximal-subpart recovery contract. Confirm its overlong/surrogate/truncation
   cases against the recorded U+10FFFF and U+FFFD deviations first.
-- [ ] Decide whether double-click word selection claims UAX #29 word semantics.
+- [x] Decide whether double-click word selection claims UAX #29 word semantics.
   If it does, pin `WordBreakTest.txt` at the same Unicode version as the
   existing `GraphemeBreakTest` corpus and generate it through the same path.
   Destination: D3.
@@ -255,10 +256,9 @@ is why they are pinned.
 
 - The census is a point-in-time read at `593ce4a`. Any support-matrix change
   invalidates F2's family-by-family verdict.
-- F5's and F8's counts are `test` blocks and `TEST_METHOD`s, which are size
-  signals, not novelty signals. No file from either source has been read for
-  content -- only counted. The fraction asserting behavior DanTerm does not
-  already cover natively is unknown until Phase 3 runs.
+- F5's and F8's full-suite counts remain size signals, not novelty signals.
+  Phase 3 read and classified the six scoped files; F9's measured result applies
+  only to those files, not to every Ghostty or windows-terminal test.
 - The eight new reference pins landed mid-session as `4f1f325`, after F1-F7
   were written. F8 is the only finding that depends on them.
 - The eight trees were pinned to be *read* for how other emulators solve a
@@ -282,7 +282,10 @@ directions in D1-D5. Phase 2 is complete: `92lp1640917` and the seven supported
 out-of-scope on DECALN, all nine stale rationales are rewritten, and D4 is
 decided. Phase 3 is complete: the scoped sources are classified, Ghostty is
 declined, and windows-terminal's two novel OSC 52 cases replay from a neutral
-fixture under a complete manifest and bundled license notice. Phases 4-5 are
+fixture under a complete manifest and bundled license notice. Phase 4 is
+complete: a neutral Kuhn-derived corpus pins the decoder's modern
+maximal-subpart behavior, while double-click selection is explicitly DanTerm's
+terminal-token policy rather than UAX #29 word segmentation. Phase 5 remains
 open.
 
 The one-line answer Phase 1 produced, for a reader who goes no further: the

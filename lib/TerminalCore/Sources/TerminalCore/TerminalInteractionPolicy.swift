@@ -205,7 +205,7 @@ private enum PointerOwnership: Equatable, Sendable {
 
 private enum SelectionGranularity: Equatable, Sendable {
     case character
-    case cluster
+    case terminalToken
     case line
 }
 
@@ -525,7 +525,7 @@ private func pointerDownDecision(
         guard button == .left else { return pointerDecision(.ignored) }
         let granularity: SelectionGranularity = switch max(clickCount, 1) % 3 {
         case 1: .character
-        case 2: .cluster
+        case 2: .terminalToken
         default: .line
         }
         let anchor = selectionUnit(
@@ -599,7 +599,7 @@ private func selectionUnit(
 ) -> TerminalTextRange {
     switch granularity {
     case .character: terminal.characterRange(at: position)
-    case .cluster: terminal.clusterRange(at: position)
+    case .terminalToken: terminal.terminalTokenRange(at: position)
     case .line: terminal.trimmedLogicalLineRange(at: position)
     }
 }
