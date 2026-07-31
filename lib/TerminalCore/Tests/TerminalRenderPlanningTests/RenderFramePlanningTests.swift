@@ -5,6 +5,32 @@ import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct RenderFramePlanningTests {
+    @Test("Baked terminal defaults match the dark theme and planned frame")
+    func bakedDefaultsMatchPresentation() throws {
+        let defaults = TerminalDefaultColors.baked
+        let expectedForeground = RenderColor(
+            red: defaults.foreground.red,
+            green: defaults.foreground.green,
+            blue: defaults.foreground.blue
+        )
+        let expectedBackground = RenderColor(
+            red: defaults.background.red,
+            green: defaults.background.green,
+            blue: defaults.background.blue
+        )
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+        terminal.feed(Array("A".utf8))
+        let plan = planFrame(
+            for: terminal,
+            presentation: .init(theme: .dark, isCursorVisible: false, cursorShape: .block)
+        )
+
+        #expect(RenderTheme.dark.defaultForeground == expectedForeground)
+        #expect(RenderTheme.dark.defaultBackground == expectedBackground)
+        #expect(plan.defaultBackground == expectedBackground)
+        #expect(plan.textRuns.first?.foreground == expectedForeground)
+    }
+
     @Test("Hovered links gain a single underline without replacing stronger decorations")
     func hoveredLinkDecoration() throws {
         var plain = try #require(Terminal(columns: 24, rows: 2))

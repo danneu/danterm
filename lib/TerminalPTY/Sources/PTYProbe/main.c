@@ -387,6 +387,27 @@ static int run_query_probe(void) {
     return 0;
 }
 
+static int run_color_query_probe(void) {
+    const uint8_t expected[] =
+        "\033]10;rgb:e5e5/e5e5/e5e5\033\\"
+        "\033]11;rgb:0000/0000/0000\033\\";
+    uint8_t observed[sizeof(expected) - 1];
+    if (disable_input_echo_and_canonical() < 0) {
+        return 91;
+    }
+    printf("__COLOR_QUERY_READY__\n\033]10;?\007\033]11;?\033\\");
+    fflush(stdout);
+    if (read_exact(observed, sizeof(observed)) < 0) {
+        return 92;
+    }
+    if (memcmp(observed, expected, sizeof(observed)) != 0) {
+        return 93;
+    }
+    printf("__COLOR_QUERY_OK__\n");
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         return 64;
@@ -432,6 +453,9 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "query") == 0) {
         return run_query_probe();
+    }
+    if (strcmp(argv[1], "color-query") == 0) {
+        return run_color_query_probe();
     }
     return 65;
 }

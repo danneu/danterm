@@ -71,6 +71,7 @@ Supported protocol families, with their evidence suite:
 |---|---|
 | `da1-dsr-cpr-deccpr-decrqm` | TerminalQueryTests |
 | `xtversion` | TerminalQueryTests |
+| `osc-10-11-default-color-queries` | TerminalQueryTests, TerminalPTYHostTests, RenderFramePlanningTests |
 | `kitty-keyboard` | TerminalKeyEncodingTests |
 | `legacy-xterm-keyboard` | TerminalKeyEncodingTests |
 | `legacy-and-sgr-mouse` | TerminalMouseEncodingTests |
@@ -134,6 +135,11 @@ first-label match (`mac.evil.com` stays rejected).
 `CSI > q` and `CSI > 0 q` return `DCS >|DanTerm <version> ST`. The accepted
 desktop notification forms are `OSC 9;<body>` and
 `OSC 777;notify;<title>;<body>`. The OSC 777 body may contain semicolons.
+
+`OSC 10;?` and `OSC 11;?` report the pane's baked default foreground and
+background as `rgb:rrrr/gggg/bbbb` using 7-bit `ST`. Each eight-bit sRGB
+component is expanded by repeating its byte. Setting forms, reset forms, and
+multi-resource queries are unsupported and ignored.
 
 Progress uses only:
 

@@ -18,6 +18,64 @@ struct TerminalQueryTests {
         #expect(terminal.drainReplyBytes() == Array("\u{1B}[3;4R\u{1B}[?3;4R".utf8))
     }
 
+    @Test("OSC 10 and 11 report canonical baked default colors without changing terminal state")
+    func defaultColorQueries() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("content".utf8))
+        let before = terminal
+
+        terminal.feed(Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8))
+
+        #expect(
+            terminal.drainReplyBytes()
+                == Array(
+                    ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
+                        + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
+                )
+        )
+        #expect(terminal == before)
+    }
+
+    @Test("OSC default-color queries preserve stream order and recover after invalid forms")
+    func defaultColorQueryOrderingAndRecovery() throws {
+        let invalidQueries = [
+            "\u{1B}]10;\u{07}",
+            "\u{1B}]10;?;?\u{07}",
+            "\u{1B}]10;rgb:ffff/ffff/ffff\u{07}",
+            "\u{1B}]11;#ffffff\u{07}",
+            "\u{1B}]12;?\u{07}",
+            "\u{1B}]110;?\u{07}",
+            "\u{1B}]111;?\u{07}",
+        ]
+        for query in invalidQueries {
+            var terminal = try #require(Terminal(columns: 8, rows: 4))
+            terminal.feed(Array("content".utf8))
+            let before = terminal
+            terminal.feed(Array(query.utf8))
+            #expect(terminal == before, "query bytes: \(Array(query.utf8))")
+            #expect(terminal.pendingReplyBytes.isEmpty)
+        }
+
+        let bytes = Array(
+            (invalidQueries.joined() + "\u{1B}]10;?\u{07}\u{1B}[5n\u{1B}]11;?\u{1B}\\").utf8
+        )
+        let expected = Array(
+            ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
+                + "\u{1B}[0n"
+                + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
+        )
+        var authored = try #require(Terminal(columns: 8, rows: 4))
+        authored.feed(bytes)
+        #expect(authored.drainReplyBytes() == expected)
+
+        for split in 0...bytes.count {
+            var terminal = try #require(Terminal(columns: 8, rows: 4))
+            terminal.feed(Array(bytes[..<split]))
+            terminal.feed(Array(bytes[split...]))
+            #expect(terminal.drainReplyBytes() == expected, "split at \(split)")
+        }
+    }
+
     @Test("CPR reports coordinates relative to the DECOM origin")
     func originRelativeCursorReport() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 5))
@@ -196,5 +254,21 @@ struct TerminalQueryTests {
         _ = terminal.drainReplyBytes()
         terminal.feed(query)
         #expect(terminal.drainReplyBytes() == Array("\u{1B}[0n".utf8))
+    }
+
+    @Test("OSC default-color replies are admitted atomically at the 64 KiB limit")
+    func defaultColorReplyLimitAndRecovery() throws {
+        let query = Array("\u{1B}]10;?\u{07}".utf8)
+        let reply = Array("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\".utf8)
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+
+        for _ in 0..<(65_536 / reply.count) { terminal.feed(query) }
+        #expect(terminal.pendingReplyBytes.count == (65_536 / reply.count) * reply.count)
+        terminal.feed(query)
+        #expect(terminal.pendingReplyBytes.count == (65_536 / reply.count) * reply.count)
+
+        _ = terminal.drainReplyBytes()
+        terminal.feed(query)
+        #expect(terminal.drainReplyBytes() == reply)
     }
 }

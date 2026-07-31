@@ -20,6 +20,10 @@ public struct RenderColor: Equatable, Sendable {
         self.green = green
         self.blue = blue
     }
+
+    fileprivate init(_ color: TerminalRGBColor) {
+        self.init(red: color.red, green: color.green, blue: color.blue)
+    }
 }
 
 /// Fixes every palette input needed to turn semantic terminal colors into a
@@ -68,8 +72,8 @@ public struct RenderTheme: Equatable, Sendable {
             RenderColor(red: 0, green: 255, blue: 255),
             RenderColor(red: 255, green: 255, blue: 255),
         ],
-        defaultForeground: RenderColor(red: 229, green: 229, blue: 229),
-        defaultBackground: RenderColor(red: 0, green: 0, blue: 0),
+        defaultForeground: RenderColor(TerminalDefaultColors.baked.foreground),
+        defaultBackground: RenderColor(TerminalDefaultColors.baked.background),
         selectionBackground: RenderColor(red: 56, green: 88, blue: 140),
         searchMatchBackground: RenderColor(red: 175, green: 128, blue: 20),
         cursor: RenderColor(red: 229, green: 229, blue: 229),

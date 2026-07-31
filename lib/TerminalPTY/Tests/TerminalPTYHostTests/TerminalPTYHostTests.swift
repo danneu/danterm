@@ -461,6 +461,28 @@ struct TerminalPTYHostTests {
         #expect((await host.snapshot()).pendingReplyBytes.isEmpty)
     }
 
+    @Test("OSC default-color replies reach a real PTY child", .timeLimit(.minutes(1)))
+    func defaultColorRepliesReachChild() async throws {
+        // Intent: route both baked default-color replies through the production PTY write path.
+        // Why it exists: pure core reply tests cannot prove the serialized host writes OSC replies
+        //   back to the child or preserves the two replies as one ordered response stream.
+        // Scenario: a child probes foreground and background before choosing its UI colors.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) color-query \"$0\""
+        ))
+
+        let result = await host.waitForResult()
+        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        #expect(result == .exited(.exited(0)), "result: \(String(describing: result))")
+        #expect(output.contains("__COLOR_QUERY_OK__"), "output: \(output.debugDescription)")
+        let replies = await host.replyWrites()
+        #expect(replies.flatMap { $0 } == Array(
+            ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
+                + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
+        ))
+    }
+
     @Test("query-bearing capture replays to the drained live terminal", .timeLimit(.minutes(1)))
     func queryCaptureReplayEquality() async throws {
         let host = try makeHost()

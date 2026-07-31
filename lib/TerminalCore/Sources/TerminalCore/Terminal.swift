@@ -1039,6 +1039,20 @@ public struct Terminal: Equatable, Sendable {
             dispatchOSC8(payload, selectorEnd: selectorEnd)
         case 9:
             dispatchOSC9(payload, selectorEnd: selectorEnd)
+        case 10:
+            dispatchDefaultColorQuery(
+                payload,
+                selectorEnd: selectorEnd,
+                selector: selector,
+                color: TerminalDefaultColors.baked.foreground
+            )
+        case 11:
+            dispatchDefaultColorQuery(
+                payload,
+                selectorEnd: selectorEnd,
+                selector: selector,
+                color: TerminalDefaultColors.baked.background
+            )
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)
         case 133:
@@ -1050,6 +1064,24 @@ public struct Terminal: Equatable, Sendable {
         default:
             break
         }
+    }
+
+    private mutating func dispatchDefaultColorQuery(
+        _ payload: [UInt8],
+        selectorEnd: Int,
+        selector: Int,
+        color: TerminalRGBColor
+    ) {
+        guard payload[(selectorEnd + 1)...].elementsEqual([0x3F]) else { return }
+        appendReply("\u{1B}]\(selector);rgb:\(oscColorComponent(color.red))/"
+            + "\(oscColorComponent(color.green))/\(oscColorComponent(color.blue))\u{1B}\\")
+    }
+
+    private func oscColorComponent(_ component: UInt8) -> String {
+        let digits = Array("0123456789abcdef".utf8)
+        let high = digits[Int(component >> 4)]
+        let low = digits[Int(component & 0x0F)]
+        return String(decoding: [high, low, high, low], as: UTF8.self)
     }
 
     private mutating func dispatchOSC133(_ payload: [UInt8], selectorEnd: Int) {
