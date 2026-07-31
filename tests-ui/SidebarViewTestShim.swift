@@ -36,6 +36,11 @@ final class AppRuntime {
     /// ThemeBrowserView close-button hook. Production toggles the panel in and
     /// out of the content area; the harness only counts invocations.
     func toggleThemeBrowser() { themeBrowserToggles += 1 }
+
+    // PreferencesPanel's "Config file" row. Both reach the filesystem in
+    // production, so the harness keeps them inert.
+    func openDanTermConfig() {}
+    func reloadAllConfig() {}
 }
 
 class TerminalView: NSView, TerminalSession {

@@ -28,6 +28,7 @@ struct UITestRunner {
         remoteThemePickerSheetTests()
         todoPopoverViewTests()
         alertsPopoverViewTests()
+        preferencesPanelTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }

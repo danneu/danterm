@@ -30,14 +30,29 @@ func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
 
 // MARK: - Preferences Panel
 
+/// The font picker's one entry that is not a font: it stands for "no
+/// `font.family` key", i.e. the built-in monospace face. It is a reserved
+/// sentinel on the draft -- `resolveFontFamilyDraft` normalizes it back to nil --
+/// which is what lets the combo box write its selected title straight into the
+/// draft with no AppKit-side special case.
+let systemMonospaceFontChoiceTitle = "System Monospace (Default)"
+
 /// Pure value describing the visible preferences panel state.
 struct PreferencesPanelProjection: Equatable {
     var selectedAlertClearMode: AlertClearMode
     var remoteThemeText: String
     var ghosttyThemeText: String
     var fontSizeText: String
+    var fontFamilyText: String
+    /// Every family the picker offers, system monospace first. Sourced from the
+    /// catalog injected on open, never from an ambient CoreText query.
+    var fontFamilyChoices: [String]
+    /// Inline, non-modal report that the committed family is not installed.
+    /// Non-nil only while the field still holds the name it describes.
+    var fontFamilyWarning: String?
     var ghosttyThemeDirtyLabel: String?
     var fontSizeDirtyLabel: String?
+    var fontFamilyDirtyLabel: String?
     var alertClearModeDirtyLabel: String?
     var remoteThemeDirtyLabel: String?
     var saveEnabled: Bool
@@ -57,13 +72,29 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
 
     let alertDisplayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
+    // Warn only while the field still holds the unresolved name: once the user
+    // edits it, the warning would be describing text no longer on screen, and the
+    // new name has not been resolved against the installed families yet.
+    let unresolvedFamily = committed.fontFamily.flatMap {
+        model.resolvedFontFamily == nil && resolveFontFamilyDraft(draft.fontFamily) == $0 ? $0 : nil
+    }
     return PreferencesPanelProjection(
         selectedAlertClearMode: draft.alertClearMode,
         remoteThemeText: draft.remoteTheme,
         ghosttyThemeText: draft.theme ?? "",
         fontSizeText: draft.fontSize ?? "",
+        // Raw draft text, like the other fields: normalizing here would rewrite
+        // the field under the user mid-edit. Absent means the sentinel choice, so
+        // the picker always displays a selected entry.
+        fontFamilyText: draft.fontFamily ?? systemMonospaceFontChoiceTitle,
+        fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
+        fontFamilyWarning: unresolvedFamily.map {
+            "Font \"\($0)\" is not installed -- using the system monospace font."
+        },
         ghosttyThemeDirtyLabel: ghosttyThemeDirty ? "Prev: \(ghostty?.theme ?? "(default)")" : nil,
         fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(ghostty?.fontSize ?? "(default)")" : nil,
+        fontFamilyDirtyLabel: fontFamilyDirty
+            ? "Prev: \(committed.fontFamily ?? systemMonospaceFontChoiceTitle)" : nil,
         alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
         remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
         saveEnabled: ghosttyThemeDirty || fontSizeDirty || fontFamilyDirty

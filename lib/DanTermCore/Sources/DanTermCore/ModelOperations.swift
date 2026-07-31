@@ -20,12 +20,15 @@ func resolveRemoteTheme(_ raw: String) -> String {
 }
 
 /// Normalizes a drafted font family to the value that belongs in the config
-/// document: trimmed, with blank text meaning "no `font.family` key" rather than
-/// an empty family name. This is the whole of the core's font-family validation
-/// -- whether the name is installed is a CoreText question the core never asks.
+/// document: trimmed, with blank text -- or the picker's system-monospace entry,
+/// which is a choice rather than a font name -- meaning "no `font.family` key"
+/// rather than an empty family name. This is the whole of the core's font-family
+/// validation: whether the name is installed is a CoreText question the core
+/// never asks.
 func resolveFontFamilyDraft(_ raw: String?) -> String? {
     guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
-          trimmed.isEmpty == false
+          trimmed.isEmpty == false,
+          trimmed != systemMonospaceFontChoiceTitle
     else { return nil }
     return trimmed
 }

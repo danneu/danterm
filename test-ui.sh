@@ -73,6 +73,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ThemeSwatchViews.swift" \
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
+        "$SCRIPT_DIR/app/PreferencesPanel.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
@@ -92,6 +93,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/DanTermConfigStoreTests.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/PreferencesPanelTests.swift" \
         -framework Cocoa
 )
 echo "Running UI tests..."

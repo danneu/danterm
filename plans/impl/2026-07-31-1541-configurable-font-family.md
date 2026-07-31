@@ -284,7 +284,7 @@ states. The pure projection tests cannot prove this AppKit wiring.
       path through launch, reload, and save (I4)
 - [x] 4. Render the resolved family end to end, including the system-monospace
       metrics fallback (I3, I5)
-- [ ] 5. Preferences installed-family combo box + inline warning
+- [x] 5. Preferences installed-family combo box + inline warning
 - [ ] 6. `danterm doctor` config-font check + `SKILL.md` update
 
 ## Implementation notes
@@ -343,6 +343,34 @@ states. The pure projection tests cannot prove this AppKit wiring.
   `symbolsFontURL` is an initializer parameter of the real type, which the UI tests
   never construct. The plan's actual requirement -- no dependence on a particular
   font being installed on the test machine -- holds either way.
+
+- **Commit 5:** `System Monospace (Default)` is a reserved sentinel *on the draft*,
+  not a panel-local display string. The combo box writes its selected item's title
+  straight into `prefSetFontFamily`, and `resolveFontFamilyDraft` normalizes that
+  one title back to nil alongside blank text. The alternative -- translating the
+  entry to nil inside the panel -- loses to AppKit's ordering: after
+  `comboBoxSelectionDidChange`, the combo also updates its text field, so
+  `controlTextDidChange` fires with the selected title anyway and would have
+  re-drafted it as a literal font name. One normalization point in the core beats
+  two half-cases in the view.
+
+- **Commit 5:** the catalog lives on `AppModel.installedFontFamilies` rather than
+  inside `PreferencesDraft`. The draft is documented as "what the user actually
+  typed"; the catalog is neither typed nor comparable for dirtiness, and it is
+  panel-lifetime state exactly like the existing `committedGhosttyPrefs` sibling,
+  so it follows that field's set-on-open / clear-on-close shape.
+
+- **Commit 5:** the projected `fontFamilyText` is the raw draft, not the
+  normalized value -- normalizing would let `apply()` rewrite the field under the
+  user mid-edit (a trailing space would vanish as it was typed), which is why
+  every other field in this projection is raw too.
+
+- **Commit 5:** `PreferencesPanel` joins the UI harness, which needed the shim
+  `AppRuntime` to gain the two inert `openDanTermConfig` / `reloadAllConfig` hooks
+  the panel's "Config file" row calls, and the combo box, warning label, dirty row
+  and reset button to be internal rather than private. The alternative -- digging
+  the controls out of the `NSGridView` subtree by position -- would pin layout
+  structure the tests have no business asserting.
 
 ## Follow Up
 

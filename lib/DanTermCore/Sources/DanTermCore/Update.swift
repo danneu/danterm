@@ -586,9 +586,10 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Preferences Panel
 
-    case .preferencesOpened(let ghostty):
+    case .preferencesOpened(let ghostty, let installedFontFamilies):
         // Only create draft on closed → open transition; re-focus is a no-op.
         if model.preferencesDraft == nil {
+            model.installedFontFamilies = installedFontFamilies
             model.preferencesDraft = PreferencesDraft(
                 alertClearMode: model.config.alertClearMode,
                 remoteTheme: model.config.remoteTheme,
@@ -603,6 +604,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .preferencesClosed:
         model.preferencesDraft = nil
         model.committedGhosttyPrefs = nil
+        model.installedFontFamilies = []
         return []
 
     case .prefSetAlertClearMode(let mode):
@@ -648,6 +650,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .prefResetFontSize:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.fontSize = model.committedGhosttyPrefs?.fontSize
+        return []
+
+    case .prefResetFontFamily:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontFamily = model.config.fontFamily
         return []
 
     case .ghosttyPrefsRefreshed(let ghostty):

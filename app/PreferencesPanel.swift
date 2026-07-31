@@ -3,13 +3,17 @@
 // Each dirty field shows its previous committed value with a Reset button.
 import Cocoa
 
-class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
+class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     weak var runtime: AppRuntime?
 
     // Ghostty settings
     private let ghosttyThemeField = NSTextField()
     private let ghosttyBrowseButton = NSButton()
     private let fontSizeField = NSTextField()
+    // Font-family row. Not private: the UI harness reads these three to prove the
+    // projection reaches the controls and that gestures dispatch the right Msg.
+    let fontFamilyCombo = NSComboBox()
+    let fontFamilyWarningLabel = NSTextField(labelWithString: "")
 
     // DanTerm settings
     private let alertClearModePopup = NSPopUpButton()
@@ -23,6 +27,9 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     private let fontSizeDirtyRow = NSStackView()
     private let fontSizePrevLabel = NSTextField(labelWithString: "")
     private let fontSizeResetButton = NSButton()
+    let fontFamilyDirtyRow = NSStackView()
+    private let fontFamilyPrevLabel = NSTextField(labelWithString: "")
+    let fontFamilyResetButton = NSButton()
     private let alertClearModeDirtyRow = NSStackView()
     private let alertClearModePrevLabel = NSTextField(labelWithString: "")
     private let alertClearModeResetButton = NSButton()
@@ -61,6 +68,10 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
             formRow("Theme", makeHStack([ghosttyThemeField, ghosttyBrowseButton])),
             dirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, ghosttyThemeResetButton,
                      action: #selector(resetTheme(_:))),
+            formRow("Font Family", fontFamilyCombo),
+            dirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, fontFamilyResetButton,
+                     action: #selector(resetFontFamily(_:))),
+            [NSGridCell.emptyContentView, fontFamilyWarningLabel],
             formRow("Font Size", fontSizeField),
             dirtyRow(fontSizeDirtyRow, fontSizePrevLabel, fontSizeResetButton,
                      action: #selector(resetFontSize(_:))),
@@ -86,9 +97,9 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         grid.rowAlignment = .firstBaseline
         grid.rowSpacing = 4
         // Add extra spacing before DanTerm section (Alert Clear Mode row).
-        grid.row(at: 4).topPadding = 12
+        grid.row(at: 7).topPadding = 12
         // Add extra spacing before the "Config file" row.
-        grid.row(at: 8).topPadding = 8
+        grid.row(at: 11).topPadding = 8
 
         // Configure terminal appearance controls.
         ghosttyThemeField.delegate = self
@@ -101,6 +112,25 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         ghosttyBrowseButton.action = #selector(browseGhosttyTheme(_:))
         ghosttyBrowseButton.setContentHuggingPriority(.required, for: .horizontal)
         ghosttyBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Editable so the user can type a PostScript alias or a family they are
+        // about to install; `completes` makes the installed list searchable by
+        // prefix instead of forcing a scroll through every family on the machine.
+        fontFamilyCombo.delegate = self
+        fontFamilyCombo.usesDataSource = false
+        fontFamilyCombo.isEditable = true
+        fontFamilyCombo.completes = true
+        fontFamilyCombo.numberOfVisibleItems = 12
+        fontFamilyCombo.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        fontFamilyWarningLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        fontFamilyWarningLabel.textColor = .systemOrange
+        fontFamilyWarningLabel.lineBreakMode = .byWordWrapping
+        fontFamilyWarningLabel.maximumNumberOfLines = 0
+        // NSGridView gives a wrapping label no width to wrap against, so it would
+        // otherwise stretch the panel to one long line.
+        fontFamilyWarningLabel.preferredMaxLayoutWidth = 250
+        fontFamilyWarningLabel.isHidden = true
 
         fontSizeField.delegate = self
         fontSizeField.placeholderString = configFontSizeText(DanTermConfig.default.resolvedFontSize)
@@ -240,14 +270,38 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         if fontSizeField.stringValue != projection.fontSizeText {
             fontSizeField.stringValue = projection.fontSizeText
         }
+        if fontFamilyCombo.objectValues as? [String] != projection.fontFamilyChoices {
+            fontFamilyCombo.removeAllItems()
+            fontFamilyCombo.addItems(withObjectValues: projection.fontFamilyChoices)
+        }
+        if fontFamilyCombo.stringValue != projection.fontFamilyText {
+            fontFamilyCombo.stringValue = projection.fontFamilyText
+        }
+
+        applyWarning(projection.fontFamilyWarning)
 
         applyDirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, label: projection.ghosttyThemeDirtyLabel)
+        applyDirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, label: projection.fontFamilyDirtyLabel)
         applyDirtyRow(fontSizeDirtyRow, fontSizePrevLabel, label: projection.fontSizeDirtyLabel)
         applyDirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, label: projection.alertClearModeDirtyLabel)
         applyDirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, label: projection.remoteThemeDirtyLabel)
 
         if saveButton.isEnabled != projection.saveEnabled {
             saveButton.isEnabled = projection.saveEnabled
+        }
+    }
+
+    /// Show or hide the inline font warning. This is the whole feedback channel
+    /// for a font that is configured but not installed: the failure is soft and
+    /// already recovered, so it must never become a modal that re-fires every
+    /// launch.
+    private func applyWarning(_ warning: String?) {
+        let shouldHide = warning == nil
+        if fontFamilyWarningLabel.isHidden != shouldHide {
+            fontFamilyWarningLabel.isHidden = shouldHide
+        }
+        if let warning, fontFamilyWarningLabel.stringValue != warning {
+            fontFamilyWarningLabel.stringValue = warning
         }
     }
 
@@ -289,7 +343,21 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         } else if field === fontSizeField {
             let text = field.stringValue
             runtime?.send(.prefSetFontSize(text.isEmpty ? nil : text))
+        } else if field === fontFamilyCombo {
+            let text = field.stringValue
+            runtime?.send(.prefSetFontFamily(text.isEmpty ? nil : text))
         }
+    }
+
+    // NSComboBoxDelegate: the user picked a family from the list. The selected
+    // title goes into the draft verbatim, including the system-monospace entry --
+    // the core normalizes that sentinel back to "no family", which is what keeps
+    // this side free of special cases.
+    func comboBoxSelectionDidChange(_ notification: Notification) {
+        guard let combo = notification.object as? NSComboBox, combo === fontFamilyCombo,
+              let title = combo.objectValueOfSelectedItem as? String
+        else { return }
+        runtime?.send(.prefSetFontFamily(title))
     }
 
     @objc private func savePreferences(_ sender: Any?) {
@@ -314,6 +382,10 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func resetFontSize(_ sender: Any?) {
         runtime?.send(.prefResetFontSize)
+    }
+
+    @objc private func resetFontFamily(_ sender: Any?) {
+        runtime?.send(.prefResetFontFamily)
     }
 
     /// Present the theme picker sheet so the user can browse DanTerm's catalog.

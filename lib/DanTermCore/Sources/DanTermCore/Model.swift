@@ -220,6 +220,11 @@ struct AppModel: Equatable {
     // a second copy of the requested name could drift from `config`.
     var resolvedFontFamily: String? = nil
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
+    // The font families installed on this machine, injected when the preferences
+    // panel opens and dropped when it closes. Ephemeral and panel-scoped: the
+    // core cannot enumerate them (a CoreText question, I1), and the catalog is
+    // deliberately a snapshot per open rather than a live view (AR1).
+    var installedFontFamilies: [String] = []
     var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
     var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering

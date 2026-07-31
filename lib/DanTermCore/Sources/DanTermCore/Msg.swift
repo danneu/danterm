@@ -123,7 +123,11 @@ enum Msg {
     case ghosttyConfigReloaded
 
     // Preferences panel
-    case preferencesOpened(ghostty: GhosttyPrefs)
+    // The installed-family catalog is injected for the same reason the font
+    // resolution is: which families exist is a CoreText question the core may not
+    // ask (I1). It rides in on open so the picker's choices are a snapshot taken
+    // when the panel appeared, not a live query.
+    case preferencesOpened(ghostty: GhosttyPrefs, installedFontFamilies: [String] = [])
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)
     case prefSetRemoteTheme(String)
@@ -134,6 +138,7 @@ enum Msg {
     case prefResetRemoteTheme
     case prefResetTheme
     case prefResetFontSize
+    case prefResetFontFamily
     case prefSave
     case ghosttyPrefsRefreshed(GhosttyPrefs)
 

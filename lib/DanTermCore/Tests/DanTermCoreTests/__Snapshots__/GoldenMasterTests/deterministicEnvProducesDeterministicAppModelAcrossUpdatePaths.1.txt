@@ -130,6 +130,7 @@ AppModel(
   ),
   resolvedFontFamily: nil,
   preferencesDraft: nil,
+  installedFontFamilies: [],
   committedGhosttyPrefs: nil,
   todoPopover: nil,
   mruOrder: [

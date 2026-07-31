@@ -1129,10 +1129,15 @@ class AppRuntime {
     /// the draft, then lets reconcile create/show from the model. The final
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
-        send(.preferencesOpened(ghostty: GhosttyPrefs(
-            theme: model.config.defaultTheme,
-            fontSize: model.config.fontSize.map(configFontSizeText)
-        )))
+        send(.preferencesOpened(
+            ghostty: GhosttyPrefs(
+                theme: model.config.defaultTheme,
+                fontSize: model.config.fontSize.map(configFontSizeText)
+            ),
+            // Snapshotted per open (AR1): the core may not query CoreText, and a
+            // font installed while the panel sits open is not worth a watcher.
+            installedFontFamilies: installedFontFamilyNames()
+        ))
         preferencesPanel?.makeKeyAndOrderFront(nil)
     }
 
