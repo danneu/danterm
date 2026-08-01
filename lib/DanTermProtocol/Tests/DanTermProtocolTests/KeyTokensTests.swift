@@ -1,215 +1,216 @@
 // Tests for the argv-token classifier used by `danterm pane input --`.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class KeyTokensTests: XCTestCase {
-    func testEmptyTokens() throws {
-        XCTAssertEqual(try parseKeyTokens([]), [])
+struct KeyTokensTests {
+    @Test("empty tokens")
+    func emptyTokens() throws {
+        #expect(try parseKeyTokens([]) == [])
     }
 
-    func testPlainText() throws {
-        XCTAssertEqual(try parseKeyTokens(["ls"]), [.text("ls")])
+    @Test("plain text")
+    func plainText() throws {
+        #expect(try parseKeyTokens(["ls"]) == [.text("ls")])
     }
 
-    func testTextThenKey() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["ls", "Enter"]),
-            [.text("ls"), .key(.named(.enter), [])]
-        )
+    @Test("text then key")
+    func textThenKey() throws {
+        #expect(try parseKeyTokens(["ls", "Enter"]) == [.text("ls"), .key(.named(.enter), [])])
     }
 
-    func testColonPrefixedTextIsLiteral() throws {
-        XCTAssertEqual(try parseKeyTokens([":wq"]), [.text(":wq")])
+    @Test("colon prefixed text is literal")
+    func colonPrefixedTextIsLiteral() throws {
+        #expect(try parseKeyTokens([":wq"]) == [.text(":wq")])
     }
 
-    func testUnknownKeynameFallsThroughAsText() throws {
-        XCTAssertEqual(try parseKeyTokens(["Entr"]), [.text("Entr")])
+    @Test("unknown keyname falls through as text")
+    func unknownKeynameFallsThroughAsText() throws {
+        #expect(try parseKeyTokens(["Entr"]) == [.text("Entr")])
     }
 
-    func testCtrlLetter() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["C-c"]),
-            [.key(.letter("c"), [.ctrl])]
-        )
+    @Test("ctrl letter")
+    func ctrlLetter() throws {
+        #expect(try parseKeyTokens(["C-c"]) == [.key(.letter("c"), [.ctrl])])
     }
 
-    func testModifierWithUnresolvableBaseThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["C-yz"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("C-yz"))
+    @Test("modifier with unresolvable base throws")
+    func modifierWithUnresolvableBaseThrows() throws {
+        #expect(throws: KeyTokenError.unknownKey("C-yz")) {
+            try parseKeyTokens(["C-yz"])
         }
     }
 
-    func testAltLetter() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["M-x"]),
-            [.key(.letter("x"), [.alt])]
-        )
+    @Test("alt letter")
+    func altLetter() throws {
+        #expect(try parseKeyTokens(["M-x"]) == [.key(.letter("x"), [.alt])])
     }
 
-    func testAltNamedKey() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["M-Enter"]),
-            [.key(.named(.enter), [.alt])]
-        )
+    @Test("alt named key")
+    func altNamedKey() throws {
+        #expect(try parseKeyTokens(["M-Enter"]) == [.key(.named(.enter), [.alt])])
     }
 
-    func testCtrlAltNamedKey() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["C-M-Up"]),
-            [.key(.named(.up), [.ctrl, .alt])]
-        )
+    @Test("ctrl alt named key")
+    func ctrlAltNamedKey() throws {
+        #expect(try parseKeyTokens(["C-M-Up"]) == [.key(.named(.up), [.ctrl, .alt])])
     }
 
-    func testFunctionKey() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["F5"]),
-            [.key(.named(.f5), [])]
-        )
+    @Test("function key")
+    func functionKey() throws {
+        #expect(try parseKeyTokens(["F5"]) == [.key(.named(.f5), [])])
     }
 
-    func testFunctionKeyF12() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["F12"]),
-            [.key(.named(.f12), [])]
-        )
+    @Test("function key F12")
+    func functionKeyF12() throws {
+        #expect(try parseKeyTokens(["F12"]) == [.key(.named(.f12), [])])
     }
 
-    func testFunctionKeyOutOfRangeThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["F30"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("F30"))
+    @Test("function key out of range throws")
+    func functionKeyOutOfRangeThrows() throws {
+        #expect(throws: KeyTokenError.unknownKey("F30")) {
+            try parseKeyTokens(["F30"])
         }
     }
 
-    func testFunctionKeyZeroThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["F0"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("F0"))
+    @Test("function key zero throws")
+    func functionKeyZeroThrows() throws {
+        #expect(throws: KeyTokenError.unknownKey("F0")) {
+            try parseKeyTokens(["F0"])
         }
     }
 
-    func testFunctionKeyLeadingZeroThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["F01"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("F01"))
+    @Test("function key leading zero throws")
+    func functionKeyLeadingZeroThrows() throws {
+        #expect(throws: KeyTokenError.unknownKey("F01")) {
+            try parseKeyTokens(["F01"])
         }
     }
 
-    func testFunctionKeyLeadingZeroF12Throws() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["F012"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("F012"))
+    @Test("function key leading zero F12 throws")
+    func functionKeyLeadingZeroF12Throws() throws {
+        #expect(throws: KeyTokenError.unknownKey("F012")) {
+            try parseKeyTokens(["F012"])
         }
     }
 
-    func testAlmostFnShapedFallsThroughAsText() throws {
-        XCTAssertEqual(try parseKeyTokens(["F1a"]), [.text("F1a")])
+    @Test("almost fn shaped falls through as text")
+    func almostFnShapedFallsThroughAsText() throws {
+        #expect(try parseKeyTokens(["F1a"]) == [.text("F1a")])
     }
 
-    func testShiftNamedKey() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["S-Tab"]),
-            [.key(.named(.tab), [.shift])]
-        )
+    @Test("shift named key")
+    func shiftNamedKey() throws {
+        #expect(try parseKeyTokens(["S-Tab"]) == [.key(.named(.tab), [.shift])])
     }
 
-    func testShiftAnywhereInNamedKeyChain() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["C-S-Up"]),
-            [.key(.named(.up), [.ctrl, .shift])]
-        )
+    @Test("shift anywhere in named key chain")
+    func shiftAnywhereInNamedKeyChain() throws {
+        #expect(try parseKeyTokens(["C-S-Up"]) == [.key(.named(.up), [.ctrl, .shift])])
     }
 
-    func testShiftLetterRemainsRejected() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["S-a"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("S-a"))
+    @Test("shift letter remains rejected")
+    func shiftLetterRemainsRejected() throws {
+        #expect(throws: KeyTokenError.unknownKey("S-a")) {
+            try parseKeyTokens(["S-a"])
         }
     }
 
-    func testBareSpaceTokenIsLiteralSpace() throws {
-        XCTAssertEqual(try parseKeyTokens(["Space"]), [.text(" ")])
+    @Test("bare space token is literal space")
+    func bareSpaceTokenIsLiteralSpace() throws {
+        #expect(try parseKeyTokens(["Space"]) == [.text(" ")])
     }
 
-    func testSpaceAmidTextEvents() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["echo", "Space", "hi"]),
-            [.text("echo"), .text(" "), .text("hi")]
-        )
+    @Test("space amid text events")
+    func spaceAmidTextEvents() throws {
+        #expect(try parseKeyTokens(["echo", "Space", "hi"]) == [.text("echo"), .text(" "), .text("hi")])
     }
 
-    func testCtrlSpaceThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["C-Space"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("C-Space"))
+    @Test("ctrl space throws")
+    func ctrlSpaceThrows() throws {
+        #expect(throws: KeyTokenError.unknownKey("C-Space")) {
+            try parseKeyTokens(["C-Space"])
         }
     }
 
-    func testLiteralModeIsExhaustive() throws {
-        XCTAssertEqual(
-            try parseKeyTokens(["Enter", "C-c", "Space"], literal: true),
-            [.text("Enter"), .text("C-c"), .text("Space")]
-        )
+    @Test("literal mode is exhaustive")
+    func literalModeIsExhaustive() throws {
+        #expect(try parseKeyTokens(["Enter", "C-c", "Space"], literal: true) == [.text("Enter"), .text("C-c"), .text("Space")])
     }
 
     // Wire-level KeyName decoder, used by direct IPC clients that bypass the
     // CLI parser.
 
-    func testWireNameEnter() {
-        XCTAssertEqual(KeyName(wireName: "Enter"), .named(.enter))
+    @Test("wire name enter")
+    func wireNameEnter() {
+        #expect(KeyName(wireName: "Enter") == .named(.enter))
     }
 
-    func testWireNameBackspaceAlias() {
-        XCTAssertEqual(KeyName(wireName: "Backspace"), .named(.bspace))
+    @Test("wire name backspace alias")
+    func wireNameBackspaceAlias() {
+        #expect(KeyName(wireName: "Backspace") == .named(.bspace))
     }
 
-    func testWireNameEscAlias() {
-        XCTAssertEqual(KeyName(wireName: "Esc"), .named(.escape))
+    @Test("wire name esc alias")
+    func wireNameEscAlias() {
+        #expect(KeyName(wireName: "Esc") == .named(.escape))
     }
 
-    func testWireNameF12() {
-        XCTAssertEqual(KeyName(wireName: "F12"), .named(.f12))
+    @Test("wire name F12")
+    func wireNameF12() {
+        #expect(KeyName(wireName: "F12") == .named(.f12))
     }
 
-    func testEveryNamedKeyWireNameRoundTrips() {
+    @Test("every named key wire name round trips", arguments: NamedKey.allCases)
+    func everyNamedKeyWireNameRoundTrips(_ key: NamedKey) {
         // Intent: every NamedKey's canonical wireName decodes back to that same key.
         // Why it exists: NamedKey.wireName (encode) and namedAliases/KeyName(wireName:)
         //   (decode) are now one derived pair; this CaseIterable sweep turns any future
         //   case that forgets to round-trip into a test failure, not a silent wire bug.
         // Scenario: spec-first invariant for the pane.input key serialization bijection.
-        for k in NamedKey.allCases {
-            XCTAssertEqual(
-                KeyName(wireName: KeyName.named(k).wireName),
-                .named(k),
-                "wireName round-trip failed for \(k)"
-            )
-        }
+        #expect(
+            KeyName(wireName: KeyName.named(key).wireName) == .named(key),
+            "wireName round-trip failed for \(key)"
+        )
     }
 
-    func testWireNameF30Rejected() {
-        XCTAssertNil(KeyName(wireName: "F30"))
+    @Test("wire name F30 rejected")
+    func wireNameF30Rejected() {
+        #expect(KeyName(wireName: "F30") == nil)
     }
 
-    func testWireNameF0Rejected() {
-        XCTAssertNil(KeyName(wireName: "F0"))
+    @Test("wire name F0 rejected")
+    func wireNameF0Rejected() {
+        #expect(KeyName(wireName: "F0") == nil)
     }
 
-    func testWireNameF01Rejected() {
-        XCTAssertNil(KeyName(wireName: "F01"))
+    @Test("wire name F01 rejected")
+    func wireNameF01Rejected() {
+        #expect(KeyName(wireName: "F01") == nil)
     }
 
-    func testWireNameF012Rejected() {
-        XCTAssertNil(KeyName(wireName: "F012"))
+    @Test("wire name F012 rejected")
+    func wireNameF012Rejected() {
+        #expect(KeyName(wireName: "F012") == nil)
     }
 
-    func testWireNameLowercaseLetter() {
-        XCTAssertEqual(KeyName(wireName: "c"), .letter("c"))
+    @Test("wire name lowercase letter")
+    func wireNameLowercaseLetter() {
+        #expect(KeyName(wireName: "c") == .letter("c"))
     }
 
-    func testWireNameBogusRejected() {
-        XCTAssertNil(KeyName(wireName: "Bogus"))
+    @Test("wire name bogus rejected")
+    func wireNameBogusRejected() {
+        #expect(KeyName(wireName: "Bogus") == nil)
     }
 
-    func testWireNameEmptyRejected() {
-        XCTAssertNil(KeyName(wireName: ""))
+    @Test("wire name empty rejected")
+    func wireNameEmptyRejected() {
+        #expect(KeyName(wireName: "") == nil)
     }
 
-    func testWireNameUppercaseEnterRejected() {
-        XCTAssertNil(KeyName(wireName: "ENTER"))
+    @Test("wire name uppercase enter rejected")
+    func wireNameUppercaseEnterRejected() {
+        #expect(KeyName(wireName: "ENTER") == nil)
     }
 }

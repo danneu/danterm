@@ -85,7 +85,7 @@ lib/
 │   ├── Sources/DanTermCore/      #   ModelOperations.swift, Projections.swift,
 │   │                             #   Persistence.swift, TabTodo.swift, DanTermConfig.swift, ...
 │   └── Tests/DanTermCoreTests/   # Swift Testing suites (auto-discovered).
-├── DanTermProtocol/              # CLI parser + IPC envelope + line framer, shared by app/ and cli/.
+├── DanTermProtocol/              # CLI parser + IPC envelope + line framer; Swift Testing unit tests.
 └── DanTermSupport/               # IpcConnection.swift, Debouncer.swift,
     ├── Sources/DanTermSupport/   #   CLIPathInstaller.swift, RecoveryStore.swift.
     └── Tests/DanTermSupportTests/  # Swift Testing suites (auto-discovered).
@@ -255,9 +255,8 @@ labeled sections at the top of the method body:
    user-facing behavior. Don't invent an incident -- DanTerm is TDD-first, so
    most tests are spec-first and legitimately have none.
 
-Applies to both idioms: Swift Testing `@Test("...") func ...` in
-`lib/DanTermCore/Tests/` and XCTest `func testX()` in
-`lib/DanTermProtocol/Tests/` -- same shape in both.
+Applies to Swift Testing `@Test("...") func ...` methods in the `lib/`
+unit-test packages, including DanTermCore, DanTermProtocol, and DanTermSupport.
 
 ```swift
 // A bug-fix test, so the Scenario names the real incident:
@@ -284,7 +283,7 @@ the first Swift build. Re-run only when the pinned Ghostty version changes.
 - `just build-run` -- same as `just build`, then launch the installed app.
 - `just build-optimized` -- compile the same `DanTerm Dev.app` identity with SwiftPM's release configuration and install it. This is an optimized dev build, not a production release or publish operation.
 - `just build-run-optimized` -- same as `just build-optimized`, then launch the installed app.
-- `just test` -- local gate: protocol XCTest + core Swift Testing + DanTermSupport Swift Testing + core-purity lint (pure + portable profiles) + shell contract self-tests, including the dev-build configuration contract. Steps run as a bounded parallel pool (default: half the cores; `just test 8` to override). The step list lives in `scripts/run-test-suite.sh`, not the justfile -- add new gate steps there, and only steps that are independent of every other one (no shared temp path, SwiftPM build directory, port, or socket). Use `just test-serial` when parallel scheduling or interleaved output is in the way.
+- `just test` -- local gate: protocol, core, and DanTermSupport Swift Testing + core-purity lint (pure + portable profiles) + shell contract self-tests, including the dev-build configuration contract. Steps run as a bounded parallel pool (default: half the cores; `just test 8` to override). The step list lives in `scripts/run-test-suite.sh`, not the justfile -- add new gate steps there, and only steps that are independent of every other one (no shared temp path, SwiftPM build directory, port, or socket). Use `just test-serial` when parallel scheduling or interleaved output is in the way.
 - `just test-ui` -- automated AppKit UI harness: compiles and runs the XCTest UI suite (split-view geometry, sidebar selection/badges, todo-input sizing) and self-reports pass/fail. Kept out of the `just test` gate because it needs a WindowServer connection -- it fails headless (e.g. CI) but runs fine from any shell in a logged-in GUI session, including an agent's.
 
 Targeted core runs: `swift test --package-path lib/DanTermCore`, optionally with `--filter CheckpointTests`. Protocol-only: `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`.

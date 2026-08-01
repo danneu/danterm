@@ -1,10 +1,11 @@
 // Tests for DanTerm JSON-RPC envelope and JSONValue encoding.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class EnvelopeTests: XCTestCase {
-    func testObjectParamsRoundTrip() throws {
+struct EnvelopeTests {
+    @Test("object params round trip")
+    func objectParamsRoundTrip() throws {
         let request = JsonRpcRequest(
             id: .number(1),
             method: Methods.tabRename,
@@ -15,26 +16,22 @@ final class EnvelopeTests: XCTestCase {
         )
 
         let encoded = try sortedEncoder().encode(request)
-        XCTAssertEqual(
-            String(data: encoded, encoding: .utf8),
-            #"{"id":1,"jsonrpc":"2.0","method":"tab.rename","params":{"a":1,"b":[2,3]}}"#
-        )
+        #expect(String(data: encoded, encoding: .utf8) == #"{"id":1,"jsonrpc":"2.0","method":"tab.rename","params":{"a":1,"b":[2,3]}}"#)
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
-        XCTAssertEqual(decoded, request)
+        #expect(decoded == request)
     }
 
-    func testNotificationRequestRoundTripsWithoutId() throws {
+    @Test("notification request round trips without id")
+    func notificationRequestRoundTripsWithoutId() throws {
         let request = JsonRpcRequest(method: Methods.hello, params: .object(["protocol": .number(1)]))
         let encoded = try sortedEncoder().encode(request)
-        XCTAssertEqual(
-            String(data: encoded, encoding: .utf8),
-            #"{"jsonrpc":"2.0","method":"hello","params":{"protocol":1}}"#
-        )
+        #expect(String(data: encoded, encoding: .utf8) == #"{"jsonrpc":"2.0","method":"hello","params":{"protocol":1}}"#)
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
-        XCTAssertEqual(decoded, request)
+        #expect(decoded == request)
     }
 
-    func testErrorResponseWithDataRoundTrips() throws {
+    @Test("error response with data round trips")
+    func errorResponseWithDataRoundTrips() throws {
         let response = JsonRpcResponse(
             id: .string("abc"),
             error: JsonRpcError(
@@ -46,10 +43,11 @@ final class EnvelopeTests: XCTestCase {
 
         let encoded = try sortedEncoder().encode(response)
         let decoded = try JSONDecoder().decode(JsonRpcResponse.self, from: encoded)
-        XCTAssertEqual(decoded, response)
+        #expect(decoded == response)
     }
 
-    func testRequestContextDecodesFromParams() throws {
+    @Test("request context decodes from params")
+    func requestContextDecodesFromParams() throws {
         let request = JsonRpcRequest(
             id: .string("1"),
             method: Methods.todoList,
@@ -62,13 +60,14 @@ final class EnvelopeTests: XCTestCase {
 
         let encoded = try sortedEncoder().encode(request)
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
-        XCTAssertEqual(IpcRequestContext.from(params: decoded.params), IpcRequestContext(paneId: "pane-1"))
+        #expect(IpcRequestContext.from(params: decoded.params) == IpcRequestContext(paneId: "pane-1"))
     }
 
-    func testJSONValueDoesNotEncodeObjectAsBase64Data() throws {
+    @Test("JSON value does not encode object as base64 data")
+    func jSONValueDoesNotEncodeObjectAsBase64Data() throws {
         let value = JSONValue.object(["x": .number(1)])
         let encoded = try sortedEncoder().encode(value)
-        XCTAssertEqual(String(data: encoded, encoding: .utf8), #"{"x":1}"#)
+        #expect(String(data: encoded, encoding: .utf8) == #"{"x":1}"#)
     }
 
     private func sortedEncoder() -> JSONEncoder {

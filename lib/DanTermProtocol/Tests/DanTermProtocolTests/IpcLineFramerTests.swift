@@ -2,29 +2,32 @@
 // socket byte stream into whole `.line` frames and rejects oversized lines: full-line emission,
 // two-lines-in-one-read, split-frame reassembly, and oversized-line rejection. Moved here with the
 // framer from DanTermCore in the pure-core/portable-support refactor (Phase 2); the IpcConnection
-// socket class that drives the framer stays separate. XCTest to match this package's convention.
+// socket class that drives the framer stays separate.
 import Foundation
-import XCTest
+import Testing
 
 @testable import DanTermProtocol
 
-final class IpcLineFramerTests: XCTestCase {
-    func testOneFullLineEmitsOneFrame() throws {
+struct IpcLineFramerTests {
+    @Test("one full line emits one frame")
+    func oneFullLineEmitsOneFrame() throws {
         // Intent: a full JSON-RPC line emits exactly one .line event.
         // Why it exists: pins the happy framing path.
         // Scenario: spec-first single line.
         var framer = IpcLineFramer()
         let events = framer.append(ipcLine(#"{"jsonrpc":"2.0","id":1,"method":"ls"}"#))
-        XCTAssertEqual(events.count, 1)
-        guard case .line(let line) = events[0] else {
-            XCTFail("expected line event")
+        #expect(events.count == 1)
+        let event = try #require(events.first)
+        guard case .line(let line) = event else {
+            Issue.record("expected line event")
             return
         }
         let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
-        XCTAssertEqual(request.method, Methods.ls)
+        #expect(request.method == Methods.ls)
     }
 
-    func testTwoFullLinesInOneReadEmitTwoFrames() {
+    @Test("two full lines in one read emit two frames")
+    func twoFullLinesInOneReadEmitTwoFrames() {
         // Intent: two full lines in one chunk emit two frames.
         // Why it exists: pins the multi-line case.
         // Scenario: spec-first two-lines.
@@ -32,27 +35,30 @@ final class IpcLineFramerTests: XCTestCase {
         var chunk = ipcLine(#"{"jsonrpc":"2.0","id":1,"method":"ls"}"#)
         chunk.append(ipcLine(#"{"jsonrpc":"2.0","id":2,"method":"tab.rename"}"#))
         let events = framer.append(chunk)
-        XCTAssertEqual(events.count, 2)
+        #expect(events.count == 2)
     }
 
-    func testSplitFrameReassemblesAfterSecondChunk() throws {
+    @Test("split frame reassembles after second chunk")
+    func splitFrameReassemblesAfterSecondChunk() throws {
         // Intent: a frame split across two chunks reassembles into one
         //   event.
         // Why it exists: pins the reassembly case.
         // Scenario: spec-first split frame.
         var framer = IpcLineFramer()
-        XCTAssertEqual(framer.append(Data(#"{"jsonrpc":"#.utf8)).count, 0)
+        #expect(framer.append(Data(#"{"jsonrpc":"#.utf8)).count == 0)
         let events = framer.append(ipcLine(#""2.0","id":1,"method":"ls"}"#))
-        XCTAssertEqual(events.count, 1)
-        guard case .line(let line) = events[0] else {
-            XCTFail("expected line event")
+        #expect(events.count == 1)
+        let event = try #require(events.first)
+        guard case .line(let line) = event else {
+            Issue.record("expected line event")
             return
         }
         let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
-        XCTAssertEqual(request.method, Methods.ls)
+        #expect(request.method == Methods.ls)
     }
 
-    func testOversizedLineEmitsRejectionEvent() {
+    @Test("oversized line emits rejection event")
+    func oversizedLineEmitsRejectionEvent() {
         // Intent: a line over IpcLineFramer.maxLineBytes emits an
         //   .oversized event.
         // Why it exists: pins the line-length cap.
@@ -60,7 +66,7 @@ final class IpcLineFramerTests: XCTestCase {
         var framer = IpcLineFramer()
         let data = Data(repeating: 65, count: IpcLineFramer.maxLineBytes + 1)
         let events = framer.append(data)
-        XCTAssertTrue(events.contains(.oversized), "expected oversized event")
+        #expect(events.contains(.oversized), "expected oversized event")
     }
 }
 
