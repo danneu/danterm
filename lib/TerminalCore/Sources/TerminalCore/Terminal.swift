@@ -165,28 +165,17 @@ public struct Terminal: Equatable, Sendable {
         var semanticPrompt = SemanticPromptRow.none
     }
 
-    /// Marks only the rows needed to find and preserve a shell-redraw prompt block.
+    /// Tracks a shell-redraw prompt row through prompt -> vacated -> repainted or
+    /// reclaimed. Ownership is explicit because empty cells alone cannot distinguish
+    /// a repaint grant from user content; see
+    /// `docs/design/2026-08-01-osc-133-prompt-anchoring.md`.
     private enum SemanticPromptRow: Equatable, Sendable {
         case none
         case prompt
         case continuation
-        /// The row a command's output starts on, and so the upper bound of any search
-        /// for the prompt below it.
-        ///
-        /// A shell repaint erases its prompt before re-marking it, and a resize landing
-        /// in that window finds no stamp where the prompt is. Without a floor the search
-        /// keeps climbing, anchors on the *previous* prompt, and blanks the last
-        /// command's output along with it.
+        /// The hard upper bound for a search for the prompt below this output.
         case output
-        /// A prompt row that prompt blanking emptied and no shell has repainted yet.
-        ///
-        /// Distinct from `.none` because the two are only alike on screen. Blanking
-        /// vacates rows on the promise that the shell repaints them, and until it does
-        /// they are ours to reclaim; an ordinary blank row is the user's. Without this
-        /// case the difference had to be re-derived by asking whether a still-stamped
-        /// row had any content left, which is a question about cells standing in for a
-        /// fact about intent -- and one that two separate walks answered in opposite
-        /// directions.
+        /// A blanked prompt row still awaiting repaint or empty-row reclaim.
         case vacated
     }
 
@@ -1239,15 +1228,8 @@ public struct Terminal: Equatable, Sendable {
         case 0x43: // C
             semanticContent = .output
             semanticContentClearsAtEndOfLine = false
-            // Mark where the command's output begins. This is a floor for every walk
-            // that searches upward for the current prompt: output is never part of a
-            // prompt block, so a walk that reaches this row has already gone too far
-            // and must stop rather than anchor on an older prompt above it.
-            //
-            // Unconditional, including when output starts partway along the prompt's own
-            // row. That row is then no longer blankable, which is correct -- it holds
-            // output -- and it costs the current prompt nothing, since blanking is
-            // suppressed for the whole command and the next `A` re-stamps a fresh head.
+            // Stamp even when output starts partway through the prompt row: the row now
+            // holds output and must stop every later prompt-block search.
             // Kitty marks it the same way (`references/kitty/kitty/screen.c#shell_prompt_marking`).
             rows[cursor.row].semanticPrompt = .output
         case 0x44: // D
@@ -1272,58 +1254,26 @@ public struct Terminal: Equatable, Sendable {
         semanticContentClearsAtEndOfLine = false
         rows[cursor.row].semanticPrompt = kind
         reclaimStalePromptHeads(for: kind)
-        // A prompt head begins a logical line, so the row above it stops claiming it as a
-        // continuation. Both fish and zsh advance a line by deliberately overflowing one:
-        // the PROMPT_SP hack writes a marker and pads to the right margin so the
-        // terminal's own wrap does the newline
-        // (`references/fish-shell/src/screen.rs#abandon_line_string`). Padded for a width
-        // the shell has already lost to a drag, that padding really does wrap, and the
-        // padded row is left asserting the prompt below it is part of its line. Reflow
-        // measures a wrapped row to its full old width, so every later resize spliced the
-        // padding in front of the prompt. Only at column 0: a prompt that starts partway
-        // along a row is genuinely mid-line, and the claim above it is genuinely live.
-        //
-        // After the reclaim, not before: a stranded head is recognized *by* the claim it
-        // still makes on the row below it, so clearing the claim first would erase the
-        // evidence and leave the fragment on screen.
+        // A column-zero head starts a logical line. Clear the claim only after reclaim,
+        // which needs that claim to recognize a stranded soft-wrapped head.
         if kind == .prompt, cursor.column == 0, cursor.row > 0 {
             rows[cursor.row - 1].isSoftWrapped = false
         }
     }
 
-    /// Removes the prompt rows a repaint stranded above the head just stamped, rather than
-    /// waiting for a resize: the drag that strands one need not be followed by another
-    /// resize, and a drag ending on the stranding repaint would leave the debris forever.
+    /// Reclaims removable prompt rows as soon as a newer head makes them identifiable.
     private mutating func reclaimStalePromptHeads(for kind: SemanticPromptRow) {
-        // Clear stale heads here as well as at resize, because the repaint that strands
-        // one need not be followed by another resize: a drag that ends on the stranding
-        // repaint leaves debris that the resize path never gets a chance to see. This is
-        // the earliest point it can be recognized -- the new head has just been stamped,
-        // which is what makes the row above it identifiable as a stale copy.
         // `.full` only. Under `.last` the shell has declared it repaints just the final
-        // prompt row, so the rows above are content it will never restore -- and Bash
-        // re-stamps through `P;k=i`, which arrives here as a `.prompt` kind, so without
-        // this gate a readline repaint could reclaim rows nothing rewrites.
+        // prompt row, so rows above it remain shell-owned content.
         guard kind == .prompt, promptRedrawMode == .full else { return }
-        // The reclaim shifts rows and the cursor together, which only stays coherent
-        // while both sit inside the same scroll region. A prompt drawn under an active
-        // DECSTBM margin with the cursor outside it would otherwise move the cursor
-        // without moving the row it points at.
+        // Row deletion and cursor movement are coherent only in one primary-screen
+        // scroll region.
         guard isAlternateScreenActive == false,
               activeScrollRegion.contains(cursor.row)
         else { return }
         var top = topOfStalePromptHeads(above: cursor.row)
-        // Also reclaim rows an earlier resize vacated. Leaving them is what makes the
-        // prompt appear to walk down the pane: the shell repaints below the block it
-        // vacated and never comes back for it.
-        //
-        // Still empty is the condition, not the identity -- `.vacated` already says
-        // these rows are ours to take, and the emptiness check says taking them is
-        // free. A shell that printed into the vacated block without stamping a mark
-        // (a banner, unmarked output) keeps what it wrote. It also makes a reflow
-        // subtlety harmless: a wrapped content row above a vacated one absorbs the mark
-        // into its own logical line, so a packed row can come back marked `.vacated`
-        // while holding content, and this check declines it.
+        // `.vacated` establishes ownership; emptiness establishes that deletion is free.
+        // Reflow can preserve the stamp on a packed row with content, which must remain.
         while top > 0,
               rows[top - 1].semanticPrompt == .vacated,
               retainedContentEnd(in: rows[top - 1]) == 0
@@ -1331,13 +1281,8 @@ public struct Terminal: Equatable, Sendable {
             top -= 1
         }
         guard top < cursor.row, activeScrollRegion.contains(top) else { return }
-        // Remove the stale rows rather than blanking them in place. Each stale-width
-        // overflow costs the prompt one row: the shell repaints from one row lower and
-        // never reclaims the row above, so blanking would trade a visible fragment for a
-        // blank line and accumulate one per overflow -- the prompt walking down the pane
-        // with a growing gap above it. Deleting closes the gap, and moving the cursor up
-        // by the same count keeps the shell's own relative cursor arithmetic valid,
-        // exactly as it stays valid across an ordinary scroll.
+        // Delete instead of re-blanking so the vacated rows do not become a permanent gap.
+        // Move the cursor by the same count to preserve relative cursor arithmetic.
         let removed = cursor.row - top
         moveAndFillRows(in: top..<activeScrollRegion.upperBound, by: -removed, pushesToScrollback: false)
         cursor.row -= removed
@@ -1904,19 +1849,13 @@ public struct Terminal: Equatable, Sendable {
         while start >= 0 {
             switch rows[start].semanticPrompt {
             case .prompt, .vacated:
-                // `.vacated` stops the walk as firmly as a live head: it is the block a
-                // previous resize already emptied and the shell has not repainted yet,
-                // so the prompt to blank starts here, not at whatever older prompt sits
-                // above it. Walking past it would blank the last command's output every
-                // time a drag outran the shell.
+                // A vacated head is still the current block's ownership boundary.
                 start = topOfStalePromptHeads(above: start)
                 for row in start..<rowCount { clearPromptCells(in: row) }
                 return
             case .output:
-                // Reached the last command's output without finding a prompt, which
-                // means the shell erased its stamp and has not re-marked it yet. There
-                // is nothing here we are entitled to blank; the older prompt above this
-                // row belongs to output that is finished and must survive.
+                // The shell erased the current head but has not re-marked it; an older
+                // prompt above completed output is outside this repaint grant.
                 return
             case .continuation, .none:
                 start -= 1
@@ -1924,24 +1863,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Walks up from a prompt head over the stale copies of itself a shell can strand
-    /// above it, returning the topmost row of that block.
-    ///
-    /// A shell handed a prompt string rendered for the previous width paints it too wide,
-    /// so it soft-wraps onto a second row; the next repaint moves up by the prompt's
-    /// *logical* line count, which is one row short, and erases from there. The wrapped
-    /// head above survives, stamped and full of stale cells.
-    ///
-    /// Together the two conditions are one invariant, not a pair of heuristics: a row
-    /// carrying `isSoftWrapped` asserts that the rest of its logical line lives on the
-    /// row below, so a `.prompt` row still making that claim directly above a *newer*
-    /// prompt head has had its continuation overwritten. It is a dangling wrap, which
-    /// is what a fragment is. Neither condition can go. Dropping `isSoftWrapped` ate
-    /// legitimate history -- a one-row prompt entered repeatedly with no output stacks
-    /// real heads on each other, and debris only exists because it overflowed, so
-    /// debris always wrapped. Crossing `.continuation` blanked the previous prompt and
-    /// the command typed at it, because a genuinely earlier prompt is separated from
-    /// this one by its own continuation row.
+    /// Finds the topmost dangling soft-wrapped head directly above a newer prompt head.
+    /// Adjacency alone is insufficient because legitimate one-row prompts can stack.
     private func topOfStalePromptHeads(above row: Int) -> Int {
         var top = row
         while top > 0,
@@ -1953,14 +1876,7 @@ public struct Terminal: Equatable, Sendable {
         return top
     }
 
-    /// Empties one row on the promise that the shell repaints it, and records that it
-    /// did so.
-    ///
-    /// The row's own bookkeeping has to go with its cells. A wrap flag left on an
-    /// emptied row is a claim that the row's content continues below, so the next
-    /// reflow re-flattens a full row of padding into the logical line and shifts
-    /// whatever follows it -- the row's width in blank cells, spliced into the middle
-    /// of real content. Clearing the flag ends the line where the content now ends.
+    /// Vacates one row on the shell's repaint promise, including its obsolete wrap claim.
     private mutating func clearPromptCells(in row: Int) {
         invalidateInspection(inViewportRows: row..<(row + 1))
         let styleId = backgroundEraseStyleId()
