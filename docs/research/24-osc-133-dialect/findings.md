@@ -708,15 +708,24 @@ Evidence for the OSC 133 dialect. Parser probes feed
 
 ### F16 -- a stale-width repaint strands a prompt head above the newest stamp, and the resize blanking never looked there
 
-- Status: settled and fixed. **Closes Phase 3's "never rendered in a real pane"
-  gap by rendering them and finding a bug; refutes the leading hypothesis about
+- Status: settled and fixed, over four rounds against three separate reports
+  from the same drag. **Closes Phase 3's "never rendered in a real pane" gap by
+  rendering them and finding a bug; refutes the leading hypothesis about
   reflow's wrap flags.**
 - Date and investigator: 2026-07-31, R1.
-- Commit and worktree state: fix and fixture in `e97345e`; the recording
-  instrument described below was removed before that commit.
-- Result or artifact paths:
-  `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/zsh-stale-width-repaint.json`,
-  asserted by `TerminalShellDialectTests.staleWidthRepaintLeavesNoDebris`.
+- Commit and worktree state: `e97345e` (round one), `62c5e4b` (round two and
+  the one-row-prompt regression it caused), `8a0a982` (round three),
+  `d2fffbf` (review guards). The recording instrument was removed before
+  `e97345e` and then restored for rounds two and three, which is what settled
+  the ledger's open question about keeping it.
+- Result or artifact paths: two live-pane fixtures under
+  `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/` --
+  `zsh-stale-width-repaint.json` (390 events, 240 resizes) and
+  `zsh-stale-width-prompt-drift.json` (90 events, 36 resizes, narrowing 81 to
+  46) -- asserted by `TerminalShellDialectTests`'
+  `staleWidthRepaintLeavesNoDebris`, `staleWidthDebrisSurvivesNoFollowingResize`,
+  `staleWidthRepaintDoesNotAccumulateBlankRows`, and
+  `oneRowPromptsAreNotTreatedAsDebris`.
 - Commands, inputs, or reproduction: the maintainer opened a fish pane in
   DanTerm Dev, typed `zsh`, and dragged the window narrower. A temporary
   env-gated tape in `TerminalPTYHost` appended every `feed` chunk (at its real
@@ -740,9 +749,9 @@ Evidence for the OSC 133 dialect. Parser probes feed
   walking up from the cursor: after 212 there are two stamped heads, it anchored
   on the lower one, and no later resize ever looked above it. The debris was
   permanent.
-- Fix: climb through prompt heads stacked directly on one another before
-  blanking. Which stamps may be crossed is the whole content of the fix, and the
-  instrumented state settled it rather than reasoning:
+- Fix, round one: climb through prompt heads stacked directly on one another
+  before blanking. Which stamps may be crossed is the whole content of the fix,
+  and the instrumented state settled it rather than reasoning:
 
   ```
   CLIMB from 2 to 0;  0:prompt/46  1:continuation/7  2:prompt/46   <- harmful
@@ -756,6 +765,56 @@ Evidence for the OSC 133 dialect. Parser probes feed
   the `zsh` command line the maintainer had typed at the fish prompt above --
   which is why the test asserts that line survives as well as that the fragment
   is gone.
+- Fix, round two -- the drag that ends on the stranding repaint. The maintainer
+  reported the identical fragment on a build carrying round one. Round one ran
+  from the resize path alone, so it depended on the drag *continuing* past the
+  repaint that stranded the head; a drag that ends on that repaint -- the
+  ordinary case, since the last repaint is the one rendered at a stale width --
+  left the fragment with nothing scheduled to remove it. Clearing also runs
+  where the new head is stamped (`Terminal.swift#setSemanticPrompt`), which is
+  the earliest point the row above is identifiable as a stale copy: it takes the
+  arrival of a *newer* head to make the older one dangling.
+- Regression from round two, and the third condition it forced. Adjacency alone
+  ate real history: a one-row prompt entered repeatedly with no output between
+  commands (`$ cmd1` / `$ cmd2` / `$ cmd3`) stacks legitimate heads directly on
+  one another, and resizing erased them all. Debris exists only because it
+  overflowed the width, so it is always soft-wrapped -- requiring
+  `isSoftWrapped` separates the two cases exactly. `oneRowPromptsAreNotTreatedAsDebris`
+  pins it.
+- Fix, round three -- blanking traded the fragment for a growing gap. The
+  maintainer's third report: blank lines accumulating between the prompt and the
+  previous one, eight rows over a single narrowing drag. The cause is not the
+  blanking but what the blanking left addressable. Every stale-width overflow
+  costs the prompt one row permanently -- the shell repaints one row lower and
+  never reclaims the row above -- so blanking in place converts each fragment
+  into a blank line and the prompt walks down the pane. Remove the rows instead
+  (`moveAndFillRows` by the removed count, `cursor.row` up by the same), which
+  keeps the shell's relative cursor arithmetic valid exactly as an ordinary
+  scroll does. Rows the resize path had already emptied are reclaimed too; they
+  are stamped but hold nothing, and leaving them is what actually held the gap
+  open. Verified pre-existing rather than introduced by rounds one and two
+  before fixing.
+- Review guards, round four. A Fable review of the accumulated fix raised two
+  failure modes, neither of which could be constructed -- in both attempts the
+  reclaim never fired -- so they stand as code-reading arguments, not
+  demonstrated defects. Applied anyway in `d2fffbf` because they cost nothing:
+  the reclaim ran under `.last` as well as `.full`, where Bash's `P;k=i`
+  re-stamp arrives as a `.prompt` kind and could delete rows readline will never
+  restore (F4); and it shifted rows and cursor together without checking both
+  sit in the same scroll region, and ran on the alt screen.
+- Prior art, and where DanTerm now stands relative to it. **No surveyed terminal
+  reclaims the vacated rows, and one argues against it.**
+  `references/kitty/kitty/screen.c#prevent_current_prompt_from_rewrapping`
+  anchors on the first stamped head walking up -- DanTerm's pre-`e97345e`
+  anchor -- so kitty strands the identical fragment;
+  `.ghostty-src/src/terminal/Screen.zig#resizeInternal` inherits the same anchor
+  and carries an explicit comment against physically erasing rows, on the
+  grounds that the shell expects the space to remain available. foot, wezterm,
+  vte and Windows Terminal use OSC 133 marks for navigation only and do no
+  resize blanking at all. That comment targets *resize-time* clearing, whereas
+  the round-three deletion fires at `A`-time after the shell has committed a new
+  head, which is a materially different moment -- but the deletion is novel and
+  should be treated as such.
 - Competing interpretations, and what killed them: a Fable review proposed that
   `clearPromptCells` blanks cells without clearing `isSoftWrapped`, so a blanked
   row still carrying a wrap flag contributes `oldColumnCount` blank cells into
@@ -773,10 +832,30 @@ Evidence for the OSC 133 dialect. Parser probes feed
   was also wrong, but explains why the artifact was zsh-only in a useful way:
   fish's prompt supplied the `.continuation` row that made the over-blanking
   version of the fix visible.
-- Uncertainty: the fix keys on adjacency of stamped heads, which is a signature
-  of this repaint shape rather than a proof about all of them. A shell that emits
-  two heads with legitimately distinct content and no continuation row between
-  them would have the upper one blanked. None was found among the three bundled
-  integrations; a framework that stamps its own rows could produce one.
-- Next action: none for the bug. The instrument is the open question -- see the
-  method note in the README.
+- Uncertainty, narrowed by the review. Round one read as pattern-matching on a
+  signature: two adjacent heads mean a stale repaint. The stronger statement is
+  that conditions one and two are **a dangling-wrap invariant**, not a
+  heuristic. A row carrying `isSoftWrapped` must be followed by the continuation
+  of its own logical line; when a fresh `.prompt` head is stamped at row N, a
+  row N-1 that is `.prompt` and `isSoftWrapped` has had its continuation
+  overwritten, so it is provably a fragment. What survives as genuine
+  uncertainty is narrower than F16 first claimed: a shell would have to strand a
+  head that both soft-wrapped *and* is content it intends to keep. The third
+  condition (retained content) is not part of that invariant -- it is
+  bookkeeping debt, see the next action.
+- Known gap, not yet addressed: a resize landing between the shell's `ESC[J` and
+  its `A`. The erase clears the head's stamp, so the upward walk in
+  `clearPromptForResizeIfNeeded` crosses the now-`.none` rows and anchors on the
+  *previous* prompt, blanking the last command's output. Kitty is immune because
+  its walk stops at an `OUTPUT_START` stamp; DanTerm stamps no output rows
+  (`C` only un-stamps the cursor row at column 0) and so shares ghostty's
+  exposure. Unreproduced -- ranked highest of the review's unhit modes.
+- Next action: two follow-ups, both structural rather than bug fixes.
+  (1) Make the blanking representable. `clearPromptCells` leaves
+  `semanticPrompt` and `isSoftWrapped` on the row it empties, and three separate
+  things exist only to compensate: the walk's retained-content condition (which
+  refuses to cross blanked rows), the reclaim-empty loop in `setSemanticPrompt`
+  (which exists to cross those same rows, with the opposite predicate), and the
+  latent re-flatten hazard below. Two mechanisms disagreeing about one set of
+  rows is the tell that a state is missing rather than that the logic is subtle.
+  (2) Stamp output rows from `C`, closing the gap above.

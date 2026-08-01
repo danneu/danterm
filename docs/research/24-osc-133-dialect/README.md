@@ -258,19 +258,26 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
 ### Phase 4 -- render it in a real pane
 
 - [x] Rendered the shipped zsh dialect in a real DanTerm Dev pane for the first
-  time. It stranded a prompt head; F16 records the mechanism, the fix, and the
-  two hypotheses it refuted. Fixed in `e97345e` and pinned by
-  `zsh-stale-width-repaint`, a fixture recorded from the live pane because no
-  synthetic stimulus reproduced it.
+  time. It stranded a prompt head, then two more artifacts from the same drag
+  once that was fixed; F16 records all four rounds, the mechanism, the
+  hypotheses they refuted, and the prior-art survey showing no other terminal
+  reclaims the vacated rows. Fixed across `e97345e`, `62c5e4b`, `8a0a982` and
+  `d2fffbf`, pinned by two live-pane fixtures because no synthetic stimulus
+  reproduced any of it.
+- [ ] TODO: make the prompt blanking representable, and stamp output rows from
+  `C`. F16's two next actions. Neither is a bug report -- the first removes the
+  bookkeeping debt that two of the fix's conditions are compensating for, the
+  second closes the one review-raised gap that survives `d2fffbf`.
 - [ ] TODO: render the Bash dialect in a real pane. Still never done, and F16 is
   the evidence that this is where the remaining defects are: every mark in this
   doc was parser-checked and correct, and the bug was in the consumer's anchor.
   Bash's doubled `B` on its SIGWINCH repaint is the specific thing to look at.
-- [ ] TODO: decide whether the live-pane tape becomes a permanent instrument.
-  It was temporary and was removed in `e97345e`, but it turned an investigation
-  that had exhausted its synthetic stimuli into a one-drag reproduction plus a
-  permanent fixture, and this project builds neutral fixtures constantly. The
-  cost is two call sites in `TerminalPTYHost` behind an env gate.
+- [x] Decided: the live-pane tape is a permanent instrument
+  (`TerminalPTY/Sources/TerminalPTYHost/TerminalTapeRecorder.swift`, off unless
+  `DANTERM_TAPE_PATH` is set). It was removed as temporary in `e97345e` and had
+  to be rebuilt twice within the same day for rounds two and three, each time to
+  answer the same question -- does a bare `Terminal` reproduce this. Two call
+  sites behind an env gate is less than the cost of restoring it a fourth time.
 
 ## Rejected
 
@@ -456,6 +463,18 @@ What settled it in one attempt was recording the real pane's drive sequence and
 replaying it against a bare `Terminal`. Where F13 taught that a null result is
 only as strong as its stimulus, F16 adds that a *reconstructed* stimulus is a
 standing guess about which variable matters -- and that when the artifact is in
-front of you, recording beats reconstructing. The instrument was temporary and
-was removed with the fix; whether DanTerm should carry a permanent live-pane
-tape is an open product question, not a research one.
+front of you, recording beats reconstructing. The instrument was removed as
+temporary with the first fix and rebuilt twice the same day, once per further
+report, which answered the product question by attrition: it is permanent now,
+env-gated and off by default.
+
+Three rounds followed the first fix, and their shape is its own lesson. The
+first was scope -- clearing ran only from the resize path, so it needed the drag
+to continue past the repaint that stranded the head. The second was a regression
+the fix introduced, eating legitimate stacked one-row prompts. The third was a
+different artifact the same drag had been producing all along, invisible until
+the fragment stopped hiding it: the prompt walking down the pane, one blank row
+per overflow. None of the three was reachable from the first report, and each
+came from the maintainer re-running the same drag on a fresh optimized build.
+For a defect that only appears in a live pane, the loop is not fix-then-verify
+but fix, hand back, and expect the next layer.
