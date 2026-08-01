@@ -705,3 +705,78 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Next action: amend D1 with the re-tail + heal mechanism and D2 with the
   `PROMPT_COMMAND` requirement and its residual first-prompt gap; drop the
   Phase 3 blocker to an emitter task.
+
+### F16 -- a stale-width repaint strands a prompt head above the newest stamp, and the resize blanking never looked there
+
+- Status: settled and fixed. **Closes Phase 3's "never rendered in a real pane"
+  gap by rendering them and finding a bug; refutes the leading hypothesis about
+  reflow's wrap flags.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: fix and fixture in `e97345e`; the recording
+  instrument described below was removed before that commit.
+- Result or artifact paths:
+  `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/zsh-stale-width-repaint.json`,
+  asserted by `TerminalShellDialectTests.staleWidthRepaintLeavesNoDebris`.
+- Commands, inputs, or reproduction: the maintainer opened a fish pane in
+  DanTerm Dev, typed `zsh`, and dragged the window narrower. A temporary
+  env-gated tape in `TerminalPTYHost` appended every `feed` chunk (at its real
+  PTY read boundaries) and every `resize` to a JSONL file in the neutral fixture
+  schema; replaying that tape against a bare `Terminal` reproduced the
+  maintainer's screenshot row for row.
+- Result: the stranding step contains **no resize at all**. Two consecutive
+  repaints do it:
+
+  ```
+  211: ESC[J OSC133;A;redraw=1 <prompt padded to 49 cols> \r\n <lower row>
+  212: \r\r ESC[A ESC[J OSC133;A;redraw=1 <prompt padded to 46 cols> ...
+  ```
+
+  Feed 211 paints a prompt string Starship rendered for the *previous* width, so
+  it overflows the 46-column pane and soft-wraps onto two rows. Feed 212 repaints
+  at the correct width but moves up only one row before erasing, so the wrapped
+  head one row higher survives. That under-erase is zsh's, and `redraw=1` exists
+  precisely so DanTerm's blanking makes it moot. It did not, because
+  `clearPromptForResizeIfNeeded` anchored on the *first* `.prompt` row found
+  walking up from the cursor: after 212 there are two stamped heads, it anchored
+  on the lower one, and no later resize ever looked above it. The debris was
+  permanent.
+- Fix: climb through prompt heads stacked directly on one another before
+  blanking. Which stamps may be crossed is the whole content of the fix, and the
+  instrumented state settled it rather than reasoning:
+
+  ```
+  CLIMB from 2 to 0;  0:prompt/46  1:continuation/7  2:prompt/46   <- harmful
+  CLIMB from 5 to 4;  4:prompt/46  5:prompt/46                     <- correct
+  ```
+
+  Two heads with nothing between them is the stale-repaint signature; a
+  genuinely earlier prompt is always separated from the current one by its own
+  continuation row. So the climb crosses `.prompt` only. The first version
+  crossed any non-`.none` row, passed the debris assertion, and silently erased
+  the `zsh` command line the maintainer had typed at the fish prompt above --
+  which is why the test asserts that line survives as well as that the fragment
+  is gone.
+- Competing interpretations, and what killed them: a Fable review proposed that
+  `clearPromptCells` blanks cells without clearing `isSoftWrapped`, so a blanked
+  row still carrying a wrap flag contributes `oldColumnCount` blank cells into
+  the next row's logical line under a resize burst. **All of its code claims are
+  true** -- `Terminal.swift#clearPromptCells` does leave the flag,
+  `Terminal.swift#pack` does set it on rows it splits, the re-flatten loop does
+  read `iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd`, and
+  (uncited by the review, and the link that would make the chain fire) the loop's
+  `case .narrow, .padding` appends real units for padding cells. The chain is
+  live in source; it is simply not what happened. Splicing the feeds out of the
+  real zsh sweep -- resizes in pairs, in fours, and all 52 back-to-back followed
+  by the repaints -- replayed clean at one prompt every time. It remains a latent
+  hazard nobody needs to re-derive.
+  The maintainer's own hypothesis, that nesting zsh inside fish was the cause,
+  was also wrong, but explains why the artifact was zsh-only in a useful way:
+  fish's prompt supplied the `.continuation` row that made the over-blanking
+  version of the fix visible.
+- Uncertainty: the fix keys on adjacency of stamped heads, which is a signature
+  of this repaint shape rather than a proof about all of them. A shell that emits
+  two heads with legitimately distinct content and no continuation row between
+  them would have the upper one blanked. None was found among the three bundled
+  integrations; a framework that stamps its own rows could produce one.
+- Next action: none for the bug. The instrument is the open question -- see the
+  method note in the README.

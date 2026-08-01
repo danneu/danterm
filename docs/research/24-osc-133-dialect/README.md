@@ -50,6 +50,18 @@ reflow or how the prompt block is treated on resize.
   and was wrong, because its prompt was narrower than the pane and so no row
   could re-wrap. A probe that reports "no effect" states what shape the effect
   would have taken and why the stimulus would have exhibited it.
+- **When a real pane misbehaves, record its drive sequence before theorizing
+  about it.** Added after F16. Every synthetic stimulus tried against that bug
+  replayed clean -- three geometry sweeps, then resizes spliced into bursts of
+  two, of four, and all 52 at once -- and each clean result was read as evidence
+  against a hypothesis when it was really evidence that the stimulus was wrong
+  again. A temporary tape in `TerminalPTYHost`, appending every `feed` chunk at
+  its real PTY read boundaries and every `resize` in the neutral fixture schema,
+  reproduced the artifact row for row on the maintainer's first attempt and made
+  it a permanent fixture. Reconstructing a stimulus means guessing the variable
+  that matters; recording one does not. It also decides core-versus-app in a
+  single step, because a tape that reproduces against a bare `Terminal` has
+  excluded every layer above it.
 
 ## Trigger and current evidence
 
@@ -229,12 +241,36 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   (whose capture used the maintainer's real fish config) reproduces the
   staircase, and only Bash's sweep discriminates its own value. Finding a
   recordable stimulus that discriminates for zsh would close the gap.
+  **Found, not yet landed.** A width sweep captured against the maintainer's real
+  `~/.zshrc` discriminates 1 prompt as-recorded against 44 forced to `redraw=0`,
+  and holds under width-only, width-plus-rows, and a 20 ms fast-drag variant. It
+  is unlanded because the capture's cwd bakes a real project path into every
+  frame; re-capture in a neutral directory before promoting it. F16's
+  `zsh-stale-width-repaint` fixture does not close this -- it pins the blanking
+  anchor, not the redraw value.
 - [x] Folded the shipped dialect into `docs/terminal-capabilities.md` (accepted
   actions and options, the per-integration emit/declare table, and why Bash uses
   `P`) and `plan-terminal-engine/10-protocols-shell-integration.md` (the
   measured-not-inherited `redraw` choice and why the declaration is load-bearing
   rather than a hint). Both previously recorded only the OSC 1337 envelope on the
   emitting side.
+
+### Phase 4 -- render it in a real pane
+
+- [x] Rendered the shipped zsh dialect in a real DanTerm Dev pane for the first
+  time. It stranded a prompt head; F16 records the mechanism, the fix, and the
+  two hypotheses it refuted. Fixed in `e97345e` and pinned by
+  `zsh-stale-width-repaint`, a fixture recorded from the live pane because no
+  synthetic stimulus reproduced it.
+- [ ] TODO: render the Bash dialect in a real pane. Still never done, and F16 is
+  the evidence that this is where the remaining defects are: every mark in this
+  doc was parser-checked and correct, and the bug was in the consumer's anchor.
+  Bash's doubled `B` on its SIGWINCH repaint is the specific thing to look at.
+- [ ] TODO: decide whether the live-pane tape becomes a permanent instrument.
+  It was temporary and was removed in `e97345e`, but it turned an investigation
+  that had exhausted its synthetic stimuli into a one-drag reproduction plus a
+  permanent fixture, and this project builds neutral fixtures constantly. The
+  cost is two call sites in `TerminalPTYHost` behind an env gate.
 
 ## Rejected
 
@@ -301,6 +337,11 @@ an `aid=`.
   test. A real-pane probe must observe the rendered window (screen capture) or
   feed bytes to `TerminalCore.Terminal` and inspect the grid. Driving the pane
   over the control socket is fine; only the observation is unsuitable.
+  Narrowed by F16: this holds for the *staircase*, which is a count of physical
+  rows. It does not hold for every artifact -- F16's stranded head merged into a
+  single logical line, which survives logical projection intact, and a `pane
+  read` would have shown it. Read the caveat as "logical projection erases
+  physical-row structure", not as "the reader is useless here".
 - **The probe environment changed on 2026-07-31, mid-investigation.** Until
   then the maintainer's `~/.zshrc` exec'd fish on line 3, so every probe of
   "the user's zsh" -- and every DanTerm pane -- was silently running fish under
@@ -327,6 +368,9 @@ an `aid=`.
   parser-checked. This caveat is unchanged by shipping: the emitters are now
   real, and their recorded output is replayed in tests, but the consumer in those
   tests is still `TerminalCore.Terminal` and not a DanTerm pane.
+  **Closed for zsh by F16, and it cost a bug.** The first time the shipped zsh
+  dialect was rendered in a real pane it stranded a prompt head, through a
+  mechanism no probe in this doc had a stimulus for. Bash remains unrendered.
 
 ## Outcome
 
@@ -393,3 +437,25 @@ width-sweep recordings guard the emitters without discriminating the redraw valu
 for zsh or fish -- only F13's fish trio and Bash's own sweep do that. The public
 contract and the engine plan now both record the shipped dialect, so no
 documentation work remains; what is left is the two open gaps above.
+
+The first of those gaps closed the same day, by being walked into. F16 rendered
+the shipped zsh dialect in a real pane for the first time and it stranded a
+prompt head: zsh repaints with a prompt string rendered for the previous width,
+which soft-wraps onto two rows, then repaints from one row lower, and the
+blanking anchored on the first stamp it found walking up -- so it never looked
+above the newest head and the debris was permanent. The mark contract was right
+and the emitters were right; the consumer's anchor was wrong, which is precisely
+the class of defect a doc that only ever checked marks against
+`TerminalCore.Terminal` could not have found.
+
+The method lesson outranks the fix, and generalizes past this doc. Every
+synthetic reconstruction of that bug replayed clean, including the resize bursts
+a review argued were the missing variable, and the leading hypothesis was a
+mechanism that genuinely exists in the reflow path and genuinely was not firing.
+What settled it in one attempt was recording the real pane's drive sequence and
+replaying it against a bare `Terminal`. Where F13 taught that a null result is
+only as strong as its stimulus, F16 adds that a *reconstructed* stimulus is a
+standing guess about which variable matters -- and that when the artifact is in
+front of you, recording beats reconstructing. The instrument was temporary and
+was removed with the fix; whether DanTerm should carry a permanent live-pane
+tape is an open product question, not a research one.
