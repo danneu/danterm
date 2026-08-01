@@ -754,6 +754,13 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in owner.flightTape?.fromNowOrigin() }.value
     }
 
+    /// Reads birth geometry with the lifetime beginning cursor for a backlog stream.
+    package nonisolated func fencedFlightRecordingBacklogOrigin()
+        -> TerminalFlightRecordingOrigin?
+    {
+        fence(countsAsProduction: false) { owner in owner.flightTape?.backlogOrigin() }.value
+    }
+
     /// Fences test work and drains exactly the damage accumulated through that fence.
     nonisolated public func fencedFrameState() -> TerminalPTYFrameState {
         fence(countsAsProduction: false) { owner in owner.drainedFrameState() }.value

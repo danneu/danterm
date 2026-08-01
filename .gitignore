@@ -22,6 +22,8 @@ build/
 # SwiftPM's build-argument hash. Sharing .build/ with a bare `swift test` made the two
 # invalidate each other on every switch; the gate gets its own scratch path instead.
 .build-gate/
+# The app-module test is an independent parallel gate step and needs its own SwiftPM build tree.
+.build-app-tests/
 .swiftpm/
 Package.resolved
 __pycache__/

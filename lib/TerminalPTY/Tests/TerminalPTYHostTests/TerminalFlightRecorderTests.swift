@@ -168,6 +168,20 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.events.map(\.event) == [.feed([3])])
     }
 
+    @Test("backlog origin pairs birth geometry with the beginning cursor")
+    func backlogOriginUsesBirthGeometry() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.resize(columns: 100, rows: 30))
+
+        let origin = recorder.backlogOrigin()
+        #expect(origin.initial == .init(columns: 80, rows: 24))
+        #expect(origin.cursor == .beginning)
+    }
+
     @Test("disabled host configuration retains no flight recording")
     func disabledHostRetainsNothing() throws {
         let host = try TerminalPTYHost(

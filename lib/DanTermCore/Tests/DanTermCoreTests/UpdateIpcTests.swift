@@ -2558,6 +2558,34 @@ import DanTermProtocol
         #expect(commandPaneId == paneId)
     }
 
+    @Test("pane.tape follow resolves the addressed pane and preserves tail mode")
+    func paneTapeFollowResolvesAddressedPane() {
+        // Intent: follow requests emit a long-lived stream command for the explicit pane.
+        // Why it exists: the one-reply dump command cannot represent later notifications.
+        // Scenario: an agent asks to tail a known background pane without its backlog.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneTape,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "follow": .bool(true),
+                "fromNow": .bool(true),
+            ])
+        )
+
+        #expect(commands.count == 1)
+        guard case .followPaneTape(_, let commandPaneId, let fromNow) = commands[0] else {
+            Issue.record("expected followPaneTape command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+        #expect(fromNow)
+    }
+
     @Test("pane.tape rejects missing and unknown panes")
     func paneTapeRejectsMissingAndUnknownPanes() throws {
         var missingModel = makeModel()
@@ -2578,6 +2606,22 @@ import DanTermProtocol
             params: .object(["pane": .string(UUID().uuidString)])
         )
         #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
+
+        var invalidModel = makeModel()
+        createTab(&invalidModel)
+        let paneId = selectedTab(in: invalidModel)!.focusedPaneId
+        let invalid = sendIpc(
+            &invalidModel,
+            method: Methods.paneTape,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "fromNow": .bool(true),
+            ])
+        )
+        #expect(try requireIpcError(invalid) == .init(
+            code: -32602,
+            message: "fromNow requires follow"
+        ))
     }
 }
 

@@ -705,9 +705,25 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecording(from: cursor)
     }
 
+    /// Keeps app adapters from importing the recorder host module just to construct a cursor.
+    public func flightRecordingSnapshot(
+        nextSequence: UInt64,
+        payloadBytesBeforeNextSequence: Int
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        flightRecordingSnapshot(from: .init(
+            nextSequence: nextSequence,
+            payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+        ))
+    }
+
     /// Fences current geometry with the first cursor for a tail-only follow stream.
     public func flightRecordingOriginFromNow() -> TerminalFlightRecordingOrigin? {
         host.fencedFlightRecordingOriginFromNow()
+    }
+
+    /// Fences recorder birth geometry with the cursor that requests retained backlog.
+    public func flightRecordingBacklogOrigin() -> TerminalFlightRecordingOrigin? {
+        host.fencedFlightRecordingBacklogOrigin()
     }
 
     /// Test harness seam that fences live evidence without changing completion eligibility.

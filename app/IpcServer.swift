@@ -70,8 +70,9 @@ actor IpcServer {
         )
     }
 
-    private func close(_ connection: IpcConnection) {
+    private func close(_ connection: IpcConnection) async {
         connections.removeValue(forKey: connection.id)
+        await runtime?.ipcConnectionClosed(connection.id)
     }
 
     private func dispatch(_ request: JsonRpcRequest, from connection: IpcConnection) async {

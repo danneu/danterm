@@ -77,5 +77,17 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        .testTarget(
+            name: "DanTermAppTests",
+            dependencies: [
+                "DanTerm",
+                "DanTermProtocol",
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+            ],
+            path: "app-tests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
     ]
 )

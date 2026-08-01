@@ -5,6 +5,7 @@ import DanTermProtocol
 #if !DANTERM_UI_TEST
 import PaneLifecycle
 import TerminalCore
+import TerminalCoreRecording
 import TerminalPaneSession
 import TerminalRenderExecution
 import TerminalRenderPlanning
@@ -20,6 +21,12 @@ func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int
         expanded.insert(min(rowCount - 1, row + 1))
     }
     return expanded
+}
+
+/// Preserves TerminalCoreRecording's single event dialect when wrapping live tape events for IPC.
+func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
+    let data = try JSONEncoder().encode(event)
+    return try JSONDecoder().decode(JSONValue.self, from: data)
 }
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
@@ -530,6 +537,57 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
         guard let snapshot = controller.flightRecordingSnapshot() else { return nil }
         return { try snapshot.encodedRecording() }
+    }
+
+    func paneTapeFollowStart(
+        fromNow: Bool
+    ) -> (@Sendable () throws -> PaneTapeFollowStart)? {
+        let origin = fromNow
+            ? controller.flightRecordingOriginFromNow()
+            : controller.flightRecordingBacklogOrigin()
+        guard let origin else { return nil }
+        return {
+            let provenanceData = try JSONEncoder().encode(NeutralTerminalProvenance.liveCapture())
+            let provenance = try JSONDecoder().decode(JSONValue.self, from: provenanceData)
+            return makePaneTapeFollowStart(
+                provenance: provenance,
+                initial: .init(columns: origin.initial.columns, rows: origin.initial.rows),
+                cursor: .init(
+                    nextSequence: origin.cursor.nextSequence,
+                    payloadBytesBeforeNextSequence: origin.cursor.payloadBytesBeforeNextSequence
+                )
+            )
+        }
+    }
+
+    func paneTapeFollowBatch(
+        from cursor: PaneTapeFollowCursor
+    ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? {
+        guard let snapshot = controller.flightRecordingSnapshot(
+            nextSequence: cursor.nextSequence,
+            payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence
+        ) else {
+            return nil
+        }
+        return {
+            let events = try snapshot.events.map { recorded in
+                return PaneTapeFollowEvent(
+                    sequence: recorded.sequence,
+                    elapsedNanoseconds: recorded.elapsedNanoseconds,
+                    event: try paneTapeFollowEventJSON(recorded.event)
+                )
+            }
+            return PaneTapeFollowSnapshot(
+                events: events,
+                droppedEventCount: snapshot.droppedEventCount,
+                droppedPayloadBytes: snapshot.droppedPayloadBytes,
+                nextCursor: .init(
+                    nextSequence: snapshot.nextCursor.nextSequence,
+                    payloadBytesBeforeNextSequence:
+                        snapshot.nextCursor.payloadBytesBeforeNextSequence
+                )
+            )
+        }
     }
 
     func scroll(toRow row: Int) {

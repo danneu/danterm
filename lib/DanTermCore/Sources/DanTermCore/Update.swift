@@ -1724,7 +1724,30 @@ private func dispatchIpc(
             in: model,
             requireExplicit: true
         )
-        return [.dumpPaneTape(reqId: reqId, paneId: paneId)]
+        let follow: Bool
+        switch params["follow"] {
+        case nil:
+            follow = false
+        case .some(.bool(let value)):
+            follow = value
+        default:
+            throw IpcParamsError("follow must be boolean")
+        }
+        let fromNow: Bool
+        switch params["fromNow"] {
+        case nil:
+            fromNow = false
+        case .some(.bool(let value)):
+            fromNow = value
+        default:
+            throw IpcParamsError("fromNow must be boolean")
+        }
+        guard fromNow == false || follow else {
+            throw IpcParamsError("fromNow requires follow")
+        }
+        return follow
+            ? [.followPaneTape(reqId: reqId, paneId: paneId, fromNow: fromNow)]
+            : [.dumpPaneTape(reqId: reqId, paneId: paneId)]
 
     case Methods.todoList:
         let paneId = try resolvePane(params: params, context: context, in: model)

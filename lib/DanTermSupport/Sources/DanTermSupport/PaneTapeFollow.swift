@@ -110,6 +110,7 @@ func makePaneTapeFollowEndRecord(reason: String = "pane-closed") -> JSONValue {
 
 /// Enforces one fetch-and-delivery batch in flight per stream and drops dead owners eagerly.
 struct PaneTapeFollowSubscriptions {
+    /// One main-actor-owned stream position; no event storage lives here.
     private struct Subscription {
         let connectionId: UUID
         let paneId: UUID
@@ -157,12 +158,11 @@ struct PaneTapeFollowSubscriptions {
     /// Advances a claimed stream through the exact suffix that will be handed to its socket.
     mutating func finishFetch(
         subscriptionId: UUID,
-        snapshot: PaneTapeFollowSnapshot
+        batch: PaneTapeFollowBatch
     ) -> PaneTapeFollowBatch? {
         guard var subscription = subscriptions[subscriptionId], subscription.isInFlight else {
             return nil
         }
-        let batch = makePaneTapeFollowBatch(from: snapshot)
         subscription.cursor = batch.nextCursor
         subscriptions[subscriptionId] = subscription
         return batch
@@ -197,5 +197,10 @@ struct PaneTapeFollowSubscriptions {
     /// Ensures a disconnected socket can never trigger another owner-queue fence.
     mutating func connectionClosed(_ connectionId: UUID) {
         subscriptions = subscriptions.filter { $0.value.connectionId != connectionId }
+    }
+
+    /// Drops process-ending streams without manufacturing an end record the app cannot flush.
+    mutating func removeAll() {
+        subscriptions.removeAll()
     }
 }

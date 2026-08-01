@@ -106,6 +106,29 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
 }
 #endif
 
+/// Encodes and queues one complete follow batch off the main actor, completing after its last line.
+private func writePaneTapeFollowRecords(
+    _ records: [JSONValue],
+    connection: IpcConnection,
+    subscriptionId: UUID,
+    completion: @escaping @Sendable (Bool) -> Void
+) {
+    precondition(records.isEmpty == false)
+    DispatchQueue.global(qos: .utility).async {
+        for (index, record) in records.enumerated() {
+            let isLast = index == records.index(before: records.endIndex)
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([
+                    "subscription": .string(subscriptionId.uuidString),
+                    "record": record,
+                ]),
+                completion: isLast ? completion : nil
+            )
+        }
+    }
+}
+
 // App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
 @MainActor
@@ -170,11 +193,15 @@ class AppRuntime {
     private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
     private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
+    private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
+    private var paneTapeFollowConnections: [UUID: IpcConnection] = [:]
+    private var paneTapeFollowTimer: DispatchSourceTimer?
     private var ipcServer: IpcServer?
     private static let checkpointDebounceInterval: TimeInterval = 2.0
     // Matches Ghostty's title coalesce interval: quick enough to feel live, slow
     // enough to avoid flickering chrome under terminal-title spam.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
+    private static let paneTapeFollowInterval: TimeInterval = 0.05
     // Slowed from 60s to 10min until the libghostty memory leak is fixed.
     // https://github.com/danneu/danterm/issues/31
     private static let enrichedCheckpointInterval: TimeInterval = 600.0
@@ -233,6 +260,7 @@ class AppRuntime {
         if let monitor = switcherEventMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        paneTapeFollowTimer?.cancel()
     }
 
     // MARK: - Ephemeral Mode Event Monitor
@@ -485,6 +513,219 @@ class AppRuntime {
         ipcConnections[reqId] = connection
     }
 
+    /// Drops all streams owned by a closed socket before another polling fence can start.
+    func ipcConnectionClosed(_ connectionId: UUID) {
+        paneTapeFollowSubscriptions.connectionClosed(connectionId)
+        paneTapeFollowConnections.removeValue(forKey: connectionId)
+        stopPaneTapeFollowTimerIfIdle()
+    }
+
+    private func beginPaneTapeFollow(
+        reqId: UUID,
+        paneId: PaneId,
+        fromNow: Bool,
+        connection: IpcConnection,
+        session: any TerminalSession
+    ) {
+        guard let prepareStart = session.paneTapeFollowStart(fromNow: fromNow) else {
+            connection.writeError(
+                reqId: reqId,
+                code: -32603,
+                message: "pane tape unavailable for this terminal backend"
+            )
+            return
+        }
+        let subscriptionId = UUID()
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let start = try prepareStart()
+                connection.writeSuccess(reqId: reqId, result: start.record) { succeeded in
+                    DispatchQueue.main.async { [weak self] in
+                        self?.finishPaneTapeFollowStart(
+                            succeeded: succeeded,
+                            subscriptionId: subscriptionId,
+                            paneId: paneId,
+                            connection: connection,
+                            start: start
+                        )
+                    }
+                }
+            } catch {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "failed to encode pane tape"
+                )
+            }
+        }
+    }
+
+    private func finishPaneTapeFollowStart(
+        succeeded: Bool,
+        subscriptionId: UUID,
+        paneId: PaneId,
+        connection: IpcConnection,
+        start: PaneTapeFollowStart
+    ) {
+        guard succeeded else { return }
+        guard surfaces[paneId] != nil else {
+            writePaneTapeFollowNotification(
+                connection: connection,
+                subscriptionId: subscriptionId,
+                record: makePaneTapeFollowEndRecord(),
+                closeAfterWrite: true
+            )
+            return
+        }
+        paneTapeFollowConnections[connection.id] = connection
+        paneTapeFollowSubscriptions.add(
+            id: subscriptionId,
+            connectionId: connection.id,
+            paneId: paneId.rawValue,
+            cursor: start.cursor
+        )
+        ensurePaneTapeFollowTimer()
+    }
+
+    private func ensurePaneTapeFollowTimer() {
+        guard paneTapeFollowTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(
+            deadline: .now(),
+            repeating: Self.paneTapeFollowInterval,
+            leeway: .milliseconds(10)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.pollPaneTapeFollowers()
+        }
+        paneTapeFollowTimer = timer
+        timer.resume()
+    }
+
+    private func stopPaneTapeFollowTimerIfIdle() {
+        guard paneTapeFollowSubscriptions.count == 0 else { return }
+        paneTapeFollowTimer?.cancel()
+        paneTapeFollowTimer = nil
+    }
+
+    private func pollPaneTapeFollowers() {
+        for fetch in paneTapeFollowSubscriptions.beginFetches() {
+            guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
+                paneTapeFollowSubscriptions.completeDelivery(
+                    subscriptionId: fetch.subscriptionId,
+                    succeeded: false
+                )
+                continue
+            }
+            let paneId = PaneId(rawValue: fetch.paneId)
+            guard let session = surfaces[paneId] else {
+                endPaneTapeFollowers(for: paneId)
+                continue
+            }
+            guard let prepareBatch = session.paneTapeFollowBatch(from: fetch.cursor) else {
+                paneTapeFollowSubscriptions.completeDelivery(
+                    subscriptionId: fetch.subscriptionId,
+                    succeeded: false
+                )
+                paneTapeFollowConnections.removeValue(forKey: connection.id)
+                connection.close()
+                continue
+            }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                do {
+                    let snapshot = try prepareBatch()
+                    let batch = makePaneTapeFollowBatch(from: snapshot)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.deliverPaneTapeFollowBatch(
+                            subscriptionId: fetch.subscriptionId,
+                            connection: connection,
+                            batch: batch
+                        )
+                    }
+                } catch {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.paneTapeFollowSubscriptions.completeDelivery(
+                            subscriptionId: fetch.subscriptionId,
+                            succeeded: false
+                        )
+                        self?.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                        self?.stopPaneTapeFollowTimerIfIdle()
+                        connection.close()
+                    }
+                }
+            }
+        }
+        stopPaneTapeFollowTimerIfIdle()
+    }
+
+    private func deliverPaneTapeFollowBatch(
+        subscriptionId: UUID,
+        connection: IpcConnection,
+        batch: PaneTapeFollowBatch
+    ) {
+        guard let accepted = paneTapeFollowSubscriptions.finishFetch(
+            subscriptionId: subscriptionId,
+            batch: batch
+        ) else { return }
+        guard accepted.records.isEmpty == false else {
+            paneTapeFollowSubscriptions.completeDelivery(
+                subscriptionId: subscriptionId,
+                succeeded: true
+            )
+            return
+        }
+
+        writePaneTapeFollowRecords(
+            accepted.records,
+            connection: connection,
+            subscriptionId: subscriptionId
+        ) { [weak self] succeeded in
+            DispatchQueue.main.async { [weak self] in
+                self?.paneTapeFollowSubscriptions.completeDelivery(
+                    subscriptionId: subscriptionId,
+                    succeeded: succeeded
+                )
+                if succeeded == false {
+                    self?.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                }
+                self?.stopPaneTapeFollowTimerIfIdle()
+            }
+        }
+    }
+
+    private func endPaneTapeFollowers(for paneId: PaneId) {
+        for end in paneTapeFollowSubscriptions.paneClosed(paneId.rawValue) {
+            guard let connection = paneTapeFollowConnections.removeValue(
+                forKey: end.connectionId
+            ) else { continue }
+            writePaneTapeFollowNotification(
+                connection: connection,
+                subscriptionId: end.subscriptionId,
+                record: end.record,
+                closeAfterWrite: true
+            )
+        }
+        stopPaneTapeFollowTimerIfIdle()
+    }
+
+    private func writePaneTapeFollowNotification(
+        connection: IpcConnection,
+        subscriptionId: UUID,
+        record: JSONValue,
+        closeAfterWrite: Bool
+    ) {
+        DispatchQueue.global(qos: .utility).async {
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([
+                    "subscription": .string(subscriptionId.uuidString),
+                    "record": record,
+                ]),
+                closeAfterWrite: closeAfterWrite
+            )
+        }
+    }
+
     func stopIpcServer() {
         let socketPath = ipcSocketPath
         Task { await ipcServer?.stop() }
@@ -635,6 +876,24 @@ class AppRuntime {
                 }
             }
 
+        case .followPaneTape(let reqId, let paneId, let fromNow):
+            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let session = surfaces[paneId] else {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "pane no longer available"
+                )
+                break
+            }
+            beginPaneTapeFollow(
+                reqId: reqId,
+                paneId: paneId,
+                fromNow: fromNow,
+                connection: connection,
+                session: session
+            )
+
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
             runConfirmation(
                 messageText: "Close tab \"\(tabTitle)\"?",
@@ -679,6 +938,10 @@ class AppRuntime {
 
         case .terminate:
             cancelCoalescedReconcile()
+            paneTapeFollowTimer?.cancel()
+            paneTapeFollowTimer = nil
+            paneTapeFollowSubscriptions.removeAll()
+            paneTapeFollowConnections.removeAll()
             checkpointDebouncer.cancel()
             enrichedCheckpointTimer?.cancel()
             enrichedCheckpointTimer = nil
@@ -840,6 +1103,7 @@ class AppRuntime {
     /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
     /// cross-file reconcile extension can reach it.
     func tearDownSurface(_ paneId: PaneId) {
+        endPaneTapeFollowers(for: paneId)
         cleanupReplayFile(for: paneId)
         searchDebouncers[paneId]?.cancel()
         searchDebouncers.removeValue(forKey: paneId)
@@ -1329,6 +1593,7 @@ class AppRuntime {
         }
 
         for paneId in Array(surfaces.keys) {
+            endPaneTapeFollowers(for: paneId)
             cleanupReplayFile(for: paneId)
             if let session = surfaces.removeValue(forKey: paneId) {
                 session.tearDown()

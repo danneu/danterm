@@ -286,6 +286,11 @@ package final class TerminalFlightRecorder {
         )
     }
 
+    /// Pairs recorder birth geometry with the cursor that requests all retained history.
+    package func backlogOrigin() -> TerminalFlightRecordingOrigin {
+        TerminalFlightRecordingOrigin(initial: initial, cursor: .beginning)
+    }
+
     private func enforceBounds() {
         while accountedBytes > configuration.budgetBytes
             || eventCount > configuration.eventLimit

@@ -103,6 +103,14 @@ protocol TerminalSession: AnyObject {
     func readPrimaryHistoryText() -> String?
     /// Copies the pane tape now and returns work that can encode it away from the main actor.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)?
+    /// Fences the chosen stream origin and defers its protocol adaptation off the main actor.
+    func paneTapeFollowStart(
+        fromNow: Bool
+    ) -> (@Sendable () throws -> PaneTapeFollowStart)?
+    /// Fences one retained suffix and defers event adaptation off the main actor.
+    func paneTapeFollowBatch(
+        from cursor: PaneTapeFollowCursor
+    ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)?
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
@@ -137,4 +145,12 @@ extension TerminalBackend {
 extension TerminalSession {
     /// Backends without the dev-only recorder advertise the unsupported state explicitly.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
+    /// Keeps non-recording backends outside the follow implementation and unsupported by default.
+    func paneTapeFollowStart(
+        fromNow: Bool
+    ) -> (@Sendable () throws -> PaneTapeFollowStart)? { nil }
+    /// A backend without a follow origin can never produce a later cursor batch.
+    func paneTapeFollowBatch(
+        from cursor: PaneTapeFollowCursor
+    ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? { nil }
 }

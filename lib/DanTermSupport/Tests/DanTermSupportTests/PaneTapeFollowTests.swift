@@ -107,9 +107,12 @@ struct PaneTapeFollowTests {
         #expect(firstFetch.subscriptionId == subscriptionId)
         #expect(subscriptions.beginFetches().isEmpty)
 
+        let preparedBatch = makePaneTapeFollowBatch(
+            from: snapshot(sequences: [0], nextSequence: 1)
+        )
         let finishedBatch = subscriptions.finishFetch(
             subscriptionId: subscriptionId,
-            snapshot: snapshot(sequences: [0], nextSequence: 1)
+            batch: preparedBatch
         )
         let batch = try #require(finishedBatch)
         #expect(batch.records.compactMap(sequence) == [0])

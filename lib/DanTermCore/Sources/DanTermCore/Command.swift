@@ -47,6 +47,7 @@ enum Command {
     case ipcError(reqId: UUID, code: Int, message: String)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)
+    case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
@@ -101,7 +102,7 @@ extension Command {
             return true
         case .createSurface, .sendText, .sendInputText, .sendInputKey,
              .focusSurface, .exportState, .ipcReply, .ipcError,
-             .readPaneText, .dumpPaneTape, .sendNotification,
+             .readPaneText, .dumpPaneTape, .followPaneTape, .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,
              .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,
