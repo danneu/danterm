@@ -1723,6 +1723,26 @@ public struct Terminal: Equatable, Sendable {
         while start >= 0 {
             switch rows[start].semanticPrompt {
             case .prompt:
+                // Climb through prompt heads stacked directly on top of each other. A
+                // shell handed a stale-width prompt string wraps it over two rows, then
+                // repaints from one row lower and erases from there, stranding the
+                // wrapped head above the newest stamp. Anchoring on the first stamp
+                // found leaves that debris forever, because no later resize ever looks
+                // above it.
+                //
+                // Only `.prompt` may be crossed, never `.continuation`: two heads with
+                // nothing between them is precisely the stale-repaint signature, while a
+                // genuinely earlier prompt is always separated from the current one by
+                // its own continuation row. Crossing continuations instead would blank
+                // the previous prompt and the command the user typed at it. The content
+                // test covers the other direction -- `clearPromptCells` leaves the stamp
+                // behind, so spent prompt rows would otherwise chain the climb upward.
+                while start > 0,
+                      rows[start - 1].semanticPrompt == .prompt,
+                      retainedContentEnd(in: rows[start - 1]) > 0
+                {
+                    start -= 1
+                }
                 for row in start..<rowCount { clearPromptCells(in: row) }
                 return
             case .continuation, .none:

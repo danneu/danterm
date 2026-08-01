@@ -172,4 +172,28 @@ struct TerminalShellDialectTests {
             #expect(promptCopies(in: terminal) == 1, "\(shell)")
         }
     }
+
+    @Test("a stale-width repaint strands no prompt head, and clearing it spares history")
+    func staleWidthRepaintLeavesNoDebris() throws {
+        // Intent: replaying a real drag over a real zsh prompt leaves exactly one prompt
+        //   head on screen, while the earlier shell's prompt and the command typed at it
+        //   survive untouched above it.
+        // Why it exists: a shell handed a prompt string rendered for the previous width
+        //   wraps it over two rows, then repaints from one row lower and erases from
+        //   there, leaving the wrapped head stranded one row above the newest stamp.
+        //   Anchoring the resize blanking on the first stamp found never looks above it,
+        //   so the debris survived every later resize. The second expectation is the
+        //   other half of the fix: the climb that reaches the debris must stop at a
+        //   continuation row, or it walks into the previous prompt and eats the user's
+        //   command line.
+        // Scenario: the 2026-07-31 report -- a fish pane, `zsh` typed at it, then the
+        //   window dragged narrower, leaving a truncated prompt fragment floating above
+        //   the live prompt. Recorded from the live pane rather than reconstructed,
+        //   because no synthetic resize burst reproduced it.
+        let terminal = try replay("zsh-stale-width-repaint")
+
+        #expect(terminal.screenText.components(separatedBy: "╭ ~").count - 1 == 1)
+        #expect(terminal.screenText.contains("╰ $ zsh"))
+        expectValidGrid(terminal)
+    }
 }
