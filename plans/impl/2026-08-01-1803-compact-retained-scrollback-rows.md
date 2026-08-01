@@ -193,5 +193,5 @@ core test suites that denominate scrollback budgets in whole-row costs.
 ## Commit progress
 
 - [x] 1. refactor(core): add logical retained-row access seam
-- [ ] 2. fix(core): trim retained row padding
+- [x] 2. fix(core): trim retained row padding
 - [ ] 3. perf(core): validate compact scrollback storage

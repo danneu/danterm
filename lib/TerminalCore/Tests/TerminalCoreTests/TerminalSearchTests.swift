@@ -262,7 +262,7 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 8) * 2
+            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 1) * 2
         ))
         terminal.feed(Array("hit\r\na".utf8))
 
@@ -428,7 +428,8 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 8) * 3
+            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 3) * 2
+                + compactHistoryRowCost(storedCells: 1)
         ))
         terminal.feed(Array("hit\r\nhit\r\na".utf8))
 
@@ -444,7 +445,7 @@ struct TerminalSearchTests {
         terminal.feed(Array("\r\nd".utf8))
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
 
-        terminal.feed(Array("\r\ne".utf8))
+        terminal.feed(Array("\r\ne\r\nf".utf8))
         #expect(terminal.searchStatus == .empty)
     }
 }

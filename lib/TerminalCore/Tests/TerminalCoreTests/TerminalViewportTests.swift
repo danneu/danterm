@@ -117,7 +117,7 @@ struct TerminalViewportTests {
         var terminal = try #require(Terminal(
             columns: 4,
             rows: 3,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 1) * 2
         ))
         terminal.feed(Array("a\r\nb\r\nc\r\nd\r\ne".utf8))
         terminal.scroll(toTopRow: 0)

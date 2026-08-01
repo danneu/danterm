@@ -332,6 +332,7 @@ struct CSIEraseTests {
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed(Array("\u{1B}[X".utf8))
 
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
         expectValidGrid(terminal)
     }
 

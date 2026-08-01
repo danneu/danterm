@@ -152,6 +152,24 @@ struct TerminalResetTests {
         expectValidGrid(wideSeam)
     }
 
+    @Test("RIS preserves compact history and exact byte accounting")
+    func hardResetOverCompactHistory() throws {
+        // Intent: hard reset can inspect and mutate the history seam without inflating a short row.
+        // Why it exists: RIS repairs the predecessor wrap claim directly, so compact storage must
+        //   keep that last-column access safe and its cached budget charge exact.
+        // Scenario: a short shell line enters a wide pane's history before the application resets.
+        var terminal = try #require(Terminal(columns: 10, rows: 1))
+        terminal.feed(Array("abc\r\n".utf8))
+        let before = terminal.memoryCensus.cellCount
+
+        terminal.feed(Array("\u{1B}c".utf8))
+
+        #expect(terminal.primaryHistoryText == "abc")
+        #expect(terminal.memoryCensus.cellCount == before)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        expectValidGrid(terminal)
+    }
+
     @Test("parameterized DECSTR is inert and reset controls are chunk invariant")
     func resetDispatchAndChunkInvariance() throws {
         var invalid = try #require(Terminal(columns: 3, rows: 2))

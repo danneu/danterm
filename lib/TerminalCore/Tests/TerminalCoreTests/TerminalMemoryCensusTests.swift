@@ -11,6 +11,67 @@ import Testing
 
 /// Keeps the census honest about what the grid actually holds, since findings are built on it.
 struct TerminalMemoryCensusTests {
+    @Test("census reports compact retained cells while terminal rows stay logically full width")
+    func censusReportsCompactRetainedRows() throws {
+        // Intent: history storage omits default padding while terminal-facing rows remain full
+        //   width and byte-identical to their pre-compaction presentation.
+        // Why it exists: the memory census is the deliberate representation-level exception to
+        //   transparent retained-row compaction and must report the storage actually held.
+        // Scenario: a short line enters a wide pane's history and is inspected both as terminal
+        //   content and as allocated cell storage.
+        var terminal = try #require(Terminal(columns: 20, rows: 1))
+        terminal.feed(Array("abc\r\n".utf8))
+
+        let retained = try #require(terminal.scrollbackRow(at: 0))
+        let census = terminal.memoryCensus
+
+        #expect(retained.cells.count == 20)
+        #expect(retained.cells.map(\.scalars).prefix(3) == [["a"], ["b"], ["c"]])
+        #expect(retained.cells.dropFirst(3).allSatisfy { $0.kind == .padding })
+        #expect(census.scrollbackRowCount == 1)
+        #expect(census.cellCount == 20 + 3)
+        #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
+    }
+
+    @Test("trimmed retained padding remains readable through inspection and browsing render")
+    func compactPaddingRemainsLogicallyVisible() throws {
+        // Intent: every terminal-facing reader observes a full-width blank tail on a compact row.
+        // Why it exists: pointer inspection, selection, link detection, and browsing render use
+        //   separate paths, so any one of them could expose or index past the stored extent.
+        // Scenario: a short retained line is browsed and queried at the pane's last column.
+        var terminal = try #require(Terminal(columns: 20, rows: 1))
+        terminal.feed(Array("abc\r\n".utf8))
+        terminal.scroll(toTopRow: 0)
+
+        #expect(terminal.cell(row: 0, column: 19)?.kind == .padding)
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 19)) == nil)
+        terminal.setSelection(from: .init(row: 0, column: 19), to: .init(row: 0, column: 19))
+        #expect(terminal.selectedText == "")
+
+        var rendered: [(Int, TerminalScalars, TerminalStyle)] = []
+        terminal.forEachViewportCell(row: 0) { rendered.append(($0, $1, $2)) }
+        #expect(rendered.count == 20)
+        #expect(rendered.map(\.0) == Array(0..<20))
+        #expect(rendered[0].1 == ["a"])
+        #expect(rendered[19].1.isEmpty)
+        #expect(rendered[19].2 == TerminalStyle())
+    }
+
+    @Test("colored erase padding remains stored and visible in history")
+    func coloredErasePaddingIsNotCompacted() throws {
+        // Intent: compaction drops only cells identical to default blank padding.
+        // Why it exists: background-color erase cells are visually meaningful even though they
+        //   carry no scalar content, so trimming them would change browsing render output.
+        // Scenario: a red pen erases the tail of a short line before it enters history.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("abc\u{1B}[41m\u{1B}[K\r\n".utf8))
+
+        let retained = try #require(terminal.scrollbackRow(at: 0))
+        #expect(retained.cells.last?.kind == .padding)
+        #expect(retained.cells.last?.style.background == .indexed(1))
+        #expect(terminal.memoryCensus.cellCount == 8 + 8)
+    }
+
     @Test("an untouched grid holds exactly one full screen of cells")
     func emptyGridCensus() throws {
         // Intent: the census's baseline is the screen itself -- rows x columns cells, one array
@@ -31,11 +92,11 @@ struct TerminalMemoryCensusTests {
         #expect(census.bytesPerCell == Double(census.cellStrideBytes))
     }
 
-    @Test("scrolled-off rows are counted in history at full width")
+    @Test("scrolled-off rows report their compact stored-cell extent")
     func scrollbackCensus() throws {
-        // Intent: history rows carry a full `columnCount` of cells, not a trimmed count.
-        // Why it exists: doc 15's F4 corrected a sizing error that assumed rows were trimmed to
-        //   their content. The census is now the evidence for that, so it must state it directly.
+        // Intent: history rows report only content cells while live rows remain full width.
+        // Why it exists: compact retention deliberately makes the census representation-visible,
+        //   so memory measurements must not silently restore the old full-width assumption.
         var terminal = try #require(Terminal(columns: 20, rows: 2))
         for line in 1...10 { terminal.feed(Array("row\(line)\r\n".utf8)) }
 
@@ -45,8 +106,8 @@ struct TerminalMemoryCensusTests {
         // quietly bias every bytes-per-row figure derived from the census.
         #expect(census.scrollbackRowCount == 9)
         #expect(census.screenRowCount == 2)
-        #expect(census.cellCount == 20 * 11)
-        #expect(census.cellStorageBytes == 20 * 11 * census.cellStrideBytes)
+        #expect(census.cellCount == 2 * 20 + 9 * 4)
+        #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
         #expect(census.rowStorageAllocationCount == 11)
     }
 

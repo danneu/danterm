@@ -149,6 +149,22 @@ struct TerminalResizeTests {
         #expect(aboveBottom.geometry.cursor?.row == 0)
     }
 
+    @Test("a compact history row becomes full width when pulled into the live grid")
+    func heightGrowthMaterializesCompactHistory() throws {
+        // Intent: a retained row returning to the viewport accepts mutation at the last column.
+        // Why it exists: live-grid algorithms index full-width rows directly, so transferring the
+        //   compact allocation without materializing it would trap on the first edge write.
+        // Scenario: height growth pulls a short history line back, then output targets its edge.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("abc\r\n".utf8))
+        terminal.resize(columns: 8, rows: 2)
+        terminal.moveCursor(row: 0, column: 7)
+        terminal.feed(Array("Z".utf8))
+
+        #expect(terminal.cell(row: 0, column: 7)?.scalars == ["Z"])
+        expectValidGrid(terminal)
+    }
+
     @Test("height transfer preserves wrap flags and does not accrete filler blanks")
     func heightTransferPreservesFlagsAndFillerIdentity() throws {
         var wrapped = try #require(Terminal(columns: 4, rows: 2))

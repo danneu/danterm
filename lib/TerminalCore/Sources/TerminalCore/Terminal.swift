@@ -206,6 +206,16 @@ public struct Terminal: Equatable, Sendable {
             return row
         }
 
+        /// Returns the canonical retained representation without default trailing padding.
+        func compacted() -> GridRow {
+            let lastStoredColumn = cells.lastIndex(where: { $0 != GridCell() }) ?? 0
+            let storedCount = lastStoredColumn + 1
+            guard storedCount < cells.count else { return self }
+            var row = self
+            row.cells = Array(cells.prefix(storedCount))
+            return row
+        }
+
         /// Writes anywhere in the logical row, materializing omitted padding first when needed.
         mutating func setCell(_ cell: GridCell, at column: Int, columns: Int) {
             precondition(column >= 0 && column < columns)
@@ -2136,6 +2146,14 @@ public struct Terminal: Equatable, Sendable {
         scrollbackByteCost(of: GridRow(cells: (0..<columns).map { _ in GridCell() }))
     }
 
+    /// Sizes a compact ordinary row so retention tests can choose exact eviction boundaries.
+    static func compactScrollbackRowByteCost(storedCells: Int) -> Int {
+        precondition(storedCells >= 1)
+        return scrollbackByteCost(
+            of: GridRow(cells: (0..<storedCells).map { _ in GridCell(kind: .narrow) })
+        )
+    }
+
     /// Sums what history's cell storage *actually reserved*, derived independently of the charge
     /// model so a test can hold one against the other.
     ///
@@ -3702,7 +3720,8 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
     where S.Element == GridRow {
-        for row in newRows {
+        for sourceRow in newRows {
+            let row = sourceRow.compacted()
             scrollbackRows.append(row)
             scrollbackByteCount += Self.scrollbackByteCost(of: row)
         }
@@ -4210,7 +4229,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         let viewportStart = rebuiltRows.count - rowCount
-        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart])
+        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart].map { $0.compacted() })
         scrollbackByteCount = recomputedScrollbackByteCount
         rows = Array(rebuiltRows[viewportStart...])
         columnCount = newColumnCount
@@ -6151,6 +6170,7 @@ public struct Terminal: Equatable, Sendable {
         var retained = scrollbackRows[row]
         let oldCost = Self.scrollbackByteCost(of: retained)
         retained.setCell(cell, at: column, columns: columnCount)
+        retained = retained.compacted()
         scrollbackRows[row] = retained
         scrollbackByteCount += Self.scrollbackByteCost(of: retained) - oldCost
     }

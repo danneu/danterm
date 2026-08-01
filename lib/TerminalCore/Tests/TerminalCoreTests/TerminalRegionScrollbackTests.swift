@@ -110,7 +110,7 @@ struct TerminalRegionScrollbackTests {
         // Why it exists: the retention rule must reuse the existing push path, not
         //   a parallel one that bypasses accounting and grows history unbounded.
         // Scenario: a long-running inline-viewport session overruns its budget.
-        let rowCost = historyRowCost(columns: 2)
+        let rowCost = compactHistoryRowCost(storedCells: 1)
         var terminal = try labeledTerminal(
             columns: 2,
             rows: 4,

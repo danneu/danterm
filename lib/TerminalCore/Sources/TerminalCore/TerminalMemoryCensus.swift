@@ -33,7 +33,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// Rows retained in history, after budget eviction.
     public var scrollbackRowCount: Int
 
-    /// Cells across the whole grid. Rows are full-width, so this is rows x columns.
+    /// Cells physically stored across the whole grid; compact history rows may be narrower.
     public var cellCount: Int
 
     /// `MemoryLayout<GridCell>.stride` -- what a cell costs *in an array*, which is the only way

@@ -266,3 +266,8 @@ func historyRowCost(columns: Int, spilledClusterScalars: [Int] = []) -> Int {
     Terminal.blankScrollbackRowByteCost(columns: columns)
         + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
 }
+
+/// Bytes an ordinary compact history row costs for an exact stored-cell extent.
+func compactHistoryRowCost(storedCells: Int) -> Int {
+    Terminal.compactScrollbackRowByteCost(storedCells: storedCells)
+}

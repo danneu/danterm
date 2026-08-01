@@ -5,6 +5,73 @@ import Testing
 
 /// Locks the fixed byte budget to every history mutation path without coupling tests to storage.
 struct TerminalScrollbackBudgetTests {
+    @Test("widening preserves hard-terminated history that already fits the budget")
+    func wideningDoesNotEvictCompactHistory() throws {
+        // Intent: widening a pane preserves every retained hard-terminated line and its order.
+        // Why it exists: full-width history rows were re-padded during reflow, increasing their
+        //   budget charge and silently evicting the oldest content during an ordinary resize.
+        // Scenario: four short shell-output lines fill a modest-width pane's history budget, then
+        //   the user doubles the pane width without changing the logical lines.
+        var terminal = try #require(Terminal(
+            columns: 8,
+            rows: 1,
+            scrollbackBudgetBytes: historyRowCost(columns: 8) * 4
+        ))
+        terminal.feed(Array("A\r\nB\r\nC\r\nD\r\n".utf8))
+        let before = terminal.primaryHistoryText
+        let rowCount = terminal.scrollbackRowCount
+
+        terminal.resize(columns: 16, rows: 1)
+
+        #expect(terminal.primaryHistoryText == before)
+        #expect(terminal.scrollbackRowCount == rowCount)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+    }
+
+    @Test("short compact lines retain deeper history than full-width lines at one budget")
+    func compactLineLengthControlsRetentionDepth() throws {
+        // Intent: a fixed byte budget retains more short rows than full-width rows.
+        // Why it exists: compact storage is useful only if its smaller allocation charge turns
+        //   into user-visible history depth rather than merely changing a diagnostic counter.
+        // Scenario: equal-width panes stream ten one-cell and ten full-width hard lines.
+        let columns = 8
+        let budget = historyRowCost(columns: columns) * 2
+        var short = try #require(Terminal(
+            columns: columns,
+            rows: 1,
+            scrollbackBudgetBytes: budget
+        ))
+        var full = try #require(Terminal(
+            columns: columns,
+            rows: 1,
+            scrollbackBudgetBytes: budget
+        ))
+        for _ in 0..<10 {
+            short.feed(Array("x\r\n".utf8))
+            full.feed(Array("12345678\r\n".utf8))
+        }
+
+        #expect(short.scrollbackRowCount > full.scrollbackRowCount)
+        #expect(short.scrollbackByteCount <= budget)
+        #expect(full.scrollbackByteCount <= budget)
+    }
+
+    @Test("equivalent resize routes converge to one canonical retained representation")
+    func compactHistoryIsCanonicalAcrossResizeRoutes() throws {
+        // Intent: equal terminal content reached through different retained widths compares equal.
+        // Why it exists: synthesized equality includes private row storage, so non-canonical blank
+        //   tails would make observably identical terminals unequal and break no-op detection.
+        // Scenario: one pane retains a line narrowly then widens; its twin starts wide.
+        var resized = try #require(Terminal(columns: 4, rows: 1))
+        resized.feed(Array("abc\r\n".utf8))
+        resized.resize(columns: 8, rows: 1)
+
+        var direct = try #require(Terminal(columns: 8, rows: 1))
+        direct.feed(Array("abc\r\n".utf8))
+
+        #expect(resized == direct)
+    }
+
     @Test("history never reserves more than the budget, at widths where rows round up")
     func budgetChargesReservedStorageNotJustCells() throws {
         // Intent: the bytes history actually reserves stay inside the configured budget, not just
@@ -39,9 +106,9 @@ struct TerminalScrollbackBudgetTests {
         // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
         let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            (4, "", 48 + 4 * 32),
-            // Identical to the blank row above, and correctly so: an ASCII cell stores its one
-            // scalar inline, so it costs exactly what an empty cell costs.
+            (4, "", 48 + 1 * 32),
+            // A full ASCII row keeps all four cells, but each scalar stays inline, so there is no
+            // per-cell spill beyond the row allocation.
             (4, "ABCD", 48 + 4 * 32),
             (2, "\u{754C}", 48 + 2 * 32),
             // The only shape that costs more: a five-scalar cluster spills to its own allocation.
@@ -78,7 +145,7 @@ struct TerminalScrollbackBudgetTests {
         // Intent: prove the strict-over trigger and minimal oldest-first batch removal.
         // Why it exists: an off-by-one would discard history at the documented boundary.
         // Scenario: two rows fill a tiny budget before one push and one shrink overshoot it.
-        let rowCost = historyRowCost(columns: 2)
+        let rowCost = compactHistoryRowCost(storedCells: 1)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
@@ -526,10 +593,11 @@ struct TerminalScrollbackBudgetTests {
         }
 
         let census = terminal.memoryCensus
-        // Rows are full width regardless of the text on them, so history's true cell cost is
-        // rows x columns x stride. Deliberately measured from the census rather than from
+        // Live rows remain full width, so subtracting their cells leaves the exact compact
+        // history-cell storage. Deliberately measured from the census rather than from
         // `scrollbackByteCount`, which is the very thing under test.
-        let historyBytes = census.scrollbackRowCount * columns * census.cellStrideBytes
+        let historyCellCount = census.cellCount - census.screenRowCount * columns
+        let historyBytes = historyCellCount * census.cellStrideBytes
         #expect(census.scrollbackRowCount > 0)
         #expect(historyBytes <= Terminal.productionScrollbackBudgetBytes)
     }

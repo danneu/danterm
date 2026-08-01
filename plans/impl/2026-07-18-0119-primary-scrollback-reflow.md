@@ -212,11 +212,13 @@ re-attachment -- as one slice, phase A before phase B.
   exactly one newline each, right-hand padding and trailing padding-only
   rows are omitted, written spaces and empty logical lines are preserved, no
   final newline is synthesized.
-- I4. Conservation: any valid resize, and any sequence of them, leaves
-  full-history text bit-identical -- same logical text, same hard-boundary
-  positions.
-- I5. Reflow legality: after any resize, every retained row has exactly the
-  current column count; a row is soft-wrapped iff its logical line continues
+- I4. Conservation before budget enforcement: reflow itself leaves full-history
+  text bit-identical -- same logical text, same hard-boundary positions. A width
+  change may still evict the oldest rows when splitting lines increases fixed
+  per-row overhead beyond the configured scrollback budget.
+- I5. Reflow legality: after any resize, every retained row has the current
+  column count logically; physical history storage may omit default trailing
+  padding. A row is soft-wrapped iff its logical line continues
   on the next row; every non-final row of a logical line is exactly full at
   the current width (a trailing spacer head counts as full); wide pairs and
   grapheme clusters never split across rows; the slice 1-3 grid-validity

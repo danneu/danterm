@@ -114,14 +114,15 @@ struct TerminalMemoryProbeSupportTests {
         #expect(mixedCensus != styledCensus)
     }
 
-    @Test("cell storage is exact stride arithmetic over full-width rows")
+    @Test("cell storage is exact stride arithmetic over physical row extents")
     func cellStorageIsExact() throws {
         // Why it exists: the probe's entire advantage over `just benchmark-memory` is that its
         // bytes are exact rather than sampled or bucket-rounded (doc 15's F6). If this identity
         // ever stops holding, the probe has silently become an estimator.
         let census = try census(payload(named: "scrollback-plain"))
         let totalRows = census.screenRowCount + census.scrollbackRowCount
-        #expect(census.cellCount == totalRows * Self.geometry.columns)
+        #expect(census.cellCount >= census.screenRowCount * Self.geometry.columns)
+        #expect(census.cellCount < totalRows * Self.geometry.columns)
         #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
         #expect(census.bytesPerCell == Double(census.cellStrideBytes))
     }
