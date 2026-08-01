@@ -5,7 +5,9 @@ import TerminalCore
 
 /// Errors reject malformed or unrecognized recordings before they can become evidence.
 public enum NeutralTerminalRecordingError: Error, Equatable, Sendable {
+    case ambiguousFeedEncoding
     case invalidDimensions
+    case invalidBase64(String)
     case invalidHex(String)
     case invalidProvenance(String)
     case unsupportedEvent(String)
@@ -44,6 +46,16 @@ public struct NeutralTerminalProvenance: Codable, Equatable, Sendable {
             recordedDeviations: [],
             author: "DanTerm",
             test: test
+        )
+    }
+
+    /// Marks an unscrubbed live-pane dump as replayable evidence that is not fixture-ready.
+    public static func liveCapture() -> Self {
+        Self(
+            source: "danterm-live-capture",
+            recordedDeviations: [],
+            author: "DanTerm",
+            test: "live-pane-tape"
         )
     }
 
@@ -100,7 +112,7 @@ public struct NeutralTerminalProvenance: Codable, Equatable, Sendable {
             else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)
             }
-        case "danterm":
+        case "danterm", "danterm-live-capture":
             guard author == "DanTerm", test?.isEmpty == false else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)
             }
@@ -206,7 +218,7 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, text, hex, columns, rows, action, key, scalar, modifiers, focused
+        case type, text, hex, base64, columns, rows, action, key, scalar, modifiers, focused
         case button, column, row, clickCount
     }
 
@@ -217,15 +229,21 @@ extension NeutralTerminalRecordingEvent: Codable {
         case "feed":
             let text = try values.decodeIfPresent(String.self, forKey: .text)
             let hex = try values.decodeIfPresent(String.self, forKey: .hex)
-            guard text == nil || hex == nil else {
-                throw NeutralTerminalRecordingError.invalidHex(hex ?? "")
+            let base64 = try values.decodeIfPresent(String.self, forKey: .base64)
+            guard [text, hex, base64].compactMap({ $0 }).count == 1 else {
+                throw NeutralTerminalRecordingError.ambiguousFeedEncoding
             }
             if let text {
                 self = .feed(Array(text.utf8))
             } else if let hex {
                 self = .feed(try Self.decodeHex(hex))
+            } else if let base64 {
+                guard let data = Data(base64Encoded: base64) else {
+                    throw NeutralTerminalRecordingError.invalidBase64(base64)
+                }
+                self = .feed(Array(data))
             } else {
-                throw NeutralTerminalRecordingError.invalidHex("")
+                throw NeutralTerminalRecordingError.ambiguousFeedEncoding
             }
         case "resize":
             self = .resize(
@@ -290,7 +308,7 @@ extension NeutralTerminalRecordingEvent: Codable {
         switch self {
         case .feed(let bytes):
             try values.encode("feed", forKey: .type)
-            try values.encode(bytes.map { String(format: "%02x", $0) }.joined(), forKey: .hex)
+            try values.encode(Data(bytes).base64EncodedString(), forKey: .base64)
         case .input(let key, let modifiers):
             try values.encode("input", forKey: .type)
             let encoded = Self.encodeKey(key)

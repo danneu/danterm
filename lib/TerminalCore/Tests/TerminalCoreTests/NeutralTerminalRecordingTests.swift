@@ -7,6 +7,112 @@ import TerminalCoreRecording
 
 /// Proves DanTerm-authored recordings use the same public replay path as corpus evidence.
 struct NeutralTerminalRecordingTests {
+    @Test("feed bytes encode as base64 and round-trip arbitrary values")
+    func feedBytesEncodeAsBase64() throws {
+        let bytes = Array(UInt8.min...UInt8.max)
+        let encoded = try JSONEncoder().encode(NeutralTerminalRecordingEvent.feed(bytes))
+        let object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+
+        #expect(object["base64"] as? String == Data(bytes).base64EncodedString())
+        #expect(object["hex"] == nil)
+        #expect(
+            try JSONDecoder().decode(NeutralTerminalRecordingEvent.self, from: encoded)
+                == .feed(bytes)
+        )
+    }
+
+    @Test("malformed feed base64 is rejected")
+    func malformedFeedBase64IsRejected() {
+        let data = Data(#"{"type":"feed","base64":"not base64!"}"#.utf8)
+
+        do {
+            _ = try JSONDecoder().decode(NeutralTerminalRecordingEvent.self, from: data)
+            Issue.record("Expected malformed base64 to be rejected.")
+        } catch NeutralTerminalRecordingError.invalidBase64(let invalidBase64) {
+            #expect(invalidBase64 == "not base64!")
+        } catch {
+            Issue.record("Expected invalidBase64, got \(error).")
+        }
+    }
+
+    @Test(
+        "feed events reject multiple byte representations",
+        arguments: [
+            #"{"type":"feed","base64":"AQ==","hex":"01"}"#,
+            #"{"type":"feed","base64":"AQ==","text":"x"}"#,
+        ]
+    )
+    func multipleFeedRepresentationsAreRejected(_ json: String) {
+        #expect(throws: NeutralTerminalRecordingError.ambiguousFeedEncoding) {
+            try JSONDecoder().decode(
+                NeutralTerminalRecordingEvent.self,
+                from: Data(json.utf8)
+            )
+        }
+    }
+
+    @Test("recordings may mix legacy hex and compact base64 feed events")
+    func mixedHexAndBase64FeedsDecode() throws {
+        let data = Data(#"""
+        {
+          "version": 1,
+          "provenance": {"source":"danterm","author":"DanTerm","test":"mixed-feeds"},
+          "initial": {"columns": 8, "rows": 2},
+          "events": [
+            {"type":"feed","hex":"00 ff"},
+            {"type":"feed","base64":"AQI="}
+          ]
+        }
+        """#.utf8)
+
+        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
+
+        #expect(recording.events == [.feed([0x00, 0xFF]), .feed([0x01, 0x02])])
+    }
+
+    @Test("live capture provenance is replay-valid and distinct from fixture provenance")
+    func liveCaptureProvenanceValidates() throws {
+        let provenance = NeutralTerminalProvenance.liveCapture()
+
+        try provenance.validate()
+        #expect(provenance.source == "danterm-live-capture")
+        #expect(provenance != .danTerm(test: "live-pane-tape"))
+    }
+
+    @Test("elapsed timestamps are inert during decode and replay")
+    func elapsedTimestampsAreInert() throws {
+        let withTimestamps = Data(#"""
+        {
+          "version": 1,
+          "provenance": {"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape"},
+          "initial": {"columns": 8, "rows": 2},
+          "events": [
+            {"type":"feed","base64":"aGk=","elapsedNanoseconds":12},
+            {"type":"resize","columns":10,"rows":3,"elapsedNanoseconds":25}
+          ]
+        }
+        """#.utf8)
+        let withoutTimestamps = Data(#"""
+        {
+          "version": 1,
+          "provenance": {"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape"},
+          "initial": {"columns": 8, "rows": 2},
+          "events": [
+            {"type":"feed","base64":"aGk="},
+            {"type":"resize","columns":10,"rows":3}
+          ]
+        }
+        """#.utf8)
+
+        let timed = try JSONDecoder().decode(NeutralTerminalRecording.self, from: withTimestamps)
+        let untimed = try JSONDecoder().decode(NeutralTerminalRecording.self, from: withoutTimestamps)
+
+        #expect(timed == untimed)
+        #expect(try timed.replay() == untimed.replay())
+    }
+
     @Test("feed hex accepts mixed case and whitespace")
     func feedHexAcceptsMixedCaseAndWhitespace() throws {
         let event = try decodeFeedEvent(hex: " 0a\tBc\nDe Ff ")

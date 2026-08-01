@@ -31,6 +31,7 @@ struct TerminalSemanticPromptInvariantTests {
                 NeutralTerminalRecording.self,
                 from: Data(contentsOf: url)
             )
+            try admitDanTermRecordingFixture(decoded.provenance)
             let recording = decoded.provenance.source == "danterm" ? decoded : NeutralTerminalRecording(
                 provenance: .danTerm(test: url.deletingPathExtension().lastPathComponent),
                 initial: decoded.initial,
@@ -42,6 +43,13 @@ struct TerminalSemanticPromptInvariantTests {
                     context: "\(url.lastPathComponent) event \(eventIndex)"
                 )
             }
+        }
+    }
+
+    @Test("raw live captures are rejected before fixture provenance normalization")
+    func rawLiveCaptureIsNotFixtureAdmissible() {
+        #expect(throws: DanTermRecordingFixtureAdmissionError.rawLiveCapture) {
+            try admitDanTermRecordingFixture(.liveCapture())
         }
     }
 
@@ -183,5 +191,17 @@ struct TerminalSemanticPromptInvariantTests {
         region.feed(Array("\u{1B}[2;5r\u{1B}[2;1H\u{1B}]133;A;redraw=1\u{7}new".utf8))
         #expect(region.semanticPromptRowsForTesting.filter { $0.stamp == .prompt }.count == 2)
         expectSemanticPromptInvariants(region, context: "scroll-region guard")
+    }
+}
+
+private enum DanTermRecordingFixtureAdmissionError: Error {
+    case rawLiveCapture
+}
+
+private func admitDanTermRecordingFixture(
+    _ provenance: NeutralTerminalProvenance
+) throws {
+    guard provenance.source != "danterm-live-capture" else {
+        throw DanTermRecordingFixtureAdmissionError.rawLiveCapture
     }
 }
