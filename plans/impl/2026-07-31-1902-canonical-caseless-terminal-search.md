@@ -245,8 +245,11 @@ and now also documents AR2.
 
 ## Implementation notes
 
-- Production mapping tables are fixed-width hexadecimal strings decoded once
-  by import-free Swift, and the official conformance files remain text test
-  resources. Large generated Swift initializer arrays drove `swift-frontend`
-  into multi-gigabyte constraint solving; this representation keeps generated
-  data checked in without making compilation memory scale pathologically.
+- Production mapping tables are flat, explicitly typed parallel integer
+  literal arrays (`static let foo: [UInt32] = [...]`), the same representation
+  as `GeneratedPackedUnicodeTables`; the official conformance files remain
+  text test resources. The `swift-frontend` multi-gigabyte constraint-solver
+  blowup is specific to nested or tuple-shaped literals (measured: 2k
+  `(UInt32, [UInt32])` entries cost 1.1 GB to typecheck, while 13k flat
+  elements cost 80 MB); flat homogeneous literals typecheck linearly and are
+  proven in-tree at 31k+ elements, so no runtime decoding step is needed.
