@@ -1160,6 +1160,14 @@ public struct Terminal: Equatable, Sendable {
         semanticContent = .prompt
         semanticContentClearsAtEndOfLine = false
         rows[cursor.row].semanticPrompt = kind
+        // Clear stale heads here as well as at resize, because the repaint that strands
+        // one need not be followed by another resize: a drag that ends on the stranding
+        // repaint leaves debris that the resize path never gets a chance to see. This is
+        // the earliest point it can be recognized -- the new head has just been stamped,
+        // which is what makes the row above it identifiable as a stale copy.
+        guard kind == .prompt, promptRedrawMode != .disabled else { return }
+        let top = topOfStalePromptHeads(above: cursor.row)
+        for row in top..<cursor.row { clearPromptCells(in: row) }
     }
 
     private func semanticPromptKind(in options: [UInt8]) -> SemanticPromptRow {
@@ -1723,32 +1731,41 @@ public struct Terminal: Equatable, Sendable {
         while start >= 0 {
             switch rows[start].semanticPrompt {
             case .prompt:
-                // Climb through prompt heads stacked directly on top of each other. A
-                // shell handed a stale-width prompt string wraps it over two rows, then
-                // repaints from one row lower and erases from there, stranding the
-                // wrapped head above the newest stamp. Anchoring on the first stamp
-                // found leaves that debris forever, because no later resize ever looks
-                // above it.
-                //
-                // Only `.prompt` may be crossed, never `.continuation`: two heads with
-                // nothing between them is precisely the stale-repaint signature, while a
-                // genuinely earlier prompt is always separated from the current one by
-                // its own continuation row. Crossing continuations instead would blank
-                // the previous prompt and the command the user typed at it. The content
-                // test covers the other direction -- `clearPromptCells` leaves the stamp
-                // behind, so spent prompt rows would otherwise chain the climb upward.
-                while start > 0,
-                      rows[start - 1].semanticPrompt == .prompt,
-                      retainedContentEnd(in: rows[start - 1]) > 0
-                {
-                    start -= 1
-                }
+                start = topOfStalePromptHeads(above: start)
                 for row in start..<rowCount { clearPromptCells(in: row) }
                 return
             case .continuation, .none:
                 start -= 1
             }
         }
+    }
+
+    /// Walks up from a prompt head over the stale copies of itself a shell can strand
+    /// above it, returning the topmost row of that block.
+    ///
+    /// A shell handed a prompt string rendered for the previous width paints it too wide,
+    /// so it soft-wraps onto a second row; the next repaint moves up by the prompt's
+    /// *logical* line count, which is one row short, and erases from there. The wrapped
+    /// head above survives, stamped and full of stale cells.
+    ///
+    /// All three conditions carry weight, and each was added because dropping it broke a
+    /// real case. `.prompt` only, never `.continuation`: a genuinely earlier prompt is
+    /// separated from the current one by its own continuation row, so crossing those
+    /// blanks the previous prompt and the command typed at it. `isSoftWrapped`: without
+    /// it, a one-row prompt entered repeatedly with no output stacks legitimate heads
+    /// that this would eat -- debris exists only because it overflowed, so it always
+    /// wrapped. Retained content: `clearPromptCells` leaves the stamp behind, so spent
+    /// prompt rows would otherwise chain the walk upward into real history.
+    private func topOfStalePromptHeads(above row: Int) -> Int {
+        var top = row
+        while top > 0,
+              rows[top - 1].semanticPrompt == .prompt,
+              rows[top - 1].isSoftWrapped,
+              retainedContentEnd(in: rows[top - 1]) > 0
+        {
+            top -= 1
+        }
+        return top
     }
 
     private mutating func clearPromptCells(in row: Int) {

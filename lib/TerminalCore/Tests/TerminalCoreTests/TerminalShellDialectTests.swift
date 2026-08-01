@@ -196,4 +196,53 @@ struct TerminalShellDialectTests {
         #expect(terminal.screenText.contains("╰ $ zsh"))
         expectValidGrid(terminal)
     }
+
+    @Test("a drag that ends on the stranding repaint still strands nothing", arguments: [213, 390])
+    func staleWidthDebrisSurvivesNoFollowingResize(_ limit: Int) throws {
+        // Intent: cutting the same recording off right after the repaint pair that
+        //   strands a head leaves one head, not two.
+        // Why it exists: the first fix cleared the debris only from the resize path, so
+        //   it depended on the user dragging *past* the stranding repaint. A drag that
+        //   stops on it -- the ordinary case, since the last repaint is the one that
+        //   matters -- left the artifact on screen with nothing scheduled to remove it.
+        //   Clearing at the moment the new head is stamped is what closes that, and this
+        //   is the cut point that tells the two fixes apart.
+        // Scenario: the maintainer's second report, on a build that already carried the
+        //   resize-path fix: same fragment, drag released as the prompt settled.
+        let recording = try recording("zsh-stale-width-repaint")
+        var terminal = try #require(
+            Terminal(columns: recording.initial.columns, rows: recording.initial.rows)
+        )
+        for event in recording.events.prefix(limit) {
+            guard event.type != "resize" else {
+                terminal.resize(columns: try #require(event.columns), rows: try #require(event.rows))
+                continue
+            }
+            terminal.feed(Self.bytes(fromHex: try #require(event.hex)))
+        }
+
+        #expect(terminal.screenText.components(separatedBy: "╭ ~").count - 1 == 1)
+        #expect(terminal.screenText.contains("╰ $ zsh"))
+        expectValidGrid(terminal)
+    }
+
+    @Test("stacked one-row prompts are history, not debris")
+    func oneRowPromptsAreNotTreatedAsDebris() throws {
+        // Intent: a single-row prompt entered repeatedly with no output stacks prompt
+        //   rows directly on each other; a resize blanks only the live one.
+        // Why it exists: the stale-head cleanup walks up over adjacent prompt heads, and
+        //   keying that walk on adjacency alone erased the two prompts above -- real
+        //   history, silently. Debris is distinguishable because it exists only by
+        //   overflowing the width, so it is always soft-wrapped; these are not.
+        // Scenario: pressing Enter at an empty prompt a few times, then resizing.
+        var terminal = try #require(Terminal(columns: 20, rows: 8))
+        for index in 1...3 {
+            terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}$ cmd\(index)\u{1B}]133;B\u{7}\r\n".utf8))
+        }
+        terminal.resize(columns: 18, rows: 8)
+
+        #expect(terminal.screenText.contains("$ cmd1"))
+        #expect(terminal.screenText.contains("$ cmd2"))
+        expectValidGrid(terminal)
+    }
 }
