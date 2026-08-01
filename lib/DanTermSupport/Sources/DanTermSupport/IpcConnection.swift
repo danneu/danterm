@@ -79,9 +79,16 @@ final class IpcConnection: @unchecked Sendable {
         writeLine(hello)
     }
 
-    func writeSuccess(reqId: UUID, result: JSONValue) {
-        guard let rpcId = takeResponseId(reqId) else { return }
-        writeLine(JsonRpcResponse(id: rpcId, result: result))
+    func writeSuccess(
+        reqId: UUID,
+        result: JSONValue,
+        completion: (@Sendable (Bool) -> Void)? = nil
+    ) {
+        guard let rpcId = takeResponseId(reqId) else {
+            completion?(false)
+            return
+        }
+        writeLine(JsonRpcResponse(id: rpcId, result: result), completion: completion)
     }
 
     func writeError(reqId: UUID, code: Int, message: String) {
@@ -102,6 +109,20 @@ final class IpcConnection: @unchecked Sendable {
         writeLine(response, closeAfterWrite: closeAfterWrite)
     }
 
+    /// Queues one server-initiated JSON-RPC notification after earlier writes on this socket.
+    func writeNotification(
+        method: String,
+        params: JSONValue,
+        closeAfterWrite: Bool = false,
+        completion: (@Sendable (Bool) -> Void)? = nil
+    ) {
+        writeLine(
+            JsonRpcRequest(method: method, params: params),
+            closeAfterWrite: closeAfterWrite,
+            completion: completion
+        )
+    }
+
     func close() {
         lock.lock()
         let shouldClose = !closed
@@ -119,28 +140,43 @@ final class IpcConnection: @unchecked Sendable {
         return pendingResponseIds.removeValue(forKey: reqId)
     }
 
-    private func writeLine<T: Encodable>(_ value: T, closeAfterWrite: Bool = false) {
+    private func writeLine<T: Encodable>(
+        _ value: T,
+        closeAfterWrite: Bool = false,
+        completion: (@Sendable (Bool) -> Void)? = nil
+    ) {
         lock.lock()
         let shouldWrite = !closed
         lock.unlock()
-        guard shouldWrite else { return }
+        guard shouldWrite else {
+            completion?(false)
+            return
+        }
 
-        guard let line = try? encodeIpcLine(value) else { return }
+        guard let line = try? encodeIpcLine(value) else {
+            completion?(false)
+            return
+        }
         writeQueue.async { [self, line] in
             defer {
                 if closeAfterWrite {
                     close()
                 }
             }
-            line.withUnsafeBytes { rawBuffer in
-                guard let baseAddress = rawBuffer.baseAddress else { return }
+            let succeeded = line.withUnsafeBytes { rawBuffer -> Bool in
+                guard let baseAddress = rawBuffer.baseAddress else { return false }
                 var written = 0
                 while written < line.count {
                     let result = Darwin.write(fd, baseAddress.advanced(by: written), line.count - written)
                     if result < 0 && errno == EINTR { continue }
-                    guard result > 0 else { return }
+                    guard result > 0 else { return false }
                     written += result
                 }
+                return true
+            }
+            completion?(succeeded)
+            if succeeded == false {
+                close()
             }
         }
     }
