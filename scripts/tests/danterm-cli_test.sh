@@ -1,18 +1,55 @@
 #!/usr/bin/env bash
-# Smoke-test the bundled danterm CLI against a running DanTerm Dev app.
+# Smoke-test the bundled danterm CLI against an isolated development slot.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-APP_NAME="DanTerm Dev"
-APP_PATH="$HOME/Applications/$APP_NAME.app"
-CLI_PATH="$APP_PATH/Contents/Helpers/danterm"
+CLI_PATH="$SCRIPT_DIR/.build/DanTerm Dev.app/Contents/Helpers/danterm"
+launch_output="$(mktemp)"
+launch_error="$(mktemp)"
+smoke_output="$(mktemp)"
+smoke_error="$(mktemp)"
+launcher_pid=""
 
-if [[ "${DANTERM_CLI_TEST_ALLOW_APP_CONTROL:-}" != "1" ]]; then
-    echo "Refusing to launch or quit $APP_NAME without DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1" >&2
-    exit 2
-fi
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [[ "$launcher_pid" =~ ^[0-9]+$ ]]; then
+        kill -TERM "$launcher_pid" 2>/dev/null || true
+        wait "$launcher_pid" 2>/dev/null || true
+    fi
+    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
 
-"$SCRIPT_DIR/dev-build.sh"
+python3 "$SCRIPT_DIR/scripts/dev-slot-launcher.py" >"$launch_output" 2>"$launch_error" &
+launcher_pid=$!
+handle=""
+for _ in $(seq 1 180); do
+    if [[ -s "$launch_output" ]]; then
+        handle="$(tail -1 "$launch_output")"
+        printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 && break
+    fi
+    kill -0 "$launcher_pid" 2>/dev/null || {
+        echo "DanTerm slot launcher exited before emitting a handle" >&2
+        cat "$launch_error" >&2
+        exit 1
+    }
+    sleep 1
+done
+printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 || {
+    echo "DanTerm slot launcher did not emit a handle" >&2
+    cat "$launch_error" >&2
+    exit 1
+}
+socket="$(printf '%s\n' "$handle" | jq -er '.socketPath')"
+bundle_id="$(printf '%s\n' "$handle" | jq -er '.bundleId')"
+reported_pid="$(printf '%s\n' "$handle" | jq -er '.pid')"
+slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
+[[ "$slot" -ge 1 && "$slot" -le 8 ]]
+[[ "$bundle_id" == "com.danneu.danterm-dev.$slot" ]]
+[[ "$reported_pid" == "$launcher_pid" ]]
+[[ "$socket" == "$HOME/Library/Caches/$bundle_id/control.sock" ]]
 
 # Help-text smoke tests. These run against the freshly built helper but
 # do not require the app to be running -- help is local arg handling.
@@ -114,13 +151,8 @@ grep -qx 'danterm: unknown flag: --bogus' "$err"
 ! grep -qF 'DanTerm is not running' "$out" "$err"
 rm -rf "$doctor_home"
 
-pkill -x "$APP_NAME" 2>/dev/null || true
-open -a "$APP_PATH"
-
-socket=""
 for _ in $(seq 1 30); do
-    socket="$(find "$HOME/Library/Caches/com.danneu.danterm-dev" -name control.sock -type s 2>/dev/null | head -1 || true)"
-    if [[ -n "$socket" ]]; then
+    if [[ -S "$socket" ]]; then
         break
     fi
     sleep 1
@@ -154,6 +186,7 @@ fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
+"$CLI_PATH" pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
 
 info="$("$CLI_PATH" pane info --pane "$pane_id")"
 printf '%s\n' "$info" | jq -e \
@@ -207,13 +240,15 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         raise SystemExit("no response for unknown method")
 PY
 
-pkill -x "$APP_NAME" 2>/dev/null || true
+kill -TERM "$launcher_pid"
+wait "$launcher_pid" 2>/dev/null || true
+launcher_pid=""
 for _ in $(seq 1 10); do
     [[ ! -S "$socket" ]] && break
     sleep 0.5
 done
-if env -u DANTERM_PANE "$CLI_PATH" ls >/tmp/danterm-cli-smoke.out 2>/tmp/danterm-cli-smoke.err; then
+if env -u DANTERM_PANE "$CLI_PATH" ls >"$smoke_output" 2>"$smoke_error"; then
     echo "danterm ls unexpectedly succeeded after app quit" >&2
     exit 1
 fi
-grep -qx 'danterm: DanTerm is not running' /tmp/danterm-cli-smoke.err
+grep -qx 'danterm: DanTerm is not running' "$smoke_error"

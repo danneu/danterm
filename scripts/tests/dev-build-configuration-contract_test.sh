@@ -44,6 +44,7 @@ for shell in zsh bash fish; do
 done
 
 export SWIFT_ARGV_LOG="$TEST_ROOT/swift-argv.log"
+export KILLALL_ARGV_LOG="$TEST_ROOT/killall-argv.log"
 cat > "$FAKE_BIN/swift" <<'SHIM'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SWIFT_ARGV_LOG"
@@ -60,6 +61,7 @@ case " $* " in
                 mkdir -p "$bin_path"
                 cp /usr/bin/true "$bin_path/DanTerm"
                 cp /usr/bin/true "$bin_path/DanTermCLI"
+                cp /usr/bin/true "$bin_path/DanTermInstanceIdentityTool"
                 ;;
         esac
         printf '%s\n' "$bin_path"
@@ -70,11 +72,25 @@ chmod +x "$FAKE_BIN/swift"
 
 cat > "$FAKE_BIN/codesign" <<'SHIM'
 #!/usr/bin/env bash
-# Stop after the bundle has consumed every SwiftPM output. Installation and
-# LaunchServices registration are outside this configuration contract.
-exit 86
+exit 0
 SHIM
 chmod +x "$FAKE_BIN/codesign"
+
+cat > "$FAKE_BIN/lsregister" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+chmod +x "$FAKE_BIN/lsregister"
+
+cat > "$FAKE_BIN/killall" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$KILLALL_ARGV_LOG"
+case "$1" in
+    -0) exit 1 ;;
+esac
+exit 0
+SHIM
+chmod +x "$FAKE_BIN/killall"
 
 run_build() {
     local name="$1"
@@ -82,13 +98,14 @@ run_build() {
     : > "$SWIFT_ARGV_LOG"
     set +e
     HOME="$TEST_ROOT/home-$name" TEST_ROOT="$TEST_ROOT" \
+        DANTERM_DEV_LSREGISTER="$FAKE_BIN/lsregister" \
         PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
         "$BUILD_ROOT/dev-build.sh" "$@" \
         > "$TEST_ROOT/$name.out" 2> "$TEST_ROOT/$name.err"
     status=$?
     set -e
-    [[ $status -eq 86 ]] \
-        || fail "$name build did not reach the signing boundary (status $status): $(cat "$TEST_ROOT/$name.err")"
+    [[ $status -eq 0 ]] \
+        || fail "$name build failed (status $status): $(cat "$TEST_ROOT/$name.err")"
     cp "$SWIFT_ARGV_LOG" "$TEST_ROOT/$name.swift-argv"
 }
 
@@ -134,6 +151,17 @@ grep -q -- "--package-path $BUILD_ROOT/lib/TerminalPTY .* --show-bin-path --conf
     "$TEST_ROOT/release.swift-argv" \
     || fail "PTYSessionBootstrap bin-path lookup did not select release configuration"
 
+# Intent: a launcher can produce the canonical signed bundle without replacing or
+#   terminating the user's installed slot-zero application.
+# Why it exists: concurrent development slots are staged from .build, while the user's
+#   personal app and its live process must remain untouched.
+# Scenario: an agent launcher requests a build-only artifact before cloning its claimed slot.
+run_build no-install --no-install
+[[ ! -e "$TEST_ROOT/home-no-install/Applications/DanTerm Dev.app" ]] \
+    || fail "--no-install replaced the shared install"
+[[ ! -s "$KILLALL_ARGV_LOG" ]] \
+    || fail "--no-install targeted a running application"
+
 if HOME="$TEST_ROOT/home-invalid" TEST_ROOT="$TEST_ROOT" \
     PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$BUILD_ROOT/dev-build.sh" --unknown \
@@ -142,6 +170,17 @@ if HOME="$TEST_ROOT/home-invalid" TEST_ROOT="$TEST_ROOT" \
 fi
 grep -qF 'Usage:' "$TEST_ROOT/invalid.err" \
     || fail "unknown dev-build.sh option did not print usage help"
+
+: > "$KILLALL_ARGV_LOG"
+HOME="$TEST_ROOT/home-install" TEST_ROOT="$TEST_ROOT" \
+    DANTERM_DEV_LSREGISTER="$FAKE_BIN/lsregister" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$BUILD_ROOT/dev-build.sh" --kill-running \
+    > "$TEST_ROOT/install.out" 2> "$TEST_ROOT/install.err"
+grep -qFx 'DanTerm Dev' "$KILLALL_ARGV_LOG" \
+    || fail "install did not terminate exactly the slot-zero executable"
+grep -qFx -- '-0 DanTerm Dev' "$KILLALL_ARGV_LOG" \
+    || fail "install did not poll the literal slot-zero executable name"
 
 RUN_ROOT="$TEST_ROOT/run-root"
 mkdir -p "$RUN_ROOT"
@@ -153,13 +192,11 @@ printf 'argv=%s\n' "$*" > "$RUN_BUILD_LOG"
 printf 'backend=%s\n' "${DANTERM_TERMINAL_BACKEND-unset}" >> "$RUN_BUILD_LOG"
 SHIM
 chmod +x "$RUN_ROOT/dev-build.sh"
-for command in killall open; do
-    cat > "$FAKE_BIN/$command" <<'SHIM'
+cat > "$FAKE_BIN/open" <<'SHIM'
 #!/usr/bin/env bash
 exit 0
 SHIM
-    chmod +x "$FAKE_BIN/$command"
-done
+chmod +x "$FAKE_BIN/open"
 
 # Intent: the build-and-run wrapper passes configuration and backend selection through while
 # requesting that the build stop the installed app immediately before replacing its bundle.

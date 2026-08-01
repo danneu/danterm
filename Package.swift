@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "DanTerm", targets: ["DanTerm"]),
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
+        .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
         .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
     ],
     dependencies: [
@@ -67,6 +68,14 @@ let package = Package(
                 // The CLI compiles DanTermSupport through its symlink, and the
                 // font-availability probe there imports CoreText.
                 .linkedFramework("CoreText"),
+            ]
+        ),
+        .executableTarget(
+            name: "DanTermInstanceIdentityTool",
+            dependencies: ["DanTermProtocol"],
+            path: "tools/DanTermInstanceIdentityTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ]
         ),
         .testTarget(

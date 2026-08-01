@@ -5,6 +5,26 @@ import Darwin
 import DanTermProtocol
 import GhosttyKit
 
+/// Keeps the launcher-owned slot lock in the app while preventing pane children
+/// from inheriting it and delaying slot reuse after the app process dies.
+func configureDevelopmentSlotLock(arguments: [String]) throws {
+    let prefix = "--development-slot-lock-fd="
+    guard let argument = arguments.first(where: { $0.hasPrefix(prefix) }) else { return }
+    guard let descriptor = Int32(argument.dropFirst(prefix.count)), descriptor >= 0 else {
+        throw CocoaError(.fileReadInvalidFileName)
+    }
+    guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+}
+
+do {
+    try configureDevelopmentSlotLock(arguments: CommandLine.arguments)
+} catch {
+    fputs("DanTerm: invalid development slot lock: \(error.localizedDescription)\n", stderr)
+    exit(2)
+}
+
 #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
 /// Publish the app process's resolved filesystem paths before terminal creation,
 /// allowing the real-backend harness to reject any escape from its isolated run.

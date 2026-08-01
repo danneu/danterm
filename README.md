@@ -563,10 +563,24 @@ The dev loop is to make changes and `just build-run` to try them out.
   dev app with SwiftPM's release configuration.
 - `just build-run-optimized` or `bash ./dev-build-run.sh --release` to build
   and run that optimized dev app.
+- `just launch` or `./scripts/dev-slot-launcher.py` to claim and directly run
+  an isolated, unattended development slot without replacing the user's app.
+- `just launch-optimized` to do the same with SwiftPM's release configuration.
+- `just launch-prime` to launch one fresh slot in the foreground when granting
+  that slot notification permission for the first time.
 
-The optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
+The build-optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
 development signing, install path, and selected terminal backend. They do not
 create a production release or publish anything.
+
+Isolated launches use slots 1 through 8; slot 0 remains the canonical
+`~/Applications/DanTerm Dev.app`. The launcher prints one JSON handle containing
+`slot`, `bundleId`, `socketPath`, and `pid`, then becomes the app process. Set
+`DANTERM_SOCK` to the reported socket when driving that instance. A slot is held
+by a kernel lock for the app lifetime and becomes reusable on any exit, including
+SIGKILL. If all slots are occupied, the launcher exits with status 75 without
+starting another app. Use `./dev-build.sh --no-install` when only the canonical
+`.build/DanTerm Dev.app` artifact is wanted.
 
 The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for
 its Powerline references. It requires

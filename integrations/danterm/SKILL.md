@@ -102,6 +102,24 @@ If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique
 user-provided criteria.
 
+## Isolated source-tree instances
+
+When an agent needs its own development app, run `just launch` from the source
+tree. The launcher builds without replacing the user's slot-zero app, claims a
+free slot from 1 through 8, prints one JSON handle, and then becomes the app
+process. Capture the handle from stdout and target its `socketPath` explicitly:
+
+    ./scripts/dev-slot-launcher.py > /tmp/danterm-slot.json &
+    DANTERM_SLOT_PID=$!
+    DANTERM_SOCK=$(jq -r '.socketPath' /tmp/danterm-slot.json)
+    export DANTERM_SOCK
+
+The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the launched
+app because the launcher uses direct exec. The default is fresh, background,
+and notification-prompt-free. Use `just launch-prime` only when a human is ready
+to grant one slot's notification permission, and `just launch-optimized` for an
+optimized build. Pool exhaustion exits with status 75 and starts no process.
+
 ## Shell integration capability
 
 DanTerm ships opt-in zsh, Bash, and fish integrations at

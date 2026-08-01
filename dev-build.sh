@@ -7,17 +7,24 @@ set -euo pipefail
 
 SWIFT_CONFIGURATION=""
 KILL_RUNNING=""
+INSTALL="1"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --release) SWIFT_CONFIGURATION="release" ;;
         --kill-running) KILL_RUNNING="1" ;;
+        --no-install) INSTALL="" ;;
         *)
-            echo "Usage: $0 [--release] [--kill-running]" >&2
+            echo "Usage: $0 [--release] [--kill-running] [--no-install]" >&2
             exit 2
             ;;
     esac
     shift
 done
+
+if [ -n "$KILL_RUNNING" ] && [ -z "$INSTALL" ]; then
+    echo "Error: --kill-running cannot be combined with --no-install" >&2
+    exit 2
+fi
 
 swift_build() {
     if [ -n "$SWIFT_CONFIGURATION" ]; then
@@ -31,6 +38,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/.build"
 APP_PATH="$BUILD_DIR/DanTerm Dev.app"
 INSTALL_APP="$HOME/Applications/DanTerm Dev.app"
+LSREGISTER="${DANTERM_DEV_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister}"
 SRC_DIR="$SCRIPT_DIR/app"
 LIB_DIR="$SCRIPT_DIR/lib"
 
@@ -61,6 +69,8 @@ cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Dev"
 mkdir -p "$APP_PATH/Contents/Helpers"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 chmod +x "$APP_PATH/Contents/Helpers/danterm"
+cp "$BIN_PATH/DanTermInstanceIdentityTool" "$APP_PATH/Contents/Helpers/danterm-instance-identity"
+chmod +x "$APP_PATH/Contents/Helpers/danterm-instance-identity"
 cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 
@@ -109,18 +119,19 @@ codesign --force --deep --sign "Apple Development" --entitlements "$SCRIPT_DIR/d
 if [ -n "$KILL_RUNNING" ]; then
     killall "DanTerm Dev" 2>/dev/null || true
     for _ in $(seq 1 50); do
-        pgrep -x "DanTerm Dev" >/dev/null || break
+        killall -0 "DanTerm Dev" 2>/dev/null || break
         sleep 0.1
     done
 fi
 
-# Install the freshly built app so launchers using ~/Applications are in sync.
-mkdir -p "$HOME/Applications"
-rm -rf "$INSTALL_APP"
-cp -R "$APP_PATH" "$INSTALL_APP"
-
-# Force macOS to rescan the app bundle so icon changes take effect immediately.
-/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$INSTALL_APP"
-
 echo "Built: $APP_PATH"
-echo "Installed: $INSTALL_APP"
+if [ -n "$INSTALL" ]; then
+    # Install the freshly built app so launchers using ~/Applications are in sync.
+    mkdir -p "$HOME/Applications"
+    rm -rf "$INSTALL_APP"
+    cp -R "$APP_PATH" "$INSTALL_APP"
+
+    # Force macOS to rescan the app bundle so icon changes take effect immediately.
+    "$LSREGISTER" -f "$INSTALL_APP"
+    echo "Installed: $INSTALL_APP"
+fi

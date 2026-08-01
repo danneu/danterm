@@ -221,7 +221,7 @@ per-instance path and is the checklist for what must be namespaced.
 - [x] 1. Model pooled instance identities and namespace runtime state
 - [x] 2. Make control-socket ownership race-safe
 - [x] 3. Add explicit fresh-start and notification policies
-- [ ] 4. Launch isolated development slots and update tooling contracts
+- [x] 4. Launch isolated development slots and update tooling contracts
 
 ## Implementation notes
 
@@ -237,3 +237,18 @@ per-instance path and is the checklist for what must be namespaced.
 - App launch arguments use `--fresh` for recovery policy and `--background` for
   unattended activation. Background launches never request notification
   authorization; `--fresh` without `--background` is the foreground priming mode.
+- The launcher is a Python executable so it can hold a BSD `flock` descriptor
+  across `execve` without adding a launcher to production bundles. Slot locks
+  and staged bundles share `~/Library/Caches/com.danneu.danterm-dev-slots`,
+  independent of any checkout. A development-only identity helper bridges the
+  launcher to `DanTermProtocol` so the naming and path scheme remains
+  single-source.
+- Slot apps inherit the GUI launchd environment plus canonical account values,
+  rather than the launching agent's environment. This preserves session-owned
+  values such as `SSH_AUTH_SOCK` while dropping unmanaged agent state.
+- A worktree-local build lock serializes canonical bundle assembly through slot
+  cloning. Slot ownership stays user-global; the narrower build lock only keeps
+  two launchers in one checkout from racing on its shared `.build` artifact.
+- The launcher passes its slot descriptor as an app argument. DanTerm marks it
+  close-on-exec at entry, retaining the claim itself without leaking it into pane
+  children that could outlive a killed app and delay reuse.

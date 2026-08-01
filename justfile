@@ -186,7 +186,7 @@ test-pty-external:
     @/usr/bin/ssh -o BatchMode=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no localhost true >/dev/null || { echo "test-pty-external requires Remote Login and passwordless localhost ssh"; exit 1; }
     DANTERM_PTY_EXTERNAL=1 DANTERM_TMUX_PATH="$(command -v tmux)" swift test --package-path lib/TerminalPTY --filter TerminalPTYExternalTests
 
-# Run CLI smoke test (requires GUI access, jq, and DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1)
+# Run CLI smoke test in an isolated development slot (requires GUI access and jq)
 test-cli:
     ./scripts/tests/danterm-cli_test.sh
 
@@ -205,6 +205,18 @@ build-run:
 # Build an optimized DanTerm Dev app, install it, and run it
 build-run-optimized:
     ./dev-build-run.sh --release
+
+# Build and launch an unattended isolated development slot
+launch:
+    ./scripts/dev-slot-launcher.py
+
+# Build and launch an optimized unattended isolated development slot
+launch-optimized:
+    ./scripts/dev-slot-launcher.py --release
+
+# Build and launch a foreground slot to grant notification authorization once
+launch-prime:
+    ./scripts/dev-slot-launcher.py --foreground
 
 # Show current version
 version:
