@@ -272,6 +272,85 @@ struct TerminalSelectionUnitTests {
         #expect(terminal.selectedText == "ab")
     }
 
+    @Test("nearest-unit fallback searches the whole stream backward, then forward")
+    func nearestUnitFallbackAcrossBlankRegions() throws {
+        // Intent: a terminal-token query on a row that projects no unit resolves to
+        //   the nearest unit in the whole retained stream -- backward first, forward
+        //   only when nothing precedes the click.
+        // Why it exists: this is one of the three whole-stream dependencies an
+        //   upcoming point-local projection change has to reproduce inside a bounded
+        //   slice. A slice that searched only the clicked row would return an empty
+        //   range for every case here, and the change would look correct because no
+        //   existing test covers a click on a blank row between content.
+        // Scenario: a user double-clicks in the vertical gap between two command
+        //   outputs, below the last output, or above the first.
+
+        // Blank line between two content lines: falls back to the preceding line.
+        var between = try #require(Terminal(columns: 8, rows: 4))
+        between.feed(Array("alpha\r\n\r\nbeta\r\n".utf8))
+        for column in [0, 3, 7] {
+            #expect(between.terminalTokenRange(at: .init(row: 1, column: column)) == range(0, 0, 0, 5))
+        }
+        between.setSelection(between.terminalTokenRange(at: .init(row: 1, column: 3)))
+        #expect(between.selectedText == "alpha")
+
+        // Blank rows after all content: still backward, across more than one row.
+        var after = try #require(Terminal(columns: 8, rows: 4))
+        after.feed(Array("alpha\r\nbeta\r\n".utf8))
+        #expect(after.terminalTokenRange(at: .init(row: 2, column: 0)) == range(1, 0, 1, 4))
+        #expect(after.terminalTokenRange(at: .init(row: 3, column: 0)) == range(1, 0, 1, 4))
+
+        // Blank rows before all content: nothing precedes, so the search runs forward.
+        var before = try #require(Terminal(columns: 8, rows: 4))
+        before.feed(Array("\r\n\r\nbeta\r\n".utf8))
+        #expect(before.terminalTokenRange(at: .init(row: 0, column: 0)) == range(2, 0, 2, 4))
+        #expect(before.terminalTokenRange(at: .init(row: 1, column: 2)) == range(2, 0, 2, 4))
+        before.setSelection(before.terminalTokenRange(at: .init(row: 0, column: 4)))
+        #expect(before.selectedText == "beta")
+
+        // A whitespace row inside a soft-wrapped line is NOT a fallback case: it
+        // projects its own whitespace unit, so the query stays on the clicked row.
+        var wrapped = try #require(Terminal(columns: 6, rows: 4))
+        wrapped.feed(Array("abcdef      ghi".utf8))
+        #expect(wrapped.terminalTokenRange(at: .init(row: 1, column: 3)) == range(1, 0, 1, 6))
+        wrapped.setSelection(wrapped.terminalTokenRange(at: .init(row: 1, column: 3)))
+        #expect(wrapped.selectedText == "      ")
+        #expect(wrapped.trimmedLogicalLineRange(at: .init(row: 1, column: 3)) == range(0, 0, 2, 3))
+    }
+
+    @Test("expansion on whitespace inside a soft-wrapped line truncates at the global last-content boundary")
+    func expansionWhitespaceTruncatesAtLastContent() throws {
+        // Intent: a terminal-token query on trailing whitespace inside a
+        //   soft-wrapped line yields a whitespace unit that crosses the wrap and
+        //   ends at the stream's last-content boundary, not at a row edge.
+        // Why it exists: the second of the three whole-stream dependencies. The
+        //   boundary is a property of the whole retained stream, so a bounded slice
+        //   that recomputed it from the clicked row's own content would truncate in
+        //   the wrong place -- and would still return a plausible-looking range.
+        // Scenario: a command emits a line with trailing padding that wraps past the
+        //   window width, and the user double-clicks inside the padding.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("ab    cd      ".utf8))
+
+        // Content ends mid-row-1 at "d"; the trailing run spans row 1 into row 2 and
+        // stops where retained content stops.
+        let trailing = terminal.terminalTokenRange(at: .init(row: 1, column: 2))
+        #expect(trailing == range(1, 2, 2, 2))
+        terminal.setSelection(trailing)
+        #expect(terminal.selectedText == "      ")
+
+        // Clicking further into the same run, on the next row, resolves to the same
+        // unit rather than to a row-local one.
+        #expect(terminal.terminalTokenRange(at: .init(row: 2, column: 0)) == trailing)
+        #expect(terminal.terminalTokenRange(at: .init(row: 2, column: 3)) == trailing)
+
+        // The interior whitespace run is a separate unit, bounded by content.
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 3)) == range(0, 2, 0, 6))
+
+        // Line trimming drops the trailing run entirely.
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 1, column: 2)) == range(0, 0, 1, 2))
+    }
+
     private func range(
         _ startRow: Int,
         _ startColumn: Int,

@@ -284,10 +284,12 @@ exists. `I6` deliberately preserves today's behavior rather than fixing it.
       (the viewport-row mapping a real click takes). Characterizing the click
       mapping was not in the original step; it turned out to be necessary --
       see `F5`.
-- [ ] Write `PO4` and `PO6` first and verify each fails against a naive
-      per-line slice that recomputes the last-content boundary and searches
-      only the clicked row. A test that passes against the naive version is not
-      guarding `F1`'s dependencies.
+- [x] **Done 2026-07-31.** `PO4`
+      (`nearestUnitFallbackAcrossBlankRegions`) and `PO6`
+      (`expansionWhitespaceTruncatesAtLastContent`) are written and green
+      against unmodified code, and each was verified to **fail** against a
+      naive per-line slice -- see `F6` for the falsification and the one
+      assertion it showed was not carrying its weight.
 
 ### Phase 4 -- implement the selected direction
 
@@ -695,6 +697,50 @@ that says what it is doing -- so it cannot regress silently afterward.
 
 **Not fixed here.** The follow-up stands as written and is still out of scope.
 This finding only makes it concrete enough to schedule.
+
+### F6 -- falsifying `PO4` and `PO6` against a naive slice
+
+- Status: **verified 2026-07-31.** Phase 3.
+
+Phase 3 requires that `PO4` and `PO6` be shown to fail against a naive per-line
+slice before they are trusted, because a test that passes against the naive
+version is not guarding `F1`'s whole-stream dependencies -- it would sit green
+through exactly the regression it was written to catch.
+
+**Method.** A scratchpad probe (never committed) models the naive slice
+literally: for a click at `(row, column)`, build a fresh `Terminal` holding only
+that row's cells, query it at `(0, column)`, and translate the result back by
+`+row`. That is "slice one row, recompute every boundary from the slice",
+including last-content. No source file was patched; the real engine was left
+untouched and consulted only for the true answer.
+
+**Result.** Five of six queried points diverge outright:
+
+| obligation | case | real | naive |
+|---|---|---|---|
+| `PO4` | blank line between content lines | `(0,0)-(0,5)` | `(1,3)-(1,3)` |
+| `PO4` | blank row after all content | `(1,0)-(1,4)` | `(2,0)-(2,0)` |
+| `PO4` | blank row before all content | `(2,0)-(2,4)` | `(0,4)-(0,4)` |
+| `PO4` | blank soft-wrapped continuation row | `(1,0)-(1,6)` | `(1,0)-(1,6)` |
+| `PO6` | trailing whitespace crossing the wrap | `(1,2)-(2,2)` | `(1,2)-(1,6)` |
+| `PO6` | same run, clicked on the next row | `(1,2)-(2,2)` | `(2,0)-(2,2)` |
+
+The naive slice returns a *plausible* range in every failing case -- an empty
+range at the click, or a run truncated at the row edge instead of at the
+stream's last-content boundary. None of them look obviously broken, which is
+the point: without these assertions the optimization would appear to work.
+
+**The one assertion that was not carrying its weight.** The blank
+soft-wrapped continuation row agrees at token granularity, because that row
+projects its own whitespace unit and a row-local slice finds the same one. That
+assertion discriminates fallback-from-projected -- a real and separate job,
+worth keeping -- but it does **not** guard the whole-stream dependency, and
+claiming otherwise would have been wrong. The same sub-case is guarded by its
+*line* assertion, which spans the wrapped line: real `(0,0)-(2,3)` against
+naive `(1,0)-(1,0)`. That assertion is already in the test.
+
+So all four `PO4` sub-cases and both `PO6` points are guarded, but one of them
+is guarded by line granularity rather than by the token query it sits next to.
 
 ## Decision log
 
