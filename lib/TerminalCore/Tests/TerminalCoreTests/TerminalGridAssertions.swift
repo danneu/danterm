@@ -5,12 +5,14 @@ import Testing
 
 func expectValidGrid(
     _ geometry: TerminalGeometry,
+    context: Comment? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     for row in geometry.rows {
         expectValidRow(
             kinds: row.cells.map(\.kind),
             isSoftWrapped: row.isSoftWrapped,
+            context: context,
             sourceLocation: sourceLocation
         )
     }
@@ -18,21 +20,28 @@ func expectValidGrid(
 
 func expectValidGrid(
     _ terminal: Terminal,
+    context: Comment? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     #expect(
         terminal.scrollbackByteCount <= terminal.scrollbackBudgetBytes,
+        context,
         sourceLocation: sourceLocation
     )
     #expect(
         terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount,
+        context,
         sourceLocation: sourceLocation
     )
 
     var liveTerminal = terminal
     liveTerminal.scrollToBottom()
-    let activeRows = inspectedViewportRows(of: liveTerminal, sourceLocation: sourceLocation)
-    expectValidStream(activeRows, sourceLocation: sourceLocation)
+    let activeRows = inspectedViewportRows(
+        of: liveTerminal,
+        context: context,
+        sourceLocation: sourceLocation
+    )
+    expectValidStream(activeRows, context: context, sourceLocation: sourceLocation)
 
     var primary = terminal
     primary.feed(Array("\u{1B}[?1047l".utf8))
@@ -40,17 +49,26 @@ func expectValidGrid(
     var primaryRows: [(cells: [TerminalCell], isSoftWrapped: Bool)] =
         (0..<primary.scrollbackRowCount).compactMap { index in
         guard let row = primary.scrollbackRow(at: index) else {
-            Issue.record("missing scrollback row \(index)", sourceLocation: sourceLocation)
+            if let context {
+                Issue.record(context, sourceLocation: sourceLocation)
+            } else {
+                Issue.record("missing scrollback row \(index)", sourceLocation: sourceLocation)
+            }
             return nil
         }
-        #expect(row.cells.count == primary.geometry.columns, sourceLocation: sourceLocation)
+        #expect(
+            row.cells.count == primary.geometry.columns,
+            context,
+            sourceLocation: sourceLocation
+        )
         return (row.cells, row.isSoftWrapped)
     }
     primaryRows.append(contentsOf: inspectedViewportRows(
         of: primary,
+        context: context,
         sourceLocation: sourceLocation
     ))
-    expectValidStream(primaryRows, sourceLocation: sourceLocation)
+    expectValidStream(primaryRows, context: context, sourceLocation: sourceLocation)
 }
 
 /// Checks the snapshot-provable OSC 133 prompt-anchor invariants (I1 ownership, I2 logical-line
@@ -102,25 +120,32 @@ func semanticPromptStateViolations(
 
 private func inspectedViewportRows(
     of terminal: Terminal,
+    context: Comment?,
     sourceLocation: SourceLocation
 ) -> [(cells: [TerminalCell], isSoftWrapped: Bool)] {
     terminal.geometry.rows.enumerated().map { rowIndex, row in
         let cells = row.cells.indices.compactMap {
             terminal.cell(row: rowIndex, column: $0)
         }
-        #expect(cells.count == terminal.geometry.columns, sourceLocation: sourceLocation)
+        #expect(
+            cells.count == terminal.geometry.columns,
+            context,
+            sourceLocation: sourceLocation
+        )
         return (cells, row.isSoftWrapped)
     }
 }
 
 private func expectValidStream(
     _ inspectedRows: [(cells: [TerminalCell], isSoftWrapped: Bool)],
+    context: Comment?,
     sourceLocation: SourceLocation
 ) {
     for row in inspectedRows {
         expectValidRow(
             kinds: row.cells.map(\.kind),
             isSoftWrapped: row.isSoftWrapped,
+            context: context,
             sourceLocation: sourceLocation
         )
     }
@@ -133,10 +158,12 @@ private func expectValidStream(
                 if column + 1 < cells.count {
                     #expect(
                         cells[column + 1].style == cells[column].style,
+                        context,
                         sourceLocation: sourceLocation
                     )
                     #expect(
                         cells[column + 1].hyperlink == cells[column].hyperlink,
+                        context,
                         sourceLocation: sourceLocation
                     )
                 }
@@ -144,25 +171,37 @@ private func expectValidStream(
                 if column > 0 {
                     #expect(
                         cells[column - 1].style == cells[column].style,
+                        context,
                         sourceLocation: sourceLocation
                     )
                     #expect(
                         cells[column - 1].hyperlink == cells[column].hyperlink,
+                        context,
                         sourceLocation: sourceLocation
                     )
                 }
             case .spacerHead:
-                #expect(rowIndex + 1 < inspectedRows.count, sourceLocation: sourceLocation)
+                #expect(
+                    rowIndex + 1 < inspectedRows.count,
+                    context,
+                    sourceLocation: sourceLocation
+                )
                 if rowIndex + 1 < inspectedRows.count,
                    let deferredHead = inspectedRows[rowIndex + 1].cells.first
                 {
-                    #expect(deferredHead.kind == .wideHead, sourceLocation: sourceLocation)
+                    #expect(
+                        deferredHead.kind == .wideHead,
+                        context,
+                        sourceLocation: sourceLocation
+                    )
                     #expect(
                         deferredHead.style == cells[column].style,
+                        context,
                         sourceLocation: sourceLocation
                     )
                     #expect(
                         deferredHead.hyperlink == cells[column].hyperlink,
+                        context,
                         sourceLocation: sourceLocation
                     )
                 }
@@ -176,23 +215,32 @@ private func expectValidStream(
 private func expectValidRow(
     kinds: [TerminalCellKind],
     isSoftWrapped: Bool,
+    context: Comment?,
     sourceLocation: SourceLocation
 ) {
     for column in kinds.indices {
         switch kinds[column] {
         case .wideHead:
-            #expect(column + 1 < kinds.count, sourceLocation: sourceLocation)
+            #expect(column + 1 < kinds.count, context, sourceLocation: sourceLocation)
             if column + 1 < kinds.count {
-                #expect(kinds[column + 1] == .wideTail, sourceLocation: sourceLocation)
+                #expect(
+                    kinds[column + 1] == .wideTail,
+                    context,
+                    sourceLocation: sourceLocation
+                )
             }
         case .wideTail:
-            #expect(column > 0, sourceLocation: sourceLocation)
+            #expect(column > 0, context, sourceLocation: sourceLocation)
             if column > 0 {
-                #expect(kinds[column - 1] == .wideHead, sourceLocation: sourceLocation)
+                #expect(
+                    kinds[column - 1] == .wideHead,
+                    context,
+                    sourceLocation: sourceLocation
+                )
             }
         case .spacerHead:
-            #expect(column == kinds.count - 1, sourceLocation: sourceLocation)
-            #expect(isSoftWrapped, sourceLocation: sourceLocation)
+            #expect(column == kinds.count - 1, context, sourceLocation: sourceLocation)
+            #expect(isSoftWrapped, context, sourceLocation: sourceLocation)
         case .padding, .narrow:
             break
         }

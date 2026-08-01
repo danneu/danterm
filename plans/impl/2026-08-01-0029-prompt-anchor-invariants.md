@@ -255,7 +255,7 @@ precisely.
   the universal snapshot oracle for I1/I2/I4; add the I3 output-floor and I6
   redraw-scope behavioral brackets beside the existing I5 guard-domain
   tests. Re-proves PO2, PO5, PO6 under the revised proof-shape rule.
-- [ ] **4. test(terminal): sweep resize injection points over the dialect
+- [x] **4. test(terminal): sweep resize injection points over the dialect
   recordings** -- seeded deterministic event-stream transform with
   intra-chunk placement, snapshot oracle per event, observable-outcome
   assertions (preserved completed output, coherent cursor and content,
@@ -268,3 +268,14 @@ precisely.
   original provenance bytes. The corpus oracle substitutes valid DanTerm
   provenance only in memory before using `NeutralTerminalRecording.replay`, so
   provenance validation does not exclude their authored event streams.
+- The resize sweep seeds over real OSC 133 `A`, `N`, and `P` mark offsets inside
+  feed chunks and moves the next authored resize to immediately before the
+  selected mark. This targets the erase-to-re-mark window while preserving the
+  fixture's later repaint and authoritative final prompt outcome.
+
+## Follow Up
+
+- `scripts/tests/dev-build-configuration-contract_test.sh` currently fails
+  because `scripts/dev-build-run.sh` does not forward `--release`; this is
+  unrelated to the prompt-anchor test changes but prevents `just test` from
+  completing.
