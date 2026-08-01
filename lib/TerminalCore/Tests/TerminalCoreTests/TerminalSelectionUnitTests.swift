@@ -186,6 +186,92 @@ struct TerminalSelectionUnitTests {
         #expect(link.hyperlink.uri == "https://a.example/x")
     }
 
+    @Test("selection range APIs index the active stream while alternate screen is active")
+    func alternateScreenSelectionRangesCharacterization() throws {
+        // Intent: characterize -- not fix -- what character, terminal-token, and
+        //   line range queries return while the alternate screen is active over
+        //   retained primary scrollback.
+        // Why it exists: this is the baseline an upcoming point-local projection
+        //   optimization must preserve. The optimization replaces whole-stream row
+        //   materialization with indexed access, and alternate screen is the one
+        //   configuration where the active stream is not simply "all primary
+        //   history" -- scrollback and alt rows are concatenated with a hard seam.
+        //   Without this test the refactor could silently re-coordinate alt-screen
+        //   selection and nothing would fail.
+        // Scenario: a session scrolls output into history, then a full-screen
+        //   program takes over the alternate screen; the user selects text.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ab cd\r\nef gh\r\nij kl\r\n".utf8))
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}[HWX YZ".utf8))
+
+        #expect(terminal.isAlternateScreenActive)
+        #expect(terminal.scrollbackRowCount == 5)
+
+        // The active stream is primary scrollback (rows 0-4) followed by the two
+        // alternate rows (5-6). Range queries index that concatenation.
+        #expect(terminal.characterRange(at: .init(row: 0, column: 0)) == range(0, 0, 0, 1))
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 0)) == range(0, 0, 0, 2))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 0)) == range(0, 0, 1, 1))
+
+        // The alternate rows sit at the end of the same stream, and a soft wrap
+        // joins them: the logical line spans the seam from row 5 into row 6.
+        #expect(terminal.characterRange(at: .init(row: 5, column: 0)) == range(5, 0, 5, 1))
+        #expect(terminal.terminalTokenRange(at: .init(row: 5, column: 0)) == range(5, 0, 5, 2))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 5, column: 0)) == range(5, 0, 6, 1))
+        #expect(terminal.terminalTokenRange(at: .init(row: 6, column: 0)) == range(5, 3, 6, 1))
+
+        for (row, expected) in [(0, "ab"), (5, "WX"), (6, "YZ")] {
+            var selected = terminal
+            selected.setSelection(selected.terminalTokenRange(at: .init(row: row, column: 0)))
+            #expect(selected.selectedText == expected)
+        }
+
+        // The last retained primary row is truncated where the alternate screen
+        // replaced the live rows beneath it: "ij kl" reads back as "ij k".
+        var line = terminal
+        line.setSelection(line.trimmedLogicalLineRange(at: .init(row: 4, column: 0)))
+        #expect(line.selectedText == "ij k")
+    }
+
+    @Test("a click on the alternate screen resolves against primary scrollback, not the alt row under the cursor")
+    func alternateScreenClickCoordinateMismatchCharacterization() throws {
+        // Intent: characterize the viewport-row -> stream-row mapping a real click
+        //   takes while the alternate screen is active, which does not currently
+        //   address the alternate rows at all.
+        // Why it exists: `scrollProjection` reports `totalRows == rows` while alt is
+        //   active, so `topRow` is 0 and viewport row 0 maps to stream row 0 -- the
+        //   oldest primary scrollback row -- even though the alt content the user
+        //   sees lives at the far end of the same stream. The point-local
+        //   optimization must preserve this mapping rather than accidentally
+        //   correcting it, because correcting it is a separate, deliberate change.
+        //   Pinning it also stops the bug from being reintroduced silently after
+        //   it is eventually fixed on purpose.
+        // Scenario: a full-screen program is showing "WX YZ"; the user
+        //   double-clicks the visible "WX" and the selection resolves to "ab",
+        //   text from primary scrollback that is not on screen.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ab cd\r\nef gh\r\nij kl\r\n".utf8))
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}[HWX YZ".utf8))
+
+        #expect(terminal.scrollProjection.totalRows == 2)
+        #expect(terminal.scrollProjection.topRow == 0)
+
+        var state = TerminalInteractionState()
+        let decision = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, clickCount: 2),
+            terminal: terminal,
+            state: &state
+        )
+        guard case let .set(selected) = decision.selectionMutation else {
+            Issue.record("double-click down must set a selection, got \(String(describing: decision.selectionMutation))")
+            return
+        }
+        // Not "WX", which is what row 0 of the alternate screen displays.
+        #expect(selected == range(0, 0, 0, 2))
+        terminal.setSelection(selected)
+        #expect(terminal.selectedText == "ab")
+    }
+
     private func range(
         _ startRow: Int,
         _ startColumn: Int,

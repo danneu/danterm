@@ -276,8 +276,14 @@ exists. `I6` deliberately preserves today's behavior rather than fixing it.
 
 ### Phase 3 -- pin behavior before changing it (only on "take")
 
-- [ ] Land `PO7`'s alternate-screen characterization against unmodified code;
-      it must be green before any refactor. No such coverage exists today.
+- [x] **Done 2026-07-31.** `PO7`'s alternate-screen characterization is green
+      against unmodified code, as two tests in
+      `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSelectionUnitTests.swift`:
+      `alternateScreenSelectionRangesCharacterization` (the stream the range
+      APIs index) and `alternateScreenClickCoordinateMismatchCharacterization`
+      (the viewport-row mapping a real click takes). Characterizing the click
+      mapping was not in the original step; it turned out to be necessary --
+      see `F5`.
 - [ ] Write `PO4` and `PO6` first and verify each fails against a naive
       per-line slice that recomputes the last-content boundary and searches
       only the clicked row. A test that passes against the naive version is not
@@ -650,6 +656,45 @@ and it is still missing.
 ### F4 -- post-change measurement
 
 - Status: **pending.** Phase 5, only on "take".
+
+### F5 -- the alternate-screen coordinate mismatch, characterized concretely
+
+- Status: **characterized 2026-07-31**, while writing `PO7`. Phase 3.
+
+The candidate direction's follow-up note already named "the current mismatch
+between viewport row coordinates and the active text projection when retained
+primary scrollback exists" and put it out of scope. Writing `PO7` turned that
+abstract note into a reproduction, which changes what `PO7` has to pin.
+
+**What the active stream is.** With 5 rows of primary scrollback and a 2-row
+alternate screen showing `WX YZ`, the range APIs index a concatenation:
+primary scrollback at stream rows 0-4, the alternate rows at 5-6, joined at a
+hard seam. Selecting at stream row 5 gives `WX`; at row 6, `YZ`. That part is
+coherent.
+
+**Where it breaks.** `scrollProjection` reports `totalRows == 2` while alt is
+active -- it describes the alternate viewport only -- so `topRow` is 0. A click
+maps through `streamPosition` as `topRow + row`, so **viewport row 0 maps to
+stream row 0**: the oldest primary scrollback row, not the alternate row under
+the cursor. The two coordinate systems disagree by the full scrollback depth.
+
+The user-visible consequence: with a full-screen program showing `WX YZ`, a
+double-click on the visible `WX` selects `"ab"` -- text from primary scrollback
+that is not on screen anywhere. Both facts are now pinned by
+`alternateScreenClickCoordinateMismatchCharacterization`.
+
+**Why this belongs to `PO7` and not to this optimization.** `I6` preserves
+today's alternate-screen coordinates deliberately, so the characterization
+records the mismatch as the baseline rather than fixing it. The risk `PO7`
+guards is real and now specific: an indexed implementation that recomputed the
+click's stream row from the active projection would *accidentally correct* this,
+which would look like the optimization working and would in fact be an unrelated
+behavior change smuggled in under a performance commit. Pinning it also means
+that when the mismatch is fixed on purpose, the fix has to delete an assertion
+that says what it is doing -- so it cannot regress silently afterward.
+
+**Not fixed here.** The follow-up stands as written and is still out of scope.
+This finding only makes it concrete enough to schedule.
 
 ## Decision log
 
