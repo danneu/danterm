@@ -322,6 +322,8 @@ See [docs/ci.md](docs/ci.md) for details on secrets, signing, and troubleshootin
 
 ## CLI API Documentation
 
+`integrations/danterm/SKILL.md` is the source of truth for the `danterm` CLI in this repo. Read it from the working tree, not the installed `danterm` skill (`~/.claude/skills/danterm` and the Codex equivalent) -- that one is provisioned from the last production release and lags this branch.
+
 When changing the `danterm` CLI surface (commands, flags, stdout shape, parser errors), update `integrations/danterm/SKILL.md` in the same change.
 
 ## Further reading
