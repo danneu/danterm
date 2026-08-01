@@ -1166,8 +1166,25 @@ public struct Terminal: Equatable, Sendable {
         // the earliest point it can be recognized -- the new head has just been stamped,
         // which is what makes the row above it identifiable as a stale copy.
         guard kind == .prompt, promptRedrawMode != .disabled else { return }
-        let top = topOfStalePromptHeads(above: cursor.row)
-        for row in top..<cursor.row { clearPromptCells(in: row) }
+        var top = topOfStalePromptHeads(above: cursor.row)
+        // Also reclaim rows the resize path already emptied. Those are stamped but hold
+        // nothing, so removing them costs no visible content -- and leaving them is what
+        // makes the prompt appear to walk down the pane, since the shell repaints below
+        // the block it vacated.
+        while top > 0, rows[top - 1].semanticPrompt != .none, retainedContentEnd(in: rows[top - 1]) == 0 {
+            top -= 1
+        }
+        guard top < cursor.row else { return }
+        // Remove the stale rows rather than blanking them in place. Each stale-width
+        // overflow costs the prompt one row: the shell repaints from one row lower and
+        // never reclaims the row above, so blanking would trade a visible fragment for a
+        // blank line and accumulate one per overflow -- the prompt walking down the pane
+        // with a growing gap above it. Deleting closes the gap, and moving the cursor up
+        // by the same count keeps the shell's own relative cursor arithmetic valid,
+        // exactly as it stays valid across an ordinary scroll.
+        let removed = cursor.row - top
+        moveAndFillRows(in: top..<activeScrollRegion.upperBound, by: -removed, pushesToScrollback: false)
+        cursor.row -= removed
     }
 
     private func semanticPromptKind(in options: [UInt8]) -> SemanticPromptRow {

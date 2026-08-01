@@ -226,6 +226,26 @@ struct TerminalShellDialectTests {
         expectValidGrid(terminal)
     }
 
+    @Test("a narrowing drag does not walk the prompt down the pane")
+    func staleWidthRepaintDoesNotAccumulateBlankRows() throws {
+        // Intent: after a continuous narrowing drag, the reprinted prompt sits directly
+        //   under the command that started the shell, with no blank rows between.
+        // Why it exists: every stale-width overflow costs the prompt one row -- the shell
+        //   repaints one row lower and never reclaims the row it left. Clearing that row
+        //   in place traded a visible fragment for a blank line, so a drag accumulated
+        //   one blank per overflow and the prompt visibly walked down the pane. The rows
+        //   have to be removed, not emptied.
+        // Scenario: the maintainer's third report, on a build carrying both earlier
+        //   fixes: no fragment, but eight blank rows between the prompts.
+        let terminal = try replay("zsh-stale-width-prompt-drift")
+        let lines = terminal.screenText.split(separator: "\n", omittingEmptySubsequences: false)
+        let command = try #require(lines.firstIndex { $0.hasPrefix("╰ $ zsh") })
+        let head = try #require(lines.lastIndex { $0.hasPrefix("╭ ~") })
+
+        #expect(head == command + 1)
+        expectValidGrid(terminal)
+    }
+
     @Test("stacked one-row prompts are history, not debris")
     func oneRowPromptsAreNotTreatedAsDebris() throws {
         // Intent: a single-row prompt entered repeatedly with no output stacks prompt
