@@ -1023,3 +1023,80 @@ Evidence for the OSC 133 dialect. Parser probes feed
   readline never rewrites the upper row, so DanTerm reflows it as the
   soft-wrapped logical line it is and nothing more.
 - Next action: none. Phase 4 is complete.
+
+### F20 -- the prompt blink during a resize is DanTerm's blanking, not the shell re-running its prompt
+
+- Status: settled as a diagnosis, open as a fix. **Reopens one item after Phase
+  4 closed** -- the dialect is correct and complete; what this finding measures
+  is the cost of the blanking contract it buys.
+- Date and investigator: 2026-07-31 (measurement), 2026-08-01 (maintainer
+  confirmation).
+- Commit and worktree state: this finding's commit. The deferral described below
+  was built, measured, and reverted -- it is evidence, not shipped code.
+- Result or artifact paths: none committed. The two probes are scratch
+  (`probe-winch-prompt.py`, `probe-winch-latency.py`); the replay comparison ran
+  as a throwaway suite against the committed fixtures and needs no fixture of
+  its own.
+- Question: the maintainer asked whether the prompt blinking during a width drag
+  meant the prompt command was re-firing.
+- It is not the shell. Twenty SIGWINCHes per shell, each with the maintainer's
+  real config and Starship loaded: fish ran `fish_prompt` 0 times, zsh ran
+  `precmd` 0 times, Bash ran `PROMPT_COMMAND` 0 times. zsh re-expands `PROMPT`
+  20 times, but Starship's zsh integration assigns an already-computed string in
+  `precmd`, so the re-expansion re-substitutes a literal. No fork, no prompt
+  recomputation, in any shell.
+- It is ours, and it is the declared contract working as specified.
+  `clearPromptForResizeIfNeeded` empties the prompt block synchronously inside
+  `Terminal.resize()` and the repaint arrives asynchronously over the PTY, so
+  every frame drawn in between shows a blanked prompt. Replayed across all 11
+  committed `Fixtures/danterm/` recordings, essentially every resize step blanks:
+  zsh and fish lose 2-3 rows, Bash 1.
+- How long the blank lasts, per resize, 20 samples each:
+
+  | Shell | first repaint byte | repaint complete | blank frames at 60Hz | repaint size |
+  |---|---|---|---|---|
+  | zsh | 40ms (28-53) | 40ms | 2.4 | 182 B |
+  | fish | 0.7ms | 66ms (49-75) | 3.9 | 260 B |
+  | Bash | 0.1ms | 0.1ms | 0.0 | 14 B |
+
+- The per-shell split is a confirmed prediction, not a coincidence. `redraw=last`
+  blanks one row and readline answers in 0.1ms with 14 bytes, so Bash cannot
+  blink; `.full` blanks 2-3 rows and waits 40-66ms, so zsh and fish must. The
+  maintainer independently confirmed exactly that pattern in a real pane: zsh and
+  fish blink, Bash does not (F19 recorded Bash as clean before this was measured).
+- The candidate fix, measured and reverted: defer the blank from resize to the
+  arrival of the repaint's own prompt mark, so the erase and the redraw land in
+  one frame. This is the F16-round-2 move (`62c5e4b`) -- clear when the head is
+  stamped rather than on resize -- applied to the blanking instead of the
+  reclaim. Across all 11 recordings it left a **byte-identical final grid and
+  full history**, dropped blanked resizes from ~100% of steps to ~0, and the
+  mid-drag frame held the whole prompt instead of nothing.
+- Why it cannot be unconditional, which is the substance of this finding. The
+  blank does double duty: running *before* reflow, it also removes the prompt
+  from reflow's input. Defer it and the stale-width prompt reflows, splicing its
+  old width into the middle of a live logical line -- the I4 hazard, inverted to
+  come from live content rather than blanks. Splitting the operation (drop the
+  wrap claims at resize, empty the cells at the mark) fails by construction:
+  keeping the prompt visible *means* keeping its content, and content reflows.
+  Gating the deferral to `.full` resolves it and is principled rather than a
+  patch -- `.full` means the shell repaints the whole block, `.last` means it
+  repaints one row and everything above is ordinary content that must reflow
+  normally. Bash is `.last` and does not blink, so it gives up nothing.
+- What the change would still cost: about eight unit cases assert that a resize
+  *alone* blanks the prompt, which stops being true when the blank waits for a
+  mark; and `bashRequiresRedrawLast`'s counterfactuals stop discriminating,
+  because deferral makes a wrong `redraw=1` on Bash non-destructive -- a better
+  outcome that removes the lever that test uses to prove the declaration matters.
+- Not yet proven: the mid-drag frame was sampled on two recordings and read as
+  "prompt briefly stale, one row wider" (self-corrected by the reclaim when the
+  mark lands). It was not checked on the messier drift and overflow recordings,
+  and no per-event invariant check ran during a deferred replay.
+- Next action: none here. `plans/wip/playful-soaring-horizon.md` deferred
+  anti-flicker work explicitly "until flicker is actually observed" -- that gate
+  is now met, and its D2 oracle and D3 resize-injection sweep are the instruments
+  this change needs, since deferral moves behavior into precisely the erase-to-
+  re-mark window D3 exists to probe. Sequence it after that plan, not before.
+  Note the plan's objection to anti-flicker is aimed at Kitty-style copy-back
+  (putting content back into rows the reclaim identifies by emptiness) and does
+  not apply here: deferral never removes the content, and still empties the rows
+  immediately before the reclaim walks them.

@@ -324,6 +324,15 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   to be rebuilt twice within the same day for rounds two and three, each time to
   answer the same question -- does a bare `Terminal` reproduce this. Two call
   sites behind an env gate is less than the cost of restoring it a fourth time.
+- [ ] OPEN: the prompt blinks during a width drag under `redraw=1`, and it is
+  our blanking rather than the shell (F20). Diagnosed and measured -- zsh blanks
+  for 2.4 frames per resize step, fish 3.9, Bash 0 -- with the maintainer
+  confirming that split in a real pane. The candidate fix (defer the blank to the
+  repaint's mark, `.full` only) was built, measured against all 11 recordings for
+  an identical final grid, and reverted. Sequenced behind
+  `plans/wip/playful-soaring-horizon.md`, whose D2 oracle and D3 injection sweep
+  are the instruments it needs; that plan deferred anti-flicker work "until
+  flicker is actually observed", and F20 is that observation.
 
 ## Rejected
 
@@ -541,3 +550,26 @@ first try, stepping the replay named the exact resize, and the recording caught
 an ordering mistake -- clearing the wrap claim before the reclaim that reads it
 as evidence -- that the synthetic case built from the same understanding could
 not see.
+
+F20 is the loop's turn after that, and it reopens the doc one item wide. The
+maintainer asked why the prompt blinks during a drag, which reads like another
+render defect and is not one: the dialect is correct, the shells are innocent --
+none of the three re-runs its prompt command on SIGWINCH -- and the blink is the
+`redraw=1` contract being honored literally. `clearPromptForResizeIfNeeded`
+empties the prompt block synchronously and the repaint arrives asynchronously,
+so the gap between them is a blank the user sees, 2.4 frames wide on zsh and 3.9
+on fish. Bash is clean for the same structural reason F19 gave: `redraw=last`
+blanks one row and readline answers in 0.1ms. That per-shell split was predicted
+from the mode and then confirmed independently at the keyboard, which is the
+first time in this doc a prediction from the dialect ran ahead of the observation
+rather than behind it.
+
+The fix is not free and that is the finding. Blanking runs *before* reflow, so it
+is not only hiding the prompt -- it is keeping a stale-width prompt out of
+reflow's input. Deferring it re-admits that content, and the attempt to keep both
+properties (drop the wrap claims at resize, empty the cells at the mark) fails by
+construction: keeping the prompt visible means keeping its content, and content
+reflows. What survives is the same fix scoped by the mode that already means
+"the shell repaints the whole block". The measurement that a design costs
+something is worth as much as the measurement that it works, and this doc has
+now recorded both for the same contract.
