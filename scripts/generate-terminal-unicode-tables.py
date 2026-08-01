@@ -287,6 +287,16 @@ def hexadecimal_array(values: list[int], values_per_line: int = 10) -> str:
     return "\n".join(lines)
 
 
+def boolean_array(values: list[bool], values_per_line: int = 12) -> str:
+    lines = []
+    for index in range(0, len(values), values_per_line):
+        chunk = ", ".join(
+            str(value).lower() for value in values[index : index + values_per_line]
+        )
+        lines.append(f"        {chunk},")
+    return "\n".join(lines)
+
+
 def parse_canonical_data(
     text: str,
 ) -> tuple[dict[int, list[int]], list[tuple[int, int, int]]]:
@@ -565,13 +575,16 @@ def reference_ranges(
 
 
 def reference_source(ranges: list[tuple[int, int, int, bool, bool]]) -> str:
-    entries = "\n".join(
-        f"    UnicodeReferenceRange(lowerBound: 0x{lower:X}, upperBound: 0x{upper:X}, "
-        f"cellWidth: {width}, isExtendedPictographic: {str(pictographic).lower()}, "
-        f"isEmojiModifier: {str(is_modifier).lower()}),"
-        for lower, upper, width, pictographic, is_modifier in ranges
-    )
+    lower_bounds = [lower for lower, _, _, _, _ in ranges]
+    upper_bounds = [upper for _, upper, _, _, _ in ranges]
+    widths = [width for _, _, width, _, _ in ranges]
+    pictographic_flags = [pictographic for _, _, _, pictographic, _ in ranges]
+    modifier_flags = [is_modifier for _, _, _, _, is_modifier in ranges]
     return f'''// Generated independently from the official Unicode {UNICODE_VERSION} property files.
+//
+// Flat, explicitly typed parallel arrays: an array-of-initializer literal at this
+// scale costs gigabytes of swift-frontend memory to typecheck, while flat
+// homogeneous literals typecheck linearly. The structs are rebuilt at runtime.
 
 /// Exhaustive expected-property run used to validate every Unicode scalar offline.
 struct UnicodeReferenceRange {{
@@ -582,9 +595,33 @@ struct UnicodeReferenceRange {{
     let isEmojiModifier: Bool
 }}
 
-let unicodeReferenceRanges: [UnicodeReferenceRange] = [
-{entries}
-]
+let unicodeReferenceRanges: [UnicodeReferenceRange] = UnicodeReferenceTables.lowerBounds.indices.map {{
+    UnicodeReferenceRange(
+        lowerBound: UnicodeReferenceTables.lowerBounds[$0],
+        upperBound: UnicodeReferenceTables.upperBounds[$0],
+        cellWidth: UnicodeReferenceTables.cellWidths[$0],
+        isExtendedPictographic: UnicodeReferenceTables.pictographicFlags[$0],
+        isEmojiModifier: UnicodeReferenceTables.emojiModifierFlags[$0]
+    )
+}}
+
+private enum UnicodeReferenceTables {{
+    static let lowerBounds: [UInt32] = [
+{hexadecimal_array(lower_bounds)}
+    ]
+    static let upperBounds: [UInt32] = [
+{hexadecimal_array(upper_bounds)}
+    ]
+    static let cellWidths: [UInt8] = [
+{integer_array(widths)}
+    ]
+    static let pictographicFlags: [Bool] = [
+{boolean_array(pictographic_flags)}
+    ]
+    static let emojiModifierFlags: [Bool] = [
+{boolean_array(modifier_flags)}
+    ]
+}}
 '''
 
 
@@ -606,13 +643,15 @@ def grapheme_reference_ranges(
 
 
 def grapheme_reference_source(ranges: list[tuple[int, int, int, bool]]) -> str:
-    entries = "\n".join(
-        f"    UnicodeGraphemeReferenceRange(lowerBound: 0x{lower:X}, "
-        f"upperBound: 0x{upper:X}, breakClass: {break_class}, "
-        f"isEmojiVariationBase: {str(is_variation_base).lower()}),"
-        for lower, upper, break_class, is_variation_base in ranges
-    )
+    lower_bounds = [lower for lower, _, _, _ in ranges]
+    upper_bounds = [upper for _, upper, _, _ in ranges]
+    break_classes = [break_class for _, _, break_class, _ in ranges]
+    variation_flags = [is_variation_base for _, _, _, is_variation_base in ranges]
     return f'''// Generated independently from the official Unicode {UNICODE_VERSION} property files.
+//
+// Flat, explicitly typed parallel arrays: an array-of-initializer literal at this
+// scale costs gigabytes of swift-frontend memory to typecheck, while flat
+// homogeneous literals typecheck linearly. The structs are rebuilt at runtime.
 
 /// Exhaustive grapheme-property run used to validate every Unicode scalar offline.
 struct UnicodeGraphemeReferenceRange {{
@@ -622,9 +661,29 @@ struct UnicodeGraphemeReferenceRange {{
     let isEmojiVariationBase: Bool
 }}
 
-let unicodeGraphemeReferenceRanges: [UnicodeGraphemeReferenceRange] = [
-{entries}
-]
+let unicodeGraphemeReferenceRanges: [UnicodeGraphemeReferenceRange] = UnicodeGraphemeReferenceTables.lowerBounds.indices.map {{
+    UnicodeGraphemeReferenceRange(
+        lowerBound: UnicodeGraphemeReferenceTables.lowerBounds[$0],
+        upperBound: UnicodeGraphemeReferenceTables.upperBounds[$0],
+        breakClass: UnicodeGraphemeReferenceTables.breakClasses[$0],
+        isEmojiVariationBase: UnicodeGraphemeReferenceTables.variationBaseFlags[$0]
+    )
+}}
+
+private enum UnicodeGraphemeReferenceTables {{
+    static let lowerBounds: [UInt32] = [
+{hexadecimal_array(lower_bounds)}
+    ]
+    static let upperBounds: [UInt32] = [
+{hexadecimal_array(upper_bounds)}
+    ]
+    static let breakClasses: [UInt8] = [
+{integer_array(break_classes)}
+    ]
+    static let variationBaseFlags: [Bool] = [
+{boolean_array(variation_flags)}
+    ]
+}}
 '''
 
 
@@ -648,14 +707,24 @@ def parse_grapheme_corpus(text: str) -> list[tuple[int, list[int], list[bool]]]:
 
 
 def grapheme_corpus_source(cases: list[tuple[int, list[int], list[bool]]]) -> str:
-    entries = "\n".join(
-        "    GraphemeBreakCorpusFixture("
-        f"line: {line}, "
-        f"scalars: [{', '.join(f'0x{value:X}' for value in scalars)}], "
-        f"boundaries: [{', '.join(str(value).lower() for value in boundaries)}]),"
-        for line, scalars, boundaries in cases
-    )
+    lines = [line for line, _, _ in cases]
+    scalar_offsets: list[int] = []
+    scalar_pool: list[int] = []
+    boundary_pool: list[bool] = []
+    for _, scalars, boundaries in cases:
+        if len(boundaries) != len(scalars) + 1:
+            raise RuntimeError("corpus fixture boundary count must be scalar count + 1")
+        scalar_offsets.append(len(scalar_pool))
+        scalar_pool.extend(scalars)
+        boundary_pool.extend(boundaries)
+    scalar_offsets.append(len(scalar_pool))
     return f'''// Generated from Unicode {UNICODE_VERSION} GraphemeBreakTest.txt; do not edit.
+//
+// Flat, explicitly typed parallel arrays with an offsets-plus-pool encoding for
+// the variable-length fields: an array-of-initializer literal with nested array
+// literals per element costs gigabytes of swift-frontend memory to typecheck,
+// while flat homogeneous literals typecheck linearly. The fixtures are rebuilt
+// at runtime.
 
 /// One official UAX #29 sequence with every boundary retained verbatim.
 struct GraphemeBreakCorpusFixture {{
@@ -664,9 +733,35 @@ struct GraphemeBreakCorpusFixture {{
     let boundaries: [Bool]
 }}
 
-let graphemeBreakCorpus: [GraphemeBreakCorpusFixture] = [
-{entries}
-]
+let graphemeBreakCorpus: [GraphemeBreakCorpusFixture] = GraphemeBreakCorpusTables.lines.indices.map {{ index in
+    let scalarLower = GraphemeBreakCorpusTables.scalarOffsets[index]
+    let scalarUpper = GraphemeBreakCorpusTables.scalarOffsets[index + 1]
+    // Every fixture holds exactly one more boundary than scalars, so the
+    // boundary pool's offsets are the scalar offsets shifted by the fixture
+    // index; the generator validates that invariant when it emits the pools.
+    return GraphemeBreakCorpusFixture(
+        line: GraphemeBreakCorpusTables.lines[index],
+        scalars: Array(GraphemeBreakCorpusTables.scalarPool[scalarLower..<scalarUpper]),
+        boundaries: Array(
+            GraphemeBreakCorpusTables.boundaryPool[(scalarLower + index)..<(scalarUpper + index + 1)]
+        )
+    )
+}}
+
+private enum GraphemeBreakCorpusTables {{
+    static let lines: [Int] = [
+{integer_array(lines)}
+    ]
+    static let scalarOffsets: [Int] = [
+{integer_array(scalar_offsets)}
+    ]
+    static let scalarPool: [UInt32] = [
+{hexadecimal_array(scalar_pool)}
+    ]
+    static let boundaryPool: [Bool] = [
+{boolean_array(boundary_pool)}
+    ]
+}}
 '''
 
 
