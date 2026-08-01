@@ -18,6 +18,10 @@ build/
 
 # SwiftPM
 .spm-build/
+# The `just test` gate builds lib/TerminalCore with extra -Xswiftc args, which change
+# SwiftPM's build-argument hash. Sharing .build/ with a bare `swift test` made the two
+# invalidate each other on every switch; the gate gets its own scratch path instead.
+.build-gate/
 .swiftpm/
 Package.resolved
 __pycache__/
