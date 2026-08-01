@@ -151,8 +151,9 @@ precisely.
 
 - **PO1.** The oracle passes per-event over every `Fixtures/danterm/`
   recording, discovered by enumeration rather than named lists, so a future
-  fixture cannot be silently excluded. This is the proof that the invariants
-  as stated actually describe the shipped behavior.
+  fixture cannot be silently excluded. This proves that the snapshot
+  invariants I1, I2, and I4 describe the shipped behavior; targeted behavioral
+  tests prove the transition invariants I3, I5, and I6.
 - **PO2.** Every check in the oracle can fire: for each, a test demonstrates a
   stream or state that violates it and is caught. An oracle that cannot fail
   proves nothing.

@@ -13,7 +13,7 @@ import TerminalCoreRecording
 struct TerminalSemanticPromptInvariantTests {
     @Test("every DanTerm recording preserves prompt-anchor invariants after every event")
     func recordingCorpus() throws {
-        // Intent: every authored recording runs every stable and mutation-level prompt check.
+        // Intent: every authored recording runs every snapshot-provable prompt check.
         // Why it exists: named fixture lists let future recordings silently miss the oracle.
         // Scenario: a new live-pane recording is added to Fixtures/danterm without a test edit.
         let root = try #require(Bundle.module.resourceURL)
@@ -130,6 +130,29 @@ struct TerminalSemanticPromptInvariantTests {
         #expect(stamps[1].stamp == .vacated)
         #expect(stamps[1].isEmpty)
         expectSemanticPromptInvariants(last, context: "redraw last")
+    }
+
+    @Test(
+        "reclaim preserves earlier prompt rows outside full redraw mode",
+        arguments: ["last", "0"]
+    )
+    func redrawModeScopesReclaim(_ redrawMode: String) throws {
+        // Intent: a new prompt head under redraw=last or redraw=0 does not reclaim an
+        //   earlier soft-wrapped prompt head or pull the cursor upward.
+        // Why it exists: I6 constrains reclaim as well as resize blanking, so the mode
+        //   guard needs a focused behavioral bracket independent of dialect recordings.
+        // Scenario: a non-full-redraw shell marks a new prompt directly below a wrapped
+        //   earlier head whose shape would be reclaimable under redraw=1.
+        var terminal = try #require(Terminal(columns: 4, rows: 5))
+        terminal.feed(Array("\u{1B}]133;A;redraw=\(redrawMode)\u{7}ABCDX\r".utf8))
+        let cursorBeforeMark = try #require(terminal.geometry.cursor)
+
+        terminal.feed(Array("\u{1B}]133;A;redraw=\(redrawMode)\u{7}new".utf8))
+
+        #expect(terminal.geometry.cursor?.row == cursorBeforeMark.row)
+        #expect(terminal.screenText.hasPrefix("ABCD\nnew"))
+        #expect(terminal.semanticPromptRowsForTesting.filter { $0.stamp == .prompt }.count == 2)
+        expectSemanticPromptInvariants(terminal, context: "redraw=\(redrawMode) reclaim")
     }
 
     @Test("reclaim runs only on coherent primary-screen geometry")
