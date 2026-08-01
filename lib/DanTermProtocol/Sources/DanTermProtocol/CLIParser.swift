@@ -302,22 +302,32 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"
     let parsed: ParsedTapePane
     do {
         parsed = try parseTapePaneArgs(args)
     } catch let error as TapePaneParseError {
         switch error {
         case .missingPane, .missingPaneArg:
-            throw CLIParseError("usage: danterm pane tape --pane <pane-id>")
+            throw CLIParseError(usage)
+        case .fromNowRequiresFollow:
+            throw CLIParseError("--from-now requires --follow\n\(usage)")
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
             throw CLIParseError("unexpected argument: \(argument)")
         }
     }
+    var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
+    if parsed.follow {
+        params["follow"] = .bool(true)
+    }
+    if parsed.fromNow {
+        params["fromNow"] = .bool(true)
+    }
     return CLICommand(
         method: Methods.paneTape,
-        params: ["pane": .string(parsed.pane)],
+        params: params,
         outputMode: .json
     )
 }

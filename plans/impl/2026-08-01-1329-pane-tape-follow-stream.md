@@ -353,7 +353,7 @@ Decisive constraints:
 - [x] 1. feat(pty): sequence flight recordings and serve cursor snapshots
 - [x] 2. feat(ipc): add the portable pane-tape follow layer and method
 - [x] 3. feat(app): stream pane tape events to follow subscribers
-- [ ] 4. feat(cli): follow a pane tape as JSON Lines
+- [x] 4. feat(cli): follow a pane tape as JSON Lines
 
 ## Implementation notes
 

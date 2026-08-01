@@ -89,5 +89,13 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        .testTarget(
+            name: "DanTermCLITests",
+            dependencies: ["DanTermCLI", "DanTermProtocol"],
+            path: "cli-tests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
     ]
 )

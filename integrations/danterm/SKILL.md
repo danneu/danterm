@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output or dump a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -25,7 +25,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
-    danterm pane tape --pane <pane-id>
+    danterm pane tape --pane <pane-id> [--follow] [--from-now]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
     danterm doctor
@@ -136,6 +136,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
 | "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
+| "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
 | "what tabs/panes are open?" | `ls` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
@@ -251,6 +252,17 @@ unsupported-backend error.
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \\
         --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
 
+### Follow a pane flight recording
+
+`--follow` writes the bounded backlog and each new event immediately as JSON
+Lines. `--from-now` skips the backlog and waits for the next live event. The
+stream is raw and unscrubbed, and may contain a `gap` record when a slow reader
+falls behind the recorder's bounded ring. A pane close writes an `end` record;
+app exit is a clean EOF.
+
+    danterm pane tape --pane "$PANE_ID" --follow
+    danterm pane tape --pane "$PANE_ID" --follow --from-now
+
 ### Send keys to another pane
 
 Use this for interrupts, replies to prompts, or scripted interaction with an
@@ -351,6 +363,7 @@ else prints nothing on success and exits 0.
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
+| `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
 
 `agent attach --kind <kind> --id <session-id>` is a silent mutation: no stdout
 on success.

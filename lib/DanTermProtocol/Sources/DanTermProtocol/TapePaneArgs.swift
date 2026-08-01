@@ -4,9 +4,13 @@ import Foundation
 /// Keeps pane-tape targeting independent from the broader command parser.
 public struct ParsedTapePane: Equatable {
     public let pane: String
+    public let follow: Bool
+    public let fromNow: Bool
 
-    public init(pane: String) {
+    public init(pane: String, follow: Bool = false, fromNow: Bool = false) {
         self.pane = pane
+        self.follow = follow
+        self.fromNow = fromNow
     }
 }
 
@@ -14,6 +18,7 @@ public struct ParsedTapePane: Equatable {
 public enum TapePaneParseError: Error, Equatable {
     case missingPane
     case missingPaneArg
+    case fromNowRequiresFollow
     case unknownFlag(String)
     case unexpectedArgument(String)
 }
@@ -21,6 +26,8 @@ public enum TapePaneParseError: Error, Equatable {
 /// Parses exactly one explicit pane target without consulting ambient shell context.
 public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
     var pane: String?
+    var follow = false
+    var fromNow = false
     var index = 0
 
     while index < args.count {
@@ -32,6 +39,12 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
             }
             pane = args[index + 1]
             index += 2
+        case "--follow":
+            follow = true
+            index += 1
+        case "--from-now":
+            fromNow = true
+            index += 1
         default:
             if argument.hasPrefix("--") {
                 throw TapePaneParseError.unknownFlag(argument)
@@ -43,5 +56,8 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
     guard let pane, pane.isEmpty == false else {
         throw TapePaneParseError.missingPane
     }
-    return ParsedTapePane(pane: pane)
+    guard fromNow == false || follow else {
+        throw TapePaneParseError.fromNowRequiresFollow
+    }
+    return ParsedTapePane(pane: pane, follow: follow, fromNow: fromNow)
 }

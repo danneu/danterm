@@ -31,7 +31,7 @@ STEPS=(
     './scripts/tests/dev-build-configuration-contract_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'
-    'swift test --scratch-path .build-app-tests --filter PaneTapeFollowEncodingTests'
+    'swift test --scratch-path .build-app-tests --filter PaneTapeFollow'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/terminal-characterization-harness_test.sh'

@@ -240,10 +240,29 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(command.outputMode, .json)
     }
 
+    func testPaneTapeParsesFollowAndFromNow() throws {
+        let follow = try parseCLI(["pane", "tape", "--pane", "P1", "--follow"])
+        XCTAssertEqual(follow.params, [
+            "pane": .string("P1"),
+            "follow": .bool(true),
+        ])
+
+        let fromNow = try parseCLI([
+            "pane", "tape", "--follow", "--from-now", "--pane", "P1",
+        ])
+        XCTAssertEqual(fromNow.params, [
+            "pane": .string("P1"),
+            "follow": .bool(true),
+            "fromNow": .bool(true),
+        ])
+    }
+
     func testPaneTapeRejectsMissingAndUnexpectedArguments() {
         let cases: [([String], String)] = [
-            (["pane", "tape"], "usage: danterm pane tape --pane <pane-id>"),
-            (["pane", "tape", "--pane"], "usage: danterm pane tape --pane <pane-id>"),
+            (["pane", "tape"], "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"),
+            (["pane", "tape", "--follow"], "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"),
+            (["pane", "tape", "--pane"], "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"),
+            (["pane", "tape", "--pane", "P1", "--from-now"], "--from-now requires --follow\nusage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"),
             (["pane", "tape", "--pane", "P1", "extra"], "unexpected argument: extra"),
             (["pane", "tape", "--bogus"], "unknown flag: --bogus"),
         ]

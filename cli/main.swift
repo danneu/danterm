@@ -47,7 +47,9 @@ struct DanTermCLI {
           pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
-          pane tape --pane <pane-id>  Print the pane's replayable flight recording as JSON
+          pane tape --pane <pane-id> [--follow] [--from-now]
+                                      Print a replayable snapshot, or follow the
+                                      bounded backlog and live events as JSON Lines
           theme set [--pane <pane-id>] <name>|--clear
                                       Set or clear a pane theme
           agent attach --kind <kind> --id <session-id>
@@ -102,6 +104,15 @@ struct DanTermCLI {
             let command = try parseCLI(rawArgs)
             let environment = ProcessInfo.processInfo.environment
             let socketPath = nonEmpty(environment[EnvVars.sock]) ?? controlSocketPath().path
+            if command.method == Methods.paneTape, command.params["follow"] == .bool(true) {
+                signal(SIGPIPE, SIG_IGN)
+                try requestPaneTapeFollow(
+                    command,
+                    socketPath: socketPath,
+                    environment: environment
+                )
+                exit(0)
+            }
             let response = try request(command, socketPath: socketPath, environment: environment)
             if let error = response.error {
                 throw CLIError(error.message)
@@ -125,7 +136,7 @@ struct DanTermCLI {
         socketPath: String,
         environment: [String: String]
     ) throws -> JsonRpcResponse {
-        let fd = try connectSocket(path: socketPath)
+        let fd = try connectSocket(path: socketPath, receiveTimeout: true)
         defer { Darwin.close(fd) }
 
         guard let helloLine = try readLine(from: fd) else {
@@ -133,17 +144,7 @@ struct DanTermCLI {
         }
         try validateHello(helloLine)
 
-        let requestId = UUID().uuidString
-        var params = command.params
-        let context = IpcRequestContext(
-            paneId: nonEmpty(environment[EnvVars.pane])
-        )
-        params[IpcRequestContext.paramsKey] = context.jsonValue
-        let request = JsonRpcRequest(
-            id: .string(requestId),
-            method: command.method,
-            params: .object(params)
-        )
+        let (requestId, request) = makeRequest(command, environment: environment)
         try writeJSON(request, to: fd)
 
         while let line = try readLine(from: fd) {
@@ -154,6 +155,46 @@ struct DanTermCLI {
             }
         }
         throw CLIError("DanTerm closed the connection")
+    }
+
+    private static func requestPaneTapeFollow(
+        _ command: CLICommand,
+        socketPath: String,
+        environment: [String: String]
+    ) throws {
+        let fd = try connectSocket(path: socketPath, receiveTimeout: false)
+        defer { Darwin.close(fd) }
+
+        guard let helloLine = try readLine(from: fd) else {
+            return
+        }
+        try validateHello(helloLine)
+
+        let (requestId, request) = makeRequest(command, environment: environment)
+        try writeJSON(request, to: fd)
+        _ = try renderPaneTapeFollowStream(
+            socket: fd,
+            output: STDOUT_FILENO,
+            requestId: requestId
+        )
+    }
+
+    private static func makeRequest(
+        _ command: CLICommand,
+        environment: [String: String]
+    ) -> (id: String, request: JsonRpcRequest) {
+        let requestId = UUID().uuidString
+        var params = command.params
+        let context = IpcRequestContext(paneId: nonEmpty(environment[EnvVars.pane]))
+        params[IpcRequestContext.paramsKey] = context.jsonValue
+        return (
+            requestId,
+            JsonRpcRequest(
+                id: .string(requestId),
+                method: command.method,
+                params: .object(params)
+            )
+        )
     }
 
     private static func runDoctor(_ args: [String]) throws {
@@ -181,11 +222,11 @@ struct DanTermCLI {
         }
     }
 
-    private static func connectSocket(path: String) throws -> Int32 {
+    private static func connectSocket(path: String, receiveTimeout: Bool) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw CLIError("failed to create socket") }
         do {
-            try configureSocketTimeouts(fd)
+            try configureSocket(fd, receiveTimeout: receiveTimeout)
         } catch {
             Darwin.close(fd)
             throw error
@@ -230,9 +271,11 @@ struct DanTermCLI {
         }
     }
 
-    private static func configureSocketTimeouts(_ fd: Int32) throws {
+    private static func configureSocket(_ fd: Int32, receiveTimeout: Bool) throws {
         try setNoSigPipe(fd)
-        try setSocketTimeout(fd, option: SO_RCVTIMEO)
+        if receiveTimeout {
+            try setSocketTimeout(fd, option: SO_RCVTIMEO)
+        }
         try setSocketTimeout(fd, option: SO_SNDTIMEO)
     }
 
