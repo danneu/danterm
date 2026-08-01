@@ -29,13 +29,16 @@ struct LegacyComputingSpriteGeometryTests {
         #expect(smooth == smoothGrids.map(LegacyComputingTopology.smoothMosaic(grid:)))
 
         for offset in 0..<8 {
-            #expect(LegacyComputingPattern(scalar: 0x1FB68 + UInt32(offset)).topology
+            let scalar = UInt32(0x1FB68 + offset)
+            #expect(LegacyComputingPattern(scalar: scalar).topology
                 == .edgeTriangle(edge: offset % 4, inverted: offset < 4))
         }
         for offset in 0..<6 {
-            #expect(LegacyComputingPattern(scalar: 0x1FB70 + UInt32(offset)).topology
+            let vertical = UInt32(0x1FB70 + offset)
+            let horizontal = UInt32(0x1FB76 + offset)
+            #expect(LegacyComputingPattern(scalar: vertical).topology
                 == .verticalEighth(index: offset + 1))
-            #expect(LegacyComputingPattern(scalar: 0x1FB76 + UInt32(offset)).topology
+            #expect(LegacyComputingPattern(scalar: horizontal).topology
                 == .horizontalEighth(index: offset + 1))
         }
         let blockPolicies = [
@@ -49,7 +52,8 @@ struct LegacyComputingSpriteGeometryTests {
             "checker-odd", "horizontal-bands-second-fourth",
         ]
         for (offset, policy) in blockPolicies.enumerated() {
-            #expect(LegacyComputingPattern(scalar: 0x1FB7C + UInt32(offset)).topology
+            let scalar = UInt32(0x1FB7C + offset)
+            #expect(LegacyComputingPattern(scalar: scalar).topology
                 == .legacyBlock(policy: policy))
         }
         #expect(LegacyComputingPattern(scalar: 0x1FB98).topology == .diagonalFill(ascending: true))
@@ -57,17 +61,20 @@ struct LegacyComputingSpriteGeometryTests {
         #expect(LegacyComputingPattern(scalar: 0x1FB9A).topology == .pairedEdgeTriangles(horizontal: true))
         #expect(LegacyComputingPattern(scalar: 0x1FB9B).topology == .pairedEdgeTriangles(horizontal: false))
         for offset in 0..<4 {
-            #expect(LegacyComputingPattern(scalar: 0x1FB9C + UInt32(offset)).topology
+            let scalar = UInt32(0x1FB9C + offset)
+            #expect(LegacyComputingPattern(scalar: scalar).topology
                 == .shadedCorner(index: offset))
         }
         let cornerMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
         for (offset, mask) in cornerMasks.enumerated() {
-            #expect(LegacyComputingPattern(scalar: 0x1FBA0 + UInt32(offset)).topology
+            let scalar = UInt32(0x1FBA0 + offset)
+            #expect(LegacyComputingPattern(scalar: scalar).topology
                 == .cornerDiagonals(mask: mask))
         }
         #expect(LegacyComputingPattern(scalar: 0x1FBAF).topology == .mixedCross)
         for offset in 0..<3 {
-            #expect(LegacyComputingPattern(scalar: 0x1FBBD + UInt32(offset)).topology
+            let scalar = UInt32(0x1FBBD + offset)
+            #expect(LegacyComputingPattern(scalar: scalar).topology
                 == .negativeDiagonal(index: offset))
         }
         #expect(LegacyComputingPattern(scalar: 0x1FBCE).topology == .fractionalLeft(thirds: 2))
@@ -85,9 +92,11 @@ struct LegacyComputingSpriteGeometryTests {
             "filled-top-right", "filled-bottom-left", "filled-bottom-right", "filled-top-left",
         ]
         for offset in 0..<16 {
-            #expect(LegacyComputingPattern(scalar: 0x1FBD0 + UInt32(offset)).topology
+            let diagonal = UInt32(0x1FBD0 + offset)
+            let circle = UInt32(0x1FBE0 + offset)
+            #expect(LegacyComputingPattern(scalar: diagonal).topology
                 == .cellDiagonals(segments: diagonalSegments[offset]))
-            #expect(LegacyComputingPattern(scalar: 0x1FBE0 + UInt32(offset)).topology
+            #expect(LegacyComputingPattern(scalar: circle).topology
                 == .legacyCircle(shape: circleShapes[offset]))
         }
     }
