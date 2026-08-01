@@ -70,8 +70,10 @@ primary screen independently follows the primary resize contract above.
 
 ## Proof obligations
 
-- Precomposed and decomposed Spanish examples render, select, erase, and search
-  correctly.
+- Search compares whole graphemes by Unicode 17.0 canonical caseless keys, so
+  canonically equivalent forms and root-locale full case folds match without
+  crossing cell boundaries. Compatibility decomposition and locale-sensitive
+  casing remain excluded.
 - Chinese wide characters and U+1F618 render with stable geometry and survive
   all grid mutations without corruption.
 - Every supported emoji sequence is one selection and editing unit even when

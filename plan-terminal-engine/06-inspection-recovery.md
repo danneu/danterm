@@ -36,11 +36,12 @@ operation preserves whether the source projection ended in a newline.
 Linear selection uses the same serialization: it joins soft-wrapped rows,
 places `\n` at included hard boundaries, preserves selected spaces and empty
 logical lines, and never splits a grapheme cluster or wide cell. Search is a
-literal search over the same full-history projection. It is ASCII
-case-insensitive and otherwise Unicode-exact initially, can span soft wraps but
-not an unrequested hard newline, selects the newest match first, navigates
-toward older matches with Next and newer matches with Previous, and wraps
-around at either end.
+literal search over the same full-history projection. It compares whole
+graphemes by Unicode 17.0 canonical caseless keys, including root-locale full
+case folding, while excluding compatibility decomposition and locale-sensitive
+casing. It can span soft wraps but not an unrequested hard newline, selects the
+newest match first, navigates toward older matches with Next and newer matches
+with Previous, and wraps around at either end.
 
 Export and enriched recovery checkpoints capture primary-screen full history;
 alternate-screen content is transient and is not replayed into a new shell.

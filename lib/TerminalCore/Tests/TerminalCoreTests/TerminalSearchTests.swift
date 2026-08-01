@@ -5,8 +5,14 @@ import Testing
 
 /// Locks unit-aligned search to live terminal content without a stale match cache.
 struct TerminalSearchTests {
-    @Test("search folds ASCII only and requires complete non-ASCII units")
+    @Test("search matches canonical caseless graphemes and preserves their cell ranges")
     func foldingAndUnicodeExactness() throws {
+        // Intent: search compares one canonical caseless grapheme at a time and
+        //   reports the exact cell range for both normalization forms.
+        // Why it exists: boolean-only coverage allowed visually identical precomposed
+        //   and decomposed text to disagree while the old ASCII behavior looked green.
+        // Scenario: a pane contains the same Spanish letter typed in both forms and
+        //   the user searches with either form and either case.
         var terminal = try #require(Terminal(columns: 20, rows: 2))
         terminal.feed(Array("AbC ñ n\u{0303}".utf8))
 
@@ -16,17 +22,66 @@ struct TerminalSearchTests {
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 3)
         ))
-        result = terminal.beginSearch("Ñ")
-        #expect(result == false)
-        result = terminal.beginSearch("n\u{0303}")
-        #expect(result)
+
+        for needle in ["ñ", "Ñ", "N\u{0303}", "n\u{0303}"] {
+            result = terminal.beginSearch(needle)
+            #expect(result)
+            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 6),
+                end: TerminalTextPosition(row: 0, column: 7)
+            ))
+            result = terminal.searchNext()
+            #expect(result)
+            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 4),
+                end: TerminalTextPosition(row: 0, column: 5)
+            ))
+            result = terminal.searchPrevious()
+            #expect(result)
+            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 6),
+                end: TerminalTextPosition(row: 0, column: 7)
+            ))
+        }
+
         result = terminal.beginSearch("n")
         #expect(result == false)
-        result = terminal.beginSearch("ñ")
-        #expect(result)
         result = terminal.beginSearch("")
         #expect(result == false)
         #expect(terminal.activeSearchMatchRange == nil)
+    }
+
+    @Test("search keeps grapheme count and compatibility distinctions")
+    func canonicalCaselessSearchLimits() throws {
+        // Intent: full case folding stays inside one already-segmented grapheme and
+        //   canonical search does not apply compatibility decomposition.
+        // Why it exists: a whole-string fold would make sharp-s and ligatures match
+        //   multi-cell needles, while NFKD would erase visible terminal distinctions.
+        // Scenario: a user searches a pane containing characters whose case folds or
+        //   compatibility mappings expand to ordinary ASCII text.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("ß ﬁ ① Ａ".utf8))
+
+        var result = terminal.beginSearch("ß")
+        #expect(result)
+        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            start: TerminalTextPosition(row: 0, column: 0),
+            end: TerminalTextPosition(row: 0, column: 1)
+        ))
+        result = terminal.beginSearch("ss")
+        #expect(result == false)
+        result = terminal.beginSearch("ﬁ")
+        #expect(result)
+        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            start: TerminalTextPosition(row: 0, column: 2),
+            end: TerminalTextPosition(row: 0, column: 3)
+        ))
+        result = terminal.beginSearch("fi")
+        #expect(result == false)
+        result = terminal.beginSearch("1")
+        #expect(result == false)
+        result = terminal.beginSearch("A")
+        #expect(result == false)
     }
 
     @Test("newest-first navigation exposes overlaps and wraps at both ends")

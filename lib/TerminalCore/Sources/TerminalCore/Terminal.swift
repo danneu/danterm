@@ -384,6 +384,13 @@ public struct Terminal: Equatable, Sendable {
         var isHardBoundary: Bool
     }
 
+    /// Keeps search comparison allocation-free for the common one-scalar key while
+    /// retaining full folded expansions for Unicode graphemes that need them.
+    private enum SearchGraphemeKey: Equatable {
+        case scalar(UInt32)
+        case scalars([Unicode.Scalar])
+    }
+
     /// Reuses cursor reflow keys and logical-line boundaries for inspection anchors.
     private enum ReflowTextAttachment {
         case cell(key: Int, width: Int, usesStart: Bool)
@@ -2988,39 +2995,65 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func searchMatches(for query: String) -> [TextAnchorRange] {
-        let queryScalars = Array(query.unicodeScalars)
-        guard queryScalars.isEmpty == false else { return [] }
+        let needleKeys = searchGraphemeKeys(for: query)
+        guard needleKeys.isEmpty == false else { return [] }
         let units = projectionUnits()
+        guard needleKeys.count <= units.count else { return [] }
         var matches: [TextAnchorRange] = []
+        var window = [SearchGraphemeKey?](repeating: nil, count: needleKeys.count)
 
-        for startIndex in units.indices {
-            var candidate: [Unicode.Scalar] = []
-            var endIndex = startIndex
-            while endIndex < units.endIndex, candidate.count < queryScalars.count {
-                candidate.append(contentsOf: units[endIndex].scalars)
-                endIndex += 1
+        for endIndex in units.indices {
+            window[endIndex % needleKeys.count] = searchGraphemeKey(for: units[endIndex].scalars)
+            guard endIndex + 1 >= needleKeys.count else { continue }
+            let startIndex = endIndex - needleKeys.count + 1
+            var matchesNeedle = true
+            for offset in needleKeys.indices {
+                guard window[(startIndex + offset) % needleKeys.count] == needleKeys[offset] else {
+                    matchesNeedle = false
+                    break
+                }
             }
-            guard candidate.count == queryScalars.count,
-                  asciiFoldedEqual(candidate, queryScalars)
-            else { continue }
+            guard matchesNeedle else { continue }
             matches.append(TextAnchorRange(
                 start: units[startIndex].start,
-                end: units[endIndex - 1].end
+                end: units[endIndex].end
             ))
         }
         return matches
     }
 
-    private func asciiFoldedEqual(
-        _ lhs: [Unicode.Scalar],
-        _ rhs: [Unicode.Scalar]
-    ) -> Bool {
-        zip(lhs, rhs).allSatisfy { asciiFold($0) == asciiFold($1) }
+    private func searchGraphemeKeys(for query: String) -> [SearchGraphemeKey] {
+        let scalars = Array(query.unicodeScalars)
+        guard let first = scalars.first else { return [] }
+        var keys: [SearchGraphemeKey] = []
+        var cluster = [first]
+        var previous = first
+        var breakState = GraphemeBreakState()
+
+        for current in scalars.dropFirst() {
+            if graphemeBreak(between: previous, and: current, state: &breakState) {
+                keys.append(searchGraphemeKey(for: cluster))
+                cluster = [current]
+                breakState = GraphemeBreakState()
+            } else {
+                cluster.append(current)
+            }
+            previous = current
+        }
+        keys.append(searchGraphemeKey(for: cluster))
+        return keys
     }
 
-    private func asciiFold(_ scalar: Unicode.Scalar) -> UInt32 {
-        let value = scalar.value
-        return value >= 0x41 && value <= 0x5A ? value + 0x20 : value
+    private func searchGraphemeKey(for scalars: [Unicode.Scalar]) -> SearchGraphemeKey {
+        if scalars.count == 1, let scalar = scalars.first, scalar.value < 0x80 {
+            let value = scalar.value
+            return .scalar(value >= 0x41 && value <= 0x5A ? value + 0x20 : value)
+        }
+        let key = canonicalCaselessKey(for: scalars)
+        if key.count == 1, let scalar = key.first {
+            return .scalar(scalar.value)
+        }
+        return .scalars(key)
     }
 
     private func attachments(

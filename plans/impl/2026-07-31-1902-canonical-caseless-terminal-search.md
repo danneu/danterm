@@ -241,7 +241,7 @@ and now also documents AR2.
 ## Commit progress
 
 - [x] 1. feat(terminal): add canonical caseless grapheme keys
-- [ ] 2. feat(terminal): search by canonical caseless grapheme
+- [x] 2. feat(terminal): search by canonical caseless grapheme
 
 ## Implementation notes
 
@@ -253,3 +253,8 @@ and now also documents AR2.
   `(UInt32, [UInt32])` entries cost 1.1 GB to typecheck, while 13k flat
   elements cost 80 MB); flat homogeneous literals typecheck linearly and are
   proven in-tree at 31k+ elements, so no runtime decoding step is needed.
+- Search represents one-scalar keys inline and retains only a needle-sized
+  circular window, so ASCII cells avoid normalization allocations and every
+  projected unit is keyed once. On the same optimized 179x66 saturated-history
+  probe (20 iterations), cold ASCII search improved from 59.14 ms to 9.53 ms
+  mean while peak RSS changed from 384.8 MB to 386.9 MB (0.6%).
