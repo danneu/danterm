@@ -698,6 +698,18 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecording()
     }
 
+    /// Fences the recorder suffix and exact loss after a previously delivered cursor.
+    public func flightRecordingSnapshot(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        host.fencedFlightRecording(from: cursor)
+    }
+
+    /// Fences current geometry with the first cursor for a tail-only follow stream.
+    public func flightRecordingOriginFromNow() -> TerminalFlightRecordingOrigin? {
+        host.fencedFlightRecordingOriginFromNow()
+    }
+
     /// Test harness seam that fences live evidence without changing completion eligibility.
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
         let fence = performAccountedFence(kind: .diagnostic, operation: .diagnosticState)

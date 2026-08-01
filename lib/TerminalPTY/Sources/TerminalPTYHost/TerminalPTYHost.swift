@@ -738,6 +738,22 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in owner.flightTape?.snapshot() }.value
     }
 
+    /// Copies the retained suffix and exact cursor gap in one owner-queue fence.
+    package nonisolated func fencedFlightRecording(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        fence(countsAsProduction: false) { owner in
+            owner.flightTape?.cursorSnapshot(from: cursor)
+        }.value
+    }
+
+    /// Reads live geometry and the tail cursor together so resize cannot interleave them.
+    package nonisolated func fencedFlightRecordingOriginFromNow()
+        -> TerminalFlightRecordingOrigin?
+    {
+        fence(countsAsProduction: false) { owner in owner.flightTape?.fromNowOrigin() }.value
+    }
+
     /// Fences test work and drains exactly the damage accumulated through that fence.
     nonisolated public func fencedFrameState() -> TerminalPTYFrameState {
         fence(countsAsProduction: false) { owner in owner.drainedFrameState() }.value

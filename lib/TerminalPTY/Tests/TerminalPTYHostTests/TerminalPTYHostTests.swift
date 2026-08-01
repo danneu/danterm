@@ -667,6 +667,8 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
         let snapshot = try #require(host.fencedFlightRecording())
+        let fromNow = try #require(host.fencedFlightRecordingOriginFromNow())
+        let liveSuffix = try #require(host.fencedFlightRecording(from: fromNow.cursor))
         let recording = try JSONDecoder().decode(
             NeutralTerminalRecording.self,
             from: snapshot.encodedRecording()
@@ -686,6 +688,9 @@ struct TerminalPTYHostTests {
         #expect(zip(snapshot.events, snapshot.events.dropFirst()).allSatisfy {
             $0.elapsedNanoseconds <= $1.elapsedNanoseconds
         })
+        #expect(fromNow.initial == .init(columns: 96, rows: 28))
+        #expect(fromNow.cursor.nextSequence == snapshot.events.last.map { $0.sequence + 1 })
+        #expect(liveSuffix.events.isEmpty)
     }
 
     @Test("teardown reaches every job in the owned session without touching a sibling", .timeLimit(.minutes(1)))

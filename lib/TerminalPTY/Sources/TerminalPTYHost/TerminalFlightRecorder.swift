@@ -28,16 +28,66 @@ package struct TerminalFlightRecorderConfiguration: Sendable {
 
 /// Pairs one neutral transition with capture time relative to pane construction.
 public struct TerminalFlightRecordingEvent: Equatable, Sendable {
+    /// Lifetime-monotonic position assigned before retention bounds can evict the event.
+    public let sequence: UInt64
     /// Replayable transition captured at the PTY owner's actual application boundary.
     public let event: NeutralTerminalRecordingEvent
     /// Monotonic time since this pane's recorder was constructed.
     public let elapsedNanoseconds: UInt64
 
     /// Keeps timing metadata beside, but behaviorally independent from, the replay event.
-    public init(event: NeutralTerminalRecordingEvent, elapsedNanoseconds: UInt64) {
+    public init(
+        sequence: UInt64,
+        event: NeutralTerminalRecordingEvent,
+        elapsedNanoseconds: UInt64
+    ) {
+        self.sequence = sequence
         self.event = event
         self.elapsedNanoseconds = elapsedNanoseconds
     }
+}
+
+/// Resumable position whose payload watermark makes later eviction gaps exactly measurable.
+public struct TerminalFlightRecordingCursor: Equatable, Sendable {
+    /// Sequence that the next snapshot should attempt to return first.
+    public let nextSequence: UInt64
+    /// Lifetime payload bytes assigned to every event before `nextSequence`.
+    public let payloadBytesBeforeNextSequence: Int
+
+    /// Starts a backlog read before the recorder's first lifetime event.
+    public static let beginning = Self(nextSequence: 0, payloadBytesBeforeNextSequence: 0)
+
+    /// Preserves both coordinates needed to distinguish an exact gap from delivered history.
+    public init(nextSequence: UInt64, payloadBytesBeforeNextSequence: Int) {
+        precondition(payloadBytesBeforeNextSequence >= 0)
+        self.nextSequence = nextSequence
+        self.payloadBytesBeforeNextSequence = payloadBytesBeforeNextSequence
+    }
+}
+
+/// One owner-fenced cursor read, including exact loss before its retained event suffix.
+public struct TerminalFlightRecordingCursorSnapshot: Equatable, Sendable {
+    /// Oldest sequence still present at the time of the fence.
+    public let firstRetainedSequence: UInt64
+    /// Retained events at or after the requested cursor, ordered by sequence.
+    public let events: [TerminalFlightRecordingEvent]
+    /// Exact whole-event loss between the requested cursor and retained suffix.
+    public let droppedEventCount: UInt64
+    /// Exact payload loss between the requested cursor and retained suffix.
+    public let droppedPayloadBytes: Int
+    /// Cursor immediately after every event returned by this snapshot.
+    public let nextCursor: TerminalFlightRecordingCursor
+
+    /// Next lifetime sequence to be assigned after this snapshot's fence.
+    public var nextSequence: UInt64 { nextCursor.nextSequence }
+}
+
+/// Atomically pairs the geometry for a tail-only stream with its first event cursor.
+public struct TerminalFlightRecordingOrigin: Equatable, Sendable {
+    /// Pane geometry immediately before the cursor's first possible event.
+    public let initial: NeutralTerminalDimensions
+    /// Cursor that excludes every event recorded before this owner fence.
+    public let cursor: TerminalFlightRecordingCursor
 }
 
 /// Immutable dump boundary whose arrays retain feed storage by reference until encoding ends.
@@ -92,25 +142,35 @@ package final class TerminalFlightRecorder {
     private final class Node {
         let event: TerminalFlightRecordingEvent
         let payloadBytes: Int
+        let payloadBytesBeforeEvent: Int
         var next: Node?
 
-        init(event: TerminalFlightRecordingEvent, payloadBytes: Int) {
+        init(
+            event: TerminalFlightRecordingEvent,
+            payloadBytes: Int,
+            payloadBytesBeforeEvent: Int
+        ) {
             self.event = event
             self.payloadBytes = payloadBytes
+            self.payloadBytesBeforeEvent = payloadBytesBeforeEvent
         }
     }
 
     private let initial: NeutralTerminalDimensions
+    private var currentDimensions: NeutralTerminalDimensions
     private let configuration: TerminalFlightRecorderConfiguration
     private let now: @Sendable () -> UInt64
     private let startedNanoseconds: UInt64
     private var lastElapsedNanoseconds: UInt64 = 0
     private var head: Node?
     private var tail: Node?
+    private var retainedNodesBySequence: [UInt64: Node] = [:]
     private var eventCount = 0
     private var accountedBytes = 0
     private var droppedEventCount = 0
     private var droppedPayloadBytes = 0
+    private var nextSequence: UInt64 = 0
+    private var totalPayloadBytes = 0
 
     package init(
         initialDimensions: TerminalDimensions,
@@ -121,6 +181,7 @@ package final class TerminalFlightRecorder {
             columns: initialDimensions.columns,
             rows: initialDimensions.rows
         )
+        currentDimensions = initial
         self.configuration = configuration
         self.now = now
         startedNanoseconds = now()
@@ -141,15 +202,22 @@ package final class TerminalFlightRecorder {
         lastElapsedNanoseconds = elapsed
         let payloadBytes = Self.payloadBytes(of: event)
         let node = Node(
-            event: .init(event: event, elapsedNanoseconds: elapsed),
-            payloadBytes: payloadBytes
+            event: .init(sequence: nextSequence, event: event, elapsedNanoseconds: elapsed),
+            payloadBytes: payloadBytes,
+            payloadBytesBeforeEvent: totalPayloadBytes
         )
+        nextSequence += 1
+        totalPayloadBytes += payloadBytes
+        if case .resize(let columns, let rows) = event {
+            currentDimensions = .init(columns: columns, rows: rows)
+        }
         if let tail {
             tail.next = node
         } else {
             head = node
         }
         tail = node
+        retainedNodesBySequence[node.event.sequence] = node
         eventCount += 1
         accountedBytes += payloadBytes + configuration.eventOverheadBytes
         enforceBounds()
@@ -172,6 +240,52 @@ package final class TerminalFlightRecorder {
         )
     }
 
+    package func cursorSnapshot(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot {
+        precondition(cursor.nextSequence <= nextSequence)
+        precondition(cursor.payloadBytesBeforeNextSequence <= totalPayloadBytes)
+
+        let firstRetainedSequence = head?.event.sequence ?? nextSequence
+        let firstRetainedPayloadBytes = head?.payloadBytesBeforeEvent ?? totalPayloadBytes
+        let firstReturnedSequence = max(cursor.nextSequence, firstRetainedSequence)
+        var events: [TerminalFlightRecordingEvent] = []
+        events.reserveCapacity(Int(nextSequence - firstReturnedSequence))
+        var node = firstReturnedSequence == firstRetainedSequence
+            ? head
+            : retainedNodesBySequence[firstReturnedSequence]
+        while let current = node {
+            if current.event.sequence >= firstReturnedSequence {
+                events.append(current.event)
+            }
+            node = current.next
+        }
+
+        let hasGap = cursor.nextSequence < firstRetainedSequence
+        return TerminalFlightRecordingCursorSnapshot(
+            firstRetainedSequence: firstRetainedSequence,
+            events: events,
+            droppedEventCount: hasGap ? firstRetainedSequence - cursor.nextSequence : 0,
+            droppedPayloadBytes: hasGap
+                ? firstRetainedPayloadBytes - cursor.payloadBytesBeforeNextSequence
+                : 0,
+            nextCursor: .init(
+                nextSequence: nextSequence,
+                payloadBytesBeforeNextSequence: totalPayloadBytes
+            )
+        )
+    }
+
+    package func fromNowOrigin() -> TerminalFlightRecordingOrigin {
+        TerminalFlightRecordingOrigin(
+            initial: currentDimensions,
+            cursor: .init(
+                nextSequence: nextSequence,
+                payloadBytesBeforeNextSequence: totalPayloadBytes
+            )
+        )
+    }
+
     private func enforceBounds() {
         while accountedBytes > configuration.budgetBytes
             || eventCount > configuration.eventLimit
@@ -179,6 +293,7 @@ package final class TerminalFlightRecorder {
             guard let evicted = head else { break }
             head = evicted.next
             if head == nil { tail = nil }
+            retainedNodesBySequence.removeValue(forKey: evicted.event.sequence)
             eventCount -= 1
             accountedBytes -= evicted.payloadBytes + configuration.eventOverheadBytes
             droppedEventCount += 1

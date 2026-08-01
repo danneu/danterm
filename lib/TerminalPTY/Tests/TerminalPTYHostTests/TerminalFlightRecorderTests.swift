@@ -89,6 +89,85 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.droppedPayloadBytes == 1)
     }
 
+    @Test("cursor snapshots retain stable lifetime sequences across eviction")
+    func cursorSnapshotsRetainStableSequences() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2, 3]))
+
+        let delivered = recorder.cursorSnapshot(from: .beginning)
+        let suffix = recorder.cursorSnapshot(from: .init(
+            nextSequence: 1,
+            payloadBytesBeforeNextSequence: 1
+        ))
+        recorder.record(.feed([4, 5, 6, 7]))
+        recorder.record(.resize(columns: 100, rows: 30))
+
+        let retained = recorder.cursorSnapshot(from: delivered.nextCursor)
+        let truncatedBacklog = recorder.cursorSnapshot(from: .beginning)
+        #expect(delivered.events.map(\.sequence) == [0, 1])
+        #expect(suffix.events.map(\.sequence) == [1])
+        #expect(delivered.nextCursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 3))
+        #expect(retained.firstRetainedSequence == 2)
+        #expect(retained.events.map(\.sequence) == [2, 3])
+        #expect(retained.droppedEventCount == 0)
+        #expect(retained.droppedPayloadBytes == 0)
+        #expect(retained.nextCursor == .init(nextSequence: 4, payloadBytesBeforeNextSequence: 7))
+        #expect(truncatedBacklog.droppedEventCount == 2)
+        #expect(truncatedBacklog.droppedPayloadBytes == 3)
+        #expect(truncatedBacklog.events.map(\.sequence) == [2, 3])
+    }
+
+    @Test("cursor gap counts only undelivered events evicted after an earlier batch")
+    func cursorGapExcludesPreviouslyDeliveredEvictions() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2, 3]))
+        let delivered = recorder.cursorSnapshot(from: .beginning)
+
+        recorder.record(.feed([4, 5, 6, 7]))
+        recorder.record(.feed([8, 9, 10, 11, 12]))
+        recorder.record(.feed([13, 14, 15, 16, 17, 18]))
+
+        let snapshot = recorder.cursorSnapshot(from: delivered.nextCursor)
+        #expect(snapshot.firstRetainedSequence == 3)
+        #expect(snapshot.droppedEventCount == 1)
+        #expect(snapshot.droppedPayloadBytes == 4)
+        #expect(snapshot.events.map(\.sequence) == [3, 4])
+        #expect(snapshot.events.map(\.event) == [
+            .feed([8, 9, 10, 11, 12]),
+            .feed([13, 14, 15, 16, 17, 18]),
+        ])
+    }
+
+    @Test("from-now origin pairs current geometry with the next event cursor")
+    func fromNowOriginIsAtomicRecorderState() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1, 2]))
+        recorder.record(.resize(columns: 100, rows: 30))
+
+        let origin = recorder.fromNowOrigin()
+        recorder.record(.feed([3]))
+        let snapshot = recorder.cursorSnapshot(from: origin.cursor)
+
+        #expect(origin.initial == .init(columns: 100, rows: 30))
+        #expect(origin.cursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2))
+        #expect(snapshot.events.map(\.sequence) == [2])
+        #expect(snapshot.events.map(\.event) == [.feed([3])])
+    }
+
     @Test("disabled host configuration retains no flight recording")
     func disabledHostRetainsNothing() throws {
         let host = try TerminalPTYHost(
@@ -127,6 +206,7 @@ struct TerminalFlightRecorderTests {
         #expect(truncation["isTruncated"] as? Bool == false)
         #expect(truncation["droppedEventCount"] as? Int == 0)
         #expect(truncation["droppedPayloadBytes"] as? Int == 0)
+        #expect(events.allSatisfy { $0["sequence"] == nil })
         _ = try recording.replay()
     }
 
