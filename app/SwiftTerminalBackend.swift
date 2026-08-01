@@ -1,6 +1,7 @@
 // Process-wide Swift terminal backend: gathers launch facts, creates AppKit
 // session adapters, and retains native teardown handles through app exit.
 import Cocoa
+import DanTermProtocol
 import Darwin
 import PaneLifecycle
 #if DANTERM_TERMINAL_CHARACTERIZATION
@@ -38,7 +39,9 @@ final class SwiftTerminalBackend: TerminalBackend {
         bootstrapExecutable = bundle.bundleURL
             .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
             .path
-        recordsFlightTape = bundle.bundleIdentifier == "com.danneu.danterm-dev"
+        recordsFlightTape = DanTermBundleCapabilities.recordsFlightTape(
+            infoDictionary: bundle.infoDictionary
+        )
         #if DANTERM_TERMINAL_CHARACTERIZATION
         if let path = ProcessInfo.processInfo.environment["DANTERM_PTY_RECORDING_DIR"],
            path.isEmpty == false {

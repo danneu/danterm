@@ -32,7 +32,10 @@ let package = Package(
         ),
         .testTarget(
             name: "DanTermSupportTests",
-            dependencies: ["DanTermSupport"],
+            dependencies: [
+                "DanTermSupport",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "Tests/DanTermSupportTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

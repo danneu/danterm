@@ -56,7 +56,7 @@ cat >"$probe" <<EOF
   "config": "$owned_root/home/.config/danterm/config.json",
   "recovery": "$owned_root/home/Library/Application Support/com.danneu.danterm-terminal-characterization/Recovery",
   "socket": "$owned_root/home/Library/Caches/com.danneu.danterm-terminal-characterization/control.sock",
-  "replay": "$owned_root/tmp/danterm-scrollback"
+  "replay": "$owned_root/tmp/danterm-scrollback/com.danneu.danterm-terminal-characterization"
 }
 EOF
 assert_probe_paths "$probe" "$owned_root" \

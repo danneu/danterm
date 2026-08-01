@@ -18,8 +18,10 @@ func danTermTemporaryDirectoryURL(fileManager: FileManager = .default) -> URL {
 /// Centralize the replay directory used by restore writes, stale cleanup, and
 /// the characterization isolation probe so all three observe the same path.
 func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
-    danTermTemporaryDirectoryURL(fileManager: fileManager)
-        .appendingPathComponent("danterm-scrollback", isDirectory: true)
+    scrollbackReplayDirectoryURL(
+        identity: DanTermInstanceIdentity(),
+        temporaryDirectory: danTermTemporaryDirectoryURL(fileManager: fileManager)
+    )
 }
 
 #if DANTERM_TERMINAL_CHARACTERIZATION
@@ -1112,10 +1114,12 @@ class AppRuntime {
         }
     }
 
-    /// Delete all files in $TMPDIR/danterm-scrollback/ from prior sessions.
+    /// Delete this identity's replay files from prior sessions.
     func cleanupStaleReplayDirectory() {
-        let dir = scrollbackReplayDirectoryURL()
-        try? FileManager.default.removeItem(at: dir)
+        cleanupStaleScrollbackReplayDirectory(
+            identity: DanTermInstanceIdentity(),
+            temporaryDirectory: danTermTemporaryDirectoryURL()
+        )
     }
 
     // MARK: - Session Checkpointing

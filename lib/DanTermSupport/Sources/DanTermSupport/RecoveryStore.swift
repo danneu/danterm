@@ -8,8 +8,10 @@
 // production entry points are zero-arg (real dir/clock/pid computed here) so the
 // app's call sites are byte-for-byte unchanged, while defaulted recoveryDir/now/pid
 // seams let the round-trip test inject a temp dir + frozen clock + fixed pid.
-// Depends only on Foundation -- never on DanTermCore (a core dependency would be
-// the forbidden support->core edge), which is why SessionLock is defined here too.
+// Depends only on DanTermProtocol + Foundation -- never on DanTermCore (a core
+// dependency would be the forbidden support->core edge), which is why SessionLock
+// is defined here too.
+import DanTermProtocol
 import Foundation
 
 /// Written to ~/Library/Application Support/<bundle-id>/Recovery/session.json at launch
@@ -30,14 +32,14 @@ struct SessionLock: Codable {
 //
 // Namespacing by bundle ID isolates DanTerm.app (com.danneu.danterm) from
 // DanTerm Dev.app (com.danneu.danterm-dev) so the dev build never restores
-// from a prod session and vice versa. The bundleId parameter exists for
+// from a prod session and vice versa. The identity parameter exists for
 // tests; production code always takes the default.
 
 func recoveryDirectoryURL(
-    bundleId: String = Bundle.main.bundleIdentifier ?? "com.danneu.danterm"
+    identity: DanTermInstanceIdentity = DanTermInstanceIdentity()
 ) -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent(bundleId, isDirectory: true)
+        .appendingPathComponent(identity.bundleIdentifier, isDirectory: true)
         .appendingPathComponent("Recovery", isDirectory: true)
 }
 

@@ -5,13 +5,19 @@ import XCTest
 
 final class SocketPathTests: XCTestCase {
     func testControlSocketPathUsesCachesBundleDirectory() {
-        let path = controlSocketPath(bundleId: "com.example.one").path
+        let path = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.one")
+        ).path
         XCTAssertTrue(path.hasSuffix("/Library/Caches/com.example.one/control.sock"))
     }
 
     func testDistinctBundleIdsProduceDistinctPaths() {
-        let first = controlSocketPath(bundleId: "com.example.one")
-        let second = controlSocketPath(bundleId: "com.example.two")
+        let first = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.one")
+        )
+        let second = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.two")
+        )
         XCTAssertNotEqual(first, second)
     }
 }
