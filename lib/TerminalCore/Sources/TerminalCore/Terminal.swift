@@ -317,6 +317,43 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Indexed view of the active text projection -- retained scrollback followed by the live
+    /// rows -- so a point-local query reads only the rows it touches instead of materializing a
+    /// copy of the whole retained stream on every pointer event.
+    ///
+    /// Owns the alternate-screen seam rule, which is the one place the projection is not a plain
+    /// concatenation: while the alternate grid is active, the last scrollback row cannot soft-wrap
+    /// into the alternate rows appended after it. Keeping the rule here is what lets an indexed
+    /// reader match the materialized projection row for row.
+    ///
+    /// Constructing one is O(1): both row collections are copy-on-write and nothing here mutates
+    /// them, so the whole type is two retained buffers and a flag.
+    private struct ProjectionRows: RandomAccessCollection {
+        private let scrollback: ScrollbackBuffer
+        private let live: [GridRow]
+        private let isAlternateScreenActive: Bool
+
+        init(scrollback: ScrollbackBuffer, live: [GridRow], isAlternateScreenActive: Bool) {
+            self.scrollback = scrollback
+            self.live = live
+            self.isAlternateScreenActive = isAlternateScreenActive
+        }
+
+        var startIndex: Int { 0 }
+        var endIndex: Int { scrollback.count + live.count }
+
+        subscript(position: Int) -> GridRow {
+            guard position < scrollback.count else {
+                return live[position - scrollback.count]
+            }
+            var row = scrollback[position]
+            if isAlternateScreenActive, position == scrollback.count - 1 {
+                row.isSoftWrapped = false
+            }
+            return row
+        }
+    }
+
     /// Tracks cursor coordinates without exposing storage indices.
     private struct CellPosition: Equatable, Sendable {
         var row: Int
@@ -2370,7 +2407,7 @@ public struct Terminal: Equatable, Sendable {
     /// terminal-oriented double-click selection. Classification uses the leading
     /// scalar so a combining mark cannot move its base cell across the boundary.
     public func terminalTokenRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        let stream = activeProjectionRows()
+        let stream = activeProjection()
         guard let lastContentRow = stream.lastIndex(where: rowContainsContent),
               let origin = nearestTextUnit(
                   to: position,
@@ -2398,14 +2435,15 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns one logical line across all soft-wrapped visual rows for multi-click selection.
     public func logicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        logicalLineRange(at: position, in: activeProjectionRows())
+        logicalLineRange(at: position, in: activeProjection())
     }
 
-    /// Takes the stream so a caller that already materialized it -- `trimmedLogicalLineRange` --
-    /// does not rebuild the whole projection a second time per pointer sample.
+    /// Walks the soft-wrap chain outward from the clicked row, so the rows it reads are the
+    /// logical line's own. Takes the projection so a caller that already has one --
+    /// `trimmedLogicalLineRange`, `detectedLink` -- shares it.
     private func logicalLineRange(
         at position: TerminalTextPosition,
-        in stream: [GridRow]
+        in stream: ProjectionRows
     ) -> TerminalTextRange {
         let target = min(max(position.row, 0), stream.count - 1)
         var first = target
@@ -2428,7 +2466,7 @@ public struct Terminal: Equatable, Sendable {
     /// place would move the rows it searches. A line that projects only whitespace -- or no units at
     /// all -- collapses to an empty range at the logical line's start, matching a blank line.
     public func trimmedLogicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        let stream = activeProjectionRows()
+        let stream = activeProjection()
         let line = logicalLineRange(at: position, in: stream)
         let lineStart = TerminalTextPosition(row: line.start.row, column: 0)
         let empty = TerminalTextRange(start: lineStart, end: lineStart)
@@ -2461,7 +2499,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func explicitLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
-        let stream = activeProjectionRows()
+        let stream = activeProjection()
         guard stream.isEmpty == false else { return nil }
         let row = min(max(position.row, 0), stream.count - 1)
         let column = min(max(position.column, 0), columnCount - 1)
@@ -2513,9 +2551,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func detectedLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
-        let lineRange = logicalLineRange(at: position)
+        let stream = activeProjection()
+        let lineRange = logicalLineRange(at: position, in: stream)
         let absoluteBase = evictedRowCount
-        let stream = activeProjectionRows()
         let rowRadius = Self.maximumHyperlinkTargetBytes / columnCount + 2
         let targetRow = min(max(position.row, lineRange.start.row), lineRange.end.row)
         let firstRow = max(lineRange.start.row, targetRow - rowRadius)
@@ -2616,7 +2654,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func activationIdentity(
         in range: TerminalTextRange,
-        stream: [GridRow]
+        stream: ProjectionRows
     ) -> Int {
         guard range.start.row <= range.end.row else { return 0 }
         var identity = 0
@@ -2928,13 +2966,25 @@ public struct Terminal: Equatable, Sendable {
         ))
     }
 
+    /// Rows the active text projection spans, for the clamps that need only its extent.
+    private var projectionRowCount: Int { scrollbackRows.count + rows.count }
+
+    /// The active text projection as an indexed sequence. Every point-local query reads through
+    /// this rather than `activeProjectionRows()`, which is what keeps a pointer gesture's cost
+    /// independent of how much history is retained.
+    private func activeProjection() -> ProjectionRows {
+        ProjectionRows(
+            scrollback: scrollbackRows,
+            live: rows,
+            isAlternateScreenActive: isAlternateScreenActive
+        )
+    }
+
+    /// Materializes the whole projection. Reserved for consumers that inherently read all of
+    /// history -- search, Select All, history export, width reflow, selected-text serialization.
+    /// A query that only touches the clicked point must use `activeProjection()` instead.
     private func activeProjectionRows() -> [GridRow] {
-        var stream = scrollbackRows.asArray()
-        if isAlternateScreenActive, let last = stream.indices.last {
-            stream[last].isSoftWrapped = false
-        }
-        stream.append(contentsOf: rows)
-        return stream
+        Array(activeProjection())
     }
 
     private func projectionUnits() -> [ProjectionUnit] {
@@ -3044,7 +3094,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func normalizedCellPosition(_ position: TerminalTextPosition) -> CellPosition {
-        let stream = activeProjectionRows()
+        let stream = activeProjection()
         let row = min(max(position.row, 0), stream.count - 1)
         var column = min(max(position.column, 0), columnCount - 1)
         if stream[row].cells[column].kind == .wideTail {
@@ -3054,8 +3104,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func normalizedBoundaryPosition(_ position: TerminalTextPosition) -> TextAnchor {
-        let stream = activeProjectionRows()
-        let row = min(max(position.row, 0), stream.count - 1)
+        let row = min(max(position.row, 0), projectionRowCount - 1)
         let column = min(max(position.column, 0), columnCount)
         return TextAnchor(row: evictedRowCount + row, column: column)
     }
@@ -3064,8 +3113,7 @@ public struct Terminal: Equatable, Sendable {
         _ position: TerminalTextPosition,
         isEnd: Bool
     ) -> TextAnchor {
-        let stream = activeProjectionRows()
-        let row = min(max(position.row, 0), stream.count - 1)
+        let row = min(max(position.row, 0), projectionRowCount - 1)
         if isEnd {
             guard position.column > 0 else {
                 return TextAnchor(row: evictedRowCount + row, column: 0)
@@ -3092,7 +3140,7 @@ public struct Terminal: Equatable, Sendable {
     /// *between* rows -- so the expansion walk applies that rule structurally instead
     /// (`textUnit(before:)` / `textUnit(after:)`).
     private func rowTextUnits(
-        in stream: [GridRow],
+        in stream: ProjectionRows,
         row rowIndex: Int,
         lastContentRow: Int
     ) -> [ProjectionUnit] {
@@ -3114,7 +3162,7 @@ public struct Terminal: Equatable, Sendable {
     /// row-level content scan each and no unit construction.
     private func nearestTextUnit(
         to position: TerminalTextPosition,
-        in stream: [GridRow],
+        in stream: ProjectionRows,
         lastContentRow: Int
     ) -> ProjectionCursor? {
         let target = normalizedBoundaryPosition(position)
@@ -3142,7 +3190,7 @@ public struct Terminal: Equatable, Sendable {
     /// so does the top of the stream.
     private func textUnit(
         before cursor: ProjectionCursor,
-        in stream: [GridRow],
+        in stream: ProjectionRows,
         lastContentRow: Int
     ) -> ProjectionCursor? {
         if cursor.indexInRow > cursor.rowUnits.startIndex {
@@ -3173,7 +3221,7 @@ public struct Terminal: Equatable, Sendable {
     /// last content row, past which the projection emits nothing.
     private func textUnit(
         after cursor: ProjectionCursor,
-        in stream: [GridRow],
+        in stream: ProjectionRows,
         lastContentRow: Int
     ) -> ProjectionCursor? {
         if cursor.indexInRow < cursor.rowUnits.index(before: cursor.rowUnits.endIndex) {
@@ -3239,8 +3287,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func anchor(after position: CellPosition) -> TextAnchor {
-        let stream = activeProjectionRows()
-        let width = stream[position.row].cells[position.column].kind == .wideHead ? 2 : 1
+        let row = activeProjection()[position.row]
+        let width = row.cells[position.column].kind == .wideHead ? 2 : 1
         return TextAnchor(
             row: evictedRowCount + position.row,
             column: min(columnCount, position.column + width)

@@ -150,7 +150,7 @@ paired run reports `equivalent` regardless of this change's size.
 ## Commit progress
 
 - [x] 1. perf(terminal): expand a terminal token from the clicked point outward
-- [ ] 2. refactor(terminal): index the projected row stream instead of copying it
+- [x] 2. refactor(terminal): index the projected row stream instead of copying it
 - [ ] 3. docs(research): record `F4` and close doc 21
 
 Each slice lands green, with its tests. Slice 1 carries the measured win and is
@@ -195,3 +195,20 @@ what completes `I2`.
   and `I2` is not yet met; removing it is slice 2's whole job. What slice 1
   removes is the unit array and its per-cell `[Unicode.Scalar]` allocation for
   the whole retained stream.
+- Slice 2 gives the indexed access as a `ProjectionRows` value conforming to
+  `RandomAccessCollection` over `(scrollbackRows, rows)`, rather than as
+  `projectionRow(at:)`-style accessors. Every existing point-local reader already
+  spoke `stream[i]` / `stream.count` / `stream.lastIndex(where:)` /
+  `Array(stream[a...b])`, so the collection shape turned each call site into a
+  one-line type change and left the walks themselves untouched -- which is what
+  makes the slice behavior-preserving by construction.
+- The alternate-screen seam rule moved into that view's subscript and
+  `activeProjectionRows()` became `Array(activeProjection())`, so the materialized
+  and indexed projections cannot disagree about the seam. The whole-stream
+  consumers (search, Select All, reflow, selected-text serialization) therefore pay
+  a per-row subscript branch where they previously got a bulk copy; they are
+  already linear in retained rows with much heavier per-row work, and this keeps
+  the rule stated once.
+- `normalizedBoundaryPosition` and `normalizedSelectionBoundary` only ever needed
+  the projection's extent, so they read a `projectionRowCount` property and build
+  no view at all.
