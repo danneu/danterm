@@ -826,8 +826,10 @@ Evidence for the OSC 133 dialect. Parser probes feed
   `case .narrow, .padding` appends real units for padding cells. The chain is
   live in source; it is simply not what happened. Splicing the feeds out of the
   real zsh sweep -- resizes in pairs, in fours, and all 52 back-to-back followed
-  by the repaints -- replayed clean at one prompt every time. It remains a latent
-  hazard nobody needs to re-derive.
+  by the repaints -- replayed clean at one prompt every time. The review's
+  mechanism was right and its stimulus was wrong: the chain fires on a cursor
+  parked mid-line at a resize, not on a burst of them, and once probed that way
+  it reproduced immediately. Fixed in round five.
   The maintainer's own hypothesis, that nesting zsh inside fish was the cause,
   was also wrong, but explains why the artifact was zsh-only in a useful way:
   fish's prompt supplied the `.continuation` row that made the over-blanking
@@ -843,19 +845,44 @@ Evidence for the OSC 133 dialect. Parser probes feed
   head that both soft-wrapped *and* is content it intends to keep. The third
   condition (retained content) is not part of that invariant -- it is
   bookkeeping debt, see the next action.
-- Known gap, not yet addressed: a resize landing between the shell's `ESC[J` and
-  its `A`. The erase clears the head's stamp, so the upward walk in
-  `clearPromptForResizeIfNeeded` crosses the now-`.none` rows and anchors on the
-  *previous* prompt, blanking the last command's output. Kitty is immune because
-  its walk stops at an `OUTPUT_START` stamp; DanTerm stamps no output rows
-  (`C` only un-stamps the cursor row at column 0) and so shares ghostty's
-  exposure. Unreproduced -- ranked highest of the review's unhit modes.
-- Next action: two follow-ups, both structural rather than bug fixes.
-  (1) Make the blanking representable. `clearPromptCells` leaves
-  `semanticPrompt` and `isSoftWrapped` on the row it empties, and three separate
-  things exist only to compensate: the walk's retained-content condition (which
-  refuses to cross blanked rows), the reclaim-empty loop in `setSemanticPrompt`
-  (which exists to cross those same rows, with the opposite predicate), and the
-  latent re-flatten hazard below. Two mechanisms disagreeing about one set of
-  rows is the tell that a state is missing rather than that the logic is subtle.
-  (2) Stamp output rows from `C`, closing the gap above.
+- Round five, and the review's two structural follow-ups. Both were taken, and
+  both turned out to be real defects rather than cleanups -- each reproduced
+  once the right variable was varied, which is the same lesson round one taught.
+  1. **Representable blanking** (`c6c476c`). `clearPromptCells` emptied a row's
+     cells and left its stamp and wrap flag, so "a row we vacated" was not a
+     state anything could read; it had to be re-derived by asking whether a
+     still-stamped row had content left. Two walks answered that question in
+     opposite directions -- the stale-head climb refused to cross emptied rows,
+     the reclaim loop directly below existed to cross exactly those rows. A
+     `.vacated` case replaces both inferences. The climb keeps only the
+     dangling-wrap invariant; the reclaim names `.vacated` and keeps the
+     emptiness check as what it always was, the reason taking a row is free
+     rather than the reason it is ours.
+     Clearing the wrap flag with the cells fixed the "latent" re-flatten hazard
+     below, which is not latent: reflow measures a soft-wrapped row to its full
+     old width, so an emptied row still claiming a wrap flattens `oldColumnCount`
+     blank cells into the middle of its logical line. Under `redraw=last`, a
+     cursor parked mid-line at a resize shifted everything after it right by a
+     full row and pushed the tail down. The resize bursts a review proposed never
+     reproduced it because the burst was never the variable -- the cursor was.
+     Pinned by `TerminalOSC133Tests.blankedPromptRowDoesNotWidenTheLineBelow`.
+  2. **Output stamps** (`d1eb808`), closing the gap below. Worse than the review
+     described: one resize inside the window cleared the entire pane, not just
+     the anchor row. `C` now marks the row output starts on and every
+     prompt-block search stops there. The first attempt to reproduce it failed
+     and nearly retired the report -- `ESC[J` at column 0 leaves the cursor row's
+     stamp intact, so the walk stopped harmlessly. It reproduces immediately with
+     the cursor-up form a real shell emits (`\r ESC[A ESC[J`), which is the shape
+     already recorded in this finding. Pinned by
+     `TerminalOSC133Tests.resizeDuringARepaintEraseKeepsFinishedOutput`.
+- The gap the output stamps closed: a resize landing between the shell's `ESC[J`
+  and its `A`. The erase clears the head's stamp, so the upward walk in
+  `clearPromptForResizeIfNeeded` crossed the now-`.none` rows and anchored on the
+  *previous* prompt, blanking the last command's output and everything below it.
+  Kitty was immune because its walk stops at an `OUTPUT_START` stamp
+  (`references/kitty/kitty/screen.c#shell_prompt_marking`); DanTerm stamped no
+  output rows -- `C` only un-stamped the cursor row, which says "not a prompt"
+  and is precisely what let a walk pass through -- and so shared ghostty's
+  exposure.
+- Next action: none outstanding for this finding. The remaining Phase 4 work is
+  rendering the Bash dialect in a real pane.

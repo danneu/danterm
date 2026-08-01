@@ -62,6 +62,15 @@ reflow or how the prompt block is treated on resize.
   that matters; recording one does not. It also decides core-versus-app in a
   single step, because a tape that reproduces against a bare `Terminal` has
   excluded every layer above it.
+- **A clean replay refutes the stimulus, not the mechanism.** Added after F16's
+  round five. Twice in this investigation a review named a real chain in the
+  source, the proposed stimulus replayed clean, and the report was filed as
+  latent-but-not-firing. Both were live defects, and both reproduced on the first
+  try once a different variable was varied -- a cursor parked mid-line rather
+  than a burst of resizes, a cursor-up erase rather than an in-place one. A
+  mechanism that exists in the code is a standing claim; only a stimulus that
+  could have exhibited it can argue against it, which is the null-result rule
+  above pointed at someone else's hypothesis.
 
 ## Trigger and current evidence
 
@@ -264,10 +273,13 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   reclaims the vacated rows. Fixed across `e97345e`, `62c5e4b`, `8a0a982` and
   `d2fffbf`, pinned by two live-pane fixtures because no synthetic stimulus
   reproduced any of it.
-- [ ] TODO: make the prompt blanking representable, and stamp output rows from
-  `C`. F16's two next actions. Neither is a bug report -- the first removes the
-  bookkeeping debt that two of the fix's conditions are compensating for, the
-  second closes the one review-raised gap that survives `d2fffbf`.
+- [x] Made the prompt blanking representable (`c6c476c`) and stamped output rows
+  from `C` (`d1eb808`). Filed as structural follow-ups, both turned out to be
+  live defects: an emptied row that kept its wrap flag spliced a full row of
+  blanks into the middle of a logical line, and a resize landing between a
+  shell's repaint erase and its next mark cleared the whole pane. Neither
+  reproduced from the stimulus that was proposed for it; both reproduced
+  immediately from the right one.
 - [ ] TODO: render the Bash dialect in a real pane. Still never done, and F16 is
   the evidence that this is where the remaining defects are: every mark in this
   doc was parser-checked and correct, and the bug was in the consumer's anchor.
