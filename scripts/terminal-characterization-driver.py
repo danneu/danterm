@@ -15,10 +15,17 @@ STATE_DIRECTORY = pathlib.Path(sys.argv[1])
 FIXTURE_PATH = pathlib.Path(sys.argv[2])
 with FIXTURE_PATH.open(encoding="utf-8") as fixture_file:
     REPLAY_EVENTS = json.load(fixture_file)["replay"]["events"]
+
+
+def decode_replay_feed(event):
+    """Decode the characterization family's one canonical feed representation."""
+    if set(event).intersection({"base64", "text", "hex"}) != {"base64"}:
+        raise ValueError("Characterization feed must contain only base64")
+    return base64.b64decode(event["base64"], validate=True)
+
+
 REPLAY_FEEDS = [
-    base64.b64decode(event["base64"], validate=True)
-    if "base64" in event
-    else bytes.fromhex(event["hex"])
+    decode_replay_feed(event)
     for event in REPLAY_EVENTS
     if event["type"] == "feed"
 ]

@@ -44,6 +44,8 @@ STEPS=(
     'python3 ./scripts/tests/pack_theme_catalog_test.py'
     'python3 ./scripts/tests/terminal_tape_to_fixture_test.py'
     'python3 ./scripts/tests/terminal_recording_research_producers_test.py'
+    'python3 ./scripts/tests/terminal_recording_schema_audit_test.py'
+    'python3 ./scripts/terminal-recording-schema-audit.py'
     './scripts/tests/build-lib-contract_test.sh'
     './scripts/tests/terminal-viability-harness_test.sh'
     './scripts/tests/build-lib-fetch_test.sh'

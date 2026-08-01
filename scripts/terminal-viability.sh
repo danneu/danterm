@@ -229,12 +229,13 @@ with open(fixture_path, "r", encoding="utf-8") as stream:
 for event in fixture["events"]:
     if event["type"] != "feed":
         continue
+    encodings = set(event).intersection({"base64", "text", "hex"})
+    if encodings not in ({"base64"}, {"text"}):
+        raise ValueError("Neutral feed must contain exactly one of base64 or text")
     if "text" in event:
         payload = event["text"].encode("utf-8")
-    elif "base64" in event:
-        payload = base64.b64decode(event["base64"], validate=True)
     else:
-        payload = bytes.fromhex(event["hex"])
+        payload = base64.b64decode(event["base64"], validate=True)
     os.write(1, payload)
 with open(ready_path, "w", encoding="ascii") as stream:
     stream.write(f"{os.getpid()}\n")

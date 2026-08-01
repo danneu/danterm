@@ -5,7 +5,7 @@ A tape is normally the JSON document printed by `danterm pane tape --pane ID`.
 It already uses the neutral recording schema, including real PTY chunk boundaries
 and resize ordering, so this script only scrubs feed bytes, verifies that local
 identifiers are gone, and marks the result as fixture-ready DanTerm evidence.
-Legacy JSONL files written through `DANTERM_TAPE_PATH` remain accepted.
+The input may instead be the JSONL stream written by `danterm pane tape --follow`.
 
     scripts/terminal-tape-to-fixture.py /tmp/tape.json \\
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json
@@ -67,7 +67,7 @@ def local_identifiers() -> list:
 
 
 def load_tape(path: str):
-    """Loads a live-capture document, follow stream, or legacy JSONL tape."""
+    """Loads a complete live-capture snapshot or an ordered follow stream."""
     with open(path, encoding="utf-8") as handle:
         contents = handle.read()
     try:
@@ -81,6 +81,11 @@ def load_tape(path: str):
         provenance = document.get("provenance")
         if not isinstance(provenance, dict) or provenance.get("source") != "danterm-live-capture":
             raise ValueError("recording is not a raw DanTerm live capture")
+        events = document.get("events")
+        if not isinstance(events, list):
+            raise ValueError("invalid snapshot events")
+        for event in events:
+            validate_event(event)
         return document, document.get("truncation")
 
     try:
@@ -89,13 +94,7 @@ def load_tape(path: str):
         raise ValueError(f"invalid tape JSON: {error.msg}") from error
     if lines and isinstance(lines[0], dict) and lines[0].get("kind") == "start":
         return load_follow_stream(lines), None
-    if not lines or "initial" not in lines[0]:
-        raise ValueError("no geometry header; not a tape")
-    return {
-        "version": 1,
-        "initial": lines[0]["initial"],
-        "events": lines[1:],
-    }, None
+    raise ValueError("recording is neither a snapshot nor a follow stream")
 
 
 def load_follow_stream(records: list):
@@ -154,7 +153,9 @@ def load_follow_stream(records: list):
         if previous_sequence is not None and sequence != previous_sequence + 1:
             raise ValueError("follow stream event sequence is not contiguous")
         previous_sequence = sequence
-        events.append({**event, "elapsedNanoseconds": elapsed})
+        flattened = {**event, "elapsedNanoseconds": elapsed}
+        validate_event(flattened)
+        events.append(flattened)
 
     return {
         "version": start["version"],
@@ -165,15 +166,13 @@ def load_follow_stream(records: list):
 
 
 def decode_feed(event: dict):
-    encodings = [key for key in ("base64", "hex", "text") if key in event]
+    encodings = [key for key in ("base64", "text") if key in event]
     if len(encodings) != 1:
         raise ValueError("feed event must contain exactly one byte encoding")
     encoding = encodings[0]
     try:
         if encoding == "base64":
             return encoding, base64.b64decode(event[encoding], validate=True)
-        if encoding == "hex":
-            return encoding, bytes.fromhex(event[encoding])
         return encoding, event[encoding].encode("utf-8")
     except (binascii.Error, ValueError, AttributeError) as error:
         raise ValueError(f"invalid {encoding} feed event") from error
@@ -182,21 +181,122 @@ def decode_feed(event: dict):
 def encode_feed(event: dict, encoding: str, raw: bytes):
     if encoding == "base64":
         event[encoding] = base64.b64encode(raw).decode("ascii")
-    elif encoding == "hex":
-        event[encoding] = raw.hex()
     else:
         event[encoding] = raw.decode("utf-8")
+
+
+def validate_event(event: dict):
+    """Reject any neutral event outside its complete allowed object shape."""
+    if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+        raise ValueError("invalid recording event")
+    event_type = event["type"]
+    elapsed = event.get("elapsedNanoseconds")
+    if "elapsedNanoseconds" in event and not nonnegative_integer(elapsed):
+        raise ValueError(f"invalid {event_type} event")
+
+    if event_type == "feed":
+        encodings = [key for key in ("base64", "text") if key in event]
+        if len(encodings) != 1:
+            raise ValueError("invalid feed event")
+        encoding = encodings[0]
+        require_shape(event, {"type", encoding}, {"elapsedNanoseconds"})
+        if not isinstance(event[encoding], str):
+            raise ValueError("invalid feed event")
+        return
+    if event_type == "resize":
+        require_shape(event, {"type", "columns", "rows"}, {"elapsedNanoseconds"})
+        if not all(integer(event[key]) for key in ("columns", "rows")):
+            raise ValueError("invalid resize event")
+        return
+    if event_type == "input":
+        key = event.get("key")
+        required = {"type", "key", "scalar"} if key == "character" else {"type", "key"}
+        require_shape(event, required, {"modifiers", "elapsedNanoseconds"})
+        if not isinstance(key, str) or ("scalar" in event and not isinstance(event["scalar"], str)):
+            raise ValueError("invalid input event")
+        validate_modifiers(event, event_type)
+        return
+    if event_type == "paste":
+        require_shape(event, {"type", "text"}, {"elapsedNanoseconds"})
+        if not isinstance(event["text"], str):
+            raise ValueError("invalid paste event")
+        return
+    if event_type == "focus":
+        require_shape(event, {"type", "focused"}, {"elapsedNanoseconds"})
+        if not isinstance(event["focused"], bool):
+            raise ValueError("invalid focus event")
+        return
+    if event_type == "mouse":
+        require_shape(
+            event,
+            {"type", "action", "column", "row"},
+            {"button", "modifiers", "clickCount", "elapsedNanoseconds"},
+        )
+        action = event["action"]
+        if action not in ("down", "up", "move"):
+            raise ValueError("invalid mouse event")
+        if "button" in event and not integer(event["button"]):
+            raise ValueError("invalid mouse event")
+        if not integer(event["column"]) or not integer(event["row"]):
+            raise ValueError("invalid mouse event")
+        if "clickCount" in event and not integer(event["clickCount"]):
+            raise ValueError("invalid mouse event")
+        validate_modifiers(event, event_type)
+        return
+    if event_type == "viewport":
+        action = event.get("action")
+        required = {"type", "action"}
+        if action in ("byRows", "toTopRow"):
+            required.add("rows")
+        require_shape(event, required, {"elapsedNanoseconds"})
+        if action not in ("byRows", "toTopRow", "toBottom"):
+            raise ValueError("invalid viewport event")
+        if "rows" in event and not integer(event["rows"]):
+            raise ValueError("invalid viewport event")
+        return
+    if event_type == "expect":
+        require_shape(event, {"type"}, {"expect", "elapsedNanoseconds"})
+        if "expect" in event and not isinstance(event["expect"], dict):
+            raise ValueError("invalid expect event")
+        return
+    raise ValueError(f"unsupported recording event: {event_type}")
+
+
+def require_shape(event: dict, required: set, optional: set):
+    """Require one event's keys to match its closed schema."""
+    keys = set(event)
+    if not required <= keys or not keys <= required | optional:
+        raise ValueError(f"invalid {event.get('type', 'recording')} event")
+
+
+def integer(value) -> bool:
+    """Recognize JSON integers without accepting Python's boolean subtype."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def nonnegative_integer(value) -> bool:
+    """Recognize the unsigned integer domain used by elapsed timing."""
+    return integer(value) and value >= 0
+
+
+def validate_modifiers(event: dict, event_type: str):
+    """Validate an optional neutral modifier-name list shared by input events."""
+    if "modifiers" not in event:
+        return
+    modifiers = event["modifiers"]
+    if not isinstance(modifiers, list) or not all(
+        modifier in ("shift", "alt", "control", "command") for modifier in modifiers
+    ):
+        raise ValueError(f"invalid {event_type} event")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", help="JSON document from `danterm pane tape` (or legacy JSONL)")
+    parser.add_argument("tape", help="snapshot JSON or follow JSONL from `danterm pane tape`")
     parser.add_argument("fixture", help="fixture JSON to write")
     parser.add_argument("--keep-identifiers", action="store_true",
                         help="skip host/home scrubbing (local-only tapes)")
-    parser.add_argument("--allow-truncated", action="store_true",
-                        help="convert despite dropped events, retaining truncation metadata")
     parser.add_argument("--test", default="TerminalShellDialectTests",
                         help="behavioral test this recording is evidence for")
     parser.add_argument("--shell", default="", help="what was running in the pane")
@@ -225,9 +325,9 @@ def main() -> int:
         truncation.get("isTruncated")
         or truncation.get("droppedEventCount", 0) > 0
         or truncation.get("droppedPayloadBytes", 0) > 0
-    ) and not args.allow_truncated:
+    ):
         print(
-            f"{args.tape}: tape is truncated; pass --allow-truncated to convert incomplete evidence",
+            f"{args.tape}: tape is truncated and cannot become fixture evidence",
             file=sys.stderr,
         )
         return 1

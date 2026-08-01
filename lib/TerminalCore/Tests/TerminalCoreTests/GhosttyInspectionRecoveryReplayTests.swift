@@ -6,6 +6,23 @@ import Testing
 
 /// Keeps backend migration evidence headless while treating recorded Ghostty output as adjudicable evidence.
 struct GhosttyInspectionRecoveryReplayTests {
+    @Test(
+        "Ghostty characterization feeds reject non-base64 representations",
+        arguments: [
+            #"{"type":"feed","hex":"61"}"#,
+            #"{"type":"feed","base64":"YQ==","hex":"61"}"#,
+            #"{"type":"feed","base64":"YQ==","text":"a"}"#,
+        ]
+    )
+    func characterizationNonBase64FeedsAreRejected(_ json: String) {
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(
+                ReplayEvent.self,
+                from: Data(json.utf8)
+            )
+        }
+    }
+
     @Test("Ghostty inspection and recovery corpus replays through Swift projections")
     func replayCharacterizationCorpus() throws {
         // Intent: replay the exact characterized bytes and resize sequence through
@@ -157,8 +174,9 @@ private enum ReplayEvent: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type
-        case hex
         case base64
+        case hex
+        case text
         case columns
         case checkpoint
     }
@@ -167,19 +185,22 @@ private enum ReplayEvent: Decodable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         switch try values.decode(String.self, forKey: .type) {
         case "feed":
-            if let base64 = try values.decodeIfPresent(String.self, forKey: .base64) {
-                guard let data = Data(base64Encoded: base64) else {
-                    throw DecodingError.dataCorruptedError(
-                        forKey: .base64,
-                        in: values,
-                        debugDescription: "Invalid base64 feed"
-                    )
-                }
-                self = .feed(Array(data))
-            } else {
-                let hex = try values.decode(String.self, forKey: .hex)
-                self = .feed(try Self.decodeHex(hex))
+            guard values.contains(.hex) == false, values.contains(.text) == false else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: values.contains(.hex) ? .hex : .text,
+                    in: values,
+                    debugDescription: "Characterization feeds must contain only base64"
+                )
             }
+            let base64 = try values.decode(String.self, forKey: .base64)
+            guard let data = Data(base64Encoded: base64) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .base64,
+                    in: values,
+                    debugDescription: "Invalid base64 feed"
+                )
+            }
+            self = .feed(Array(data))
         case "resize":
             self = .resize(columns: try values.decode(Int.self, forKey: .columns))
         case "expect":
@@ -193,17 +214,4 @@ private enum ReplayEvent: Decodable {
         }
     }
 
-    private static func decodeHex(_ hex: String) throws -> [UInt8] {
-        guard hex.count.isMultiple(of: 2) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Odd-length hex feed"))
-        }
-        return try stride(from: 0, to: hex.count, by: 2).map { offset in
-            let start = hex.index(hex.startIndex, offsetBy: offset)
-            let end = hex.index(start, offsetBy: 2)
-            guard let byte = UInt8(hex[start..<end], radix: 16) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid hex feed"))
-            }
-            return byte
-        }
-    }
 }

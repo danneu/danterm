@@ -35,11 +35,29 @@ SYNCHRONIZED_END = b"\x1b[?2026l"
 
 
 class RecordingLoaderTests(unittest.TestCase):
+    def test_recording_loader_rejects_removed_hex_feeds(self):
+        for event in (
+            {"type": "feed", "hex": "61"},
+            {"type": "feed", "base64": "YQ==", "hex": "61"},
+        ):
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as directory:
+                document = {
+                    "dimensions": {"columns": 80, "rows": 24},
+                    "events": [event],
+                }
+                root = pathlib.Path(directory)
+                (root / "recording.json").write_text(
+                    json.dumps(document), encoding="utf-8"
+                )
+
+                with self.assertRaises((KeyError, ValueError)):
+                    list(iter_bytes(root, {"recording": "recording.json"}))
+
     def test_a_gzipped_recording_yields_the_bytes_its_plain_form_yields(self):
         # Intent: a `.json.gz` recording replays byte-for-byte identically to the
         #   same document stored uncompressed.
         # Why it exists: compression exists only to make a real capture committable
-        #   -- a 1.25 MB stimulus is 6.2 MB as JSON hex and 149 KB gzipped. The
+        #   -- a 1.25 MB stimulus is still large as JSON base64 and 149 KB gzipped. The
         #   moment it changes even one delivered byte it has stopped being the
         #   same stimulus, and nothing downstream would report that.
         # Scenario: spec-first; the corpus gains its first captured workload, and

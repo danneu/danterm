@@ -97,9 +97,8 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
                 b"\x1b]7;file://host/home/user/project\x07prompt\r\n",
             )
 
-    def test_truncated_capture_is_refused_unless_explicitly_allowed(self):
-        # Intent: truncation is a blocking conversion error unless the caller opts into
-        #   incomplete evidence, and the override does not hide the dropped-data counts.
+    def test_truncated_capture_is_refused_without_an_override(self):
+        # Intent: truncation is always a blocking conversion error with no escape hatch.
         # Why it exists: an evicted recording no longer begins at pane birth, so silently
         #   treating it as a complete fixture can make replay conclusions unsound.
         # Scenario: a long-lived pane exceeds its recorder budget before a dump is taken.
@@ -115,18 +114,17 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             self.assertIn("truncated", refused.stderr)
             self.assertFalse(destination.exists())
 
-            accepted = self.run_converter(
+            override = self.run_converter(
                 source,
                 destination,
                 "--keep-identifiers",
                 "--allow-truncated",
             )
 
-            self.assertEqual(accepted.returncode, 0, accepted.stderr)
-            fixture = json.loads(destination.read_text(encoding="utf-8"))
-            self.assertEqual(fixture["truncation"], live_capture(truncated=True)["truncation"])
+            self.assertNotEqual(override.returncode, 0)
+            self.assertFalse(destination.exists())
 
-    def test_legacy_streaming_tape_remains_convertible(self):
+    def test_legacy_bare_jsonl_and_hex_feeds_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "capture.jsonl"
@@ -145,10 +143,81 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
 
             result = self.run_converter(source, destination, "--keep-identifiers")
 
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(destination.exists())
+
+    def test_snapshot_and_stream_reject_invalid_event_shapes(self):
+        invalid_events = {
+            "missing payload": {"type": "feed"},
+            "multiple payloads": {"type": "feed", "base64": "YQ==", "text": "a"},
+            "hex payload": {"type": "feed", "hex": "61"},
+            "unknown field": {"type": "resize", "columns": 8, "rows": 2, "note": "x"},
+        }
+        for name, event in invalid_events.items():
+            for shape in ("snapshot", "stream"):
+                with (
+                    self.subTest(name=name, shape=shape),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
+                    root = Path(directory)
+                    source = root / "capture.json"
+                    destination = root / "fixture.json"
+                    if shape == "snapshot":
+                        capture = live_capture()
+                        capture["events"] = [event]
+                        contents = json.dumps(capture)
+                    else:
+                        contents = json_lines([follow_start(), follow_event(1, event)])
+                    source.write_text(contents, encoding="utf-8")
+
+                    result = self.run_converter(source, destination, "--keep-identifiers")
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(destination.exists())
+
+    def test_snapshot_and_stream_require_raw_live_capture_provenance(self):
+        for shape in ("snapshot", "stream"):
+            with self.subTest(shape=shape), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "capture.json"
+                destination = root / "fixture.json"
+                if shape == "snapshot":
+                    capture = live_capture()
+                    capture["provenance"]["source"] = "danterm"
+                    contents = json.dumps(capture)
+                else:
+                    start = follow_start()
+                    start["provenance"]["source"] = "danterm"
+                    contents = json_lines([start])
+                source.write_text(contents, encoding="utf-8")
+
+                result = self.run_converter(source, destination, "--keep-identifiers")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(destination.exists())
+
+    def test_snapshot_preserves_optional_mouse_button_on_move(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.json"
+            destination = root / "fixture.json"
+            capture = live_capture()
+            capture["events"] = [
+                {
+                    "type": "mouse",
+                    "action": "move",
+                    "button": 1,
+                    "column": 3,
+                    "row": 2,
+                }
+            ]
+            source.write_text(json.dumps(capture), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
             self.assertEqual(result.returncode, 0, result.stderr)
             fixture = json.loads(destination.read_text(encoding="utf-8"))
-            self.assertEqual(fixture["initial"], {"columns": 4, "rows": 2})
-            self.assertEqual([event["type"] for event in fixture["events"]], ["feed", "resize"])
+            self.assertEqual(fixture["events"], capture["events"])
 
     def test_follow_stream_flattens_wrappers_and_preserves_feed_encodings(self):
         # Intent: an unwrapped pane-tape follow stream becomes one neutral fixture

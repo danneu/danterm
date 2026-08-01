@@ -40,12 +40,11 @@ struct NeutralTerminalRecordingTests {
     @Test(
         "feed events reject multiple byte representations",
         arguments: [
-            #"{"type":"feed","base64":"AQ==","hex":"01"}"#,
             #"{"type":"feed","base64":"AQ==","text":"x"}"#,
         ]
     )
     func multipleFeedRepresentationsAreRejected(_ json: String) {
-        #expect(throws: NeutralTerminalRecordingError.ambiguousFeedEncoding) {
+        #expect(throws: NeutralTerminalRecordingError.self) {
             try JSONDecoder().decode(
                 NeutralTerminalRecordingEvent.self,
                 from: Data(json.utf8)
@@ -53,23 +52,49 @@ struct NeutralTerminalRecordingTests {
         }
     }
 
-    @Test("recordings may mix legacy hex and compact base64 feed events")
-    func mixedHexAndBase64FeedsDecode() throws {
-        let data = Data(#"""
-        {
-          "version": 1,
-          "provenance": {"source":"danterm","author":"DanTerm","test":"mixed-feeds"},
-          "initial": {"columns": 8, "rows": 2},
-          "events": [
-            {"type":"feed","hex":"00 ff"},
-            {"type":"feed","base64":"AQI="}
-          ]
+    @Test("feed hex is rejected as an invalid event shape")
+    func feedHexIsRejected() {
+        #expect(throws: NeutralTerminalRecordingError.self) {
+            try JSONDecoder().decode(
+                NeutralTerminalRecordingEvent.self,
+                from: Data(#"{"type":"feed","hex":"00ff"}"#.utf8)
+            )
         }
-        """#.utf8)
+    }
 
-        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
+    @Test(
+        "event objects reject missing, duplicate, and unknown fields",
+        arguments: [
+            #"{"type":"feed"}"#,
+            #"{"type":"feed","base64":"YQ==","text":"a"}"#,
+            #"{"type":"feed","base64":"YQ==","note":"ignored"}"#,
+            #"{"type":"resize","columns":8,"rows":2,"note":"ignored"}"#,
+            #"{"type":"expect","expect":{},"note":"ignored"}"#,
+        ]
+    )
+    func invalidEventFieldsAreRejected(_ json: String) {
+        #expect(throws: NeutralTerminalRecordingError.self) {
+            try JSONDecoder().decode(
+                NeutralTerminalRecordingEvent.self,
+                from: Data(json.utf8)
+            )
+        }
+    }
 
-        #expect(recording.events == [.feed([0x00, 0xFF]), .feed([0x01, 0x02])])
+    @Test("elapsed timing is the only inert event metadata and must be nonnegative integer")
+    func invalidElapsedTimingIsRejected() {
+        for json in [
+            #"{"type":"feed","base64":"YQ==","elapsedNanoseconds":-1}"#,
+            #"{"type":"resize","columns":8,"rows":2,"elapsedNanoseconds":"later"}"#,
+            #"{"type":"expect","elapsedNanoseconds":null}"#,
+        ] {
+            #expect(throws: (any Error).self) {
+                try JSONDecoder().decode(
+                    NeutralTerminalRecordingEvent.self,
+                    from: Data(json.utf8)
+                )
+            }
+        }
     }
 
     @Test("live capture provenance is replay-valid and distinct from fixture provenance")
@@ -88,6 +113,7 @@ struct NeutralTerminalRecordingTests {
           "version": 1,
           "provenance": {"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape"},
           "initial": {"columns": 8, "rows": 2},
+          "futureMetadata": {"readerMayIgnore": true},
           "events": [
             {"type":"feed","base64":"aGk=","elapsedNanoseconds":12},
             {"type":"resize","columns":10,"rows":3,"elapsedNanoseconds":25}
@@ -111,35 +137,6 @@ struct NeutralTerminalRecordingTests {
 
         #expect(timed == untimed)
         #expect(try timed.replay() == untimed.replay())
-    }
-
-    @Test("feed hex accepts mixed case and whitespace")
-    func feedHexAcceptsMixedCaseAndWhitespace() throws {
-        let event = try decodeFeedEvent(hex: " 0a\tBc\nDe Ff ")
-
-        #expect(event == .feed([0x0A, 0xBC, 0xDE, 0xFF]))
-    }
-
-    @Test("empty feed hex decodes to no bytes")
-    func emptyFeedHexDecodesToNoBytes() throws {
-        let event = try decodeFeedEvent(hex: "")
-
-        #expect(event == .feed([]))
-    }
-
-    @Test(
-        "malformed feed hex preserves the original input in invalidHex",
-        arguments: ["a", "0g", "0\u{00E9}"]
-    )
-    func malformedFeedHexPreservesOriginalInput(_ hex: String) {
-        do {
-            _ = try decodeFeedEvent(hex: hex)
-            Issue.record("Expected malformed hex to be rejected.")
-        } catch NeutralTerminalRecordingError.invalidHex(let invalidHex) {
-            #expect(invalidHex == hex)
-        } catch {
-            Issue.record("Expected invalidHex, got \(error).")
-        }
     }
 
     @Test("Alacritty provenance validates its pinned Apache-2.0 source")
@@ -362,15 +359,20 @@ struct NeutralTerminalRecordingTests {
         #expect(decoded == recording)
     }
 
-    @Test("legacy recordings decode without viewport events")
-    func legacyRecordingCompatibility() throws {
+    @Test("readable text feeds decode and replay without changing their UTF-8 bytes")
+    func readableTextFeedRoundTrip() throws {
         let data = Data(#"""
         {
           "version": 1,
-          "provenance": {"source":"danterm","author":"DanTerm","test":"legacy"},
+          "provenance": {
+            "source":"danterm",
+            "author":"DanTerm",
+            "test":"readable-text",
+            "note":"top-level provenance remains extensible"
+          },
           "initial": {"columns": 8, "rows": 2},
           "events": [
-            {"type":"feed", "text":"legacy"},
+            {"type":"feed", "text":"café"},
             {"type":"resize", "columns": 10, "rows": 3}
           ]
         }
@@ -379,15 +381,10 @@ struct NeutralTerminalRecordingTests {
         let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
 
         #expect(recording.events == [
-            .feed(Array("legacy".utf8)),
+            .feed(Array("café".utf8)),
             .resize(columns: 10, rows: 3),
         ])
         #expect(try recording.replay().geometry.columns == 10)
     }
 
-    private func decodeFeedEvent(hex: String) throws -> NeutralTerminalRecordingEvent {
-        let encodedHex = try JSONEncoder().encode(hex)
-        let json = Data("{\"type\":\"feed\",\"hex\":".utf8) + encodedHex + Data("}".utf8)
-        return try JSONDecoder().decode(NeutralTerminalRecordingEvent.self, from: json)
-    }
 }

@@ -32,7 +32,7 @@ def iter_bytes(root, workload):
     if "recording" in workload:
         path = root / workload["recording"]
         # Captured workloads are stored gzipped because a real one cannot be
-        # committed otherwise: 1.25 MB of btop is 6.2 MB as JSON hex and 149 KB
+        # committed otherwise: 1.25 MB of btop is large as JSON base64 and 149 KB
         # packed. Generated workloads stay plain -- they are a manifest, not a
         # payload. Keyed on the suffix so both forms remain readable by hand.
         if path.suffix == ".gz":
@@ -43,10 +43,9 @@ def iter_bytes(root, workload):
         for event in recording["events"]:
             if event.get("type") != "feed":
                 continue
-            if "base64" in event:
-                chunks.append(base64.b64decode(event["base64"], validate=True))
-            else:
-                chunks.append(bytes.fromhex(event["hex"]))
+            if set(event).intersection({"base64", "text", "hex"}) != {"base64"}:
+                raise ValueError("Benchmark feed must contain only base64")
+            chunks.append(base64.b64decode(event["base64"], validate=True))
         # A capture is repeated rather than re-captured to lengthen a block.
         # `20/F12` measured this workload's noise as additive -- near-flat
         # absolute SD across a 2.24x change in duration -- so the denominator is

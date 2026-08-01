@@ -117,7 +117,7 @@ danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
 - [x] 1. Add stream fixture conversion and base64 producer support
 - [x] 2. Migrate committed recordings to base64
 - [x] 3. Remove the legacy tape recorder and update research producers
-- [ ] 4. Enforce strict recording schemas and audit the corpus
+- [x] 4. Enforce strict recording schemas and audit the corpus
 - [ ] 5. Document the unified recording formats and run the full gate
 
 ## Implementation notes

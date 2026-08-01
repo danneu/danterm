@@ -5,10 +5,9 @@ import TerminalCore
 
 /// Errors reject malformed or unrecognized recordings before they can become evidence.
 public enum NeutralTerminalRecordingError: Error, Equatable, Sendable {
-    case ambiguousFeedEncoding
     case invalidDimensions
     case invalidBase64(String)
-    case invalidHex(String)
+    case invalidEvent(String)
     case invalidProvenance(String)
     case unsupportedEvent(String)
 }
@@ -218,42 +217,62 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, text, hex, base64, columns, rows, action, key, scalar, modifiers, focused
-        case button, column, row, clickCount
+        case type, text, base64, columns, rows, action, key, scalar, modifiers, focused
+        case button, column, row, clickCount, expect, elapsedNanoseconds
     }
 
     public init(from decoder: any Decoder) throws {
+        let dynamicValues = try decoder.container(keyedBy: EventCodingKey.self)
+        let keys = Set(dynamicValues.allKeys.map(\.stringValue))
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let type = try values.decode(String.self, forKey: .type)
+        if values.contains(.elapsedNanoseconds) {
+            _ = try values.decode(UInt64.self, forKey: .elapsedNanoseconds)
+        }
         switch type {
         case "feed":
-            let text = try values.decodeIfPresent(String.self, forKey: .text)
-            let hex = try values.decodeIfPresent(String.self, forKey: .hex)
-            let base64 = try values.decodeIfPresent(String.self, forKey: .base64)
-            guard [text, hex, base64].compactMap({ $0 }).count == 1 else {
-                throw NeutralTerminalRecordingError.ambiguousFeedEncoding
+            let encodings = Set(["base64", "text"]).intersection(keys)
+            guard encodings.count == 1, let encoding = encodings.first else {
+                throw NeutralTerminalRecordingError.invalidEvent(type)
             }
-            if let text {
+            try Self.validateKeys(
+                keys,
+                required: ["type", encoding],
+                optional: ["elapsedNanoseconds"],
+                type: type
+            )
+            if encoding == "text" {
+                let text = try values.decode(String.self, forKey: .text)
                 self = .feed(Array(text.utf8))
-            } else if let hex {
-                self = .feed(try Self.decodeHex(hex))
-            } else if let base64 {
+            } else {
+                let base64 = try values.decode(String.self, forKey: .base64)
                 guard let data = Data(base64Encoded: base64) else {
                     throw NeutralTerminalRecordingError.invalidBase64(base64)
                 }
                 self = .feed(Array(data))
-            } else {
-                throw NeutralTerminalRecordingError.ambiguousFeedEncoding
             }
         case "resize":
+            try Self.validateKeys(
+                keys,
+                required: ["type", "columns", "rows"],
+                optional: ["elapsedNanoseconds"],
+                type: type
+            )
             self = .resize(
                 columns: try values.decode(Int.self, forKey: .columns),
                 rows: try values.decode(Int.self, forKey: .rows)
             )
         case "input":
+            let key = try values.decode(String.self, forKey: .key)
+            try Self.validateKeys(
+                keys,
+                required: key == "character" ? ["type", "key", "scalar"] : ["type", "key"],
+                optional: ["modifiers", "elapsedNanoseconds"],
+                type: type
+            )
             self = .input(
                 key: try Self.decodeKey(
-                    try values.decode(String.self, forKey: .key),
+                    key,
                     scalar: try values.decodeIfPresent(String.self, forKey: .scalar)
                 ),
                 modifiers: try Self.decodeModifiers(
@@ -261,10 +280,28 @@ extension NeutralTerminalRecordingEvent: Codable {
                 )
             )
         case "paste":
+            try Self.validateKeys(
+                keys,
+                required: ["type", "text"],
+                optional: ["elapsedNanoseconds"],
+                type: type
+            )
             self = .paste(try values.decode(String.self, forKey: .text))
         case "focus":
+            try Self.validateKeys(
+                keys,
+                required: ["type", "focused"],
+                optional: ["elapsedNanoseconds"],
+                type: type
+            )
             self = .focus(try values.decode(Bool.self, forKey: .focused))
         case "mouse":
+            try Self.validateKeys(
+                keys,
+                required: ["type", "action", "column", "row"],
+                optional: ["button", "modifiers", "clickCount", "elapsedNanoseconds"],
+                type: type
+            )
             guard let action = NeutralTerminalMouseAction(
                 rawValue: try values.decode(String.self, forKey: .action)
             ) else {
@@ -288,15 +325,39 @@ extension NeutralTerminalRecordingEvent: Codable {
             let action = try values.decode(String.self, forKey: .action)
             switch action {
             case "byRows":
+                try Self.validateKeys(
+                    keys,
+                    required: ["type", "action", "rows"],
+                    optional: ["elapsedNanoseconds"],
+                    type: type
+                )
                 self = .viewport(.byRows(try values.decode(Int.self, forKey: .rows)))
             case "toTopRow":
+                try Self.validateKeys(
+                    keys,
+                    required: ["type", "action", "rows"],
+                    optional: ["elapsedNanoseconds"],
+                    type: type
+                )
                 self = .viewport(.toTopRow(try values.decode(Int.self, forKey: .rows)))
             case "toBottom":
+                try Self.validateKeys(
+                    keys,
+                    required: ["type", "action"],
+                    optional: ["elapsedNanoseconds"],
+                    type: type
+                )
                 self = .viewport(.toBottom)
             default:
                 throw NeutralTerminalRecordingError.unsupportedEvent("viewport.\(action)")
             }
         case "expect":
+            try Self.validateKeys(
+                keys,
+                required: ["type"],
+                optional: ["expect", "elapsedNanoseconds"],
+                type: type
+            )
             self = .checkpoint
         default:
             throw NeutralTerminalRecordingError.unsupportedEvent(type)
@@ -350,39 +411,14 @@ extension NeutralTerminalRecordingEvent: Codable {
         }
     }
 
-    // Keep this a sequential traversal: offsetting from a String's start for every
-    // byte made large recording feeds quadratic and dominated the replay suite.
-    private static func decodeHex(_ hex: String) throws -> [UInt8] {
-        var bytes: [UInt8] = []
-        bytes.reserveCapacity(hex.utf8.count / 2)
-        var highNibble: UInt8?
-
-        for scalar in hex.unicodeScalars {
-            if scalar.properties.isWhitespace { continue }
-            guard let nibble = hexNibble(scalar.value) else {
-                throw NeutralTerminalRecordingError.invalidHex(hex)
-            }
-
-            if let high = highNibble {
-                bytes.append(high << 4 | nibble)
-                highNibble = nil
-            } else {
-                highNibble = nibble
-            }
-        }
-
-        guard highNibble == nil else {
-            throw NeutralTerminalRecordingError.invalidHex(hex)
-        }
-        return bytes
-    }
-
-    private static func hexNibble(_ scalar: UInt32) -> UInt8? {
-        switch scalar {
-        case 0x30...0x39: UInt8(scalar - 0x30)
-        case 0x41...0x46: UInt8(scalar - 0x41 + 10)
-        case 0x61...0x66: UInt8(scalar - 0x61 + 10)
-        default: nil
+    private static func validateKeys(
+        _ keys: Set<String>,
+        required: Set<String>,
+        optional: Set<String>,
+        type: String
+    ) throws {
+        guard required.isSubset(of: keys), keys.isSubset(of: required.union(optional)) else {
+            throw NeutralTerminalRecordingError.invalidEvent(type)
         }
     }
 
@@ -445,6 +481,22 @@ extension NeutralTerminalRecordingEvent: Codable {
         "keypadSubtract": .keypadSubtract, "keypadAdd": .keypadAdd,
         "keypadEnter": .keypadEnter, "keypadEqual": .keypadEqual,
     ]
+}
+
+/// Exposes every object key so event decoding can reject fields unknown to its schema.
+private struct EventCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
 }
 
 /// Replays one neutral mouse event through the shared policy and applies only local selection.
