@@ -1165,7 +1165,18 @@ public struct Terminal: Equatable, Sendable {
         // repaint leaves debris that the resize path never gets a chance to see. This is
         // the earliest point it can be recognized -- the new head has just been stamped,
         // which is what makes the row above it identifiable as a stale copy.
-        guard kind == .prompt, promptRedrawMode != .disabled else { return }
+        // `.full` only. Under `.last` the shell has declared it repaints just the final
+        // prompt row, so the rows above are content it will never restore -- and Bash
+        // re-stamps through `P;k=i`, which arrives here as a `.prompt` kind, so without
+        // this gate a readline repaint could reclaim rows nothing rewrites.
+        guard kind == .prompt, promptRedrawMode == .full else { return }
+        // The reclaim shifts rows and the cursor together, which only stays coherent
+        // while both sit inside the same scroll region. A prompt drawn under an active
+        // DECSTBM margin with the cursor outside it would otherwise move the cursor
+        // without moving the row it points at.
+        guard isAlternateScreenActive == false,
+              activeScrollRegion.contains(cursor.row)
+        else { return }
         var top = topOfStalePromptHeads(above: cursor.row)
         // Also reclaim rows the resize path already emptied. Those are stamped but hold
         // nothing, so removing them costs no visible content -- and leaving them is what
@@ -1174,7 +1185,7 @@ public struct Terminal: Equatable, Sendable {
         while top > 0, rows[top - 1].semanticPrompt != .none, retainedContentEnd(in: rows[top - 1]) == 0 {
             top -= 1
         }
-        guard top < cursor.row else { return }
+        guard top < cursor.row, activeScrollRegion.contains(top) else { return }
         // Remove the stale rows rather than blanking them in place. Each stale-width
         // overflow costs the prompt one row: the shell repaints from one row lower and
         // never reclaims the row above, so blanking would trade a visible fragment for a
