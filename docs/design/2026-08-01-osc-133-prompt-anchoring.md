@@ -79,12 +79,17 @@ declared promise. Full-block work runs only under `redraw=1`. Under
 `redraw=last`, DanTerm vacates only the final prompt row and never takes rows
 above it; disabled redraw takes none.
 
-I1, I2, and I4 are state properties and can be checked on a terminal snapshot.
-I3, I5, and I6 constrain mutations: their proof must compare state immediately
-before and after blanking or reclaim, because later parser actions in the same
-feed can hide an invalid intermediate change. Recording-event boundaries are
-still useful for indexing snapshot failures, but are not a substitute for a
-mutation-level transition check.
+I1, I2, and I4 are state properties and can be checked on a terminal snapshot,
+so a universal oracle can replay every recording and check them after every
+event. I3, I5, and I6 constrain mutations, and no external per-event trace can
+prove them in general: later parser actions in the same feed can hide an
+invalid intermediate change, resize blanking is followed by reflow inside the
+same resize call, and a mutation that wrongly never fires leaves no delta to
+inspect. Their proof is instead targeted behavioral tests that bracket the
+specific blanking or reclaim operation and assert observable outcomes.
+Observing the mutation from inside production code would close the remaining
+gap but is rejected for its cost: it would charge every release-build resize
+full-grid snapshots for a test-only need.
 
 ### Scrollback boundary
 
@@ -107,8 +112,10 @@ terminal's stronger promise that scrollback is stable user-visible output.
 - The design depends on OSC 133 marks, not erase sequences. fish and zsh can
   perform the same pad-and-wrap transition with different trailing erases, but
   both emit the prompt mark that states the new logical-line boundary.
-- Tests may expose internal stamps and mutation traces to the TerminalCore test
-  target, but the production public API does not change.
+- Tests may expose internal stamps to the TerminalCore test target through
+  computed accessors that cost production nothing unless a test calls them;
+  the production public API does not change and production paths carry no
+  observation state or hooks.
 
 ## Rejected alternatives
 

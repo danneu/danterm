@@ -52,22 +52,29 @@ re-narrating the protocol.
 
 **D2 -- Executable oracle.** The shared test assertions
 (`lib/TerminalCore/Tests/TerminalCoreTests/TerminalGridAssertions.swift`) gain
-semantic-prompt invariant checks. Universal coverage comes from a corpus test
-that discovers every recording in `Fixtures/danterm/` by directory enumeration
-(extending the `TerminalFixtureTests#recordingFixtureURLs` precedent) and
-replays each through the oracle per event via `replay(inspect:)` -- a fixture
-added later is covered without any test edit. Replay loops that transform the
-authored stream before feeding it (the dialect suite rewrites `redraw=` bytes,
-the truncation cases replay a prefix) additionally run the oracle directly.
-Prompt-stamp state becomes visible to the test target through a test-facing
-internal accessor following the `withUnlimitedScrollbackForTesting` precedent;
-the public geometry surface does not change.
+semantic-prompt snapshot checks for I1, I2, and I4. Universal coverage comes
+from a corpus test that discovers every recording in `Fixtures/danterm/` by
+directory enumeration (extending the `TerminalFixtureTests#recordingFixtureURLs`
+precedent) and replays each through the oracle per event via
+`replay(inspect:)` -- a fixture added later is covered without any test edit.
+Replay loops that transform the authored stream before feeding it (the dialect
+suite rewrites `redraw=` bytes, the truncation cases replay a prefix)
+additionally run the oracle directly. The transition invariants I3, I5, and I6
+are proven by targeted behavioral tests instead (see the proof-shape rule
+below). Prompt-stamp state becomes visible to the test target through a
+test-facing internal accessor following the `withUnlimitedScrollbackForTesting`
+precedent -- a computed property that costs nothing unless a test calls it; the
+public geometry surface does not change, and no observation state, snapshots,
+or hooks live on production paths.
 
 **D3 -- Resize-injection sweep.** A seeded, deterministic replay mode injects
 synthetic resize events into decoded fixture event streams at chosen points --
 including byte offsets inside a feed chunk, which is where the real windows
-open -- and runs the oracle per event. Recorded fixtures are never edited; the
-transform operates on the decoded events at replay time.
+open -- and runs the snapshot oracle per event alongside observable-outcome
+assertions: completed command output preserved, cursor and content coherent,
+fixture-specific prompt outcomes intact. It does not claim to reconstruct an
+internal mutation from coarse before/after deltas. Recorded fixtures are never
+edited; the transform operates on the decoded events at replay time.
 
 Decisive constraints:
 
@@ -116,17 +123,23 @@ invariant quantifies over:
 - **Transition invariants** -- properties of what a mutation was allowed to
   change (I3: the last command's output survives blanking and reclaim; I5: a
   reclaim moves rows and cursor together or not at all; I6: nothing above the
-  final prompt row is taken under `redraw=last`) -- get before/after
-  assertions anchored at the blanking or reclaim mutation itself, active
-  wherever the oracle runs, injected replays included. A snapshot cannot
-  prove these: the pre-`d1eb808` bug deleted finished output and left
-  structurally valid rows, stamps, and an in-bounds cursor behind. A
-  recording event is the wrong granularity too: one feed event reduces to
-  many parser actions, so a later action in the same event can mask a faulty
-  reclaim delta or make a correct one look incoherent. Recording-event
-  boundaries remain the unit for snapshot checks and failure indexing. The
-  mutation is observed through a test-facing seam under the same
-  no-public-API constraint as the stamp accessor.
+  final prompt row is taken under `redraw=last`) -- get controlled behavioral
+  tests that bracket the relevant operation precisely: the pre-`d1eb808`
+  output-loss shape, permitted and guard-blocked reclaims, and resize
+  blanking under each declared redraw mode. A snapshot cannot prove these:
+  the pre-`d1eb808` bug deleted finished output and left structurally valid
+  rows, stamps, and an in-bounds cursor behind. But a universal external
+  trace cannot prove them either: one feed event reduces to many parser
+  actions, so a later action in the same event can mask a faulty reclaim
+  delta; resize blanking is followed by reflow inside the same `resize()`
+  call, so external before/after snapshots bracket blanking plus reflow, not
+  the blanking alone; and a mutation that incorrectly never fires produces no
+  delta to validate. Mutation-anchored observation from inside production
+  code closes those gaps but was implemented and withdrawn: it cost two
+  full-grid deep snapshots per resize in release builds to serve a test-only
+  need. The transition guarantees stay executable through the behavioral
+  brackets; they are deliberately not advertised as mutation-level checks
+  over every authored feed chunk.
 
 Only genuinely unobservable intermediate parser states may fall back to a
 documented domain statement instead of a check (AR2); an observable resize or
@@ -181,7 +194,7 @@ precisely.
   those -- are documented with their domain rather than checked; a violation
   confined to such a state would not be caught by the oracle. Observable
   resize and reclaim transitions never fall under this entry (they carry
-  transition checks per the proof-shape rule). The ADR states each documented
+  targeted behavioral tests per the proof-shape rule). The ADR states each documented
   domain so the gap is deliberate and visible.
 
 ## Rejected ideas
@@ -201,9 +214,10 @@ precisely.
 - The exact executable phrasing of each invariant check within its assigned
   proof shape (snapshot vs transition), provided every I-entry is checked in
   the matching shape or falls under AR2's narrow domain.
-- The form of the mutation-observation seam (callback, debug-build assertion,
-  or recorded trace), provided transition checks fire at the mutation and the
-  seam adds no public API.
+- The exact bracket each transition-invariant behavioral test drives, provided
+  the bracketed operation is the one the invariant constrains and no
+  observation state, snapshots, or hooks are added to production paths to
+  serve it.
 - The injection schedule's shape: seed count, width sequences, and how
   injection points are drawn -- provided PO3/PO4 hold and runtime stays inside
   the decisive constraint.
@@ -232,10 +246,20 @@ precisely.
   directory-enumerating corpus test plus direct wiring into the transforming
   replay loops, the can-fire tests, and the I5 guard-domain behavioral tests.
   Discharges PO1, PO2, PO5, PO6.
-- [ ] **3. test(terminal): sweep resize injection points over the dialect
+- [x] **3. test(terminal): scope the corpus oracle to snapshot invariants and
+  prove transitions behaviorally** -- remove the production observation
+  state, transition snapshots, and mutation hooks that commit 2 threaded
+  into `Terminal.swift` (two full-grid deep snapshots per resize, in release
+  builds, to serve a test-only need); keep the zero-cost stamp accessor and
+  the universal snapshot oracle for I1/I2/I4; add the I3 output-floor and I6
+  redraw-scope behavioral brackets beside the existing I5 guard-domain
+  tests. Re-proves PO2, PO5, PO6 under the revised proof-shape rule.
+- [ ] **4. test(terminal): sweep resize injection points over the dialect
   recordings** -- seeded deterministic event-stream transform with
-  intra-chunk placement, oracle per event, and a rerun selector (fixture,
-  seed, injection point) in every failure message. Discharges PO3, PO4.
+  intra-chunk placement, snapshot oracle per event, observable-outcome
+  assertions (preserved completed output, coherent cursor and content,
+  fixture-specific prompt outcomes), and a rerun selector (fixture, seed,
+  injection point) in every failure message. Discharges PO3, PO4.
 
 ## Implementation notes
 

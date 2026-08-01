@@ -53,7 +53,11 @@ func expectValidGrid(
     expectValidStream(primaryRows, sourceLocation: sourceLocation)
 }
 
-/// Checks the OSC 133 prompt-anchor state and every mutation-level violation observed so far.
+/// Checks the snapshot-provable OSC 133 prompt-anchor invariants (I1 ownership, I2 logical-line
+/// integrity, I4 total vacating). The transition invariants (I3, I5, I6) quantify over what a
+/// single blanking or reclaim mutation changed, which no post-event snapshot can prove; they are
+/// covered by targeted behavioral tests in `TerminalSemanticPromptInvariantTests` that bracket
+/// the relevant operation precisely.
 func expectSemanticPromptInvariants(
     _ terminal: Terminal,
     context: String,
@@ -65,12 +69,6 @@ func expectSemanticPromptInvariants(
     #expect(
         stateViolations.isEmpty,
         "\(context): \(stateViolations.map(\.rawValue).joined(separator: ", "))",
-        sourceLocation: sourceLocation
-    )
-    let transitionViolations = terminal.semanticPromptTransitionViolationsForTesting
-    #expect(
-        transitionViolations.isEmpty,
-        "\(context): \(transitionViolations.map(\.rawValue).joined(separator: ", "))",
         sourceLocation: sourceLocation
     )
 }
