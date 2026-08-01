@@ -151,7 +151,7 @@ paired run reports `equivalent` regardless of this change's size.
 
 - [x] 1. perf(terminal): expand a terminal token from the clicked point outward
 - [x] 2. refactor(terminal): index the projected row stream instead of copying it
-- [ ] 3. docs(research): record `F4` and close doc 21
+- [x] 3. docs(research): record `F4` and close doc 21
 
 Each slice lands green, with its tests. Slice 1 carries the measured win and is
 where `PO1`, `PO3` and `PO5` are written; slice 2 is behavior-preserving by
@@ -212,3 +212,36 @@ what completes `I2`.
 - `normalizedBoundaryPosition` and `normalizedSelectionBoundary` only ever needed
   the projection's extent, so they read a `projectionRowCount` property and build
   no view at all.
+- Slice 3's `F4` re-ran the original `F2` probe unmodified -- it survived in the
+  earlier session's scratchpad, so "byte-identical" is literal (`sha256`
+  compared), not reconstructed. Only the build script's scratchpad path changed.
+  Three `.move` runs plus one `.down` run; the probe is still uncommitted per the
+  doc's `AR1`.
+- `F4` records no post-change `sample` capture. `F3`'s instrument answers a
+  presence/absence question, and after the change its frames are expected absent
+  for two independent reasons (the work is gone, and what is left is under the
+  sampler's resolution), so it could not discriminate between success and a
+  broken capture.
+- The plan's manual check (double-click in a deep-scrollback pane, confirm the
+  selection and the clipboard are unchanged) is **not done** -- it needs a human
+  at a GUI. Doc 21 closes noting that the subjective read was never taken, before
+  or after.
+
+## Follow Up
+
+- Manual verification is still owed and cannot be done headlessly: in a pane
+  with deep scrollback, double-click a word, confirm the selection is unchanged
+  and the click no longer stalls, then copy it and confirm the clipboard content
+  is unchanged. This is also the subjective read doc 21 closes without ever
+  having taken.
+- `selectedText` still walks the whole projection, and `hasSelection`
+  (`TerminalPaneSession.swift#hasSelection`) calls it for Copy menu validation,
+  so menu validation over deep scrollback still pays a full projection. Unmeasured;
+  doc 21's reopening condition 1 says to price it before designing anything,
+  because a range-local serializer provably cannot reproduce today's text.
+- The alternate-screen click-coordinate mismatch (`21/F5`) is still live: a
+  double-click on a full-screen program's visible text selects primary scrollback
+  that is not on screen. Pinned as current behavior by
+  `alternateScreenClickCoordinateMismatchCharacterization` in
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSelectionUnitTests.swift`,
+  which the eventual fix has to delete deliberately.

@@ -11,8 +11,9 @@ reproduced below as the candidate direction), but every claim in it about cost
 was derived from reading the call graph. This file exists to price the gesture
 before the change is implemented, and to hold the decision either way. As of
 2026-07-31 the pricing is complete -- probe (`F2`) and app-level check (`F3`)
-both in -- and `D1` records **take**. What remains is Phases 3-5: pin the
-behavior, implement, re-measure.
+both in -- and `D1` records **take**. **Closed 2026-07-31**: the behavior was
+pinned (`F5`, `F6`), the change shipped in two slices, and `F4` re-ran the
+byte-identical probe -- every deep/shallow ratio is now ~1.
 
 It owns an axis no earlier performance file does: **the cost of a pointer-driven
 query**. Docs 9-18 all measure the output path -- parse, plan, draw, and the
@@ -243,10 +244,11 @@ exists. `I6` deliberately preserves today's behavior rather than fixing it.
       median per granularity. *Extended beyond `D2`'s ask with saturated
       100 MB and 50,000-row arms (`F2b`) to characterize the scaling curve;
       those arms' absolutes are not user-facing figures.*
-- [ ] Confirm the cost exists in the real app, not just the probe, as a
-      **differential** capture: optimized build, deep scrollback, two
-      equal-duration `sample` runs -- one across a burst of repeated bare
-      double-clicks on a word, one idle control with no pointer activity.
+- [x] **Done 2026-07-31** (`F3`; the app agrees). Confirm the cost exists in
+      the real app, not just the probe, as a **differential** capture:
+      optimized build, deep scrollback, two equal-duration `sample` runs -- one
+      across a burst of repeated bare double-clicks on a word, one idle control
+      with no pointer activity.
       Record in `F3` whether the `projectionUnits` / `activeProjectionRows`
       subtree appears materially only in the click capture, and the delivered
       click count if it can be observed. `F3` passes on that presence/absence
@@ -293,14 +295,17 @@ exists. `I6` deliberately preserves today's behavior rather than fixing it.
 
 ### Phase 4 -- implement the selected direction
 
-- [ ] Implement the candidate direction; `PO1`-`PO8` green.
+- [x] **Done 2026-07-31.** Implemented from
+      [plans/impl/2026-07-31-2224-point-local-selection-projection.md](../../plans/impl/2026-07-31-2224-point-local-selection-projection.md),
+      split per `D1`'s sequencing note: the bounded unit build first
+      (`aca4f43`), then the indexed row access (`c50600e`). `PO1`-`PO8` green;
+      `PO2` by inspection per `AR1`.
 
 ### Phase 5 -- close with a final measurement
 
-- [ ] Re-run the byte-identical probe from `F2` and record the result in `F4`.
-      Expected: deep/shallow ratio collapses toward 1 for the expansion arm.
-      Record the outcome even if the win is smaller than `F2` predicted --
-      especially then.
+- [x] **Done 2026-07-31** (`F4`). Re-ran the byte-identical probe from `F2`.
+      Ratios collapsed to ~1 for every granularity at every depth, and the
+      expansion absolute fell from ~13.6 ms to ~5.5 us at the shipped budget.
 
 ## Findings log
 
@@ -657,7 +662,77 @@ and it is still missing.
 
 ### F4 -- post-change measurement
 
-- Status: **pending.** Phase 5, only on "take".
+- Status: **measured 2026-07-31.** Phase 5. Diagnostic numbers, not benchmark
+  results: no verdict, no threshold, no `faster`/`slower` label.
+- Commit and worktree state: `c50600e` (both implementation slices landed),
+  clean except unrelated untracked docs and this file.
+- Machine state: Apple M1 Pro, macOS 26.5.2, AC power, no other deliberate load
+  -- the same machine and posture as `F2`.
+- Method: **the byte-identical probe from `F2b`/`F2c`**, re-run unmodified
+  (`sha256 cd2cb86d...`), rebuilt by the same `swift build -c release ...
+  -Xswiftc -enable-testing` + ad-hoc `swiftc -O` recipe. Three `.move` runs and
+  one `.down` run; median of 300 iterations after 10 warmup, falling to 30/15
+  for the two non-production arms as before. Never committed.
+
+**Medians**, microseconds, `.move` drag event, three runs:
+
+| granularity | 81 rows | 1,768 rows (10 MB) | 17,088 rows (100 MB) | 50,081 rows |
+| --- | --- | --- | --- | --- |
+| `character` | 0.125 / 0.125 / 0.125 | 0.125 / 0.125 / 0.125 | 0.125 / 0.125 / 0.125 | 0.125 / 0.125 / 0.125 |
+| `terminalToken` | 5.88 / 5.54 / 5.54 | 5.88 / 5.54 / 5.50 | 5.88 / 5.54 / 5.54 | 5.54 / 5.54 / 5.75 |
+| `line` | 13.13 / 12.83 / 12.88 | 13.08 / 12.83 / 12.83 | 13.29 / 12.88 / 12.79 | 13.25 / 12.88 / 13.79 |
+
+`.down` bare click, one run: `character` 0.167 us at every depth,
+`terminalToken` 5.38 / 5.38 / 5.54 / 5.42, `line` 12.83 / 12.88 / 13.25 / 12.88.
+
+`text_equal` was `yes` for every granularity in every arm of every run, as in
+`F2`: all four streams still select byte-identical text, so this is the same
+comparison `F2` made and `I1` held through the change.
+
+**Observation 1 -- the deciding quantity landed.** Every deep/shallow ratio is
+between 0.94 and 1.07 across all three granularities, all four depths, and both
+event kinds. `F2`'s ratios were 18-19 (`character`), 27-47 (`terminalToken`) and
+5.5 (`line`); at the 50k-row arm the deep/shallow factors were 1,300x, 807x and
+371x. Gesture cost is now flat in retained history, which is the claim the
+change was taken on. The spread that remains is run-to-run noise, not depth: the
+50k-row arm is measured over 15 iterations and moves as much between runs of the
+same arm as it does between arms.
+
+**Observation 2 -- the absolutes, against `F2b`'s same-flavor figures.** At the
+shipped 10 MB budget the double-click drag went **13,580 us -> ~5.5 us**
+(~2,400x), the character drag 89.6 -> 0.125 us, and the line drag 89.5 ->
+~12.8 us. `D1` fired on a ~13.6 ms number against a ~2 ms threshold; that number
+is now under 6 microseconds, which is ~0.07% of a 120 Hz frame. The bare
+double-click that `F2c` identified as the real symptom went 13,542 -> ~5.4 us.
+
+**Observation 3 -- the shallow arm improved too, which is the point about
+scope.** `terminalToken` at 81 rows went 495 -> ~5.5 us. The old walk was
+whole-stream even when the whole stream was small, so removing it helps a fresh
+pane as much as a saturated one; the ratio collapsing is the asymptotic claim,
+and the shallow improvement is the constant that came with it.
+
+**Observation 4 -- the granularity ordering inverted.** `line` is now the most
+expensive gesture (~12.8 us) and `character` the cheapest by two orders of
+magnitude. `line` is the one path that still builds projection units --
+`trimmedLogicalLineRange` bounds them to the clicked logical line, which is
+`I3`'s stated worst case, not a regression. It no longer scales with history,
+which is all this change claimed for it.
+
+**Uncertainty.** `character`'s 0.125 us sits at the probe's timer floor
+(`DispatchTime` ticks ~41.7 ns), so that figure is an upper bound rather than a
+measurement -- it means "too fast for this instrument", and no smaller number
+should be read out of it. Absolutes remain M1 Pro-specific. The probe measures
+core-local cost only; no post-change `sample` capture was taken, because `F3`'s
+instrument answers a presence/absence question and the frames it looked for are
+now expected to be absent for two independent reasons (the work is gone, and
+what remains is below the sampler's resolution) -- an absence that cannot
+discriminate is not evidence.
+
+**`I2` is met.** `PO2` is discharged by inspection per `AR1`: no query on the
+gesture or range-application path calls `activeProjectionRows()` or
+`projectionUnits()`. Both survive for the consumers that inherently read all
+history -- search, Select All, history export, width reflow, and selected-text
+serialization -- which the plan scoped out and this measurement does not cover.
 
 ### F5 -- the alternate-screen coordinate mismatch, characterized concretely
 
@@ -914,8 +989,45 @@ Reopen if that actually happens.
 
 ## Outcome
 
-**Phases 1 and 2 are closed. `D1` records TAKE.** Phases 3-5 remain; nothing is
-implemented yet.
+**Closed 2026-07-31. Shipped, and the ratio the file was opened to move is now
+~1.** All five phases are done: the gesture was priced (`F2`), the change
+decided (`D1`, take), the behavior pinned before it moved (`F5`, `F6`),
+implemented in two slices (`aca4f43`, `c50600e`), and re-measured with the
+byte-identical probe (`F4`).
+
+The headline: at the shipped 10 MB budget a double-click's selection query went
+from **~13.6 ms to ~5.5 us**, and every deep/shallow ratio -- across three
+granularities, four history depths spanning 81 to 50,081 rows, and both the
+click and the drag event -- now sits between 0.94 and 1.07, against 5.5-47
+before. Selection cost stopped scaling with retained history, which was the
+claim; the constant-factor win came along with it. The selected text is
+byte-identical in every arm, as it was before.
+
+**Reopening conditions.** Three, each with its own entry point:
+
+1. **The copy path.** `selectedText` still walks the whole stream and
+   `hasSelection` calls it for Copy menu validation, so menu validation over a
+   deep scrollback still pays a full projection. Deliberately out of scope: the
+   plan records that a range-local serializer *cannot* reproduce today's text,
+   because whether a blank hard-ended row contributes a newline depends on
+   content at unbounded distance. It needs its own evidence and probably its own
+   semantic decision. Unmeasured -- start by pricing it.
+2. **The alternate-screen coordinate mismatch** (`F5`): a double-click on a
+   full-screen program's visible text selects primary scrollback that is not on
+   screen. Pinned by `alternateScreenClickCoordinateMismatchCharacterization`,
+   which the fix has to delete on purpose. Not a performance question.
+3. **Retaining more history.** `F2b`'s 17k- and 50k-row arms were a headroom
+   argument for after the cell-representation work. That argument is now spent
+   on the selection path -- it is flat at 50k rows -- so raising the scrollback
+   budget no longer has this cost standing behind it.
+
+The one thing this file never produced is a subjective read on whether a
+double-click *felt* like it hitched at the shipped budget, before or after. It
+is the closest thing to a user-facing measurement here and it stayed missing;
+the case was carried entirely by the probe and by `F3`'s app-level presence
+check.
+
+### The arc
 
 Phase 1 measured the gesture (`F2`): the double-click expansion costs ~13.6 ms
 at the 10 MiB scrollback ceiling against ~0.5 ms shallow, and `character` and
@@ -937,6 +1049,7 @@ alone. And Phase 4 should be split, bounded unit build first: it captures the
 whole user-visible win at a fraction of `H3`'s equivalence risk, with
 `trimmedLogicalLineRange` already shipping the pattern for `.line`.
 
-The one thing Phase 1 did not produce is a subjective read on whether a
-double-click *feels* like it hitches at the shipped budget. That is still the
-closest thing to a user-facing measurement here, and it is still missing.
+Both were honored. Phase 3 pinned the three whole-stream dependencies first and
+falsified them against a naive slice (`F6`) -- five of six points diverged, all
+plausibly -- which is what made Phase 4 safe to write. Phase 4 split as `D1`
+asked, and Phase 5's `F4` closed the loop.
