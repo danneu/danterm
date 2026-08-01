@@ -170,6 +170,16 @@ public struct Terminal: Equatable, Sendable {
         case none
         case prompt
         case continuation
+        /// A prompt row that prompt blanking emptied and no shell has repainted yet.
+        ///
+        /// Distinct from `.none` because the two are only alike on screen. Blanking
+        /// vacates rows on the promise that the shell repaints them, and until it does
+        /// they are ours to reclaim; an ordinary blank row is the user's. Without this
+        /// case the difference had to be re-derived by asking whether a still-stamped
+        /// row had any content left, which is a question about cells standing in for a
+        /// fact about intent -- and one that two separate walks answered in opposite
+        /// directions.
+        case vacated
     }
 
     /// Tracks whether subsequent output belongs to command output, a prompt, or input.
@@ -1178,11 +1188,21 @@ public struct Terminal: Equatable, Sendable {
               activeScrollRegion.contains(cursor.row)
         else { return }
         var top = topOfStalePromptHeads(above: cursor.row)
-        // Also reclaim rows the resize path already emptied. Those are stamped but hold
-        // nothing, so removing them costs no visible content -- and leaving them is what
-        // makes the prompt appear to walk down the pane, since the shell repaints below
-        // the block it vacated.
-        while top > 0, rows[top - 1].semanticPrompt != .none, retainedContentEnd(in: rows[top - 1]) == 0 {
+        // Also reclaim rows an earlier resize vacated. Leaving them is what makes the
+        // prompt appear to walk down the pane: the shell repaints below the block it
+        // vacated and never comes back for it.
+        //
+        // Still empty is the condition, not the identity -- `.vacated` already says
+        // these rows are ours to take, and the emptiness check says taking them is
+        // free. A shell that printed into the vacated block without stamping a mark
+        // (a banner, unmarked output) keeps what it wrote. It also makes a reflow
+        // subtlety harmless: a wrapped content row above a vacated one absorbs the mark
+        // into its own logical line, so a packed row can come back marked `.vacated`
+        // while holding content, and this check declines it.
+        while top > 0,
+              rows[top - 1].semanticPrompt == .vacated,
+              retainedContentEnd(in: rows[top - 1]) == 0
+        {
             top -= 1
         }
         guard top < cursor.row, activeScrollRegion.contains(top) else { return }
@@ -1758,7 +1778,12 @@ public struct Terminal: Equatable, Sendable {
         var start = cursor.row
         while start >= 0 {
             switch rows[start].semanticPrompt {
-            case .prompt:
+            case .prompt, .vacated:
+                // `.vacated` stops the walk as firmly as a live head: it is the block a
+                // previous resize already emptied and the shell has not repainted yet,
+                // so the prompt to blank starts here, not at whatever older prompt sits
+                // above it. Walking past it would blank the last command's output every
+                // time a drag outran the shell.
                 start = topOfStalePromptHeads(above: start)
                 for row in start..<rowCount { clearPromptCells(in: row) }
                 return
@@ -1776,32 +1801,43 @@ public struct Terminal: Equatable, Sendable {
     /// *logical* line count, which is one row short, and erases from there. The wrapped
     /// head above survives, stamped and full of stale cells.
     ///
-    /// All three conditions carry weight, and each was added because dropping it broke a
-    /// real case. `.prompt` only, never `.continuation`: a genuinely earlier prompt is
-    /// separated from the current one by its own continuation row, so crossing those
-    /// blanks the previous prompt and the command typed at it. `isSoftWrapped`: without
-    /// it, a one-row prompt entered repeatedly with no output stacks legitimate heads
-    /// that this would eat -- debris exists only because it overflowed, so it always
-    /// wrapped. Retained content: `clearPromptCells` leaves the stamp behind, so spent
-    /// prompt rows would otherwise chain the walk upward into real history.
+    /// Together the two conditions are one invariant, not a pair of heuristics: a row
+    /// carrying `isSoftWrapped` asserts that the rest of its logical line lives on the
+    /// row below, so a `.prompt` row still making that claim directly above a *newer*
+    /// prompt head has had its continuation overwritten. It is a dangling wrap, which
+    /// is what a fragment is. Neither condition can go. Dropping `isSoftWrapped` ate
+    /// legitimate history -- a one-row prompt entered repeatedly with no output stacks
+    /// real heads on each other, and debris only exists because it overflowed, so
+    /// debris always wrapped. Crossing `.continuation` blanked the previous prompt and
+    /// the command typed at it, because a genuinely earlier prompt is separated from
+    /// this one by its own continuation row.
     private func topOfStalePromptHeads(above row: Int) -> Int {
         var top = row
         while top > 0,
               rows[top - 1].semanticPrompt == .prompt,
-              rows[top - 1].isSoftWrapped,
-              retainedContentEnd(in: rows[top - 1]) > 0
+              rows[top - 1].isSoftWrapped
         {
             top -= 1
         }
         return top
     }
 
+    /// Empties one row on the promise that the shell repaints it, and records that it
+    /// did so.
+    ///
+    /// The row's own bookkeeping has to go with its cells. A wrap flag left on an
+    /// emptied row is a claim that the row's content continues below, so the next
+    /// reflow re-flattens a full row of padding into the logical line and shifts
+    /// whatever follows it -- the row's width in blank cells, spliced into the middle
+    /// of real content. Clearing the flag ends the line where the content now ends.
     private mutating func clearPromptCells(in row: Int) {
         invalidateInspection(inViewportRows: row..<(row + 1))
         let styleId = backgroundEraseStyleId()
         for column in 0..<columnCount {
             rows[row].cells[column] = GridCell(styleId: styleId)
         }
+        rows[row].semanticPrompt = .vacated
+        rows[row].isSoftWrapped = false
         clusterContext = nil
     }
 

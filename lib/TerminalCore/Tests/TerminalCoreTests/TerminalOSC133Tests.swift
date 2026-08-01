@@ -155,4 +155,31 @@ struct TerminalOSC133Tests {
         heightOnly.resize(columns: 8, rows: 4)
         #expect(heightOnly.fullHistoryText.contains("> prompt") == false)
     }
+
+    @Test("a row emptied by prompt blanking does not splice its old width into the next reflow")
+    func blankedPromptRowDoesNotWidenTheLineBelow() throws {
+        // Intent: blanking a row that sat mid-way through a soft-wrapped logical line
+        //   removes it from that line, rather than leaving it as a full row of blanks
+        //   inside it.
+        // Why it exists: reflow measures a soft-wrapped row to its full old width on the
+        //   grounds that a wrapped row is full by definition. Blanking used to empty the
+        //   cells and leave the wrap flag, so the row kept asserting its content
+        //   continued below, and the next resize flattened `oldColumnCount` blank cells
+        //   into the middle of the line -- shifting everything after it right by a full
+        //   row and pushing the tail down.
+        // Scenario: a `redraw=last` shell (Bash's mode) parks the cursor on a row that is
+        //   in the middle of a wrapped line and the pane is resized, so the blanking
+        //   empties exactly that row and reflow then re-flattens the line around it.
+        var terminal = try #require(Terminal(columns: 10, rows: 6))
+        terminal.feed(Array("\u{1B}]133;A;redraw=last\u{7}ABCDEFGHIJKLMNOPQRSTUVWXY".utf8))
+        terminal.feed(Array("\u{1B}[A".utf8))
+        terminal.resize(columns: 12, rows: 6)
+
+        let lines = terminal.screenText.split(separator: "\n", omittingEmptySubsequences: false)
+        #expect(lines.first?.hasPrefix("ABCDEFGHIJ") == true)
+        // The tail keeps its own row and its own left margin. Before the fix it arrived
+        // as "        UVWX" / "Y" -- indented by the emptied row's width and re-wrapped.
+        #expect(lines.dropFirst().first?.hasPrefix("UVWXY") == true)
+        expectValidGrid(terminal)
+    }
 }
