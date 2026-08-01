@@ -324,15 +324,18 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   to be rebuilt twice within the same day for rounds two and three, each time to
   answer the same question -- does a bare `Terminal` reproduce this. Two call
   sites behind an env gate is less than the cost of restoring it a fourth time.
-- [ ] OPEN: the prompt blinks during a width drag under `redraw=1`, and it is
-  our blanking rather than the shell (F20). Diagnosed and measured -- zsh blanks
-  for 2.4 frames per resize step, fish 3.9, Bash 0 -- with the maintainer
-  confirming that split in a real pane. The candidate fix (defer the blank to the
-  repaint's mark, `.full` only) was built, measured against all 11 recordings for
-  an identical final grid, and reverted. Sequenced behind
-  `plans/wip/playful-soaring-horizon.md`, whose D2 oracle and D3 injection sweep
-  are the instruments it needs; that plan deferred anti-flicker work "until
-  flicker is actually observed", and F20 is that observation.
+- [x] REJECTED after prototype and live validation: the prompt blink during a
+  width drag under `redraw=1` is our blanking rather than the shell (F20). F21's
+  render-only prompt hold removed it without weakening vacate/reflow/reclaim,
+  passed its render-planning tests and the 55-step repository gate, and worked
+  well enough in the maintainer's optimized-pane check. The implementation was
+  nevertheless reverted: drag resize is infrequent, the artifact is cosmetic,
+  and the benefit was too marginal to justify cross-frame renderer state, a new
+  core-to-renderer transaction contract, clipping and re-anchoring logic,
+  cancellation paths, and intentional temporary divergence from the stateless
+  frame plan. F21 retains the measured design and proof recipe if experience
+  changes that tradeoff. Current behavior deliberately keeps the authoritative
+  vacate-before-reflow path and may show the brief blank.
 
 ## Rejected
 
@@ -573,3 +576,18 @@ reflows. What survives is the same fix scoped by the mode that already means
 "the shell repaints the whole block". The measurement that a design costs
 something is worth as much as the measurement that it works, and this doc has
 now recorded both for the same contract.
+
+The F21 prototype separated the two jobs F20 treated as one. Correctness still
+vacated before reflow exactly as the accepted prompt-anchor design requires;
+only presentation retained the old, unreflowed prompt rows. Those rows were
+renderer state, not terminal cells, and disappeared atomically when `B` closed
+the replacement prompt. This was the DanTerm-shaped version of Kitty's proven
+copy-back idea: the same visual continuity, without copying disposable
+presentation back into the authoritative grid. It also closed F20's fish timing
+gap: fish can start answering in 0.7ms but take 66ms to finish, so the swap
+belonged at the end mark, not the first repaint byte or the opening `A`.
+
+The prototype worked, but was reverted by maintainer decision. The visible gain
+was too marginal for an infrequent drag-resize artifact to carry the permanent
+state and lifecycle complexity. The design remains here as a tested option, not
+as current behavior or planned work.

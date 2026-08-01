@@ -1091,12 +1091,109 @@ Evidence for the OSC 133 dialect. Parser probes feed
   "prompt briefly stale, one row wider" (self-corrected by the reclaim when the
   mark lands). It was not checked on the messier drift and overflow recordings,
   and no per-event invariant check ran during a deferred replay.
-- Next action: none here. `plans/wip/playful-soaring-horizon.md` deferred
-  anti-flicker work explicitly "until flicker is actually observed" -- that gate
-  is now met, and its D2 oracle and D3 resize-injection sweep are the instruments
-  this change needs, since deferral moves behavior into precisely the erase-to-
-  re-mark window D3 exists to probe. Sequence it after that plan, not before.
-  Note the plan's objection to anti-flicker is aimed at Kitty-style copy-back
-  (putting content back into rows the reclaim identifies by emptiness) and does
-  not apply here: deferral never removes the content, and still empties the rows
-  immediately before the reclaim walks them.
+- Next action: none. F21 records the safer presentation-only alternative and the
+  maintainer's decision to reject it after a working prototype. The shipped D2
+  oracle and D3 resize-injection sweep in
+  `plans/impl/2026-08-01-0029-prompt-anchor-invariants.md` remain the right
+  instruments if that decision is revisited.
+
+### F21 -- preserve the old prompt only in presentation, then swap at `B`
+
+- Status: rejected after a working prototype and live optimized-pane validation.
+  The design supersedes F20's preference for deferring the full-mode vacate, but
+  the current product deliberately ships neither anti-flicker approach. F20's
+  measurements and diagnosis still stand.
+- Date and investigator: 2026-08-01.
+- Commit and worktree state: the uncommitted prototype and its tests were
+  reverted; no implementation is present.
+- Question: what is the ideal fix, rather than merely the smallest change that
+  removes the observed blink in the recording corpus?
+- Prior art: Kitty independently diagnosed the same blank-then-repaint gap and
+  fixed it by copying the old prompt before its correctness pass blanks it,
+  reflowing the blank grid, then copying the prompt back unreflowed. See
+  `references/kitty/kitty/screen.c#prevent_current_prompt_from_rewrapping` and
+  `references/kitty/kitty/screen.c#screen_resize`. The shipped comment names the
+  same cause F20 measured. This is evidence that an unreflowed visual hold works;
+  Kitty's grid-level storage is a design input, not DanTerm's required shape.
+- Four candidate boundaries were compared:
+
+  | Candidate | Keeps stale cells out of reflow | Keeps the prompt visible | Preserves DanTerm's authoritative-grid boundary |
+  |---|---:|---:|---:|
+  | Vacate on resize (current) | yes | no | yes |
+  | Defer full vacate to `A` | no | yes | yes |
+  | Vacate, then copy cells back into the grid | yes for that resize | yes | no |
+  | Vacate grid + retain old rendered rows | yes | yes | yes |
+
+- Why the F20 deferral is not the ideal fix. Its final grid and history matched
+  all 11 recordings, which proves the reclaim path can recover those authored
+  streams. It still lets a stale-width, disposable prompt determine reflow's
+  intermediate logical lines and cursor mapping. Full redraw makes that state
+  recoverable; it does not make it irrelevant to the shell's relative cursor
+  operations during the repaint. The prompt-anchor design exists specifically
+  to remove that variable before reflow, so giving the variable back to avoid a
+  visual gap crosses the wrong boundary.
+- Why a literal Kitty-style grid copy-back is also wrong for DanTerm. A copied
+  prompt row would be nonempty while semantically vacated. Today nonemptiness is
+  the safety check that prevents reclaim from deleting unmarked content, and
+  terminal cells also feed history, `pane read`, search, selection, and equality.
+  A visual placeholder should affect none of those. Adding another grid stamp
+  plus write tracking could distinguish placeholder bytes from later shell
+  bytes, but that is machinery for repairing a boundary the renderer already
+  provides naturally.
+- Prototype design: if this is revisited, full redraw should get a presentation
+  transaction, not a different grid transaction.
+
+  1. On the first visible primary-screen resize with a current `redraw=1`
+     prompt, the core still vacates before reflow exactly as it does now. It also
+     identifies the old prompt's viewport rows and their cursor-relative anchor.
+  2. The pane's retained frame planner holds the already-planned cell-derived
+     layers for those rows. They are clipped or padded to the new width and
+     re-anchored relative to the post-resize cursor, but never fed back into
+     `Terminal` cells.
+  3. Further resizes reuse and re-anchor the same held rows. They must not
+     recapture the blank authoritative grid and turn the hold into the blink it
+     exists to prevent.
+  4. OSC 133 `A` starts the replacement but does not reveal a partial prompt.
+     OSC 133 `B` completes it and atomically drops the hold, exposing the current
+     planned rows. `I`, `C`, `D`, RIS, leaving the primary screen, or changing
+     away from full redraw cancels a hold so a broken or interrupted repaint
+     cannot pin stale presentation indefinitely.
+  5. `redraw=last` and disabled redraw keep their current paths. Bash does not
+     blink, and freezing its untouched upper prompt rows would weaken the
+     declaration that those rows are ordinary content.
+
+- Why `B`, not the first repaint byte or `A`, is the swap boundary. zsh's first
+  byte and completed repaint arrived together in F20, but fish started in 0.7ms
+  and needed 66ms to finish. Releasing at input arrival or `A` can merely move
+  fish's blank from resize-to-first-byte into the repaint itself. DanTerm's
+  integrations already bracket the complete prompt with `A`/`B`; using the end
+  mark makes the visual transaction match the authored protocol transaction and
+  requires no timer in the pure core.
+- This is presentation state, not synchronized output. Suppressing the whole
+  pane until `B` would also freeze unrelated output, scrollbar state, selection,
+  and every row's resize. Only the rows the shell promised to replace are held;
+  the rest of the frame continues to reflect the authoritative terminal.
+- Prototype evidence (the prototype-specific tests were removed with the code):
+  - the existing per-event prompt oracle and resize-injection sweep passed
+    without changing final terminal grid or history;
+  - planning tests observed the old prompt after the authoritative grid vacated
+    it, retained it across `A`, and swapped to the canonical plan at `B`;
+  - `I`, `C`, `D`, RIS, alternate-screen entry, and a redraw-mode change released
+    the hold;
+  - repeated resizes retained the original planned rows rather than capturing a
+    blank, and Bash `redraw=last` created no hold;
+  - the full TerminalCore corpus passed 791 tests with one pre-existing known
+    issue, and the repository-wide `just test` gate passed all 55 steps;
+  - the maintainer's optimized-pane check found that the prototype worked well
+    enough to remove the observed distraction.
+- Rejection rationale: the result was only marginal UX polish for an infrequent
+  drag-resize interaction. It permanently added cross-frame state to the pane
+  planner, a generation-based core-to-renderer contract, retained-row clipping
+  and re-anchoring, cancellation behavior across protocol and screen-state
+  transitions, and a period where the stateful plan intentionally differed from
+  the canonical stateless plan. The runtime cost was negligible and the design
+  was correct, but its conceptual and maintenance cost outweighed the benefit.
+- Next action: none. Accept the brief blank and revisit only if resize flicker
+  becomes a recurring user complaint or a materially simpler design appears. Do
+  not weaken `clearPromptForResizeIfNeeded` or the ADR's vacate-before-reflow
+  contract.
