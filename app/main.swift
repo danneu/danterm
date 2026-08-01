@@ -48,7 +48,8 @@ guard rc == GHOSTTY_SUCCESS else {
     exit(1)
 }
 
-// Parse restore-related CLI arguments.
+// Resolve explicit launch policy and parse restore-related CLI arguments.
+let launchPolicy = AppLaunchPolicy(arguments: CommandLine.arguments)
 var initSnapshot: AppModelSnapshot? = nil
 do {
     let args = CommandLine.arguments
@@ -81,7 +82,7 @@ do {
 var lastSessionSnapshot: ValidatedAppRestore? = nil
 var previousSessionCrashed = false
 
-if initSnapshot == nil {
+if initSnapshot == nil, launchPolicy.startup == .promptForRecovery {
     // Crash detection: lock file exists = previous exit was unclean.
     // Don't delete it here — writeSessionLockFile() in applicationDidFinishLaunching
     // atomically overwrites it, so there's no gap where a startup crash would be
@@ -114,6 +115,7 @@ let delegate = MainActor.assumeIsolated { () -> AppDelegate in
     delegate.initSnapshot = initSnapshot
     delegate.lastSessionSnapshot = lastSessionSnapshot
     delegate.previousSessionCrashed = previousSessionCrashed
+    delegate.launchPolicy = launchPolicy
     NSApp.delegate = delegate
     return delegate
 }

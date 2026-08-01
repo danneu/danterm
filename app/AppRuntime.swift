@@ -143,6 +143,7 @@ class AppRuntime {
 
     var model: AppModel
     private let configStore: DanTermConfigStore
+    private let notificationAuthorizationPolicy: NotificationAuthorizationPolicy
     private var pendingConfigError: Error?
     // Ephemeral view state the reconciler reads as a second input (see ViewLocalState).
     // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
@@ -210,10 +211,12 @@ class AppRuntime {
 
     init(
         terminalBackend: any TerminalBackend,
-        configStore: DanTermConfigStore = DanTermConfigStore()
+        configStore: DanTermConfigStore = DanTermConfigStore(),
+        notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded
     ) {
         self.terminalBackend = terminalBackend
         self.configStore = configStore
+        self.notificationAuthorizationPolicy = notificationAuthorizationPolicy
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
@@ -1052,6 +1055,7 @@ class AppRuntime {
     // no model/view mutation here without hopping back to main.
     private func enqueueNotificationRequest(_ request: UNNotificationRequest) {
         let center = UNUserNotificationCenter.current()
+        let permitsAuthorizationRequest = notificationAuthorizationPolicy.permitsRequest
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
@@ -1061,6 +1065,7 @@ class AppRuntime {
                     }
                 }
             case .notDetermined:
+                guard permitsAuthorizationRequest else { return }
                 center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
                     if let error {
                         print("Notification authorization request failed: \(error)")

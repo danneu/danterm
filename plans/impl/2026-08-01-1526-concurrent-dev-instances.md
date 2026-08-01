@@ -220,7 +220,7 @@ per-instance path and is the checklist for what must be namespaced.
 
 - [x] 1. Model pooled instance identities and namespace runtime state
 - [x] 2. Make control-socket ownership race-safe
-- [ ] 3. Add explicit fresh-start and notification policies
+- [x] 3. Add explicit fresh-start and notification policies
 - [ ] 4. Launch isolated development slots and update tooling contracts
 
 ## Implementation notes
@@ -234,3 +234,6 @@ per-instance path and is the checklist for what must be namespaced.
 - Socket reclamation uses a persistent `<control-socket>.lock` sibling. The lock
   is held only across liveness detection plus rebind, or ownership-checked
   teardown; the listener records the bound path's device and inode at bind time.
+- App launch arguments use `--fresh` for recovery policy and `--background` for
+  unattended activation. Background launches never request notification
+  authorization; `--fresh` without `--background` is the foreground priming mode.

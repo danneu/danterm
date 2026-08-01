@@ -17,6 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
     var initSnapshot: AppModelSnapshot?
+    var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
@@ -51,7 +52,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         }
 
         // Create runtime
-        runtime = AppRuntime(terminalBackend: terminalBackend)
+        runtime = AppRuntime(
+            terminalBackend: terminalBackend,
+            notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
+        )
 
         // Build menu bar
         buildMenu()
@@ -126,7 +130,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         #if DANTERM_TERMINAL_BENCHMARK
         window.orderFront(nil)
         #else
-        window.makeKeyAndOrderFront(nil)
+        if launchPolicy.activation == .foreground {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.orderFront(nil)
+        }
         #endif
 
         // Set divider position after window is visible
@@ -155,7 +163,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         if let snapshot = initSnapshot {
             runtime.bootstrapFromSnapshot(snapshot)
             initSnapshot = nil
-        } else if let lastSession = lastSessionSnapshot {
+        } else if launchPolicy.startup == .promptForRecovery,
+                  let lastSession = lastSessionSnapshot {
             // Prompt the user before restoring so they know what's coming.
             // Crash path gets a warning tone; clean exit is a neutral prompt.
             let summary = sessionSummary(lastSession)
@@ -208,15 +217,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         #if DANTERM_TERMINAL_BENCHMARK
         NSApp.activate()
         #else
-        NSApp.activate(ignoringOtherApps: true)
+        if launchPolicy.activation == .foreground {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         #endif
 
         // Benchmark builds are excluded so notification authorization never interrupts a measurement.
         #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Request notification authorization after the app is active so the
         // system prompt is not racing the initial launch and window setup.
-        DispatchQueue.main.async { [weak self] in
-            self?.requestNotificationAuthorizationIfNeeded()
+        if launchPolicy.notificationAuthorization.permitsRequest {
+            DispatchQueue.main.async { [weak self] in
+                self?.requestNotificationAuthorizationIfNeeded()
+            }
         }
         #endif
 
