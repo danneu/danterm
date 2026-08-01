@@ -190,6 +190,30 @@ public struct Terminal: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
         var semanticPrompt = SemanticPromptRow.none
+
+        /// Reads the logical row rather than exposing its physical storage extent.
+        func cell(at column: Int) -> GridCell {
+            precondition(column >= 0)
+            return cells.indices.contains(column) ? cells[column] : GridCell()
+        }
+
+        /// Materializes the logical row for a consumer that requires full-width storage.
+        func materialized(to columns: Int) -> GridRow {
+            precondition(columns >= cells.count)
+            guard cells.count < columns else { return self }
+            var row = self
+            row.cells.append(contentsOf: repeatElement(GridCell(), count: columns - cells.count))
+            return row
+        }
+
+        /// Writes anywhere in the logical row, materializing omitted padding first when needed.
+        mutating func setCell(_ cell: GridCell, at column: Int, columns: Int) {
+            precondition(column >= 0 && column < columns)
+            if cells.count < columns {
+                cells.append(contentsOf: repeatElement(GridCell(), count: columns - cells.count))
+            }
+            cells[column] = cell
+        }
     }
 
     /// Tracks a shell-redraw prompt row through prompt -> vacated -> repainted or
@@ -1919,7 +1943,8 @@ public struct Terminal: Equatable, Sendable {
     public var screenText: String {
         presentedRows.map { row in
             var result = ""
-            for cell in row.cells {
+            for column in 0..<columnCount {
+                let cell = row.cell(at: column)
                 switch cell.kind {
                 case .narrow, .wideHead:
                     for scalar in cell.scalars {
@@ -2015,7 +2040,7 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes one retained row without allowing callers to mutate terminal storage.
     public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
         guard scrollbackRows.indices.contains(index) else { return nil }
-        let row = scrollbackRows[index]
+        let row = scrollbackRows[index].materialized(to: columnCount)
         return TerminalScrollbackRow(
             cells: row.cells.map {
                 TerminalCell(
@@ -2501,7 +2526,7 @@ public struct Terminal: Equatable, Sendable {
         guard stream.isEmpty == false else { return nil }
         let row = min(max(position.row, 0), stream.count - 1)
         let column = min(max(position.column, 0), columnCount - 1)
-        guard let id = stream[row].cells[column].hyperlinkId,
+        guard let id = stream[row].cell(at: column).hyperlinkId,
               let target = hyperlinkTargets[id]
         else { return nil }
 
@@ -2522,12 +2547,12 @@ public struct Terminal: Equatable, Sendable {
         var upper = targetIndex
         while lower > 0 {
             let candidate = coordinates[lower - 1]
-            guard stream[candidate.row].cells[candidate.column].hyperlinkId == id else { break }
+            guard stream[candidate.row].cell(at: candidate.column).hyperlinkId == id else { break }
             lower -= 1
         }
         while upper + 1 < coordinates.count {
             let candidate = coordinates[upper + 1]
-            guard stream[candidate.row].cells[candidate.column].hyperlinkId == id else { break }
+            guard stream[candidate.row].cell(at: candidate.column).hyperlinkId == id else { break }
             upper += 1
         }
         let start = coordinates[lower]
@@ -2660,7 +2685,7 @@ public struct Terminal: Equatable, Sendable {
             let start = row == range.start.row ? range.start.column : 0
             let end = row == range.end.row ? range.end.column : columnCount
             for column in max(0, start)..<min(columnCount, end) {
-                identity = max(identity, Int(stream[row].cells[column].contentIdentity ?? 0))
+                identity = max(identity, Int(stream[row].cell(at: column).contentIdentity ?? 0))
             }
         }
         return identity
@@ -3037,7 +3062,7 @@ public struct Terminal: Equatable, Sendable {
         let end = projectedCellEnd(in: row)
         var column = 0
         while column < end {
-            let cell = row.cells[column]
+            let cell = row.cell(at: column)
             let width = cell.kind == .wideHead ? 2 : 1
             let scalars: [Unicode.Scalar]?
             switch cell.kind {
@@ -3061,7 +3086,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func projectedCellEnd(in row: GridRow) -> Int {
-        row.isSoftWrapped ? row.cells.endIndex : retainedContentEnd(in: row)
+        row.isSoftWrapped ? columnCount : retainedContentEnd(in: row)
     }
 
     private func text(in range: TextAnchorRange) -> String {
@@ -3136,7 +3161,7 @@ public struct Terminal: Equatable, Sendable {
         let stream = activeProjection()
         let row = min(max(position.row, 0), stream.count - 1)
         var column = min(max(position.column, 0), columnCount - 1)
-        if stream[row].cells[column].kind == .wideTail {
+        if stream[row].cell(at: column).kind == .wideTail {
             column = max(0, column - 1)
         }
         return CellPosition(row: row, column: column)
@@ -3327,7 +3352,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func anchor(after position: CellPosition) -> TextAnchor {
         let row = activeProjection()[position.row]
-        let width = row.cells[position.column].kind == .wideHead ? 2 : 1
+        let width = row.cell(at: position.column).kind == .wideHead ? 2 : 1
         return TextAnchor(
             row: evictedRowCount + position.row,
             column: min(columnCount, position.column + width)
@@ -3714,7 +3739,9 @@ public struct Terminal: Equatable, Sendable {
             columns: columnCount,
             rows: windowRows.map { row in
                 TerminalRowGeometry(
-                    cells: row.cells.map { TerminalCellGeometry(kind: $0.kind) },
+                    cells: (0..<columnCount).map {
+                        TerminalCellGeometry(kind: row.cell(at: $0).kind)
+                    },
                     isSoftWrapped: row.isSoftWrapped
                 )
             },
@@ -3734,11 +3761,12 @@ public struct Terminal: Equatable, Sendable {
         guard row >= 0,
               row < rowCount,
               let windowRow = viewportStreamRow(at: streamRow),
-              windowRow.cells.indices.contains(column)
+              column >= 0,
+              column < columnCount
         else {
             return nil
         }
-        let cell = windowRow.cells[column]
+        let cell = windowRow.cell(at: column)
         return TerminalCell(
             kind: cell.kind,
             scalars: cell.scalars,
@@ -3786,6 +3814,14 @@ public struct Terminal: Equatable, Sendable {
                 lastId = cell.styleId
             }
             body(column, cell.scalars, lastStyle)
+        }
+        guard windowRow.cells.count < columnCount else { return }
+        let padding = GridCell()
+        if padding.styleId != lastId {
+            lastStyle = self.style(for: padding.styleId)
+        }
+        for column in windowRow.cells.count..<columnCount {
+            body(column, padding.scalars, lastStyle)
         }
     }
 
@@ -3941,7 +3977,10 @@ public struct Terminal: Equatable, Sendable {
                         $0 + Self.scrollbackByteCost(of: $1)
                     }
                     scrollbackRows.removeLast(pulledCount)
-                    rows.insert(contentsOf: pulled, at: 0)
+                    rows.insert(
+                        contentsOf: pulled.map { $0.materialized(to: columnCount) },
+                        at: 0
+                    )
                     cursor.row += pulledCount
                 }
             }
@@ -4253,7 +4292,7 @@ public struct Terminal: Equatable, Sendable {
             var column = 0
             var firstSourceKey: Int?
             while column < iterationEnd {
-                let cell = row.cells[column]
+                let cell = row.cell(at: column)
                 let key = sourceKey(row: rowIndex, column: column, columns: oldColumnCount)
                 switch cell.kind {
                 case .spacerHead:
@@ -4266,7 +4305,7 @@ public struct Terminal: Equatable, Sendable {
                     pendingSpacerKeys.removeAll(keepingCapacity: true)
                     sources.append((key: key, offset: 0))
                     retainedSourceKeys.insert(key)
-                    if column + 1 < row.cells.count {
+                    if column + 1 < oldColumnCount {
                         let tailKey = sourceKey(
                             row: rowIndex,
                             column: column + 1,
@@ -6022,12 +6061,16 @@ public struct Terminal: Equatable, Sendable {
         replacementStyleId: StyleId
     ) {
         guard scrollbackRows[row].isSoftWrapped
-            || scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead
+            || scrollbackRows[row].cell(at: columnCount - 1).kind == .spacerHead
         else { return }
         invalidateInspection(inScrollbackRow: row)
         scrollbackRows[row].isSoftWrapped = false
-        if scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead {
-            scrollbackRows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
+        if scrollbackRows[row].cell(at: columnCount - 1).kind == .spacerHead {
+            setScrollbackCell(
+                GridCell(styleId: replacementStyleId),
+                row: row,
+                column: columnCount - 1
+            )
         }
     }
 
@@ -6092,10 +6135,23 @@ public struct Terminal: Equatable, Sendable {
         } else if row == 0,
                   isAlternateScreenActive == false,
                   let last = scrollbackRows.indices.last,
-                  scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
+                  scrollbackRows[last].cell(at: columnCount - 1).kind == .spacerHead
         {
             invalidateInspection(inScrollbackRow: last)
-            scrollbackRows[last].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
+            setScrollbackCell(
+                GridCell(styleId: replacementStyleId),
+                row: last,
+                column: columnCount - 1
+            )
         }
+    }
+
+    /// Mutates logical history while keeping its cached byte charge exact.
+    private mutating func setScrollbackCell(_ cell: GridCell, row: Int, column: Int) {
+        var retained = scrollbackRows[row]
+        let oldCost = Self.scrollbackByteCost(of: retained)
+        retained.setCell(cell, at: column, columns: columnCount)
+        scrollbackRows[row] = retained
+        scrollbackByteCount += Self.scrollbackByteCost(of: retained) - oldCost
     }
 }
