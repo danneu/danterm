@@ -286,6 +286,16 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   shell's repaint erase and its next mark cleared the whole pane. Neither
   reproduced from the stimulus that was proposed for it; both reproduced
   immediately from the right one.
+- [x] Fixed the second live-pane defect class, in fish rather than zsh (F17).
+  Both shells advance a line by overflowing one -- the PROMPT_SP hack pads to the
+  right margin and lets autowrap do the newline -- and a drag routinely leaves
+  that padding sized for a width the shell has already lost. The padded row then
+  really is soft-wrapped, into the prompt, and reflow spliced its full old width
+  in front of that prompt at every later resize. A prompt head at column 0 now
+  breaks the wrap claim above it, after the F16 reclaim rather than before, since
+  the reclaim recognizes a fragment by that same claim. Pinned by
+  `fish-prompt-sp-overflow.json`, which caught the ordering mistake the synthetic
+  case could not see.
 - [ ] TODO: render the Bash dialect in a real pane. Still never done, and F16 is
   the evidence that this is where the remaining defects are: every mark in this
   doc was parser-checked and correct, and the bug was in the consumer's anchor.
@@ -496,3 +506,17 @@ per overflow. None of the three was reachable from the first report, and each
 came from the maintainer re-running the same drag on a fresh optimized build.
 For a defect that only appears in a live pane, the loop is not fix-then-verify
 but fix, hand back, and expect the next layer.
+
+F17 is that loop's next turn, and it moved the target. The maintainer recorded
+the handed-back build while entering and leaving two subshells mid-drag -- a
+stimulus no earlier round had run -- and found a fish artifact with a different
+cause: both shells advance a line by deliberately overflowing one, and a drag
+leaves that overflow sized for a width the shell has already lost. It also
+retired a comfortable assumption. Rounds one through four all traced back to a
+shell repainting a stale-width *prompt*; this one traces back to a shell
+repainting a stale-width *newline*, and the prompt was only what the debris
+happened to land on. What stayed constant is the method: replay reproduced it
+first try, stepping the replay named the exact resize, and the recording caught
+an ordering mistake -- clearing the wrap claim before the reclaim that reads it
+as evidence -- that the synthetic case built from the same understanding could
+not see.

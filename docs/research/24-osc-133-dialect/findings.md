@@ -886,3 +886,66 @@ Evidence for the OSC 133 dialect. Parser probes feed
   exposure.
 - Next action: none outstanding for this finding. The remaining Phase 4 work is
   rendering the Bash dialect in a real pane.
+
+### F17 -- a shell advances a line by overflowing one, and padding sized for a width the drag already took away glues the prompt to the row above it
+
+- Status: settled and fixed. **Second live-pane defect class, found in fish
+  rather than zsh, and reached by a stimulus no earlier round had run: entering
+  and leaving subshells mid-drag.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: this finding's commit; core suite 747 to 750.
+- Result or artifact paths:
+  `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/fish-prompt-sp-overflow.json`
+  (359 events, 165 resizes, 135 down to 52 and back to 84), asserted by
+  `TerminalShellDialectTests.promptSPOverflowSurvivesAShellTransitionDrag`;
+  parser-level case in
+  `TerminalOSC133Tests.promptStartBreaksTheWrapClaimAboveIt`.
+- Commands, inputs, or reproduction: the maintainer ran DanTerm Dev under
+  `DANTERM_TAPE_PATH`, opened a fish pane, entered and exited `bash`, entered
+  and exited `zsh`, and dragged the width throughout. The fish prompt above the
+  `zsh` command came back indented three columns with its right-aligned segment
+  re-wrapped onto a row of its own, and stayed that way. The tape converts and
+  replays with
+  `scripts/terminal-tape-to-fixture.py <tape> <fixture> --replace orbstack=cluster1`.
+- Result: reproduced against a bare `Terminal` on the first replay, and the
+  stepped replay named the exact event -- the resize from 118 to 115 columns,
+  120 events after the bytes that caused it.
+- Mechanism, and it is not DanTerm's invention. fish and zsh advance a line by
+  *overflowing* one: the PROMPT_SP hack writes a marker and pads with spaces to
+  `screen_width`, letting the terminal's own autowrap perform the newline, then
+  returns and erases the landing row
+  (`references/fish-shell/src/screen.rs#abandon_line_string`, whose comment
+  notes zsh omits only the final erase). The padding is composed from a width
+  the shell holds, and a drag takes that width away between the composing and
+  the writing: here fish padded 135 cells into a pane already narrowed to 118.
+  The overflow is then real -- 17 cells landed on the next row -- so the padded
+  row is genuinely soft-wrapped, and after fish erases and repaints, what it is
+  wrapped *into* is the prompt. Reflow measures a soft-wrapped row to its full
+  old width, so every later resize spliced 118 cells of padding in front of the
+  prompt and offset it by the overflow. Permanent, and re-derived at each new
+  width.
+- Fix: a `.prompt` head stamped at column 0 clears `isSoftWrapped` on the row
+  above it. A prompt begins a logical line by definition, so nothing above it
+  may claim it as a continuation.
+- Ordering is load-bearing, and getting it wrong is silent. The stale-head
+  reclaim from F16 recognizes a fragment *by* the wrap claim it still makes, so
+  clearing the claim first destroys the evidence: the intermediate version fixed
+  the indent and left a truncated head stranded above the final prompt. The
+  synthetic case did not see it; the recording did, on the same replay. That is
+  the second time in two findings that a recording caught what a reconstruction
+  built from the same understanding could not.
+- Why the fix keys on the prompt mark and not on the erase: zsh runs the same
+  pad-and-wrap without the trailing `ESC[K`, so a rule keyed on "the
+  continuation row was erased" would have fixed fish and missed zsh. The prompt
+  mark is the one signal both dialects emit, and it states the invariant
+  directly rather than approximating it.
+- Accepted residual: the padded row's trailing spaces are cells the shell really
+  wrote, so `retainedContentEnd` counts them and narrowing past them costs one
+  blank row above the prompt. That is geometry-dependent rather than permanent
+  -- widening back re-absorbs it, unlike the indent, which was baked in -- and
+  the alternative, trimming trailing blanks during reflow, cannot distinguish
+  padding from an echoed trailing space and would change selection and copy. Not
+  taken.
+- Next action: none. Bash in a real pane remains the open Phase 4 item; this
+  round covered fish and zsh transitions but never rendered a Bash prompt of its
+  own.
