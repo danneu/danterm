@@ -6,6 +6,11 @@ import Testing
 struct TerminalResizeTests {
     @Test("same-size and invalid resize requests are bit-identical no-ops")
     func invalidAndSameSizeResizeAreNoOps() throws {
+        // Adapted from kitty_tests/datatypes.py#test_rewrap_simple
+        //   (kitty v0.48.2 2cb1d95, body sha256:4f347ba22878).
+        //   Divergence: covers only that test's same-width identity leg, and asserts whole-
+        //   terminal equality rather than kitty's per-line `lb2.line(i) == lb.line(i)`.
+        //   Pre-existing coverage; annotated rather than duplicated.
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("abcdefghijkl".utf8))
         #expect(terminal.scrollbackRowCount == 1)
@@ -98,6 +103,12 @@ struct TerminalResizeTests {
 
     @Test("height shrink trims filler then retains displaced top rows")
     func heightShrinkTransfersRows() throws {
+        // Adapted from kitty_tests/datatypes.py#test_rewrap_simple
+        //   (kitty v0.48.2 2cb1d95, body sha256:4f347ba22878).
+        //   Divergence: covers that test's row-shrink leg. kitty's LineBuf has no history,
+        //   so it asserts the top rows are gone; DanTerm retains them in scrollback, which
+        //   is what `scrollbackRowCount` pins here. Pre-existing coverage; annotated
+        //   rather than duplicated.
         var filler = try #require(Terminal(columns: 4, rows: 3))
         filler.feed(Array("ab".utf8))
         filler.moveCursor(row: 0, column: 2)
@@ -115,6 +126,12 @@ struct TerminalResizeTests {
 
     @Test("height growth pulls history only for a bottom-row cursor")
     func heightGrowthEligibility() throws {
+        // Adapted from kitty_tests/datatypes.py#test_rewrap_simple
+        //   (kitty v0.48.2 2cb1d95, body sha256:4f347ba22878).
+        //   Divergence: covers that test's row-growth leg -- content preserved, the added
+        //   rows blank. kitty grows into empty lines unconditionally; DanTerm only pulls
+        //   history back for a bottom-row cursor, which is the extra case here.
+        //   Pre-existing coverage; annotated rather than duplicated.
         var bottom = try #require(Terminal(columns: 4, rows: 2))
         bottom.feed(Array("a\r\nb\r\nc\r\nd".utf8))
         #expect(bottom.scrollbackRowCount == 2)
