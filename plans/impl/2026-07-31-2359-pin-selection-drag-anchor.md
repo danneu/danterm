@@ -155,7 +155,7 @@ the fix caller-independent.
       pair carrying the eviction clamp, and the policy switchover. Discharges
       PO1-PO4, PO8, PO9. Independently shippable -- it fixes the reported
       incident on its own.
-- [ ] Invalidate the anchor when absolute rows stop meaning the same thing: the
+- [x] Invalidate the anchor when absolute rows stop meaning the same thing: the
       epoch, its bump sites, and the stop-extending branch. Discharges PO5-PO7.
 
 ## Verification
@@ -180,6 +180,21 @@ the fix caller-independent.
 - `PinnedTextRange` spells out its `==` because a synthesized one would inherit
   the stored property's `fileprivate` access, which leaves `SelectionDrag`'s
   `Equatable` conformance unsatisfiable from the policy file.
+
+- The epoch is a counter in a wrapper whose `==` answers true, the same shape
+  `ObservationGeneration` already uses, so it stays out of `Terminal`'s value
+  equality: two terminals holding identical screen state must remain equal
+  however each got there, and dozens of suites compare whole terminals. The pin
+  therefore stores the raw `UInt64`, not the wrapper -- storing the wrapper would
+  make every stale pin compare equal and resolve as current.
+- Bump sites: `hardReset`, `resizeWidth`, both replacing branches of
+  `switchAlternateScreen`, and `selectPrimaryScreen` after its guard. That guard
+  is what makes a soft reset stop the drag only when it is taken from the
+  alternate screen. `resizeHeight` is deliberately untouched: it moves rows
+  between viewport and scrollback in stream order, so absolute numbers survive.
+- Commit 2 changed no policy code. The stop-extending branch landed in commit 1
+  for the reason recorded above, and the epoch reaches it through the same
+  `resolvedRange` nil.
 
 ## Implementation discretion
 

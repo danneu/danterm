@@ -920,6 +920,178 @@ struct TerminalInteractionPolicyTests {
         }
     }
 
+    @Test("hard reset width reflow and screen replacement each stop a held drag")
+    func renumberingRowsStopsTheDrag() throws {
+        // Intent: after an event that makes absolute row numbers name different text, a held
+        //   drag stops extending instead of resolving its anchor against the new numbering.
+        // Why it exists: the pin resolves through a row number that survives eviction, but a
+        //   hard reset returns the eviction count to zero and a reflow or a screen swap
+        //   rewrites what those rows hold -- each leaves a stale anchor resolving to a
+        //   wrong-but-in-range position, which reads as the selection jumping to text the
+        //   user never touched.
+        let renumberings: [(String, (inout Terminal) -> Void)] = [
+            ("hard reset", { $0.feed(Array("\u{1b}c".utf8)) }),
+            ("width reflow", { $0.resize(columns: 10, rows: 3) }),
+            ("screen replacement", { $0.feed(Array("\u{1b}[?1049h".utf8)) }),
+        ]
+        for (label, renumber) in renumberings {
+            var terminal = try #require(Terminal(columns: 12, rows: 3))
+            terminal.feed(Array("one two\r\nthree\r\nfour".utf8))
+
+            var state = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+            )
+            #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
+
+            renumber(&terminal)
+            let moved = decideTerminalPointer(
+                .move(column: 4, row: 0), terminal: terminal, state: &state
+            )
+
+            #expect(moved.selectionMutation == nil, "\(label)")
+            // The gesture is over as a selection, not as input: the button stays
+            // selection-owned so its release cannot send bytes to the child.
+            #expect(moved.consumption == .selection, "\(label)")
+            #expect(moved.inputBytes.isEmpty, "\(label)")
+        }
+    }
+
+    @Test("a height-only resize and a primary-screen soft reset leave a held drag extending")
+    func rowPreservingEventsKeepTheDragExtending() throws {
+        // Intent: only events that renumber absolute rows stop a drag. A taller viewport and
+        //   a soft reset on the primary screen leave every row naming the text it named.
+        // Why it exists: the cheap way to satisfy the stop rule is to invalidate on anything
+        //   that smells structural, which would kill live drags during an ordinary window
+        //   resize or a shell's prompt-time DECSTR.
+        let preservations: [(String, (inout Terminal) -> Void)] = [
+            ("height-only resize", { $0.resize(columns: 12, rows: 4) }),
+            ("primary-screen soft reset", { $0.feed(Array("\u{1b}[!p".utf8)) }),
+        ]
+        for (label, preserve) in preservations {
+            var terminal = try #require(Terminal(columns: 12, rows: 3))
+            terminal.feed(Array("one two\r\nthree\r\nfour".utf8))
+
+            var state = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+            )
+            #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
+
+            preserve(&terminal)
+            let moved = decideTerminalPointer(
+                .move(column: 4, row: 0), terminal: terminal, state: &state
+            )
+
+            #expect(moved.selectionMutation == .set(range(0, 0, 0, 7)), "\(label)")
+            var settled = terminal
+            settled.setSelection(range(0, 0, 0, 7))
+            #expect(settled.selectedText == "one two", "\(label)")
+        }
+    }
+
+    @Test("leaving the alternate screen stops a held drag, by mode reset or by soft reset")
+    func leavingTheAlternateScreenStopsTheDrag() throws {
+        // Intent: putting the primary screen back underneath a drag anchored on the
+        //   alternate one stops it, by whichever route the child took.
+        // Why it exists: the soft-reset case pairs with the primary-screen soft reset above
+        //   to name why the two differ -- it is the screen replacement that invalidates the
+        //   anchor, not the reset, so keying the rule on "is this a reset" gets both wrong.
+        //   The mode-reset case covers the other direction of the swap.
+        let exits = [("mode reset", "\u{1b}[?1049l"), ("soft reset", "\u{1b}[!p")]
+        for (label, exit) in exits {
+            var terminal = try #require(Terminal(columns: 12, rows: 3))
+            terminal.feed(Array("\u{1b}[?1049hone two\r\nthree".utf8))
+
+            var state = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+            )
+            #expect(down.selectionMutation == .set(range(0, 0, 0, 3)), "\(label)")
+
+            terminal.feed(Array(exit.utf8))
+            let moved = decideTerminalPointer(
+                .move(column: 4, row: 0), terminal: terminal, state: &state
+            )
+
+            #expect(moved.selectionMutation == nil, "\(label)")
+            #expect(moved.consumption == .selection, "\(label)")
+        }
+    }
+
+    @Test("clearing the scrollback drops a scrollback anchor and keeps a viewport one")
+    func clearingScrollbackDropsOnlyTheScrollbackAnchor() throws {
+        // Intent: erasing the scrollback retires an anchor that lived in it and renumbers --
+        //   without invalidating -- one that lived in the viewport.
+        // Why it exists: a wholesale scrollback erase is the largest eviction a terminal can
+        //   perform. Treating it as a renumbering event would kill drags anchored on text
+        //   that is still on screen; treating it as nothing would resolve a dropped anchor
+        //   against rows that no longer exist.
+        var scrollbackHeld = try #require(Terminal(columns: 12, rows: 2))
+        scrollbackHeld.feed(Array("s01\r\ns02\r\nv01 xy\r\nv02".utf8))
+        scrollbackHeld.scroll(toTopRow: 0)
+
+        var scrollbackState = TerminalInteractionState()
+        let scrollbackDown = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, clickCount: 2),
+            terminal: scrollbackHeld,
+            state: &scrollbackState
+        )
+        #expect(scrollbackDown.selectionMutation == .set(range(0, 0, 0, 3)))
+
+        scrollbackHeld.feed(Array("\u{1b}[3J".utf8))
+        #expect(decideTerminalPointer(
+            .move(column: 4, row: 0), terminal: scrollbackHeld, state: &scrollbackState
+        ).selectionMutation == nil)
+
+        var viewportHeld = try #require(Terminal(columns: 12, rows: 2))
+        viewportHeld.feed(Array("s01\r\ns02\r\nv01 xy\r\nv02".utf8))
+
+        var viewportState = TerminalInteractionState()
+        let viewportDown = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, clickCount: 2),
+            terminal: viewportHeld,
+            state: &viewportState
+        )
+        #expect(viewportDown.selectionMutation == .set(range(2, 0, 2, 3)))
+
+        viewportHeld.feed(Array("\u{1b}[3J".utf8))
+        let extended = decideTerminalPointer(
+            .move(column: 4, row: 0), terminal: viewportHeld, state: &viewportState
+        )
+
+        #expect(extended.selectionMutation == .set(range(0, 0, 0, 6)))
+        viewportHeld.setSelection(range(0, 0, 0, 6))
+        #expect(viewportHeld.selectedText == "v01 xy")
+    }
+
+    @Test("rewriting the anchored cells in place leaves the drag extending from that position")
+    func rewritingAnchoredCellsKeepsTheDragExtending() throws {
+        // Intent: output that overwrites the anchored text without moving any row keeps the
+        //   drag alive, anchored at the same position and now covering the new text.
+        // Why it exists: records a deliberate divergence from what a settled selection does
+        //   -- `Terminal` clears that one on an in-place rewrite. The button is still held
+        //   and the user is actively re-selecting, so position wins over content; the policy
+        //   layer has no cell-rewrite signal anyway, and killing a live gesture is worse.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("one two\r\nthree\r\nfour".utf8))
+
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, clickCount: 2), terminal: terminal, state: &state
+        )
+        #expect(down.selectionMutation == .set(range(0, 0, 0, 3)))
+
+        terminal.feed(Array("\u{1b}[1;1Hzzz".utf8))
+        let moved = decideTerminalPointer(
+            .move(column: 5, row: 0), terminal: terminal, state: &state
+        )
+
+        #expect(moved.selectionMutation == .set(range(0, 0, 0, 7)))
+        terminal.setSelection(range(0, 0, 0, 7))
+        #expect(terminal.selectedText == "zzz two")
+    }
+
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
         switch mutation {
         case .clear:

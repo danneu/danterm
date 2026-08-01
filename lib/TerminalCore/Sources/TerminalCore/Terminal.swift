@@ -376,6 +376,18 @@ public struct Terminal: Equatable, Sendable {
         var end: TextAnchor
     }
 
+    /// Counts the events after which an absolute retained row no longer names the text it
+    /// named -- a hard reset, a width reflow, a screen replacement.
+    ///
+    /// Kept out of value equality like `ObservationGeneration`, and for the same reason: two
+    /// terminals holding identical screen state are the same value however each got there.
+    /// What it identifies is outstanding `PinnedTextRange`s, not the state.
+    private struct RowNumberingEpoch: Equatable, Sendable {
+        var value: UInt64 = 0
+
+        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
+    }
+
     /// A text range a caller can hold across terminal mutations, readable only through
     /// `resolvedRange(_:)`.
     ///
@@ -387,10 +399,16 @@ public struct Terminal: Equatable, Sendable {
     /// and drift from it.
     struct PinnedTextRange: Equatable, Sendable {
         fileprivate let range: TextAnchorRange
+        // The raw counter, not a `RowNumberingEpoch`: that type's `==` answers true so the
+        // epoch stays out of `Terminal`'s value equality, which would silently make every
+        // stale pin compare and resolve as current.
+        fileprivate let epoch: UInt64
 
-        // Written out rather than synthesized: synthesis would inherit the stored property's
+        // Written out rather than synthesized: synthesis would inherit the stored properties'
         // fileprivate access, leaving the pointer policy's own `Equatable` unsatisfiable.
-        static func == (lhs: Self, rhs: Self) -> Bool { lhs.range == rhs.range }
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.range == rhs.range && lhs.epoch == rhs.epoch
+        }
     }
 
     /// Keeps bottom-follow policy explicit when a browsing anchor becomes bottom-aligned.
@@ -593,6 +611,7 @@ public struct Terminal: Equatable, Sendable {
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
+    private var rowNumberingEpoch = RowNumberingEpoch()
     // The four inspection fields below are read together, per printed character, by
     // `invalidateInspection`, whose guard rejects whenever all four are nil -- the state of
     // every run with no selection, search, hover, or armed link. Each observer keeps
@@ -3103,10 +3122,13 @@ public struct Terminal: Equatable, Sendable {
         let ordered = textPositionPrecedes(range.start, range.end)
             ? (range.start, range.end)
             : (range.end, range.start)
-        return PinnedTextRange(range: TextAnchorRange(
-            start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-            end: normalizedSelectionBoundary(ordered.1, isEnd: true)
-        ))
+        return PinnedTextRange(
+            range: TextAnchorRange(
+                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+            ),
+            epoch: rowNumberingEpoch.value
+        )
     }
 
     /// Resolves a pinned range against the stream as it is now, or nil once it no longer
@@ -3114,14 +3136,24 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// Applies the eviction rule `handleEviction` applies to a settled selection rather than
     /// a second one derived at the call site: a range whose end has been evicted is gone, and
-    /// a partially evicted one clamps its start forward to the oldest retained row.
+    /// a partially evicted one clamps its start forward to the oldest retained row. A pin
+    /// minted before the rows were renumbered is gone outright: it would otherwise resolve to
+    /// a position that is in range and wrong, which is worse than nothing.
     func resolvedRange(_ pinned: PinnedTextRange) -> TerminalTextRange? {
+        guard pinned.epoch == rowNumberingEpoch.value else { return nil }
         let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
         guard pinned.range.end > firstRetained else { return nil }
         return publicRange(TextAnchorRange(
             start: max(pinned.range.start, firstRetained),
             end: pinned.range.end
         ))
+    }
+
+    /// Retires every outstanding pinned range. Call from any mutation after which an absolute
+    /// retained row names different text than it did before -- the counter restarting, the
+    /// stream re-flowing, one screen replacing another.
+    private mutating func renumberRows() {
+        rowNumberingEpoch.value &+= 1
     }
 
     private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {
@@ -3960,6 +3992,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func resizeWidth(to newColumnCount: Int) {
+        // Reflow redistributes logical lines across rows, so a row keeps its number and loses
+        // its text. Height-only resizes never reach here, and must not.
+        renumberRows()
         let oldUnits = projectionUnits()
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row
@@ -5225,6 +5260,9 @@ public struct Terminal: Equatable, Sendable {
         recordFullDamage()
         if enabled {
             clearInspection()
+            // The viewport rows keep their numbers and get a different grid underneath them,
+            // in both directions -- including a redundant enable, which blanks them again.
+            renumberRows()
             if isAlternateScreenActive == false {
                 inactivePrimaryScreen = InactivePrimaryScreen(
                     rows: rows,
@@ -5241,6 +5279,7 @@ public struct Terminal: Equatable, Sendable {
             semanticContentClearsAtEndOfLine = false
         } else if let primary = inactivePrimaryScreen {
             clearInspection()
+            renumberRows()
             rows = primary.rows
             semanticContent = primary.semanticContent
             semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
@@ -5253,6 +5292,10 @@ public struct Terminal: Equatable, Sendable {
         guard let primary = inactivePrimaryScreen else { return }
         recordFullDamage()
         clearInspection()
+        // Guarded above, so a reset that finds the primary screen already active renumbers
+        // nothing -- which is why a soft reset stops a drag only when taken from the
+        // alternate screen.
+        renumberRows()
         rows = primary.rows
         semanticContent = primary.semanticContent
         semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
@@ -5313,6 +5356,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func hardReset() {
         recordFullDamage()
         clearInspection()
+        // Restarting the count is what a pinned range cannot survive: without this, a stale
+        // anchor resolves against rows that are numbered from zero again.
+        renumberRows()
         evictedRowCount = 0
         selectPrimaryScreen()
         resetControlState()
