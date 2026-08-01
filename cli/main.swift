@@ -3,7 +3,7 @@ import Foundation
 import DanTermProtocol
 import Darwin
 
-private struct CLIError: Error {
+struct CLIError: Error {
     let message: String
     let exitCode: Int32
 
@@ -79,6 +79,8 @@ struct DanTermCLI {
           the new pane within its tab. App UI shortcuts are unaffected.
 
         Environment:
+          DANTERM        Marks a process launched inside DanTerm. Without a
+                         non-empty DANTERM_SOCK, socket lookup fails closed.
           DANTERM_SOCK   Path to the DanTerm control socket
           DANTERM_PANE   Pane id for context-aware commands (set by shell integration)
 
@@ -103,7 +105,10 @@ struct DanTermCLI {
             }
             let command = try parseCLI(rawArgs)
             let environment = ProcessInfo.processInfo.environment
-            let socketPath = nonEmpty(environment[EnvVars.sock]) ?? controlSocketPath().path
+            let socketPath = try selectControlSocketPath(
+                environment: environment,
+                fallback: controlSocketPath().path
+            )
             if command.method == Methods.paneTape, command.params["follow"] == .bool(true) {
                 signal(SIGPIPE, SIG_IGN)
                 try requestPaneTapeFollow(
@@ -372,6 +377,25 @@ struct DanTermCLI {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
+}
+
+/// Selects an explicit owner or the external-process fallback without crossing instances.
+func selectControlSocketPath(
+    environment: [String: String],
+    fallback: String
+) throws -> String {
+    func nonEmptyValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    if let explicit = nonEmptyValue(environment[EnvVars.sock]) {
+        return explicit
+    }
+    if nonEmptyValue(environment[EnvVars.flag]) != nil {
+        throw CLIError("DanTerm is not running")
+    }
+    return fallback
 }
 
 DanTermCLI.main()

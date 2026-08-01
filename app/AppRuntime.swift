@@ -257,8 +257,13 @@ class AppRuntime {
         // the model directly; mutations go through send().
         installSwitcherEventMonitor()
 
-        self.ipcServer = IpcServer(socketPath: controlSocketPath(), runtime: self)
-        Task { await self.ipcServer?.start() }
+        do {
+            self.ipcServer = try IpcServer(socketPath: controlSocketPath(), runtime: self)
+            Task { await self.ipcServer?.start() }
+        } catch {
+            self.ipcServer = nil
+            print("Failed to start DanTerm IPC server: \(error)")
+        }
     }
 
     deinit {
@@ -510,8 +515,8 @@ class AppRuntime {
         window?.makeFirstResponder(session.hostView)
     }
 
-    var ipcSocketPath: URL {
-        ipcServer?.socketPath ?? controlSocketPath()
+    var ipcSocketPath: URL? {
+        ipcServer?.socketPath
     }
 
     func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
@@ -732,9 +737,8 @@ class AppRuntime {
     }
 
     func stopIpcServer() {
-        let socketPath = ipcSocketPath
-        Task { await ipcServer?.stop() }
-        try? FileManager.default.removeItem(at: socketPath)
+        ipcServer?.stop()
+        ipcServer = nil
     }
 
     // MARK: - Command Performer
@@ -743,7 +747,7 @@ class AppRuntime {
         switch command {
         case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let envVars = terminalLaunchEnvironment(
-                ipcSocketPath: ipcSocketPath.path,
+                ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
             )
             guard let session = makeTerminalSession(
@@ -1544,7 +1548,7 @@ class AppRuntime {
                             scrollbackFilePath = replayURL.path
                         }
                         let envVars = restoreLaunchEnvironment(
-                            ipcSocketPath: ipcSocketPath.path,
+                            ipcSocketPath: ipcSocketPath?.path,
                             paneId: paneId,
                             scrollbackFilePath: scrollbackFilePath,
                             command: resolved?.command

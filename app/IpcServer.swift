@@ -5,33 +5,25 @@ import Darwin
 
 actor IpcServer {
     nonisolated let socketPath: URL
+    nonisolated private let listener: ControlSocketListener
 
     private weak var runtime: AppRuntime?
     private let appVersion: String
     private let acceptQueue = DispatchQueue(label: "danterm.ipc.accept", qos: .utility)
-    private var listener: ControlSocketListener?
     private var connections: [UUID: IpcConnection] = [:]
 
     init(
         socketPath: URL = controlSocketPath(),
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
-        runtime: AppRuntime
-    ) {
+        runtime: AppRuntime?
+    ) throws {
         self.socketPath = socketPath
+        self.listener = try ControlSocketListener.open(at: socketPath)
         self.appVersion = appVersion
         self.runtime = runtime
     }
 
     func start() {
-        guard listener == nil else { return }
-        do {
-            listener = try ControlSocketListener.open(at: socketPath)
-        } catch {
-            print("Failed to start DanTerm IPC server: \(error)")
-            return
-        }
-
-        guard let listener else { return }
         let fd = listener.fileDescriptor
         acceptQueue.async { [weak self] in
             while true {
@@ -45,9 +37,13 @@ actor IpcServer {
         }
     }
 
-    func stop() {
-        listener?.close()
-        listener = nil
+    /// Makes the owned socket unreachable before returning to the synchronous app exit path.
+    nonisolated func stop() {
+        listener.close()
+        Task { [weak self] in await self?.closeConnections() }
+    }
+
+    private func closeConnections() {
         for connection in connections.values {
             connection.close()
         }

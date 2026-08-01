@@ -97,6 +97,9 @@ DanTerm sets these per pane:
 - `DANTERM_PANE` -- caller's pane id. Humans may omit explicit targets inside
   DanTerm; agents should use it only to derive live ids.
 - `DANTERM_SOCK` -- control socket path. Rarely needed; the CLI resolves it.
+  Inside DanTerm, an absent or empty value means that process does not own a
+  control socket, so the CLI reports that DanTerm is not running instead of
+  falling back to another same-identity instance.
 
 If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique

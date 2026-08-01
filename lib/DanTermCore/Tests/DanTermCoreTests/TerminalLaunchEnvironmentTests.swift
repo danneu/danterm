@@ -29,6 +29,25 @@ import DanTermProtocol
         #expect(dict["DANTERM_TAB"] == nil, "new pane environments should not include DANTERM_TAB")
     }
 
+    @Test("terminal launch env clears inherited socket targeting for a non-owner")
+    func terminalLaunchEnvClearsSocketForNonOwner() {
+        // Intent: a pane launched by an instance without a control socket cannot
+        //   inherit a different instance's socket target.
+        // Why it exists: the launch environment is an overlay, so omitting
+        //   DANTERM_SOCK would preserve a hostile inherited value.
+        // Scenario: a second same-identity app is launched from the first app's
+        //   pane, loses the bind race, and then opens its own pane.
+        let paneId = PaneId()
+        let env = Dictionary(uniqueKeysWithValues: terminalLaunchEnvironment(
+            ipcSocketPath: nil,
+            paneId: paneId
+        ))
+
+        #expect(env[EnvVars.flag] == "1")
+        #expect(env[EnvVars.sock] == "")
+        #expect(env[EnvVars.pane] == paneId.rawValue.uuidString)
+    }
+
     @Test("restore launch env includes optional restore values verbatim")
     func restoreLaunchEnvIncludesPaneContextAndOptionalScrollbackVar() {
         // Intent: restoreLaunchEnvironment restores the same DanTerm pane

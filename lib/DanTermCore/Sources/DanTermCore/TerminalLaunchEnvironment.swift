@@ -15,12 +15,14 @@ func scrubbedTerminalProcessEnvironment(
 }
 
 func terminalLaunchEnvironment(
-    ipcSocketPath: String,
+    ipcSocketPath: String?,
     paneId: PaneId
 ) -> [(String, String)] {
     [
         (EnvVars.flag, "1"),
-        (EnvVars.sock, ipcSocketPath),
+        // libghostty's environment API can override inherited values but cannot
+        // remove them. Empty is the CLI's explicit fail-closed representation.
+        (EnvVars.sock, ipcSocketPath ?? ""),
         (EnvVars.pane, paneId.rawValue.uuidString),
     ]
 }
@@ -28,7 +30,7 @@ func terminalLaunchEnvironment(
 /// Build the environment for restored panes, preserving pane-scoped CLI context
 /// and adding the scrollback replay hook when present.
 func restoreLaunchEnvironment(
-    ipcSocketPath: String,
+    ipcSocketPath: String?,
     paneId: PaneId,
     scrollbackFilePath: String?,
     command: String?
