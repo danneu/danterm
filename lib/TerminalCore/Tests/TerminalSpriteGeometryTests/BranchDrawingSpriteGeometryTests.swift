@@ -11,13 +11,23 @@ struct BranchDrawingSpriteGeometryTests {
         let bl = "A(5,0;5,9;9,9;1)"
         let tr = "A(5,17;5,9;0,9;1)"
         let tl = "A(5,17;5,9;9,9;1)"
-        let expected = [
+        let fadeUp: String = (0..<17).map { (row: Int) -> String in
+            let coverage = Double(17 - row) * 255 / 17
+            let alpha = Int(coverage.rounded())
+            return "R(4,\(row),1,1,\(alpha))"
+        }.joined(separator: " ")
+        let fadeDown: String = (0..<17).map { (row: Int) -> String in
+            let coverage = Double(row) * 255 / 17
+            let alpha = Int(coverage.rounded())
+            return "R(4,\(row),1,1,\(alpha))"
+        }.joined(separator: " ")
+        let expected: [String] = [
             h,
             v,
             "R(0,8,1,1,255) R(1,8,1,1,227) R(2,8,1,1,198) R(3,8,1,1,170) R(4,8,1,1,142) R(5,8,1,1,113) R(6,8,1,1,85) R(7,8,1,1,57) R(8,8,1,1,28)",
             "R(0,8,1,1,0) R(1,8,1,1,28) R(2,8,1,1,57) R(3,8,1,1,85) R(4,8,1,1,113) R(5,8,1,1,142) R(6,8,1,1,170) R(7,8,1,1,198) R(8,8,1,1,227)",
-            (0..<17).map { "R(4,\($0),1,1,\(Int((Double(17 - $0) * 255 / 17).rounded())))" }.joined(separator: " "),
-            (0..<17).map { "R(4,\($0),1,1,\(Int((Double($0) * 255 / 17).rounded())))" }.joined(separator: " "),
+            fadeUp,
+            fadeDown,
             br, bl, tr, tl,
             "\(v) \(tr)", "\(v) \(br)", "\(tr) \(br)",
             "\(v) \(tl)", "\(v) \(bl)", "\(tl) \(bl)",
