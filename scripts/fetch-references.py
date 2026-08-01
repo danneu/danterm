@@ -219,6 +219,14 @@ REFERENCES = [
         why="A cross-shell prompt in wide real-world use: multi-line and right prompts, transient prompts, and the per-shell init hooks it wraps the shells' own marks in.",
         release_tag="v1.26.0",
     ),
+    Reference(
+        name="swift-collections",
+        url="https://github.com/apple/swift-collections.git",
+        pin="a0cb0954ecb21e4e31b0070e6ed5674e8556685a",
+        sparse_cone=(),
+        why="Apple's data structures for the containers DanTerm hand-rolls -- Deque, OrderedSet/OrderedDictionary, BitArray, Heap, and RopeModule's BigString -- pinned at the release SwiftPM would resolve today.",
+        release_tag="1.6.0",
+    ),
 ]
 
 

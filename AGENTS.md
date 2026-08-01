@@ -48,6 +48,9 @@ memory about what a terminal, a shell, or Darwin does, and it costs one command:
   the shell-integration research measured.
 - **Darwin** -- `xnu` (process, signal, tty, Mach), `Libc`, `libdispatch`,
   `libpthread`, `libplatform`, `objc4`.
+- **Swift** -- `swift-collections` (Deque, OrderedSet, BitArray, Heap,
+  RopeModule's `BigString`), pinned at the release SwiftPM would resolve.
+  Read it before hand-rolling a container.
 
 `references/` is gitignored, so it's empty in a fresh clone: run
 `just fetch-references [name]` (`--list` shows names, pins, and why each exists)

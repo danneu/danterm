@@ -76,6 +76,13 @@ The following pinned source trees are materialized under `references/`:
   large share of users actually run: multi-line and right prompts, transient
   prompts, and the per-shell init hooks (`src/init/`) it wraps the shells' own
   marks in.
+- [`references/swift-collections/`](../references/swift-collections/) -- Apple's
+  data-structure package at the release SwiftPM would resolve today (1.6.0):
+  `Sources/DequeModule` (ring buffer), `Sources/OrderedCollections`,
+  `Sources/BitCollections`, `Sources/HeapModule`, and `Sources/RopeModule`
+  (`BigString`). Read it before hand-rolling a container -- both for the
+  algorithm and for how a Swift library keeps one fast (`@inlinable`, unsafe
+  buffer access, COW).
 
 The three shells are pinned at the versions DanTerm's shell-integration
 research measured (fish 4.7.1, zsh 5.9, bash 5.3). A shell's *behavior* is
