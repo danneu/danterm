@@ -194,38 +194,47 @@ struct RenderCorpusPlanningTests {
             return clipped
         }
         let rows = damage.rows
+        // Each run array is a hoisted local with fully spelled-out closure signatures.
+        // Written as five inline `flatMap { row in cond ? a.filter { $0.row == row } : ... }`
+        // arguments, this one function cost ~1s of typecheck time: the solver had to infer
+        // both closures' parameter and result types through a ternary in each of five
+        // arguments at once. Keep the annotations.
+        let backgroundRuns: [RenderBackgroundRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderBackgroundRun] in
+            let source: [RenderBackgroundRun] = rows.contains(row) ? clipped.backgroundRuns : retained.backgroundRuns
+            return source.filter { (run: RenderBackgroundRun) -> Bool in run.row == row }
+        }
+        let selectionRuns: [RenderSelectionRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderSelectionRun] in
+            let source: [RenderSelectionRun] = rows.contains(row) ? clipped.selectionRuns : retained.selectionRuns
+            return source.filter { (run: RenderSelectionRun) -> Bool in run.row == row }
+        }
+        let searchMatchRuns: [RenderSelectionRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderSelectionRun] in
+            let source: [RenderSelectionRun] = rows.contains(row) ? clipped.searchMatchRuns : retained.searchMatchRuns
+            return source.filter { (run: RenderSelectionRun) -> Bool in run.row == row }
+        }
+        let textRuns: [RenderTextRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderTextRun] in
+            let source: [RenderTextRun] = rows.contains(row) ? clipped.textRuns : retained.textRuns
+            return source.filter { (run: RenderTextRun) -> Bool in run.row == row }
+        }
+        let decorationRuns: [RenderDecorationRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderDecorationRun] in
+            let source: [RenderDecorationRun] = rows.contains(row) ? clipped.decorationRuns : retained.decorationRuns
+            return source.filter { (run: RenderDecorationRun) -> Bool in run.row == row }
+        }
+        let retainedCursor: RenderCursor? = retained.cursor.flatMap { cursor in
+            rows.contains(cursor.row) ? nil : cursor
+        }
+        let cursor: RenderCursor? = clipped.cursor ?? retainedCursor
         return RenderFramePlan(
             columns: retained.columns,
             rows: retained.rows,
             defaultBackground: retained.defaultBackground,
             selectionBackground: retained.selectionBackground,
             searchMatchBackground: retained.searchMatchBackground,
-            backgroundRuns: (0..<retained.rows).flatMap { row in
-                rows.contains(row)
-                    ? clipped.backgroundRuns.filter { $0.row == row }
-                    : retained.backgroundRuns.filter { $0.row == row }
-            },
-            selectionRuns: (0..<retained.rows).flatMap { row in
-                rows.contains(row)
-                    ? clipped.selectionRuns.filter { $0.row == row }
-                    : retained.selectionRuns.filter { $0.row == row }
-            },
-            searchMatchRuns: (0..<retained.rows).flatMap { row in
-                rows.contains(row)
-                    ? clipped.searchMatchRuns.filter { $0.row == row }
-                    : retained.searchMatchRuns.filter { $0.row == row }
-            },
-            textRuns: (0..<retained.rows).flatMap { row in
-                rows.contains(row)
-                    ? clipped.textRuns.filter { $0.row == row }
-                    : retained.textRuns.filter { $0.row == row }
-            },
-            decorationRuns: (0..<retained.rows).flatMap { row in
-                rows.contains(row)
-                    ? clipped.decorationRuns.filter { $0.row == row }
-                    : retained.decorationRuns.filter { $0.row == row }
-            },
-            cursor: clipped.cursor ?? retained.cursor.flatMap { rows.contains($0.row) ? nil : $0 }
+            backgroundRuns: backgroundRuns,
+            selectionRuns: selectionRuns,
+            searchMatchRuns: searchMatchRuns,
+            textRuns: textRuns,
+            decorationRuns: decorationRuns,
+            cursor: cursor
         )
     }
 }

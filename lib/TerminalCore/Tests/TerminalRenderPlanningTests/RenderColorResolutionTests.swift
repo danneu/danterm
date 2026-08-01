@@ -7,14 +7,18 @@ import TerminalCore
 struct RenderColorResolutionTests {
     @Test("ANSI palettes accept exactly 16 entries")
     func ansiPaletteArity() throws {
-        let colors = (0..<16).map {
-            RenderColor(red: UInt8($0), green: UInt8($0 + 16), blue: UInt8($0 + 32))
+        let colors: [RenderColor] = (0..<16).map { index in
+            let red = UInt8(index)
+            let green = UInt8(index + 16)
+            let blue = UInt8(index + 32)
+            return RenderColor(red: red, green: green, blue: blue)
         }
+        let overlong: [RenderColor] = colors + [RenderColor(red: 1, green: 2, blue: 3)]
 
         let palette = try #require(RenderANSIColors(exactly: colors))
         #expect(palette.colors == colors)
         #expect(RenderANSIColors(exactly: Array(colors.dropLast())) == nil)
-        #expect(RenderANSIColors(exactly: colors + [.init(red: 1, green: 2, blue: 3)]) == nil)
+        #expect(RenderANSIColors(exactly: overlong) == nil)
     }
 
     @Test("The baked dark theme retains its complete fixed palette")

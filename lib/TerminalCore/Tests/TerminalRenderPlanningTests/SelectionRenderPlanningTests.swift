@@ -97,21 +97,20 @@ struct SelectionRenderPlanningTests {
 
     private func selectionTheme() throws -> RenderTheme {
         let colors: [RenderColor] = (0..<16).map { index in
-            RenderColor(
-                red: UInt8(index),
-                green: UInt8(index + 20),
-                blue: UInt8(index + 40)
-            )
+            let red = UInt8(index)
+            let green = UInt8(index + 20)
+            let blue = UInt8(index + 40)
+            return RenderColor(red: red, green: green, blue: blue)
         }
         let palette = try #require(RenderANSIColors(exactly: colors))
         return RenderTheme(
             ansiColors: palette,
-            defaultForeground: .init(red: 100, green: 101, blue: 102),
-            defaultBackground: .init(red: 1, green: 2, blue: 3),
-            selectionForeground: .init(red: 200, green: 201, blue: 202),
-            selectionBackground: .init(red: 4, green: 5, blue: 6),
-            cursor: .init(red: 7, green: 8, blue: 9),
-            cursorText: .init(red: 10, green: 11, blue: 12)
+            defaultForeground: RenderColor(red: 100, green: 101, blue: 102),
+            defaultBackground: RenderColor(red: 1, green: 2, blue: 3),
+            selectionForeground: RenderColor(red: 200, green: 201, blue: 202),
+            selectionBackground: RenderColor(red: 4, green: 5, blue: 6),
+            cursor: RenderColor(red: 7, green: 8, blue: 9),
+            cursorText: RenderColor(red: 10, green: 11, blue: 12)
         )
     }
 

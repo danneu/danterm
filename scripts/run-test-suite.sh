@@ -19,7 +19,7 @@ cd "$REPO_ROOT"
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
 STEPS=(
-    'swift test --package-path lib/TerminalCore'
+    'swift test --package-path lib/TerminalCore -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
     './scripts/test-terminal-pty.sh'
     './scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/shell-integration_test.sh'
