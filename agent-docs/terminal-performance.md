@@ -22,20 +22,18 @@ run -- see "Profile memory" below.
 
 `benchmark-quick` compares one selected workload; `benchmark-confirm` compares
 all five. Both require an explicit baseline revision -- anything `git rev-parse`
-accepts. Neither infers it from `HEAD`, merge-base, history, or the candidate.
+accepts (`HEAD~5`, a SHA, a tag, a branch). Neither infers it from `HEAD`,
+merge-base, history, or the candidate.
 
 The common case is an uncommitted experiment measured against the commit it
-started from:
+started from, and nothing is stashed, committed, or checked out to do it:
 
     just benchmark-quick baseline=HEAD workload=content-churn
 
-Nothing is stashed, committed, or checked out to do this. The baseline is any
-revision `git rev-parse` accepts -- `HEAD~5`, a SHA, a tag, a branch -- so the
-working tree can be compared against an arbitrarily old point. The wider the
-gap, the more the verdict attributes to everything in between rather than to
-your change alone. If you have committed since starting the experiment, `HEAD`
-is no longer where you began; note the pre-change revision before you start and
-name it explicitly.
+The wider the baseline gap, the more the verdict attributes to everything in
+between rather than to your change alone. If you have committed since starting
+the experiment, `HEAD` is no longer where you began; note the pre-change revision
+before you start and name it explicitly.
 
 The candidate is an immutable snapshot of the complete current working tree:
 tracked changes plus non-ignored untracked files, captured through a scratch
@@ -78,10 +76,8 @@ Each mode lays out its complete position-balanced schedule at the frozen pair
 count before the first block runs, then applies the frozen median symmetric rule
 exactly once: `faster`, `slower`, `equivalent`, or `inconclusive`. There is no
 early stopping, no rerun of a valid block, and no partial decision. A single
-invalid block -- lost geometry, an occluded window, battery power, thermal
-pressure, low-power mode, missing damage or draw acknowledgment -- invalidates
-the whole invocation; the evidence is kept, but a new decision needs a fresh
-complete run.
+invalid block invalidates the whole invocation -- see "Run it under the stated
+conditions" below.
 
 ### Read the result
 
@@ -108,69 +104,45 @@ The three serialized-draw workloads decide on `drawNanosecondsPerDraw`, which
 brackets only clipping and drawing inside `draw(_:)`. Frame planning does not
 run there -- `planFrame` runs on the PTY-output path, when a pane applies child
 output -- so **the draw verdict cannot see a planner change at all**. It is not
-that planning is a small term in that number; it is not in that number.
+that planning is a small term in that number; it is not in that number. So
+judging a planner change means reading the plan line, and a change that moves
+only planning correctly reads `equivalent` on all three draw verdicts.
 
-That is not a small blind spot. Measured on this machine at `4ecb032`, one
-accepted draw costs about 540k ns to draw against 501k-510k ns to plan on
-`content-churn`, and about 86k ns to draw against 66k ns to plan on
-`incremental-mixed`.
+Planning is the **smaller** cost, and it shrinks ~7.6x when damage goes from 66
+rows to 6, because **the planner is damage-scoped**: production planning runs
+through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans only
+the rows `damage` marks and copies an undamaged row's runs forward from the
+retained frame. (`RenderFramePlanner`'s free-function `planFrame(for:presentation:)`
+does pass `damage: .full`, but it is not the pane path.) Measured at `4ecb032`
+(`17/F12`): `content-churn` ~540k ns to draw against 501k-510k to plan;
+`incremental-mixed` ~86k against ~66k.
 
-**No plan/draw ratio generalizes across workloads**, so do not carry one from a
-doc or a profile to a workload it was not measured on. The two figures above
-already differ, and `docs/research/14-live-scroll-workload-profile.md` `F1`
-found docs 13 and 14 disagreeing by 2x in opposite directions. The ratio is a
-property of how much damage the workload generates, not of the code.
+**No plan/draw ratio generalizes across workloads** -- it is a property of how
+much damage a workload generates, not of the code -- so do not carry one from a
+doc or a profile to a workload it was not measured on
+(`docs/research/14-live-scroll-workload-profile.md` `F1`).
 
-Planning is the **smaller** cost on both, and it shrinks by ~7.6x when damage goes
-from 66 rows to 6, because **the planner is damage-scoped**. Production planning
-runs through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans
-only the rows `damage` marks and copies an undamaged row's runs forward from the
-retained frame instead of re-inspecting its cells. (`RenderFramePlanner`'s
-free-function `planFrame(for:presentation:)` does pass `damage: .full`, but it is
-not the pane path -- reading it as the production entry point is the likely origin
-of the superseded claim below.)
+The plan estimate is normalized over the same 50 accepted draws, and only two
+cells carry a rule:
 
-> Superseded text, kept because a reader may be working from it: this section
-> previously said one draw cost ~0.9M ns to draw and ~1.16M ns to plan on
-> `content-churn`, ~0.16M/~1.15M on `incremental-mixed`, that planning was the
-> larger cost in both, and that "the planner plans the whole viewport
-> regardless". All four claims were wrong. Damage scoping landed in `8188b9a`,
-> three days after the text was written, and the figures were 1.7x-17.5x too
-> high. See `docs/research/17-cpu-profile-sweep.md` `F5` (the mechanism) and
-> `F12` (the replacement numbers). **Date a performance number before planning
-> against it.**
-
-So each of those workloads also reports a plan-time estimate, normalized over
-the same 50 accepted draws:
-
-- In `quick`, `content-churn` and `style-churn` carry **their own calibrated
-  rule** -- 2 pairs at +/-2.5%, equivalence band 1.0% -- and report a `faster` /
-  `slower` / `equivalent` / `inconclusive` classification for plan time, decided
-  independently of the draw verdict. The thresholds come from a plan-time A/A
+- In `quick`, `content-churn` and `style-churn` have **their own calibrated
+  rule** -- 2 pairs at +/-2.5%, equivalence band 1.0% -- and classify plan time
+  independently of the draw verdict. Its thresholds come from a plan-time A/A
   series, not from the draw thresholds, because the two metrics have different
   noise.
-- Everything else reports a bare percentage marked `no verdict`, and that is a
-  measured conclusion rather than unfinished work:
-  - `incremental-mixed` plans only a handful of damaged rows, so its per-draw
-    plan quantity is small and jittery: A/A spread SD 5.75% over a
-    -6.6%..+12.0% range. No threshold clears the gates.
-  - `confirm` claims a 3% effect at 4 pairs, and no threshold reaches it while
-    holding A/A false positives under 1% -- the best cell measured either
-    0.0198 false positives or 0.633 detection.
+- Everything else reports a bare percentage marked `no verdict`. That is a
+  measured conclusion, not unfinished work: `incremental-mixed` plans a handful
+  of rows, so its per-draw quantity is small and jittery (A/A SD 5.75% over
+  -6.6%..+12.0%), and `confirm` claims a 3% effect at 4 pairs that no threshold
+  reaches while holding A/A false positives under 1%. Do not read those
+  percentages as decisions or borrow a calibrated workload's threshold for them.
 
-  Do not read those percentages as decisions, and do not borrow a calibrated
-  workload's threshold for them.
-
-A plan rule is pinned to the pair count its mode already collects. Plan time is
-measured on the very same blocks as the draw metric, so it cannot buy itself a
-longer schedule, and a rule is refused rather than applied when the series
-length does not match the count it was calibrated at.
-- The line is **absent whenever either arm lacks it**, which is the normal case
-  when the baseline revision predates the timer. A missing plan line never
-  invalidates the draw verdict.
-- Judging a planner change means reading this line. Judging a drawing change
-  means reading the draw verdict. A change that moves only planning will
-  correctly read `equivalent` on all three draw verdicts.
+A plan rule is pinned to the pair count its mode already collects -- plan time
+rides the draw metric's own blocks, so it cannot buy a longer schedule, and a
+rule is refused rather than applied when the series length does not match. The
+line is **absent whenever either arm lacks it**, the normal case when the
+baseline predates the timer; a missing plan line never invalidates the draw
+verdict.
 
 ### `scrollback-stream` reports how its block splits into drain and draw tail
 
@@ -193,22 +165,21 @@ expected reading of a real drawing win, not evidence against it. That also means
 the verdict has always been ~96% a throughput measurement wearing a draw
 metric's name.
 
-Three limits. The rate is the app's, not the harness's: the Python producer can
-push the same chunk sequence in 30.2 ms against a reader that never blocks, but
-that overhead is **fully absorbed** once the consumer runs at the app's real
-rate -- rechunking the writes moves the block by 0.0 ms there, against 20.4 ms
-unthrottled, because the writer is parked on a full PTY buffer either way. So
-quote the MB/s as measured; it needs no correction. The lines
-are **absent rather than wrong** when an arm predates the byte counter or when
-the two arms drained different byte totals; there is no assumed corpus size. And
-they exist only for `scrollback-stream` -- the serialized-draw workloads write one
-update and wait for that exact draw, so their write time is a handshake, and no
-byte count is recorded for them precisely so no rate can be derived.
+Three limits. The rate is the app's, not the harness's: the Python producer's own
+overhead is **fully absorbed** once the consumer runs at the app's real rate
+(rechunking the writes moves the block by 0.0 ms there, against 20.4 ms
+unthrottled, because the writer is parked on a full PTY buffer either way), so
+quote the MB/s as measured. The lines are **absent rather than wrong** when an
+arm predates the byte counter or the two arms drained different byte totals;
+there is no assumed corpus size. And they exist only for `scrollback-stream` --
+the serialized-draw workloads write one update and wait for that exact draw, so
+their write time is a handshake, and no byte count is recorded for them precisely
+so no rate can be derived.
 
 Like plan time and process CPU, this decides nothing. Evidence and the survey
 behind it: [docs/research/20-pty-throughput-and-interactive-stimulus.md](../docs/research/20-pty-throughput-and-interactive-stimulus.md).
 
-### `synchronized-frames` is an expensive candidate, and knowing why is the point
+### `synchronized-frames` is a candidate and issues no verdict
 
 It is the only captured candidate -- 95 real btop frames rather than a generator
 we wrote. Two things about it are not like the calibrated workloads.
@@ -222,46 +193,19 @@ inflates the tail's percentage without measuring one nanosecond more drawing
 (`20/F10`). Read it as "how fast can we absorb a real TUI's output", and reach for
 `content-churn` or `style-churn` for anything about drawing.
 
-**Its former rule was the loosest and costliest in the table, and its margins
-were thin.** It used 6 pairs at +/-2.65% (quick) and 8 at +/-2.15% (confirm),
-against `scrollback-stream`'s 2 and 4. Those came from two replicating 48-pair
-A/A series and were the conservative envelope across them (`20/F11`). On that
-evidence, A/A false positives sat at 0.0084 and 0.0095 against a 0.01 gate, and
-confirm detection ran 0.917-0.944 against a 0.90 gate -- both the narrowest
-margins in the corpus. **8 of 48 A/A pairs exceeded +/-3% with no code change at
-all.** The median-symmetric estimator absorbed that tail and was why any rule
-appeared to clear. Fresh evidence below rejected both cells, so these numbers
-are provenance, not an operational decision rule.
-
-A first screen proposed 12 pairs at +/-1.05% and was discarded: its spread came
-from one block in 48 running 193 ms against a 164 ms median. **That block is the
-only one of its kind ever recorded** -- across the 192 blocks of the two screens
-the rule rests on, none exceeds +10% over median and the worst is +6.9%
-(`20/F12`). An earlier version of this section called that tail "rare, real, and
-unexplained" and handed it to doc 19. It was neither real nor doc 19's: the
-discarded outlier had been counted a second time as independent evidence. **A
-block discarded from a statistic is discarded from the whole file.**
-
-**Fresh post-rewrite evidence now refuses the frozen rule** (`23/F8`). Two
-independent 48-pair 1x screens on one immutable post-fix tree had trimmed SD
-2.48% and 3.62%; both independently select no confirm cell, and pooled evidence
-selects none. The frozen `confirm 8p@2.15%` cell now reads 12-14% A/A false
-positives against the 1% gate and only 74-78% detection against 90%. The missing
-100,000-trial stage correctly did not run: screen-then-freeze requires one exact
-screened cell, and no such cell exists. `23/D4` therefore demoted the workload
-to `CANDIDATE_WORKLOADS` and removed its unsupported quick and confirm rules.
-Routine comparisons no longer issue a verdict for it, but its fixture,
-collector, direct harness command, block contract, and candidate-screen path
-remain available for descriptive collection and future research.
+**It has no frozen rule.** `23/D4` demoted it to `CANDIDATE_WORKLOADS` and
+removed its quick and confirm rules after fresh post-rewrite evidence refused
+them (`23/F8`): the frozen `confirm 8p@2.15%` cell read 12-14% A/A false
+positives against a 1% gate and 74-78% detection against 90%, and two
+independent 48-pair screens each selected no cell. Its fixture, collector,
+direct harness command, block contract, and candidate-screen path all remain
+available for descriptive collection.
 
 **Do not try to buy a tighter rule by lengthening the replay.** It was tried
-(`20/F16`). `replayCount` exists and works, and block length is *not* a lever on
-this workload's noise: at 1x/2x/3x/5x the trimmed A/A pair SD reads
-1.30-1.72% / 1.65% / 1.62% / 0.56-0.77%. The first three are flat, which is
-multiplicative noise, not the additive noise a two-point comparison had
-suggested. The 5x point is a two-screen anomaly with no mechanism -- and note
-that lengthening also changes what the workload measures, since the main-thread
-fence regime shifts at 2x (9 stalls of ~16 ms become 1-2 of 126-266 ms).
+(`20/F16`): at 1x/2x/3x the trimmed A/A pair SD is flat (1.30-1.72% / 1.65% /
+1.62%), which is multiplicative noise. Lengthening also changes what the
+workload measures -- the main-thread fence regime shifts at 2x, where 9 stalls
+of ~16 ms become 1-2 of 126-266 ms.
 
 Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
 <name> --revision <rev>`, which searches pair count alongside threshold -- a
@@ -274,13 +218,7 @@ The draw verdict times elapsed work between two points on the **main thread**, s
 work on any other thread is invisible to it at any size. That is not a corner
 case: `docs/research/17-cpu-profile-sweep.md` `F6` found the largest single cost
 in the app -- Core Animation recomputing every glyph's bounds while replaying the
-display list -- living entirely in that blind spot. **Do not quote its 16.8%
-figure**: that share came from a stimulus republishing every glyph on screen 120
-times a second, and `17/F17` measured the same node at **27.3 us/draw against
-801.0 -- 29.3x smaller -- under a damage-scoped draw**, with `17/F3`'s 1.85% on
-`scrollback-stream` agreeing. The mechanism is real and elastic (`17/F16`, 95.1%
-of linear); the magnitude was the benchmark's. The blind spot is the durable
-point here, not the number that was found in it.
+display list -- living entirely in that blind spot.
 
 So the three serialized-draw workloads also report
 `processCPUNanosecondsPerDraw`: CPU time summed over **every thread**, taken from
@@ -301,12 +239,11 @@ empty one about total cost. Read this line before concluding a change was free.
 **And the churn workloads are frame-rate-capped, not CPU-bound.** `17/F16` traced
 `full-screen-content-churn` at 179x66 and at 80x25 -- a 5.9x change in per-frame
 glyph work -- and the draw rate was 119.10/s and 119.32/s, pinned at the built-in
-120Hz panel's refresh in both. The glyph-bounds cost that scaled 5.62x between those
-two runs was being paid *while every frame still landed*. Two consequences when
-reading any result on these workloads: a CPU reduction is not a throughput win
-because there is no throughput headroom to win, and a cost living off the main
-thread has no metric here that can decide it -- not the draw rule (wrong thread),
-not the frame rate (pinned), and not process CPU (uncalibratable, point 3 above).
+120Hz panel's refresh in both. So a CPU reduction on these workloads is not a
+throughput win, because there is no throughput headroom to win, and a cost living
+off the main thread has no metric here that can decide it: not the draw rule
+(wrong thread), not the frame rate (pinned), not process CPU (uncalibratable,
+below).
 
 Four things it is not, each of which invites a misreading:
 
@@ -322,15 +259,9 @@ Four things it is not, each of which invites a misreading:
 3. **It cannot be calibrated, so it never carries a verdict.** It is reported
    through `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no
    code path by which it can classify. That is settled, not pending: the A/A
-   screening pass was run (`17/F15`, 24 paired A/A blocks per workload) and **no
-   threshold clears the accuracy gates on any workload in either mode**. The
-   false-positive gate and the detection gate cross with no overlap -- the closest
-   case, `content-churn`/`quick`, reaches a 0.0000 false-positive rate only at a
-   +/-3.0% threshold where detection has already fallen to 0.8320 against a 0.90
-   gate. Its paired A/A spread: SD 1.88% (`content-churn`), 3.52% (`style-churn`),
-   8.75% (`incremental-mixed`, one pair at -27.63%). Because an auxiliary metric
-   rides the deciding metric's own blocks, it cannot buy more pairs, which is the
-   only knob that would close the gap.
+   screening pass ran (`17/F15`) and no threshold clears the accuracy gates on any
+   workload in either mode, because an auxiliary metric rides the deciding
+   metric's blocks and so cannot buy the extra pairs that would close the gap.
 
    **What you may still do with it** (`17/D6`): use a co-movement to *undermine* a
    draw verdict -- if plan time and CPU shift by the same amount on a change with
@@ -357,12 +288,20 @@ never edits the frozen rules: a human moves
 `DECISION_RULES[mode]["planWorkloads"]` after reading the report. A report that
 proposes nothing is a real answer -- see point 3 above and `17/F15`.
 
-An invalid invocation is not a verdict and never becomes one by retrying. It
-means a stated measurement condition failed, so fix the condition -- put the
-machine on AC power, stop covering or unfocusing the benchmark windows, let it
-cool -- and run again from scratch. While a comparison runs, leave the machine
-otherwise idle: the windows must stay visible and unoccluded for every measured
-block, and competing load biases both arms unequally.
+### Run it under the stated conditions
+
+The thresholds are calibrated for a fully visible, unoccluded 179x66 window on
+one MacBook on AC power. Changing the machine, geometry, workload contract, or
+decision rule requires recalibrating before directional claims resume. While a
+comparison runs, leave the machine otherwise idle: competing load biases both
+arms unequally.
+
+Any of these invalidates a block, and one invalid block invalidates the whole
+invocation: lost geometry, an occluded window, battery power, thermal pressure,
+low-power mode, missing damage or draw acknowledgment. **An invalid invocation
+is not a verdict and never becomes one by retrying.** The evidence is kept, but
+a new decision needs a fresh complete run -- so fix the condition (AC power,
+uncover and focus the windows, let it cool) and run again from scratch.
 
 Every invocation writes its complete evidence to
 `.build/terminal-benchmark-comparisons/<mode>/<run>/run.json`: both source and
@@ -376,10 +315,6 @@ cite the artifact path only as a supplementary pointer.
 Expect a cached quick comparison to finish in under 60 seconds and a cached
 confirm suite in under five minutes. The first run against a new tree pays for
 compilation, which the command reports separately from the comparison phase.
-
-The thresholds are calibrated for a fully visible, unoccluded 179x66 window on
-one MacBook on AC power. Changing the machine, geometry, workload contract, or
-decision rule requires recalibrating before directional claims resume.
 
 Run `quick` for the routine question. Run `confirm` when the quick result is
 close, the change crosses workload boundaries, or the decision warrants the
@@ -408,12 +343,9 @@ Measure when you have a hypothesis the result would settle:
   that; `quick` returning `equivalent` does not.
 
 Sanity-checking a change you are merely unsure about is a legitimate reason to
-run one, and an `equivalent` at `confirm`'s thresholds is real evidence. Two
-things to keep straight when you do. First, a comparison answers "is this tree
-different from that tree" -- it is not a regression watch, and there is no stored
-history to watch against. Second, an `inconclusive` or an invalid invocation
-leaves you exactly where you started: say so plainly rather than reporting that
-the change was benchmarked and looked fine.
+run one, and an `equivalent` at `confirm`'s thresholds is real evidence. But an
+`inconclusive` or an invalid invocation leaves you exactly where you started: say
+so plainly rather than reporting that the change was benchmarked and looked fine.
 
 When the honest answer is that you have no hypothesis yet, profile the
 suspicious path instead. That is the cheaper question and usually the one you
@@ -427,12 +359,11 @@ Two things that are not hypotheses, and have each cost real time here:
   Name what a user would observe differently, or leave it.
 - **Date a number before you plan against it.** Every figure in this guide and
   in `docs/research/` is a measurement of one tree at one commit, and the commit
-  that invalidates it does not come back to update the prose. One claim here
-  outlived its fix by three days and kept a parked backlog item alive on the
-  strength of it (`docs/research/17-cpu-profile-sweep.md` `F5`); the superseded
-  block under "The plan-time line is decided separately" is what that looks like
-  once it is caught. Check the commit a number names against what has landed
-  since.
+  that invalidates it does not come back to update the prose. This guide's
+  plan/draw figures were once 1.7x-17.5x too high because damage scoping landed
+  three days after they were written, and the stale claim kept a parked backlog
+  item alive (`docs/research/17-cpu-profile-sweep.md` `F5`). Check the commit a
+  number names against what has landed since.
 
 ## Choose a profiler
 
@@ -517,12 +448,9 @@ and a profiler spends seconds attaching and saving, so the counted window
 overshoots: 20.1 s counted for a 12 s trace, 67% long (`17/F11`). The artifact
 separates `measured` from `estimated` and carries that warning in its own text.
 The rate is only a valid conversion because these workloads are sustained and
-steady-state; nothing here would notice if one started trending.
-
-Without this, a trace cannot be normalized per frame at all. Before it existed,
-the three available frame-count proxies (`__open`, `iokit_user_client_trap`,
-`mach_msg2_trap`) disagreed by 1.7x, which forced `17/F5` to rest on commit
-history instead of on its own measurement.
+steady-state; nothing here would notice if one started trending. Without it a
+trace cannot be normalized per frame at all -- the available frame-count proxies
+(`__open`, `iokit_user_client_trap`, `mach_msg2_trap`) disagree by 1.7x.
 
 One reading trap, and it is the reason the thread filter exists: `sample`
 captures every thread whether or not it is on-CPU, so an idle app's report is
@@ -709,38 +637,27 @@ here. Those questions stay with `benchmark-quick` on `incremental-mixed`, whose
 coarse verdict is still the only one that sees them.
 
 **Its A/A precision is not its precision on a revision pair.** Against itself it
-holds ~0.7% paired SD and a mean within 0.1% of zero. Comparing two *different*
-revisions is worse, and an A/A control cannot reveal by how much, because there
-both arms hold identical code. **Treat ~0.5-1% as the honest resolution for a
-revision claim, not the A/A figures.** That range is measured, over 18 cold
-rebuilds of one revision pair, and it decomposes into:
-
-- **Rebuild-to-rebuild SD of the estimate, 0.25-0.37%.** Every rebuild produces a
-  distinct dylib -- Swift release builds are not byte-reproducible here -- so
-  re-running is not free of it. Averaging several runs shrinks this term.
-- **A residual order bias of ~+0.3%**, reported per run as `orderBiasPercent`. It
-  is slot-bound, not revision-bound, so counterbalancing already removes it from
-  `realEffectPercent`; it is not load order, which was tested and exonerated.
-  Averaging does *not* shrink this term, which is why ~0.5% is a floor rather
-  than a starting point.
-
-**Re-running does not need a fresh A/A control to interpret it.** A/A shifts
-across rebuilds by the same amount the revision pair does, so the rebuild floor
-belongs to the instrument rather than to cross-revision comparison. A shift
-between two of your runs is expected at ~0.3%, not evidence that something broke.
+holds ~0.7% paired SD and a mean within 0.1% of zero, but an A/A control cannot
+reveal how much worse a real revision pair is, because there both arms hold
+identical code. **Treat ~0.5-1% as the honest resolution for a revision claim,
+not the A/A figures.** That range is measured over 18 cold rebuilds of one
+revision pair, and decomposes into rebuild-to-rebuild SD of 0.25-0.37% (every
+rebuild produces a distinct dylib -- Swift release builds are not
+byte-reproducible here -- and averaging runs shrinks this term) plus a residual
+order bias of ~+0.3% that averaging does *not* shrink, which is why ~0.5% is a
+floor rather than a starting point. A shift of ~0.3% between two of your runs is
+therefore expected, not evidence that something broke, and re-running needs no
+fresh A/A control to interpret.
 
 **A claim needs both directions, which is why the recipe passes
 `--both-directions` whenever a candidate checkout is given.** A real difference
 reverses when the arms swap slots; an order bias does not. The report splits them
-into `realEffectPercent` (claimable) and `orderBiasPercent` (diagnostic). The
-direction runs are themselves scheduled ABBA -- forward, reverse, reverse,
-forward -- because running forward first every time puts it immediately after the
-rebuild and reintroduces the asymmetry.
-
-**Read `orderBiasPercent` before believing `realEffectPercent`.** It should sit
-near zero. If it is comparable to the effect, the measurement is asymmetric and
-neither direction is trustworthy; that is the tool reporting its own failure
-rather than you having to suspect it.
+into `realEffectPercent` (claimable) and `orderBiasPercent` (diagnostic), and the
+direction runs are themselves scheduled ABBA, because running forward first every
+time puts it immediately after the rebuild and reintroduces the asymmetry.
+**Read `orderBiasPercent` before believing `realEffectPercent`**: it should sit
+near zero, and if it is comparable to the effect the measurement is asymmetric
+and neither direction is trustworthy.
 
 **No decision rule is frozen for it.** It reports statistics; `--threshold` is
 caller-supplied and labelled as such in the report. A frozen rule needs a
@@ -839,83 +756,13 @@ answer exactly when it is blind, and nothing downstream can tell the difference
 -- so the failure is silent and always in the direction that ends the
 investigation early.
 
-Four instances cost real time on this code, all the same shape:
-
-- A mutation harness grepped for `✘`, which Swift Testing does not emit (it uses
-  `􀢄`). Caught mutations rendered as clean runs.
-- `cumulativePlanNanoseconds` is promoted from pending to accepted only when a
-  draw is accepted, and `scrollback-stream` accepts none. It reads `0.00` on the
-  one workload whose sustained output the number was wanted for.
-- The fence-stall counter first shipped latched at drain time, so a delivery
-  whose publish the synchronized-output guard suppressed lost its stall
-  entirely -- understating precisely the full-screen TUI floods worth measuring.
-- A flake rate sampled from single-test runs (~1 failure in 60) instead of
-  full-suite runs (~3 in 14). Twenty clean runs in the wrong denominator prove
-  nothing, at any sample size. The ~21% rate was itself a property of a degraded
-  machine -- a quiet one expresses the flake at neither read-turn cap (0-of-9
-  interleaved arms each) -- so "did the cap resolve it" stays open until suite
-  arms at both caps run under generated load (for example a concurrent
-  `scrollback-stream` flood), with the readings pre-registered.
-
-Practical rules:
-
-- Emit a count beside every aggregate. `cumulative...Nanoseconds` without its
-  sample count cannot distinguish "no cost" from "no samples". Assert a floor on
-  that count where the number drives a decision.
-- Check that a new field is actually present in the artifact before reading its
-  value. Both benchmark blind spots above were guards inherited by copying a
-  neighbouring metric's emit site. **A missing field is not a zero.** The
-  fixture-replay collector records fence-stall fields and no `drawCount`; reading
-  its absence as "this workload never draws" was wrong, and the two collectors
-  simply instrument different things.
-- **Read a gate from the code that owns it, not from a reconstruction of it.**
-  The calibration gates are deliberately not all read from the same condition:
-  `select_candidate` (`scripts/terminal-benchmark-calibration.py`) takes the
-  false-positive rate from the **A/A** condition and detection, inconclusive and
-  wrong-direction from the **injected-effect** conditions. Reading `inconclusive`
-  off `aa` produces a much larger number and manufactures failures that are not
-  there -- it briefly indicted every frozen rule in the table (`20/F15`). Call
-  `select_candidate` on the candidate; do not re-implement its arithmetic.
-- **Two points are not a trend, and a trend with a small-n endpoint is not even
-  two points.** An additive-noise model inferred from block lengths of 40 frames
-  (n=5) and 95 frames survived one confirming measurement at 5x and then died
-  when the intermediate 2x and 3x points were finally taken -- they were flat,
-  and the model had the direction backwards (`20/F12`, `20/F16`). When a model
-  predicts a curve, measure the middle of the curve before acting on it. This is
-  the same rule as "derive nothing that one more run could measure", applied to
-  the shape of a relationship rather than to a single value.
-- **A screen is not a freeze.** The corpus's protocol (doc 7) is two-stage:
-  screen a grid at 50,000 trials to select a cell, then re-run *that exact cell*
-  at 100,000 trials with disjoint fresh seeds and no parameter changed after
-  screening. Freezing straight off a screen skips the confirmation the whole
-  design rests on, and a cell that looks selected-and-verified may only be
-  selected (`20/F15`).
-- **Verify a candidate cell on each series independently, not only pooled.** A
-  cell can clear every gate on combined evidence and fail on two of the three
-  series that fed it -- which was the defect that caused
-  `synchronized-frames`' confirm rule to be re-screened and then removed.
-  Pooling hides fragility that a per-series check surfaces.
-- Prefer the continuous quantity to the thresholded one. A pass/fail at a 60s
-  time limit is one bit; the test's wall time underneath it shows a distribution
-  shifting before any verdict flips. Across nine interleaved suite pairs, the
-  read-turn cap moved the termination test from 1.073s to 0.810s with
-  non-overlapping ranges -- while the pass/fail bit read 0-of-9 failures on both
-  arms and so carried no signal at all.
-- Verify a weakened or cheapened measurement still detects what it was built to
-  detect, by reintroducing the defect and confirming it goes red.
-- Derive nothing that one more run could measure.
-- Give every comparison a control the change cannot reach, measured in the same
-  session. A read-turn constant in `TerminalPTYHost` cannot touch the 679 pure
-  `TerminalCore` tests, so those are the control for any claim about the PTY
-  suite's wall time. This is what separates an effect from a machine state: a
-  9.1x PTY "speedup" read out of two archived gate logs evaporated when the
-  control showed the untouched core suite had moved 13x across the same pair.
-  Measured properly, interleaved and same-session, the real effect was 24%.
-  Every comparative claim that survived this investigation came from
-  contemporaneous interleaved arms; every one that fell came from comparing logs
-  across sessions. Subtracting medians of two
-  comparisons put the read-turn cap's cost at ~+1%; measured directly against
-  the same baseline it was +3.69%.
+That rule and the rest of the measurement discipline these commands rest on --
+emit a count beside every aggregate, a missing field is not a zero, read a gate
+from the code that owns it, a screen is not a freeze, give every comparison a
+control the change cannot reach -- are in
+[measurement-discipline.md](measurement-discipline.md). Read it before building
+a new metric, freezing a decision rule, or acting on a difference between two
+numbers.
 
 ## Optimize safely
 

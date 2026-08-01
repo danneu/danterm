@@ -36,31 +36,18 @@ For GitHub API requests:
 
 ## Local source references
 
-Real source for the systems DanTerm imitates or runs on is available locally at
-pinned revisions. Read it. Grepping a real implementation beats reasoning from
-memory about what a terminal, a shell, or Darwin does, and it costs one command:
-
-- **Terminals** -- `libvterm` (parser, reflow), `alacritty` (recordings and
-  replay cases), `kitty`, `wezterm`, `iterm2`, `vte`, `foot`, `xterm`, `tmux`,
-  and `windows-terminal` for how other emulators solve a problem or handle an
-  edge case, plus `.ghostty-src/` for the libghostty C API.
-- **Shells** -- `fish-shell`, `zsh`, `bash` (readline). Pinned at the versions
-  the shell-integration research measured.
-- **Darwin** -- `xnu` (process, signal, tty, Mach), `Libc`, `libdispatch`,
-  `libpthread`, `libplatform`, `objc4`.
-- **Swift** -- `swift-collections` (Deque, OrderedSet, BitArray, Heap,
-  RopeModule's `BigString`), pinned at the release SwiftPM would resolve.
-  Importing swift-collections is encouraged wherever one of its containers is
-  the right tool -- prefer it over hand-rolling a ring buffer, ordered set,
-  bitset, or heap. Consult the checkout when deciding whether a container fits
-  and while using it: which type to pick, what its API and complexity
-  guarantees are, and how it behaves under COW.
+Real source for the systems DanTerm imitates or runs on -- nine terminal
+emulators, `libvterm`, the three shells, Darwin, `swift-collections`, and
+`.ghostty-src/` -- is checked out at pinned revisions. Read it: grepping a real
+implementation beats reasoning from memory, and it costs one command. Prefer
+`swift-collections` over hand-rolling a ring buffer, ordered set, bitset, or
+heap. The inventory, per-tree entry points, and the upstream-test citation
+format are in
+[agent-docs/reference-sources.md](agent-docs/reference-sources.md).
 
 `references/` is gitignored, so it's empty in a fresh clone: run
 `just fetch-references [name]` (`--list` shows names, pins, and why each exists)
-and read locally instead of fetching files over the web. Details and per-tree
-entry points are in
-[agent-docs/reference-sources.md](agent-docs/reference-sources.md).
+and read locally instead of fetching files over the web.
 
 Source explains a behavior or picks the next probe; it does not replace
 measuring one. A shell's behavior is established by a real binary in a real PTY,
@@ -81,31 +68,26 @@ commands (creating surfaces, rebuilding views, sending notifications, etc.).
 Model and update logic are pure and fully unit-testable without Cocoa or
 GhosttyKit.
 
+Both symlinks below are tracked, and both modules compile same-module into the
+app target -- no `import DanTermCore` / `import DanTermSupport`. The nested
+packages under `lib/` compile the same files standalone so they can be tested.
+
 ```
 app/                              # App target (root Package.swift, path: "app").
 ├── main.swift, AppDelegate.swift, AppRuntime.swift, GhosttyApp.swift, TerminalView.swift,
 │   SplitContainerView.swift, SidebarView.swift, Reconcile.swift, ...   # AppKit + GhosttyKit
-├── DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore   # tracked symlink; the pure core
-│                                                          # is compiled same-module into the app
-│                                                          # target (no `import DanTermCore`).
-├── DanTermSupport -> ../lib/DanTermSupport/Sources/DanTermSupport   # tracked symlink; portable
-│                                                          # side effects (IpcConnection, Debouncer,
-│                                                          # CLIPathInstaller, RecoveryStore),
-│                                                          # compiled same-module like the core.
+├── DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore
+├── DanTermSupport -> ../lib/DanTermSupport/Sources/DanTermSupport
 └── Info.plist
 
 lib/
-├── DanTermCore/                  # Pure model/update, no AppKit/GhosttyKit. Same files as the
-│   ├── Sources/DanTermCore/      # symlink above; compiled standalone here for tests:
-│   │                             #   Model.swift, Msg.swift, Command.swift, Update.swift,
-│   │                             #   ModelOperations.swift, Projections.swift, Persistence.swift,
-│   │                             #   TabTodo.swift, DanTermConfig.swift, ...
+├── DanTermCore/                  # Model.swift, Msg.swift, Command.swift, Update.swift,
+│   ├── Sources/DanTermCore/      #   ModelOperations.swift, Projections.swift,
+│   │                             #   Persistence.swift, TabTodo.swift, DanTermConfig.swift, ...
 │   └── Tests/DanTermCoreTests/   # Swift Testing suites (auto-discovered).
 ├── DanTermProtocol/              # CLI parser + IPC envelope + line framer, shared by app/ and cli/.
-└── DanTermSupport/                 # Portable side effects (no AppKit/GhosttyKit); same symlink +
-    ├── Sources/DanTermSupport/     #   nested-package pattern as core. Depends on DanTermProtocol +
-    │                               #   Foundation, NOT on DanTermCore: IpcConnection.swift,
-    │                               #   Debouncer.swift, CLIPathInstaller.swift, RecoveryStore.swift.
+└── DanTermSupport/               # IpcConnection.swift, Debouncer.swift,
+    ├── Sources/DanTermSupport/   #   CLIPathInstaller.swift, RecoveryStore.swift.
     └── Tests/DanTermSupportTests/  # Swift Testing suites (auto-discovered).
 
 docs/design/                      # ADR-style design notes; index at docs/design/index.md.
@@ -338,6 +320,7 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 - [docs/terminal-sprites.md](docs/terminal-sprites.md) -- procedural terminal glyph contract, pure geometry boundary, shared abstraction policy, family models, and behavioral test requirements. Read before changing sprite classification, geometry, rendering, or tests.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
 - [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) -- real-app benchmarks, compatible history, profiler selection, CPU and memory profiling, and artifact handling. Read before measuring or optimizing terminal speed or memory footprint.
+- [agent-docs/measurement-discipline.md](agent-docs/measurement-discipline.md) -- how to build an instrument that can say "not measured", read a calibration gate, freeze a decision rule, and control a comparison. Read before adding a metric, freezing a threshold, or acting on a difference between two numbers.
 - [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) -- why hot value types crossing a SwiftPM target boundary need an inlinable surface, and how to tell witness-table dispatch from value-witness traffic in a profile. Read before removing an `@inlinable`/`@usableFromInline` annotation in `lib/TerminalCore`, adding a generic entry point that crosses a target boundary, or acting on an `outlined copy`/`outlined consume` frame.
 - [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, and the pinned `references/` checkouts (terminals, shells, Darwin). Read when implementing against libghostty, or before reasoning from memory about what a terminal, shell, or Darwin API does.
 - [docs/ci.md](docs/ci.md) -- CI/CD pipeline, code signing, notarization, troubleshooting.
