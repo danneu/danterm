@@ -208,7 +208,7 @@ printed reason. Those three are the self-test's core cases, not manual steps.
 
 ## Commit progress
 - [x] 1. test(terminal): adapt kitty's prompt-marking and rewrap cases
-- [ ] 2. build(scripts): lint adapted-kitty citations against the pinned checkout
+- [x] 2. build(scripts): lint adapted-kitty citations against the pinned checkout
 
 ## Implementation notes
 
@@ -229,6 +229,26 @@ printed reason. Those three are the self-test's core cases, not manual steps.
   is what blanking does -- which is what A3 is about.
 - **Commit 1 -- citation hashes are 12-hex sha256 prefixes**, matching the plan's
   worked example rather than the full digest, which does not fit a comment line.
+- **Commit 2 -- I2 checks the commit, not the release tag.** The citation carries
+  both (`kitty v0.48.2 2cb1d95`), but the commit changes on every pin bump while
+  the tag may not, so checking the commit already catches every case the tag
+  check would and the tag check adds nothing.
+- **Commit 2 -- the recorded hash is matched as a prefix.** Citations record 12
+  hex characters because a full digest does not fit a comment line; the lint
+  requires 12-64 and asserts the upstream digest starts with what was recorded.
+- **Commit 2 -- the lint scans every `.swift` under the root**, not just
+  `lib/TerminalCore/Tests/`, skipping `references/`, `.git`, `.ghostty-src`, the
+  xcframework, and build trees. The citation format is a repo-wide convention, so
+  a citation added elsewhere should be checked rather than silently unenforced.
+- **Commit 2 -- I1 also rejects a near-miss citation line**, beyond the plan's
+  "resolves to a real `def`". A line that means to be a citation but does not
+  parse (a trailing period, a wrong separator) was otherwise invisible to the
+  lint, so the gate would keep passing while checking nothing -- a strictly worse
+  state than having written no citation. Covered by its own self-test case.
+- **Commit 2 -- the self-test computes its expected hash from the fixture text
+  itself**, with `printf | shasum`, rather than asking the lint what the hash is.
+  Taking the lint's own answer as the expectation would pass no matter what the
+  body extraction did, which is the one thing that test needs to pin.
 - All eight adapted cases passed on first run. Per the plan's Verification
   section that is characterization coverage, not a missing red step: no defect
   surfaced and no behavioral divergence from kitty was found.

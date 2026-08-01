@@ -92,6 +92,33 @@ line numbers rot when a pin advances, while named identifiers usually survive.
 DanTerm's own tracked files still use `file:line`, because Git preserves the
 version that a citation describes.
 
+### Adapting an upstream test
+
+A test adapted from a pinned suite carries its citation in the preamble, as the
+section after the AGENTS.md `Intent / Why it exists / Scenario` block:
+
+```swift
+// Adapted from kitty_tests/datatypes.py#test_rewrap_narrower
+//   (kitty v0.48.2 2cb1d95, body sha256:ab12cd34ef56).
+//   Divergence: asserts logical text and `isSoftWrapped`, not LineBuf.is_continued.
+```
+
+The hash covers the upstream test's body -- its `def` line down to the next
+same-or-lower-indented `def`/`class` -- so a pin bump surfaces upstream revisions
+as a lint failure instead of as silent compatibility drift. It lives in the
+comment rather than a side manifest, so there is exactly one source of truth and
+nothing to desync.
+
+`Divergence:` is required, `Divergence: none` included. We adopt an upstream
+suite's *scenarios*, never its assertions: it asserts through APIs DanTerm does
+not have, and its verdict on a behavior is not automatically ours. A citation
+with no `Divergence:` line is an unstated claim of assertion-level parity.
+
+`scripts/kitty-parity-lint.py` enforces all of that in the `just test` gate: the
+citation resolves to a real `def`, the commit is the current pin, the hash
+matches, and the `Divergence:` line exists. It exits 0 with a printed reason when
+`references/kitty` is absent, since a fresh clone has no checkout.
+
 ## Other terminals
 
 Nine terminal emulators are pinned above (`kitty`, `wezterm`, `iterm2`, `vte`,
