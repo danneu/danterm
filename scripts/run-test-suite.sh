@@ -40,6 +40,7 @@ STEPS=(
     './scripts/terminal-backend-boundary-lint.sh'
     './scripts/tests/test-terminal-pty_test.sh'
     'python3 ./scripts/tests/pack_theme_catalog_test.py'
+    'python3 ./scripts/tests/terminal_tape_to_fixture_test.py'
     './scripts/tests/build-lib-contract_test.sh'
     './scripts/tests/terminal-viability-harness_test.sh'
     './scripts/tests/build-lib-fetch_test.sh'

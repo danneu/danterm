@@ -241,10 +241,15 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
 
 `pane tape` prints the dev pane's bounded, raw recording as replayable JSON.
 The output is unscrubbed; redirect it to a file, then run the repository's
-fixture converter before committing it. Production and Ghostty-backed panes
-return an unsupported-backend error.
+fixture converter before committing it. The converter refuses a recording that
+has dropped old events unless `--allow-truncated` explicitly acknowledges the
+incomplete evidence. Production and Ghostty-backed panes return an
+unsupported-backend error.
 
     danterm pane tape --pane "$PANE_ID" > tape.json
+    scripts/terminal-tape-to-fixture.py tape.json \\
+        lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \\
+        --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
 
 ### Send keys to another pane
 

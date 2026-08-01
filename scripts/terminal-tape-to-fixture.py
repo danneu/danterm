@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""Convert a live-pane terminal tape into a neutral replay fixture.
+"""Scrub a live-pane terminal tape into a neutral replay fixture.
 
-A tape is what `TerminalTapeRecorder` writes when a DanTerm build runs with
-`DANTERM_TAPE_PATH` set: one JSON object per line, the first carrying the pane's
-initial geometry and every later one a feed or resize in the order `Terminal`
-actually saw it, with real PTY chunk boundaries preserved. That ordering and
-those boundaries are the whole value of a tape -- a corruption that only appears
-in a live pane is usually sensitive to where the chunks fell -- so this script
-rewraps rather than rewrites: no event is merged, split, or reordered.
+A tape is normally the JSON document printed by `danterm pane tape --pane ID`.
+It already uses the neutral recording schema, including real PTY chunk boundaries
+and resize ordering, so this script only scrubs feed bytes, verifies that local
+identifiers are gone, and marks the result as fixture-ready DanTerm evidence.
+Legacy JSONL files written through `DANTERM_TAPE_PATH` remain accepted.
 
-    scripts/terminal-tape-to-fixture.py /tmp/danterm-tape.51234.jsonl \\
+    scripts/terminal-tape-to-fixture.py /tmp/tape.json \\
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json
 
-Each pane writes its own PID-suffixed file; the summary this prints (event
-count, resize count, resize geometries) is how you pick the one whose drag
-matches the artifact you reproduced.
+The summary this prints (event count, resize count, resize geometries) helps
+confirm that the dump contains the interaction that exposed the artifact.
 
 Scrubbing is on by default and is not cosmetic: a tape is verbatim terminal
 output, so it carries the recording machine's hostname and home directory in
@@ -32,6 +29,8 @@ width: changing a segment's length would move every column after it and quietly
 alter the wrapping the fixture exists to pin.
 """
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
@@ -67,13 +66,69 @@ def local_identifiers() -> list:
     return sorted((c.encode() for c in candidates if len(c) > 2), key=len, reverse=True)
 
 
+def load_tape(path: str):
+    """Loads either one live-capture document or the legacy JSONL stream."""
+    with open(path, encoding="utf-8") as handle:
+        contents = handle.read()
+    try:
+        document = json.loads(contents)
+    except json.JSONDecodeError:
+        document = None
+
+    if isinstance(document, dict) and all(
+        key in document for key in ("version", "provenance", "initial", "events")
+    ):
+        provenance = document.get("provenance")
+        if not isinstance(provenance, dict) or provenance.get("source") != "danterm-live-capture":
+            raise ValueError("recording is not a raw DanTerm live capture")
+        return document, document.get("truncation")
+
+    try:
+        lines = [json.loads(line) for line in contents.splitlines() if line.strip()]
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid tape JSON: {error.msg}") from error
+    if not lines or "initial" not in lines[0]:
+        raise ValueError("no geometry header; not a tape")
+    return {
+        "version": 1,
+        "initial": lines[0]["initial"],
+        "events": lines[1:],
+    }, None
+
+
+def decode_feed(event: dict):
+    encodings = [key for key in ("base64", "hex", "text") if key in event]
+    if len(encodings) != 1:
+        raise ValueError("feed event must contain exactly one byte encoding")
+    encoding = encodings[0]
+    try:
+        if encoding == "base64":
+            return encoding, base64.b64decode(event[encoding], validate=True)
+        if encoding == "hex":
+            return encoding, bytes.fromhex(event[encoding])
+        return encoding, event[encoding].encode("utf-8")
+    except (binascii.Error, ValueError, AttributeError) as error:
+        raise ValueError(f"invalid {encoding} feed event") from error
+
+
+def encode_feed(event: dict, encoding: str, raw: bytes):
+    if encoding == "base64":
+        event[encoding] = base64.b64encode(raw).decode("ascii")
+    elif encoding == "hex":
+        event[encoding] = raw.hex()
+    else:
+        event[encoding] = raw.decode("utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", help="JSONL file written by TerminalTapeRecorder")
+    parser.add_argument("tape", help="JSON document from `danterm pane tape` (or legacy JSONL)")
     parser.add_argument("fixture", help="fixture JSON to write")
     parser.add_argument("--keep-identifiers", action="store_true",
                         help="skip host/home scrubbing (local-only tapes)")
+    parser.add_argument("--allow-truncated", action="store_true",
+                        help="convert despite dropped events, retaining truncation metadata")
     parser.add_argument("--test", default="TerminalShellDialectTests",
                         help="behavioral test this recording is evidence for")
     parser.add_argument("--shell", default="", help="what was running in the pane")
@@ -93,25 +148,43 @@ def main() -> int:
             return 1
         swaps.append((old.encode(), new.encode()))
 
-    with open(args.tape) as handle:
-        lines = [json.loads(line) for line in handle if line.strip()]
-    if not lines or "initial" not in lines[0]:
-        print(f"{args.tape}: no geometry header; not a tape", file=sys.stderr)
+    try:
+        tape, truncation = load_tape(args.tape)
+    except (OSError, ValueError) as error:
+        print(f"{args.tape}: {error}", file=sys.stderr)
+        return 1
+    if truncation and (
+        truncation.get("isTruncated")
+        or truncation.get("droppedEventCount", 0) > 0
+        or truncation.get("droppedPayloadBytes", 0) > 0
+    ) and not args.allow_truncated:
+        print(
+            f"{args.tape}: tape is truncated; pass --allow-truncated to convert incomplete evidence",
+            file=sys.stderr,
+        )
         return 1
 
-    head, events = lines[0], lines[1:]
+    events = tape["events"]
     identifiers = [] if args.keep_identifiers else local_identifiers()
     leftovers = set()
     for event in events:
         if event.get("type") != "feed":
             continue
-        raw = bytes.fromhex(event["hex"])
+        try:
+            encoding, raw = decode_feed(event)
+        except ValueError as error:
+            print(f"{args.tape}: {error}", file=sys.stderr)
+            return 1
         if not args.keep_identifiers:
             raw = scrub(raw)
             leftovers.update(i.decode() for i in identifiers if i in raw)
         for old, new in swaps:
             raw = raw.replace(old, new)
-        event["hex"] = raw.hex()
+        try:
+            encode_feed(event, encoding, raw)
+        except UnicodeDecodeError:
+            print(f"{args.tape}: replacement made a text feed invalid UTF-8", file=sys.stderr)
+            return 1
 
     if leftovers:
         print(f"identifiers survived scrubbing: {sorted(leftovers)}", file=sys.stderr)
@@ -132,11 +205,15 @@ def main() -> int:
     if args.stimulus:
         provenance["stimulus"] = args.stimulus
 
-    with open(args.fixture, "w") as handle:
-        json.dump({"version": 1, "initial": head["initial"], "events": events,
-                   "provenance": provenance}, handle)
+    fixture = {"version": 1, "initial": tape["initial"], "events": events,
+               "provenance": provenance}
+    if truncation is not None:
+        fixture["truncation"] = truncation
+    with open(args.fixture, "w", encoding="utf-8") as handle:
+        json.dump(fixture, handle)
+        handle.write("\n")
 
-    print(f"{len(events)} events, {len(resizes)} resizes, initial {head['initial']}")
+    print(f"{len(events)} events, {len(resizes)} resizes, initial {tape['initial']}")
     if resizes:
         print("resize geometries:", [(r["columns"], r["rows"]) for r in resizes])
     print("wrote", args.fixture)
