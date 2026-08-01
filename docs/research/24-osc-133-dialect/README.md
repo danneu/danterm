@@ -306,10 +306,18 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   the reclaim recognizes a fragment by that same claim. Pinned by
   `fish-prompt-sp-overflow.json`, which caught the ordering mistake the synthetic
   case could not see.
-- [ ] TODO: render the Bash dialect in a real pane. Still never done, and F16 is
-  the evidence that this is where the remaining defects are: every mark in this
-  doc was parser-checked and correct, and the bug was in the consumer's anchor.
-  Bash's doubled `B` on its SIGWINCH repaint is the specific thing to look at.
+- [x] Rendered the Bash dialect in a real pane. Clean -- the first shell whose
+  first live render produced no defect, over a width drag that also entered and
+  left the pane's fish and zsh. Nothing stranded, nothing indented, no debris
+  from the doubled `B`. The reason is structural rather than luck: readline
+  repaints only the final prompt line on SIGWINCH
+  (`references/bash/lib/readline/display.c#_rl_redisplay_after_sigwinch`, whose
+  own comment says so), so a Bash prompt above the current one is inert history
+  and there is no repaint to strand a copy or to land a resize in the middle of.
+  That is the same fact `redraw=last` declares. Bash's upper prompt row does not
+  re-lay-out on resize -- it stays wrapped at the width it was written at, and
+  DanTerm reflows it as the soft-wrapped logical line it is. Confirmed not a
+  DanTerm limitation by the source above; zsh and fish repaint and Bash does not.
 - [x] Decided: the live-pane tape is a permanent instrument
   (`TerminalPTY/Sources/TerminalPTYHost/TerminalTapeRecorder.swift`, off unless
   `DANTERM_TAPE_PATH` is set). It was removed as temporary in `e97345e` and had
@@ -415,7 +423,10 @@ an `aid=`.
   tests is still `TerminalCore.Terminal` and not a DanTerm pane.
   **Closed for zsh by F16, and it cost a bug.** The first time the shipped zsh
   dialect was rendered in a real pane it stranded a prompt head, through a
-  mechanism no probe in this doc had a stimulus for. Bash remains unrendered.
+  mechanism no probe in this doc had a stimulus for. **Now closed for Bash too,
+  and it cost nothing**: the doubled `B` renders as inert as it parses, because
+  readline repaints only the final prompt line and leaves every earlier one
+  alone. The caveat is retired for all three shells.
 
 ## Outcome
 

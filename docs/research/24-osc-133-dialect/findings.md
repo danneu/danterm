@@ -992,3 +992,34 @@ Evidence for the OSC 133 dialect. Parser probes feed
   Bash leaves it behind on exit, and re-declaring on every prompt is what takes
   it back. That is the hazard D3 asserted from reasoning and this measures.
 - Next action: none. Bash in a real pane remains the one open item.
+
+### F19 -- Bash renders clean in a real pane, and the reason it cannot strand a prompt is readline's
+
+- Status: settled, no defect. **Closes the last Phase 4 item and retires the
+  "never rendered in a real pane" caveat for all three shells.**
+- Date and investigator: 2026-07-31, R1 (maintainer at the keyboard).
+- Commit and worktree state: this finding's commit.
+- Result or artifact paths: none. Nothing to pin -- a fixture of a stream that
+  strands nothing would assert nothing the existing sweeps do not.
+- Commands, inputs, or reproduction: the maintainer opened a fish pane in
+  DanTerm Dev, entered `bash`, exited, entered `zsh`, exited, and dragged the
+  width throughout -- the F17 stimulus, extended to cover Bash's own prompt.
+- Result: clean. No stranded head, no indent, no debris from the doubled `B` on
+  Bash's SIGWINCH repaint, which until now had been measured as inert at the
+  parser but never seen rendered.
+- Why it is structural and not luck. Readline repaints only the final line of a
+  multi-line prompt on SIGWINCH -- `rl_clear_visible_line`, move to the last
+  line, `redraw_prompt` on the text after the final newline
+  (`references/bash/lib/readline/display.c#_rl_redisplay_after_sigwinch`, whose
+  own comment reads "Redraw only the last line of a multi-line prompt"). So a
+  Bash prompt above the current one is inert history: there is no repaint to
+  strand a copy of, and no repaint for a resize to land in the middle of, which
+  is the shape of every defect F16 and F17 found. `redraw=last` declares exactly
+  this, and the live render is the first evidence for it that is not a parser
+  measurement.
+- What the maintainer noticed and it is correct: Bash's prompt does not re-lay
+  out on resize the way zsh's and fish's do, it stays wrapped at the width it
+  was written at. That is the same source fact, not a DanTerm limitation --
+  readline never rewrites the upper row, so DanTerm reflows it as the
+  soft-wrapped logical line it is and nothing more.
+- Next action: none. Phase 4 is complete.
