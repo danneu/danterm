@@ -149,6 +149,34 @@ struct TerminalShellDialectTests {
         )
     }
 
+    @Test("zsh's redraw declaration is what keeps its sweep down to one prompt")
+    func zshRequiresTheDeclaration() throws {
+        // Intent: on a zsh stream that actually strands rows, declaring `redraw=1` leaves
+        //   one prompt and suppressing it leaves a staircase.
+        // Why it exists: `zsh-dialect-width-sweep` guards the emitter but cannot discriminate
+        //   the redraw value -- replaying it with `redraw=0` still leaves one prompt, because
+        //   a settled sweep that drains each repaint before the next resize never strands
+        //   anything. So the zsh half of the contract was pinned by nothing, and a change
+        //   that dropped zsh's declaration would have passed the whole suite.
+        // Scenario: a fast width drag against a two-row Starship prompt whose right-aligned
+        //   segment is padded to the pane width -- one SIGWINCH per column, 100 down to 48,
+        //   with only a short drain between steps, which is what a real drag does.
+        #expect(topPromptRows(in: try replay("zsh-redraw-discriminator")) == 1)
+        #expect(topPromptRows(in: try replay("zsh-redraw-discriminator", redrawOverride: "redraw=1")) == 1)
+        // A copy per stranding step, so the magnitude is the claim and the exact count is a
+        // property of the recording's length.
+        #expect(topPromptRows(in: try replay("zsh-redraw-discriminator", redrawOverride: "redraw=0")) > 10)
+        expectValidGrid(try replay("zsh-redraw-discriminator"))
+    }
+
+    /// Counts this prompt's top row by the box-drawing glyph that opens it, which is the
+    /// row a stranded copy leaves behind. `upperRow` cannot serve: the right-aligned
+    /// segment it keys on is dropped by the prompt framework at narrow widths, so it
+    /// undercounts exactly where the staircase is worst.
+    private func topPromptRows(in terminal: Terminal) -> Int {
+        terminal.fullHistoryText.components(separatedBy: "\u{256D}").count - 1
+    }
+
     @Test("resizing while a command runs leaves its output untouched")
     func resizeDuringOutputPreservesIt() throws {
         // Intent: after `C`, a resize blanks nothing, so a running command's output and

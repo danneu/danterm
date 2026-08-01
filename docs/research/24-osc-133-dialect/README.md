@@ -241,22 +241,28 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   [capture-fish-sweep.py](capture-fish-sweep.py) reproduces F13's numbers (1 / 31
   / 1), so the trio still discriminates the redraw value, which is what makes it
   the test that would have caught D3's two wrong versions.
-- [ ] TODO: the `*-dialect-width-sweep` recordings guard the shipped emitters but
-  do **not** discriminate the redraw value for zsh or fish: replaying them with
-  `redraw=0`, or with the declaration stripped, still leaves exactly one prompt.
-  A settled sweep -- each repaint drained before the next resize -- does not
-  strand rows, and coalescing the resizes does not help because dropping a
-  repaint also drops the redraw that follows a blank. Only the F13 fish trio
-  (whose capture used the maintainer's real fish config) reproduces the
-  staircase, and only Bash's sweep discriminates its own value. Finding a
-  recordable stimulus that discriminates for zsh would close the gap.
-  **Found, not yet landed.** A width sweep captured against the maintainer's real
-  `~/.zshrc` discriminates 1 prompt as-recorded against 44 forced to `redraw=0`,
-  and holds under width-only, width-plus-rows, and a 20 ms fast-drag variant. It
-  is unlanded because the capture's cwd bakes a real project path into every
-  frame; re-capture in a neutral directory before promoting it. F16's
-  `zsh-stale-width-repaint` fixture does not close this -- it pins the blanking
-  anchor, not the redraw value.
+- [x] Landed a zsh recording that discriminates the redraw value:
+  `zsh-redraw-discriminator`, asserted by
+  `TerminalShellDialectTests.zshRequiresTheDeclaration` at 1 prompt as-recorded
+  against 29 forced to `redraw=0`. The gap it closes: the `*-dialect-width-sweep`
+  recordings guard the shipped emitters but cannot discriminate the redraw value
+  for zsh or fish -- replaying them with `redraw=0`, or with the declaration
+  stripped, still leaves exactly one prompt, because a settled sweep that drains
+  each repaint before the next resize never strands a row. Coalescing the resizes
+  does not help either, since dropping a repaint also drops the redraw that
+  follows a blank. Until this landed, only the F13 fish trio reproduced the
+  staircase and only Bash's sweep discriminated its own value, so a change that
+  dropped zsh's declaration would have passed the whole suite. What made the
+  difference is a fast drag -- one SIGWINCH per column with a short drain rather
+  than a settled one. Re-captured in a neutral cwd against the maintainer's real
+  `~/.zshrc`, since the framework is what pads the prompt to the pane width; the
+  earlier capture was withheld only because its cwd baked a real project path
+  into every frame. F16's `zsh-stale-width-repaint` does not close this -- it
+  pins the blanking anchor, not the redraw value.
+- [ ] TODO: fish has no discriminating recording either, for the same reason. The
+  F13 trio covers the staircase incident but predates the shipped emitter, so
+  what is unpinned is specifically `danterm.fish`'s own declaration. The fast-drag
+  stimulus that worked for zsh is the thing to try.
 - [x] Folded the shipped dialect into `docs/terminal-capabilities.md` (accepted
   actions and options, the per-integration emit/declare table, and why Bash uses
   `P`) and `plan-terminal-engine/10-protocols-shell-integration.md` (the
