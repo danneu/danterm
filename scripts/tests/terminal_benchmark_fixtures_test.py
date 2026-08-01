@@ -7,6 +7,7 @@ produces a stimulus nobody notices is different; a recording that ends inside an
 open synchronized-output bracket produces a block that never draws and hangs the
 harness with no error. This file exists so neither can reach a run.
 """
+import base64
 import gzip
 import importlib.util
 import json
@@ -46,9 +47,15 @@ class RecordingLoaderTests(unittest.TestCase):
         document = {
             "dimensions": {"columns": 179, "rows": 66},
             "events": [
-                {"type": "feed", "hex": "1b5b3f3230323668"},
-                {"type": "feed", "hex": "616263"},
-                {"type": "feed", "hex": "1b5b3f323032366c"},
+                {
+                    "type": "feed",
+                    "base64": base64.b64encode(SYNCHRONIZED_BEGIN).decode("ascii"),
+                },
+                {"type": "feed", "base64": base64.b64encode(b"abc").decode("ascii")},
+                {
+                    "type": "feed",
+                    "base64": base64.b64encode(SYNCHRONIZED_END).decode("ascii"),
+                },
             ],
         }
         expected = b"\x1b[?2026habc\x1b[?2026l"
@@ -80,9 +87,15 @@ class RecordingLoaderTests(unittest.TestCase):
         document = {
             "dimensions": {"columns": 179, "rows": 66},
             "events": [
-                {"type": "feed", "hex": "1b5b3f3230323668"},
-                {"type": "feed", "hex": "616263"},
-                {"type": "feed", "hex": "1b5b3f323032366c"},
+                {
+                    "type": "feed",
+                    "base64": base64.b64encode(SYNCHRONIZED_BEGIN).decode("ascii"),
+                },
+                {"type": "feed", "base64": base64.b64encode(b"abc").decode("ascii")},
+                {
+                    "type": "feed",
+                    "base64": base64.b64encode(SYNCHRONIZED_END).decode("ascii"),
+                },
             ],
         }
         one = b"\x1b[?2026habc\x1b[?2026l"

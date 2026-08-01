@@ -67,7 +67,7 @@ def local_identifiers() -> list:
 
 
 def load_tape(path: str):
-    """Loads either one live-capture document or the legacy JSONL stream."""
+    """Loads a live-capture document, follow stream, or legacy JSONL tape."""
     with open(path, encoding="utf-8") as handle:
         contents = handle.read()
     try:
@@ -87,6 +87,8 @@ def load_tape(path: str):
         lines = [json.loads(line) for line in contents.splitlines() if line.strip()]
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid tape JSON: {error.msg}") from error
+    if lines and isinstance(lines[0], dict) and lines[0].get("kind") == "start":
+        return load_follow_stream(lines), None
     if not lines or "initial" not in lines[0]:
         raise ValueError("no geometry header; not a tape")
     return {
@@ -94,6 +96,72 @@ def load_tape(path: str):
         "initial": lines[0]["initial"],
         "events": lines[1:],
     }, None
+
+
+def load_follow_stream(records: list):
+    """Flatten one ordered pane-tape follow stream into a snapshot-shaped value."""
+    start = records[0]
+    if set(start) != {"kind", "version", "provenance", "initial"}:
+        raise ValueError("invalid follow start record")
+    if isinstance(start["version"], bool) or start["version"] != 1:
+        raise ValueError("unsupported follow stream version")
+    provenance = start["provenance"]
+    if not isinstance(provenance, dict) or provenance.get("source") != "danterm-live-capture":
+        raise ValueError("recording is not a raw DanTerm live capture")
+    initial = start["initial"]
+    if not isinstance(initial, dict) or set(initial) != {"columns", "rows"}:
+        raise ValueError("invalid follow start geometry")
+
+    events = []
+    previous_sequence = None
+    ended = False
+    for record in records[1:]:
+        if not isinstance(record, dict) or not isinstance(record.get("kind"), str):
+            raise ValueError("invalid follow stream record")
+        if ended:
+            raise ValueError("follow stream contains a record after end")
+        kind = record["kind"]
+        if kind == "gap":
+            raise ValueError("follow stream dropped events")
+        if kind == "end":
+            if (
+                set(record) not in ({"kind"}, {"kind", "reason"})
+                or ("reason" in record and not isinstance(record["reason"], str))
+            ):
+                raise ValueError("invalid follow end record")
+            ended = True
+            continue
+        if kind != "event" or set(record) != {
+            "kind", "sequence", "elapsedNanoseconds", "event"
+        }:
+            raise ValueError("invalid follow stream order")
+
+        sequence = record["sequence"]
+        elapsed = record["elapsedNanoseconds"]
+        event = record["event"]
+        if (
+            isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+            or isinstance(elapsed, bool)
+            or not isinstance(elapsed, int)
+            or elapsed < 0
+            or not isinstance(event, dict)
+            or not isinstance(event.get("type"), str)
+            or "elapsedNanoseconds" in event
+        ):
+            raise ValueError("invalid follow event record")
+        if previous_sequence is not None and sequence != previous_sequence + 1:
+            raise ValueError("follow stream event sequence is not contiguous")
+        previous_sequence = sequence
+        events.append({**event, "elapsedNanoseconds": elapsed})
+
+    return {
+        "version": start["version"],
+        "provenance": provenance,
+        "initial": initial,
+        "events": events,
+    }
 
 
 def decode_feed(event: dict):

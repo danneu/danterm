@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Controlled PTY child for Ghostty text and recovery characterization."""
 
+import base64
 import json
 import os
 import pathlib
@@ -14,7 +15,13 @@ STATE_DIRECTORY = pathlib.Path(sys.argv[1])
 FIXTURE_PATH = pathlib.Path(sys.argv[2])
 with FIXTURE_PATH.open(encoding="utf-8") as fixture_file:
     REPLAY_EVENTS = json.load(fixture_file)["replay"]["events"]
-REPLAY_FEEDS = [bytes.fromhex(event["hex"]) for event in REPLAY_EVENTS if event["type"] == "feed"]
+REPLAY_FEEDS = [
+    base64.b64decode(event["base64"], validate=True)
+    if "base64" in event
+    else bytes.fromhex(event["hex"])
+    for event in REPLAY_EVENTS
+    if event["type"] == "feed"
+]
 if len(REPLAY_FEEDS) != 3:
     raise ValueError("Characterization replay must contain primary, alternate, and return feeds")
 PRIMARY_CORPUS, ALTERNATE_CORPUS, RETURN_TO_PRIMARY = REPLAY_FEEDS

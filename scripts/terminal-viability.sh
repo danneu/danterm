@@ -216,6 +216,7 @@ EOF
 
 cat >"$CORPUS_DIRECTORY/external-replay.py" <<'PYTHON'
 #!/usr/bin/env python3
+import base64
 import json
 import os
 import signal
@@ -230,6 +231,8 @@ for event in fixture["events"]:
         continue
     if "text" in event:
         payload = event["text"].encode("utf-8")
+    elif "base64" in event:
+        payload = base64.b64decode(event["base64"], validate=True)
     else:
         payload = bytes.fromhex(event["hex"])
     os.write(1, payload)

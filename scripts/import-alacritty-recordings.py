@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Convert adopted pinned Alacritty recordings into neutral replay fixtures."""
 
+import base64
 import json
 from pathlib import Path
 
@@ -201,7 +202,10 @@ def main() -> None:
             },
             "initial": {"columns": size["columns"], "rows": size["screen_lines"]},
             "events": [
-                {"type": "feed", "hex": recording.hex()},
+                {
+                    "type": "feed",
+                    "base64": base64.b64encode(recording).decode("ascii"),
+                },
                 {
                     "type": "expect",
                     "expect": (

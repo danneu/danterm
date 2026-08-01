@@ -12,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "terminal-tape-to-fixture.py"
+FOLLOW_SAMPLE = ROOT / "scripts" / "tests" / "fixtures" / "pane-tape-follow.jsonl"
 
 
 def live_capture(*, truncated=False):
@@ -148,6 +149,157 @@ class TerminalTapeToFixtureTests(unittest.TestCase):
             fixture = json.loads(destination.read_text(encoding="utf-8"))
             self.assertEqual(fixture["initial"], {"columns": 4, "rows": 2})
             self.assertEqual([event["type"] for event in fixture["events"]], ["feed", "resize"])
+
+    def test_follow_stream_flattens_wrappers_and_preserves_feed_encodings(self):
+        # Intent: an unwrapped pane-tape follow stream becomes one neutral fixture
+        #   while retaining event timing and the producer's chosen feed encoding.
+        # Why it exists: the CLI's crash-surviving capture is useful as fixture
+        #   evidence only if the converter consumes its actual persisted grammar.
+        # Scenario: a developer redirects --follow, captures binary and readable
+        #   output plus a resize, and closes the pane normally.
+        records = [
+            follow_start(),
+            follow_event(41, {"type": "feed", "base64": "AP8="}, elapsed=12),
+            follow_event(42, {"type": "feed", "text": "ready"}, elapsed=15),
+            follow_event(43, {"type": "resize", "columns": 90, "rows": 30}, elapsed=20),
+            {"kind": "end", "reason": "pane-closed"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.jsonl"
+            destination = root / "fixture.json"
+            source.write_text(json_lines(records), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fixture = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(fixture["initial"], {"columns": 80, "rows": 24})
+            self.assertEqual(
+                fixture["events"],
+                [
+                    {"type": "feed", "base64": "AP8=", "elapsedNanoseconds": 12},
+                    {"type": "feed", "text": "ready", "elapsedNanoseconds": 15},
+                    {
+                        "type": "resize",
+                        "columns": 90,
+                        "rows": 30,
+                        "elapsedNanoseconds": 20,
+                    },
+                ],
+            )
+
+    def test_follow_stream_without_end_remains_convertible(self):
+        records = [
+            follow_start(),
+            follow_event(7, {"type": "feed", "base64": "YQ=="}, elapsed=1),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.jsonl"
+            destination = root / "fixture.json"
+            source.write_text(json_lines(records), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(destination.exists())
+
+    def test_follow_stream_rejects_gaps_sequence_jumps_and_malformed_order(self):
+        cases = {
+            "leading gap": [follow_start(), follow_gap()],
+            "interior gap": [
+                follow_start(),
+                follow_event(4, {"type": "feed", "base64": "YQ=="}),
+                follow_gap(),
+            ],
+            "sequence jump": [
+                follow_start(),
+                follow_event(41, {"type": "feed", "base64": "YQ=="}),
+                follow_event(43, {"type": "feed", "base64": "Yg=="}),
+            ],
+            "event before start": [
+                follow_event(1, {"type": "feed", "base64": "YQ=="}),
+            ],
+            "multiple starts": [follow_start(), follow_start()],
+            "record after end": [follow_start(), {"kind": "end"}, {"kind": "end"}],
+        }
+        for name, records in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "capture.jsonl"
+                destination = root / "fixture.json"
+                source.write_text(json_lines(records), encoding="utf-8")
+
+                result = self.run_converter(source, destination, "--keep-identifiers")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(destination.exists())
+
+    def test_follow_stream_rejects_json_rpc_notification_envelopes(self):
+        envelope = {
+            "jsonrpc": "2.0",
+            "method": "pane.tape.event",
+            "params": {
+                "record": follow_event(
+                    1,
+                    {"type": "feed", "base64": "YQ=="},
+                )
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "capture.jsonl"
+            destination = root / "fixture.json"
+            source.write_text(json_lines([follow_start(), envelope]), encoding="utf-8")
+
+            result = self.run_converter(source, destination, "--keep-identifiers")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(destination.exists())
+
+    def test_committed_follow_sample_is_convertible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "fixture.json"
+
+            result = self.run_converter(
+                FOLLOW_SAMPLE,
+                destination,
+                "--keep-identifiers",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fixture = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(
+                fixture["events"][0],
+                {"type": "feed", "base64": "SGk=", "elapsedNanoseconds": 2},
+            )
+
+
+def follow_start():
+    return {
+        "kind": "start",
+        "version": 1,
+        "provenance": {"source": "danterm-live-capture"},
+        "initial": {"columns": 80, "rows": 24},
+    }
+
+
+def follow_event(sequence, event, elapsed=0):
+    return {
+        "kind": "event",
+        "sequence": sequence,
+        "elapsedNanoseconds": elapsed,
+        "event": event,
+    }
+
+
+def follow_gap():
+    return {"kind": "gap", "droppedEventCount": 1, "droppedPayloadBytes": 2}
+
+
+def json_lines(records):
+    return "".join(json.dumps(record) + "\n" for record in records)
 
 
 if __name__ == "__main__":

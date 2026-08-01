@@ -1,0 +1,4 @@
+{"kind":"start","version":1,"provenance":{"source":"danterm-live-capture","author":"DanTerm","test":"live-pane-tape","recordedDeviations":[]},"initial":{"columns":80,"rows":24}}
+{"kind":"event","sequence":91,"elapsedNanoseconds":2,"event":{"type":"feed","base64":"SGk="}}
+{"kind":"event","sequence":92,"elapsedNanoseconds":5,"event":{"type":"resize","columns":90,"rows":30}}
+{"kind":"end","reason":"pane-closed"}

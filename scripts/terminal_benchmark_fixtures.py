@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Load provenance-bearing byte streams for the real-app benchmark corpus."""
+import base64
 import gzip
 import json
 import os
@@ -38,11 +39,14 @@ def iter_bytes(root, workload):
             recording = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
         else:
             recording = json.loads(path.read_text(encoding="utf-8"))
-        chunks = [
-            bytes.fromhex(event["hex"])
-            for event in recording["events"]
-            if event.get("type") == "feed"
-        ]
+        chunks = []
+        for event in recording["events"]:
+            if event.get("type") != "feed":
+                continue
+            if "base64" in event:
+                chunks.append(base64.b64decode(event["base64"], validate=True))
+            else:
+                chunks.append(bytes.fromhex(event["hex"]))
         # A capture is repeated rather than re-captured to lengthen a block.
         # `20/F12` measured this workload's noise as additive -- near-flat
         # absolute SD across a 2.24x change in duration -- so the denominator is

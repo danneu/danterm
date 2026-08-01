@@ -158,6 +158,7 @@ private enum ReplayEvent: Decodable {
     private enum CodingKeys: String, CodingKey {
         case type
         case hex
+        case base64
         case columns
         case checkpoint
     }
@@ -166,8 +167,19 @@ private enum ReplayEvent: Decodable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         switch try values.decode(String.self, forKey: .type) {
         case "feed":
-            let hex = try values.decode(String.self, forKey: .hex)
-            self = .feed(try Self.decodeHex(hex))
+            if let base64 = try values.decodeIfPresent(String.self, forKey: .base64) {
+                guard let data = Data(base64Encoded: base64) else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .base64,
+                        in: values,
+                        debugDescription: "Invalid base64 feed"
+                    )
+                }
+                self = .feed(Array(data))
+            } else {
+                let hex = try values.decode(String.self, forKey: .hex)
+                self = .feed(try Self.decodeHex(hex))
+            }
         case "resize":
             self = .resize(columns: try values.decode(Int.self, forKey: .columns))
         case "expect":
