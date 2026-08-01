@@ -71,8 +71,8 @@ REFERENCES = [
         name="kitty",
         url="https://github.com/kovidgoyal/kitty.git",
         pin="2cb1d95c3accadd536bd66ba6bda044973440177",
-        sparse_cone=("kitty", "shell-integration", "docs"),
-        why="Graphics, keyboard, and shell-integration protocols kitty authored, next to the C parser that implements them.",
+        sparse_cone=("kitty", "shell-integration", "docs", "kitty_tests"),
+        why="Graphics, keyboard, and shell-integration protocols kitty authored, next to the C parser that implements them and the suite that exercises it.",
         release_tag="v0.48.2",
     ),
     Reference(

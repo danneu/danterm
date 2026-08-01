@@ -30,7 +30,10 @@ The following pinned source trees are materialized under `references/`:
   and replay-runner cases for neutral fixtures.
 - [`references/kitty/`](../references/kitty/) -- The graphics, keyboard, and
   shell-integration protocols kitty authored (`docs/`), beside the C parser
-  and screen that implement them.
+  and screen that implement them, and `kitty_tests/` -- the suite that
+  exercises the author's own protocols, which is where their edge cases are
+  written down (`kitty_tests/screen.py#test_prompt_marking` for OSC 133
+  regions, `kitty_tests/shell_integration.py` for real shells in a PTY).
 - [`references/wezterm/`](../references/wezterm/) -- Escape parsing
   (`vtparse`, `wezterm-escape-parser`), the cell/surface model, and reflow in
   an engine split from its renderer the way DanTerm's is.
