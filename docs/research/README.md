@@ -54,6 +54,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 22 | [Application-exit crash](22-application-exit-job-corruption.md) | A crash in the application-exit job path | Shipped -- exit path removed; the corrupting write never identified |
 | 23 | [PTY benchmark alignment](23-pty-benchmark-alignment.md) | Whether the benchmarks still match the rewritten PTY | Shipped -- one atomic timed consume fence; `synchronized-frames` demoted |
 | 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Shipped -- 8 cases reclassified, two corpora mined, M9's external gate passes |
+| 27 | [swift-collections adoption](27-swift-collections-adoption/README.md) | Where library containers fit DanTerm storage | Rejected -- all twelve sites failed the adoption bar; no new conversion |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
