@@ -194,4 +194,19 @@ core test suites that denominate scrollback budgets in whole-row costs.
 
 - [x] 1. refactor(core): add logical retained-row access seam
 - [x] 2. fix(core): trim retained row padding
-- [ ] 3. perf(core): validate compact scrollback storage
+- [x] 3. perf(core): validate compact scrollback storage
+
+## Implementation notes
+
+- No routine paired workload renders retained history: `scrollback-stream`
+  follows the bottom and the draw workloads start from live grids. Browsing CPU
+  validation therefore used a temporary ABBA-scheduled `planFrame` probe in
+  throwaway baseline and candidate worktrees; the probe was removed after its
+  result was recorded in `docs/research/15-memory-footprint.md#f18`.
+
+## Follow Up
+
+- Investigate why `benchmark-confirm` receives empty stdout from
+  `scrollback-stream` arm A at `scripts/terminal-benchmark-validation.py:883`,
+  then rerun the feed comparison against `fa01b66`; quick was inconclusive at
+  +1.13%, and two confirm attempts failed before producing evidence.

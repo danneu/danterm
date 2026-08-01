@@ -617,6 +617,8 @@ baseline.
 
 ### F4 -- the row count does not reconcile because evicted scrollback rows keep their cells, so the buffer holds up to 2x its live rows
 
+- Follow-up: `F18` replaces the full-width retained-row premise below. History
+  now omits default trailing padding and spends the same budget on more content.
 - Status: recorded, and the mechanism is confirmed by a controlled fix. Resolves
   `F1`'s gating uncertainty and `12/F1`'s implied row arithmetic.
 - Date and investigator: 2026-07-29, Claude (agent).
@@ -757,7 +759,8 @@ baseline.
   mixed all land within 0.75 MB of each other, because the budget is denominated
   in a cost model that content perturbs only slightly, and every row is
   full-width regardless. Memory is a function of the budget, not of what the user
-  ran.
+  ran. **Superseded by `F18`: retained rows now omit default trailing padding, so
+  content length determines how many rows fit.**
 - Observation 3, and it is bad news for `H3`: a payload built to *stress* styling
   produces **193 distinct styles**, against the at-most-9 doc `12/F3` found in
   the fixture corpus. `12/F3` flagged exactly this as its uncertainty -- that the
@@ -2049,12 +2052,88 @@ different proposal and is not covered by this rejection.
   baseline caveat. The honest end-to-end figure is therefore *better* than -57%,
   by an amount `F4` sized but this instrument cannot restate.
 
+### F18 -- compact retained rows buy 1.7-3.4x deeper plain-text history, and make browsing frame planning 5.8% faster
+
+- Status: recorded. Validates compact retained-row storage after
+  `dd51a12`; the representation and behavior shipped in `F18`'s candidate, while
+  the temporary browsing timing probe was removed after measurement.
+- Date and investigator: 2026-08-01, Codex (agent).
+- Commit and worktree state: baseline `fa01b66` (logical retained-row access
+  seam, before trimming), candidate `dd51a12` (compact retained-row storage),
+  with the main tracked tree clean before this documentation slice. Both release
+  arms used the same Swift 6.2 toolchain on battery power with low-power mode off
+  and nominal thermal state.
+- Memory method: `TerminalMemoryProbe`, production 10 MiB budget, 10,000-line
+  payloads, at both 179x66 and 80x66. The complete matrix was run once at each
+  width. The attributable footprint figures below use a separate fresh process
+  per `scrollback-plain` arm, per `F7`; they are `footprintAfterBytes -
+  footprintBeforeBytes`, not a cross-payload process total.
+- Plain-text memory and depth:
+
+  | geometry | retained rows | stored cell bytes | attributable footprint |
+  | --- | ---: | ---: | ---: |
+  | 179x66 | 1,702 -> **5,799 (+241%)** | 10.13 -> **9.84 MB (-2.8%)** | 11.49 -> **13.99 MB (+21.8%)** |
+  | 80x66 | 3,395 -> **5,799 (+71%)** | 8.86 -> **9.63 MB (+8.7%)** | 13.14 -> **13.58 MB (+3.4%)** |
+
+- Matrix cross-check: at 179 columns, Unicode and styled history both reach
+  9,935 retained rows against 1,684 and 1,702 before; mixed reaches 8,291 against
+  1,696. At 80 columns the same three candidate counts are 9,935, 9,935, and
+  8,291 against 3,324, 3,395, and 3,371. The candidate counts converge across
+  pane widths because stored content, not pane width, now dominates each row's
+  charge. Unicode and styled stop at 9,935 because the 10,000-line fixture is
+  exhausted, not because the budget evicts them.
+- Observation 1, and it is the finding: **plain retained history is 3.41x deeper
+  at 179 columns and 1.71x deeper at 80 columns.** Widening no longer spends the
+  budget on blank tail cells, so depth follows the content the user ran rather
+  than the width of the pane.
+- Observation 2: compact storage is a depth win, not a process-footprint win at
+  saturation. The exact stored-cell bytes remain near the fixed budget while the
+  candidate owns 2,404-4,097 more row arrays. Their fixed headers and allocator
+  buckets raise attributable footprint by 0.44 MB at 80 columns and 2.51 MB at
+  179. The user receives substantially more retained content for that cost; the
+  budget was not reduced to manufacture the row-count result.
+- CPU method, feed path: `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just
+  benchmark-quick baseline=fa01b66 workload=terminal-feed`. The valid paired run
+  was **inconclusive at +1.13% symmetric median of two pairs**. Per the frozen
+  protocol it was escalated to `benchmark-confirm`; two confirm invocations
+  collected no usable evidence because `scrollback-stream` arm A returned empty
+  stdout instead of JSON. No feed-neutrality or feed-regression claim is made.
+  The candidate snapshot also captured five pre-existing untracked prose files;
+  none is built or reachable from the measured terminal path.
+- CPU method, browsing render path: no routine paired workload displays retained
+  history -- `scrollback-stream` follows the bottom and the draw workloads start
+  from live grids. A temporary release probe therefore built identical 179x66
+  terminals with 10,000 short hard-terminated lines, browsed from the oldest
+  retained row, warmed 20 full `planFrame` calls, and timed 2,000 calls per
+  process. Eight ABBA rounds produced 16 adjacent symmetric pairs. Both arms
+  returned the same 3,828,000-cell checksum per process.
+- Browsing CPU result: **338,995 ns baseline versus 319,461 ns candidate median
+  per full frame plan; -5.79% symmetric median.** Every pair favored the compact
+  representation. One baseline process was a 534,717 ns outlier; it widened the
+  untrimmed mean and standard deviation but did not move the paired median. The
+  speedup is mechanically consistent with the new viewport loop processing the
+  stored prefix normally and emitting the uniform blank tail without resolving
+  every omitted cell through the full planning path.
+- Live check: an isolated optimized app retained numbered hard-terminated lines
+  `3004`, `3005`, and `3006` as its oldest three rows before and after its window
+  widened from 863 to 1,500 points. The head of history was byte-identical across
+  the resize; the isolated app was then terminated.
+- Correctness gates: the behavioral suite covers widening conservation, seam
+  reads and writes, canonical equality, true census totals, and live-grid
+  materialization. The full repository gate passed after this finding was added.
+- Uncertainty: the feed comparison remains unresolved because quick was
+  inconclusive and the required confirm harness failed before producing a
+  decision. The browsing probe has no frozen decision rule; its 5.79% result is
+  reported as a paired descriptive measurement, supported by all 16 pairs
+  agreeing in direction rather than by a calibrated verdict.
+
 ## Outcome
 
 **Closed.** All four phases are complete: Phase 1's harness was built and its
 attribution closed, Phase 1.5 and Phase 2 shipped, Phase 3 took every hypothesis
-it opened, and `F17` is Phase 4's closing measurement. Findings F1 through F17 are
-recorded; the next free ID is **F18**. Decisions D1 through D4 are recorded,
+it opened, and `F17` is Phase 4's closing measurement. `F18` is the later
+retained-row compaction follow-up. Findings F1 through F18 are recorded; the next
+free ID is **F19**. Decisions D1 through D4 are recorded,
 implemented, and closed; the next free ID is **D5**.
 
 **The headline, from `F17`'s end-to-end matrix.** At the canonical 179x66
