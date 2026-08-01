@@ -1,5 +1,9 @@
 # Real-Pane Protocol Probe Evidence - 2026-07-21
 
+> Historical Milestone 7 result. The expanded 14-case esctest2 and
+> three-session vttest gate is recorded in
+> [the 2026-07-31 Milestone 9 evidence](2026-07-31-external-terminal-gate.md).
+
 ## Judgment
 
 DanTerm's supported Milestone 7 black-box protocol and capability tranche passes

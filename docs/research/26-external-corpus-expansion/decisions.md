@@ -175,12 +175,13 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D5 -- what actually closes Milestone 9's external leg
 
-- Status: decided; the 14-case esctest2 gate passes and vttest execution remains
-  to land.
+- Status: selected and implemented; the 14-case esctest2 gate and three-session
+  vttest gate pass.
 - Evidence used: F10 corrects F7: the pinned esctest2 runner and 11-case
-  allowlist already existed and pass, while vttest still has no external runner.
-  F10 also scopes a 14-case Milestone 9 esctest2 target against the capability
-  contract. F1 shows there is no fixture-classification backlog to clear first.
+  allowlist already existed and passed, while vttest had no external runner at
+  decision time. F10 also scopes a 14-case Milestone 9 esctest2 target against
+  the capability contract. F1 shows there is no fixture-classification backlog
+  to clear first. F12 records both completed external legs.
 - Candidate solutions:
   1. Build the esctest2 subset and the replayable vttest sessions, and assemble
      the pinned evidence package.
@@ -210,5 +211,5 @@ review obligations before copying or translating GPL/LGPL test code.
 - Decision and rationale: complete the two external legs rather than waive
   them. The esctest2 gate already supplies the licensing, pinning, timeout,
   artifact, and real-PTY seams; three narrow additions finish its advertised
-  query coverage without adopting xterm-only behavior. A replayable external
-  vttest path is still required before the evidence package can close doc 1.
+  query coverage without adopting xterm-only behavior. F12 records the passing
+  replayable vttest path and the evidence package that closes doc 1.

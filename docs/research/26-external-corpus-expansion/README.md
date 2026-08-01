@@ -11,9 +11,10 @@ Continues: [1-external-tests.md](../1-external-tests.md).
 ## Purpose
 
 Doc 1 surveyed which external suites DanTerm should adopt and set the licensing
-and neutrality rules. It is still live because its Milestone 8/9/10 injection
-points have not been consumed. This doc owns the narrower successor question,
-asked once Milestones 1-8 were checked:
+and neutrality rules. It was live when this doc opened, because its Milestone
+8/9/10 injection points had not been consumed; this doc's Phase 5 evidence
+package closed it. This doc owns the narrower successor question, asked once
+Milestones 1-8 were checked:
 
 1. Of the cases the pinned corpora classify as **out-of-scope**, which are
    blocked on a feature DanTerm does not implement, and which are blocked only
@@ -218,10 +219,13 @@ DanTerm contract, never against the source engine's behavior.
 - [x] Select and record the replayable vttest sessions for the gate. F11 chooses
   VT100 DSR/CPR, VT100 DA1, and VT320 DECCPR, and declines unjudged visual
   sessions as gate oracles.
-- [ ] Land the pinned three-session vttest runner and its result parser.
-- [ ] Reduce every failure either program finds to the smallest native
-  byte-stream fixture before fixing it.
-- [ ] Assemble the pinned evidence package and confirm upstream updates cannot
+- [x] Land the pinned three-session vttest runner and its result parser. F12
+  records the failing-first parser proof, replay correction, and passing gate.
+- [x] Reduce every failure either program finds to the smallest native
+  byte-stream fixture before fixing it. Neither external program exposed a
+  DanTerm behavior failure; the replay-orchestration failure required no native
+  fixture.
+- [x] Assemble the pinned evidence package and confirm upstream updates cannot
   silently change the gate. This is the criterion that closes doc 1.
 
 ## Rejected
@@ -277,13 +281,12 @@ is why they are pinned.
   judgment; the full-session `90vttest_*` recordings are argued to be worth more
   than their case count because they exercise sequence interleaving the isolated
   fixtures do not, but that argument is untested.
-- Doc 1 stays live and stays the owner of the survey, the licensing rules, and
-  the Milestone 9 close condition. This doc owns only the re-adjudication and
-  the unsurveyed corpora.
+- Doc 1 remains the historical owner of the survey and licensing rules. F12's
+  evidence package satisfies its Milestone 9 close condition.
 
 ## Outcome
 
-Investigation in progress. Phase 1 is complete: the census, both stale
+Investigation complete. Phase 1 is complete: the census, both stale
 rationales, and the unsurveyed corpora are recorded in F1-F8, with recommended
 directions in D1-D5. Phase 2 is complete: `92lp1640917` and the seven supported
 `90vttest_*` sessions are adopted, `90vttest_01-movement-1` remains
@@ -293,14 +296,22 @@ declined, and windows-terminal's two novel OSC 52 cases replay from a neutral
 fixture under a complete manifest and bundled license notice. Phase 4 is
 complete: a neutral Kuhn-derived corpus pins the decoder's modern
 maximal-subpart behavior, while double-click selection is explicitly DanTerm's
-terminal-token policy rather than UAX #29 word segmentation. Phase 5's
-esctest2 leg is complete: F10's pinned 14-case gate passes. F11 scopes three
-response-driven vttest sessions; their external runner and the final evidence
-package remain open.
+terminal-token policy rather than UAX #29 word segmentation. Phase 5 is
+complete: F10's pinned 14-case esctest2 gate and F12's pinned three-session
+vttest gate pass through the production pane/PTY path. The final evidence
+package is recorded in
+[`docs/evidence/2026-07-31-external-terminal-gate.md`](../../evidence/2026-07-31-external-terminal-gate.md),
+closing doc 1's research condition and Milestone 9's external leg.
 
 The one-line answer Phase 1 produced, for a reader who goes no further: the
 pinned corpora are fully classified, ~81 of the 89 out-of-scope cases are
 feature or policy decisions rather than test decisions, exactly 8 are
 reclassifiable today on stale rationales, and the corpora most worth adding
-(Ghostty, windows-terminal) are ones doc 1's survey never listed. None of that
-is what blocks Milestone 9 -- the external vttest leg is.
+(Ghostty, windows-terminal) are ones doc 1's survey never listed. The external
+vttest leg that blocked Milestone 9 now passes.
+
+**Reopening condition** (a new doc, per the one-way closure rule): a
+support-matrix change that lands one of the ~81 feature-blocked families --
+DECALN first, which alone holds `90vttest_01-movement-1` out of scope -- since
+F2's verdict is a point-in-time read at `593ce4a` and does not survive it.
+Re-pinning either mined corpus to a newer revision is the same trigger.

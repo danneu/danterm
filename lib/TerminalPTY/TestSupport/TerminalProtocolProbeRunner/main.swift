@@ -1,4 +1,4 @@
-// Opt-in esctest2 driver that launches the pinned subset through a real pane session and retains failures.
+// Opt-in external protocol driver that launches pinned probes through a real pane session.
 import Darwin
 import Foundation
 import PaneLifecycle
@@ -22,20 +22,16 @@ private enum TerminalProtocolProbeRunner {
     @MainActor
     private static func execute() async throws {
         let arguments = CommandLine.arguments
-        guard arguments.count == 4 else { throw ProbeError.usage }
+        guard arguments.count == 4 || arguments.count == 5 else { throw ProbeError.usage }
         let runDirectory = URL(fileURLWithPath: arguments[1], isDirectory: true)
         let bootstrap = arguments[2]
-        let esctest = arguments[3]
         let environment = ProcessInfo.processInfo.environment
-        guard let include = environment["DANTERM_PROTOCOL_PROBE_INCLUDE"],
-              let expectedText = environment["DANTERM_PROTOCOL_PROBE_EXPECTED_COUNT"],
-              let expectedCount = Int(expectedText)
-        else { throw ProbeError.missingEnvironment }
+        let probe = try probeConfiguration(arguments: arguments, environment: environment)
 
-        let log = runDirectory.appending(path: "esctest.log")
+        let log = runDirectory.appending(path: probe.logName)
         let cases = runDirectory.appending(path: "cases", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: cases, withIntermediateDirectories: true)
-        let command = "exec /usr/bin/python3 \(shellQuote(esctest)) --include=\(shellQuote(include)) --expected-terminal=xterm --max-vt-level=3 --timeout=2 --test-case-dir=\(shellQuote(cases.path)) --logfile=\(shellQuote(log.path))"
+        let command = probe.command(log: log, cases: cases)
         let dimensions = TerminalDimensions(columns: 80, rows: 24)
         let launchInput = LaunchPolicyInput(
             accountShell: "/bin/sh",
@@ -72,7 +68,7 @@ private enum TerminalProtocolProbeRunner {
 
         let didEnd = await ended.wait(until: .now + .seconds(45))
         controller.synchronizeState()
-        let capture = controller.diagnosticCapture(test: "esctest2-supported-subset")
+        let capture = controller.diagnosticCapture(test: probe.captureName)
         controller.tearDown()
         await waitForQuiescence(termination)
 
@@ -88,17 +84,32 @@ private enum TerminalProtocolProbeRunner {
             )
             throw ProbeError.timeout
         }
-        let report = try EsctestReportParser.parse(
-            String(contentsOf: log, encoding: .utf8),
-            expectedCount: expectedCount
-        )
-        try report.description.write(
+        let result = try probe.parse(String(contentsOf: log, encoding: .utf8))
+        try result.summary.write(
             to: runDirectory.appending(path: "summary.txt"), atomically: true, encoding: .utf8
         )
-        guard report.isSuccess else { throw ProbeError.failed }
+        guard result.isSuccess else { throw ProbeError.failed }
     }
 
-    private static func shellQuote(_ value: String) -> String {
+    private static func probeConfiguration(
+        arguments: [String],
+        environment: [String: String]
+    ) throws -> ProbeConfiguration {
+        if arguments.count == 4 {
+            guard let include = environment["DANTERM_PROTOCOL_PROBE_INCLUDE"],
+                  let expectedText = environment["DANTERM_PROTOCOL_PROBE_EXPECTED_COUNT"],
+                  let expectedCount = Int(expectedText)
+            else { throw ProbeError.missingEnvironment }
+            return .esctest(program: arguments[3], include: include, expectedCount: expectedCount)
+        }
+
+        guard let sessionName = environment["DANTERM_VTTEST_SESSION"],
+              let session = VttestSession(rawValue: sessionName)
+        else { throw ProbeError.missingEnvironment }
+        return .vttest(program: arguments[3], replay: arguments[4], session: session)
+    }
+
+    fileprivate static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
@@ -133,10 +144,50 @@ private enum ProbeError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .usage: "usage: TerminalProtocolProbeRunner RUN_DIRECTORY BOOTSTRAP ESCTEST"
-        case .missingEnvironment: "missing allowlist environment"
-        case .timeout: "timed out waiting for esctest2"
-        case .failed: "one or more selected esctest2 probes failed"
+        case .usage: "usage: TerminalProtocolProbeRunner RUN_DIRECTORY BOOTSTRAP PROGRAM [VTTEST_REPLAY]"
+        case .missingEnvironment: "missing external-probe environment"
+        case .timeout: "timed out waiting for external protocol probe"
+        case .failed: "one or more selected external protocol probes failed"
+        }
+    }
+}
+
+/// Keeps suite-specific commands and report semantics outside pane-session orchestration.
+private enum ProbeConfiguration {
+    case esctest(program: String, include: String, expectedCount: Int)
+    case vttest(program: String, replay: String, session: VttestSession)
+
+    var logName: String {
+        switch self {
+        case .esctest: "esctest.log"
+        case .vttest: "vttest.log"
+        }
+    }
+
+    var captureName: String {
+        switch self {
+        case .esctest: "esctest2-supported-subset"
+        case let .vttest(_, _, session): "vttest-\(session.rawValue)"
+        }
+    }
+
+    func command(log: URL, cases: URL) -> String {
+        switch self {
+        case let .esctest(program, include, _):
+            "exec /usr/bin/python3 \(TerminalProtocolProbeRunner.shellQuote(program)) --include=\(TerminalProtocolProbeRunner.shellQuote(include)) --expected-terminal=xterm --max-vt-level=3 --timeout=2 --test-case-dir=\(TerminalProtocolProbeRunner.shellQuote(cases.path)) --logfile=\(TerminalProtocolProbeRunner.shellQuote(log.path))"
+        case let .vttest(program, replay, _):
+            "exec \(TerminalProtocolProbeRunner.shellQuote(program)) 24x80.80 -u -c \(TerminalProtocolProbeRunner.shellQuote(replay)) -l \(TerminalProtocolProbeRunner.shellQuote(log.path))"
+        }
+    }
+
+    func parse(_ text: String) throws -> (summary: String, isSuccess: Bool) {
+        switch self {
+        case let .esctest(_, _, expectedCount):
+            let report = try EsctestReportParser.parse(text, expectedCount: expectedCount)
+            return (report.description, report.isSuccess)
+        case let .vttest(_, _, session):
+            let report = try VttestReportParser.parse(text, session: session)
+            return (report.description, report.isSuccess)
         }
     }
 }

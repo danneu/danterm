@@ -24,18 +24,17 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 
 | # | Doc | Owns | Next |
 | --- | --- | --- | --- |
-| 1 | [External terminal tests](1-external-tests.md) | Which external suites DanTerm should adopt | Close when M9's evidence package consumes the survey's injection points |
 | 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | A variance measurement that gates the last two leads |
 | 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Why stacked prompts survive a resize storm |
 | 21 | [Selection gesture cost](21-selection-gesture-cost.md) | What a pointer-driven selection query costs | Phase 1's scratch probe, then D1's pre-registered gate |
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
-| 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Phase 2's eight stale-rationale reclassifications |
 
 ## Closed
 
 | # | Doc | Owns | Result |
 | --- | --- | --- | --- |
+| 1 | [External terminal tests](1-external-tests.md) | Which external suites DanTerm should adopt | Shipped -- the M9 external-evidence package; M10 reruns it, adds nothing |
 | 2 | [Wraptest coverage](2-wraptest-coverage.md) | Whether wraptest belongs in DanTerm's suite | Declined -- redundant coverage and an unclear license |
 | 3 | [Serialized redraw](3-serialized-redraw-optimization.md) | Making the serialized redraw path cheaper | Shipped -- per-run glyph batching; medians -97% |
 | 4 | [Fallback-glyph batching](4-fallback-glyph-batching.md) | Batching fallback-glyph draws | Superseded -- procedural sprites across eight families |
@@ -54,6 +53,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 20 | [PTY throughput](20-pty-throughput-and-interactive-stimulus.md) | What the drain costs, and what stimulus to replay | Tooling -- throughput reporting; block lengthening declined |
 | 22 | [Application-exit crash](22-application-exit-job-corruption.md) | A crash in the application-exit job path | Shipped -- exit path removed; the corrupting write never identified |
 | 23 | [PTY benchmark alignment](23-pty-benchmark-alignment.md) | Whether the benchmarks still match the rewritten PTY | Shipped -- one atomic timed consume fence; `synchronized-frames` demoted |
+| 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Shipped -- 8 cases reclassified, two corpora mined, M9's external gate passes |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)

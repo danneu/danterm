@@ -420,10 +420,13 @@ mean.
     gates.
   - [ ] The Swift backend is suitable for sustained daily use without a required
     fallback to Ghostty.
-  - [ ] The complete pinned evidence package from
+  - [x] The complete pinned evidence package from
     [External terminal test research](../docs/research/1-external-tests.md) is
     reproducible and gating; upstream updates cannot silently change expected
-    behavior.
+    behavior. Closed by the
+    [2026-07-31 external terminal gate](../docs/evidence/2026-07-31-external-terminal-gate.md):
+    the native gate, classified neutral fixtures, pinned 14-case esctest2 run,
+    and pinned three-session vttest run are maintained gates.
 
 - [ ] **10. Remove libghostty**
   - [ ] No required runtime, build, config, test, documentation, or release path

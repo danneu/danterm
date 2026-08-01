@@ -532,3 +532,51 @@ script edit). No finding depends on the uncommitted files.
   `TerminalPaneSessionController`.
 - Next action: implement the pinned three-session vttest runner and prove its
   log parser failing-first before assembling the final evidence package.
+
+### F12 -- the pinned external gate passes and closes the evidence package
+
+- Status: complete.
+- Date and investigator: 2026-07-31, Codex.
+- Commit and worktree state: implementation based on `1ba113e`; unrelated
+  concurrent Unicode/case-folding and pre-existing untracked work remained
+  untouched.
+- Commands, inputs, or reproduction:
+  - added `VttestReportParserTests` first and observed the expected compile
+    failure because the parser and session types did not exist
+  - implemented the parser and observed all four focused tests pass
+  - ran `just test-terminal-protocol-probes` against esctest2 commit
+    `664be3cf2c1e3f06bc93a8bafb48a0db83c607db` and vttest commit
+    `0229d7171a8574a2bf406c6ce14549f65d810e51`
+- Measurements or examples:
+  - the first live vttest run failed before selecting `6.3`: vttest's startup
+    DA1 query consumed the first replay wait marker, so the menu read an empty
+    choice and exited
+  - the replay files now model that startup handshake before their menu reads
+  - the final run at
+    `.build/terminal-protocol-probe-runs/20260731T233736Z-82863` passed all 14
+    esctest2 cases and all three vttest sessions
+  - VT100 DSR/CPR produced terminal OK plus two accepted cursor reports; DA1
+    decoded exact `CSI ? 1 ; 2 c` as VT100 with AVO; DECCPR decoded line 2,
+    column 1
+- Observation: the pinned `tst_vt320_device_status` menu assigns DECXCPR to
+  choice 7, so the executable replay path is `11.2.5.2.7`; F11's `.6` path was
+  an audit transcription error. The parser asserts `.7`, and its negative test
+  rejects `.6`.
+- Inference: a passing process exit is insufficient evidence. The maintained
+  gate instead requires the source-defined menu path and positive judgment for
+  each session, rejects negative or incomplete reports, records byte streams
+  and logs, applies a bounded timeout, and waits for full pane/PTY teardown.
+- Competing interpretations: the vttest sessions could be folded into one
+  process. Independent processes make each report and byte recording
+  attributable, prevent one session's terminal state from affecting another,
+  and retain the smallest useful failure artifact.
+- Uncertainty: none on the selected scope or current result. Future scope
+  changes still require adjudication against DanTerm's capability contract.
+- Implementation result: the external source and build trees remain ignored;
+  full commit hashes, DanTerm-authored replay files, exact result semantics,
+  and the vttest license artifact define the reproducible boundary. Neither
+  program exposed a DanTerm behavior failure, so no native byte-stream fixture
+  was promoted.
+- Next action: none for doc 26. The evidence package is recorded in
+  `docs/evidence/2026-07-31-external-terminal-gate.md`; the remaining Milestone
+  9 work is outside this research doc's external leg.

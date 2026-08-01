@@ -2,31 +2,20 @@
 
 Research date: 2026-07-17.
 
-**Status: SURVEY COMPLETE, RECOMMENDATIONS STILL LIVE. This is the one research
-file that is not closed, and deliberately so.** Reviewed 2026-07-28.
+**Status: CLOSED.** Reviewed and closed 2026-07-31.
 
 The survey itself needs no further work -- the candidate corpora are enumerated,
 the shared fixture seam is chosen, the libvterm coverage is broken down, and the
-licensing rules are set. What keeps it open is that its **roadmap injection
-points for Milestones 8, 9, and 10 have not been consumed yet**: those three
-milestones are unchecked in
-[plan-terminal-engine/14-roadmap.md](../../plan-terminal-engine/14-roadmap.md),
-and this file is what they are supposed to read when they start.
+licensing rules are set. Its Milestone 8 recommendations and Milestone 9
+external-evidence package have now been consumed. Milestone 10 introduces no
+new external suite; it reruns the maintained package after Ghostty removal.
 
-Consumed so far: Milestones 2-7 (all checked on the roadmap). The pinned
-libvterm and Alacritty portfolios landed, and the 2026-07-21 adjudication below
-closed out the WezTerm/xterm.js/Contour question for Milestone 6 -- **as a scope
-judgment for that milestone only**, explicitly deferring those corpora to
-Milestones 7 and 8.
-
-Still pending, and what each needs:
-- **M8** -- Alacritty tmux/Vim/htop recordings as starting points, plus
-  DanTerm-owned workflow captures; Kitty tests mined only for supported
-  protocols.
-- **M9** -- the pinned, reproducible evidence package, including the
-  classification manifest with its four outcomes (adopted / adapted /
-  superseded / out of scope).
-- **M10** -- no new suite; re-run M9's package with the Ghostty backend absent.
+Consumed: Milestones 2-8 and Milestone 9's external-evidence criterion. The
+pinned libvterm and Alacritty portfolios landed; every imported fixture is
+classified; the scoped windows-terminal cases and Unicode decoder corpus were
+adopted; and the pinned 14-case esctest2 plus three-session vttest gate passes
+through the production pane/PTY path. The closure evidence is
+[2026-07-31-external-terminal-gate.md](../evidence/2026-07-31-external-terminal-gate.md).
 
 Two standing constraints that outlive any milestone: **do not vendor wraptest
 until its reuse terms are clear** (see
@@ -34,9 +23,14 @@ until its reuse terms are clear** (see
 ground *and* on redundant coverage), and never regenerate-and-auto-accept
 another emulator's output as DanTerm truth.
 
-**Close this file when Milestone 9's evidence package is assembled** -- that is
-the point at which its recommendations have all been either taken or explicitly
-declined.
+The file's close condition -- assembling Milestone 9's pinned, reproducible,
+gating evidence package -- is satisfied. Milestone 9's other quality criteria
+remain open on the roadmap and are not claims of this research.
+
+**Reopening condition** (a new doc, per the one-way closure rule): a candidate
+corpus this survey never weighed, or a change in one it declined -- wraptest's
+reuse terms becoming clear is the concrete case. Adopting more cases from an
+already-surveyed corpus is not a reopening; that is doc 26's question.
 
 Continued by
 [26-external-corpus-expansion/README.md](26-external-corpus-expansion/README.md)
@@ -44,10 +38,8 @@ Continued by
 pinned corpora are fully classified, most out-of-scope cases are feature or
 policy decisions rather than test decisions, eight are reclassifiable on stale
 rationales, and Ghostty's and windows-terminal's test suites are absent from the
-candidate table below. Milestone 8 is now checked; the M8 line above is
-satisfied, with its waivers recorded on the roadmap. Doc 26 owns the
-re-adjudication and the unsurveyed corpora; this file keeps the survey, the
-licensing rules, and the close condition.
+candidate table below. It completed the re-adjudication, corpus mines, Unicode
+decisions, and external gate, then assembled the package that closes this file.
 
 ## Purpose
 
