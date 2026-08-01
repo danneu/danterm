@@ -53,6 +53,55 @@ func expectValidGrid(
     expectValidStream(primaryRows, sourceLocation: sourceLocation)
 }
 
+/// Checks the OSC 133 prompt-anchor state and every mutation-level violation observed so far.
+func expectSemanticPromptInvariants(
+    _ terminal: Terminal,
+    context: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let stateViolations = semanticPromptStateViolations(
+        in: terminal.semanticPromptRowsForTesting
+    )
+    #expect(
+        stateViolations.isEmpty,
+        "\(context): \(stateViolations.map(\.rawValue).joined(separator: ", "))",
+        sourceLocation: sourceLocation
+    )
+    let transitionViolations = terminal.semanticPromptTransitionViolationsForTesting
+    #expect(
+        transitionViolations.isEmpty,
+        "\(context): \(transitionViolations.map(\.rawValue).joined(separator: ", "))",
+        sourceLocation: sourceLocation
+    )
+}
+
+/// Evaluates the stable snapshot proof for ownership and logical-line integrity.
+func semanticPromptStateViolations(
+    in rows: [TerminalSemanticPromptRowSnapshot]
+) -> [TerminalSemanticPromptInvariantViolation] {
+    var violations: [TerminalSemanticPromptInvariantViolation] = []
+    for index in rows.indices {
+        let row = rows[index]
+        if row.stamp == .vacated,
+           row.isEmpty,
+           index + 1 < rows.count,
+           rows[index + 1].stamp == .prompt
+        {
+            violations.append(.ownership)
+        }
+        if row.stamp == .prompt,
+           index > 0,
+           rows[index - 1].isSoftWrapped
+        {
+            violations.append(.logicalLineIntegrity)
+        }
+        if row.stamp == .vacated, row.isEmpty, row.isSoftWrapped {
+            violations.append(.totalVacating)
+        }
+    }
+    return Array(Set(violations)).sorted { $0.rawValue < $1.rawValue }
+}
+
 private func inspectedViewportRows(
     of terminal: Terminal,
     sourceLocation: SourceLocation

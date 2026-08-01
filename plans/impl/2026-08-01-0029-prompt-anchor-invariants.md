@@ -225,7 +225,7 @@ precisely.
   RI1-RI3; index entry; `SemanticPromptRow` lifecycle doc pointing at it;
   existing comment sites reduced to local deltas. Doc-only, no behavior
   change; lint-clean.
-- [ ] **2. test(terminal): execute the invariants over every recorded
+- [x] **2. test(terminal): execute the invariants over every recorded
   fixture** -- test-facing access to per-row prompt stamps, the semantic
   oracle (snapshot checks in `TerminalGridAssertions`, mutation-anchored
   transition checks through the test-facing seam), the
@@ -236,3 +236,10 @@ precisely.
   recordings** -- seeded deterministic event-stream transform with
   intra-chunk placement, oracle per event, and a rerun selector (fixture,
   seed, injection point) in every failure message. Discharges PO3, PO4.
+
+## Implementation notes
+
+- The three pre-schema live-pane recordings in `Fixtures/danterm/` retain their
+  original provenance bytes. The corpus oracle substitutes valid DanTerm
+  provenance only in memory before using `NeutralTerminalRecording.replay`, so
+  provenance validation does not exclude their authored event streams.

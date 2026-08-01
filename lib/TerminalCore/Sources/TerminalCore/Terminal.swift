@@ -15,6 +15,67 @@ public struct TerminalTextPosition: Equatable, Sendable {
     }
 }
 
+/// Mirrors private prompt-row identity for invariant checks in the TerminalCore test target.
+enum TerminalSemanticPromptStamp: Equatable, Sendable {
+    case none
+    case prompt
+    case continuation
+    case output
+    case vacated
+}
+
+/// Names the six prompt-anchor contracts so corpus failures identify the broken guarantee.
+enum TerminalSemanticPromptInvariantViolation: String, Equatable, Hashable, Sendable {
+    case ownership = "I1 ownership"
+    case logicalLineIntegrity = "I2 logical-line integrity"
+    case outputFloor = "I3 output floor"
+    case totalVacating = "I4 total vacating"
+    case geometryCoherence = "I5 geometry coherence"
+    case redrawModeScope = "I6 redraw-mode scope"
+}
+
+/// Captures exact row presentation plus the private stamp needed by the snapshot oracle.
+struct TerminalSemanticPromptRowSnapshot: Equatable, Sendable {
+    var stamp: TerminalSemanticPromptStamp
+    var cells: [TerminalCell]
+    var isSoftWrapped: Bool
+    var isEmpty: Bool
+
+    /// Allows can-fire tests to use compact rows while production transitions retain exact cells.
+    init(
+        stamp: TerminalSemanticPromptStamp,
+        cells: [TerminalCell] = [],
+        isSoftWrapped: Bool,
+        isEmpty: Bool? = nil
+    ) {
+        self.stamp = stamp
+        self.cells = cells
+        self.isSoftWrapped = isSoftWrapped
+        self.isEmpty = isEmpty ?? cells.allSatisfy { $0.kind == .padding }
+    }
+}
+
+/// Exposes the redraw promise to mutation-validator can-fire tests without widening public state.
+enum TerminalSemanticPromptRedrawMode: Equatable, Sendable {
+    case disabled
+    case full
+    case last
+}
+
+/// Gives transition checks the before/after geometry they quantify over at a mutation boundary.
+struct TerminalSemanticPromptTransitionState: Equatable, Sendable {
+    var rows: [TerminalSemanticPromptRowSnapshot]
+    var cursorRow: Int
+    var scrollRegion: Range<Int>
+    var isAlternateScreenActive: Bool
+}
+
+/// Distinguishes in-place vacating from row-and-cursor reclaim for transition validation.
+enum TerminalSemanticPromptMutation: Equatable, Sendable {
+    case vacate
+    case reclaim(top: Int, removed: Int)
+}
+
 /// Exposes a half-open logical-text range without tying callers to grid storage.
 public struct TerminalTextRange: Equatable, Sendable {
     /// Marks the included projection boundary.
@@ -35,6 +96,13 @@ public struct Terminal: Equatable, Sendable {
     /// Carries owner-observed generations without making observation history part of value equality.
     private struct ObservationGeneration: Equatable, Sendable {
         var value: UInt64 = 0
+
+        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
+    }
+
+    /// Retains only failed mutation checks and excludes test observation history from equality.
+    private struct SemanticPromptInvariantObservation: Equatable, Sendable {
+        var violations: [TerminalSemanticPromptInvariantViolation] = []
 
         static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
     }
@@ -575,6 +643,7 @@ public struct Terminal: Equatable, Sendable {
     private var semanticContent = SemanticContent.output
     private var semanticContentClearsAtEndOfLine = false
     private var promptRedrawMode = PromptRedrawMode.full
+    private var semanticPromptInvariantObservation = SemanticPromptInvariantObservation()
     private var isInsertMode = false
     private var isLineFeedNewLineMode = false
     private var isApplicationCursorKeysMode = false
@@ -1284,8 +1353,13 @@ public struct Terminal: Equatable, Sendable {
         // Delete instead of re-blanking so the vacated rows do not become a permanent gap.
         // Move the cursor by the same count to preserve relative cursor arithmetic.
         let removed = cursor.row - top
+        let transitionBefore = semanticPromptTransitionState()
         moveAndFillRows(in: top..<activeScrollRegion.upperBound, by: -removed, pushesToScrollback: false)
         cursor.row -= removed
+        observeSemanticPromptTransition(
+            mutation: .reclaim(top: top, removed: removed),
+            before: transitionBefore
+        )
     }
 
     private func semanticPromptKind(in options: [UInt8]) -> SemanticPromptRow {
@@ -1839,6 +1913,10 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func clearPromptForResizeIfNeeded() {
+        let transitionBefore = semanticPromptTransitionState()
+        defer {
+            observeSemanticPromptTransition(mutation: .vacate, before: transitionBefore)
+        }
         guard promptRedrawMode != .disabled, semanticContent != .output else { return }
         if promptRedrawMode == .last {
             clearPromptCells(in: cursor.row)
@@ -2124,6 +2202,149 @@ public struct Terminal: Equatable, Sendable {
         var copy = self
         copy.scrollbackBudgetBytes = .max
         return copy
+    }
+
+    /// Exposes private row stamps to the shared snapshot oracle without changing public geometry.
+    var semanticPromptRowsForTesting: [TerminalSemanticPromptRowSnapshot] {
+        rows.map { semanticPromptRowSnapshot($0, includesCells: false) }
+    }
+
+    /// Reports mutation-level invariant failures accumulated at vacate and reclaim boundaries.
+    var semanticPromptTransitionViolationsForTesting: [TerminalSemanticPromptInvariantViolation] {
+        semanticPromptInvariantObservation.violations
+    }
+
+    /// Evaluates transition proof obligations independently so each check has a can-fire test.
+    static func semanticPromptTransitionViolationsForTesting(
+        mutation: TerminalSemanticPromptMutation,
+        redrawMode: TerminalSemanticPromptRedrawMode,
+        before: TerminalSemanticPromptTransitionState,
+        after: TerminalSemanticPromptTransitionState
+    ) -> [TerminalSemanticPromptInvariantViolation] {
+        var violations: Set<TerminalSemanticPromptInvariantViolation> = []
+
+        for index in before.rows.indices where before.rows[index].stamp == .output {
+            if after.rows.indices.contains(index) == false || after.rows[index] != before.rows[index] {
+                violations.insert(.outputFloor)
+            }
+        }
+
+        switch mutation {
+        case .vacate:
+            switch redrawMode {
+            case .disabled:
+                if before.rows != after.rows { violations.insert(.redrawModeScope) }
+            case .last:
+                for index in before.rows.indices
+                    where index != before.cursorRow && before.rows[index] != after.rows[index]
+                {
+                    violations.insert(.redrawModeScope)
+                }
+            case .full:
+                break
+            }
+        case .reclaim(let top, let removed):
+            if before != after {
+                if redrawMode != .full { violations.insert(.redrawModeScope) }
+                let region = before.scrollRegion
+                var coherent = before.isAlternateScreenActive == false
+                    && after.isAlternateScreenActive == false
+                    && after.scrollRegion == region
+                    && before.rows.count == after.rows.count
+                    && removed > 0
+                    && region.contains(top)
+                    && region.contains(before.cursorRow)
+                    && before.cursorRow - removed == after.cursorRow
+                    && after.rows.indices.contains(after.cursorRow)
+                if coherent {
+                    for destination in top..<(region.upperBound - removed) {
+                        if after.rows[destination] != before.rows[destination + removed] {
+                            coherent = false
+                            break
+                        }
+                    }
+                }
+                if coherent {
+                    for index in (region.upperBound - removed)..<region.upperBound {
+                        if after.rows[index].stamp != .none || after.rows[index].isEmpty == false {
+                            coherent = false
+                            break
+                        }
+                    }
+                }
+                if coherent {
+                    for index in before.rows.indices where region.contains(index) == false {
+                        if before.rows[index] != after.rows[index] {
+                            coherent = false
+                            break
+                        }
+                    }
+                }
+                if coherent == false { violations.insert(.geometryCoherence) }
+            }
+        }
+
+        return violations.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func semanticPromptRowSnapshot(
+        _ row: GridRow,
+        includesCells: Bool = true
+    ) -> TerminalSemanticPromptRowSnapshot {
+        let stamp: TerminalSemanticPromptStamp = switch row.semanticPrompt {
+        case .none: .none
+        case .prompt: .prompt
+        case .continuation: .continuation
+        case .output: .output
+        case .vacated: .vacated
+        }
+        return TerminalSemanticPromptRowSnapshot(
+            stamp: stamp,
+            cells: includesCells ? row.cells.map {
+                TerminalCell(
+                    kind: $0.kind,
+                    scalars: $0.scalars,
+                    style: style(for: $0.styleId),
+                    hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
+                )
+            } : [],
+            isSoftWrapped: row.isSoftWrapped,
+            isEmpty: retainedContentEnd(in: row) == 0
+        )
+    }
+
+    private func semanticPromptTransitionState() -> TerminalSemanticPromptTransitionState {
+        TerminalSemanticPromptTransitionState(
+            rows: rows.map { semanticPromptRowSnapshot($0) },
+            cursorRow: cursor.row,
+            scrollRegion: activeScrollRegion,
+            isAlternateScreenActive: isAlternateScreenActive
+        )
+    }
+
+    private var semanticPromptRedrawModeForTesting: TerminalSemanticPromptRedrawMode {
+        switch promptRedrawMode {
+        case .disabled: .disabled
+        case .full: .full
+        case .last: .last
+        }
+    }
+
+    private mutating func observeSemanticPromptTransition(
+        mutation: TerminalSemanticPromptMutation,
+        before: TerminalSemanticPromptTransitionState
+    ) {
+        let violations = Self.semanticPromptTransitionViolationsForTesting(
+            mutation: mutation,
+            redrawMode: semanticPromptRedrawModeForTesting,
+            before: before,
+            after: semanticPromptTransitionState()
+        )
+        for violation in violations
+            where semanticPromptInvariantObservation.violations.contains(violation) == false
+        {
+            semanticPromptInvariantObservation.violations.append(violation)
+        }
     }
 
     /// Projects retained history and the viewport as logical text without a final newline.

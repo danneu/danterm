@@ -55,9 +55,13 @@ struct TerminalShellDialectTests {
         var terminal = try #require(
             Terminal(columns: recording.initial.columns, rows: recording.initial.rows)
         )
-        for event in recording.events {
+        for (eventIndex, event) in recording.events.enumerated() {
             guard event.type != "resize" else {
                 terminal.resize(columns: try #require(event.columns), rows: try #require(event.rows))
+                expectSemanticPromptInvariants(
+                    terminal,
+                    context: "\(name) transformed event \(eventIndex)"
+                )
                 continue
             }
             var bytes = Self.bytes(fromHex: try #require(event.hex))
@@ -69,6 +73,10 @@ struct TerminalShellDialectTests {
                 bytes = Array(text.utf8)
             }
             terminal.feed(bytes)
+            expectSemanticPromptInvariants(
+                terminal,
+                context: "\(name) transformed event \(eventIndex)"
+            )
         }
         return terminal
     }
@@ -313,12 +321,20 @@ struct TerminalShellDialectTests {
         var terminal = try #require(
             Terminal(columns: recording.initial.columns, rows: recording.initial.rows)
         )
-        for event in recording.events.prefix(limit) {
+        for (eventIndex, event) in recording.events.prefix(limit).enumerated() {
             guard event.type != "resize" else {
                 terminal.resize(columns: try #require(event.columns), rows: try #require(event.rows))
+                expectSemanticPromptInvariants(
+                    terminal,
+                    context: "zsh-stale-width-repaint prefix event \(eventIndex)"
+                )
                 continue
             }
             terminal.feed(Self.bytes(fromHex: try #require(event.hex)))
+            expectSemanticPromptInvariants(
+                terminal,
+                context: "zsh-stale-width-repaint prefix event \(eventIndex)"
+            )
         }
 
         #expect(terminal.screenText.components(separatedBy: "╭ ~").count - 1 == 1)
