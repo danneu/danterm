@@ -541,7 +541,8 @@ struct TerminalFixtureTests {
             #expect(clipboardWrites == expectedClipboardWrites)
         }
         if let expectedSemanticEvents = expectation.semanticEvents {
-            #expect(semanticEvents == expectedSemanticEvents.map(\.terminalEvent))
+            let expected: [TerminalSemanticEvent] = expectedSemanticEvents.map(\.terminalEvent)
+            #expect(semanticEvents == expected)
         }
         if let presentation = expectation.cursorPresentation {
             #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
@@ -600,10 +601,14 @@ struct TerminalFixtureTests {
             }
         }
         if let cellKinds = expectation.cellKinds {
-            #expect(terminal.geometry.rows.map { $0.cells.map(\.kind.fixtureName) } == cellKinds)
+            let actualKinds: [[String]] = terminal.geometry.rows.map { row in
+                row.cells.map(\.kind.fixtureName)
+            }
+            #expect(actualKinds == cellKinds)
         }
         if let softWraps = expectation.softWraps {
-            #expect(terminal.geometry.rows.map(\.isSoftWrapped) == softWraps)
+            let actualSoftWraps: [Bool] = terminal.geometry.rows.map(\.isSoftWrapped)
+            #expect(actualSoftWraps == softWraps)
         }
         if let cursor = expectation.cursor {
             #expect(terminal.geometry.cursor == TerminalCursor(
@@ -620,12 +625,16 @@ struct TerminalFixtureTests {
             for (index, expectedRow) in rows.enumerated() {
                 let actual = try #require(terminal.scrollbackRow(at: index))
                 #expect(actual.isSoftWrapped == expectedRow.softWrapped)
-                #expect(actual.cells.map(\.kind.fixtureName) == expectedRow.cells.map(\.kind))
-                #expect(actual.cells.map { cell in
+                let actualKinds: [String] = actual.cells.map(\.kind.fixtureName)
+                let expectedKinds: [String] = expectedRow.cells.map(\.kind)
+                #expect(actualKinds == expectedKinds)
+                let actualScalars: [String] = actual.cells.map { cell in
                     var text = ""
                     text.unicodeScalars.append(contentsOf: cell.scalars)
                     return text
-                } == expectedRow.cells.map(\.scalars))
+                }
+                let expectedScalars: [String] = expectedRow.cells.map(\.scalars)
+                #expect(actualScalars == expectedScalars)
                 for (column, expectedCell) in expectedRow.cells.enumerated() {
                     if let style = expectedCell.style {
                         #expect(actual.cells[column].style == (try style.terminalStyle()))
