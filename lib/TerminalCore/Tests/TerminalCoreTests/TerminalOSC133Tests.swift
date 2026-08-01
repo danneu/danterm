@@ -156,6 +156,30 @@ struct TerminalOSC133Tests {
         #expect(heightOnly.fullHistoryText.contains("> prompt") == false)
     }
 
+    @Test("a resize between a shell's repaint erase and its next mark spares the last command")
+    func resizeDuringARepaintEraseKeepsFinishedOutput() throws {
+        // Intent: when a resize lands after the shell has erased its prompt but before it
+        //   re-marks one, nothing is blanked -- the finished command and its output stay.
+        // Why it exists: prompt blanking finds the prompt by walking up from the cursor to
+        //   the nearest prompt stamp. During a repaint there is no such stamp, because the
+        //   shell erased the row carrying it, so the walk used to climb past the output and
+        //   anchor on the *previous* prompt -- then blank from there to the bottom of the
+        //   screen. One resize inside that window cleared the whole pane.
+        // Scenario: the recorded zsh repaint is `\r \r ESC[A ESC[J` followed by the mark, so
+        //   the window is a real one; a drag delivers resizes continuously and only has to
+        //   land between the two feeds.
+        var terminal = try #require(Terminal(columns: 12, rows: 8))
+        terminal.feed(Array("\u{1B}]133;A\u{7}$ \u{1B}]133;B\u{7}ls\r\n".utf8))
+        terminal.feed(Array("\u{1B}]133;C\u{7}FILE-ONE\r\nFILE-TWO\r\n".utf8))
+        terminal.feed(Array("\u{1B}]133;D;0\u{7}\u{1B}]133;A\u{7}$ \u{1B}]133;B\u{7}".utf8))
+        terminal.feed(Array("\r\u{1B}[A\u{1B}[J".utf8))
+        terminal.resize(columns: 11, rows: 8)
+
+        #expect(terminal.screenText.contains("$ ls"))
+        #expect(terminal.screenText.contains("FILE-ONE"))
+        expectValidGrid(terminal)
+    }
+
     @Test("a row emptied by prompt blanking does not splice its old width into the next reflow")
     func blankedPromptRowDoesNotWidenTheLineBelow() throws {
         // Intent: blanking a row that sat mid-way through a soft-wrapped logical line

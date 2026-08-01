@@ -170,6 +170,14 @@ public struct Terminal: Equatable, Sendable {
         case none
         case prompt
         case continuation
+        /// The row a command's output starts on, and so the upper bound of any search
+        /// for the prompt below it.
+        ///
+        /// A shell repaint erases its prompt before re-marking it, and a resize landing
+        /// in that window finds no stamp where the prompt is. Without a floor the search
+        /// keeps climbing, anchors on the *previous* prompt, and blanks the last
+        /// command's output along with it.
+        case output
         /// A prompt row that prompt blanking emptied and no shell has repainted yet.
         ///
         /// Distinct from `.none` because the two are only alike on screen. Blanking
@@ -1146,9 +1154,17 @@ public struct Terminal: Equatable, Sendable {
         case 0x43: // C
             semanticContent = .output
             semanticContentClearsAtEndOfLine = false
-            if cursor.column == 0, rows[cursor.row].semanticPrompt != .none {
-                rows[cursor.row].semanticPrompt = .none
-            }
+            // Mark where the command's output begins. This is a floor for every walk
+            // that searches upward for the current prompt: output is never part of a
+            // prompt block, so a walk that reaches this row has already gone too far
+            // and must stop rather than anchor on an older prompt above it.
+            //
+            // Unconditional, including when output starts partway along the prompt's own
+            // row. That row is then no longer blankable, which is correct -- it holds
+            // output -- and it costs the current prompt nothing, since blanking is
+            // suppressed for the whole command and the next `A` re-stamps a fresh head.
+            // Kitty marks it the same way (`references/kitty/kitty/screen.c#shell_prompt_marking`).
+            rows[cursor.row].semanticPrompt = .output
         case 0x44: // D
             semanticContent = .output
             semanticContentClearsAtEndOfLine = false
@@ -1786,6 +1802,12 @@ public struct Terminal: Equatable, Sendable {
                 // time a drag outran the shell.
                 start = topOfStalePromptHeads(above: start)
                 for row in start..<rowCount { clearPromptCells(in: row) }
+                return
+            case .output:
+                // Reached the last command's output without finding a prompt, which
+                // means the shell erased its stamp and has not re-marked it yet. There
+                // is nothing here we are entitled to blank; the older prompt above this
+                // row belongs to output that is finished and must survive.
                 return
             case .continuation, .none:
                 start -= 1
