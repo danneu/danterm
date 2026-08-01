@@ -402,6 +402,18 @@ public struct Terminal: Equatable, Sendable {
         var isHardBoundary: Bool
     }
 
+    /// Locates one projected unit by the row it came from, so an expansion walk can step
+    /// outward from a click without an index into a units array for the whole stream.
+    /// Carrying the row's units keeps a step within the row allocation-free; crossing a row
+    /// projects exactly one more row.
+    private struct ProjectionCursor {
+        var row: Int
+        var indexInRow: Int
+        var rowUnits: [ProjectionUnit]
+
+        var unit: ProjectionUnit { rowUnits[indexInRow] }
+    }
+
     /// Keeps search comparison allocation-free for the common one-scalar key while
     /// retaining full folded expansions for Unicode graphemes that need them.
     private enum SearchGraphemeKey: Equatable {
@@ -2358,30 +2370,29 @@ public struct Terminal: Equatable, Sendable {
     /// terminal-oriented double-click selection. Classification uses the leading
     /// scalar so a combining mark cannot move its base cell across the boundary.
     public func terminalTokenRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        let units = projectionUnits()
-        guard let target = nearestTextUnitIndex(to: position, in: units) else {
-            return emptyRange(at: position)
-        }
-        let targetIsBoundary = isTerminalTokenSeparator(units[target])
-        var lower = target
-        var upper = target
-        while lower > units.startIndex {
-            let candidate = units.index(before: lower)
-            guard units[candidate].isHardBoundary == false,
-                  isTerminalTokenSeparator(units[candidate]) == targetIsBoundary
-            else { break }
+        let stream = activeProjectionRows()
+        guard let lastContentRow = stream.lastIndex(where: rowContainsContent),
+              let origin = nearestTextUnit(
+                  to: position,
+                  in: stream,
+                  lastContentRow: lastContentRow
+              )
+        else { return emptyRange(at: position) }
+
+        let targetIsBoundary = isTerminalTokenSeparator(origin.unit)
+        var lower = origin
+        while let candidate = textUnit(before: lower, in: stream, lastContentRow: lastContentRow),
+              isTerminalTokenSeparator(candidate.unit) == targetIsBoundary {
             lower = candidate
         }
-        while upper < units.index(before: units.endIndex) {
-            let candidate = units.index(after: upper)
-            guard units[candidate].isHardBoundary == false,
-                  isTerminalTokenSeparator(units[candidate]) == targetIsBoundary
-            else { break }
+        var upper = origin
+        while let candidate = textUnit(after: upper, in: stream, lastContentRow: lastContentRow),
+              isTerminalTokenSeparator(candidate.unit) == targetIsBoundary {
             upper = candidate
         }
         return publicRange(TextAnchorRange(
-            start: units[lower].start,
-            end: units[upper].end
+            start: lower.unit.start,
+            end: upper.unit.end
         )) ?? emptyRange(at: position)
     }
 
@@ -2953,29 +2964,7 @@ public struct Terminal: Equatable, Sendable {
         for rowIndex in 0...lastContentRow {
             let row = stream[rowIndex]
             let end = projectedCellEnd(in: row)
-            var column = 0
-            while column < end {
-                let cell = row.cells[column]
-                let width = cell.kind == .wideHead ? 2 : 1
-                let scalars: [Unicode.Scalar]?
-                switch cell.kind {
-                case .narrow, .wideHead:
-                    scalars = Array(cell.scalars)
-                case .padding:
-                    scalars = [" "]
-                case .wideTail, .spacerHead:
-                    scalars = nil
-                }
-                if let scalars {
-                    body(ProjectionUnit(
-                        scalars: scalars,
-                        start: TextAnchor(row: absoluteBase + rowIndex, column: column),
-                        end: TextAnchor(row: absoluteBase + rowIndex, column: column + width),
-                        isHardBoundary: false
-                    ))
-                }
-                column += width
-            }
+            forEachRowTextUnit(in: row, rowIndex: rowIndex, absoluteBase: absoluteBase, body)
             if rowIndex < lastContentRow, row.isSoftWrapped == false {
                 body(ProjectionUnit(
                     scalars: ["\n"],
@@ -2984,6 +2973,42 @@ public struct Terminal: Equatable, Sendable {
                     isHardBoundary: true
                 ))
             }
+        }
+    }
+
+    /// Emits one row's text units, the single definition of what a projected cell becomes.
+    /// The whole-stream walk and the point-local expansion walk both go through here, so
+    /// they cannot drift apart on wide cells, padding, or trailing-cell truncation; the
+    /// hard boundary *between* rows is not a row-local fact and stays with each caller.
+    private func forEachRowTextUnit(
+        in row: GridRow,
+        rowIndex: Int,
+        absoluteBase: Int,
+        _ body: (ProjectionUnit) -> Void
+    ) {
+        let end = projectedCellEnd(in: row)
+        var column = 0
+        while column < end {
+            let cell = row.cells[column]
+            let width = cell.kind == .wideHead ? 2 : 1
+            let scalars: [Unicode.Scalar]?
+            switch cell.kind {
+            case .narrow, .wideHead:
+                scalars = Array(cell.scalars)
+            case .padding:
+                scalars = [" "]
+            case .wideTail, .spacerHead:
+                scalars = nil
+            }
+            if let scalars {
+                body(ProjectionUnit(
+                    scalars: scalars,
+                    start: TextAnchor(row: absoluteBase + rowIndex, column: column),
+                    end: TextAnchor(row: absoluteBase + rowIndex, column: column + width),
+                    isHardBoundary: false
+                ))
+            }
+            column += width
         }
     }
 
@@ -3061,19 +3086,112 @@ public struct Terminal: Equatable, Sendable {
         return anchor(before: cell)
     }
 
-    private func nearestTextUnitIndex(
+    /// Projects one stream row's text units, applying the whole-stream truncation rule: a
+    /// row past the stream's last content row projects nothing. Hard boundaries are absent
+    /// by construction -- a row-local list has nowhere to put the newline that belongs
+    /// *between* rows -- so the expansion walk applies that rule structurally instead
+    /// (`textUnit(before:)` / `textUnit(after:)`).
+    private func rowTextUnits(
+        in stream: [GridRow],
+        row rowIndex: Int,
+        lastContentRow: Int
+    ) -> [ProjectionUnit] {
+        guard rowIndex <= lastContentRow else { return [] }
+        var units: [ProjectionUnit] = []
+        forEachRowTextUnit(
+            in: stream[rowIndex],
+            rowIndex: rowIndex,
+            absoluteBase: evictedRowCount
+        ) { units.append($0) }
+        return units
+    }
+
+    /// Resolves the unit a click expands from without projecting the stream: the containing
+    /// unit when one exists, else the nearest preceding one, else -- when nothing precedes
+    /// the click -- the stream's first unit. Units are ordered and non-overlapping, so the
+    /// last unit with `start <= target` is the containing unit whenever there is one, which
+    /// collapses both cases into one backward walk. Rows that project nothing cost one
+    /// row-level content scan each and no unit construction.
+    private func nearestTextUnit(
         to position: TerminalTextPosition,
-        in units: [ProjectionUnit]
-    ) -> Int? {
-        let textIndices = units.indices.filter { units[$0].isHardBoundary == false }
-        guard let first = textIndices.first else { return nil }
+        in stream: [GridRow],
+        lastContentRow: Int
+    ) -> ProjectionCursor? {
         let target = normalizedBoundaryPosition(position)
-        if let containing = textIndices.first(where: {
-            units[$0].start <= target && target < units[$0].end
-        }) {
-            return containing
+        var backward = min(max(target.row - evictedRowCount, 0), lastContentRow)
+        while backward >= 0 {
+            let units = rowTextUnits(in: stream, row: backward, lastContentRow: lastContentRow)
+            if let index = units.lastIndex(where: { $0.start <= target }) {
+                return ProjectionCursor(row: backward, indexInRow: index, rowUnits: units)
+            }
+            backward -= 1
         }
-        return textIndices.last(where: { units[$0].start <= target }) ?? first
+        var forward = 0
+        while forward <= lastContentRow {
+            let units = rowTextUnits(in: stream, row: forward, lastContentRow: lastContentRow)
+            if units.isEmpty == false {
+                return ProjectionCursor(row: forward, indexInRow: 0, rowUnits: units)
+            }
+            forward += 1
+        }
+        return nil
+    }
+
+    /// Steps to the preceding text unit, or `nil` where the whole-stream projection would
+    /// have emitted a hard boundary: a non-soft-wrapped predecessor row ends the line, and
+    /// so does the top of the stream.
+    private func textUnit(
+        before cursor: ProjectionCursor,
+        in stream: [GridRow],
+        lastContentRow: Int
+    ) -> ProjectionCursor? {
+        if cursor.indexInRow > cursor.rowUnits.startIndex {
+            return ProjectionCursor(
+                row: cursor.row,
+                indexInRow: cursor.rowUnits.index(before: cursor.indexInRow),
+                rowUnits: cursor.rowUnits
+            )
+        }
+        // A soft-wrapped row that projects no unit is not a boundary; keep walking past it,
+        // exactly as a scan of the whole unit array would.
+        var row = cursor.row
+        while row > 0, stream[row - 1].isSoftWrapped {
+            row -= 1
+            let units = rowTextUnits(in: stream, row: row, lastContentRow: lastContentRow)
+            if units.isEmpty == false {
+                return ProjectionCursor(
+                    row: row,
+                    indexInRow: units.index(before: units.endIndex),
+                    rowUnits: units
+                )
+            }
+        }
+        return nil
+    }
+
+    /// Steps to the following text unit, stopping at a hard line ending and at the stream's
+    /// last content row, past which the projection emits nothing.
+    private func textUnit(
+        after cursor: ProjectionCursor,
+        in stream: [GridRow],
+        lastContentRow: Int
+    ) -> ProjectionCursor? {
+        if cursor.indexInRow < cursor.rowUnits.index(before: cursor.rowUnits.endIndex) {
+            return ProjectionCursor(
+                row: cursor.row,
+                indexInRow: cursor.rowUnits.index(after: cursor.indexInRow),
+                rowUnits: cursor.rowUnits
+            )
+        }
+        var row = cursor.row
+        while row < lastContentRow, stream[row].isSoftWrapped {
+            row += 1
+            let units = rowTextUnits(in: stream, row: row, lastContentRow: lastContentRow)
+            if units.isEmpty == false {
+                return ProjectionCursor(row: row, indexInRow: units.startIndex, rowUnits: units)
+            }
+        }
+        return nil
     }
 
     private func emptyRange(at position: TerminalTextPosition) -> TerminalTextRange {

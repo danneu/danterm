@@ -351,6 +351,110 @@ struct TerminalSelectionUnitTests {
         #expect(terminal.trimmedLogicalLineRange(at: .init(row: 1, column: 2)) == range(0, 0, 1, 2))
     }
 
+    @Test("range queries over deep scrollback answer for the clicked point, not the stream")
+    func rangeQueriesOverDeepScrollback() throws {
+        // Intent: with a large body of unrelated scrollback retained, character,
+        //   terminal-token and line queries near the live bottom and deep in browsed
+        //   history return the ranges and text of the clicked line.
+        // Why it exists: this is the equivalence baseline for point-local expansion.
+        //   Every one of these queries used to be answered by materializing the whole
+        //   retained stream; the point-local walk has to return the same answers with
+        //   the unrelated rows never projected, so the assertions have to hold with
+        //   hundreds of rows of noise on both sides of the click.
+        // Scenario: a long-running session with hundreds of lines of build output;
+        //   the user double-clicks a word on the last line, then scrolls back and
+        //   double-clicks one buried deep in history.
+        var terminal = try #require(Terminal(columns: 16, rows: 4))
+        terminal.feed(Array("deep marker\r\n".utf8))
+        for index in 0..<400 {
+            terminal.feed(Array("fill \(index)\r\n".utf8))
+        }
+        terminal.feed(Array("hello world\r\n".utf8))
+        terminal.feed(Array("tail token".utf8))
+        #expect(terminal.scrollbackRowCount == 399)
+
+        // Row 401 is the last hard-ended line; row 402 is live.
+        #expect(terminal.characterRange(at: .init(row: 401, column: 0)) == range(401, 0, 401, 1))
+        #expect(terminal.terminalTokenRange(at: .init(row: 401, column: 2)) == range(401, 0, 401, 5))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 401, column: 9))
+            == range(401, 0, 401, 11))
+        #expect(terminal.terminalTokenRange(at: .init(row: 402, column: 7)) == range(402, 5, 402, 10))
+
+        // Browsing history does not re-coordinate the queries: the same deep row
+        // answers the same way whether or not it is on screen.
+        let deepToken = terminal.terminalTokenRange(at: .init(row: 0, column: 2))
+        terminal.scroll(toTopRow: 0)
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 2)) == deepToken)
+        #expect(deepToken == range(0, 0, 0, 4))
+        #expect(terminal.characterRange(at: .init(row: 0, column: 5)) == range(0, 5, 0, 6))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 0)) == range(0, 0, 0, 11))
+
+        for (query, expected) in [
+            (terminal.terminalTokenRange(at: .init(row: 401, column: 2)), "hello"),
+            (terminal.terminalTokenRange(at: .init(row: 402, column: 7)), "token"),
+            (deepToken, "deep"),
+            (terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 0)), "deep marker"),
+        ] {
+            var selected = terminal
+            selected.setSelection(query)
+            #expect(selected.selectedText == expected)
+        }
+    }
+
+    @Test("a terminal token spans a soft-wrapped line straddling scrollback and live rows")
+    func terminalTokenSpansScrollbackToLiveWrap() throws {
+        // Intent: a token whose soft-wrapped rows begin in scrollback storage and end
+        //   in the live rows selects as one unit, and a hard line ending still bounds it.
+        // Why it exists: the scrollback/live boundary is a storage seam, not a text
+        //   boundary. A point-local walk steps row by row rather than over one
+        //   materialized array, so it is exactly where the two storages could be
+        //   mistaken for a line ending.
+        // Scenario: a command prints a long unbroken path that wraps across the
+        //   bottom of the window while earlier rows have already scrolled off.
+        var terminal = try #require(Terminal(columns: 6, rows: 2))
+        terminal.feed(Array("stop\r\nabcdefghijklmnop".utf8))
+
+        // The wrapped token occupies stream rows 1-3, and the storage seam falls
+        // inside it: row 1 has scrolled into scrollback, rows 2-3 are still live.
+        #expect(terminal.scrollbackRowCount == 2)
+        let wrapped = terminal.terminalTokenRange(at: .init(row: 2, column: 3))
+        #expect(wrapped == range(1, 0, 3, 4))
+        terminal.setSelection(wrapped)
+        #expect(terminal.selectedText == "abcdefghijklmnop")
+
+        // The hard line ending above it is still a boundary: the row above is its own token.
+        #expect(terminal.terminalTokenRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 4))
+    }
+
+    @Test("applying a computed range through setSelection preserves the range and its text")
+    func computedRangesRoundTripThroughSetSelection() throws {
+        // Intent: every locally computed range survives being applied -- the selection
+        //   reads back as the same range and yields the same text.
+        // Why it exists: endpoint normalization inside `setSelection` is a second
+        //   projection-dependent path. A range computed point-locally has to normalize
+        //   to itself, or a double-click would select one unit and report another.
+        // Scenario: a double-click or triple-click, which computes a range and
+        //   immediately applies it.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("one two\r\n\u{6F22}z ab\r\n  pad  ".utf8))
+
+        let queries: [(TerminalTextRange, String)] = [
+            (terminal.characterRange(at: .init(row: 0, column: 4)), "t"),
+            (terminal.terminalTokenRange(at: .init(row: 0, column: 5)), "two"),
+            (terminal.terminalTokenRange(at: .init(row: 0, column: 3)), " "),
+            (terminal.characterRange(at: .init(row: 1, column: 1)), "\u{6F22}"),
+            (terminal.terminalTokenRange(at: .init(row: 1, column: 0)), "\u{6F22}z"),
+            (terminal.trimmedLogicalLineRange(at: .init(row: 1, column: 4)), "\u{6F22}z ab"),
+            (terminal.trimmedLogicalLineRange(at: .init(row: 2, column: 0)), "pad"),
+        ]
+        for (query, expected) in queries {
+            var applied = terminal
+            applied.setSelection(query)
+            #expect(applied.selectionRange == query)
+            #expect(applied.selectedText == expected)
+        }
+    }
+
     private func range(
         _ startRow: Int,
         _ startColumn: Int,
