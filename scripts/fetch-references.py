@@ -211,6 +211,14 @@ REFERENCES = [
         why="Readline redisplay after SIGWINCH, which decides how much of a Bash prompt may be blanked.",
         release_tag="bash-5.3",
     ),
+    Reference(
+        name="starship",
+        url="https://github.com/starship/starship.git",
+        pin="fca92d8dcbd5981b0160af2f7ed7a430b6475a72",
+        sparse_cone=("src", "docs/config", "docs/advanced-config"),
+        why="A cross-shell prompt in wide real-world use: multi-line and right prompts, transient prompts, and the per-shell init hooks it wraps the shells' own marks in.",
+        release_tag="v1.26.0",
+    ),
 ]
 
 

@@ -72,6 +72,10 @@ The following pinned source trees are materialized under `references/`:
   which decide whether marks embedded in `PS1` survive a repaint.
 - [`references/bash/`](../references/bash/) -- readline redisplay after
   SIGWINCH, which decides how much of a Bash prompt may be blanked.
+- [`references/starship/`](../references/starship/) -- the cross-shell prompt a
+  large share of users actually run: multi-line and right prompts, transient
+  prompts, and the per-shell init hooks (`src/init/`) it wraps the shells' own
+  marks in.
 
 The three shells are pinned at the versions DanTerm's shell-integration
 research measured (fish 4.7.1, zsh 5.9, bash 5.3). A shell's *behavior* is
