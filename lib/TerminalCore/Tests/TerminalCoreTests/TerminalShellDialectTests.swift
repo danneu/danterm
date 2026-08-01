@@ -27,6 +27,7 @@ struct TerminalShellDialectTests {
         struct Event: Decodable {
             let type: String
             let hex: String?
+            let base64: String?
             let columns: Int?
             let rows: Int?
         }
@@ -64,7 +65,7 @@ struct TerminalShellDialectTests {
                 )
                 continue
             }
-            var bytes = Self.bytes(fromHex: try #require(event.hex))
+            var bytes = try Self.bytes(from: event)
             if let redrawOverride {
                 var text = String(decoding: bytes, as: UTF8.self)
                 for existing in ["redraw=1", "redraw=last", "redraw=0"] {
@@ -95,6 +96,13 @@ struct TerminalShellDialectTests {
             index = next
         }
         return out
+    }
+
+    private static func bytes(from event: Recording.Event) throws -> [UInt8] {
+        if let base64 = event.base64 {
+            return Array(try #require(Data(base64Encoded: base64)))
+        }
+        return bytes(fromHex: try #require(event.hex))
     }
 
     @Test("the recorded staircase incident is fixed by the redraw declaration and only by it")
@@ -268,7 +276,7 @@ struct TerminalShellDialectTests {
         for shell in ["zsh", "bash"] {
             let recording = try recording("\(shell)-dialect-width-sweep")
             var terminal = try #require(Terminal(columns: 100, rows: 10))
-            terminal.feed(Self.bytes(fromHex: try #require(recording.events[0].hex)))
+            terminal.feed(try Self.bytes(from: recording.events[0]))
             terminal.feed(Array("\u{1B}]133;C\u{7}BUILD-OUTPUT-LINE\r\n".utf8))
             for width in [96, 92, 88, 84] {
                 terminal.resize(columns: width, rows: 10)
@@ -330,7 +338,7 @@ struct TerminalShellDialectTests {
                 )
                 continue
             }
-            terminal.feed(Self.bytes(fromHex: try #require(event.hex)))
+            terminal.feed(try Self.bytes(from: event))
             expectSemanticPromptInvariants(
                 terminal,
                 context: "zsh-stale-width-repaint prefix event \(eventIndex)"

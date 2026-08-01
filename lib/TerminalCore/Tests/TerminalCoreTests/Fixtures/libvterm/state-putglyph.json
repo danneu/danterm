@@ -15,12 +15,12 @@
   "events": [
     { "type": "feed", "text": "ABC" },
     { "type": "expect", "expect": { "viewportText": "ABC             " } },
-    { "type": "feed", "hex": "1b 63 c3 81 c3 a9" },
+    { "type": "feed", "base64": "G2PDgcOp" },
     { "type": "expect", "expect": { "viewportText": "\u00c1\u00e9              " } },
-    { "type": "feed", "hex": "1b 63 c3" },
-    { "type": "feed", "hex": "81" },
+    { "type": "feed", "base64": "G2PD" },
+    { "type": "feed", "base64": "gQ==" },
     { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\u00c1" }] } },
-    { "type": "feed", "hex": "1b 63 ef bc 90 20" },
+    { "type": "feed", "base64": "G2PvvJAg" },
     {
       "type": "expect",
       "expect": {
@@ -28,7 +28,7 @@
         "cellScalars": [{ "row": 0, "column": 0, "scalars": "\uff10" }]
       }
     },
-    { "type": "feed", "hex": "1b 63 f0 9f 98 80 20" },
+    { "type": "feed", "base64": "G2Pwn5iAIA==" },
     {
       "type": "expect",
       "expect": {
@@ -36,7 +36,7 @@
         "cellScalars": [{ "row": 0, "column": 0, "scalars": "\ud83d\ude00" }]
       }
     },
-    { "type": "feed", "hex": "1b 63 65 cc 81 5a" },
+    { "type": "feed", "base64": "G2NlzIFa" },
     {
       "type": "expect",
       "expect": {
@@ -46,8 +46,8 @@
         ]
       }
     },
-    { "type": "feed", "hex": "1b 63 65" },
-    { "type": "feed", "hex": "cc 81 5a" },
+    { "type": "feed", "base64": "G2Nl" },
+    { "type": "feed", "base64": "zIFa" },
     { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301" }] } },
     { "type": "feed", "text": "\u001bce\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" },
     {

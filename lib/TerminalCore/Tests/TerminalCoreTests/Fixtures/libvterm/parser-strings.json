@@ -42,7 +42,7 @@
     { "type": "expect", "expect": { "viewportText": "XY          \n            " } },
     { "type": "feed", "text": "\u001bca\u001b_Hello\u0007b\u001b\\c\u001b^Hello\u0007d\u001b\\e\u001bXHello\u0007f\u001b\\g" },
     { "type": "expect", "expect": { "viewportText": "aceg        \n            " } },
-    { "type": "feed", "hex": "1b 63 68 1b 58 41 42 43 01 44 45 46 99 47 48 49 1b 5c 69" },
+    { "type": "feed", "base64": "G2NoG1hBQkMBREVGmUdISRtcaQ==" },
     { "type": "expect", "expect": { "viewportText": "hi          \n            " } }
   ]
 }

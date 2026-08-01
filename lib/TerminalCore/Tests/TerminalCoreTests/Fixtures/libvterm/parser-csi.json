@@ -65,7 +65,7 @@
         "cursor": { "row": 3, "column": 2, "pendingWrap": false }
       }
     },
-    { "type": "feed", "hex": "00 7f 1b 5b 31 32 00 33 6d 49 7f 4a" },
+    { "type": "feed", "base64": "AH8bWzEyADNtSX9K" },
     {
       "type": "expect",
       "expect": {

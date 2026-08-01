@@ -13,13 +13,13 @@
   "events": [
     { "type": "feed", "text": "ABC" },
     { "type": "expect", "expect": { "cursor": { "row": 0, "column": 3, "pendingWrap": false } } },
-    { "type": "feed", "hex": "08" },
+    { "type": "feed", "base64": "CA==" },
     { "type": "expect", "expect": { "cursor": { "row": 0, "column": 2, "pendingWrap": false } } },
-    { "type": "feed", "hex": "09" },
+    { "type": "feed", "base64": "CQ==" },
     { "type": "expect", "expect": { "cursor": { "row": 0, "column": 8, "pendingWrap": false } } },
-    { "type": "feed", "hex": "0d" },
+    { "type": "feed", "base64": "DQ==" },
     { "type": "expect", "expect": { "cursor": { "row": 0, "column": 0, "pendingWrap": false } } },
-    { "type": "feed", "hex": "0a" },
+    { "type": "feed", "base64": "Cg==" },
     { "type": "expect", "expect": { "cursor": { "row": 1, "column": 0, "pendingWrap": false } } },
 
     { "type": "feed", "text": "\u001b[4;2H\b\b" },

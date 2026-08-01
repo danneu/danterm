@@ -12,7 +12,7 @@
   "initial": { "columns": 4, "rows": 2 },
   "events": [
     { "type": "feed", "text": "ABCDE" },
-    { "type": "feed", "hex": "0D 0A" },
+    { "type": "feed", "base64": "DQo=" },
     {
       "type": "expect",
       "expect": {
@@ -38,7 +38,7 @@
         "fullHistoryText": "ABCDE"
       }
     },
-    { "type": "feed", "hex": "0A" },
+    { "type": "feed", "base64": "Cg==" },
     {
       "type": "expect",
       "expect": {

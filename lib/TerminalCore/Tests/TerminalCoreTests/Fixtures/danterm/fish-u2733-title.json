@@ -8,6 +8,6 @@
   },
   "initial": { "columns": 20, "rows": 3 },
   "events": [
-    { "type": "feed", "hex": "1b5d303b7072696e74662027e29cb32707e29cb30d0a2420" }
+    { "type": "feed", "base64": "G10wO3ByaW50ZiAn4pyzJwfinLMNCiQg" }
   ]
 }

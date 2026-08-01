@@ -13,7 +13,7 @@
   },
   "initial": { "columns": 80, "rows": 2 },
   "events": [
-    { "type": "feed", "hex": "c3 81 c3 a9" },
+    { "type": "feed", "base64": "w4HDqQ==" },
     { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\u00c1" }, { "row": 0, "column": 1, "scalars": "\u00e9" }] } },
     { "type": "feed", "text": "\u001bc0123\u001b[H\uff10" },
     { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\uff10" }] } },

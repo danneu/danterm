@@ -115,7 +115,13 @@ danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
 ## Commit progress
 
 - [x] 1. Add stream fixture conversion and base64 producer support
-- [ ] 2. Migrate committed recordings to base64
+- [x] 2. Migrate committed recordings to base64
 - [ ] 3. Remove the legacy tape recorder and update research producers
 - [ ] 4. Enforce strict recording schemas and audit the corpus
 - [ ] 5. Document the unified recording formats and run the full gate
+
+## Implementation notes
+
+- Commit 2 also updated `TerminalShellDialectTests`' test-local fixture decoder. The
+  shared replay decoder already accepted base64, but this local consumer surfaced only
+  when the migrated dialect fixtures exercised it.

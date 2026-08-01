@@ -15,11 +15,11 @@
   "events": [
     { "type": "feed", "text": "123" },
     { "type": "expect", "expect": { "viewportText": "123             " } },
-    { "type": "feed", "hex": "1b 63 c2 80 df bf" },
+    { "type": "feed", "base64": "G2PCgN+/" },
     { "type": "expect", "expect": { "viewportText": "\u0080\u07ff              " } },
-    { "type": "feed", "hex": "1b 63 e0 a0 80 ef bf bd" },
+    { "type": "feed", "base64": "G2PgoIDvv70=" },
     { "type": "expect", "expect": { "viewportText": "\u0800\ufffd              " } },
-    { "type": "feed", "hex": "1b 63 f0 90 80 80 f7 bf bf bf" },
+    { "type": "feed", "base64": "G2PwkICA97+/vw==" },
     {
       "type": "expect",
       "expect": {
@@ -27,24 +27,24 @@
         "cursor": { "row": 0, "column": 5, "pendingWrap": false }
       }
     },
-    { "type": "feed", "hex": "1b 63 c2 21 e0 21 e0 a0 21 f0 21 f0 90 21 f0 90 80 21" },
+    { "type": "feed", "base64": "G2PCIeAh4KAh8CHwkCHwkIAh" },
     { "type": "expect", "expect": { "viewportText": "\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!    " } },
-    { "type": "feed", "hex": "1b 63 c2 c2 90 e0 c2 90 f0 90 c2 90" },
+    { "type": "feed", "base64": "G2PCwpDgwpDwkMKQ" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\u0090\ufffd\u0090\ufffd\u0090          " } },
-    { "type": "feed", "hex": "1b 63 c0 80 c1 bf" },
+    { "type": "feed", "base64": "G2PAgMG/" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd            " } },
-    { "type": "feed", "hex": "1b 63 e0 80 80 e0 9f bf" },
+    { "type": "feed", "base64": "G2PggIDgn78=" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
-    { "type": "feed", "hex": "1b 63 f0 80 80 80 f0 8f bf bf" },
+    { "type": "feed", "base64": "G2PwgICA8I+/vw==" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd        " } },
-    { "type": "feed", "hex": "1b 63 ed a0 80 ed bf bf" },
+    { "type": "feed", "base64": "G2PtoIDtv78=" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
-    { "type": "feed", "hex": "1b 63 c2" },
-    { "type": "feed", "hex": "a0" },
-    { "type": "feed", "hex": "e0 a0" },
-    { "type": "feed", "hex": "80" },
-    { "type": "feed", "hex": "f0 90 80" },
-    { "type": "feed", "hex": "80" },
+    { "type": "feed", "base64": "G2PC" },
+    { "type": "feed", "base64": "oA==" },
+    { "type": "feed", "base64": "4KA=" },
+    { "type": "feed", "base64": "gA==" },
+    { "type": "feed", "base64": "8JCA" },
+    { "type": "feed", "base64": "gA==" },
     {
       "type": "expect",
       "expect": {
@@ -56,7 +56,7 @@
         "cursor": { "row": 0, "column": 3, "pendingWrap": false }
       }
     },
-    { "type": "feed", "hex": "1b 63 83 99 41" },
+    { "type": "feed", "base64": "G2ODmUE=" },
     { "type": "expect", "expect": { "viewportText": "\ufffd\ufffdA             " } }
   ]
 }
