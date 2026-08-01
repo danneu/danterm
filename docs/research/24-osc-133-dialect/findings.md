@@ -949,3 +949,46 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Next action: none. Bash in a real pane remains the open Phase 4 item; this
   round covered fish and zsh transitions but never rendered a Bash prompt of its
   own.
+
+### F18 -- what strands a row is shell-specific: fish needs a settled sweep where zsh needed a fast drag
+
+- Status: settled. **Closes the last Phase 3 gap: fish's declared `redraw` value
+  is now pinned by a recording made against the shipped emitter.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: this finding's commit; core suite 750 to 751.
+- Result or artifact paths:
+  [capture-fish-drag.py](capture-fish-drag.py), and
+  `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/fish-redraw-discriminator.json`
+  (61 events, 30 resizes, 100 down to 70 in a 12-row pane), asserted by
+  `TerminalShellDialectTests.fishRequiresTheDeclaredValue`.
+- Commands, inputs, or reproduction: `capture-fish-drag.py <tape>` runs real fish
+  under `pty.fork()` with the maintainer's own config plus
+  `-C 'source integrations/shell-integration/danterm.fish'` and `DANTERM=1`, so
+  the stream carries both fish's native `A;click_events=1` and DanTerm's
+  `A;redraw=1`. The tape converts with
+  `scripts/terminal-tape-to-fixture.py <tape> <fixture> --replace orbstack=cluster1`.
+- Result: replayed as recorded, 1 prompt. Forced to `redraw=0`, 31. Forced to
+  `redraw=last`, 31. Only DanTerm's mark carries a redraw option, so the override
+  moves exactly the byte under test.
+- What the first attempt got wrong, and it is the finding. The fast drag that
+  discriminated for zsh (F15's stimulus: one SIGWINCH per column, a 20ms drain,
+  the next resize landing mid-repaint) discriminates nothing for fish -- it left
+  1 prompt as recorded and 1 at `redraw=0`. Two shell behaviors cause that.
+  fish diffs its repaint against its own model of the screen instead of
+  rewriting the prompt, so a repaint that is interrupted and re-entered emits
+  only the changed cells; and once the prompt no longer fits the pane fish
+  truncates it with a leading ellipsis
+  (`references/fish-shell/src/screen.rs#truncate_run`), so from the first
+  narrowing step on there was no full prompt on screen to strand copies of. The
+  settled sweep -- SIGWINCH, pause, drain the repaint in full -- is what strands
+  rows for fish, which is the opposite of what zsh needed. "Reproduce the
+  stimulus that worked last time" is not transferable across shells; what has to
+  transfer is the question, *what leaves a whole old prompt on screen*.
+- What the recording does and does not pin. It pins the *value*: `redraw=1` is
+  correct and both other values staircase. It does not pin the mark's presence,
+  because the parser defaults to `full` -- deleting the line from `danterm.fish`
+  renders identically on this stream. The declaration still earns its place, and
+  the `redraw=last` column is the evidence: `last` is Bash's value, so a nested
+  Bash leaves it behind on exit, and re-declaring on every prompt is what takes
+  it back. That is the hazard D3 asserted from reasoning and this measures.
+- Next action: none. Bash in a real pane remains the one open item.

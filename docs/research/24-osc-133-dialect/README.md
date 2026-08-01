@@ -259,10 +259,20 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   earlier capture was withheld only because its cwd baked a real project path
   into every frame. F16's `zsh-stale-width-repaint` does not close this -- it
   pins the blanking anchor, not the redraw value.
-- [ ] TODO: fish has no discriminating recording either, for the same reason. The
-  F13 trio covers the staircase incident but predates the shipped emitter, so
-  what is unpinned is specifically `danterm.fish`'s own declaration. The fast-drag
-  stimulus that worked for zsh is the thing to try.
+- [x] Landed the fish counterpart: `fish-redraw-discriminator`, captured by
+  [capture-fish-drag.py](capture-fish-drag.py) against real fish with the shipped
+  `danterm.fish` sourced over the maintainer's config, asserted by
+  `TerminalShellDialectTests.fishRequiresTheDeclaredValue` at 1 prompt as
+  recorded against 31 at `redraw=0` and 31 at `redraw=last`. The F13 trio could
+  not serve: it predates the emitter and synthesizes its variants on fish's
+  *native* `A`, so it pins the parser's response rather than `danterm.fish`.
+  F18 records the part that did not transfer -- the fast drag that discriminated
+  for zsh discriminates nothing for fish, because fish diffs its repaint and
+  truncates the prompt with an ellipsis once it stops fitting, leaving no whole
+  prompt to strand copies of. The settled sweep is fish's stranding stimulus.
+  What the recording pins is the declared *value*, not the mark's presence: the
+  parser defaults to `full`, so `redraw=last` -- what a nested Bash leaves behind
+  -- is the column that shows why re-declaring per prompt is load-bearing.
 - [x] Folded the shipped dialect into `docs/terminal-capabilities.md` (accepted
   actions and options, the per-integration emit/declare table, and why Bash uses
   `P`) and `plan-terminal-engine/10-protocols-shell-integration.md` (the
