@@ -25,26 +25,59 @@ and once the prompt no longer fits it truncates with a leading ellipsis
 (`references/fish-shell/src/screen.rs#truncate_run`), so the fast capture ends up
 with no full prompt on screen to strand copies of.
 
-    docs/research/24-osc-133-dialect/capture-fish-drag.py /tmp/fish-drag.jsonl
+    docs/research/24-osc-133-dialect/capture-fish-drag.py /tmp/fish-drag.json
 
-Writes a tape in `TerminalTapeRecorder`'s JSONL shape rather than a fixture, so
-that scrubbing, provenance and any neutral value swaps go through the one
-committed instrument:
+Writes a complete live-capture snapshot. Scrubbing, provenance normalization,
+and any neutral value swaps still go through the committed converter:
 
-    scripts/terminal-tape-to-fixture.py /tmp/fish-drag.jsonl <fixture> \\
+    scripts/terminal-tape-to-fixture.py /tmp/fish-drag.json <fixture> \\
         --test TerminalShellDialectTests --shell fish --stimulus '...'
 """
-import argparse, os, pty, time, select, fcntl, termios, struct, re, json, sys
+import argparse, base64, os, pty, time, select, fcntl, termios, struct, re, json, sys
 
 REPO = "/Users/dan/Code/danterm-terminal-engine"
 FISH = "/etc/profiles/per-user/dan/bin/fish"
 INTEGRATION = f"{REPO}/integrations/shell-integration/danterm.fish"
 
 
+def feed_event(payload):
+    """Encode PTY bytes in the canonical lossless producer representation."""
+    return {
+        "type": "feed",
+        "base64": base64.b64encode(payload).decode("ascii"),
+    }
+
+
+def recording_document(*, initial, events, stimulus):
+    """Wrap one direct PTY experiment as a converter-ready live snapshot."""
+    return {
+        "version": 1,
+        "provenance": {
+            "source": "danterm-live-capture",
+            "author": "DanTerm",
+            "test": "TerminalShellDialectTests",
+            "recordedDeviations": [],
+            "shell": "fish",
+            "stimulus": stimulus,
+        },
+        "initial": initial,
+        "events": events,
+    }
+
+
+def feed_bytes(events):
+    """Reassemble captured feeds for byte counts and OSC diagnostics."""
+    return b"".join(
+        base64.b64decode(event["base64"], validate=True)
+        for event in events
+        if event["type"] == "feed"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tape", nargs="?", default="fish-drag.jsonl")
+    parser.add_argument("tape", nargs="?", default="fish-drag.json")
     parser.add_argument("--start", type=int, default=100)
     parser.add_argument("--end", type=int, default=70)
     parser.add_argument("--rows", type=int, default=12)
@@ -104,7 +137,7 @@ def main():
         return out
 
     events = []
-    events.append({"type": "feed", "hex": drain(3.0).hex()})
+    events.append(feed_event(drain(3.0)))
 
     for cols in range(START_COLS - 1, END_COLS - 1, -1):
         set_size(fd, cols)
@@ -113,12 +146,12 @@ def main():
         repaint = drain(args.drain)
         events.append({"type": "resize", "columns": cols, "rows": ROWS})
         if repaint:
-            events.append({"type": "feed", "hex": repaint.hex()})
+            events.append(feed_event(repaint))
 
     # The drag ends and the shell catches up, exactly as releasing the divider does.
     tail = drain(1.5)
     if tail:
-        events.append({"type": "feed", "hex": tail.hex()})
+        events.append(feed_event(tail))
 
     os.write(fd, b"exit\n")
     drain(0.5)
@@ -128,14 +161,19 @@ def main():
         pass
     os.waitpid(pid, 0)
 
+    recording = recording_document(
+        initial={"columns": START_COLS, "rows": ROWS},
+        events=events,
+        stimulus=(
+            f"fish integration width drag from {START_COLS} to {END_COLS} columns"
+        ),
+    )
     with open(out_path, "w") as f:
-        f.write(json.dumps({"initial": {"columns": START_COLS, "rows": ROWS}}) + "\n")
-        for event in events:
-            f.write(json.dumps(event) + "\n")
+        json.dump(recording, f)
 
     feeds = [e for e in events if e["type"] == "feed"]
     resizes = [e for e in events if e["type"] == "resize"]
-    blob = bytes.fromhex("".join(e["hex"] for e in feeds))
+    blob = feed_bytes(feeds)
     marks = re.findall(rb"\x1b\]133;[^\x07\x1b]*(?:\x07|\x1b\\)", blob)
     print(f"wrote {out_path}: {len(events)} events, {len(resizes)} resizes, "
           f"{len(blob)} bytes")

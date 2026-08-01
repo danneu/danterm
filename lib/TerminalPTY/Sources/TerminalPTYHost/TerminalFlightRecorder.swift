@@ -93,7 +93,7 @@ public struct TerminalFlightRecordingOrigin: Equatable, Sendable {
 
 /// Immutable dump boundary whose arrays retain feed storage by reference until encoding ends.
 public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
-    /// Pane geometry that existed before the first retained transition.
+    /// Pane geometry when the recorder was constructed; retention eviction does not advance it.
     public let initial: NeutralTerminalDimensions
     /// Oldest-to-newest retained transitions with their inert capture timestamps.
     public let events: [TerminalFlightRecordingEvent]

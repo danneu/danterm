@@ -8,8 +8,8 @@ prompt must be one that renders at (or near) the full pane width -- a
 right-aligned segment padded to `$COLUMNS`, which is Starship's default. A
 narrower prompt cannot exhibit the failure; that is what made F11 a false null.
 
-Writes four replay JSONs of {feed, resize} events for `TerminalCore.Terminal`:
-the capture as-is, and three variants differing only in the option appended to
+Writes four complete live-capture snapshots for `TerminalCore.Terminal`: the
+capture as-is, and three variants differing only in the option appended to
 fish's own OSC 133 `A` mark.
 
 To replay, feed each variant's events to a `Terminal` in order (feed bytes,
@@ -18,13 +18,60 @@ apply resizes) and count occurrences of the prompt's `repo:` token in
 `redraw=0` 31 (10 visible on screen). Anything else means the parser's blanking
 behavior moved.
 """
-import os, pty, time, select, fcntl, termios, struct, re, json, sys
+import base64, copy, os, pty, time, select, fcntl, termios, struct, re, json, sys
 
 REPO = "/Users/dan/Code/danterm-terminal-engine"
 FISH = "/etc/profiles/per-user/dan/bin/fish"
 START_COLS = 100
 END_COLS = 70
 ROWS = 12
+
+
+def feed_event(payload):
+    """Encode PTY bytes in the canonical lossless producer representation."""
+    return {
+        "type": "feed",
+        "base64": base64.b64encode(payload).decode("ascii"),
+    }
+
+
+def recording_document(*, initial, events, stimulus):
+    """Wrap one direct PTY experiment as a converter-ready live snapshot."""
+    return {
+        "version": 1,
+        "provenance": {
+            "source": "danterm-live-capture",
+            "author": "DanTerm",
+            "test": "TerminalShellDialectTests",
+            "recordedDeviations": [],
+            "shell": "fish",
+            "stimulus": stimulus,
+        },
+        "initial": initial,
+        "events": events,
+    }
+
+
+def recording_variant(recording, marker, suffix):
+    """Derive a controlled byte-level variant without rebuilding its drive sequence."""
+    variant = copy.deepcopy(recording)
+    for event in variant["events"]:
+        if event["type"] == "feed":
+            raw = base64.b64decode(event["base64"], validate=True)
+            event["base64"] = base64.b64encode(
+                raw.replace(marker, marker + suffix)
+            ).decode("ascii")
+    return variant
+
+
+def feed_bytes(events):
+    """Reassemble captured feeds for byte counts and OSC diagnostics."""
+    return b"".join(
+        base64.b64decode(event["base64"], validate=True)
+        for event in events
+        if event["type"] == "feed"
+    )
+
 
 def set_size(fd, cols, rows=ROWS):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -72,7 +119,7 @@ def main():
 
     events = []
     startup = drain(3.0)
-    events.append({"type": "feed", "hex": startup.hex()})
+    events.append(feed_event(startup))
 
     # Gradual shrink, one column at a time, letting fish repaint after each.
     for cols in range(START_COLS - 1, END_COLS - 1, -1):
@@ -80,7 +127,7 @@ def main():
         time.sleep(0.12)
         repaint = drain(0.35)
         events.append({"type": "resize", "columns": cols, "rows": ROWS})
-        events.append({"type": "feed", "hex": repaint.hex()})
+        events.append(feed_event(repaint))
 
     os.write(fd, b"exit\n")
     drain(0.5)
@@ -90,36 +137,33 @@ def main():
         pass
     os.waitpid(pid, 0)
 
-    doc = {
-        "initial": {"columns": START_COLS, "rows": ROWS},
-        "events": events,
-    }
+    doc = recording_document(
+        initial={"columns": START_COLS, "rows": ROWS},
+        events=events,
+        stimulus=f"fish native mark width sweep from {START_COLS} to {END_COLS} columns",
+    )
     out_path = sys.argv[1] if len(sys.argv) > 1 else "fish_sweep.json"
     with open(out_path, "w") as f:
         json.dump(doc, f)
 
     # The three replay variants, differing only in the option on fish's own `A`.
-    import copy
     base = b"\x1b]133;A;click_events=1"
     for suffix, name in ((b"", "asis"), (b";redraw=0", "redraw0"), (b";redraw=1", "redraw1")):
-        variant = copy.deepcopy(doc)
-        for event in variant["events"]:
-            if event["type"] == "feed":
-                raw = bytes.fromhex(event["hex"]).replace(base, base + suffix)
-                event["hex"] = raw.hex()
+        variant = recording_variant(doc, base, suffix)
         with open(out_path.replace(".json", f"_{name}.json"), "w") as f:
             json.dump(variant, f)
 
     feeds = [e for e in events if e["type"] == "feed"]
-    total = sum(len(e["hex"]) // 2 for e in feeds)
+    blob = feed_bytes(feeds)
+    total = len(blob)
     marks = re.findall(rb"\x1b\]133;[^\x07\x1b]*(?:\x07|\x1b\\)",
-                       bytes.fromhex("".join(e["hex"] for e in feeds)))
+                       blob)
     print(f"wrote {out_path}: {len(events)} events, {total} bytes")
     print(f"OSC 133 marks seen: {len(marks)}")
     seen = sorted({m.decode('latin1') for m in marks})
     for s in seen:
         print(f"  {s!r}")
-    empty = sum(1 for e in feeds if not e["hex"])
+    empty = sum(1 for e in feeds if not e["base64"])
     print(f"resize steps that produced NO repaint bytes: {empty}/{len(feeds) - 1}")
 
 if __name__ == "__main__":

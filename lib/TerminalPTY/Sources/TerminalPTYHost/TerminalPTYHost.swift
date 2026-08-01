@@ -207,11 +207,6 @@ public actor TerminalPTYHost {
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
     private var flightTape: TerminalFlightRecorder?
-    // nil unless DANTERM_TAPE_PATH is set. See TerminalTapeRecorder.swift.
-    private lazy var tape = TerminalTapeRecorder.fromEnvironment(
-        initialColumns: initialDimensions.columns,
-        initialRows: initialDimensions.rows
-    )
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
     private var capturedReplyWrites: [[UInt8]] = []
@@ -1594,7 +1589,6 @@ public actor TerminalPTYHost {
 
     private func applyOutput(_ bytes: [UInt8]) {
         let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
-        tape?.recordFeed(bytes)
         flightTape?.record(.feed(bytes))
         terminal.feed(bytes)
         let replies = terminal.drainReplyBytes()
@@ -1631,7 +1625,6 @@ public actor TerminalPTYHost {
         )
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
         let previousTerminal = terminal
-        tape?.recordResize(columns: dimensions.columns, rows: dimensions.rows)
         flightTape?.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
         if terminal != previousTerminal { markUpdatePending() }
