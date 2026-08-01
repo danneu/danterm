@@ -6,21 +6,18 @@
 set -euo pipefail
 
 SWIFT_CONFIGURATION=""
-case "$#" in
-    0) ;;
-    1)
-        if [ "$1" = "--release" ]; then
-            SWIFT_CONFIGURATION="release"
-        else
-            echo "Usage: $0 [--release]" >&2
+KILL_RUNNING=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --release) SWIFT_CONFIGURATION="release" ;;
+        --kill-running) KILL_RUNNING="1" ;;
+        *)
+            echo "Usage: $0 [--release] [--kill-running]" >&2
             exit 2
-        fi
-        ;;
-    *)
-        echo "Usage: $0 [--release]" >&2
-        exit 2
-        ;;
-esac
+            ;;
+    esac
+    shift
+done
 
 swift_build() {
     if [ -n "$SWIFT_CONFIGURATION" ]; then
@@ -78,6 +75,8 @@ for pair in \
     "integrations/claude-code/claude-notify-osc777.sh danterm-claude-notify-osc777" \
     "integrations/claude-code/danterm-agent-session.sh danterm-claude-agent-session" \
     "integrations/codex/danterm-agent-session.sh danterm-codex-agent-session"; do
+    # Intentional word splitting: each entry is a "source destination" pair.
+    # shellcheck disable=SC2086
     set -- $pair
     cp "$SCRIPT_DIR/$1" "$APP_PATH/Contents/Resources/danterm-hooks/$2"
     chmod +x "$APP_PATH/Contents/Resources/danterm-hooks/$2"
@@ -100,6 +99,19 @@ plutil -replace CFBundleExecutable -string "DanTerm Dev" "$APP_PATH/Contents/Inf
 plutil -replace CFBundleIconName -string "AppIcon-dev" "$APP_PATH/Contents/Info.plist"
 
 codesign --force --deep --sign "Apple Development" --entitlements "$SCRIPT_DIR/dev-entitlements.plist" "$APP_PATH"
+
+# Quit a running instance at the last possible moment -- after the compile, just
+# before the install replaces the bundle out from under it. Waiting for the
+# process to actually exit is the point: `killall` only sends SIGTERM, and a
+# caller that runs `open` against a half-dead instance gets LaunchServices error
+# -600 (procNotFound) because `open` reuses the still-registered bundle id.
+if [ -n "$KILL_RUNNING" ]; then
+    killall "DanTerm Dev" 2>/dev/null || true
+    for _ in $(seq 1 50); do
+        pgrep -x "DanTerm Dev" >/dev/null || break
+        sleep 0.1
+    done
+fi
 
 # Install the freshly built app so launchers using ~/Applications are in sync.
 mkdir -p "$HOME/Applications"
