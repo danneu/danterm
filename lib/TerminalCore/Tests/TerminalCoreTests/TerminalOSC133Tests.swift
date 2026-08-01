@@ -206,4 +206,41 @@ struct TerminalOSC133Tests {
         #expect(lines.dropFirst().first?.hasPrefix("UVWXY") == true)
         expectValidGrid(terminal)
     }
+
+    @Test("a prompt head starts its own logical line rather than continuing the row above")
+    func promptStartBreaksTheWrapClaimAboveIt() throws {
+        // Intent: a row stamped as a prompt head is a line start, so the row above it stops
+        //   claiming it as the continuation of a wrapped line.
+        // Why it exists: fish and zsh advance a line by *overflowing* one -- the PROMPT_SP
+        //   hack writes a marker plus enough padding to reach the right margin, letting the
+        //   terminal's own wrap do the newline
+        //   (`references/fish-shell/src/screen.rs#abandon_line_string`). When the width the
+        //   shell padded for is wider than the pane -- which a drag makes routine, since the
+        //   shell composes the string from a width it has already lost -- the padding really
+        //   does wrap, and the padded row is left asserting that the prompt below it is its
+        //   own continuation. Reflow measures a wrapped row to its full old width, so every
+        //   later resize spliced that padding in front of the prompt and pushed it right by
+        //   the overflow.
+        // Scenario: exiting a subshell mid-drag in a live pane. fish printed its
+        //   missing-newline marker padded for 135 columns into a pane already narrowed to
+        //   118, and the fish prompt above the `zsh` command sat permanently indented,
+        //   re-wrapping its tail onto a row of its own.
+        var terminal = try #require(Terminal(columns: 20, rows: 6))
+        terminal.feed(Array("done\r\n".utf8))
+        terminal.feed(Array("\u{23CE}\(String(repeating: " ", count: 23))".utf8))
+        terminal.feed(Array("\r\u{23CE} \r\u{1B}[K".utf8))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}".utf8))
+        terminal.feed(Array("P\(String(repeating: "-", count: 18))Q$ \u{1B}]133;B\u{7}cmd\r\n".utf8))
+        terminal.feed(Array("\u{1B}]133;C\u{7}out\r\n\u{1B}]133;D;0\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}$ \u{1B}]133;B\u{7}".utf8))
+        terminal.resize(columns: 17, rows: 6)
+
+        let lines = terminal.screenText.split(separator: "\n", omittingEmptySubsequences: false)
+        let promptRow = try #require(lines.firstIndex { $0.contains("P---") })
+        // Before the fix the prompt arrived as "   P--------------" -- indented by the
+        // three columns the stale-width padding overflowed by, with "--Q" pushed down.
+        #expect(lines[promptRow].hasPrefix("P\(String(repeating: "-", count: 16))"))
+        #expect(lines[promptRow + 1].hasPrefix("--Q"))
+        expectValidGrid(terminal)
+    }
 }

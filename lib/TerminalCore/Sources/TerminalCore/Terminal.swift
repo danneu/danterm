@@ -1186,6 +1186,30 @@ public struct Terminal: Equatable, Sendable {
         semanticContent = .prompt
         semanticContentClearsAtEndOfLine = false
         rows[cursor.row].semanticPrompt = kind
+        reclaimStalePromptHeads(for: kind)
+        // A prompt head begins a logical line, so the row above it stops claiming it as a
+        // continuation. Both fish and zsh advance a line by deliberately overflowing one:
+        // the PROMPT_SP hack writes a marker and pads to the right margin so the
+        // terminal's own wrap does the newline
+        // (`references/fish-shell/src/screen.rs#abandon_line_string`). Padded for a width
+        // the shell has already lost to a drag, that padding really does wrap, and the
+        // padded row is left asserting the prompt below it is part of its line. Reflow
+        // measures a wrapped row to its full old width, so every later resize spliced the
+        // padding in front of the prompt. Only at column 0: a prompt that starts partway
+        // along a row is genuinely mid-line, and the claim above it is genuinely live.
+        //
+        // After the reclaim, not before: a stranded head is recognized *by* the claim it
+        // still makes on the row below it, so clearing the claim first would erase the
+        // evidence and leave the fragment on screen.
+        if kind == .prompt, cursor.column == 0, cursor.row > 0 {
+            rows[cursor.row - 1].isSoftWrapped = false
+        }
+    }
+
+    /// Removes the prompt rows a repaint stranded above the head just stamped, rather than
+    /// waiting for a resize: the drag that strands one need not be followed by another
+    /// resize, and a drag ending on the stranding repaint would leave the debris forever.
+    private mutating func reclaimStalePromptHeads(for kind: SemanticPromptRow) {
         // Clear stale heads here as well as at resize, because the repaint that strands
         // one need not be followed by another resize: a drag that ends on the stranding
         // repaint leaves debris that the resize path never gets a chance to see. This is

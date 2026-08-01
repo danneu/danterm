@@ -177,6 +177,41 @@ struct TerminalShellDialectTests {
         terminal.fullHistoryText.components(separatedBy: "\u{256D}").count - 1
     }
 
+    @Test("a drag across shell transitions leaves every prompt whole and at the left margin")
+    func promptSPOverflowSurvivesAShellTransitionDrag() throws {
+        // Intent: replaying a drag that spans entering and leaving two subshells leaves
+        //   each prompt head at column 0 with exactly one tail, at every width the drag
+        //   passed through.
+        // Why it exists: fish and zsh advance a line by overflowing one -- the PROMPT_SP
+        //   hack pads to the right margin and lets the terminal's wrap do the newline
+        //   (`references/fish-shell/src/screen.rs#abandon_line_string`). Padded for a
+        //   width a drag has already taken away, that padding really wraps, and the
+        //   padded row was left claiming the prompt below it as its own continuation;
+        //   reflow then spliced the padding in front of the prompt on every later
+        //   resize. Only a recording covers this: the artifact needs a shell whose width
+        //   is stale by a specific amount at one specific instant.
+        // Scenario: the maintainer entered bash, exited, entered zsh, exited, and dragged
+        //   the pane's width throughout. The fish prompt above the `zsh` command came
+        //   back indented, with its right-aligned segment re-wrapped onto a row of its
+        //   own, and stayed that way.
+        let terminal = try replay("fish-prompt-sp-overflow")
+        let lines = terminal.fullHistoryText.components(separatedBy: "\n")
+
+        // Before the fix one head arrived as "   \u{256D} ~" -- indented by the columns the
+        // stale-width padding overflowed by.
+        #expect(lines.allSatisfy { !$0.contains("\u{256D}") || $0.hasPrefix("\u{256D}") })
+        // Every head has exactly one tail. A repaint that strands a fragment adds a head
+        // without one, which the indent check alone cannot see.
+        #expect(topPromptRows(in: terminal) == promptTails(in: terminal))
+        expectValidGrid(terminal)
+    }
+
+    /// The closing glyph of this prompt's lower row, counted against `topPromptRows` so a
+    /// stranded head -- a copy with no input row under it -- shows up as an imbalance.
+    private func promptTails(in terminal: Terminal) -> Int {
+        terminal.fullHistoryText.components(separatedBy: "\u{2570}").count - 1
+    }
+
     @Test("resizing while a command runs leaves its output untouched")
     func resizeDuringOutputPreservesIt() throws {
         // Intent: after `C`, a resize blanks nothing, so a running command's output and
