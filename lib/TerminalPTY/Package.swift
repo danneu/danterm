@@ -15,6 +15,7 @@ let package = Package(
     dependencies: [
         .package(path: "../TerminalCore"),
         .package(path: "../DanTermProtocol"),
+        .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
     ],
     targets: [
         .target(
@@ -28,6 +29,7 @@ let package = Package(
                 "PaneLifecycle",
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+                .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/TerminalPTYHost",
             swiftSettings: [.swiftLanguageMode(.v6)]

@@ -201,7 +201,7 @@ spec-first behavior -- there is no incident to name.
 - [x] **Characterization tests.** Add the four `cursorSnapshot`/wraparound tests
       to `TerminalFlightRecorderTests.swift`. Green against the existing
       linked-list implementation, no production code touched.
-- [ ] **Swap the container.** Add the pinned dependency to
+- [x] **Swap the container.** Add the pinned dependency to
       `lib/TerminalPTY/Package.swift`, replace the list and dictionary with a
       `Deque` in `TerminalFlightRecorder.swift`, delete `Node`/`deinit`, and
       document I1, I2, and AR1.

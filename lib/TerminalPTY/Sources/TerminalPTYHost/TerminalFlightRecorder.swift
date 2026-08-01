@@ -1,6 +1,7 @@
 // Bounded in-memory capture of one live pane's feed and resize drive sequence. The PTY
 // owner records without encoding or IO; dump callers fence a value snapshot for later work.
 import PaneLifecycle
+import DequeModule
 import Foundation
 import TerminalCoreRecording
 
@@ -139,21 +140,11 @@ public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
 package final class TerminalFlightRecorder {
-    private final class Node {
+    /// Keeps retention accounting beside each event without allocating an object per entry.
+    private struct Slot {
         let event: TerminalFlightRecordingEvent
         let payloadBytes: Int
         let payloadBytesBeforeEvent: Int
-        var next: Node?
-
-        init(
-            event: TerminalFlightRecordingEvent,
-            payloadBytes: Int,
-            payloadBytesBeforeEvent: Int
-        ) {
-            self.event = event
-            self.payloadBytes = payloadBytes
-            self.payloadBytesBeforeEvent = payloadBytesBeforeEvent
-        }
     }
 
     private let initial: NeutralTerminalDimensions
@@ -162,10 +153,12 @@ package final class TerminalFlightRecorder {
     private let now: @Sendable () -> UInt64
     private let startedNanoseconds: UInt64
     private var lastElapsedNanoseconds: UInt64 = 0
-    private var head: Node?
-    private var tail: Node?
-    private var retainedNodesBySequence: [UInt64: Node] = [:]
-    private var eventCount = 0
+    /// Retains a contiguous lifetime-sequence run: slot `i` has sequence
+    /// `slots[0].event.sequence + i`.
+    /// Never let this COW value escape a snapshot; map to arrays so later owner-queue writes
+    /// stay unique. Deque keeps its high-water allocation after head eviction; that is accepted
+    /// because the retained count remains bounded per pane.
+    private var slots: Deque<Slot> = []
     private var accountedBytes = 0
     private var droppedEventCount = 0
     private var droppedPayloadBytes = 0
@@ -187,21 +180,13 @@ package final class TerminalFlightRecorder {
         startedNanoseconds = now()
     }
 
-    deinit {
-        while let current = head {
-            head = current.next
-            current.next = nil
-        }
-        tail = nil
-    }
-
     package func record(_ event: NeutralTerminalRecordingEvent) {
         let current = now()
         let measured = current >= startedNanoseconds ? current - startedNanoseconds : 0
         let elapsed = max(lastElapsedNanoseconds, measured)
         lastElapsedNanoseconds = elapsed
         let payloadBytes = Self.payloadBytes(of: event)
-        let node = Node(
+        let slot = Slot(
             event: .init(sequence: nextSequence, event: event, elapsedNanoseconds: elapsed),
             payloadBytes: payloadBytes,
             payloadBytesBeforeEvent: totalPayloadBytes
@@ -211,29 +196,20 @@ package final class TerminalFlightRecorder {
         if case .resize(let columns, let rows) = event {
             currentDimensions = .init(columns: columns, rows: rows)
         }
-        if let tail {
-            tail.next = node
-        } else {
-            head = node
-        }
-        tail = node
-        retainedNodesBySequence[node.event.sequence] = node
-        eventCount += 1
+        slots.append(slot)
         accountedBytes += payloadBytes + configuration.eventOverheadBytes
         enforceBounds()
+        assert(
+            slots.isEmpty
+                || slots[slots.count - 1].event.sequence
+                    == slots[0].event.sequence + UInt64(slots.count - 1)
+        )
     }
 
     package func snapshot() -> TerminalFlightRecordingSnapshot {
-        var events: [TerminalFlightRecordingEvent] = []
-        events.reserveCapacity(eventCount)
-        var node = head
-        while let current = node {
-            events.append(current.event)
-            node = current.next
-        }
         return TerminalFlightRecordingSnapshot(
             initial: initial,
-            events: events,
+            events: slots.map(\.event),
             accountedBytes: accountedBytes,
             droppedEventCount: droppedEventCount,
             droppedPayloadBytes: droppedPayloadBytes
@@ -246,20 +222,11 @@ package final class TerminalFlightRecorder {
         precondition(cursor.nextSequence <= nextSequence)
         precondition(cursor.payloadBytesBeforeNextSequence <= totalPayloadBytes)
 
-        let firstRetainedSequence = head?.event.sequence ?? nextSequence
-        let firstRetainedPayloadBytes = head?.payloadBytesBeforeEvent ?? totalPayloadBytes
+        let firstRetainedSequence = slots.first?.event.sequence ?? nextSequence
+        let firstRetainedPayloadBytes = slots.first?.payloadBytesBeforeEvent ?? totalPayloadBytes
         let firstReturnedSequence = max(cursor.nextSequence, firstRetainedSequence)
-        var events: [TerminalFlightRecordingEvent] = []
-        events.reserveCapacity(Int(nextSequence - firstReturnedSequence))
-        var node = firstReturnedSequence == firstRetainedSequence
-            ? head
-            : retainedNodesBySequence[firstReturnedSequence]
-        while let current = node {
-            if current.event.sequence >= firstReturnedSequence {
-                events.append(current.event)
-            }
-            node = current.next
-        }
+        let firstReturnedIndex = Int(firstReturnedSequence - firstRetainedSequence)
+        let events = slots[firstReturnedIndex...].map(\.event)
 
         let hasGap = cursor.nextSequence < firstRetainedSequence
         return TerminalFlightRecordingCursorSnapshot(
@@ -293,13 +260,10 @@ package final class TerminalFlightRecorder {
 
     private func enforceBounds() {
         while accountedBytes > configuration.budgetBytes
-            || eventCount > configuration.eventLimit
+            || slots.count > configuration.eventLimit
         {
-            guard let evicted = head else { break }
-            head = evicted.next
-            if head == nil { tail = nil }
-            retainedNodesBySequence.removeValue(forKey: evicted.event.sequence)
-            eventCount -= 1
+            guard !slots.isEmpty else { break }
+            let evicted = slots.removeFirst()
             accountedBytes -= evicted.payloadBytes + configuration.eventOverheadBytes
             droppedEventCount += 1
             droppedPayloadBytes += evicted.payloadBytes
