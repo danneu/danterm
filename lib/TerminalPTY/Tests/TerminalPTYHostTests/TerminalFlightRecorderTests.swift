@@ -148,6 +148,113 @@ struct TerminalFlightRecorderTests {
         ])
     }
 
+    @Test("cursor inside the retained range uses its offset from the retained head")
+    func cursorInsideRetainedRangeAfterEviction() {
+        // Intent: a cursor within an evicted recorder's retained range returns the exact suffix.
+        // Why it exists: pins down the non-zero retained base and non-zero cursor offset that
+        //   index-backed storage must translate into a buffer-relative position.
+        // Scenario: a polling reader resumes from sequence 3 after sequences 0 and 1 were evicted.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 3, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        for payloadSize in 1...5 {
+            recorder.record(.feed(Array(repeating: UInt8(payloadSize), count: payloadSize)))
+        }
+
+        let snapshot = recorder.cursorSnapshot(from: .init(
+            nextSequence: 3,
+            payloadBytesBeforeNextSequence: 6
+        ))
+
+        #expect(snapshot.firstRetainedSequence == 2)
+        #expect(snapshot.events.map(\.sequence) == [3, 4])
+        #expect(snapshot.droppedEventCount == 0)
+        #expect(snapshot.droppedPayloadBytes == 0)
+    }
+
+    @Test("caught-up cursor remains empty after head eviction")
+    func caughtUpCursorAfterEviction() {
+        // Intent: a caught-up cursor returns no events when the retained sequence base is non-zero.
+        // Why it exists: pins down the offset-at-end boundary for index-backed recorder storage.
+        // Scenario: a polling reader asks again after consuming all five lifetime events.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 3, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        for payloadSize in 1...5 {
+            recorder.record(.feed(Array(repeating: UInt8(payloadSize), count: payloadSize)))
+        }
+        let cursor = TerminalFlightRecordingCursor(
+            nextSequence: 5,
+            payloadBytesBeforeNextSequence: 15
+        )
+
+        let snapshot = recorder.cursorSnapshot(from: cursor)
+
+        #expect(snapshot.events.isEmpty)
+        #expect(snapshot.firstRetainedSequence == 2)
+        #expect(snapshot.droppedEventCount == 0)
+        #expect(snapshot.droppedPayloadBytes == 0)
+        #expect(snapshot.nextCursor == cursor)
+    }
+
+    @Test("zero byte budget can fully drain retained events")
+    func zeroByteBudgetFullyDrainsRecorder() {
+        // Intent: a recorder may retain no slots while preserving lifetime sequence and loss totals.
+        // Why it exists: pins down the empty-buffer fallback used by snapshots and invariants.
+        // Scenario: a pane configured with no recording budget receives two feed events.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 0, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1, 2]))
+        recorder.record(.feed([3, 4, 5]))
+
+        let dump = recorder.snapshot()
+        let cursorSnapshot = recorder.cursorSnapshot(from: .beginning)
+
+        #expect(dump.events.isEmpty)
+        #expect(dump.accountedBytes == 0)
+        #expect(cursorSnapshot.events.isEmpty)
+        #expect(cursorSnapshot.firstRetainedSequence == cursorSnapshot.nextSequence)
+        #expect(cursorSnapshot.droppedEventCount == 2)
+        #expect(cursorSnapshot.droppedPayloadBytes == 5)
+    }
+
+    @Test("production recorder preserves order across repeated ring wraparound")
+    func productionRecorderRingWraparound() {
+        // Intent: bounded storage preserves a contiguous retained run and exact cursor suffix at scale.
+        // Why it exists: pins down ordering across circular-buffer wraparound after repeated eviction.
+        // Scenario: a busy pane records three times the production event limit before a reader polls.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .production,
+            now: { 0 }
+        )
+        let eventLimit = 32_768
+        let recordedCount = 3 * eventLimit
+        for _ in 0..<recordedCount {
+            recorder.record(.feed([1]))
+        }
+
+        let dump = recorder.snapshot()
+        let firstRetainedSequence = UInt64(recordedCount - eventLimit)
+        let midSequence = firstRetainedSequence + UInt64(eventLimit / 2)
+        let suffix = recorder.cursorSnapshot(from: .init(
+            nextSequence: midSequence,
+            payloadBytesBeforeNextSequence: Int(midSequence)
+        ))
+
+        #expect(dump.events.count == eventLimit)
+        #expect(dump.events.first?.sequence == firstRetainedSequence)
+        #expect(dump.events.last?.sequence == UInt64(recordedCount - 1))
+        #expect(suffix.events.map(\.sequence) == Array(midSequence..<UInt64(recordedCount)))
+    }
+
     @Test("from-now origin pairs current geometry with the next event cursor")
     func fromNowOriginIsAtomicRecorderState() {
         let recorder = TerminalFlightRecorder(
