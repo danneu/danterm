@@ -14,6 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../TerminalCore"),
+        .package(path: "../DanTermProtocol"),
     ],
     targets: [
         .target(
@@ -111,6 +112,7 @@ let package = Package(
         .testTarget(
             name: "TerminalPTYHostTests",
             dependencies: [
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 "PaneLifecycle",
                 "TerminalPTYHost",
                 "TerminalPTYTestSupport",

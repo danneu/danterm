@@ -2532,6 +2532,53 @@ import DanTermProtocol
             #expect(error.message == "lines must be a positive integer")
         }
     }
+
+    @Test("pane.tape resolves the addressed pane and defers its reply")
+    func paneTapeResolvesAddressedPane() {
+        // Intent: pane.tape emits one dump command for the explicit pane and no
+        //   immediate reply, leaving serialization to the runtime boundary.
+        // Why it exists: the pure update layer must not read a session or encode
+        //   a recording while still owning pane-addressing semantics.
+        // Scenario: a CLI client requests a tape from a known background pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneTape,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        )
+
+        #expect(commands.count == 1)
+        guard case .dumpPaneTape(_, let commandPaneId) = commands[0] else {
+            Issue.record("expected dumpPaneTape command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+    }
+
+    @Test("pane.tape rejects missing and unknown panes")
+    func paneTapeRejectsMissingAndUnknownPanes() throws {
+        var missingModel = makeModel()
+        createTab(&missingModel)
+        let missing = sendIpc(
+            &missingModel,
+            method: Methods.paneTape,
+            params: .object([:]),
+            context: IpcRequestContext()
+        )
+        #expect(try requireIpcError(missing) == .init(code: -32602, message: "pane required"))
+
+        var unknownModel = makeModel()
+        createTab(&unknownModel)
+        let unknown = sendIpc(
+            &unknownModel,
+            method: Methods.paneTape,
+            params: .object(["pane": .string(UUID().uuidString)])
+        )
+        #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
+    }
 }
 
 // MARK: - Private helpers

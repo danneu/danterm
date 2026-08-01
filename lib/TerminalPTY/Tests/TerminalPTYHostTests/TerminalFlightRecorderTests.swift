@@ -1,4 +1,6 @@
 // Behavioral proofs for the bounded live-pane recorder independent of real PTY timing.
+import Foundation
+import DanTermProtocol
 import TerminalCoreRecording
 @testable import TerminalPTYHost
 import Synchronization
@@ -98,6 +100,81 @@ struct TerminalFlightRecorderTests {
         host.deliverOutputForTesting(Array("not retained".utf8))
 
         #expect(host.fencedFlightRecording() == nil)
+    }
+
+    @Test("dump encoding produces one replayable raw recording document")
+    func dumpEncodingProducesReplayableDocument() throws {
+        let clock = TestFlightClock([100, 112, 125])
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 4, rows: 2),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: clock.now
+        )
+        recorder.record(.feed([0x41, 0x00, 0xFF]))
+        recorder.record(.resize(columns: 5, rows: 3))
+
+        let data = try recorder.snapshot().encodedRecording()
+        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
+        let json = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let events = try #require(json["events"] as? [[String: Any]])
+        let truncation = try #require(json["truncation"] as? [String: Any])
+
+        #expect(recording.provenance == .liveCapture())
+        #expect(recording.events == [.feed([0x41, 0x00, 0xFF]), .resize(columns: 5, rows: 3)])
+        #expect(events.compactMap { ($0["elapsedNanoseconds"] as? NSNumber)?.uint64Value } == [12, 25])
+        #expect(truncation["isTruncated"] as? Bool == false)
+        #expect(truncation["droppedEventCount"] as? Int == 0)
+        #expect(truncation["droppedPayloadBytes"] as? Int == 0)
+        _ = try recording.replay()
+    }
+
+    @Test("production recorder bounds fit complete JSON-RPC lines")
+    func productionBoundsFitIPCLine() throws {
+        let bulkRecorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .production,
+            now: { 0 }
+        )
+        bulkRecorder.record(.feed(Array(repeating: 0xFF, count: 8 * 1_024 * 1_024 - 128)))
+
+        let tinyRecorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .production,
+            now: { 0 }
+        )
+        for _ in 0..<32_768 {
+            tinyRecorder.record(.feed([0xFF]))
+        }
+
+        for snapshot in [bulkRecorder.snapshot(), tinyRecorder.snapshot()] {
+            let document = try JSONDecoder().decode(JSONValue.self, from: snapshot.encodedRecording())
+            let line = try encodeIpcLine(JsonRpcResponse(id: .number(1), result: document))
+            #expect(line.count <= IpcLineFramer.maxLineBytes)
+            #expect(try JSONDecoder().decode(JsonRpcResponse.self, from: line).result == document)
+        }
+    }
+
+    @Test("dump encoding carries lifetime eviction metadata")
+    func dumpEncodingCarriesEvictionMetadata() throws {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 65, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2]))
+
+        let json = try #require(
+            JSONSerialization.jsonObject(with: recorder.snapshot().encodedRecording())
+                as? [String: Any]
+        )
+        let truncation = try #require(json["truncation"] as? [String: Any])
+
+        #expect(truncation["isTruncated"] as? Bool == true)
+        #expect(truncation["droppedEventCount"] as? Int == 1)
+        #expect(truncation["droppedPayloadBytes"] as? Int == 1)
     }
 }
 

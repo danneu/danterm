@@ -47,6 +47,7 @@ struct DanTermCLI {
           pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
+          pane tape --pane <pane-id>  Print the pane's replayable flight recording as JSON
           theme set [--pane <pane-id>] <name>|--clear
                                       Set or clear a pane theme
           agent attach --kind <kind> --id <session-id>

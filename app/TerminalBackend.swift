@@ -101,6 +101,8 @@ protocol TerminalSession: AnyObject {
     func readFullHistoryText() -> String?
     /// Reads persistent primary history without changing pane-read active-screen semantics.
     func readPrimaryHistoryText() -> String?
+    /// Copies the pane tape now and returns work that can encode it away from the main actor.
+    func flightRecordingEncoder() -> (@Sendable () throws -> Data)?
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
@@ -130,4 +132,9 @@ protocol TerminalBackend: AnyObject {
 extension TerminalBackend {
     /// Gives backends a final synchronous process-lifetime teardown hook during orderly exit.
     func terminateForApplicationExit() {}
+}
+
+extension TerminalSession {
+    /// Backends without the dev-only recorder advertise the unsupported state explicitly.
+    func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
 }

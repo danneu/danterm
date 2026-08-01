@@ -274,5 +274,11 @@ Decisive constraints:
 
 - [x] 1. feat(recording): add compact live-capture schema support
 - [x] 2. feat(pty): retain bounded live-pane flight recordings
-- [ ] 3. feat(ipc): expose pane tape dumps through the CLI
+- [x] 3. feat(ipc): expose pane tape dumps through the CLI
 - [ ] 4. feat(fixtures): convert and document live-pane tape captures
+
+## Implementation notes
+
+- Swift's default `JSONEncoder` escapes `/`, which can double slash-heavy base64
+  payloads and violate the IPC bound. The shared IPC line encoder now disables
+  slash escaping; PO5 covers the worst-case payload through that production path.

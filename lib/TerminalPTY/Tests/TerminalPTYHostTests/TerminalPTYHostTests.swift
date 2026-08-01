@@ -667,16 +667,16 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
         let snapshot = try #require(host.fencedFlightRecording())
-        let recording = NeutralTerminalRecording(
-            provenance: .liveCapture(),
-            initial: snapshot.initial,
-            events: snapshot.events.map(\.event)
+        let recording = try JSONDecoder().decode(
+            NeutralTerminalRecording.self,
+            from: snapshot.encodedRecording()
         )
         let resizeIndex = try #require(snapshot.events.firstIndex {
             if case .resize = $0.event { true } else { false }
         })
 
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(recording.events == snapshot.events.map(\.event))
         #expect(snapshot.events[..<resizeIndex].contains {
             if case .feed = $0.event { true } else { false }
         })

@@ -1717,6 +1717,15 @@ private func dispatchIpc(
         }
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
+    case Methods.paneTape:
+        let paneId = try resolvePane(
+            params: params,
+            context: context,
+            in: model,
+            requireExplicit: true
+        )
+        return [.dumpPaneTape(reqId: reqId, paneId: paneId)]
+
     case Methods.todoList:
         let paneId = try resolvePane(params: params, context: context, in: model)
         let todos = model.pane(paneId)?.todos ?? []

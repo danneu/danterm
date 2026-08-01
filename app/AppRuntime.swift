@@ -606,6 +606,35 @@ class AppRuntime {
             let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
 
+        case .dumpPaneTape(let reqId, let paneId):
+            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let session = surfaces[paneId] else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            switch preparePaneTapeDump(encoder: session.flightRecordingEncoder()) {
+            case .error(let code, let message):
+                connection.writeError(
+                    reqId: reqId,
+                    code: code,
+                    message: message
+                )
+            case .encode(let encode):
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let data = try encode()
+                        let recording = try JSONDecoder().decode(JSONValue.self, from: data)
+                        connection.writeSuccess(reqId: reqId, result: recording)
+                    } catch {
+                        connection.writeError(
+                            reqId: reqId,
+                            code: -32603,
+                            message: "failed to encode pane tape"
+                        )
+                    }
+                }
+            }
+
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
             runConfirmation(
                 messageText: "Close tab \"\(tabTitle)\"?",

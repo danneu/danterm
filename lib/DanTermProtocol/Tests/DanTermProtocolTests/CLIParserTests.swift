@@ -232,6 +232,29 @@ final class CLIParserTests: XCTestCase {
         ]))
     }
 
+    func testPaneTapeParsesExplicitPaneAsJSONOutput() throws {
+        let command = try parseCLI(["pane", "tape", "--pane", "P1"])
+
+        XCTAssertEqual(command.method, Methods.paneTape)
+        XCTAssertEqual(command.params, ["pane": .string("P1")])
+        XCTAssertEqual(command.outputMode, .json)
+    }
+
+    func testPaneTapeRejectsMissingAndUnexpectedArguments() {
+        let cases: [([String], String)] = [
+            (["pane", "tape"], "usage: danterm pane tape --pane <pane-id>"),
+            (["pane", "tape", "--pane"], "usage: danterm pane tape --pane <pane-id>"),
+            (["pane", "tape", "--pane", "P1", "extra"], "unexpected argument: extra"),
+            (["pane", "tape", "--bogus"], "unknown flag: --bogus"),
+        ]
+
+        for (args, message) in cases {
+            XCTAssertThrowsError(try parseCLI(args)) { error in
+                XCTAssertEqual((error as? CLIParseError)?.message, message)
+            }
+        }
+    }
+
     func testPaneInputSerializesKeyEventJSON() throws {
         // Intent: `pane input` serializes each token to the exact wire JSON the IPC
         //   decoder consumes -- the encode path end-to-end (argv -> params["input"]).

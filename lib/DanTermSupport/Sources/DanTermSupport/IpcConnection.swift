@@ -125,9 +125,7 @@ final class IpcConnection: @unchecked Sendable {
         lock.unlock()
         guard shouldWrite else { return }
 
-        guard let encoded = try? JSONEncoder().encode(value) else { return }
-        var line = encoded
-        line.append(0x0A)
+        guard let line = try? encodeIpcLine(value) else { return }
         writeQueue.async { [self, line] in
             defer {
                 if closeAfterWrite {

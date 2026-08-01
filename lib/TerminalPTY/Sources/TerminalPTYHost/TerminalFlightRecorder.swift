@@ -1,6 +1,7 @@
 // Bounded in-memory capture of one live pane's feed and resize drive sequence. The PTY
 // owner records without encoding or IO; dump callers fence a value snapshot for later work.
 import PaneLifecycle
+import Foundation
 import TerminalCoreRecording
 
 /// Bounds retained payload and metadata independently so both bulk and tiny PTY chunks fit.
@@ -54,6 +55,36 @@ public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
 
     /// True once any event was dropped, even if later writes leave ample free budget.
     public var isTruncated: Bool { droppedEventCount > 0 }
+
+    /// Encodes the immutable snapshot as one replayable raw-capture document off the owner queue.
+    public func encodedRecording() throws -> Data {
+        let recording = NeutralTerminalRecording(
+            provenance: .liveCapture(),
+            initial: initial,
+            events: events.map(\.event)
+        )
+        let baseData = try JSONEncoder().encode(recording)
+        guard var document = try JSONSerialization.jsonObject(with: baseData) as? [String: Any],
+              var encodedEvents = document["events"] as? [[String: Any]],
+              encodedEvents.count == events.count
+        else {
+            throw EncodingError.invalidValue(
+                recording,
+                .init(codingPath: [], debugDescription: "recording did not encode as an object")
+            )
+        }
+
+        for index in encodedEvents.indices {
+            encodedEvents[index]["elapsedNanoseconds"] = events[index].elapsedNanoseconds
+        }
+        document["events"] = encodedEvents
+        document["truncation"] = [
+            "isTruncated": isTruncated,
+            "droppedEventCount": droppedEventCount,
+            "droppedPayloadBytes": droppedPayloadBytes,
+        ]
+        return try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
+    }
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.

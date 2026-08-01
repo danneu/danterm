@@ -527,6 +527,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return controller.readPrimaryHistoryText()
     }
 
+    func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
+        guard let snapshot = controller.flightRecordingSnapshot() else { return nil }
+        return { try snapshot.encodedRecording() }
+    }
+
     func scroll(toRow row: Int) {
         controller.scroll(toTopRow: row)
     }

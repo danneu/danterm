@@ -50,3 +50,12 @@ public struct JsonRpcError: Codable, Equatable {
         self.data = data
     }
 }
+
+/// Encodes one transport line without doubling base64 slash bytes inside large replies.
+public func encodeIpcLine<T: Encodable>(_ value: T) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    var line = try encoder.encode(value)
+    line.append(0x0A)
+    return line
+}

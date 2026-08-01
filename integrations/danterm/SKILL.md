@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output or dump a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -25,6 +25,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
+    danterm pane tape --pane <pane-id>
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
     danterm doctor
@@ -85,7 +86,7 @@ For agent commands:
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
 - `agent attach`: hooks may use the implicit `$DANTERM_PANE` context; ordinary
   agent recipes should not call it.
-- `pane focus` and `pane read` already require explicit pane ids; keep them
+- `pane focus`, `pane read`, and `pane tape` already require explicit pane ids; keep them
   explicit.
 
 ## Context env vars
@@ -134,6 +135,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
+| "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
 | "what tabs/panes are open?" | `ls` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
@@ -235,6 +237,15 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
     danterm pane read --pane "$PANE_ID"
     danterm pane read --pane "$PANE_ID" --lines 200
 
+### Dump a pane flight recording
+
+`pane tape` prints the dev pane's bounded, raw recording as replayable JSON.
+The output is unscrubbed; redirect it to a file, then run the repository's
+fixture converter before committing it. Production and Ghostty-backed panes
+return an unsupported-backend error.
+
+    danterm pane tape --pane "$PANE_ID" > tape.json
+
 ### Send keys to another pane
 
 Use this for interrupts, replies to prompts, or scripted interaction with an
@@ -334,6 +345,7 @@ else prints nothing on success and exits 0.
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
+| `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 
 `agent attach --kind <kind> --id <session-id>` is a silent mutation: no stdout
 on success.

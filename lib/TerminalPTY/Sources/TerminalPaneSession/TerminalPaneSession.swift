@@ -693,6 +693,11 @@ public final class TerminalPaneSessionController {
         return makeRecording(test: test, events: completedRecordingEvents)
     }
 
+    /// Fences and copies the live recorder state without serializing on the PTY owner queue.
+    public func flightRecordingSnapshot() -> TerminalFlightRecordingSnapshot? {
+        host.fencedFlightRecording()
+    }
+
     /// Test harness seam that fences live evidence without changing completion eligibility.
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
         let fence = performAccountedFence(kind: .diagnostic, operation: .diagnosticState)

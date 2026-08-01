@@ -52,7 +52,7 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         }
 
     case "pane":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm pane <focus|info|split|input|read>") }
+        guard args.count >= 2 else { throw CLIParseError("usage: danterm pane <focus|info|split|input|read|tape>") }
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
@@ -65,6 +65,8 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
             return try parsePaneInputCommand(Array(args.dropFirst(2)))
         case "read":
             return try parsePaneReadCommand(Array(args.dropFirst(2)))
+        case "tape":
+            return try parsePaneTapeCommand(Array(args.dropFirst(2)))
         default:
             throw CLIParseError("unknown pane command")
         }
@@ -297,6 +299,27 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
         params["lines"] = .number(Double(lineLimit))
     }
     return CLICommand(method: Methods.paneRead, params: params, outputMode: .text)
+}
+
+private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
+    let parsed: ParsedTapePane
+    do {
+        parsed = try parseTapePaneArgs(args)
+    } catch let error as TapePaneParseError {
+        switch error {
+        case .missingPane, .missingPaneArg:
+            throw CLIParseError("usage: danterm pane tape --pane <pane-id>")
+        case .unknownFlag(let flag):
+            throw CLIParseError("unknown flag: \(flag)")
+        case .unexpectedArgument(let argument):
+            throw CLIParseError("unexpected argument: \(argument)")
+        }
+    }
+    return CLICommand(
+        method: Methods.paneTape,
+        params: ["pane": .string(parsed.pane)],
+        outputMode: .json
+    )
 }
 
 private func parseAgentAttachCommand(_ args: [String]) throws -> CLICommand {
