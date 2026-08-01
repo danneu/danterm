@@ -305,14 +305,16 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark
+        theme: RenderTheme = .dark,
+        recordsFlightTape: Bool = false
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
-            defaultColors: theme.defaultColors
+            defaultColors: theme.defaultColors,
+            recordsFlightTape: recordsFlightTape
         )
         self.init(
             host: host,
@@ -330,7 +332,8 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool
+        captureTransitions: Bool,
+        recordsFlightTape: Bool = false
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
@@ -338,7 +341,8 @@ public final class TerminalPaneSessionController {
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
             defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions
+            captureTransitions: captureTransitions,
+            recordsFlightTape: recordsFlightTape
         )
         self.init(
             host: host,
@@ -354,7 +358,8 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
         theme: RenderTheme = .dark,
-        captureTransitions: Bool
+        captureTransitions: Bool,
+        recordsFlightTape: Bool = false
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
@@ -362,7 +367,8 @@ public final class TerminalPaneSessionController {
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
             defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions
+            captureTransitions: captureTransitions,
+            recordsFlightTape: recordsFlightTape
         )
         self.init(
             host: host,

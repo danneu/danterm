@@ -273,6 +273,6 @@ Decisive constraints:
 ## Commit progress
 
 - [x] 1. feat(recording): add compact live-capture schema support
-- [ ] 2. feat(pty): retain bounded live-pane flight recordings
+- [x] 2. feat(pty): retain bounded live-pane flight recordings
 - [ ] 3. feat(ipc): expose pane tape dumps through the CLI
 - [ ] 4. feat(fixtures): convert and document live-pane tape captures

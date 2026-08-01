@@ -18,6 +18,7 @@ func makeSwiftTerminalBackend() -> any TerminalBackend {
 @MainActor
 final class SwiftTerminalBackend: TerminalBackend {
     private let bootstrapExecutable: String
+    private let recordsFlightTape: Bool
     #if DANTERM_TERMINAL_CHARACTERIZATION
     private let recordingDirectory: URL?
     #endif
@@ -37,6 +38,7 @@ final class SwiftTerminalBackend: TerminalBackend {
         bootstrapExecutable = bundle.bundleURL
             .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
             .path
+        recordsFlightTape = bundle.bundleIdentifier == "com.danneu.danterm-dev"
         #if DANTERM_TERMINAL_CHARACTERIZATION
         if let path = ProcessInfo.processInfo.environment["DANTERM_PTY_RECORDING_DIR"],
            path.isEmpty == false {
@@ -66,13 +68,15 @@ final class SwiftTerminalBackend: TerminalBackend {
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
                 theme: theme,
-                captureTransitions: recordingDirectory != nil
+                captureTransitions: recordingDirectory != nil,
+                recordsFlightTape: recordsFlightTape
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
-                theme: theme
+                theme: theme,
+                recordsFlightTape: recordsFlightTape
             )
             #endif
         } catch {

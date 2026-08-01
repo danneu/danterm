@@ -26,6 +26,7 @@ let package = Package(
             dependencies: [
                 "PaneLifecycle",
                 .product(name: "TerminalCore", package: "TerminalCore"),
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "Sources/TerminalPTYHost",
             swiftSettings: [.swiftLanguageMode(.v6)]

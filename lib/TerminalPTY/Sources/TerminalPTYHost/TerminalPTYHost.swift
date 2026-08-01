@@ -4,6 +4,7 @@ import Darwin
 import Dispatch
 import PaneLifecycle
 import TerminalCore
+import TerminalCoreRecording
 
 /// Construction failures caught before any PTY or process ownership exists.
 public enum TerminalPTYHostError: Error, Equatable, Sendable {
@@ -205,6 +206,7 @@ public actor TerminalPTYHost {
     private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
+    private var flightTape: TerminalFlightRecorder?
     // nil unless DANTERM_TAPE_PATH is set. See TerminalTapeRecorder.swift.
     private lazy var tape = TerminalTapeRecorder.fromEnvironment(
         initialColumns: initialDimensions.columns,
@@ -245,7 +247,8 @@ public actor TerminalPTYHost {
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
-        defaultColors: TerminalDefaultColors = .baked
+        defaultColors: TerminalDefaultColors = .baked,
+        recordsFlightTape: Bool = false
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
@@ -253,7 +256,8 @@ public actor TerminalPTYHost {
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors,
-            captureTransitions: false
+            captureTransitions: false,
+            recordsFlightTape: recordsFlightTape
         )
     }
 
@@ -266,6 +270,11 @@ public actor TerminalPTYHost {
         programVersion: String = "dev",
         defaultColors: TerminalDefaultColors = .baked,
         captureTransitions: Bool,
+        recordsFlightTape: Bool = false,
+        flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
+        flightTapeClock: @escaping @Sendable () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        },
         applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
     ) throws {
         guard let terminal = Terminal(
@@ -283,6 +292,13 @@ public actor TerminalPTYHost {
         self.bootstrapExecutable = bootstrapExecutable
         self.captureTransitions = captureTransitions
         self.applicationExitBound = applicationExitBound
+        if recordsFlightTape {
+            flightTape = TerminalFlightRecorder(
+                initialDimensions: initialDimensions,
+                configuration: flightTapeConfiguration,
+                now: flightTapeClock
+            )
+        }
     }
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
@@ -715,6 +731,11 @@ public actor TerminalPTYHost {
     /// Fences earlier owner-queue work for test-only synchronous reads.
     nonisolated public func fencedSnapshot() -> Terminal {
         fence(countsAsProduction: false) { owner in owner.terminal }.value
+    }
+
+    /// Copies retained event values on the owner queue so dump encoding stays off-actor.
+    package nonisolated func fencedFlightRecording() -> TerminalFlightRecordingSnapshot? {
+        fence(countsAsProduction: false) { owner in owner.flightTape?.snapshot() }.value
     }
 
     /// Fences test work and drains exactly the damage accumulated through that fence.
@@ -1551,6 +1572,7 @@ public actor TerminalPTYHost {
     private func applyOutput(_ bytes: [UInt8]) {
         let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
         tape?.recordFeed(bytes)
+        flightTape?.record(.feed(bytes))
         terminal.feed(bytes)
         let replies = terminal.drainReplyBytes()
         if replies.isEmpty == false {
@@ -1587,6 +1609,7 @@ public actor TerminalPTYHost {
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
         let previousTerminal = terminal
         tape?.recordResize(columns: dimensions.columns, rows: dimensions.rows)
+        flightTape?.record(.resize(columns: dimensions.columns, rows: dimensions.rows))
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
         if terminal != previousTerminal { markUpdatePending() }
         if captureTransitions {

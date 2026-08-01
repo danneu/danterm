@@ -650,6 +650,44 @@ struct TerminalPTYHostTests {
         })
     }
 
+    @Test("live flight recording preserves PTY chunk boundaries and resize order", .timeLimit(.minutes(1)))
+    func liveFlightRecordingRoundTrip() async throws {
+        let host = try TerminalPTYHost(
+            initialDimensions: .init(columns: 80, rows: 24),
+            bootstrapExecutable: bootstrapExecutable(),
+            machineHostname: MachineHostname.posix,
+            recordsFlightTape: true
+        )
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) recording \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
+        host.resize(.init(columns: 96, rows: 28))
+        host.send(Array("continue\n".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+
+        let snapshot = try #require(host.fencedFlightRecording())
+        let recording = NeutralTerminalRecording(
+            provenance: .liveCapture(),
+            initial: snapshot.initial,
+            events: snapshot.events.map(\.event)
+        )
+        let resizeIndex = try #require(snapshot.events.firstIndex {
+            if case .resize = $0.event { true } else { false }
+        })
+
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(snapshot.events[..<resizeIndex].contains {
+            if case .feed = $0.event { true } else { false }
+        })
+        #expect(snapshot.events[(resizeIndex + 1)...].contains {
+            if case .feed = $0.event { true } else { false }
+        })
+        #expect(zip(snapshot.events, snapshot.events.dropFirst()).allSatisfy {
+            $0.elapsedNanoseconds <= $1.elapsedNanoseconds
+        })
+    }
+
     @Test("teardown reaches every job in the owned session without touching a sibling", .timeLimit(.minutes(1)))
     func teardownLadderCoversSessionAndPreservesSibling() async throws {
         // Intent: pane close escalates across foreground, background, stopped,
