@@ -169,6 +169,43 @@ struct TerminalShellDialectTests {
         expectValidGrid(try replay("zsh-redraw-discriminator"))
     }
 
+    @Test("fish's redraw value is what keeps its sweep down to one prompt")
+    func fishRequiresTheDeclaredValue() throws {
+        // Intent: on a sweep against fish running the shipped integration, `redraw=1`
+        //   leaves one prompt and either other value leaves a staircase.
+        // Why it exists: what was unpinned for fish is the declared *value*.
+        //   `fishStaircaseNeedsTheDeclaration` covers the incident but predates the
+        //   emitter -- its variants append an option to fish's *native* `A`, so it pins
+        //   the parser's response rather than `danterm.fish` -- and
+        //   `fish-dialect-width-sweep` cannot discriminate, because a settled sweep that
+        //   never strands a row leaves one prompt at any value. Note the mark's absence
+        //   is *not* what this catches: the parser defaults to `full`, so deleting the
+        //   line renders identically here. The declaration earns its place because the
+        //   mode is per-pane state that outlives the shell that set it -- `redraw=last`
+        //   below is what a nested Bash leaves behind on exit, and re-declaring per
+        //   prompt is what takes it back.
+        // Scenario: fish with `danterm.fish` sourced over the maintainer's real config,
+        //   swept 100 down to 70 in a 12-row pane -- short enough that stranded copies
+        //   scroll into history rather than being overwritten in place.
+        #expect(topPromptRows(in: try replay("fish-redraw-discriminator")) == 1)
+        #expect(
+            topPromptRows(in: try replay("fish-redraw-discriminator", redrawOverride: "redraw=1"))
+                == 1
+        )
+        // Only DanTerm's mark carries a redraw option -- fish's own `A` declares
+        // `click_events=1` -- so an override moves exactly the byte under test. A copy per
+        // stranding step, so the magnitude is the claim, not the exact count.
+        #expect(
+            topPromptRows(in: try replay("fish-redraw-discriminator", redrawOverride: "redraw=0"))
+                > 10
+        )
+        #expect(
+            topPromptRows(in: try replay("fish-redraw-discriminator", redrawOverride: "redraw=last"))
+                > 10
+        )
+        expectValidGrid(try replay("fish-redraw-discriminator"))
+    }
+
     /// Counts this prompt's top row by the box-drawing glyph that opens it, which is the
     /// row a stranded copy leaves behind. `upperRow` cannot serve: the right-aligned
     /// segment it keys on is dropped by the prompt framework at narrow widths, so it
