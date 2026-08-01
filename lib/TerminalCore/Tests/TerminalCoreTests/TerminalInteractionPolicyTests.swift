@@ -697,6 +697,229 @@ struct TerminalInteractionPolicyTests {
         #expect(reprinted.matchesActivation(try #require(terminal.armedLink)))
     }
 
+    @Test("a held drag anchor stays on its text across repeated evictions")
+    func dragAnchorSurvivesRepeatedEvictions() throws {
+        // Intent: while the button is held, the anchored end of a drag keeps naming the
+        //   text it was placed on, however many rows eviction retires beneath it.
+        // Why it exists: the anchor was captured as a projection-local range, which counts
+        //   from the oldest *retained* row, so every evicted row silently restated it and
+        //   the fixed end walked one row downward per eviction.
+        // Scenario: the reported incident -- a pane scrolled up with output streaming into
+        //   a saturated scrollback, where pressing and nudging the pointer showed the
+        //   selection's far edge eight rows below where it was placed.
+        var terminal = try #require(Terminal(
+            columns: 12,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 12) * 6
+        ))
+        terminal.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
+        terminal.scroll(toTopRow: 2)
+
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, column: 0, row: 1, clickCount: 3), terminal: terminal, state: &state
+        )
+        #expect(down.selectionMutation == .set(range(3, 0, 3, 3)))
+
+        // Two separate bursts, so a one-shot rebase at the first eviction cannot pass.
+        for burst in 1...2 {
+            terminal.feed(Array("\r\nr0\(8 + burst)".utf8))
+            let anchoredRow = 3 - burst
+            let held = decideTerminalPointer(
+                .move(column: 0, row: 1), terminal: terminal, state: &state
+            )
+            #expect(held.selectionMutation == .set(range(anchoredRow, 0, anchoredRow, 3)))
+            var settled = terminal
+            settled.setSelection(range(anchoredRow, 0, anchoredRow, 3))
+            #expect(settled.selectedText == "r04")
+        }
+    }
+
+    @Test("a drag's moving end tracks the pointed text while following and while browsing")
+    func dragMovingEndTracksPointedText() throws {
+        // Intent: the endpoint under the pointer names the text under the pointer, in a
+        //   bottom-following viewport and in a scrolled-up browsing one alike.
+        // Why it exists: this is the premise that lets the eviction fix target only the
+        //   anchored end. It was unpinned, so a regression here would look like the
+        //   anchor bug returning.
+        var following = try #require(Terminal(columns: 12, rows: 2))
+        following.feed(Array("abc def\r\nghi jkl".utf8))
+        var followingState = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0), terminal: following, state: &followingState
+        )
+        let followingMove = decideTerminalPointer(
+            .move(column: 2, row: 1), terminal: following, state: &followingState
+        )
+        #expect(followingMove.selectionMutation == .set(range(0, 0, 1, 3)))
+        following.setSelection(range(0, 0, 1, 3))
+        #expect(following.selectedText == "abc def\nghi")
+
+        var browsing = try #require(Terminal(
+            columns: 12,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 12) * 6
+        ))
+        browsing.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
+        browsing.scroll(toTopRow: 2)
+        var browsingState = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0), terminal: browsing, state: &browsingState
+        )
+        let browsingMove = decideTerminalPointer(
+            .move(column: 2, row: 1), terminal: browsing, state: &browsingState
+        )
+        #expect(browsingMove.selectionMutation == .set(range(2, 0, 3, 3)))
+        browsing.setSelection(range(2, 0, 3, 3))
+        #expect(browsing.selectedText == "r03\nr04")
+    }
+
+    @Test("a partially evicted drag anchor clamps forward and keeps extending")
+    func dragAnchorClampsWhenPartiallyEvicted() throws {
+        // Intent: when eviction retires part of the anchored unit, the anchored edge moves
+        //   forward to the oldest retained row and the drag goes on extending from there.
+        // Why it exists: this is the rule a settled selection already follows, and the
+        //   anchor must not invent a second one -- dropping the drag or resolving against
+        //   rows that no longer exist would both be visible as a dead or jumping gesture.
+        // Scenario: triple-clicking a soft-wrapped line at the top of history while output
+        //   streams in, until the line's first visual row is evicted.
+        var terminal = try #require(Terminal(
+            columns: 4,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 4) * 3
+        ))
+        terminal.feed(Array("xx\r\naaaabbbb\r\nyy\r\nzz".utf8))
+        terminal.scroll(toTopRow: 0)
+
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, column: 0, row: 1, clickCount: 3), terminal: terminal, state: &state
+        )
+        #expect(down.selectionMutation == .set(range(1, 0, 2, 4)))
+
+        terminal.feed(Array("\r\nww\r\nvv".utf8))
+        let move = decideTerminalPointer(
+            .move(column: 0, row: 1), terminal: terminal, state: &state
+        )
+
+        #expect(move.selectionMutation == .set(range(0, 0, 1, 2)))
+        terminal.setSelection(range(0, 0, 1, 2))
+        #expect(terminal.selectedText == "bbbb\nyy")
+    }
+
+    @Test("reversing a token drag across the anchor restores the whole anchored token")
+    func tokenDragReversalPreservesAnchoredUnit() throws {
+        // Intent: after an eviction, dragging back past the anchored token still puts that
+        //   whole token at the selection's far edge.
+        // Why it exists: the anchor is a unit, not a boundary. Deriving it from the live
+        //   selection cannot restore the far boundary a direction flip has consumed, so
+        //   this pins the whole-unit property the pinned anchor exists to keep.
+        var terminal = try #require(Terminal(
+            columns: 20,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 20) * 4
+        ))
+        terminal.feed(Array("top1\r\ntop2\r\none two three\r\nf1\r\nf2".utf8))
+        terminal.scroll(toTopRow: 2)
+
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, column: 4, row: 0, clickCount: 2), terminal: terminal, state: &state
+        )
+        #expect(down.selectionMutation == .set(range(2, 4, 2, 7)))
+        let forward = decideTerminalPointer(
+            .move(column: 9, row: 0), terminal: terminal, state: &state
+        )
+        #expect(forward.selectionMutation == .set(range(2, 4, 2, 13)))
+
+        terminal.feed(Array("\r\nf3\r\nf4".utf8))
+        let reversed = decideTerminalPointer(
+            .move(column: 1, row: 0), terminal: terminal, state: &state
+        )
+
+        #expect(reversed.selectionMutation == .set(range(1, 0, 1, 7)))
+        terminal.setSelection(range(1, 0, 1, 7))
+        #expect(terminal.selectedText == "one two")
+    }
+
+    @Test("a press that never moves selects nothing even after eviction")
+    func unmovedCharacterPressSelectsNothingAcrossEviction() throws {
+        // Intent: character granularity suppresses a drag that has not left its own cell,
+        //   and eviction beneath the pointer does not count as leaving it.
+        // Why it exists: the suppression compares the resolved anchor against a freshly
+        //   computed unit. A drifting anchor makes those differ for free, so eviction alone
+        //   would turn a plain click into a selection of text the user never dragged over.
+        var terminal = try #require(Terminal(
+            columns: 12,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 12) * 6
+        ))
+        terminal.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
+        terminal.scroll(toTopRow: 2)
+
+        var state = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.left, column: 1, row: 1), terminal: terminal, state: &state
+        ).selectionMutation == .clear)
+
+        terminal.feed(Array("\r\nr09".utf8))
+        #expect(decideTerminalPointer(
+            .move(column: 1, row: 1), terminal: terminal, state: &state
+        ).selectionMutation == nil)
+
+        let extended = decideTerminalPointer(
+            .move(column: 2, row: 1), terminal: terminal, state: &state
+        )
+        #expect(extended.selectionMutation == .set(range(2, 1, 2, 3)))
+        terminal.setSelection(range(2, 1, 2, 3))
+        #expect(terminal.selectedText == "04")
+    }
+
+    @Test("pinning a selection unit and resolving it back reproduces it exactly")
+    func pinnedRangeRoundTripsEverySelectionUnit() throws {
+        // Intent: mint-then-resolve is the identity on every unit a pointer gesture can
+        //   anchor on, including the boundary shapes -- a wide cell, a hard line end, and a
+        //   line that trims to nothing.
+        // Why it exists: the drag compares its resolved anchor against a freshly computed
+        //   unit, both to decide `hasExtended` and to suppress an unmoved character press.
+        //   A round trip that shifted a boundary by one column would misfire both silently,
+        //   with no eviction anywhere in sight.
+        var fed = try #require(Terminal(columns: 12, rows: 3))
+        fed.feed(Array("a\u{6F22}b cd\r\n\r\nlast".utf8))
+
+        let wideCell = fed.characterRange(at: .init(row: 0, column: 1))
+        let wideTail = fed.characterRange(at: .init(row: 0, column: 2))
+        let token = fed.terminalTokenRange(at: .init(row: 0, column: 0))
+        let separator = fed.terminalTokenRange(at: .init(row: 0, column: 4))
+        let line = fed.trimmedLogicalLineRange(at: .init(row: 0, column: 0))
+        let blankLine = fed.trimmedLogicalLineRange(at: .init(row: 1, column: 0))
+        let lineEnd = fed.characterRange(at: .init(row: 2, column: 3))
+        let lastLine = fed.trimmedLogicalLineRange(at: .init(row: 2, column: 0))
+
+        // Anchoring the round trip: a unit that came back degenerate would round trip
+        // trivially, so pin what these units actually are.
+        #expect(wideCell == range(0, 1, 0, 3))
+        #expect(wideTail == wideCell)
+        #expect(token == range(0, 0, 0, 4))
+        #expect(line == range(0, 0, 0, 7))
+        #expect(blankLine == range(1, 0, 1, 0))
+        #expect(lineEnd == range(2, 3, 2, 4))
+
+        let units: [(String, TerminalTextRange)] = [
+            ("wide cell", wideCell),
+            ("wide tail", wideTail),
+            ("token", token),
+            ("separator run", separator),
+            ("trimmed line", line),
+            ("blank line", blankLine),
+            ("hard line end", lineEnd),
+            ("last line", lastLine),
+        ]
+        for (label, unit) in units {
+            #expect(fed.resolvedRange(fed.pinnedRange(unit)) == unit, "\(label)")
+        }
+    }
+
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
         switch mutation {
         case .clear:

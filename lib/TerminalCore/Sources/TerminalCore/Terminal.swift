@@ -361,7 +361,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Keeps inspection state stable while rows migrate between viewport and scrollback.
-    private struct TextAnchor: Equatable, Comparable, Sendable {
+    fileprivate struct TextAnchor: Equatable, Comparable, Sendable {
         var row: Int
         var column: Int
 
@@ -371,9 +371,26 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Represents a half-open selection or match in absolute retained-row coordinates.
-    private struct TextAnchorRange: Equatable, Sendable {
+    fileprivate struct TextAnchorRange: Equatable, Sendable {
         var start: TextAnchor
         var end: TextAnchor
+    }
+
+    /// A text range a caller can hold across terminal mutations, readable only through
+    /// `resolvedRange(_:)`.
+    ///
+    /// Exists for the in-flight drag anchor, the one coordinate the pointer policy must keep
+    /// from one event to the next. `TerminalTextPosition` counts rows from the oldest
+    /// *retained* row, so eviction restates every such value the instant it happens and a
+    /// stored one silently names lower and lower text. Opaque on purpose: a caller that could
+    /// read the rows back could also restate the eviction clamp `Terminal` already applies,
+    /// and drift from it.
+    struct PinnedTextRange: Equatable, Sendable {
+        fileprivate let range: TextAnchorRange
+
+        // Written out rather than synthesized: synthesis would inherit the stored property's
+        // fileprivate access, leaving the pointer policy's own `Equatable` unsatisfiable.
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.range == rhs.range }
     }
 
     /// Keeps bottom-follow policy explicit when a browsing anchor becomes bottom-aligned.
@@ -3077,6 +3094,34 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         return result
+    }
+
+    /// Pins a just-computed range so a caller can hold it across appends, scrolls, and
+    /// evictions. Normalizes its endpoints exactly as `setSelection(_:)` does, so minting a
+    /// selection unit and resolving it back is the identity on that unit.
+    func pinnedRange(_ range: TerminalTextRange) -> PinnedTextRange {
+        let ordered = textPositionPrecedes(range.start, range.end)
+            ? (range.start, range.end)
+            : (range.end, range.start)
+        return PinnedTextRange(range: TextAnchorRange(
+            start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+            end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+        ))
+    }
+
+    /// Resolves a pinned range against the stream as it is now, or nil once it no longer
+    /// names retained text.
+    ///
+    /// Applies the eviction rule `handleEviction` applies to a settled selection rather than
+    /// a second one derived at the call site: a range whose end has been evicted is gone, and
+    /// a partially evicted one clamps its start forward to the oldest retained row.
+    func resolvedRange(_ pinned: PinnedTextRange) -> TerminalTextRange? {
+        let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
+        guard pinned.range.end > firstRetained else { return nil }
+        return publicRange(TextAnchorRange(
+            start: max(pinned.range.start, firstRetained),
+            end: pinned.range.end
+        ))
     }
 
     private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {

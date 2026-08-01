@@ -209,8 +209,11 @@ private enum SelectionGranularity: Equatable, Sendable {
     case line
 }
 
+/// The end of an in-flight drag the pointer does not hold, kept as a `Terminal`-minted pin
+/// rather than coordinates: it has to name the same text on the next event, and stream
+/// coordinates stop meaning what they meant the moment a row is evicted.
 private struct SelectionDrag: Equatable, Sendable {
-    var anchor: TerminalTextRange
+    var anchor: Terminal.PinnedTextRange
     var granularity: SelectionGranularity
     var hasExtended = false
 }
@@ -380,30 +383,32 @@ public func decideTerminalPointer(
         )
         if var drag = state.selectionDrag,
            state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
+            let dragHover = hoverMutation(
+                column: column, row: row, modifiers: modifiers, terminal: terminal
+            )
+            // The anchored text is no longer retained, so there is nothing to extend from.
+            // The button stays selection-owned -- releasing it must still end the gesture
+            // without sending bytes to the child.
+            guard let anchor = terminal.resolvedRange(drag.anchor) else {
+                return pointerDecision(.selection, hoverMutation: dragHover)
+            }
             let current = selectionUnit(
                 at: streamPosition(column: column, row: row, terminal: terminal),
                 granularity: drag.granularity,
                 terminal: terminal
             )
-            if current != drag.anchor {
+            if current != anchor {
                 drag.hasExtended = true
                 state.selectionDrag = drag
             } else if drag.granularity == .character, drag.hasExtended == false {
-                return pointerDecision(
-                    .selection,
-                    hoverMutation: hoverMutation(
-                        column: column, row: row, modifiers: modifiers, terminal: terminal
-                    )
-                )
+                return pointerDecision(.selection, hoverMutation: dragHover)
             }
             return TerminalPointerDecision(
                 consumption: .selection,
                 inputBytes: [],
-                selectionMutation: .set(union(drag.anchor, current)),
+                selectionMutation: .set(union(anchor, current)),
                 paneMenuCell: nil,
-                hoverMutation: hoverMutation(
-                    column: column, row: row, modifiers: modifiers, terminal: terminal
-                ),
+                hoverMutation: dragHover,
                 openLink: nil,
                 armMutation: nil
             )
@@ -533,7 +538,10 @@ private func pointerDownDecision(
             granularity: granularity,
             terminal: terminal
         )
-        state.selectionDrag = SelectionDrag(anchor: anchor, granularity: granularity)
+        state.selectionDrag = SelectionDrag(
+            anchor: terminal.pinnedRange(anchor),
+            granularity: granularity
+        )
         return TerminalPointerDecision(
             consumption: .selection,
             inputBytes: [],
