@@ -161,14 +161,16 @@ SHIM
     chmod +x "$FAKE_BIN/$command"
 done
 
-# Intent: the build-and-run wrapper passes configuration and backend selection through unchanged.
-# Why it exists: the optimized recipe must exercise the requested terminal backend after launch.
+# Intent: the build-and-run wrapper passes configuration and backend selection through while
+# requesting that the build stop the installed app immediately before replacing its bundle.
+# Why it exists: the optimized recipe must exercise the requested terminal backend after launch,
+# and relaunch must not race an old process that still has the previous bundle open.
 # Scenario: a developer launches an optimized Swift-terminal build from one command.
 HOME="$TEST_ROOT/run-home" DANTERM_TERMINAL_BACKEND=swift \
     PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$RUN_ROOT/dev-build-run.sh" --release
-grep -qFx 'argv=--release' "$RUN_BUILD_LOG" \
-    || fail "dev-build-run.sh did not forward --release"
+grep -qFx 'argv=--release --kill-running' "$RUN_BUILD_LOG" \
+    || fail "dev-build-run.sh did not forward --release and append --kill-running"
 grep -qFx 'backend=swift' "$RUN_BUILD_LOG" \
     || fail "dev-build-run.sh did not preserve DANTERM_TERMINAL_BACKEND"
 
