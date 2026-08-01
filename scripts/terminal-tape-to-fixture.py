@@ -5,7 +5,11 @@ A tape is normally the JSON document printed by `danterm pane tape --pane ID`.
 It already uses the neutral recording schema, including real PTY chunk boundaries
 and resize ordering, so this script only scrubs feed bytes, verifies that local
 identifiers are gone, and marks the result as fixture-ready DanTerm evidence.
-The input may instead be the JSONL stream written by `danterm pane tape --follow`.
+The two accepted inputs are a complete snapshot JSON document from `pane tape`
+and an incremental, unwrapped JSONL stream from `pane tape --follow`. The stream
+may end at EOF without an `end` record after an app crash. JSON-RPC envelopes,
+legacy bare-event JSONL, gaps, and snapshots that report dropped events are not
+fixture evidence and are refused unconditionally.
 
     scripts/terminal-tape-to-fixture.py /tmp/tape.json \\
         lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json

@@ -27,8 +27,9 @@ with no full prompt on screen to strand copies of.
 
     docs/research/24-osc-133-dialect/capture-fish-drag.py /tmp/fish-drag.json
 
-Writes a complete live-capture snapshot. Scrubbing, provenance normalization,
-and any neutral value swaps still go through the committed converter:
+Writes a complete live-capture snapshot with base64 feed payloads. Scrubbing,
+provenance normalization, and any neutral value swaps still go through the
+committed converter:
 
     scripts/terminal-tape-to-fixture.py /tmp/fish-drag.json <fixture> \\
         --test TerminalShellDialectTests --shell fish --stimulus '...'

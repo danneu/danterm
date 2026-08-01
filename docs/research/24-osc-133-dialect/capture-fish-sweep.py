@@ -10,7 +10,12 @@ narrower prompt cannot exhibit the failure; that is what made F11 a false null.
 
 Writes four complete live-capture snapshots for `TerminalCore.Terminal`: the
 capture as-is, and three variants differing only in the option appended to
-fish's own OSC 133 `A` mark.
+fish's own OSC 133 `A` mark. Feed payloads use the canonical lossless base64
+representation. Scrub and normalize any snapshot that will become a committed
+fixture with the shared converter:
+
+    scripts/terminal-tape-to-fixture.py fish_sweep.json <fixture> \
+        --test TerminalShellDialectTests --shell fish --stimulus '...'
 
 To replay, feed each variant's events to a `Terminal` in order (feed bytes,
 apply resizes) and count occurrences of the prompt's `repo:` token in

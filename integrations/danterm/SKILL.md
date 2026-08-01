@@ -261,12 +261,16 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
 
 ### Dump a pane flight recording
 
-`pane tape` prints the dev pane's bounded, raw recording as replayable JSON.
+`pane tape` prints the dev pane's bounded, raw recording as one complete
+snapshot JSON document. This is the replay artifact format: it carries the
+initial geometry, ordered neutral events, live-capture provenance, and
+truncation metadata. Feed payloads emitted by the app use lossless base64.
+
 The output is unscrubbed; redirect it to a file, then run the repository's
-fixture converter before committing it. The converter refuses a recording that
-has dropped old events unless `--allow-truncated` explicitly acknowledges the
-incomplete evidence. Production and Ghostty-backed panes return an
-unsupported-backend error.
+fixture converter before committing it. The converter refuses every snapshot
+that reports dropped events because its surviving geometry and event sequence
+cannot be trusted. There is no truncation override. Production and
+Ghostty-backed panes return an unsupported-backend error.
 
     danterm pane tape --pane "$PANE_ID" > tape.json
     scripts/terminal-tape-to-fixture.py tape.json \\
@@ -275,14 +279,27 @@ unsupported-backend error.
 
 ### Follow a pane flight recording
 
-`--follow` writes the bounded backlog and each new event immediately as JSON
-Lines. `--from-now` skips the backlog and waits for the next live event. The
-stream is raw and unscrubbed, and may contain a `gap` record when a slow reader
-falls behind the recorder's bounded ring. A pane close writes an `end` record;
-app exit is a clean EOF.
+`--follow` is the incremental capture format: it writes unwrapped `start`,
+`event`, optional `gap`, and `end` records as JSON Lines. `--from-now` skips the
+backlog and waits for the next live event. Redirect the stream when evidence
+must survive an app crash:
 
-    danterm pane tape --pane "$PANE_ID" --follow
-    danterm pane tape --pane "$PANE_ID" --follow --from-now
+    danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
+
+The stream is raw and unscrubbed. A slow reader may receive a `gap` record when
+it falls behind the bounded recorder; the fixture converter rejects any such
+stream. A pane close writes an `end` record, while an abrupt app exit can leave
+a valid stream ending at EOF without one.
+
+The fixture converter accepts either complete snapshot JSON or follow JSONL:
+
+    scripts/terminal-tape-to-fixture.py tape.jsonl \
+        lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \
+        --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
+
+JSON-RPC notifications are socket transport only and are not a persisted
+recording format.
 
 ### Send keys to another pane
 
