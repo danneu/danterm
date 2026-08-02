@@ -1,0 +1,15 @@
+# Follow `source`d files instead of reporting SC1091 "not following" on each
+# one. Without this, every script that sources a sibling needs a disable
+# directive that suppresses a real check rather than satisfying it; with it,
+# shellcheck reads the target and analyzes across the boundary. Enabling this
+# resolved two SC1091 sites and one false SC2034 across the repo's shell
+# scripts and introduced no new findings.
+#
+# external-sources is deliberately not settable from a directive inside a
+# script -- shellcheck only honors it from a config file like this one, so that
+# checking an untrusted script cannot be made to read arbitrary paths.
+external-sources=true
+
+# Resolve those sources relative to the script's own directory, which is how
+# every `source` in this repo is written (`"$(dirname "$0")/..."`).
+source-path=SCRIPTDIR

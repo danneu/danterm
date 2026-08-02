@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Nearly every assertion feeds a single-quoted snippet to `zsh -c` / `bash -c` /
-# `fish -c`, where the point is that the *child* shell expands it, and matches
-# against literal `\033\\` OSC terminators. Both idioms are deliberate and
-# pervasive, so SC2016 and SC1003 are noise for the whole file rather than at
-# any one site.
-# shellcheck disable=SC2016,SC1003
+# Nearly every assertion hands a single-quoted snippet to `zsh -c` / `bash -c` /
+# `fish -c`, and the whole point is that the *child* shell -- not this one --
+# expands it. That is what SC2016 flags, at a dozen sites, so it is silenced for
+# the file. Deliberately not blanket-silenced beyond that: an unexpanded `$` in
+# a string this script consumes itself would still be a real bug.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 # The directory under test is an input so the same script can check the source
@@ -40,7 +40,7 @@ encoded_command="$(printf '%s' "$command_text" | base64 | tr -d '\n')"
 encoded_user="$(printf '%s' 'user name' | base64 | tr -d '\n')"
 encoded_host="$(printf '%s' 'host.example' | base64 | tr -d '\n')"
 prefix="$(printf '\033]1337;DanTermShell=1;')"
-terminator="$(printf '\033\\')"
+terminator=$'\033\\'
 
 for asset in danterm.zsh danterm.bash danterm.fish vendor/bash-preexec.sh vendor/bash-preexec.LICENSE vendor/bash-preexec.PROVENANCE; do
     test -f "$integration_dir/$asset" || fail "missing $asset"

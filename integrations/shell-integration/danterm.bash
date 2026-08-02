@@ -1,10 +1,5 @@
 # Sourceable DanTerm integration for Bash command, cwd, SSH, and mosh metadata.
 
-# Every OSC this file emits ends in a literal `\033\\` string terminator, which
-# SC1003 reads as a fumbled attempt to escape a single quote. The escape is the
-# protocol, so the check does not apply anywhere in this file.
-# shellcheck disable=SC1003
-
 unset DANTERM_RESTORE_COMMAND
 
 if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
@@ -31,10 +26,18 @@ _danterm_is_remote=''
 readonly _danterm_is_remote
 readonly _danterm_enabled="${DANTERM:-${LC_DANTERM:-}}"
 
+# The OSC String Terminator, named once rather than spelled inline in each
+# format. A trailing `\\` inside a printf format is both the one construct in
+# this file that reads as a botched quote escape and a lone backslash at the end
+# of a format string, which printf only incidentally passes through; carrying the
+# two bytes in a variable sidesteps format interpretation entirely. Same
+# ANSI-C-quoting idiom as the `_danterm_esc`/`_danterm_bel` constants below.
+readonly _danterm_st=$'\033\\'
+
 danterm_base64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 danterm_emit() {
     [[ -n $_danterm_enabled ]] || return 0
-    printf '\033]1337;DanTermShell=1;%s\033\\' "$1"
+    printf '\033]1337;DanTermShell=1;%s%s' "$1" "$_danterm_st"
 }
 danterm_emit_command_start() { danterm_emit "command-start;$(danterm_base64 "$1")"; }
 danterm_emit_command_end() { danterm_emit command-end; }
@@ -45,7 +48,7 @@ danterm_emit_remote_host() {
 danterm_emit_cwd() {
     [[ -n $_danterm_enabled ]] || return 0
     [[ -z $_danterm_is_remote ]] || return 0
-    printf '\033]7;file://%s%s\033\\' "${HOSTNAME:-localhost}" "$PWD"
+    printf '\033]7;file://%s%s%s' "${HOSTNAME:-localhost}" "$PWD" "$_danterm_st"
 }
 
 danterm_emit_osc133() {
@@ -142,9 +145,6 @@ _danterm_prompt_command() {
 }
 
 __danterm_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Resolved from BASH_SOURCE at runtime, so shellcheck cannot follow it -- and
-# must not: vendor/bash-preexec.sh is third-party and carries its own directives.
-# shellcheck disable=SC1091
 source "$__danterm_dir/vendor/bash-preexec.sh"
 unset __danterm_dir
 _danterm_preexec() {
