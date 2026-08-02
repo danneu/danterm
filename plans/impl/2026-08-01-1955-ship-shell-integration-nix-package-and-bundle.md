@@ -198,7 +198,7 @@ position.
 - [x] 1. Make the shell assets and their test hermetic
 - [x] 2. Package shell integration with Nix and check the packaged output
 - [x] 3. Add the `programs.danterm.shellIntegration` home-manager module
-- [ ] 4. Ship the whole shell-integration tree into the app bundle
+- [x] 4. Ship the whole shell-integration tree into the app bundle
 - [ ] 5. Document the Nix and bundle routes in the README
 
 ## Implementation notes
@@ -246,6 +246,19 @@ position.
 - **`programs.danterm.package` is now undefined rather than defaulted on
   non-`appSystems`** (commit 3). Safe because every read of it sits inside
   `mkIf cfg.enable`, and `enable` cannot sensibly be true without a GUI package.
+
+- **The bundle copy is `cp -R` of the whole directory plus an explicit
+  six-asset `test -r` loop** (commit 4), in both build scripts rather than a
+  shared helper: the two blocks are five lines each and the scripts already
+  duplicate the `danterm-hooks` loop the same way, so extracting a script for
+  this would add a moving part without removing one. The `rm -rf` before the
+  copy keeps the copy idempotent -- `cp -R` into an existing directory would
+  nest a second `shell-integration/` inside it.
+- **`build-app.sh` picked up the `# shellcheck disable=SC2086` comment
+  `dev-build.sh` already carries** on its `set -- $pair` line (commit 4). Not
+  plan scope, but the repo's shell-lint hook blocks every edit to the file on
+  that pre-existing info-level finding; the directive is verbatim what the
+  sibling script uses for the identical line.
 
 ## Follow Up
 

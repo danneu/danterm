@@ -20,7 +20,7 @@ mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
     "$BUILD_ROOT/icon/AppIcon-dev" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
-    "$BUILD_ROOT/integrations/shell-integration" \
+    "$BUILD_ROOT/integrations/shell-integration/vendor" \
     "$BUILD_ROOT/lib/ghostty-themes" \
     "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
@@ -41,6 +41,9 @@ cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/integrations/codex/danterm-agent-session.sh"
 for shell in zsh bash fish; do
     printf '# fixture %s integration\n' "$shell" > "$BUILD_ROOT/integrations/shell-integration/danterm.$shell"
+done
+for vendored in bash-preexec.sh bash-preexec.LICENSE bash-preexec.PROVENANCE; do
+    printf '# fixture %s\n' "$vendored" > "$BUILD_ROOT/integrations/shell-integration/vendor/$vendored"
 done
 
 export SWIFT_ARGV_LOG="$TEST_ROOT/swift-argv.log"
@@ -123,6 +126,14 @@ for shell in zsh bash fish; do
     cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \
         || fail "debug bundle did not preserve the $shell integration"
+done
+# danterm.bash sources vendor/bash-preexec.sh relative to its own location, so the
+# vendored sibling (and its license/provenance) has to survive the bundle copy too;
+# shipping only the three entry points leaves the documented bash path broken.
+for vendored in bash-preexec.sh bash-preexec.LICENSE bash-preexec.PROVENANCE; do
+    cmp "$BUILD_ROOT/integrations/shell-integration/vendor/$vendored" \
+        "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/vendor/$vendored" \
+        || fail "debug bundle did not preserve vendor/$vendored"
 done
 [[ $(wc -l < "$TEST_ROOT/debug.swift-argv") -eq 4 ]] \
     || fail "debug build did not make four SwiftPM build/bin-path calls"

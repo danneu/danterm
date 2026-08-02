@@ -93,10 +93,16 @@ for pair in \
     test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
 done
 
-mkdir -p "$APP_PATH/Contents/Resources/shell-integration"
-for shell in zsh bash fish; do
-    cp "$SCRIPT_DIR/integrations/shell-integration/danterm.$shell" \
-        "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
+# Ship the whole integration tree, matching release builds: danterm.bash sources
+# vendor/bash-preexec.sh as a sibling of itself, so a bundle missing vendor/
+# breaks the documented bash source line.
+rm -rf "$APP_PATH/Contents/Resources/shell-integration"
+cp -R "$SCRIPT_DIR/integrations/shell-integration" \
+    "$APP_PATH/Contents/Resources/shell-integration"
+for asset in danterm.zsh danterm.bash danterm.fish \
+    vendor/bash-preexec.sh vendor/bash-preexec.LICENSE vendor/bash-preexec.PROVENANCE; do
+    test -r "$APP_PATH/Contents/Resources/shell-integration/$asset" \
+        || { echo "Error: shell integration asset $asset not bundled" >&2; exit 1; }
 done
 
 "$SCRIPT_DIR/scripts/bundle-theme-resources.sh" "$SCRIPT_DIR" "$APP_PATH"

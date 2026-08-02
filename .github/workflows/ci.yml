@@ -195,6 +195,9 @@ jobs:
           for shell in zsh bash fish; do
             test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
           done
+          # danterm.bash sources this as a sibling; without it the bundle path the
+          # README documents for bash fails on its source line.
+          test -r "$APP_PATH/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
           test -r "$APP_PATH/Contents/Resources/themes/catalog.json"
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
@@ -216,6 +219,7 @@ jobs:
           for shell in zsh bash fish; do
             test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/danterm.$shell"
           done
+          test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
           echo "Release build validation passed"
 
   validator-self-test:

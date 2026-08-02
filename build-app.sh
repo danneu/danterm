@@ -75,16 +75,26 @@ for pair in \
     "integrations/claude-code/claude-notify-osc777.sh danterm-claude-notify-osc777" \
     "integrations/claude-code/danterm-agent-session.sh danterm-claude-agent-session" \
     "integrations/codex/danterm-agent-session.sh danterm-codex-agent-session"; do
+    # Intentional word splitting: each entry is a "source destination" pair.
+    # shellcheck disable=SC2086
     set -- $pair
     cp "$SCRIPT_DIR/$1" "$APP_PATH/Contents/Resources/danterm-hooks/$2"
     chmod +x "$APP_PATH/Contents/Resources/danterm-hooks/$2"
     test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
 done
 
-mkdir -p "$APP_PATH/Contents/Resources/shell-integration"
-for shell in zsh bash fish; do
-    cp "$SCRIPT_DIR/integrations/shell-integration/danterm.$shell" \
-        "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
+# Ship the integration tree wholesale, not just the three entry points:
+# danterm.bash sources vendor/bash-preexec.sh relative to its own BASH_SOURCE,
+# so a bundle missing vendor/ breaks on the very line the README tells bash
+# users to source. The explicit asset check mirrors the danterm-hooks guard
+# above -- a silently thinned copy must fail the build, not the user's shell.
+rm -rf "$APP_PATH/Contents/Resources/shell-integration"
+cp -R "$SCRIPT_DIR/integrations/shell-integration" \
+    "$APP_PATH/Contents/Resources/shell-integration"
+for asset in danterm.zsh danterm.bash danterm.fish \
+    vendor/bash-preexec.sh vendor/bash-preexec.LICENSE vendor/bash-preexec.PROVENANCE; do
+    test -r "$APP_PATH/Contents/Resources/shell-integration/$asset" \
+        || { echo "Error: shell integration asset $asset not bundled" >&2; exit 1; }
 done
 
 "$SCRIPT_DIR/scripts/bundle-theme-resources.sh" "$SCRIPT_DIR" "$APP_PATH"
