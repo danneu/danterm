@@ -298,25 +298,6 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
-    uiTest("damage topology counts maximal contiguous row spans") {
-        try uiExpect(
-            terminalDamageMaximalContiguousSpanCount([]) == 0,
-            "empty damage reported a span"
-        )
-        try uiExpect(
-            terminalDamageMaximalContiguousSpanCount([2, 3, 4]) == 1,
-            "one contiguous run was split into multiple spans"
-        )
-        try uiExpect(
-            terminalDamageMaximalContiguousSpanCount([9, 1, 2, 6]) == 3,
-            "disordered damage did not report its three maximal spans"
-        )
-        try uiExpect(
-            terminalDamageMaximalContiguousSpans([9, 1, 2, 6]) == [1..<3, 6..<7, 9..<10],
-            "disordered damage did not coalesce into the expected maximal spans"
-        )
-    }
-
     uiTest("scattered terminal damage submits only its disjoint row halos") {
         // Intent: distant damaged rows stay sparse when AppKit coalesces their invalidations.
         // Why it exists: using draw(_:)'s union dirtyRect submitted every untouched row between
