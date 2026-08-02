@@ -1,5 +1,17 @@
 // Pure row-damage topology helpers shared by drawing and benchmark consumers.
 
+/// Expands partial row damage so unclipped glyph ink crossing a row boundary is repainted.
+public func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int> {
+    guard rowCount > 0 else { return [] }
+    var expanded: Set<Int> = []
+    for row in rows where row >= 0 && row < rowCount {
+        expanded.insert(max(0, row - 1))
+        expanded.insert(row)
+        expanded.insert(min(rowCount - 1, row + 1))
+    }
+    return expanded
+}
+
 /// Counts the disjoint vertical runs a renderer must represent for exact row damage.
 public func terminalDamageMaximalContiguousSpanCount(_ rows: Set<Int>) -> Int {
     rows.reduce(into: 0) { count, row in

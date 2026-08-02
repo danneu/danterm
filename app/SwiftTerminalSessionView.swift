@@ -11,18 +11,6 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 #endif
 
-/// Expands partial row damage so unclipped glyph ink crossing a row boundary is repainted.
-func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int> {
-    guard rowCount > 0 else { return [] }
-    var expanded: Set<Int> = []
-    for row in rows where row >= 0 && row < rowCount {
-        expanded.insert(max(0, row - 1))
-        expanded.insert(row)
-        expanded.insert(min(rowCount - 1, row + 1))
-    }
-    return expanded
-}
-
 #if !DANTERM_UI_TEST
 /// Preserves TerminalCoreRecording's single event dialect when wrapping live tape events for IPC.
 func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
