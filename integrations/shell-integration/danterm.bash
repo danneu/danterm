@@ -1,5 +1,10 @@
 # Sourceable DanTerm integration for Bash command, cwd, SSH, and mosh metadata.
 
+# Every OSC this file emits ends in a literal `\033\\` string terminator, which
+# SC1003 reads as a fumbled attempt to escape a single quote. The escape is the
+# protocol, so the check does not apply anywhere in this file.
+# shellcheck disable=SC1003
+
 unset DANTERM_RESTORE_COMMAND
 
 if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
@@ -137,6 +142,9 @@ _danterm_prompt_command() {
 }
 
 __danterm_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolved from BASH_SOURCE at runtime, so shellcheck cannot follow it -- and
+# must not: vendor/bash-preexec.sh is third-party and carries its own directives.
+# shellcheck disable=SC1091
 source "$__danterm_dir/vendor/bash-preexec.sh"
 unset __danterm_dir
 _danterm_preexec() {

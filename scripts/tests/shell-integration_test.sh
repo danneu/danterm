@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Nearly every assertion feeds a single-quoted snippet to `zsh -c` / `bash -c` /
+# `fish -c`, where the point is that the *child* shell expands it, and matches
+# against literal `\033\\` OSC terminators. Both idioms are deliberate and
+# pervasive, so SC2016 and SC1003 are noise for the whole file rather than at
+# any one site.
+# shellcheck disable=SC2016,SC1003
 set -euo pipefail
 
 # The directory under test is an input so the same script can check the source
