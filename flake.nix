@@ -59,6 +59,24 @@
             bashOptions = [ ];
             text = builtins.readFile ./integrations/codex/danterm-agent-session.sh;
           };
+          # The whole integration directory is installed verbatim, not the three
+          # `danterm.$shell` entry points alone: `danterm.bash` sources
+          # `vendor/bash-preexec.sh` relative to its own location, so `vendor/`
+          # has to stay a sibling. Copying rather than rewriting is also what
+          # keeps the packaged assets byte-identical to the source tree.
+          danterm-shell-integration = final.stdenvNoCC.mkDerivation {
+            pname = "danterm-shell-integration";
+            version = "0.0.0";
+            src = ./integrations/shell-integration;
+            dontConfigure = true;
+            dontBuild = true;
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/share/danterm-shell-integration
+              cp -R . $out/share/danterm-shell-integration/
+              runHook postInstall
+            '';
+          };
           danterm-agent-skill = final.stdenvNoCC.mkDerivation {
             pname = "danterm-agent-skill";
             version = "0.0.0";
@@ -81,6 +99,7 @@
         system: pkgs:
         {
           danterm-agent-skill = pkgs.danterm-agent-skill;
+          shell-integration = pkgs.danterm-shell-integration;
           claude-notify-osc777 = pkgs.danterm-claude-notify-osc777;
           claude-agent-session = pkgs.danterm-claude-agent-session;
           codex-agent-session = pkgs.danterm-codex-agent-session;
@@ -203,11 +222,15 @@
                 ];
               }
               ''
-                mkdir -p integrations scripts/tests
-                cp -R ${./integrations/shell-integration} integrations/shell-integration
+                mkdir -p scripts/tests
                 cp ${./scripts/tests/shell-integration_test.sh} scripts/tests/shell-integration_test.sh
-                chmod -R u+w integrations scripts
-                bash scripts/tests/shell-integration_test.sh
+                chmod -R u+w scripts
+                # Against the package output, not the source tree: the shipped
+                # layout is what a consumer sources, so that is what the check
+                # has to make a tested claim about.
+                packaged=${self.packages.${system}.shell-integration}
+                DANTERM_INTEGRATION_DIR=$packaged/share/danterm-shell-integration \
+                  bash scripts/tests/shell-integration_test.sh
                 touch $out
               '';
         }

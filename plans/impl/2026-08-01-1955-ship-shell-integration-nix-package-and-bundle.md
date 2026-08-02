@@ -196,7 +196,7 @@ position.
 ## Commit progress
 
 - [x] 1. Make the shell assets and their test hermetic
-- [ ] 2. Package shell integration with Nix and check the packaged output
+- [x] 2. Package shell integration with Nix and check the packaged output
 - [ ] 3. Add the `programs.danterm.shellIntegration` home-manager module
 - [ ] 4. Ship the whole shell-integration tree into the app bundle
 - [ ] 5. Document the Nix and bundle routes in the README
@@ -217,6 +217,15 @@ position.
   ahead of the commit-2 flake work. Rewriting `/usr/bin/expect` to a `PATH`
   lookup breaks `checks.aarch64-darwin.shell-integration` immediately (verified:
   `expect: command not found`), and commit 1 has to leave the repo green.
+
+- **The Linux check step landed in the `cliff-smoke` job** (commit 2). That is
+  the only existing `ubuntu-latest` + `nix-installer-action` job in
+  `ci.yml`, which is what the plan named; the job's name now undersells what it
+  runs. Commit 3's Home Manager evaluation goes in the same place.
+- **Overlay attribute is `danterm-shell-integration`, flake output is
+  `packages.<system>.shell-integration`** -- matching the existing
+  `danterm-agent-skill` / `danterm-claude-*` split between namespaced overlay
+  names and bare package names.
 
 ## Follow Up
 

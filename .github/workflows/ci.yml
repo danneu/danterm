@@ -93,6 +93,14 @@ jobs:
           [ "$fix_conv_line" -gt "$bugs_line" ] && [ "$fix_conv_line" -lt "$other_line" ] \
             || { echo "conventional 'fix:' not in Bug Fixes section"; exit 1; }
 
+      # The shell-integration check is declared for x86_64-linux, and a Linux
+      # runner is the only place it can actually execute. Building it here is
+      # what proves the assets and their test are hermetic: a Linux Nix build
+      # sandbox has no /usr/bin/env, /bin/bash, /usr/bin/expect, /bin/cat, or
+      # /bin/rm, so any surviving absolute path fails this step.
+      - name: Shell integration check (x86_64-linux)
+        run: nix build --print-build-logs .#checks.x86_64-linux.shell-integration
+
   theme-freshness:
     runs-on: ubuntu-latest
     steps:
