@@ -44,6 +44,46 @@ connection is unrepresentable instead of merely unreachable; the current pane
 model carries `isRemote` and `remoteSession` as separate fields and holds that
 invariant by hand.
 
+Sketched as types, so that a missing state is visible rather than buried in a
+sentence. This is illustrative, not normative: names and value representation
+belong to the implementer except where an invariant below constrains the
+shape, and it should be edited as the slice teaches us more.
+
+```swift
+enum IntegrationFacet {
+    case neverReported
+    case ready
+}
+
+enum CommandFacet {
+    case idle
+    case running(CommandReport)          // exactly one, completely reported
+}
+
+enum ConnectionFacet {
+    case local
+    case remote(identity: RemoteIdentity?)   // nil until the far end reports
+}
+
+enum AgentFacet {
+    case none
+    case attached(AgentSession, activity: AgentActivity?)
+}
+
+struct PaneSemanticState {
+    var integration: IntegrationFacet
+    var command: CommandFacet
+    var connection: ConnectionFacet
+    var agent: AgentFacet
+}
+```
+
+`ConnectionFacet` is where the shape carries weight: folding identity inside
+the `remote` case is what makes a reported identity on a local connection
+unrepresentable. An equivalent phrasing is an optional
+`RemoteConnection` struct holding an optional session. A `Bool` beside a
+separate optional is not equivalent and does not satisfy the invariant.
+
 The pane owner serializes terminal-originated envelope events, pane-scoped IPC
 events, and teardown into that stream. The reducer performs no IO, reads no
 ambient state, and produces latest-value snapshots and immediate product
