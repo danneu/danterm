@@ -217,6 +217,14 @@ final class TerminalBenchmarkGeometryController {
 final class TerminalBenchmarkObserver {
     static let shared = TerminalBenchmarkObserver(environment: ProcessInfo.processInfo.environment)
 
+    /// Keeps per-draw topology accounting to bounded counter updates until snapshot encoding.
+    private struct DamageTopologyKey: Hashable {
+        let damagedRowCount: Int
+        let spanCount: Int
+        let isFull: Bool
+        let usedDirtyRectFallback: Bool
+    }
+
     private let startMarker: String
     private let completionMarker: String
     private let expectedFinalState: String
@@ -294,6 +302,12 @@ final class TerminalBenchmarkObserver {
     private let activityPath: String?
     private var observedDrawCount = 0
     private var observedPlanFrameCount = 0
+    private var observedDamageTopologySampleCount = 0
+    private var observedDamageTopologyHistogram: [DamageTopologyKey: Int] = [:]
+    private var observedDamagedRowCountHistogram: [Int: Int] = [:]
+    private var observedContiguousSpanCountHistogram: [Int: Int] = [:]
+    private var observedFullDamageCount = 0
+    private var observedDirtyRectFallbackCount = 0
     private var lastActivityWriteNanoseconds: UInt64 = 0
     private weak var measuredController: TerminalPaneSessionController?
     private var fenceBlockPolicy = TerminalPaneFenceBlockPolicy()
@@ -474,7 +488,9 @@ final class TerminalBenchmarkObserver {
         _ plan: RenderFramePlan,
         dirtyRect: CGRect,
         metrics: TerminalRenderMetrics,
-        drawDurationNanoseconds: UInt64
+        drawDurationNanoseconds: UInt64,
+        damage: TerminalDamage,
+        usedDirtyRectFallback: Bool
     ) {
         // Counted before every gate below, because a profile contains every draw
         // the app performed -- not only the ones a measured block accepts. In
@@ -482,6 +498,11 @@ final class TerminalBenchmarkObserver {
         // would stay at zero for the whole profiling window.
         if let activityPath {
             observedDrawCount += 1
+            observeDamageTopology(
+                damage,
+                rowCount: plan.rows,
+                usedDirtyRectFallback: usedDirtyRectFallback
+            )
             publishActivity(atPath: activityPath)
         }
         guard completed == false, let startNanoseconds else { return }
@@ -658,6 +679,20 @@ final class TerminalBenchmarkObserver {
             "uptimeNanoseconds": now,
             "drawCount": observedDrawCount,
             "planFrameCount": observedPlanFrameCount,
+            "damageTopology": [
+                "sampleCount": observedDamageTopologySampleCount,
+                "jointHistogram": topologyHistogramArtifact(
+                    observedDamageTopologyHistogram
+                ),
+                "damagedRowCountHistogram": histogramArtifact(
+                    observedDamagedRowCountHistogram
+                ),
+                "maximalContiguousSpanCountHistogram": histogramArtifact(
+                    observedContiguousSpanCountHistogram
+                ),
+                "fullDamageCount": observedFullDamageCount,
+                "dirtyRectFallbackCount": observedDirtyRectFallbackCount,
+            ],
         ]
         guard let data = try? JSONSerialization.data(
             withJSONObject: object,
@@ -666,6 +701,48 @@ final class TerminalBenchmarkObserver {
         // Atomic because a reader snapshots this file while draws continue; a
         // torn read would be indistinguishable from a real counter value.
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    /// Records the exact post-coalescing damage topology submitted to Core Graphics.
+    private func observeDamageTopology(
+        _ damage: TerminalDamage,
+        rowCount: Int,
+        usedDirtyRectFallback: Bool
+    ) {
+        let damagedRowCount = damage.isFull ? rowCount : damage.rows.count
+        let spanCount = damage.isFull
+            ? (rowCount > 0 ? 1 : 0)
+            : terminalDamageMaximalContiguousSpanCount(damage.rows)
+        observedDamageTopologySampleCount += 1
+        let topologyKey = DamageTopologyKey(
+            damagedRowCount: damagedRowCount,
+            spanCount: spanCount,
+            isFull: damage.isFull,
+            usedDirtyRectFallback: usedDirtyRectFallback
+        )
+        observedDamageTopologyHistogram[topologyKey, default: 0] += 1
+        observedDamagedRowCountHistogram[damagedRowCount, default: 0] += 1
+        observedContiguousSpanCountHistogram[spanCount, default: 0] += 1
+        if damage.isFull { observedFullDamageCount += 1 }
+        if usedDirtyRectFallback { observedDirtyRectFallbackCount += 1 }
+    }
+
+    private func histogramArtifact(_ histogram: [Int: Int]) -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: histogram.map { (String($0.key), $0.value) })
+    }
+
+    private func topologyHistogramArtifact(
+        _ histogram: [DamageTopologyKey: Int]
+    ) -> [String: Int] {
+        Dictionary(uniqueKeysWithValues: histogram.map { key, count in
+            let label = [
+                "rows=\(key.damagedRowCount)",
+                "spans=\(key.spanCount)",
+                "full=\(key.isFull)",
+                "dirtyRectFallback=\(key.usedDirtyRectFallback)",
+            ].joined(separator: ",")
+            return (label, count)
+        })
     }
 
     /// Reports whether one pre-encoded path is absent, at the cost of a single

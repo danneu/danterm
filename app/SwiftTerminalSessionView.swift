@@ -23,6 +23,35 @@ func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int
     return expanded
 }
 
+/// Counts the disjoint vertical runs Core Graphics must represent for exact row damage.
+func terminalDamageMaximalContiguousSpanCount(_ rows: Set<Int>) -> Int {
+    rows.reduce(into: 0) { count, row in
+        if row == Int.min || rows.contains(row - 1) == false {
+            count += 1
+        }
+    }
+}
+
+/// Coalesces adjacent damaged rows into the fewest exact vertical clip spans.
+func terminalDamageMaximalContiguousSpans(_ rows: Set<Int>) -> [Range<Int>] {
+    let sortedRows = rows.sorted()
+    guard let firstRow = sortedRows.first else { return [] }
+    var spans: [Range<Int>] = []
+    var lowerBound = firstRow
+    var upperBound = firstRow + 1
+    for row in sortedRows.dropFirst() {
+        if row == upperBound {
+            upperBound += 1
+        } else {
+            spans.append(lowerBound..<upperBound)
+            lowerBound = row
+            upperBound = row + 1
+        }
+    }
+    spans.append(lowerBound..<upperBound)
+    return spans
+}
+
 #if !DANTERM_UI_TEST
 /// Preserves TerminalCoreRecording's single event dialect when wrapping live tape events for IPC.
 func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
@@ -183,23 +212,24 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         let background = frame?.plan.defaultBackground ?? RenderTheme.dark.defaultBackground
         context.setFillColor(Self.cgColor(background))
         if let frame {
-            let drawingDamage = drawingDamage(
+            let drawingDamageResolution = drawingDamage(
                 fallback: dirtyRect,
                 metrics: frame.metrics,
                 rowCount: frame.plan.rows
             )
+            let drawingDamage = drawingDamageResolution.damage
             let plan = drawingDamage.isFull
                 ? frame.plan
                 : clipFramePlan(frame.plan, to: drawingDamage)
             context.saveGState()
             if drawingDamage.isFull == false {
                 context.beginPath()
-                for row in drawingDamage.rows {
+                for span in terminalDamageMaximalContiguousSpans(drawingDamage.rows) {
                     context.addRect(NSRect(
                         x: 0,
-                        y: CGFloat(row) * frame.metrics.cellSize.height,
+                        y: CGFloat(span.lowerBound) * frame.metrics.cellSize.height,
                         width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
-                        height: frame.metrics.cellSize.height
+                        height: CGFloat(span.count) * frame.metrics.cellSize.height
                     ))
                 }
                 context.clip()
@@ -218,7 +248,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 frame.plan,
                 dirtyRect: dirtyRect,
                 metrics: frame.metrics,
-                drawDurationNanoseconds: drawDurationNanoseconds
+                drawDurationNanoseconds: drawDurationNanoseconds,
+                damage: drawingDamage,
+                usedDirtyRectFallback: drawingDamageResolution.usedDirtyRectFallback
             )
             if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
                 let redrawRect = NSRect(
@@ -242,18 +274,21 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         fallback dirtyRect: NSRect,
         metrics: TerminalRenderMetrics,
         rowCount: Int
-    ) -> TerminalDamage {
+    ) -> (damage: TerminalDamage, usedDirtyRectFallback: Bool) {
         if pendingDisplayDamage != .none {
             let damage = pendingDisplayDamage
             pendingDisplayDamage = .none
-            return damage
+            return (damage, false)
         }
         let rows = terminalRows(
             intersecting: dirtyRect,
             metrics: metrics,
             rowCount: rowCount
         )
-        return rows == 0..<rowCount ? .full : TerminalDamage(rows: Set(rows))
+        let damage: TerminalDamage = rows == 0..<rowCount
+            ? .full
+            : TerminalDamage(rows: Set(rows))
+        return (damage, true)
     }
 
     /// Prevents geometry, theme, and benchmark invalidations from inheriting stale partial damage.

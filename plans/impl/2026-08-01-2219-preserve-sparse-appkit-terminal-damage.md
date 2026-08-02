@@ -26,8 +26,10 @@ publications until the next draw:
   pending engine damage falls back to AppKit's dirty rectangle so ordinary
   AppKit-driven redraws still work.
 - Partial draws clip both the `RenderFramePlan` and the graphics context to the
-  sparse row set. This skips background fills and glyph runs in the gap between
-  damaged regions.
+  sparse row set. Adjacent rows are coalesced into maximal contiguous spans
+  before constructing the graphics-context path. This skips background fills
+  and glyph runs in the gap between damaged regions without making Core
+  Animation represent one clip rectangle per row.
 
 The source damage is authoritative because AppKit invalid-region APIs were also
 probed on this layer-backed view and exposed the same unioned region by draw
@@ -46,7 +48,9 @@ trying to recover sparse topology inside `draw(_:)`.
    glyphs remain correct.
 5. The sparse clip applies to the whole frame render, including background
    painting, not only glyph drawing.
-6. This change does not alter render scheduling, frame publication cadence, or
+6. Every partial clip uses the minimum number of exact vertical spans; adjacent
+   damaged rows never become separate Core Graphics path rectangles.
+7. This change does not alter render scheduling, frame publication cadence, or
    idle behavior.
 
 ## Proof obligations
@@ -89,6 +93,23 @@ benefit when distant rows change together; it is not a frozen or calibrated
 performance verdict. Lower CPU work should reduce energy use for this workload,
 but energy consumption was not measured directly and no battery-life claim is
 made.
+
+A follow-up live-btop profile found that the original one-rectangle-per-row
+implementation regressed whole-process CPU despite improving direct draw. At a
+verified 179x66 grid, a controlled automated three-arm comparison measured
+parent at 24.17% mean CPU (18.3--25.6%), the uncoalesced implementation at
+44.10% (31.7--46.8%), and maximal-span coalescing at 22.94% (19.0--24.7%). The
+parent and coalesced ranges overlap, so the supported claim is "equivalent or
+better," not that coalescing is faster. Coalescing reduced the regressed Core
+Animation clip-construction subtree by 95.5% to 97.6% on this stimulus.
+
+The revised implementation also retained the motivating two-distant-row win in
+eight valid 200-draw batches per arm: median direct draw was 0.057 ms/draw
+coalesced versus 0.164 parent, and median whole-process CPU was 1.945 ms/draw
+versus 2.115. At the halo-limited maximum topology for 66 rows -- 17 disjoint
+spans produced by writes every fourth row -- median process CPU was 4.695
+ms/draw coalesced versus 4.835 parent. A threshold fallback was therefore
+rejected under the rule frozen before that endpoint was measured.
 
 ## Non-goals and accepted limits
 
