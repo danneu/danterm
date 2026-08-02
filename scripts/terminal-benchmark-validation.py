@@ -26,7 +26,35 @@ WORKLOADS = (
 # has blocks and no rule, which is exactly the state an A/A screen resolves. It
 # graduates into WORKLOADS only when a human moves a screened threshold into
 # DECISION_RULES. See docs/research/20-pty-throughput-and-interactive-stimulus.md.
-CANDIDATE_WORKLOADS = ("synchronized-frames",)
+CANDIDATE_WORKLOADS = (
+    "synchronized-frames",
+    "sparse-spans-few",
+    "sparse-spans-max",
+)
+# The two sparse-span workloads' fixture identities, named here rather than at
+# the runner because the collector validates the same string the runner claims.
+# The topology is in the name: an arm that changed the stimulus would have to
+# change this too, so a block collected under an older shape cannot pass as one
+# collected under the current one.
+SPARSE_SPAN_FIXTURE_IDENTITIES = {
+    "sparse-spans-few": "sparse-spans-few-v1-two-rows-two-spans-179x66",
+    "sparse-spans-max": (
+        "sparse-spans-max-v1-seventeen-rows-seventeen-spans-179x66"
+    ),
+}
+# Every workload a persistent draw arm can be launched for, mapped to the
+# fixture identity its blocks must claim. One table because the lifecycle that
+# launches an arm and the runner that labels its blocks have to agree on the
+# same closed set: a name in one and not the other is an arm whose blocks fail
+# validation after a real app launch.
+PERSISTENT_DRAW_WORKLOADS = {
+    "full-screen-content-churn": "full-screen-content-churn",
+    "full-screen-style-churn": "full-screen-style-churn",
+    "full-screen-incremental-mixed-churn": (
+        "full-screen-incremental-mixed-churn-v2-four-rows-six-damage-179x66"
+    ),
+    **SPARSE_SPAN_FIXTURE_IDENTITIES,
+}
 DIRECTIONS = ("aa", "slower", "faster")
 CANONICAL_GEOMETRY = {"columns": 179, "rows": 66}
 TERMINAL_FEED_STATE_PROBE = (
@@ -70,6 +98,28 @@ BLOCK_CONTRACTS = {
         "metric": "final-draw-nanoseconds-per-fixture-replay",
         "measuredUnit": "one-95-frame-captured-tui-replay",
         "reset": "fresh-optimized-app-and-terminal-session-per-block",
+    },
+    # The two topology-specific workloads, whose contract includes a shape as
+    # well as a count: a block means nothing unless every accepted draw's
+    # published engine damage carried exactly these rows and spans. `metric`
+    # differs between them by design (29/D2) -- losing exact sparse clipping
+    # widens the synchronous draw, while per-row rectangle emission moves Core
+    # Animation clip replay, which happens after that bracket closes.
+    "sparse-spans-few": {
+        "metric": "draw-nanoseconds-per-draw",
+        "measuredUnit": "serialized-completed-draw",
+        "exactCompletedDraws": 50,
+        "reset": "settled-dense-screen-before-block",
+        "engineDamagedRowCount": 2,
+        "engineSpanCount": 2,
+    },
+    "sparse-spans-max": {
+        "metric": "process-cpu-nanoseconds-per-draw",
+        "measuredUnit": "serialized-completed-draw",
+        "exactCompletedDraws": 50,
+        "reset": "settled-dense-screen-before-block",
+        "engineDamagedRowCount": 17,
+        "engineSpanCount": 17,
     },
 }
 DECISION_RULES = {
@@ -1009,11 +1059,7 @@ class PersistentDrawArms:
         }
         if set(self.roots) != {"a", "b"}:
             raise ValueError("persistent lifecycle requires physical arms a and b")
-        if workload not in (
-            "full-screen-content-churn",
-            "full-screen-style-churn",
-            "full-screen-incremental-mixed-churn",
-        ):
+        if workload not in PERSISTENT_DRAW_WORKLOADS:
             raise ValueError(f"unsupported persistent draw workload {workload}")
         self.workload = workload
         self.output = pathlib.Path(output)
@@ -1154,15 +1200,7 @@ def make_persistent_draw_runner(
     """Bind redraw blocks to two already-converged persistent app arms."""
     if set(identities) != {"a", "b"}:
         raise ValueError("persistent draw runner requires physical arms a and b")
-    fixture_identities = {
-        "full-screen-content-churn": "full-screen-content-churn",
-        "full-screen-style-churn": "full-screen-style-churn",
-        "full-screen-incremental-mixed-churn": (
-            "full-screen-incremental-mixed-churn-"
-            "v2-four-rows-six-damage-179x66"
-        ),
-    }
-    if workload not in fixture_identities:
+    if workload not in PERSISTENT_DRAW_WORKLOADS:
         raise ValueError(f"unsupported persistent draw workload {workload}")
     root = pathlib.Path(root)
 
@@ -1209,7 +1247,7 @@ def make_persistent_draw_runner(
             "schemaVersion": 1,
             "backend": "swift",
             "workload": workload,
-            "fixtureIdentity": fixture_identities[workload],
+            "fixtureIdentity": PERSISTENT_DRAW_WORKLOADS[workload],
             "processId": identity["pid"],
             "sessionId": pane,
             "geometry": identity["geometry"],
@@ -1226,6 +1264,62 @@ def make_persistent_draw_runner(
     return run
 
 
+SPARSE_SPAN_TOPOLOGY_SERIES = (
+    "engineDamagedRowCounts",
+    "engineSpanCounts",
+    "haloDamagedRowCounts",
+    "haloSpanCounts",
+    "clipDamagedRowCounts",
+    "clipSpanCounts",
+)
+
+
+def _sparse_span_topology_reasons(prefix, topology, *, workload, draw_count):
+    """Judge one block's engine-damage topology against its workload's contract.
+
+    Reads the published engine damage the app recorded per accepted draw, never
+    the bounding dirty rectangle beside it: the rectangle a compound clip is
+    drawn under is the union of every span, so two spans and seventeen present
+    the same bounding row count and no rule written against it can tell the two
+    workloads apart.
+
+    Renderer behavior -- dirty-rect fallback, full clip damage -- is carried on
+    the block and judged nowhere here. A synthesized known-bad arm deviates
+    exactly there, and rejecting its draws would turn the regression being
+    measured into an unmeasured block.
+    """
+    contract = BLOCK_CONTRACTS[workload]
+    if not isinstance(topology, dict):
+        return [f"{prefix}-missing-sparse-span-topology"]
+    reasons = []
+    expected_rows = contract["engineDamagedRowCount"]
+    expected_spans = contract["engineSpanCount"]
+    if (
+        topology.get("workload") != workload
+        or topology.get("expectedEngineDamagedRowCount") != expected_rows
+        or topology.get("expectedEngineSpanCount") != expected_spans
+    ):
+        reasons.append(f"{prefix}-wrong-sparse-span-contract")
+    series = {name: topology.get(name) for name in SPARSE_SPAN_TOPOLOGY_SERIES}
+    if (
+        topology.get("sampleCount") != draw_count
+        or any(
+            not isinstance(values, list) or len(values) != draw_count
+            for values in series.values()
+        )
+    ):
+        # Every series appends in the same call as the timing and CPU series, so
+        # unequal lengths mean the block's aggregates describe more draws than
+        # its topology evidence covers -- which no reader can see in the number.
+        reasons.append(f"{prefix}-incomplete-topology-coverage")
+    elif (
+        any(value != expected_rows for value in series["engineDamagedRowCounts"])
+        or any(value != expected_spans for value in series["engineSpanCounts"])
+    ):
+        reasons.append(f"{prefix}-wrong-engine-damage-topology")
+    return reasons
+
+
 def _collect_draw_churn(
     blocks,
     *,
@@ -1235,6 +1329,8 @@ def _collect_draw_churn(
     expected_dirty_rows,
     damage_reason,
     run_block,
+    sparse_span_topology=False,
+    require_process_cpu=False,
 ):
     """Enforce the shared serialized-draw contract with workload-specific damage."""
     if not blocks:
@@ -1296,6 +1392,12 @@ def _collect_draw_churn(
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }
+        # Present only for the sparse-span workloads: the five calibrated
+        # workloads' frozen rules were screened against blocks with no topology
+        # accounting at all, so their block shape stays exactly what those rules
+        # describe.
+        if sparse_span_topology:
+            block["sparseSpanTopology"] = draw.get("sparseSpanTopology")
         raw_blocks.append(block)
 
         if artifact.get("backend") != "swift":
@@ -1348,11 +1450,29 @@ def _collect_draw_churn(
             or any(not isinstance(value, int) for value in durations)
         ):
             _append_reason(reasons, f"{prefix}-cumulative-draw-mismatch")
-        if (
+        # `expected_dirty_rows` (and with it `damage_reason`) is None exactly for
+        # the sparse-span workloads, whose bounding dirty rectangle spans the
+        # union of their halo spans and so cannot describe their topology; the
+        # engine-damage check below is what stands in its place.
+        if expected_dirty_rows is not None and (
             len(dirty_rows) != 50
             or any(value != expected_dirty_rows for value in dirty_rows)
         ):
             _append_reason(reasons, f"{prefix}-{damage_reason}")
+        # Only where whole-process CPU is the workload's deciding metric. For
+        # every other workload a short CPU series costs a descriptive line, and
+        # invalidating on it would void every comparison whose baseline predates
+        # the reading; where it decides, the same absence leaves nothing to pair.
+        if require_process_cpu and normalized_cpu is None:
+            _append_reason(reasons, f"{prefix}-incomplete-process-cpu-coverage")
+        if sparse_span_topology:
+            for reason in _sparse_span_topology_reasons(
+                prefix,
+                draw.get("sparseSpanTopology"),
+                workload=workload,
+                draw_count=50,
+            ):
+                _append_reason(reasons, reason)
         if producer.get("event") != "producer-final-write-returned":
             _append_reason(reasons, f"{prefix}-missing-producer-write")
         if (
@@ -1423,6 +1543,44 @@ def collect_incremental_mixed(blocks, *, run_block):
         expected_dirty_rows=6,
         damage_reason="wrong-damage-row-count",
         run_block=run_block,
+    )
+
+
+def _collect_sparse_spans(blocks, *, workload, run_block):
+    """Apply the shared serialized-draw contract with an engine-topology gate.
+
+    Deliberately the same collector as the three full-screen draw workloads:
+    these blocks are settled, serialized, and counted by identical rules, and a
+    private copy of that contract would drift from it in ways that pass
+    validation while measuring something else. Only the damage check differs,
+    because only the damage is what these workloads are about.
+    """
+    return _collect_draw_churn(
+        blocks,
+        workload=workload,
+        artifact_workload=workload,
+        fixture_identity=SPARSE_SPAN_FIXTURE_IDENTITIES[workload],
+        expected_dirty_rows=None,
+        damage_reason=None,
+        run_block=run_block,
+        sparse_span_topology=True,
+        require_process_cpu=(
+            BLOCK_CONTRACTS[workload]["metric"] == "process-cpu-nanoseconds-per-draw"
+        ),
+    )
+
+
+def collect_sparse_spans_few(blocks, *, run_block):
+    """Collect the ideal sparse topology: two distant rows in two maximal spans."""
+    return _collect_sparse_spans(
+        blocks, workload="sparse-spans-few", run_block=run_block
+    )
+
+
+def collect_sparse_spans_max(blocks, *, run_block):
+    """Collect the halo maximum: seventeen rows in seventeen spans at 66 rows."""
+    return _collect_sparse_spans(
+        blocks, workload="sparse-spans-max", run_block=run_block
     )
 
 
@@ -1545,6 +1703,12 @@ def make_production_collectors(
             "full-screen-incremental-mixed-churn",
             collect_incremental_mixed,
         ),
+        # Candidates, and collected exactly like the calibrated draw workloads
+        # above: a screen cannot propose a rule for blocks it cannot collect.
+        # Their planned name is also their app-side name, since they were added
+        # after the `full-screen-*-churn` naming.
+        "sparse-spans-few": ("sparse-spans-few", collect_sparse_spans_few),
+        "sparse-spans-max": ("sparse-spans-max", collect_sparse_spans_max),
     }
     try:
         if "terminal-feed" in plan:

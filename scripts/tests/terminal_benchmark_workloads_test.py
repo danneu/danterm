@@ -33,19 +33,22 @@ DRAW_WORKLOADS = (
     "full-screen-style-churn",
     "full-screen-incremental-mixed-churn",
 )
+SPARSE_SPAN_WORKLOADS = ("sparse-spans-few", "sparse-spans-max")
 
 
 class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
     def test_producer_and_paired_lifecycle_name_the_same_draw_workloads(self):
         # Intent: the stimulus generator and the paired block scheduler accept
-        #   exactly the same three full-screen draw workloads.
+        #   exactly the same serialized-draw workloads -- the three full-screen
+        #   ones and the two sparse-span ones.
         # Why it exists: a workload present in only one of them is unreachable --
         #   either stimulus no comparison measures, or a schedulable block whose
         #   frames cannot be produced. Both fail late, inside a GUI run.
         # Scenario: spec-first; the paired ladder is the only decision surface, so
         #   every draw workload it names must be producible and vice versa.
         self.assertEqual(PRODUCER.REDRAW_WORKLOADS, DRAW_WORKLOADS)
-        for workload in DRAW_WORKLOADS:
+        self.assertEqual(PRODUCER.SPARSE_SPAN_WORKLOADS, SPARSE_SPAN_WORKLOADS)
+        for workload in DRAW_WORKLOADS + SPARSE_SPAN_WORKLOADS:
             with self.subTest(workload=workload):
                 VALIDATION.PersistentDrawArms(
                     {"a": ROOT, "b": ROOT}, workload=workload, output=ROOT / ".build"
@@ -88,9 +91,7 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
         #   deleting the workload would lose unique synchronized-output coverage.
         # Scenario: 23/D4 demotes the refused workload until fresh independent
         #   screens and a held-out confirmation can graduate it again.
-        self.assertEqual(
-            VALIDATION.CANDIDATE_WORKLOADS, ("synchronized-frames",)
-        )
+        self.assertIn("synchronized-frames", VALIDATION.CANDIDATE_WORKLOADS)
         self.assertNotIn("synchronized-frames", VALIDATION.WORKLOADS)
         self.assertIn("synchronized-frames", VALIDATION.BLOCK_CONTRACTS)
         self.assertTrue(callable(VALIDATION.collect_synchronized_frames))
@@ -103,6 +104,50 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
         self.assertNotIn(
             "synchronized-frames", COMPARE.resolve_workloads("confirm")
         )
+
+    def test_the_sparse_span_workloads_are_collectable_but_not_decidable(self):
+        # Intent: both sparse-span workloads can be launched, scheduled, and
+        #   collected, and neither can produce a verdict in either mode.
+        # Why it exists: their thresholds have not been screened yet, so anything
+        #   that classified them would be inventing a rule. The opposite failure
+        #   is just as real: a workload nothing can collect cannot be screened at
+        #   all, and screening is what the next step needs from this one.
+        # Scenario: spec-first; 29/D3 admits the pair as candidates first and
+        #   grants verdict authority only after an A/A screen and a held-out
+        #   confirmation.
+        for workload in SPARSE_SPAN_WORKLOADS:
+            with self.subTest(workload=workload):
+                self.assertIn(workload, VALIDATION.CANDIDATE_WORKLOADS)
+                self.assertNotIn(workload, VALIDATION.WORKLOADS)
+                self.assertIn(workload, VALIDATION.BLOCK_CONTRACTS)
+                self.assertIn(workload, COMPARE.BLOCK_METRICS)
+                with self.assertRaises(ValueError):
+                    COMPARE.resolve_workloads("quick", workload)
+                self.assertNotIn(workload, COMPARE.resolve_workloads("confirm"))
+
+    def test_each_sparse_span_workload_names_the_metric_its_defect_moves(self):
+        # Intent: `sparse-spans-few` pairs on synchronous draw time and
+        #   `sparse-spans-max` on whole-process CPU.
+        # Why it exists: the two protect different failures. Losing exact sparse
+        #   clipping widens the synchronous draw, which the draw bracket contains;
+        #   per-row rectangle emission moves Core Animation clip replay, which
+        #   happens after that bracket closes and is invisible to it at any size.
+        #   Routing either to the other's metric would measure a workload with an
+        #   instrument that structurally cannot see its regression.
+        # Scenario: spec-first; 29/D2 gives each workload the metric that observes
+        #   its own failure mode, and that routing is workload-local.
+        self.assertEqual(
+            COMPARE.BLOCK_METRICS["sparse-spans-few"], "drawNanosecondsPerDraw"
+        )
+        self.assertEqual(
+            COMPARE.BLOCK_METRICS["sparse-spans-max"],
+            "processCPUNanosecondsPerDraw",
+        )
+        # And no existing workload gains CPU verdict authority from that routing.
+        for workload in VALIDATION.WORKLOADS:
+            self.assertNotEqual(
+                COMPARE.BLOCK_METRICS[workload], "processCPUNanosecondsPerDraw"
+            )
 
     def test_the_harness_rejects_a_draw_workload_outside_that_set(self):
         # Intent: `terminal-benchmark.sh` refuses any workload that is neither one

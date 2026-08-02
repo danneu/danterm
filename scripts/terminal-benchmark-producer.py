@@ -71,9 +71,10 @@ REDRAW_WORKLOADS = (
 
 
 # The two topology-specific draw workloads. Separate from `REDRAW_WORKLOADS`
-# because they are not ladder members: the paired lifecycle does not schedule
-# them yet, so keeping them out of that tuple is what keeps its "every entry the
-# ladder measures" contract true while the stimulus lands ahead of the harness.
+# because they are candidates rather than ladder members: the harness collects
+# their blocks and no comparison decides them, so keeping them out of that tuple
+# is what keeps its "every entry the paired ladder measures" contract true. They
+# join it when a screened threshold graduates them into `WORKLOADS`.
 SPARSE_SPAN_WORKLOADS = ("sparse-spans-few", "sparse-spans-max")
 
 

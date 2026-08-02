@@ -243,6 +243,51 @@ class PairedDifferenceTests(unittest.TestCase):
                 [0.0] * (len(schedule) // 2),
             )
 
+    def test_a_sparse_span_candidate_pairs_on_its_own_metric_and_decides_nothing(self):
+        # Intent: both sparse-span workloads reduce to paired differences on the
+        #   metric routed to them, and neither can be classified in either mode.
+        # Why it exists: pairing is what a screen consumes, so a candidate needs
+        #   it before any rule exists -- while classification is exactly what must
+        #   stay impossible until a screened threshold is frozen. Reading the
+        #   wrong metric would be invisible: a block carries draw time and process
+        #   CPU side by side, so the paired series would still look well-formed.
+        # Scenario: spec-first; 29/D3 begins each workload collectable and
+        #   undecidable, and 29/PO3 refuses classification before a frozen rule.
+        schedule = [
+            {"measurementRole": role, "physicalArm": "a", "quartet": 0}
+            for role in ("A", "B", "B", "A")
+        ]
+        for workload, decided, ignored in (
+            ("sparse-spans-few",
+             "drawNanosecondsPerDraw", "processCPUNanosecondsPerDraw"),
+            ("sparse-spans-max",
+             "processCPUNanosecondsPerDraw", "drawNanosecondsPerDraw"),
+        ):
+            with self.subTest(workload=workload):
+                blocks = [
+                    {
+                        **planned,
+                        decided: (
+                            1_100_000.0
+                            if planned["measurementRole"] == "B"
+                            else 1_000_000.0
+                        ),
+                        ignored: 1_000_000.0,
+                    }
+                    for planned in schedule
+                ]
+
+                differences = COMPARE.paired_differences(workload, blocks)
+
+                self.assertEqual(len(differences), 2)
+                for difference in differences:
+                    self.assertAlmostEqual(
+                        difference, 200.0 * 100_000 / 2_100_000
+                    )
+                for mode in COMPARE.MODES:
+                    with self.assertRaises(ValueError):
+                        COMPARE.decide_workload(mode, workload, differences)
+
     def test_incomplete_or_unpaired_block_series_are_rejected(self):
         schedule = COMPARE.make_schedule(
             "quick", ("style-churn",), physical_candidate_arm="b"

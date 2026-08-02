@@ -1117,6 +1117,189 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             ["block-0-wrong-damage-row-count"],
         )
 
+    def test_sparse_span_collectors_accept_only_their_own_engine_topology(self):
+        # Intent: a sparse-span block is valid only when every accepted draw's
+        #   published engine damage carried the exact row and span counts the
+        #   workload names, and the engine topology is what decides that.
+        # Why it exists: AppKit's bounding dirty rectangle cannot tell the two
+        #   workloads apart -- the rectangle a compound clip draws under is the
+        #   union of its spans, so 2 spans and 17 present the same bounding row
+        #   count. Validating on that rectangle would accept a block measuring a
+        #   topology the workload does not name, and its numbers would look
+        #   perfectly well-formed.
+        # Scenario: spec-first; 29/I1 and 29/I2 make a verdict impossible unless
+        #   every measured draw carried 2 rows in 2 spans, or 17 rows in 17 spans.
+        for collect, workload, engine_rows, engine_spans in (
+            (VALIDATION.collect_sparse_spans_few, "sparse-spans-few", 2, 2),
+            (VALIDATION.collect_sparse_spans_max, "sparse-spans-max", 17, 17),
+        ):
+            with self.subTest(workload=workload):
+                artifact = self._sparse_span_artifact(workload)
+
+                evidence = collect(
+                    [{"measurementRole": "A", "physicalArm": "a"}],
+                    run_block=lambda arm: artifact,
+                )
+
+                self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+                self.assertEqual(evidence["workload"], workload)
+                block = evidence["rawBlocks"][0]
+                self.assertEqual(block["drawNanosecondsPerDraw"], 300_000)
+                self.assertEqual(block["processCPUNanosecondsPerDraw"], 4_000_000)
+                self.assertEqual(
+                    block["sparseSpanTopology"],
+                    artifact["finalDraw"]["sparseSpanTopology"],
+                )
+                self.assertEqual(
+                    block["sparseSpanTopology"]["expectedEngineDamagedRowCount"],
+                    engine_rows,
+                )
+
+                off_topology = self._sparse_span_artifact(workload)
+                off_topology["finalDraw"]["sparseSpanTopology"][
+                    "engineSpanCounts"
+                ][-1] = engine_spans - 1
+                self.assertEqual(
+                    collect(
+                        [{"measurementRole": "A", "physicalArm": "a"}],
+                        run_block=lambda arm: off_topology,
+                    )["invalidationReasons"],
+                    ["block-0-wrong-engine-damage-topology"],
+                )
+
+                other = self._sparse_span_artifact(
+                    "sparse-spans-max" if workload == "sparse-spans-few"
+                    else "sparse-spans-few"
+                )
+                reasons = collect(
+                    [{"measurementRole": "A", "physicalArm": "a"}],
+                    run_block=lambda arm: other,
+                )["invalidationReasons"]
+                self.assertIn("block-0-wrong-workload", reasons)
+                self.assertIn("block-0-wrong-sparse-span-contract", reasons)
+
+    def test_a_sparse_span_block_without_complete_topology_coverage_is_invalid(self):
+        # Intent: missing topology evidence, or topology series shorter than the
+        #   accepted draws, invalidates the block rather than being read as zero.
+        # Why it exists: the timing and CPU series are only meaningful against
+        #   proof that the draws behind them carried the named topology. Partial
+        #   coverage silently turns that proof into a claim about some of the
+        #   draws while the aggregate still describes all of them -- which is the
+        #   one failure a reader cannot see in the number.
+        # Scenario: spec-first; 29/I4 invalidates a block whose draw, metric, and
+        #   topology sample counts do not cover the same accepted draw set.
+        missing = self._sparse_span_artifact("sparse-spans-few")
+        del missing["finalDraw"]["sparseSpanTopology"]
+        self.assertEqual(
+            VALIDATION.collect_sparse_spans_few(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: missing,
+            )["invalidationReasons"],
+            ["block-0-missing-sparse-span-topology"],
+        )
+
+        partial = self._sparse_span_artifact("sparse-spans-few")
+        topology = partial["finalDraw"]["sparseSpanTopology"]
+        topology["sampleCount"] = 49
+        for series in ("engineDamagedRowCounts", "engineSpanCounts",
+                       "haloDamagedRowCounts", "haloSpanCounts",
+                       "clipDamagedRowCounts", "clipSpanCounts"):
+            topology[series] = topology[series][:49]
+        self.assertEqual(
+            VALIDATION.collect_sparse_spans_few(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: partial,
+            )["invalidationReasons"],
+            ["block-0-incomplete-topology-coverage"],
+        )
+
+    def test_a_sparse_span_block_must_cover_the_draws_its_own_metric_decides_on(self):
+        # Intent: `sparse-spans-max` is invalid when its process-CPU series does
+        #   not cover all 50 accepted draws, while `sparse-spans-few` -- which
+        #   decides on draw time -- stays valid with no CPU evidence at all.
+        # Why it exists: the CPU series silently drops any interval whose reading
+        #   was non-monotonic, and a normalization over fewer draws is reported as
+        #   None. For every other workload that is a descriptive line going
+        #   missing; for this one it is the deciding metric, so pairing would be
+        #   reduced to arithmetic on an absent number.
+        # Scenario: spec-first; 29/I4 invalidates a block whose primary-metric
+        #   coverage does not match its accepted draw set, and 29/D2 is what makes
+        #   whole-process CPU that metric here.
+        short = self._sparse_span_artifact("sparse-spans-max")
+        short["finalDraw"]["processCPUCount"] = 49
+        short["finalDraw"]["processCPUDurationsNanoseconds"] = [4_000_000] * 49
+
+        evidence = VALIDATION.collect_sparse_spans_max(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: short,
+        )
+
+        self.assertEqual(
+            evidence["invalidationReasons"],
+            ["block-0-incomplete-process-cpu-coverage"],
+        )
+
+        without_cpu = self._sparse_span_artifact("sparse-spans-few")
+        for field in (
+            "processCPUCount",
+            "cumulativeProcessCPUNanoseconds",
+            "processCPUDurationsNanoseconds",
+        ):
+            del without_cpu["finalDraw"][field]
+
+        few = VALIDATION.collect_sparse_spans_few(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: without_cpu,
+        )
+
+        self.assertTrue(few["valid"], few["invalidationReasons"])
+        self.assertIsNone(few["rawBlocks"][0]["processCPUNanosecondsPerDraw"])
+
+    def test_a_sparse_span_block_records_renderer_deviation_without_rejecting_it(self):
+        # Intent: dirty-rectangle fallback and full clip damage are carried on the
+        #   block as measured behavior, and neither invalidates it.
+        # Why it exists: a synthesized known-bad arm deviates exactly at damage
+        #   resolution, so gating on renderer behavior would turn the regression
+        #   being measured into an unmeasured block -- the instrument would refuse
+        #   to observe the only thing it was built to observe.
+        # Scenario: spec-first; 29/I3 records a declared renderer deviation in an
+        #   arm's provenance instead of failing its stimulus validity.
+        artifact = self._sparse_span_artifact("sparse-spans-max")
+        artifact["finalDraw"]["sparseSpanTopology"]["dirtyRectFallbackCount"] = 50
+        artifact["finalDraw"]["sparseSpanTopology"]["clipFullDamageCount"] = 50
+
+        evidence = VALIDATION.collect_sparse_spans_max(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+        self.assertEqual(
+            evidence["rawBlocks"][0]["sparseSpanTopology"]["dirtyRectFallbackCount"],
+            50,
+        )
+
+    def test_the_existing_draw_workloads_carry_no_topology_evidence(self):
+        # Intent: a block from one of the five calibrated workloads keeps exactly
+        #   the artifact shape its frozen rule was calibrated against.
+        # Why it exists: those rules were screened against blocks with no topology
+        #   accounting on the measured path, so adding a field or a check to them
+        #   would silently change the thing the thresholds describe.
+        # Scenario: spec-first; 29/PO7 isolates the existing five workloads from
+        #   this change.
+        evidence = VALIDATION.collect_incremental_mixed(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: self._draw_churn_artifact(
+                workload="full-screen-incremental-mixed-churn",
+                fixture="full-screen-incremental-mixed-churn-"
+                        "v2-four-rows-six-damage-179x66",
+                dirty_rows=6,
+            ),
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertNotIn("sparseSpanTopology", evidence["rawBlocks"][0])
+
     def test_attempt_collector_runs_every_planned_workload_without_exposing_condition(self):
         calls = []
         plan = {
@@ -1482,6 +1665,8 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "content-churn": [{"physicalArm": "a"}],
                 "style-churn": [{"physicalArm": "b"}],
                 "incremental-mixed": [{"physicalArm": "a"}],
+                "sparse-spans-few": [{"physicalArm": "b"}],
+                "sparse-spans-max": [{"physicalArm": "a"}],
             }
             collectors, close = VALIDATION.make_production_collectors(
                 plan,
@@ -1507,11 +1692,15 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     "full-screen-content-churn",
                     "full-screen-style-churn",
                     "full-screen-incremental-mixed-churn",
+                    "sparse-spans-few",
+                    "sparse-spans-max",
                 ],
             )
             self.assertEqual(
                 closed,
                 [
+                    "sparse-spans-max",
+                    "sparse-spans-few",
                     "full-screen-incremental-mixed-churn",
                     "full-screen-style-churn",
                     "full-screen-content-churn",
@@ -2049,6 +2238,43 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 }],
             },
         }
+
+    def _sparse_span_artifact(self, workload):
+        """Spell one on-contract sparse-span block the way the app publishes it.
+
+        The bounding dirty row count is deliberately the union of the halo spans
+        rather than the drawn row count: that is what AppKit actually reports for
+        a compound clip, and it is exactly why these workloads validate on the
+        engine topology beside it instead.
+        """
+        engine, halo, spans, dirty_rows = {
+            "sparse-spans-few": (2, 6, 2, 57),
+            "sparse-spans-max": (17, 50, 17, 66),
+        }[workload]
+        artifact = self._draw_churn_artifact(
+            workload=workload,
+            fixture=VALIDATION.SPARSE_SPAN_FIXTURE_IDENTITIES[workload],
+            dirty_rows=dirty_rows,
+        )
+        intervals = [4_000_000] * 50
+        artifact["finalDraw"]["processCPUCount"] = 50
+        artifact["finalDraw"]["cumulativeProcessCPUNanoseconds"] = sum(intervals)
+        artifact["finalDraw"]["processCPUDurationsNanoseconds"] = intervals
+        artifact["finalDraw"]["sparseSpanTopology"] = {
+            "workload": workload,
+            "expectedEngineDamagedRowCount": engine,
+            "expectedEngineSpanCount": spans,
+            "sampleCount": 50,
+            "engineDamagedRowCounts": [engine] * 50,
+            "engineSpanCounts": [spans] * 50,
+            "haloDamagedRowCounts": [halo] * 50,
+            "haloSpanCounts": [spans] * 50,
+            "clipDamagedRowCounts": [halo] * 50,
+            "clipSpanCounts": [spans] * 50,
+            "clipFullDamageCount": 0,
+            "dirtyRectFallbackCount": 0,
+        }
+        return artifact
 
     def _fixture_replay_artifact(self):
         return {

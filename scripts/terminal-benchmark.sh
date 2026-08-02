@@ -72,14 +72,16 @@ fi
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
-# Closed set, not a glob: the producer emits stimulus only for these three draw
+# Closed set, not a glob: the producer emits stimulus only for these five draw
 # workloads plus the diagnostic localized microbenchmark. Anything else must come
 # from the committed corpus, so a typo or a deleted workload fails here.
 case "$WORKLOAD" in
     localized-draw-acceptance \
     | full-screen-content-churn \
     | full-screen-style-churn \
-    | full-screen-incremental-mixed-churn) ;;
+    | full-screen-incremental-mixed-churn \
+    | sparse-spans-few \
+    | sparse-spans-max) ;;
     *)
         jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
             echo "Unknown workload: $WORKLOAD" >&2

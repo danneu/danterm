@@ -267,7 +267,7 @@ power-and-performance milestone.
 - [x] 1. Share the glyph-halo damage transform from the planning library
 - [x] 2. Add the sparse-spans-few and sparse-spans-max producer stimulus
 - [x] 3. Record engine damage topology on accepted sparse-span draws
-- [ ] 4. Collect the sparse-span workloads as undecidable candidates
+- [x] 4. Collect the sparse-span workloads as undecidable candidates
 - [ ] 5. Freeze calibrated sparse-span decision rules
 - [ ] 6. Prove historical sensitivity and graduate the documentation
 
@@ -318,3 +318,24 @@ power-and-performance milestone.
   describe a shape the workload does not name. Renderer fallback is the
   deliberate exception: it is recorded, never gated on, because a known-bad arm
   deviates exactly there and gating would erase the regression being measured.
+- Commit 4: the pair joins `CANDIDATE_WORKLOADS` beside `synchronized-frames`
+  rather than getting a new mechanism. That tuple already means exactly what D3
+  asks for -- a block contract, a collector, a named metric, and no
+  `DECISION_RULES` entry -- and `terminal-benchmark-candidate-screen.py` already
+  screens anything in it off `BLOCK_METRICS`, so commit 5 needs no new command.
+- Commit 4: their blocks go through the same `_collect_draw_churn` as the three
+  full-screen draw workloads, with the dirty-row check disabled
+  (`expected_dirty_rows=None`) and the engine-topology check in its place. A
+  private collector would have re-stated the settled/serialized/counted contract
+  and drifted from it silently; the damage check is the only part that differs,
+  because the damage is the only part these workloads are about.
+- Commit 4: `sparse-spans-max` invalidates a block whose process-CPU series does
+  not cover all 50 accepted draws, which no other workload does. The series drops
+  non-monotonic intervals and normalizes to `None` when short -- a missing
+  descriptive line everywhere else, but here it is the deciding metric (D2), so
+  pairing would be arithmetic on an absent number. The pre-existing tolerance for
+  a baseline arm with no CPU reading is untouched for every other workload.
+- Commit 4: the descriptive synchronous draw-time line PO5 asks for on the
+  maximum-span run is not here. It can only reach an operator through
+  `summarize_comparison`, which no undecidable candidate reaches, so it lands
+  with the frozen rule rather than as unreachable code.

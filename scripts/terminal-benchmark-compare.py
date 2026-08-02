@@ -58,6 +58,17 @@ BLOCK_METRICS = {
     # reduced to paired differences at all. A workload here but not there is
     # collectable and undecidable, which is the state a screen resolves.
     "synchronized-frames": "finalDrawNanoseconds",
+    # Two more candidates, and the only place a workload's deciding metric is
+    # not draw time or replay time. Each names the quantity that can observe its
+    # own regression (29/D2): losing exact sparse clipping widens the
+    # synchronous draw and is fully inside that bracket, while per-row rectangle
+    # emission moves Core Animation's clip replay, which happens after the
+    # bracket closes and is invisible to it at any size. The routing is
+    # workload-local -- no existing workload gains CPU verdict authority from
+    # it, and both entries stay out of DECISION_RULES until a screen freezes a
+    # threshold for them.
+    "sparse-spans-few": "drawNanosecondsPerDraw",
+    "sparse-spans-max": "processCPUNanosecondsPerDraw",
 }
 # Reported beside the draw verdict and decided separately from it. The
 # serialized-draw metric above brackets only clipping and drawing, so it
