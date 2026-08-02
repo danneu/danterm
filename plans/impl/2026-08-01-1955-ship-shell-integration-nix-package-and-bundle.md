@@ -199,7 +199,7 @@ position.
 - [x] 2. Package shell integration with Nix and check the packaged output
 - [x] 3. Add the `programs.danterm.shellIntegration` home-manager module
 - [x] 4. Ship the whole shell-integration tree into the app bundle
-- [ ] 5. Document the Nix and bundle routes in the README
+- [x] 5. Document the Nix and bundle routes in the README
 
 ## Implementation notes
 
@@ -259,6 +259,13 @@ position.
   plan scope, but the repo's shell-lint hook blocks every edit to the file on
   that pre-existing info-level finding; the directive is verbatim what the
   sibling script uses for the identical line.
+
+- **The README got a third subsection, `### On a remote host`** (commit 5),
+  beyond the `### With Nix` / `### Without Nix` pair the plan named. The
+  remote-host guidance the plan also asked for is neither route -- it is the
+  ssh `AcceptEnv` material that already lived in the section plus how to obtain
+  the assets where no `.app` exists -- so folding it into either heading would
+  have buried it.
 
 ## Follow Up
 

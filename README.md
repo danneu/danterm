@@ -438,8 +438,48 @@ DanTerm can export its state or load from a state file.
 This state includes the tab groups, tabs, pane layout, cwd of each pane, and
 (once you opt in) the command running in each pane.
 
-Source the bundled integration for your shell to opt in. Use the matching line
-in `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish`:
+Source the integration for your shell to opt in. The assets are inert outside
+DanTerm and safe to source repeatedly. They preserve existing prompt hooks,
+report command boundaries and local cwd without changing terminal titles, and
+wrap SSH/mosh to preserve pane-scoped remote-session reporting.
+
+Both routes below ship the same directory: the three `danterm.$shell` entry
+points plus the `vendor/` sibling that `danterm.bash` sources. Source
+`danterm.bash` from a copy that lost `vendor/` and it fails.
+
+### With Nix
+
+The home-manager module wires every shell you have enabled:
+
+```nix
+programs.danterm.shellIntegration.enable = true;
+```
+
+Each of bash/zsh/fish is wired if and only if that shell's own
+`programs.<shell>.enable` is true. This is gated independently of
+`programs.danterm.enable`, so a Linux host can import
+`danterm.homeManagerModules.default` for the shell assets alone without
+evaluating the macOS app package. Override the source with
+`programs.danterm.shellIntegration.package`.
+
+To wire it yourself instead, add `danterm.overlays.default` to your
+`nixpkgs.overlays` and reference the package path:
+
+```nix
+programs.bash.initExtra = ''
+  source ${pkgs.danterm-shell-integration}/share/danterm-shell-integration/danterm.bash
+'';
+```
+
+The package is `packages.<system>.shell-integration`, built for both
+`aarch64-darwin` and `x86_64-linux`.
+
+### Without Nix
+
+The app bundle carries the same tree under
+`Contents/Resources/shell-integration`. Use the matching line in `~/.zshrc`,
+`~/.bashrc`, or `~/.config/fish/config.fish` -- only the line for the shell
+loading that configuration file:
 
 ```sh
 source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.zsh
@@ -447,13 +487,30 @@ source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.ba
 source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.fish
 ```
 
-Choose only the line for the shell loading that configuration file. The assets
-are inert outside DanTerm and safe to source repeatedly. They preserve existing
-prompt hooks, report command boundaries and local cwd without changing terminal
-titles, and wrap SSH/mosh to preserve pane-scoped remote-session reporting.
+### On a remote host
 
-For `user@host` labels, source the same bundled asset on the remote shell and ensure
-the remote sshd accepts `LC_*` environment variables. In `sshd_config`, use:
+For `user@host` labels, source the same asset on the remote shell. The remote
+has no `.app` bundle, so get the directory there one of these ways:
+
+```sh
+# On a Nix remote (Linux or macOS): build the package there.
+nix build github:danneu/danterm#shell-integration
+source ./result/share/danterm-shell-integration/danterm.bash
+
+# Or with home-manager on the remote, the same option as above:
+#   programs.danterm.shellIntegration.enable = true;
+
+# Without Nix: copy the whole directory, never a single file --
+# danterm.bash resolves vendor/bash-preexec.sh next to itself.
+scp -r "/Applications/DanTerm.app/Contents/Resources/shell-integration" \
+  user@host:~/.danterm-shell-integration
+```
+
+Pin the flake input to the DanTerm revision you run locally so both ends carry
+matching assets.
+
+The remote sshd also has to accept `LC_*` environment variables. In
+`sshd_config`, use:
 
 ```sshconfig
 AcceptEnv LC_*
