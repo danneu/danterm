@@ -56,6 +56,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 23 | [PTY benchmark alignment](23-pty-benchmark-alignment.md) | Whether the benchmarks still match the rewritten PTY | Shipped -- one atomic timed consume fence; `synchronized-frames` demoted |
 | 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Shipped -- 8 cases reclassified, two corpora mined, M9's external gate passes |
 | 27 | [swift-collections adoption](27-swift-collections-adoption/README.md) | Where library containers fit DanTerm storage | Rejected -- all twelve sites failed the adoption bar; no new conversion |
+| 29 | [Sparse AppKit damage clip topology](29-sparse-appkit-damage-clip-topology/README.md) | Exact sparse clips across AppKit and Core Animation | Shipped -- maximal spans retain the sparse win without btop regression |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
@@ -76,4 +77,3 @@ here instead:
 - [FORMAT-NOTES.md](FORMAT-NOTES.md) is the change log for the contract itself:
   dated `observation -> cost -> rule changed or rejected` entries, plus the
   rules whose only support so far is performance research.
-
