@@ -247,10 +247,18 @@ against both cells; `canonicalCaselessSearchLimits` pins the excluded scope
 (no compatibility decomposition, no cross-grapheme folding). Doc 05's
 obligation now states the rule.
 
-Follow-up, still open: rewriting that obligation dropped its other half.
-The old bullet also required precomposed and decomposed examples to "render,
-select, erase" correctly, and nothing in the list covers that now. Restore it
-as its own bullet before this tracker is deleted.
+Follow-up, RESOLVED 2026-08-01: rewriting that obligation had dropped its
+other half -- precomposed and decomposed examples must also "render, select,
+erase" correctly. Restored as its own bullet in doc 05, worded to state the
+property rather than name examples. Verified first that restoring it adds no
+gap: render is directly tested for both forms in the same test
+(TextExecutionTests `unicodeClusterContainment` runs precomposed "áéíóúñ" at
+6 columns and decomposed "e\u{0301}" at 1), grapheme-to-one-cell is pinned by
+TerminalGraphemeTests `representativeAssembly`, and atomic overwrite/erase/
+scroll of a multi-scalar cluster by `clusteredWideCellAtomicity`. Select and
+erase across normalization forms then hold by construction: a cell's payload
+is the whole grapheme, and both selection ranges and `eraseCells` address
+cells rather than scalars, so no API can split one.
 
 ## F. Low-yield remainders
 

@@ -74,6 +74,10 @@ primary screen independently follows the primary resize contract above.
   canonically equivalent forms and root-locale full case folds match without
   crossing cell boundaries. Compatibility decomposition and locale-sensitive
   casing remain excluded.
+- Precomposed and decomposed forms of the same letter render, select, and
+  erase identically. Each occupies exactly one cell, so selection addresses it
+  as one unit and erase clears it whole; no operation can strand a combining
+  mark.
 - Chinese wide characters and U+1F618 render with stable geometry and survive
   all grid mutations without corruption.
 - Every supported emoji sequence is one selection and editing unit even when
