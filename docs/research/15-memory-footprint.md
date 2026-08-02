@@ -2137,7 +2137,9 @@ different proposal and is not covered by this rejection.
 **Closed.** All four phases are complete: Phase 1's harness was built and its
 attribution closed, Phase 1.5 and Phase 2 shipped, Phase 3 took every hypothesis
 it opened, and `F17` is Phase 4's closing measurement. `F18` is the later
-retained-row compaction follow-up. Findings F1 through F18 are recorded; the next
+retained-row compaction follow-up; doc 28
+(`28-retained-row-optimizations/`) continues from `F18`, `H6`, and `H7`
+without reopening this file. Findings F1 through F18 are recorded; the next
 free ID is **F19**. Decisions D1 through D4 are recorded,
 implemented, and closed; the next free ID is **D5**.
 
