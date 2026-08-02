@@ -31,10 +31,17 @@ typeset -g _danterm_is_remote=''
 typeset -gr _danterm_is_remote
 typeset -gr _danterm_enabled=${DANTERM:-${LC_DANTERM:-}}
 
+# The OSC String Terminator, named once rather than spelled inline in each
+# format. A lone backslash at the end of a printf format is passed through only
+# incidentally; carrying the two bytes in a variable sidesteps format
+# interpretation entirely. Same ANSI-C-quoting idiom as the `_danterm_p_*`
+# prompt marks below, and matches danterm.bash.
+typeset -gr _danterm_st=$'\033\\'
+
 danterm_base64() { printf '%s' "$1" | base64 | tr -d '\n' }
 danterm_emit() {
     [[ -n $_danterm_enabled ]] || return 0
-    printf '\033]1337;DanTermShell=1;%s\033\\' "$1"
+    printf '\033]1337;DanTermShell=1;%s%s' "$1" "$_danterm_st"
 }
 danterm_emit_command_start() { danterm_emit "command-start;$(danterm_base64 "$1")" }
 danterm_emit_command_end() { danterm_emit command-end }
@@ -45,7 +52,7 @@ danterm_emit_remote_host() {
 danterm_emit_cwd() {
     [[ -n $_danterm_enabled ]] || return 0
     [[ -z $_danterm_is_remote ]] || return 0
-    printf '\033]7;file://%s%s\033\\' "${HOST:-localhost}" "$PWD"
+    printf '\033]7;file://%s%s%s' "${HOST:-localhost}" "$PWD" "$_danterm_st"
 }
 
 danterm_emit_osc133() {
