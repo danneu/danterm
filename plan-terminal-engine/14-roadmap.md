@@ -413,8 +413,29 @@ mean.
     recorded on the recordings criterion above.
 
 - [ ] **9. Pass the replacement quality gates**
-  - [ ] Every required component invariant has the behavioral proof required by
-    [Testing and conformance](12-testing-conformance.md).
+  - [x] Every required component invariant has the behavioral proof required by
+    [Testing and conformance](12-testing-conformance.md). Closed 2026-08-01 by
+    an owner-adjudicated audit of every invariant and proof obligation in docs
+    01-13 and 15. Six gaps were real and are closed: width-independent logical
+    lines in full history, single process ownership against a duplicate launch,
+    a released pane being unreachable by every controller callback, XTGETTCAP
+    as a silent no-op, search navigation wrapping at both ends (doc 06
+    corrected to match the shipped behavior), and cross-normalization search --
+    the last of which was a behavior fix rather than a test, since search
+    neither normalized nor case-folded outside ASCII and now compares canonical
+    caseless graphemes. Doc 16 (semantic model) is excluded by its own
+    Non-goals, which disclaim gating this milestone. Sleep/wake is a real open
+    gap carried to the power-and-performance criterion below, which names it
+    explicitly. Of the low-yield remainder, three are not gaps and are accepted
+    on construction or standing-decision grounds (theme presentation-only,
+    the retired terminfo two-fixture gate, admission-process discipline); four
+    are waived as real but low-value and self-announcing in daily use
+    (transient power assertions, main-thread responsiveness under sustained
+    output, machine-checked contrast, one settings value across simultaneous
+    panes); one is waived with a named follow-up -- no test drives combined
+    adversarial pressure across parser, metadata, events, replies, scrollback,
+    and damage at once, which is the assumption here most likely to be wrong
+    and the first thing to revisit.
   - [ ] [Power and performance](13-power-performance.md) passes idle, hidden-pane,
     visible-output, recovery-freshness, sleep/wake, responsiveness, and teardown
     gates.
