@@ -225,13 +225,22 @@ XTGETTCAP case to that test.
 
 ### E6. Cross-normalization search match range (05-unicode-grid-scrollback.md O1)
 
-Status: open
+Status: done -- 2026-08-01. Probing the unpinned behavior turned this from a
+test gap into a behavior fix: search neither normalized nor case-folded
+outside ASCII, so `Ñ` did not find `ñ` and the two visually identical
+n-tildes never matched each other. Search now compares canonical caseless
+grapheme keys from generated Unicode 17.0 tables
+(`UnicodeProperties.generated.swift`, built by
+`scripts/generate-terminal-unicode-tables.py` with source hashes recorded).
+TerminalSearchTests `foldingAndUnicodeExactness` pins all four needle forms
+against both cells; `canonicalCaselessSearchLimits` pins the excluded scope
+(no compatibility decomposition, no cross-grapheme folding). Doc 05's
+obligation now states the rule.
 
-Search is tested with precomposed and decomposed needles, but no assertion
-pins the match RANGE for accented needles, so whether precomposed n-tilde
-matches a decomposed occurrence is unpinned. Fill: one
-`activeSearchMatchRange` assertion in TerminalSearchTests
-foldingAndUnicodeExactness.
+Follow-up, still open: rewriting that obligation dropped its other half.
+The old bullet also required precomposed and decomposed examples to "render,
+select, erase" correctly, and nothing in the list covers that now. Restore it
+as its own bullet before this tracker is deleted.
 
 ## F. Low-yield remainders -- recommend WAIVE with notes
 
@@ -288,6 +297,11 @@ Status: open
 - 2026-07-31: E3 ruled FILL; test landed and verified failing-when-broken.
 - 2026-07-31: E4 ruled FILL; tests-ui test landed and verified
   failing-when-broken.
+- 2026-08-01: E6 ruled FIX, not fill. Dan pushed back on the initial
+  recommendation to pin exact matching; the deciding argument is that search
+  already case-folds ASCII on purpose, and a search that fails on text the
+  user cannot visually distinguish is worse than one that is case-sensitive.
+  Implemented as canonical caseless matching over generated Unicode tables.
 - 2026-07-31: E5 ruled FILL; three XTGETTCAP cases landed. The audit cited
   "10 I2", which does not exist -- the denial lives in doc 10's
   unsupported-query prose. Citation corrected in the test comment.
