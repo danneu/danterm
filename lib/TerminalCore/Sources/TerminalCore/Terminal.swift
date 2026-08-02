@@ -2710,7 +2710,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func isTrailingURLPunctuation(_ scalar: Unicode.Scalar) -> Bool {
-        [0x2C, 0x2E, 0x3B, 0x3A, 0x21, 0x3F, 0x29, 0x5D, 0x7D].contains(scalar.value)
+        [0x2C, 0x2E, 0x3B, 0x3A, 0x21, 0x3F, 0x29, 0x5C, 0x5D, 0x7D]
+            .contains(scalar.value)
     }
 
     private func isActivatableHTTPLink(_ uri: String) -> Bool {

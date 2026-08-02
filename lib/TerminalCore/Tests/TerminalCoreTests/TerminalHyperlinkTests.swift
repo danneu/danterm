@@ -245,6 +245,63 @@ struct TerminalHyperlinkTests {
         #expect(terminal.activatableLink(at: .init(row: 0, column: 1)) == nil)
     }
 
+    @Test("automatic detection trims terminal punctuation and resolves only URL cells")
+    func automaticDetectionBoundaries() throws {
+        // Intent: automatic HTTP(S) detection finds the complete token from any URL cell,
+        //   trims prose punctuation, and does not extend activation into adjacent whitespace.
+        // Why it exists: the previous coverage exercised only `(URL),`, leaving the rest of
+        //   the detector's punctuation and token-boundary policy unproved.
+        // Scenario: command output contains URLs beside punctuation, leading whitespace, and
+        //   malformed lookalikes, and the user Command-clicks both inside and beside them.
+        // Adapted from kitty_tests/datatypes.py#test_url_at
+        //   (kitty v0.48.2 2cb1d95, body sha256:2ba030f7abcf).
+        //   Divergence: asserts through `activatableLink(at:)`, supports only HTTP(S), trims an
+        //   unbalanced `)` in agreement with WezTerm/foot/iTerm2, and does not activate whitespace.
+        let cases: [(text: String, click: Int, uri: String)] = [
+            ("http://xyz.com.", 7, "http://xyz.com"),
+            ("http://xyz.com,", 7, "http://xyz.com"),
+            ("http://xyz.com\\", 7, "http://xyz.com"),
+            ("http://xyz.com}", 7, "http://xyz.com"),
+            ("http://xyz.com]", 7, "http://xyz.com"),
+            ("http://xyz.com>", 7, "http://xyz.com"),
+            ("http://xyz.com)", 7, "http://xyz.com"),
+            ("http://-abcd] ", 8, "http://-abcd"),
+            ("http://a.b?q=1/", 8, "http://a.b?q=1/"),
+            ("http://a.b?q=1-", 8, "http://a.b?q=1-"),
+            ("http://a.b?q=1&", 8, "http://a.b?q=1&"),
+        ]
+        for entry in cases {
+            var terminal = try #require(Terminal(columns: entry.text.utf8.count + 1, rows: 1))
+            terminal.feed(Array(entry.text.utf8))
+            #expect(
+                terminal.activatableLink(at: .init(row: 0, column: entry.click))?.hyperlink.uri
+                    == entry.uri,
+                "input: \(entry.text)"
+            )
+        }
+
+        let surrounded = "  https://testing.me  "
+        var terminal = try #require(Terminal(columns: surrounded.utf8.count, rows: 1))
+        terminal.feed(Array(surrounded.utf8))
+        for column in 2..<(surrounded.utf8.count - 2) {
+            #expect(
+                terminal.activatableLink(at: .init(row: 0, column: column))?.hyperlink.uri
+                    == "https://testing.me"
+            )
+        }
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 0)) == nil)
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 1)) == nil)
+        #expect(terminal.activatableLink(at: .init(row: 0, column: surrounded.utf8.count - 1)) == nil)
+
+        for text in ["https:// testing.me", "h ttp://acme.com", "http: //acme.com", "http:/ /acme.com"] {
+            var malformed = try #require(Terminal(columns: text.utf8.count + 1, rows: 1))
+            malformed.feed(Array(text.utf8))
+            for column in 0..<text.utf8.count {
+                #expect(malformed.activatableLink(at: .init(row: 0, column: column)) == nil)
+            }
+        }
+    }
+
     @Test("automatic detection accepts 64 KiB and rejects one byte more")
     func detectedTargetBoundary() {
         let prefix = "https://example.test/"

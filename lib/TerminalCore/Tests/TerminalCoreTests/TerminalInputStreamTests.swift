@@ -5,6 +5,27 @@ import Testing
 
 /// Locks the stream boundary to chunk-invariant UTF-8 and bounded VT recognition.
 struct TerminalInputStreamTests {
+    @Test("unknown ESC and unsupported charset designation swallow only their own bytes")
+    func escapeRecoveryAndCharsetDesignationBoundaries() {
+        // Intent: unknown single-byte ESC dispatch and unsupported SCS designation consume their
+        //   complete sequences while allowing the next printable byte to reach the grid.
+        // Why it exists: without an SCS boundary case, `ESC ( B` could leak `B` into nearly every
+        //   ncurses application's initial screen or swallow the printable byte after it.
+        // Scenario: an application emits an unknown escape or selects ASCII into G0, then prints `a`.
+        // Adapted from kitty_tests/parser.py#test_esc_codes
+        //   (kitty v0.48.2 2cb1d95, body sha256:d642630555b3).
+        //   Divergence: uses the common `ESC ( B` SCS sequence and asserts parser actions; kitty
+        //   probes `ESC . ESC` and diagnostic callbacks that DanTerm deliberately does not expose.
+        var unknown = TerminalInputStream()
+        #expect(unknown.feed(Array("\u{1B}xa".utf8)) == [.escape(0x78), .print("a")])
+
+        var designation = TerminalInputStream()
+        #expect(designation.feed(Array("\u{1B}(Ba".utf8)) == [
+            .escapeSequence(EscapeSequence(intermediates: [0x28], final: 0x42)),
+            .print("a"),
+        ])
+    }
+
     @Test("well-formed UTF-8 emits one print action per scalar")
     func wellFormedUTF8() {
         var stream = TerminalInputStream()

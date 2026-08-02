@@ -105,6 +105,28 @@ struct CSIParserTests {
         ])
     }
 
+    @Test("a parameter byte after a CSI intermediate is ignored through the final")
+    func malformedParameterAfterIntermediateRecovery() {
+        // Intent: a malformed CSI that returns to parameter bytes after an intermediate is
+        //   ignored through its final byte, and printable input immediately afterward survives.
+        // Why it exists: no prior case put `-` in parameter position, so recovery could either
+        //   leak the CSI final onto the grid or swallow printable bytes after the sequence.
+        // Scenario: a broken application emits `CSI 2-3 @` followed by `y`; only `y` is text.
+        // Adapted from kitty_tests/parser.py#test_csi_codes
+        //   (kitty v0.48.2 2cb1d95, body sha256:0751bdf41479).
+        //   Divergence: follows VTE/foot CSI-ignore recovery by swallowing `@`; kitty prints `@y`.
+        let bytes = Array("\u{1B}[2-3@y".utf8)
+        let expected: [TerminalStreamAction] = [.print("y")]
+
+        #expect(run(chunks: [bytes]).actions == expected)
+        for offset in 0...bytes.count {
+            #expect(
+                run(chunks: [Array(bytes[..<offset]), Array(bytes[offset...])]).actions
+                    == expected
+            )
+        }
+    }
+
     @Test("CSI parameter capacity dispatches 24 values and drops 25")
     func parameterCapacity() {
         let twentyFour = "\u{1B}[" + Array(repeating: "1", count: 23).joined(separator: ";") + ";2H"
