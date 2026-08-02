@@ -242,33 +242,60 @@ The old bullet also required precomposed and decomposed examples to "render,
 select, erase" correctly, and nothing in the list covers that now. Restore it
 as its own bullet before this tracker is deleted.
 
-## F. Low-yield remainders -- recommend WAIVE with notes
+## F. Low-yield remainders
 
-Status: open
+Status: decided -- Dan ruled 2026-08-01. The eight are not one disposition.
+Three are not gaps at all and are ACCEPTED; four are real but low-value and
+are WAIVED; one is waived with a named follow-up because it is the only
+member where a test could plausibly find something the existing coverage
+cannot.
 
-- 10 I7 / P6: every individual resource bound is pinned at exact limits, but
-  no single test drives combined adversarial pressure across
-  parser+metadata+events+replies+scrollback+damage simultaneously, and the
-  stalled-consumer test uses plain output rather than near-limit
-  notification/progress bursts.
-- 13 I8: no-power-assertion is sampled once (`pmset -g assertions`) during the
-  opt-in viability idle window only; transient assertions during activity
-  would pass unnoticed.
-- 13 P5: AppKit main-thread input responsiveness under sustained output is
-  never asserted (bounded-pending-work half IS covered).
-- 11 I3: theme presentation-only is true by construction (Terminal takes no
-  theme); no test asserts parser state bit-identical across theme changes.
-- 11 P2: all six baked-theme color roles pinned to exact values; "readable"
-  (contrast) never machine-checked.
-- 11 P3: per-pane theme application + split inheritance tested; one settings
-  value across several simultaneously created panes not directly asserted.
-- 10 P1: the two-fixture terminfo byte-comparison gate (macOS ncurses vs
-  current ncurses) was deliberately retired; one shared sequence set is pinned
-  (TerminalKeyEncodingTests terminfo test), divergence (`pairs`) covered by
-  prose provenance only.
-- 01 I2: "unsupported legacy behavior is not silently treated as a future
-  requirement" is admission-process discipline; contract doc + probe
-  allowlist exist, no automated guard possible.
+### Accepted -- no gap to fill
+
+- 11 I3 (parser state across theme changes): theme presentation-only is true
+  by construction. `Terminal` takes no theme, so a theme change cannot reach
+  the parser. Writing the test would require first adding the coupling the
+  test exists to detect. Accepted on the construction argument, same basis as
+  section D.
+- 10 P1 (terminfo two-fixture gate): the macOS-ncurses vs current-ncurses
+  byte-comparison gate was deliberately retired, not overlooked. One shared
+  sequence set stays pinned by the TerminalKeyEncodingTests terminfo test;
+  divergence (`pairs`) is covered by prose provenance. Accepted as a standing
+  decision.
+- 01 I2 (admission discipline): "unsupported legacy behavior is not silently
+  treated as a future requirement" governs how work is admitted, not how the
+  code behaves. The contract doc and probe allowlist are the mechanism; no
+  automated guard is possible. Accepted as process, not code.
+
+### Waived -- real, low value, and self-announcing in daily use
+
+- 13 I8 (power assertions): sampled once via `pmset -g assertions` during the
+  opt-in viability idle window, so a transient assertion taken during activity
+  would pass unnoticed. Waived: the cost is battery, not correctness, and
+  `pmset` reports it on demand at any time.
+- 13 P5 (input responsiveness under sustained output): never asserted; the
+  bounded-pending-work half of the invariant IS covered. Waived: a wall-clock
+  responsiveness assertion on the AppKit main thread is the classic flaky
+  test, and a stall here is felt immediately by the sole user.
+- 11 P2 (contrast): all six baked-theme color roles are pinned to exact
+  values, so a theme cannot drift silently; "readable" is never
+  machine-checked. Waived: readability is an eyes-on judgment, and the
+  pinned values already prevent the failure mode a test would guard.
+- 11 P3 (one settings value across simultaneous panes): per-pane theme
+  application and split inheritance are both tested; several panes created at
+  once landing on one settings value is not directly asserted. Waived: it is
+  the tested path executed more times, with no new code between.
+
+### Waived with a follow-up -- the one worth revisiting
+
+- 10 I7 / P6 (combined resource pressure): every individual bound is pinned at
+  its exact limit, but no test drives parser + metadata + events + replies +
+  scrollback + damage simultaneously, and the stalled-consumer test uses plain
+  output rather than near-limit notification/progress bursts. Waived for
+  criterion 1, but flagged as the highest-value remaining test in this
+  section: per-bound tests are precisely the ones that miss interaction
+  effects, so "each bound holds independently" is the assumption here most
+  likely to be wrong. If effort goes anywhere in section F, it goes here.
 
 ## Decision log
 
@@ -297,6 +324,11 @@ Status: open
 - 2026-07-31: E3 ruled FILL; test landed and verified failing-when-broken.
 - 2026-07-31: E4 ruled FILL; tests-ui test landed and verified
   failing-when-broken.
+- 2026-08-01: F ruled as a three-way split rather than a blanket waive. The
+  tracker had recommended waiving all eight, which would have recorded three
+  non-gaps (11 I3, 10 P1, 01 I2) as debts the project does not actually owe.
+  Accepted those three, waived four, and waived 10 I7/P6 with a follow-up as
+  the only member where a new test could plausibly find something.
 - 2026-08-01: E6 ruled FIX, not fill. Dan pushed back on the initial
   recommendation to pin exact matching; the deciding argument is that search
   already case-folds ASCII on purpose, and a search that fails on text the
