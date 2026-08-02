@@ -266,7 +266,7 @@ power-and-performance milestone.
 ## Commit progress
 - [x] 1. Share the glyph-halo damage transform from the planning library
 - [x] 2. Add the sparse-spans-few and sparse-spans-max producer stimulus
-- [ ] 3. Record engine damage topology on accepted sparse-span draws
+- [x] 3. Record engine damage topology on accepted sparse-span draws
 - [ ] 4. Collect the sparse-span workloads as undecidable candidates
 - [ ] 5. Freeze calibrated sparse-span decision rules
 - [ ] 6. Prove historical sensitivity and graduate the documentation
@@ -297,3 +297,24 @@ power-and-performance milestone.
   the separate tuple keeps that contract true; `redraw_screen`'s existing
   dispatch already routes them, so the settling frame, run loop, and
   serialized-draw handshake needed no change.
+- Commit 3: the accept/record rules went into a new `TerminalBenchmarkTopology`
+  target rather than into `TerminalBenchmarkMarkers`. The observer's rules are
+  only pinnable under a headless test if they live in the library -- the same
+  reason the marker scanner and (commit 1) the halo transform are there -- but
+  that module's stated boundary is matching marker literals, and workload
+  topology contracts are not that. `TerminalDamageTopology` lives with them
+  rather than in `TerminalRenderPlanning` because reducing damage to
+  (rows, spans) is only interesting to a benchmark; drawing consumes the spans
+  themselves.
+- Commit 3: engine damage is unioned across every frame published since the OSC
+  sequence number arrived, and reset when a new sequence arrives, rather than
+  latched from the sequence-carrying frame. One producer update can reach the
+  app as several parsed frames, so a latch would see a fraction of the stimulus
+  rows; resetting on the sequence is what keeps the settling frame's damage out
+  of the first measured update.
+- Commit 3: an off-topology draw is rejected by leaving its acknowledgment
+  unwritten, so the producer times out and the block fails with its
+  acknowledgment log rather than publishing an artifact whose series silently
+  describe a shape the workload does not name. Renderer fallback is the
+  deliberate exception: it is recorded, never gated on, because a known-bad arm
+  deviates exactly there and gating would erase the regression being measured.

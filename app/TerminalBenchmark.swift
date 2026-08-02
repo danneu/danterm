@@ -3,6 +3,7 @@
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
 import TerminalBenchmarkMarkers
+import TerminalBenchmarkTopology
 import TerminalCore
 import TerminalPaneSession
 import TerminalRenderExecution
@@ -288,6 +289,20 @@ final class TerminalBenchmarkObserver {
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
+    /// Accepted-draw selection and topology evidence for the two sparse-span
+    /// workloads, and nil for every other one -- which is what keeps this whole
+    /// accounting off the five existing workloads' measured path.
+    private var sparseSpanRecorder: TerminalBenchmarkSparseSpanRecorder?
+    /// Engine damage published since the current redraw sequence appeared,
+    /// unioned rather than latched.
+    ///
+    /// One producer update is one stimulus, but the parser can publish it as
+    /// several frames, so the frame carrying the sequence number in its OSC
+    /// title may hold only part of the damaged rows. Unioning until a draw is
+    /// accepted reconstructs the update's real topology; resetting when a new
+    /// sequence arrives is what keeps the settling frame's rows out of the first
+    /// measured update.
+    private var pendingEngineDamage = TerminalDamage.none
     /// Where lifetime draw/plan-publish counts are republished for an attached
     /// profiler, and the counts themselves. Absent outside profiling runs.
     ///
@@ -342,6 +357,8 @@ final class TerminalBenchmarkObserver {
         self.profilesIncrementalMixedDamage =
             environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
                 == "full-screen-incremental-mixed-churn"
+        self.sparseSpanRecorder = environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
+            .flatMap(TerminalBenchmarkSparseSpanRecorder.init(workload:))
         let updateCount = { (name: String) in
             environment[name].flatMap(Int.init) ?? 0
         }
@@ -399,6 +416,12 @@ final class TerminalBenchmarkObserver {
                 acceptedFenceStallMaxNanoseconds,
                 fenceStallNanoseconds
             )
+        }
+        if sparseSpanRecorder != nil {
+            // Reset on the frame that carries a new sequence number, union on every
+            // frame after it: together those bracket exactly one producer update.
+            if pendingRedrawSequence != nil { pendingEngineDamage = .none }
+            pendingEngineDamage.formUnion(damage)
         }
         if let pendingRedrawSequence {
             publishedRedrawSequence = pendingRedrawSequence
@@ -467,6 +490,8 @@ final class TerminalBenchmarkObserver {
         pendingRedrawSequence = nil
         publishedRedrawSequence = nil
         redrawSequences = []
+        sparseSpanRecorder?.reset()
+        pendingEngineDamage = .none
     }
 
     /// Associates benchmark-only OSC title metadata with the next published full-screen frame.
@@ -479,8 +504,13 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Tells the view to retry when AppKit merged a published full redraw with older partial damage.
+    /// Excludes the sparse-span workloads for the same reason it excludes
+    /// incremental-mixed: their stimulus is partial damage by construction, and
+    /// forcing a full redraw would replace the exact topology they measure.
     var needsPublishedRedraw: Bool {
-        publishedRedrawSequence != nil && profilesIncrementalMixedDamage == false
+        publishedRedrawSequence != nil
+            && profilesIncrementalMixedDamage == false
+            && sparseSpanRecorder == nil
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
@@ -536,11 +566,39 @@ final class TerminalBenchmarkObserver {
             metrics: metrics,
             rowCount: plan.rows
         )
+        // Two selection rules, one per stimulus family. A dirty-rectangle rule
+        // cannot serve the sparse-span workloads at all: the rectangle a compound
+        // clip draws under is the union of its spans, so 2 spans and 17 spans
+        // present the same bounding row count. Those workloads select on the
+        // engine damage that produced the clip instead, and the topology check is
+        // what makes an off-topology draw fail to acknowledge rather than enter
+        // the series.
+        //
+        // The recorder is consulted only for a sequence this block has not
+        // accepted yet, because recording is what an accepted draw is: a record
+        // written for any other draw would leave the topology series longer than
+        // the timing series they must be read against.
+        var acceptsRedrawDraw = publishedRedrawSequence
+            .map { redrawSequences.contains($0) == false } ?? false
+        if acceptsRedrawDraw {
+            if sparseSpanRecorder != nil {
+                acceptsRedrawDraw = sparseSpanRecorder?.recordDrawIfTopologyMatches(
+                    engineDamage: pendingEngineDamage,
+                    clipDamage: damage,
+                    rowCount: plan.rows,
+                    usedDirtyRectFallback: usedDirtyRectFallback
+                ) == true
+            } else {
+                acceptsRedrawDraw =
+                    redrawDirtyRowCount == (profilesIncrementalMixedDamage ? 6 : plan.rows)
+            }
+        }
         if let sequence = publishedRedrawSequence,
-           redrawDirtyRowCount == (profilesIncrementalMixedDamage ? 6 : plan.rows),
+           acceptsRedrawDraw,
            redrawSequences.insert(sequence).inserted
         {
             publishedRedrawSequence = nil
+            pendingEngineDamage = .none
             localizedDrawDurations.append(drawDurationNanoseconds)
             acceptPendingWork()
             localizedDirtyRowCounts.append(redrawDirtyRowCount)
@@ -619,6 +677,14 @@ final class TerminalBenchmarkObserver {
             {
                 object["blockProcessCPUNanoseconds"] =
                     lastAcceptedProcessCPUNanoseconds - blockStartProcessCPUNanoseconds
+            }
+            // Present only for the sparse-span workloads, and carrying the same
+            // accepted draws as the timing and CPU series above: their verdicts
+            // are unreadable without proof that every measured draw really
+            // carried the topology the workload names, while the five existing
+            // workloads keep the artifact their frozen rules were calibrated on.
+            if let sparseSpanRecorder {
+                object["sparseSpanTopology"] = sparseSpanRecorder.artifact()
             }
         }
         do {

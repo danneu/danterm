@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "TerminalRenderPlanning", targets: ["TerminalRenderPlanning"]),
         .library(name: "TerminalRenderExecution", targets: ["TerminalRenderExecution"]),
         .library(name: "TerminalBenchmarkMarkers", targets: ["TerminalBenchmarkMarkers"]),
+        .library(name: "TerminalBenchmarkTopology", targets: ["TerminalBenchmarkTopology"]),
         .executable(name: "TerminalCoreBenchmark", targets: ["TerminalCoreBenchmark"]),
         .executable(name: "TerminalDrawBenchmark", targets: ["TerminalDrawBenchmark"]),
         .executable(name: "GlyphPreview", targets: ["GlyphPreview"]),
@@ -117,6 +118,18 @@ let package = Package(
             name: "TerminalBenchmarkMarkers",
             dependencies: ["TerminalRenderPlanning"],
             path: "Sources/TerminalBenchmarkMarkers",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalBenchmarkTopology",
+            dependencies: ["TerminalCore", "TerminalRenderPlanning"],
+            path: "Sources/TerminalBenchmarkTopology",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalBenchmarkTopologyTests",
+            dependencies: ["TerminalBenchmarkTopology", "TerminalCore"],
+            path: "Tests/TerminalBenchmarkTopologyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
