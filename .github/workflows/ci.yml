@@ -101,6 +101,14 @@ jobs:
       - name: Shell integration check (x86_64-linux)
         run: nix build --print-build-logs .#checks.x86_64-linux.shell-integration
 
+      # The home-manager module is only claimed to evaluate on a non-Darwin
+      # host with just `shellIntegration` enabled, and a Linux runner is the
+      # only place that claim can be tested. The check evaluates a real Home
+      # Manager configuration against the pinned input and forces it by
+      # building the activation package.
+      - name: Home Manager module evaluation (x86_64-linux)
+        run: nix build --print-build-logs .#checks.x86_64-linux.home-manager-shell-integration
+
   theme-freshness:
     runs-on: ubuntu-latest
     steps:

@@ -13,10 +13,24 @@
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
+  # Only consumed by checks.x86_64-linux.home-manager-shell-integration, which
+  # evaluates hm-module.nix against a real Home Manager rather than a stubbed
+  # module harness. Follows our nixpkgs so the evaluated configuration uses the
+  # same package set the shell-integration package is built from -- which is
+  # also why the pin is a revision, not a branch: Home Manager tracks nixpkgs
+  # closely (recent revisions need lib/services/lib.nix, absent from our
+  # nixpkgs pin), so the two have to move together. When bumping nixpkgs, bump
+  # this to a Home Manager revision of a similar date.
+  inputs.home-manager = {
+    url = "github:nix-community/home-manager/5a75730e6f21ee624cbf86f4915c6e7489c74acc";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   outputs =
     {
       self,
       nixpkgs,
+      home-manager,
       zig-overlay,
     }:
     let
@@ -158,7 +172,8 @@
       );
 
       checks = forEachSystem hookSystems (
-        system: pkgs: {
+        system: pkgs:
+        {
           claude-notify-osc777 =
             pkgs.runCommand "danterm-claude-notify-osc777-test"
               {
@@ -234,13 +249,84 @@
                 touch $out
               '';
         }
+        // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # Non-Darwin evaluation is the module's most fragile claim -- nothing
+          # else in it is cross-platform, so a macOS-only reference creeping
+          # back in would break only for Linux consumers and only at rebuild
+          # time. Building the activation package forces the whole generated
+          # configuration here instead. The same build asserts the enable
+          # contract in both directions.
+          home-manager-shell-integration =
+            let
+              assets = "${self.packages.${system}.shell-integration}/share/danterm-shell-integration";
+              homeFilesFor =
+                shells:
+                (home-manager.lib.homeManagerConfiguration {
+                  inherit pkgs;
+                  modules = [
+                    self.homeManagerModules.default
+                    {
+                      home.username = "danterm";
+                      home.homeDirectory = "/home/danterm";
+                      home.stateVersion = "24.11";
+                      # Only shellIntegration: `programs.danterm.enable` stays
+                      # false, so no macOS app package may be reached.
+                      programs.danterm.shellIntegration.enable = true;
+                      programs.bash.enable = shells.bash;
+                      programs.zsh.enable = shells.zsh;
+                      programs.fish.enable = shells.fish;
+                    }
+                  ];
+                }).activationPackage;
+              allShells = homeFilesFor {
+                bash = true;
+                zsh = true;
+                fish = true;
+              };
+              # zsh off, the other two on: proves the wiring follows each
+              # shell's own enable flag rather than being written unconditionally.
+              zshDisabled = homeFilesFor {
+                bash = true;
+                zsh = false;
+                fish = true;
+              };
+            in
+            pkgs.runCommand "danterm-home-manager-shell-integration-test" { } ''
+              all=${allShells}/home-files
+              grep -qF 'source ${assets}/danterm.bash' "$all/.bashrc"
+              grep -qF 'source ${assets}/danterm.zsh' "$all/.zshrc"
+              grep -qF 'source ${assets}/danterm.fish' "$all/.config/fish/config.fish"
+
+              off=${zshDisabled}/home-files
+              grep -qF 'source ${assets}/danterm.bash' "$off/.bashrc"
+              if [ -e "$off/.zshrc" ] && grep -qF danterm-shell-integration "$off/.zshrc"; then
+                echo "zsh is not enabled but received DanTerm wiring" >&2
+                exit 1
+              fi
+              touch $out
+            '';
+        }
       );
 
       homeManagerModules.default =
         { pkgs, ... }:
+        let
+          system = pkgs.stdenv.system;
+        in
         {
           imports = [ ./hm-module.nix ];
-          programs.danterm.package = nixpkgs.lib.mkDefault (self.packages.${pkgs.stdenv.system}.default);
+          # The GUI default is emitted only where a GUI package exists.
+          # `packages.<system>.default` is `appSystems`-only, so defining it
+          # unconditionally makes the module fail with `attribute 'default'
+          # missing` on a Linux host the moment anything forces the option --
+          # even one that only wants the shell assets. The shell-integration
+          # default is available on every hook system, Linux included.
+          programs.danterm = {
+            shellIntegration.package = nixpkgs.lib.mkDefault self.packages.${system}.shell-integration;
+          }
+          // nixpkgs.lib.optionalAttrs (builtins.elem system appSystems) {
+            package = nixpkgs.lib.mkDefault self.packages.${system}.default;
+          };
         };
     };
 }

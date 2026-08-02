@@ -197,7 +197,7 @@ position.
 
 - [x] 1. Make the shell assets and their test hermetic
 - [x] 2. Package shell integration with Nix and check the packaged output
-- [ ] 3. Add the `programs.danterm.shellIntegration` home-manager module
+- [x] 3. Add the `programs.danterm.shellIntegration` home-manager module
 - [ ] 4. Ship the whole shell-integration tree into the app bundle
 - [ ] 5. Document the Nix and bundle routes in the README
 
@@ -226,6 +226,26 @@ position.
   `packages.<system>.shell-integration`** -- matching the existing
   `danterm-agent-skill` / `danterm-claude-*` split between namespaced overlay
   names and bare package names.
+
+- **The Home Manager input is pinned to a revision, not a branch** (commit 3).
+  Both `master` and `release-26.05` need a newer nixpkgs than this flake's pin
+  (`error: path '.../lib/services/lib.nix' does not exist`), and `release-25.11`
+  evaluates but warns on every build that Home Manager 25.11 is paired with
+  Nixpkgs 26.05. The pin is a master revision dated to within two days of the
+  nixpkgs pin, which evaluates clean; the input comment says to move the two
+  together.
+- **The Home Manager evaluation is `x86_64-linux`-only** (commit 3), not on both
+  hook systems: non-Darwin evaluation is the claim, and keeping it off
+  `aarch64-darwin` leaves the local `nix flake check` free of a Home Manager
+  fetch. Verified locally by building the same two configurations for
+  `aarch64-darwin` out-of-tree.
+- **Forcing is `activationPackage`, and the check builds two configurations**
+  (commit 3): all three shells enabled, then the same with zsh disabled. The
+  second is the negative half of the enable contract. zsh is wired through
+  `programs.zsh.initContent`; `initExtra` is deprecated in the pinned HM.
+- **`programs.danterm.package` is now undefined rather than defaulted on
+  non-`appSystems`** (commit 3). Safe because every read of it sits inside
+  `mkIf cfg.enable`, and `enable` cannot sensibly be true without a GUI package.
 
 ## Follow Up
 
