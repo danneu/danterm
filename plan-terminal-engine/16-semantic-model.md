@@ -60,6 +60,21 @@ facts:
 - remote events drive the live connection facet independently of command
   state.
 
+That independence is narrower than it sounds, and today's shipped behavior
+deliberately contradicts it. `update`'s `.commandEnded` arm clears `isRemote`,
+`remoteSession`, `agentSession`, and `remoteThemeOverride` together, pinned by
+`lib/DanTermCore/Tests/DanTermCoreTests/UpdateRemoteTests.swift`. That coupling
+is correct for the common case: when the connection is `ssh host`, its lifetime
+*is* the command's, and clearing connection state at command end is what drops
+the remote badge at the right moment. Independence is the right rule only for
+connections that outlive or nest inside a command -- a remote session reported
+from within an already-running shell, tmux, a nested PTY -- which is why P4
+scopes its obligation to nested traces. Step 2 must reconcile the two
+explicitly rather than discover the conflict: either keep the coupling and
+state the exception here, or change it and update those tests on purpose. What
+it must not do is leave the facet reducer and the pane model holding
+disagreeing answers to the same question.
+
 OSC 133 prompt/input/output marks remain an engine-internal row-classification
 and prompt-redraw protocol. They never create command state. OSC 7 remains the
 live cwd source used by pane chrome and split inheritance, but the command

@@ -47,11 +47,21 @@ facet code exists). Doc 16's own Non-goals section states: "Gating a
 terminal-engine replacement milestone on this document." Recommendation:
 record doc 16 as excluded from criterion 1 by its own scope declaration.
 
-Heads-up to preserve for whoever implements doc 16 later: its planned
-command/connection facet independence (P4) is contradicted by current behavior
--- `commandEnded` clears `remoteSession` (pinned by
-lib/DanTermCore/Tests/DanTermCoreTests/UpdateRemoteTests.swift). Also the
-envelope has no `integration-ready` event and no exit status on `command-end`.
+Heads-up to preserve for whoever implements doc 16 later -- BOTH RESOLVED
+2026-08-01, nothing left to carry:
+
+1. Command/connection facet independence vs. `commandEnded` clearing
+   `remoteSession`. Carried into doc 16's declared-inputs section as a
+   paragraph after the independence bullet. On closer reading the tracker had
+   this backwards: the code is right and the doc's prose was too broad. The
+   coupling is correct whenever the connection IS the command (`ssh host`),
+   and independence only applies to connections that nest inside or outlive
+   one -- which is what P4 already scopes to nested traces. The new paragraph
+   names the conflict, says which side is right for which case, and makes
+   reconciling them explicit work for step 2 instead of a landmine.
+2. Missing `integration-ready` and missing exit status on `command-end`.
+   Nothing to carry -- doc 16's step 1 checklist already lists both as
+   planned work. The tracker overstated this one.
 
 ## B. The one true gap: sleep/wake -- CARRIED TO CRITERION 2
 
@@ -324,6 +334,10 @@ cannot.
 - 2026-07-31: E3 ruled FILL; test landed and verified failing-when-broken.
 - 2026-07-31: E4 ruled FILL; tests-ui test landed and verified
   failing-when-broken.
+- 2026-08-01: section A's two doc-16 heads-ups discharged. Finding 1 carried
+  into doc 16 with its framing corrected -- the doc's prose was too broad, not
+  the code wrong. Finding 2 needed no carry; doc 16 step 1 already plans it.
+  Close-out no longer blocks on either.
 - 2026-08-01: F ruled as a three-way split rather than a blanket waive. The
   tracker had recommended waiving all eight, which would have recorded three
   non-gaps (11 I3, 10 P1, 01 I2) as debts the project does not actually owe.
