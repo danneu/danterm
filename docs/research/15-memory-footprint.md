@@ -2095,11 +2095,16 @@ different proposal and is not covered by this rejection.
 - CPU method, feed path: `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just
   benchmark-quick baseline=fa01b66 workload=terminal-feed`. The valid paired run
   was **inconclusive at +1.13% symmetric median of two pairs**. Per the frozen
-  protocol it was escalated to `benchmark-confirm`; two confirm invocations
-  collected no usable evidence because `scrollback-stream` arm A returned empty
-  stdout instead of JSON. No feed-neutrality or feed-regression claim is made.
-  The candidate snapshot also captured five pre-existing untracked prose files;
-  none is built or reachable from the measured terminal path.
+  protocol it was escalated to `benchmark-confirm`. Three attempts exposed a
+  harness defect before producing evidence: the theme packer's `Packed ...`
+  status line prefixed the fresh-replay JSON on stdout. After the collector was
+  taught to accept that known historical prefix and the current harness moved
+  the status to stderr, the valid fixed confirm schedule was **inconclusive at
+  +1.45% symmetric median of two pairs** (pair values +1.60%, +1.30%). No
+  feed-neutrality or feed-regression claim is made, and the frozen protocol does
+  not permit another run to shop for one. The candidate snapshot's other dirty
+  paths were prose or benchmark tooling, none built into or reachable from the
+  measured `TerminalCoreBenchmark` path.
 - CPU method, browsing render path: no routine paired workload displays retained
   history -- `scrollback-stream` follows the bottom and the draw workloads start
   from live grids. A temporary release probe therefore built identical 179x66
@@ -2121,10 +2126,10 @@ different proposal and is not covered by this rejection.
 - Correctness gates: the behavioral suite covers widening conservation, seam
   reads and writes, canonical equality, true census totals, and live-grid
   materialization. The full repository gate passed after this finding was added.
-- Uncertainty: the feed comparison remains unresolved because quick was
-  inconclusive and the required confirm harness failed before producing a
-  decision. The browsing probe has no frozen decision rule; its 5.79% result is
-  reported as a paired descriptive measurement, supported by all 16 pairs
+- Uncertainty: feed behavior remains undecided because both the valid quick and
+  confirm schedules were inconclusive; this is a measured conclusion, not a
+  missing run. The browsing probe has no frozen decision rule; its 5.79% result
+  is reported as a paired descriptive measurement, supported by all 16 pairs
   agreeing in direction rather than by a calibrated verdict.
 
 ## Outcome

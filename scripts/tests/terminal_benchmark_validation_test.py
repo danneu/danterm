@@ -575,6 +575,62 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "DANTERM-BENCH-START-1",
         )
 
+    def test_fresh_replay_runner_reports_both_child_streams_for_invalid_json(self):
+        # Intent: a successful fresh-app wrapper that emits invalid JSON preserves
+        #   both captured streams in the error at a bounded size.
+        # Why it exists: three confirm runs reached complete scrollback artifacts
+        #   but reported only a generic JSON parse error; the runner discarded the
+        #   only evidence that could distinguish interruption from contamination.
+        # Scenario: an operator reruns `benchmark-confirm` after a fresh replay
+        #   wrapper exits zero without a result and needs the failure to explain
+        #   what the child actually emitted.
+        calls = []
+
+        def run_command(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "",
+                "wrapper reached app-ready but emitted no result",
+            )
+
+        runner = VALIDATION.make_scrollback_stream_runner(
+            {"a": "/arm-a", "b": "/arm-b"},
+            run_command=run_command,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "stdout=''.*stderr='wrapper reached app-ready but emitted no result'",
+        ):
+            runner("a")
+
+        self.assertEqual(calls[0][0][0], "/arm-a/scripts/terminal-benchmark.sh")
+        self.assertTrue(calls[0][1]["capture_output"])
+
+    def test_fresh_replay_runner_accepts_historical_status_before_json(self):
+        # Intent: a comparison can read a historical arm whose harness printed
+        #   theme-packing status before its one JSON result.
+        # Why it exists: immutable baseline arms execute their own harness, so
+        #   fixing today's stdout contract cannot repair an older exported tree.
+        # Scenario: `benchmark-confirm baseline=fa01b66` must compare terminal
+        #   behavior even though that revision prefixes its result with `Packed`.
+        def run_command(command, **_options):
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                'Packed 592 themes into /tmp/catalog.json\n{"valid": true}\n',
+                "",
+            )
+
+        runner = VALIDATION.make_scrollback_stream_runner(
+            {"a": "/arm-a", "b": "/arm-b"},
+            run_command=run_command,
+        )
+
+        self.assertEqual(runner("b"), {"valid": True})
+
     def test_scrollback_collector_invalidates_bad_contract_without_dropping_raw_block(self):
         artifact = {
             "schemaVersion": 1,

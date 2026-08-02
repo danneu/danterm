@@ -832,7 +832,20 @@ def collect_synchronized_frames(blocks, *, run_block):
     )
 
 
-def make_scrollback_stream_runner(arm_roots, *, workload="scrollback-stream"):
+def _load_fresh_replay_result(stdout):
+    """Read one result while tolerating the known historical theme status prefix."""
+    prefix_end = stdout.find("\n{")
+    if stdout.startswith("Packed ") and prefix_end >= 0:
+        stdout = stdout[prefix_end + 1:]
+    return json.loads(stdout)
+
+
+def make_scrollback_stream_runner(
+    arm_roots,
+    *,
+    workload="scrollback-stream",
+    run_command=subprocess.run,
+):
     """Bind each arm to a fresh optimized app harness invocation per block.
 
     Shared by every fresh-app replay workload; `workload` selects which committed
@@ -861,7 +874,7 @@ def make_scrollback_stream_runner(arm_roots, *, workload="scrollback-stream"):
             "DANTERM_TERMINAL_BENCHMARK_COLUMNS": str(CANONICAL_GEOMETRY["columns"]),
             "DANTERM_TERMINAL_BENCHMARK_ROWS": str(CANONICAL_GEOMETRY["rows"]),
         })
-        completed = subprocess.run(
+        completed = run_command(
             [
                 str(roots[arm] / "scripts" / "terminal-benchmark.sh"),
                 workload,
@@ -878,10 +891,18 @@ def make_scrollback_stream_runner(arm_roots, *, workload="scrollback-stream"):
                 f"{completed.stderr.strip()}"
             )
         try:
-            return json.loads(completed.stdout)
+            return _load_fresh_replay_result(completed.stdout)
         except json.JSONDecodeError as error:
+            def bounded(stream):
+                if len(stream) <= 2_000:
+                    return stream
+                return stream[:1_000] + "...<truncated>..." + stream[-1_000:]
+
+            stdout = bounded(completed.stdout)
+            stderr = bounded(completed.stderr)
             raise RuntimeError(
-                f"{workload} arm {arm} returned invalid JSON"
+                f"{workload} arm {arm} returned invalid JSON: "
+                f"stdout={stdout!r}, stderr={stderr!r}"
             ) from error
 
     return run

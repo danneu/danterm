@@ -172,7 +172,7 @@ plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP_PATH/Contents/Info
 plutil -replace CFBundleName -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
-"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH"
+"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH" >&2
 codesign --force --deep --sign - --entitlements "$SCRIPT_DIR/terminal-benchmark-entitlements.plist" "$APP_PATH" >/dev/null
 codesign -d --entitlements :- "$APP_PATH" 2>&1 | grep -q '<key>com.apple.security.get-task-allow</key>' || {
     echo "Benchmark app is missing the get-task-allow profiling entitlement" >&2

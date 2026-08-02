@@ -203,10 +203,7 @@ core test suites that denominate scrollback budgets in whole-row costs.
   validation therefore used a temporary ABBA-scheduled `planFrame` probe in
   throwaway baseline and candidate worktrees; the probe was removed after its
   result was recorded in `docs/research/15-memory-footprint.md#f18`.
-
-## Follow Up
-
-- Investigate why `benchmark-confirm` receives empty stdout from
-  `scrollback-stream` arm A at `scripts/terminal-benchmark-validation.py:883`,
-  then rerun the feed comparison against `fa01b66`; quick was inconclusive at
-  +1.13%, and two confirm attempts failed before producing evidence.
+- The follow-up found theme-packing status prefixed the fresh-replay JSON; the
+  collector now accepts the historical prefix and current harnesses keep it on
+  stderr. The valid confirm schedule remained inconclusive at +1.45%, so no
+  feed-path direction is claimed and the frozen protocol permits no further run.
