@@ -119,6 +119,13 @@ comes from `just benchmark-quick` / `just benchmark-confirm`.
   single-scalar clusters stay inline while multi-scalar graphemes spill to an
   array. The trade-off is a specialized three-case storage representation and
   more involved upgrade and downgrade paths.
+- **[Sparse AppKit damage retention](../plans/impl/2026-08-01-2219-preserve-sparse-appkit-terminal-damage.md)
+  -- about 85% less direct draw time and 50% less whole-process CPU in a
+  scattered-damage diagnostic.** The view retains and merges exact engine
+  damage until `draw(_:)`, then clips both the frame plan and graphics context
+  to the sparse row set instead of AppKit's bounding dirty rectangle. The
+  trade-off is an explicit view-owned full-invalidation path; the percentages
+  describe a controlled distant-row workload, not a calibrated general verdict.
 
 ## Branch and worktree workflow
 

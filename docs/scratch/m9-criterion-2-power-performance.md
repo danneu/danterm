@@ -81,29 +81,58 @@ all notifications in that header must be registered on
 `NSWorkspace.shared.notificationCenter`, and registering on any other center
 receives nothing -- silently. Easy to get wrong and hard to notice.
 
+### Scattered damage over-draws (verified)
+
+Implementation record:
+[Preserve sparse terminal damage through AppKit](../../plans/impl/2026-08-01-2219-preserve-sparse-appkit-terminal-damage.md).
+
+`SwiftTerminalSessionView#publish` invalidates each damaged row separately, but
+AppKit passes their union to `SwiftTerminalSessionView#draw`. A controlled
+optimized-app probe on 2026-08-01 changed PTY rows 2 and 33 in each published
+frame. The benchmark observer at
+`TerminalBenchmarkObserver#observeCompletedDraw` reported
+`dirtyRowCounts: [34, 34, 34]`; the same-session single-row control reported
+`[3, 3, 3]`. Both blocks measured three draws at 179x66, scale 2, while the
+window was visible and thermal state nominal.
+
+The 3-row control is the expected damaged row plus the glyph halo from
+`terminalDamageRowsWithGlyphHalo`. The 34-row scattered result spans both
+3-row halos and the untouched rows between them, proving that the single
+`dirtyRect` consumed by `draw` is the union rather than one disjoint component.
+Because `draw` derives one contiguous row range with
+`TerminalRenderExecution#terminalRows(intersecting:metrics:rowCount:)`, it clips
+and submits all 34 rows.
+
+The current working-tree fix preserves and merges source row damage in
+`SwiftTerminalSessionView#pendingDisplayDamage`, promotes geometry/theme/benchmark
+invalidations to full damage in `#invalidateFullDisplay`, and consumes the exact
+shape in `#drawingDamage` to clip both the plan and CGContext. The AppKit harness
+test in `SwiftTerminalSessionViewTests#swiftTerminalSessionViewTests` publishes
+two distant frames before one draw and asserts that only their two 3-row halos
+reach the renderer. This turns the finding into a directly proved visible-output
+gate rather than a future plan item.
+
+A same-session descriptive before/after run on 2026-08-01 used the optimized
+real-AppKit harness at 179x66, scale 2, with the identical two-row stimulus in
+both arms (`scripts/terminal-draw-acceptance.py#main`). Each arm collected eight
+valid batches above a 200 ms draw-work floor; the baseline had 102 draws per
+batch and the candidate 697, with every draw reporting the same 34-row AppKit
+union through `TerminalBenchmarkObserver#observeCompletedDraw`.
+
+- Direct draw time: 2.336 ms/draw baseline median (2.309--2.399 ms batch
+  range), 0.343 ms/draw candidate (0.342--0.345 ms), an 85.3% reduction.
+- Whole-process CPU: 5.801 ms/draw baseline median (5.739--6.128 ms), 2.917
+  ms/draw candidate (2.898--2.946 ms), a 49.7% reduction.
+- Same-session control: paired `terminal-feed`, which cannot reach the AppKit
+  change, was `equivalent` at +0.42% under its frozen quick rule.
+
+This is direct performance and CPU-work evidence for sustained scattered
+visible output. The CPU reduction supports the expected energy direction, but
+no power or battery quantity was measured, so it is not an energy-consumption
+claim. The scattered run is diagnostic-only, not a calibrated regression
+verdict.
+
 ## Open questions
-
-### Q1: does scattered damage over-draw? (blocks a plan item existing at all)
-
-`publish` calls `setNeedsDisplay` once per damaged row. Those merge into one
-invalid *region*. But `drawRect` only reads the single `dirtyRect` it is handed
-and derives rows via `terminalRows(intersecting:)`. `getRectsBeingDrawn` and
-`needsToDrawRect` -- which exist precisely to expose a region's disjoint
-sub-rects (`NSView.h#getRectsBeingDrawn`) -- are not used anywhere in
-`SwiftTerminalSessionView`.
-
-UNVERIFIED: whether AppKit hands us one union rect or separate `drawRect` passes
-per sub-rect. If separate, there is no issue and this item does not exist. If
-union, damage on rows 0 and 40 redraws all 41 rows.
-
-How to answer: the benchmark observer already records `dirtyRect` per draw
-(`app/SwiftTerminalSessionView.swift`, `DANTERM_TERMINAL_BENCHMARK` block calling
-`observeCompletedDraw`). Scatter damage across distant rows, read what `drawRect`
-actually receives. Not a correctness bug either way -- the frame is right. It is
-wasted drawing on exactly the workload the visible-output gate is about.
-
-Do this before writing the plan. Per `agent-docs/measurement-discipline.md`,
-acting on this difference before measuring it is the failure mode.
 
 ### Q2: where does sleep/wake logic live?
 

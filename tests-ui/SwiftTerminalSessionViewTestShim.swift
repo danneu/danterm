@@ -67,9 +67,16 @@ struct RenderFramePlan {
     let defaultBackground: RenderColor
     let columns = 10
     let rows = 10
+    let includedRows: Set<Int>
+
+    init(defaultBackground: RenderColor, includedRows: Set<Int> = Set(0..<10)) {
+        self.defaultBackground = defaultBackground
+        self.includedRows = includedRows
+    }
 }
 
 struct TerminalDamage: Equatable {
+    static let full = TerminalDamage(isFull: true)
     let isFull: Bool
     let rows: Set<Int>
 
@@ -79,6 +86,23 @@ struct TerminalDamage: Equatable {
     }
 
     static let none = TerminalDamage()
+
+    mutating func formUnion(_ other: TerminalDamage) {
+        guard isFull == false else { return }
+        if other.isFull {
+            self = .full
+        } else {
+            self = TerminalDamage(rows: rows.union(other.rows))
+        }
+    }
+}
+
+func clipFramePlan(_ plan: RenderFramePlan, to damage: TerminalDamage) -> RenderFramePlan {
+    guard damage.isFull == false else { return plan }
+    return RenderFramePlan(
+        defaultBackground: plan.defaultBackground,
+        includedRows: plan.includedRows.intersection(damage.rows)
+    )
 }
 
 struct TerminalPaneFrame {
@@ -134,6 +158,17 @@ func drawRenderFrame(
     metrics: TerminalRenderMetrics,
     in context: CGContext
 ) {}
+
+func terminalRows(
+    intersecting dirtyRect: CGRect,
+    metrics: TerminalRenderMetrics,
+    rowCount: Int
+) -> Range<Int> {
+    guard rowCount > 0, dirtyRect.isEmpty == false else { return 0..<0 }
+    let first = min(rowCount, max(0, Int(floor(dirtyRect.minY / metrics.cellSize.height))))
+    let end = min(rowCount, max(0, Int(ceil(dirtyRect.maxY / metrics.cellSize.height))))
+    return first..<max(first, end)
+}
 
 struct TerminalScrollProjection: Equatable {
     let totalRows: Int
@@ -377,8 +412,8 @@ final class TerminalPaneSessionController {
         onSearchStatus?(status)
     }
 
-    func emitFrameForTest() {
-        emitFrame()
+    func emitFrameForTest(damage: TerminalDamage = .init(isFull: true)) {
+        emitFrame(damage: damage)
     }
 
     func emitHoveredLinkForTest(_ link: TerminalHyperlink) {
@@ -386,8 +421,8 @@ final class TerminalPaneSessionController {
         emitFrame()
     }
 
-    private func emitFrame() {
+    private func emitFrame(damage: TerminalDamage = .init(isFull: true)) {
         let plan = currentPlan ?? RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        onFrame?(.init(plan: plan, damage: .init(isFull: true)))
+        onFrame?(.init(plan: plan, damage: damage))
     }
 }

@@ -298,6 +298,30 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("scattered terminal damage submits only its disjoint row halos") {
+        // Intent: distant damaged rows stay sparse when AppKit coalesces their invalidations.
+        // Why it exists: using draw(_:)'s union dirtyRect submitted every untouched row between
+        //   two damaged regions, turning small scattered updates into near-full redraws.
+        // Scenario: a TUI updates status rows near the top and bottom of a ten-row viewport.
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+
+        controller.emitFrameForTest(damage: .init(rows: [1]))
+        controller.emitFrameForTest(damage: .init(rows: [8]))
+        pane.displayIfNeeded()
+
+        try uiExpect(
+            pane.drawnRowSetsForTesting == [[0, 1, 2, 7, 8, 9]],
+            "scattered damage submitted contiguous rows: \(pane.drawnRowSetsForTesting)"
+        )
+    }
+
     uiTest("semantic notifications and progress cross the AppKit adapter") {
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)

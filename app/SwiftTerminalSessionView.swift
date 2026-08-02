@@ -23,11 +23,13 @@ func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int
     return expanded
 }
 
+#if !DANTERM_UI_TEST
 /// Preserves TerminalCoreRecording's single event dialect when wrapping live tape events for IPC.
 func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> JSONValue {
     let data = try JSONEncoder().encode(event)
     return try JSONDecoder().decode(JSONValue.self, from: data)
 }
+#endif
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
@@ -46,6 +48,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var hoveredLink: TerminalHyperlink?
     private var linkPreview: LinkPreviewView?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
+    /// Retains source row damage across publishes because AppKit reduces disjoint
+    /// invalidations to one union rectangle before `draw(_:)` can inspect them.
+    private var pendingDisplayDamage = TerminalDamage.none
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
@@ -92,6 +97,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
+    }
+    private(set) var drawnRowSetsForTesting: [Set<Int>] = []
+
+    func resetDrawnRowSetsForTesting() {
+        drawnRowSetsForTesting = []
     }
     #endif
     #if DANTERM_TERMINAL_BENCHMARK
@@ -172,24 +182,35 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         let frame = publishedFrame
         let background = frame?.plan.defaultBackground ?? RenderTheme.dark.defaultBackground
         context.setFillColor(Self.cgColor(background))
-        context.fill(dirtyRect)
         if let frame {
-            #if DANTERM_UI_TEST
-            drawRenderFrame(frame.plan, metrics: frame.metrics, in: context)
-            #else
-            let rows = terminalRows(
-                intersecting: dirtyRect,
+            let drawingDamage = drawingDamage(
+                fallback: dirtyRect,
                 metrics: frame.metrics,
                 rowCount: frame.plan.rows
             )
-            let plan = rows == 0..<frame.plan.rows
+            let plan = drawingDamage.isFull
                 ? frame.plan
-                : clipFramePlan(frame.plan, to: TerminalDamage(rows: Set(rows)))
+                : clipFramePlan(frame.plan, to: drawingDamage)
             context.saveGState()
+            if drawingDamage.isFull == false {
+                context.beginPath()
+                for row in drawingDamage.rows {
+                    context.addRect(NSRect(
+                        x: 0,
+                        y: CGFloat(row) * frame.metrics.cellSize.height,
+                        width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
+                        height: frame.metrics.cellSize.height
+                    ))
+                }
+                context.clip()
+            }
+            context.fill(dirtyRect)
+            #if DANTERM_UI_TEST
+            drawnRowSetsForTesting.append(plan.includedRows)
+            #endif
             context.clip(to: dirtyRect)
             drawRenderFrame(plan, metrics: frame.metrics, in: context)
             context.restoreGState()
-            #endif
             #if DANTERM_TERMINAL_BENCHMARK
             let drawDurationNanoseconds =
                 DispatchTime.now().uptimeNanoseconds - drawStartedNanoseconds
@@ -207,10 +228,41 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                     height: CGFloat(frame.plan.rows) * frame.metrics.cellSize.height
                 )
                 DispatchQueue.main.async { [weak self] in
-                    self?.setNeedsDisplay(redrawRect)
+                    self?.invalidateFullDisplay(redrawRect)
                 }
             }
             #endif
+        } else {
+            context.fill(dirtyRect)
+        }
+    }
+
+    /// Consumes exact engine damage when available and preserves AppKit-driven redraws as fallback.
+    private func drawingDamage(
+        fallback dirtyRect: NSRect,
+        metrics: TerminalRenderMetrics,
+        rowCount: Int
+    ) -> TerminalDamage {
+        if pendingDisplayDamage != .none {
+            let damage = pendingDisplayDamage
+            pendingDisplayDamage = .none
+            return damage
+        }
+        let rows = terminalRows(
+            intersecting: dirtyRect,
+            metrics: metrics,
+            rowCount: rowCount
+        )
+        return rows == 0..<rowCount ? .full : TerminalDamage(rows: Set(rows))
+    }
+
+    /// Prevents geometry, theme, and benchmark invalidations from inheriting stale partial damage.
+    private func invalidateFullDisplay(_ rect: NSRect? = nil) {
+        pendingDisplayDamage = .full
+        if let rect {
+            setNeedsDisplay(rect)
+        } else {
+            needsDisplay = true
         }
     }
 
@@ -534,6 +586,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return controller.readPrimaryHistoryText()
     }
 
+    #if !DANTERM_UI_TEST
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
         guard let snapshot = controller.flightRecordingSnapshot() else { return nil }
         return { try snapshot.encodedRecording() }
@@ -589,6 +642,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             )
         }
     }
+    #endif
 
     func scroll(toRow row: Int) {
         controller.scroll(toTopRow: row)
@@ -759,7 +813,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 publishedFrame = (plan, metrics)
             }
             emitStateIfNeeded()
-            needsDisplay = true
+            invalidateFullDisplay()
         }
     }
 
@@ -786,7 +840,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private func applyResolvedTheme(_ theme: RenderTheme) {
         controller.setTheme(theme)
         layer?.backgroundColor = Self.cgColor(theme.defaultBackground)
-        needsDisplay = true
+        invalidateFullDisplay()
     }
 
     private func emitStateIfNeeded() {
@@ -817,12 +871,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         #endif
         publishedFrame = (frame.plan, metrics)
         if frame.damage.isFull {
-            needsDisplay = true
+            invalidateFullDisplay()
         } else {
             let rows = terminalDamageRowsWithGlyphHalo(
                 frame.damage.rows,
                 rowCount: frame.plan.rows
             )
+            pendingDisplayDamage.formUnion(TerminalDamage(rows: rows))
             for row in rows {
                 setNeedsDisplay(NSRect(
                     x: 0,
