@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The directory under test is an input so the same script can check the source
+# tree (the default, for a local `just test`) and the Nix package output (what
+# the flake check runs against). Every command below is resolved through PATH
+# rather than an absolute path: a Linux Nix build sandbox has only /bin/sh, so
+# an absolute /usr/bin/env, /bin/bash, or /usr/bin/expect would not exist there.
+# Only /bin/sh -- used for the fake ssh/mosh shebangs -- stays absolute.
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-integration_dir="$repo_root/integrations/shell-integration"
+integration_dir="${DANTERM_INTEGRATION_DIR:-$repo_root/integrations/shell-integration}"
 
 fail() {
     echo "shell-integration test failed: $*" >&2
@@ -41,13 +47,13 @@ for shell in zsh bash fish; do
 printf second'
     case "$shell" in
         zsh)
-            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /usr/bin/env zsh -f -c 'source "$1/danterm.zsh"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|%s" "$_danterm_restore_command"' _ "$integration_dir")"
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" zsh -f -c 'source "$1/danterm.zsh"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|%s" "$_danterm_restore_command"' _ "$integration_dir")"
             ;;
         bash)
-            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /bin/bash --noprofile --norc -c 'source "$1/danterm.bash"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|unset"' _ "$integration_dir")"
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" bash --noprofile --norc -c 'source "$1/danterm.bash"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|unset"' _ "$integration_dir")"
             ;;
         fish)
-            restore_output="$(env DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish; set -q DANTERM_RESTORE_COMMAND; and exit 34; printf "|%s" "$_danterm_restore_command"' "$integration_dir")"
+            restore_output="$(env DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" fish --no-config -c 'source $argv[1]/danterm.fish; set -q DANTERM_RESTORE_COMMAND; and exit 34; printf "|%s" "$_danterm_restore_command"' "$integration_dir")"
             ;;
     esac
     if test "$shell" = bash; then
@@ -61,7 +67,7 @@ done
 
 for shell in zsh fish; do
     command -v "$shell" >/dev/null 2>&1 || continue
-    SHELL_UNDER_TEST="$shell" INTEGRATION_DIR="$integration_dir" /usr/bin/expect <<'EXPECT' || fail "$shell did not seed restore command safely"
+    SHELL_UNDER_TEST="$shell" INTEGRATION_DIR="$integration_dir" expect <<'EXPECT' || fail "$shell did not seed restore command safely"
 set timeout 10
 set shell $env(SHELL_UNDER_TEST)
 set integration $env(INTEGRATION_DIR)
@@ -92,7 +98,7 @@ expect eof
 EXPECT
 done
 
-zsh_output="$(DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_output="$(DANTERM=1 zsh -f -c '
     source "$1/danterm.zsh"
     source "$1/danterm.zsh"
     [[ ${DANTERM:-} == 1 ]] || exit 31
@@ -102,7 +108,7 @@ zsh_output="$(DANTERM=1 /usr/bin/env zsh -f -c '
     danterm_emit_remote_host "user name" host.example
 ' _ "$integration_dir" "$command_text")"
 
-bash_output="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_output="$(DANTERM=1 bash --noprofile --norc -c '
     old_prompt() { :; }
     PROMPT_COMMAND=old_prompt
     trap ":" DEBUG
@@ -117,7 +123,7 @@ bash_output="$(DANTERM=1 /bin/bash --noprofile --norc -c '
     danterm_emit_remote_host "user name" host.example
 ' _ "$integration_dir" "$command_text")"
 
-fish_output="$(env DANTERM=1 /usr/bin/env fish --no-config -c '
+fish_output="$(env DANTERM=1 fish --no-config -c '
     source $argv[1]/danterm.fish
     source $argv[1]/danterm.fish
     test "$DANTERM" = 1; or exit 31
@@ -136,19 +142,19 @@ assert_not_contains "$expected" "$(printf '\033]0;')"
 for shell in zsh bash fish; do
     case "$shell" in
         zsh)
-            silent_output="$(env -u DANTERM -u LC_DANTERM /usr/bin/env zsh -f -c 'source "$1/danterm.zsh"; danterm_emit_command_end; danterm_emit_cwd' _ "$integration_dir")"
+            silent_output="$(env -u DANTERM -u LC_DANTERM zsh -f -c 'source "$1/danterm.zsh"; danterm_emit_command_end; danterm_emit_cwd' _ "$integration_dir")"
             ;;
         bash)
-            silent_output="$(env -u DANTERM -u LC_DANTERM /bin/bash --noprofile --norc -c 'source "$1/danterm.bash"; danterm_emit_command_end; danterm_emit_cwd' _ "$integration_dir")"
+            silent_output="$(env -u DANTERM -u LC_DANTERM bash --noprofile --norc -c 'source "$1/danterm.bash"; danterm_emit_command_end; danterm_emit_cwd' _ "$integration_dir")"
             ;;
         fish)
-            silent_output="$(env -u DANTERM -u LC_DANTERM /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish; danterm_emit_command_end; danterm_emit_cwd' "$integration_dir")"
+            silent_output="$(env -u DANTERM -u LC_DANTERM fish --no-config -c 'source $argv[1]/danterm.fish; danterm_emit_command_end; danterm_emit_cwd' "$integration_dir")"
             ;;
     esac
     test -z "$silent_output" || fail "$shell integration emitted without a DanTerm marker"
 done
 
-zsh_hooks="$(DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_hooks="$(DANTERM=1 zsh -f -c '
     old_hook() { :; }
     precmd_functions=(old_hook)
     source "$1/danterm.zsh"
@@ -156,12 +162,12 @@ zsh_hooks="$(DANTERM=1 /usr/bin/env zsh -f -c '
     _danterm_preexec "$2"
     _danterm_precmd
 ' _ "$integration_dir" "$command_text")"
-bash_hooks="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_hooks="$(DANTERM=1 bash --noprofile --norc -c '
     source "$1/danterm.bash"
     _danterm_preexec "$2"
     _danterm_precmd
 ' _ "$integration_dir" "$command_text")"
-fish_hooks="$(env DANTERM=1 /usr/bin/env fish --no-config -c '
+fish_hooks="$(env DANTERM=1 fish --no-config -c '
     function old_handler --on-event fish_prompt; end
     source $argv[1]/danterm.fish
     functions -q old_handler; or exit 32
@@ -198,7 +204,7 @@ assert_contains "$fish_hooks" "$osc133_a_full"
 
 # zsh puts its marks inside PS1, because zsh re-emits PS1 in full on every
 # redisplay -- that is what keeps the stamp alive across a SIGWINCH repaint.
-zsh_prompt="$(DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_prompt="$(DANTERM=1 zsh -f -c '
     PS1="%% "
     source "$1/danterm.zsh"
     _danterm_prompt_precmd
@@ -209,7 +215,7 @@ assert_contains "$zsh_prompt" "$osc133_b"
 
 # Running the hook again must not accumulate a second pair of marks. The
 # unguarded "wrap whatever PS1 is now" form grows two marks per prompt forever.
-zsh_prompt_twice="$(DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_prompt_twice="$(DANTERM=1 zsh -f -c '
     PS1="%% "
     source "$1/danterm.zsh"
     _danterm_prompt_precmd
@@ -221,7 +227,7 @@ test "$zsh_prompt" = "$zsh_prompt_twice" || fail "zsh prompt wrap is not idempot
 
 # A framework whose precmd is registered after ours would otherwise overwrite
 # PS1 behind our back, silently: no marks, no diagnostic. We re-claim the tail.
-zsh_tail="$(DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_tail="$(DANTERM=1 zsh -f -c '
     source "$1/danterm.zsh"
     late_framework_hook() { :; }
     add-zsh-hook precmd late_framework_hook
@@ -233,7 +239,7 @@ test "$zsh_tail" = _danterm_prompt_precmd || fail "zsh hook did not re-claim the
 # Bash prints `A` (fresh line + mode) and stamps the row from inside PS1 with
 # `P`, which has no fresh-line behavior, because readline redisplays mid-line.
 # `redraw=last` because readline repaints only the final line of the prompt.
-bash_prompt="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_prompt="$(DANTERM=1 bash --noprofile --norc -c '
     PS1="bash$ "
     source "$1/danterm.bash"
     _danterm_prompt_command
@@ -248,7 +254,7 @@ assert_not_contains "$bash_prompt" "$osc133_a_full"
 assert_contains "$bash_prompt" "$(printf '\\[\033]133;P;k=i\007\\]')"
 assert_contains "$bash_prompt" "$(printf '\\[\033]133;B\007\\]')"
 
-bash_prompt_twice="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_prompt_twice="$(DANTERM=1 bash --noprofile --norc -c '
     PS1="bash$ "
     source "$1/danterm.bash"
     _danterm_prompt_command >/dev/null
@@ -256,7 +262,7 @@ bash_prompt_twice="$(DANTERM=1 /bin/bash --noprofile --norc -c '
     _danterm_prompt_command >/dev/null
     printf "%s" "$PS1"
 ' _ "$integration_dir")"
-bash_prompt_once="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_prompt_once="$(DANTERM=1 bash --noprofile --norc -c '
     PS1="bash$ "
     source "$1/danterm.bash"
     _danterm_prompt_command >/dev/null
@@ -264,7 +270,7 @@ bash_prompt_once="$(DANTERM=1 /bin/bash --noprofile --norc -c '
 ' _ "$integration_dir")"
 test "$bash_prompt_once" = "$bash_prompt_twice" || fail "bash prompt wrap is not idempotent"
 
-bash_tail="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_tail="$(DANTERM=1 bash --noprofile --norc -c '
     source "$1/danterm.bash"
     PROMPT_COMMAND="${PROMPT_COMMAND}
 late_framework_hook"
@@ -278,19 +284,19 @@ test "$bash_tail" = _danterm_prompt_command || fail "bash hook did not re-claim 
 for shell in zsh bash fish; do
     case "$shell" in
         zsh)
-            quiet="$(env -u DANTERM -u LC_DANTERM /usr/bin/env zsh -f -c 'PS1="%% "; source "$1/danterm.zsh"; _danterm_prompt_precmd; printf "%s" "$PS1"' _ "$integration_dir")"
+            quiet="$(env -u DANTERM -u LC_DANTERM zsh -f -c 'PS1="%% "; source "$1/danterm.zsh"; _danterm_prompt_precmd; printf "%s" "$PS1"' _ "$integration_dir")"
             ;;
         bash)
-            quiet="$(env -u DANTERM -u LC_DANTERM /bin/bash --noprofile --norc -c 'PS1="bash$ "; source "$1/danterm.bash"; _danterm_prompt_command; printf "%s" "$PS1"' _ "$integration_dir")"
+            quiet="$(env -u DANTERM -u LC_DANTERM bash --noprofile --norc -c 'PS1="bash$ "; source "$1/danterm.bash"; _danterm_prompt_command; printf "%s" "$PS1"' _ "$integration_dir")"
             ;;
         fish)
-            quiet="$(env -u DANTERM -u LC_DANTERM /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish; danterm_emit_prompt_redraw' "$integration_dir")"
+            quiet="$(env -u DANTERM -u LC_DANTERM fish --no-config -c 'source $argv[1]/danterm.fish; danterm_emit_prompt_redraw' "$integration_dir")"
             ;;
     esac
     assert_not_contains "$quiet" "$(printf '\033]133;')"
 done
 
-precedence_output="$(env DANTERM=1 LC_DANTERM=1 /usr/bin/env zsh -f -c '
+precedence_output="$(env DANTERM=1 LC_DANTERM=1 zsh -f -c '
     source "$1/danterm.zsh"
     danterm_emit_command_end
 ' _ "$integration_dir")"
@@ -301,17 +307,17 @@ trap 'rm -rf "$fake_bin"' EXIT
 printf '#!/bin/sh\nprintf "SSH_ARGS=<%%s>\\n" "$*"\n' > "$fake_bin/ssh"
 printf '#!/bin/sh\nprintf "MOSH_ARGS=<%%s>\\n" "$*"\n' > "$fake_bin/mosh"
 chmod +x "$fake_bin/ssh" "$fake_bin/mosh"
-zsh_wrapper_output="$(PATH="$fake_bin:$PATH" DANTERM=1 /usr/bin/env zsh -f -c '
+zsh_wrapper_output="$(PATH="$fake_bin:$PATH" DANTERM=1 zsh -f -c '
     source "$1/danterm.zsh"
     ssh -o SendEnv=EXISTING "host name"
     mosh --server="mosh server" example
 ' _ "$integration_dir")"
-bash_wrapper_output="$(PATH="$fake_bin:$PATH" DANTERM=1 /bin/bash --noprofile --norc -c '
+bash_wrapper_output="$(PATH="$fake_bin:$PATH" DANTERM=1 bash --noprofile --norc -c '
     source "$1/danterm.bash"
     ssh -o SendEnv=EXISTING "host name"
     mosh --server="mosh server" example
 ' _ "$integration_dir")"
-fish_wrapper_output="$(PATH="$fake_bin:$PATH" env DANTERM=1 /usr/bin/env fish --no-config -c '
+fish_wrapper_output="$(PATH="$fake_bin:$PATH" env DANTERM=1 fish --no-config -c '
     source $argv[1]/danterm.fish
     ssh -o SendEnv=EXISTING "host name"
     mosh --server="mosh server" example
@@ -322,8 +328,8 @@ for wrapper_output in "$zsh_wrapper_output" "$bash_wrapper_output" "$fish_wrappe
     assert_contains "$wrapper_output" "MOSH_ARGS=<--server=mosh server example>"
 done
 
-remote_host="$(/usr/bin/env zsh -f -c 'printf %s "$HOST"')"
-remote_output="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 USER='user name' /usr/bin/env zsh -f -c '
+remote_host="$(zsh -f -c 'printf %s "$HOST"')"
+remote_output="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 USER='user name' zsh -f -c '
     source "$1/danterm.zsh"
     [[ ${LC_DANTERM:-} == 1 ]] || exit 31
     _danterm_preexec true
@@ -342,7 +348,7 @@ esac
 
 for remote_shell in bash fish; do
     if test "$remote_shell" = bash; then
-        remote_case="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 /bin/bash --noprofile --norc -c '
+        remote_case="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 bash --noprofile --norc -c '
             source "$1/danterm.bash"
             [[ ${LC_DANTERM:-} == 1 ]] || exit 31
             _danterm_preexec true
@@ -350,7 +356,7 @@ for remote_shell in bash fish; do
             ssh nested
         ' _ "$integration_dir")"
     else
-        remote_case="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 /usr/bin/env fish --no-config -c '
+        remote_case="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 fish --no-config -c '
             source $argv[1]/danterm.fish
             test "$LC_DANTERM" = 1; or exit 31
             emit fish_preexec true

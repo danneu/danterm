@@ -191,8 +191,12 @@
           shell-integration =
             pkgs.runCommand "danterm-shell-integration-test"
               {
+                # The test resolves every shell and helper it launches through
+                # PATH rather than an absolute path, so each one has to be
+                # supplied here -- `expect` included.
                 nativeBuildInputs = with pkgs; [
                   bash
+                  expect
                   fish
                   hostname
                   zsh

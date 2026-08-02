@@ -8,9 +8,15 @@ fi
 if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
     typeset _danterm_scrollback_file=$DANTERM_RESTORE_SCROLLBACK_FILE
     unset DANTERM_RESTORE_SCROLLBACK_FILE
+    # `command` (not an absolute path) so restore also works on a host with no
+    # /bin/cat or /bin/rm -- a NixOS or Nix-sandbox host, which is exactly where
+    # the remote LC_DANTERM route lands. Absolute paths previously guarded
+    # against a PATH hijack, but `command` already bypasses any function or
+    # alias, and an attacker who can prepend to the PATH of the shell sourcing
+    # this file already runs arbitrary code in it the moment any command does.
     if [[ -r $_danterm_scrollback_file ]]; then
-        /bin/cat -- "$_danterm_scrollback_file" 2>/dev/null || true
-        /bin/rm -f -- "$_danterm_scrollback_file" >/dev/null 2>&1 || true
+        command cat -- "$_danterm_scrollback_file" 2>/dev/null || true
+        command rm -f -- "$_danterm_scrollback_file" >/dev/null 2>&1 || true
     fi
     unset _danterm_scrollback_file
 fi
