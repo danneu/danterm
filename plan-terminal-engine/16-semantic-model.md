@@ -25,9 +25,24 @@ facets:
 
 - **integration**: never reported, or ready
 - **command**: idle, or running one completely reported command
-- **connection**: local, or a reported remote identity
+- **connection**: local, remote with no reported identity, or remote with a
+  reported identity
 - **agent**: none, or an attached agent session with the subset of activity
   states its integration can genuinely report
+
+The connection facet needs all three states because detection and identity
+come from opposite ends of the connection. The local shell wrapper detects
+that a remote command was launched and is always available; the remote
+identity is reported by DanTerm's integration on the far host and may never
+arrive at all. Remote-without-identity is therefore the normal state for any
+host that does not run the integration, not a transient one, and today's pane
+chrome already depends on the distinction -- the remote badge keys off
+detection alone while the `user@host` label keys off the reported identity
+(`app/PaneWrapperView.swift#updateToolbar`). Model it as one sum type rather
+than a boolean beside an optional, so that a reported identity on a local
+connection is unrepresentable instead of merely unreachable; the current pane
+model carries `isRemote` and `remoteSession` as separate fields and holds that
+invariant by hand.
 
 The pane owner serializes terminal-originated envelope events, pane-scoped IPC
 events, and teardown into that stream. The reducer performs no IO, reads no
@@ -95,6 +110,9 @@ The reducer has pinned degradation behavior:
   report
 - command-end while idle is ignored
 - command-end while running returns the command facet to idle
+- remote detection while the connection facet already carries a reported
+  identity keeps that identity rather than discarding it
+- a reported remote identity with no prior detection still enters remote
 - pane teardown clears all live facets
 - agent activity without an attached session is ignored
 - malformed, oversized, and unknown inputs apply nothing
@@ -135,6 +153,8 @@ than emulating it.
   exists.
 - Integration readiness is reported explicitly, never inferred from silence,
   marks, cwd, or command text.
+- A reported remote identity cannot exist on a local connection, and remote
+  without a reported identity is a valid steady state, not a transient one.
 - Agent activity cannot exist without an attached session, and integrations
   never claim activity states their hooks cannot distinguish.
 - Malformed, oversized, unknown, and excess inputs remain bounded, pane-scoped,
@@ -157,6 +177,9 @@ than emulating it.
 - Nested remote-session traces prove command and connection facets transition
   independently without adding connection identity or OSC 7 cwd to command
   state.
+- A remote host that never reports an identity holds the connection facet at
+  remote-without-identity for the whole session, and a later identity report
+  upgrades it in place without a return through local.
 - The bundled zsh, Bash, and fish integrations drive complete ready,
   command-start, and command-end transitions with exit status through a real
   Swift pane; ssh, mosh, tmux, and nested-PTY characterization determines and
@@ -198,7 +221,10 @@ dependency of this plan.
 ## Implementation discretion
 
 - The value representation of each facet and the internal typed event
-  vocabulary, provided the invariants and total transitions above hold.
+  vocabulary, provided the invariants and total transitions above hold. One
+  exception: the connection facet must make a reported identity on a local
+  connection unrepresentable, so a boolean beside an optional does not
+  satisfy it even though it can be made to hold the invariant by hand.
 - Whether a command completion fact has an immediate first-slice consumer or
   is discarded after returning the live command facet to idle.
 - Which existing pane-inspection response carries the live semantic snapshot,
