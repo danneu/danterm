@@ -20,6 +20,21 @@ PRODUCER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PRODUCER)
 
 
+def _maximal_span_count(rows):
+    """Count disjoint vertical runs the way the renderer's span helper does.
+
+    Deliberately restated here rather than imported: the point of the sparse-span
+    assertions is that the stimulus row set has the topology the Swift transform
+    is proven against, so the test must not borrow that transform's own arithmetic.
+    """
+    ordered = sorted(rows)
+    return sum(
+        1
+        for index, row in enumerate(ordered)
+        if index == 0 or ordered[index - 1] != row - 1
+    )
+
+
 class TerminalBenchmarkProducerTests(unittest.TestCase):
     def test_localized_draw_updates_are_fixed_row_writes_without_full_screen_commands(self):
         first = PRODUCER.localized_draw_update(0, row=12)
@@ -115,6 +130,105 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertIn(b"\x1b]0;DANTERM-BENCH-REDRAW-000001\x07", first)
         self.assertNotIn(b"\x1b[2J", first)
         self.assertEqual(PRODUCER.incremental_mixed_rows(66), (31, 32, 33, 34))
+
+    def test_sparse_span_updates_address_exactly_their_protected_engine_rows(self):
+        # Intent: each sparse-span workload writes exactly the source rows whose
+        #   engine damage carries the topology that workload exists to protect --
+        #   2 rows in 2 spans for `sparse-spans-few`, 17 rows in 17 spans for
+        #   `sparse-spans-max` -- and writes them without autowrapping into a
+        #   neighbouring row.
+        # Why it exists: the whole instrument rests on the stimulus topology. One
+        #   extra or missing source row silently changes the drawn shape (the halo
+        #   turns these into 6 rows/2 spans and 50 rows/17 spans), which would
+        #   leave both workloads measuring something other than the ideal-case win
+        #   and the maximum compound clip.
+        # Scenario: spec-first; the engine row sets pinned here are the same ones
+        #   `TerminalDamageSpanTests` runs through the shared glyph-halo transform,
+        #   which is what binds this stimulus to the protected drawing topology.
+        expectations = (
+            ("sparse-spans-few", (6, 61), 2),
+            ("sparse-spans-max", tuple(range(1, 67, 4)), 17),
+        )
+        self.assertEqual(
+            PRODUCER.SPARSE_SPAN_WORKLOADS, ("sparse-spans-few", "sparse-spans-max")
+        )
+        for workload, expected_rows, expected_spans in expectations:
+            with self.subTest(workload=workload):
+                self.assertEqual(PRODUCER.sparse_span_rows(workload, 66), expected_rows)
+
+                engine_rows = [row - 1 for row in expected_rows]
+                self.assertEqual(len(engine_rows), expected_spans)
+                self.assertEqual(_maximal_span_count(engine_rows), expected_spans)
+
+                payload = PRODUCER.sparse_span_screen(
+                    workload, sequence=3, columns=179, rows=66
+                )
+                addressed = tuple(
+                    int(row) for row in re.findall(rb"\x1b\[(\d+);1H", payload)
+                )
+                self.assertEqual(addressed, expected_rows)
+
+                written = [
+                    re.sub(rb"\x1b\[[0-9;]*m", b"", segment)
+                    for segment in re.split(rb"\x1b\[\d+;1H", payload)[1:]
+                ]
+                self.assertTrue(all(len(segment) == 178 for segment in written))
+                self.assertNotIn(b"\r\n", payload)
+                self.assertNotIn(b"\n", payload)
+                self.assertNotIn(b"\x1b[2J", payload)
+
+        with self.assertRaisesRegex(ValueError, "unknown sparse-span workload"):
+            PRODUCER.sparse_span_rows("sparse-spans-some", 66)
+
+    def test_sparse_span_updates_are_deterministic_and_churn_content_and_style(self):
+        # Intent: the same sequence always produces the same bytes, and successive
+        #   sequences change both the text and the colors of every source row.
+        # Why it exists: a measured draw is only accepted when the frame actually
+        #   changed those rows -- a repeated update would publish no engine damage
+        #   and stall the serialized handshake -- while non-determinism would make
+        #   the two arms of a paired comparison run different stimulus.
+        for workload in ("sparse-spans-few", "sparse-spans-max"):
+            with self.subTest(workload=workload):
+                first = PRODUCER.sparse_span_screen(workload, sequence=1)
+                second = PRODUCER.sparse_span_screen(workload, sequence=2)
+
+                self.assertEqual(first, PRODUCER.sparse_span_screen(workload, sequence=1))
+                strip_metadata = lambda payload: payload.split(b"\x07", 1)[1]
+                content = lambda payload: re.sub(
+                    rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
+                )
+                styles = lambda payload: re.findall(
+                    rb"\x1b\[38;2;[0-9;]*m", strip_metadata(payload)
+                )
+
+                self.assertNotEqual(content(first), content(second))
+                self.assertNotEqual(styles(first), styles(second))
+                self.assertIn(b"\x1b]0;DANTERM-BENCH-REDRAW-000001\x07", first)
+                # The sequence marker rides the OSC title, never the grid: drawing
+                # it into a cell would damage a row outside the protected topology.
+                self.assertNotIn(b"DANTERM-BENCH-REDRAW-", strip_metadata(first))
+
+    def test_sparse_span_workloads_settle_on_a_dense_screen_before_measurement(self):
+        # Intent: `redraw_screen` gives each sparse-span workload the same dense
+        #   66-row settling frame the other draw workloads get, then routes every
+        #   measured sequence to the sparse update.
+        # Why it exists: the protected topology is a property of changing a few
+        #   rows of an already-settled screen; measuring against a blank grid would
+        #   let the first updates damage rows the stimulus never wrote.
+        for workload in ("sparse-spans-few", "sparse-spans-max"):
+            with self.subTest(workload=workload):
+                settling = PRODUCER.redraw_screen(workload, sequence=-1, columns=179, rows=66)
+                visible = [
+                    re.sub(rb"\x1b\[[0-9;]*m", b"", row).decode()
+                    for row in settling.split(b"\x07\x1b[H", 1)[1].split(b"\r\n")
+                ]
+
+                self.assertEqual(len(visible), 66)
+                self.assertTrue(all(len(row) == 178 for row in visible))
+                self.assertEqual(
+                    PRODUCER.redraw_screen(workload, sequence=4, columns=179, rows=66),
+                    PRODUCER.sparse_span_screen(workload, sequence=4, columns=179, rows=66),
+                )
 
     def test_redraw_screen_rejects_a_workload_the_paired_ladder_does_not_measure(self):
         # Intent: the producer emits stimulus only for the three full-screen draw

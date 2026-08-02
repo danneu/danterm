@@ -265,7 +265,7 @@ power-and-performance milestone.
 
 ## Commit progress
 - [x] 1. Share the glyph-halo damage transform from the planning library
-- [ ] 2. Add the sparse-spans-few and sparse-spans-max producer stimulus
+- [x] 2. Add the sparse-spans-few and sparse-spans-max producer stimulus
 - [ ] 3. Record engine damage topology on accepted sparse-span draws
 - [ ] 4. Collect the sparse-span workloads as undecidable candidates
 - [ ] 5. Freeze calibrated sparse-span decision rules
@@ -286,3 +286,14 @@ power-and-performance milestone.
 - Commit 1: the two-distant-row derivation test names engine rows 5 and 60 at
   66 rows. The plan fixes the topology (6 rows, 2 spans), not the row indices;
   commit 2's producer contract test is what binds the stimulus to that shape.
+- Commit 2: the stimulus writes ANSI rows 6/61 and 1, 5, ..., 65, so its engine
+  row sets are exactly the ones commit 1's halo derivation test runs through the
+  shared transform. That is the binding between stimulus and drawing topology;
+  the producer test restates the span count locally rather than importing the
+  transform it is checking the stimulus against.
+- Commit 2: the two names live in their own `SPARSE_SPAN_WORKLOADS` tuple rather
+  than joining `REDRAW_WORKLOADS`, whose contract is "every entry the paired
+  ladder schedules". Commit 4 is what makes them ladder members, so until then
+  the separate tuple keeps that contract true; `redraw_screen`'s existing
+  dispatch already routes them, so the settling frame, run loop, and
+  serialized-draw handshake needed no change.

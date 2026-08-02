@@ -70,10 +70,62 @@ REDRAW_WORKLOADS = (
 )
 
 
+# The two topology-specific draw workloads. Separate from `REDRAW_WORKLOADS`
+# because they are not ladder members: the paired lifecycle does not schedule
+# them yet, so keeping them out of that tuple is what keeps its "every entry the
+# ladder measures" contract true while the stimulus lands ahead of the harness.
+SPARSE_SPAN_WORKLOADS = ("sparse-spans-few", "sparse-spans-max")
+
+
+def sparse_span_rows(workload, rows=66):
+    """Choose the ANSI rows whose engine damage carries the protected topology.
+
+    Returned 1-based for cursor addressing; the contract they satisfy is stated
+    in the engine's 0-based rows, because those are what the shared glyph halo
+    consumes. At 66 rows `sparse-spans-few` damages engine rows 5 and 60 -- far
+    enough apart that their halos stay disjoint -- which the halo draws as 6
+    rows in 2 spans, and `sparse-spans-max` damages engine rows 0, 4, ..., 64,
+    drawn as 50 rows in 17 spans. Stride four is the adversarial choice: stride
+    two and three overlap into fewer, larger spans, so four maximizes the
+    disjoint 3-row halo runs a compound clip must represent.
+    """
+    if workload == "sparse-spans-few":
+        return (6, rows - 5)
+    if workload == "sparse-spans-max":
+        return tuple(range(1, rows + 1, 4))
+    raise ValueError(f"unknown sparse-span workload: {workload}")
+
+
+def sparse_span_screen(workload, sequence, columns=179, rows=66):
+    """Change content and style on exactly one workload's sparse source rows.
+
+    Every row is addressed absolutely and written one column short of the grid,
+    so nothing wraps or scrolls into a row the topology contract does not
+    include, and the sequence number rides the OSC title rather than a cell for
+    the same reason.
+    """
+    lines = [f"\x1b]0;DANTERM-BENCH-REDRAW-{sequence:06d}\x07"]
+    width = columns - 1
+    for row in sparse_span_rows(workload, rows):
+        red = 40 + (sequence * 17 + row * 11) % 180
+        green = 40 + (sequence * 23 + row * 13) % 180
+        blue = 40 + (sequence * 29 + row * 7) % 180
+        content = (
+            f" {row:02d}  sparse span item {(sequence * 31 + row * 7) % 10000:04d} "
+            f"style {(sequence + row) % 97:02d}"
+        ).ljust(width, ".")[:width]
+        lines.append(
+            f"\x1b[{row};1H\x1b[38;2;{red};{green};{blue}m{content}\x1b[0m"
+        )
+    return "".join(lines).encode()
+
+
 def redraw_screen(workload, sequence, columns=179, rows=66):
     """Build one dense pseudo-TUI frame without scrolling or last-column writes."""
-    if workload not in REDRAW_WORKLOADS:
+    if workload not in REDRAW_WORKLOADS + SPARSE_SPAN_WORKLOADS:
         raise ValueError(f"unknown redraw workload: {workload}")
+    if workload in SPARSE_SPAN_WORKLOADS and sequence >= 0:
+        return sparse_span_screen(workload, sequence, columns, rows)
     if workload == "full-screen-incremental-mixed-churn" and sequence >= 0:
         return incremental_mixed_screen(sequence, columns, rows)
     title = (
