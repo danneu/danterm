@@ -1,6 +1,8 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F11**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F12**, which Phase 2's open resize-profile task claims (it was
+written down as `F11` before this entry existed; IDs go in the order findings are
+recorded, not in the order tasks were listed). Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -841,3 +843,198 @@ cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
   the content that would stress it -- the same gap `F8` named.
 - Next action: `D3` gates H3 vs H4 on `F8`'s split plus this finding's
   survival check.
+
+### F11 -- retained rows are ASCII text with occasional long style runs: 22.5% of cells at depth are styled, 0.12% are multi-scalar, and packing prices at 8-16x depth
+
+- Status: recorded, and it closes the evidence gap `F8`, `F10` and `D3` all named.
+  This sizes the content `H3`'s packing argument is about; the selection is `D5`'s.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `34de2e7` plus the probe extension recorded with this
+  finding, clean tree apart from untracked prose paths. Release configuration,
+  headless.
+- Method: `just terminal-retained-row-probe "--saturated"`. The committed shape
+  probe gains a third reduction, `RetainedRowComposition`, carried as parallel
+  per-row arrays index-aligned with `storedCellCounts`: styled cells, multi-scalar
+  cells, empty-scalar cells, scalars, non-ASCII scalars, UTF-8 bytes, style runs,
+  distinct styles, wide cells, hyperlink cells, and the widest single-scalar value.
+  Composition is read over the **stored prefix only** -- the public row reader
+  materializes rows to full width, and counting the trailing default cells would
+  report the pane's width rather than the row's content; the unit suite pins that.
+  Benchmark-only code, off every measured path: nothing here is timed and nothing
+  schedules it. `just test` passes (70 steps).
+- Corpus, and the one thing that is new about it: the stimulus bytes are still
+  supplied by the driver from **already-committed** content. What is added is a
+  `saturated/` variant of each stimulus -- the *same committed bytes* replayed
+  until the retained history fills the 10 MiB budget, with the repeat count derived
+  from what one pass actually charged. That was necessary because of Observation 1;
+  it is pooled separately from the recordings precisely because repetition
+  manufactures depth, so it answers "what does this content cost at depth" and is
+  **not** evidence about how often such content reaches depth.
+
+#### Observation 1 -- the reason the gap existed: styled content never reached history in one pass
+
+Every styled stimulus in the corpus retains **zero** rows in a single replay.
+`styled-screen-redraw`, `incremental-screen-updates`, `synchronized-frames` (btop),
+`tmux_htop`, `vim_24bitcolors_bce`, `vim_large_window_scroll`, `vim_simple_edit` --
+0 retained rows each, and repeating them to the byte cap leaves them at 0. That is
+not a sampling accident and it is the mechanism `F9` observation 3 already
+described from the other side: **TUIs paint in place.** They position the cursor
+and redraw; nothing scrolls off the top, so nothing is retained. `F8`'s and
+`F10`'s zero styled-cell counts were reporting this fact, not missing it.
+
+The styled content that *does* reach history comes from line-oriented output --
+shell prompts, `ls` colors, `git log`, completion listings -- which is exactly what
+the repeated recordings supply.
+
+#### Observation 2 -- what a retained row is made of
+
+| pool | stimuli | rows | stored cells | styled cells | multi-scalar cells | empty-scalar cells | non-ASCII scalars | wide cells | style runs/row | UTF-8 B/cell |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| recordings (single pass) | 34 | 133 | 2,231 | **1.79%** | 0.00% | 0.81% | 1.36% | 1.61% | 1.03 | 1.017 |
+| benchmark + recordings | 39 | 4,707 | 602,663 | 0.01% | 0.42% | 53.08% | 4.41% | 2.53% | 1.00 | 0.526 |
+| **saturated replays** | 39 | **94,990** | **2,791,196** | **22.54%** | **0.119%** | 12.36% | **1.32%** | 0.74% | **1.66** | 0.903 |
+
+The saturated pool is the one a packing scheme should be priced against: 94,990
+retained rows of committed content at depth, against 133 in the recorded pool.
+Four facts carry the design:
+
+1. **Styling is common but extremely runnable.** 22.54% of stored cells at depth
+   are styled, yet the mean row holds **1.66 style runs**. A styled row is not a
+   confetti of per-cell colors; it is two or three long spans (a prompt segment, a
+   filename, a diff line). Run-length styles are not a bet -- they are what the
+   content already is.
+2. **Content is ASCII.** 1.32% of scalars are non-ASCII and mean UTF-8 is 0.903
+   bytes per stored cell. A one-byte scalar slot is viable for most rows, and the
+   probe now records the widest *single-scalar* value per row so the tier (1/2/4
+   bytes) can be chosen from data rather than assumed.
+3. **Multi-scalar content is rare and does not dominate bytes.** 0.119% of stored
+   cells hold more than one scalar. They cluster: 2.25% of rows contain at least
+   one, and those rows carry 9.5% of charged bytes because they are long, not
+   because clusters are expensive.
+4. **Hyperlinks are not zero.** 10,334 stored cells (0.37%) carry OSC 8 metadata at
+   depth. Small, but a packing scheme has to represent them rather than assume them
+   away -- which `F8`'s and `F10`'s runs could not have told anyone.
+
+#### Observation 3 -- what each row class contributes, in `F9`'s per-row-charge terms
+
+Charges are the engine's own (`Terminal.scrollbackByteCost`: 16 B row slot +
+`malloc_good_size(32 + cells x 32)` + spills), which reproduces `F9`'s 1,808 B
+content row and 80 B blank row exactly -- the unit suite pins both.
+
+| pool | class | rows | share of rows | share of charged bytes | mean B/row | mean stored cells |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| saturated | plain | 73,560 | 77.44% | 59.16% | 822.7 | 22.2 |
+| saturated | styled | 19,293 | 20.31% | 31.38% | 1,663.7 | 45.9 |
+| saturated | multi-scalar | 1,356 | 1.43% | 6.78% | 5,116.2 | 143.2 |
+| saturated | styled + multi-scalar | 781 | 0.82% | 2.69% | 3,518.1 | 104.1 |
+| recordings | plain | 131 | 98.50% | 92.70% | 598.4 | 15.7 |
+| recordings | styled | 2 | 1.50% | 7.30% | 3,088.0 | 90.0 |
+
+So against `F9`'s 1,808 B figure: a styled row at depth costs **1,663.7 B** and a
+plain one **822.7 B**, and the difference is length, not styling -- styled rows are
+twice as long (45.9 cells against 22.2), and the styling itself adds nothing to the
+current representation because every cell already carries a 4-byte style id whether
+it uses one or not. **That is the whole of `H3`'s opportunity on the style axis:
+the current cell pays for styling unconditionally, and the content is 1.66 runs per
+row.**
+
+#### Observation 4 -- what each candidate representation would charge for these exact rows
+
+Priced by the committed probe against every retained row in the pool, through the
+same allocator and the same charge model. `D3`'s admission test -- a row's request
+must shrink by more than one ~12.5% bucket step -- is reported as the share of rows
+whose size class strictly drops. Every candidate clears it at **100% of rows** in
+every pool, which is the expected outcome of shrinking a 32-byte cell and not a
+close call.
+
+Saturated pool (current: **1,076.9 B/row**, 9,736 rows at a 10 MiB budget):
+
+| candidate | B/row | saving | depth | x depth | + `H4` arena B/row | + `H4` depth |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| C1 narrow 8 B cell | 304.6 | 71.7% | 34,421 | 3.54x | 252.6 | 41,510 |
+| C2 narrow 4 B ASCII cell | 225.0 | 79.1% | 46,602 | 4.79x | 177.0 | 59,250 |
+| C3 UTF-8 text + style runs | 123.3 | 88.6% | 85,066 | 8.74x | 83.4 | 125,707 |
+| C4 C3 + uniform-style shortcut | 122.2 | 88.6% | 85,786 | 8.81x | 81.7 | 128,363 |
+| C5 fixed stride + runs + kind byte | 143.9 | 86.6% | 72,858 | 7.48x | 101.8 | 102,953 |
+| **C6 fixed stride + runs + exceptions** | **114.5** | **89.4%** | **91,618** | **9.41x** | **73.2** | **143,204** |
+
+`F8`'s payload (`reference/scrollback-plain`), which is the one number directly
+comparable to every earlier finding, at **both** widths -- and identical at both,
+because content-sized rows already made depth width-independent:
+
+| geometry | current | C1 | C3 | C6 | C6 + `H4` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 179x66 | 1,808.0 B/row (5,799 rows) | 464.0 (3.90x) | 160.0 (11.30x) | **112.0 (16.14x)** | 73.0 (24.8x) |
+| 80x24 | 1,808.0 B/row (5,799 rows) | 464.0 (3.90x) | 160.0 (11.30x) | **112.0 (16.14x)** | 73.0 (24.8x) |
+
+#### Observation 5 -- packing inverts `F8`'s 89.5 / 10.5 split, which promotes `H4`
+
+`F8` measured stored cell bytes at 89.5% of attributable footprint and per-row
+overhead at 10.5%. Under C6 the payload shrinks by ~16x while the row slot (16 B),
+the array header (32 B) and size-class rounding do not move at all. On `F8`'s
+payload the post-packing split is roughly **51% payload / 49% fixed per-row cost**
+(112.0 B/row = 57 B payload + 32 B header + 7 B rounding + 16 B slot); on the
+saturated pool it is **50% / 50%** (114.5 = 57.2 payload+spills, 41.3 header and
+rounding, 16 slot). The arena column above is that half: composing `H4` into the
+selected candidate buys a further **36%** at depth (114.5 -> 73.2 B/row).
+
+`D3` kept `H4` alive only as a composition inside `H3`'s design. This is the
+measurement that says the composition matters: `H4` alone was a 1.16 MB ceiling
+against 11.00 MB, and after packing it is half the remaining cost.
+
+#### Observation 6 -- C6 beats the text form *and* keeps O(1) column reads
+
+C3 (variable-width UTF-8) and C6 (per-row fixed-stride scalar slot) cost almost the
+same, and on the saturated pool C6 is **cheaper** (114.5 against 123.3 B/row). The
+reason is Observation 2: at 0.903 UTF-8 bytes per cell, "one byte per scalar" and
+"UTF-8" are the same number for nearly every row, and C6 spends its per-cell
+descriptor byte only on the exceptions (wide cells and multi-scalar cells, 0.86% of
+cells combined) instead of on every cell. C3 pays a descriptor byte per cell to
+make its variable-width payload navigable at all.
+
+The consequence is the important one and it is not a byte count: **C6's column read
+stays O(1)** -- a fixed per-row stride makes column -> offset a multiplication --
+while C3's is a scan from the start of the row. `retained-browse` is the guard
+`D3` says is most likely to fire, and this is the axis it fires on.
+
+Where C6 loses is rows containing a scalar above U+00FF: the whole row moves to a
+2- or 4-byte slot. `unicode-wrapping` is that case (C6 544.0 B/row against C3's
+343.4), and it is why the tier is chosen per row from measured data rather than
+globally.
+
+- Inference for `D5`: the content supports a packing scheme, and specifically
+  supports **run-length styles plus a narrow fixed-width scalar slot**. It does not
+  support a design whose win comes from compressing blank space (`F9` killed that)
+  or from per-cell style dictionaries (1.66 runs per row makes them pointless).
+  `H4` composes and is now worth ~36% on top rather than ~10%.
+- Competing interpretation, and it is the one that most threatens these numbers:
+  the saturated pool's *composition* is real but its *mix* is an artifact of which
+  recordings happen to repeat well. `alacritty/history` alone contributes 40,772 of
+  94,990 rows at 4.7 stored cells per row, which pulls the pooled mean charge down
+  hard; `fish_cc` contributes 2,372 rows at 67.5% styled cells, which pulls the
+  styled fraction up. The per-stimulus table in the probe output is the defense --
+  every candidate is priced per stimulus, and C6's saving ranges from **65.7%**
+  (`alacritty/history`, 4.7-cell rows where fixed per-row cost dominates) to
+  **93.8%** (`F8`'s payload). No stimulus shows C6 below C1.
+- Uncertainty, stated plainly:
+  - **The two deepest single-pass workloads staircase.** `benchmark/scrollback-stream`
+    and `benchmark/unicode-wrapping` emit bare `\n` with no `\r`, so each line starts
+    where the previous ended and rows accumulate leading padding: 66.4% and 39.8% of
+    their stored cells hold *no scalar*, and their mean row is 134 and 129 cells
+    against ~50 for CRLF content. This inflates the "benchmark + recordings" pool's
+    53.08% empty-scalar figure and flatters any scheme that compresses gaps. It does
+    not touch `F8`'s or `F10`'s headline numbers (both used the CRLF
+    `reference/scrollback-plain` payload) and it does not touch the saturated pool's
+    composition materially, but it is a corpus property worth knowing and it is not
+    what a real program writing through a PTY produces (the tty driver's `ONLCR` adds
+    the CR).
+  - Saturated replays restart a stimulus mid-state; a recording ending inside an alt
+    screen or a partial escape sequence replays from there. Every report carries
+    `derivationMatchesCensus` and all of them reconstructed the census exactly, so
+    the rows measured are real rows -- but the *sequence* of content is not a
+    sequence any session would produce.
+  - Every candidate is arithmetic, not an implementation. These numbers say what a
+    representation would cost the budget; they say nothing about what it costs the
+    feed path or the browse path, which is what `D3`'s success criterion exists for.
+- Next action: `D5` selects a representation on this evidence and states the risks
+  its experiment must watch.

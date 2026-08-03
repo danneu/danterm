@@ -169,6 +169,11 @@ row must CoW-detach without corrupting siblings -- the existing suite should
 prove this for free). Reject if blank rows are a negligible fraction of real
 histories (measure first).
 
+**Rejected by `D4`** on `F9`'s sizing: 0 blank rows across the committed corpus,
+and a ceiling under 350 KB at any blank fraction below 50%, because canonical
+trimming already made a blank row cost 80 B against a content row's 1,808 B. The
+reopening condition is in the "Rejected" section.
+
 ### H3 -- retained rows can be packed tighter than `[GridCell]` (15/H6 proper)
 
 The shipped change stores fewer cells; `15/H6` proposes storing them
@@ -180,6 +185,12 @@ shipped seam -- readers already tolerate storage narrower than the logical row
 grid's `GridCell` is untouched. Gate on Phase 2 evidence: only worth designing
 if stored cell bytes, not per-row overhead, dominate the remaining footprint.
 
+**Selected by `D3`** (`F8`: stored cell bytes are 89.5% of attributable footprint
+at both widths) and **designed by `D5`** on `F11`'s composition evidence: a
+per-row fixed-stride scalar column, a run-length style table, and an exception
+list, priced at 9.41x depth at saturation. The experiment is the next hand-off,
+against `D3`'s success criterion.
+
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
 The counterpart gate to H3. `15/F18` measured the overhead side growing
@@ -189,6 +200,13 @@ immutable retained rows only, no manual memory control -- composes with H3 and
 attacks the bytes H3 cannot. Whichever of H3/H4 Phase 2 shows is larger gets
 designed first; they may graduate as one plan (that is doc 15's own Phase-3
 gate logic, reapplied to post-trim numbers).
+
+**`D3` refused it as a standalone candidate** (a 1.16 MB ceiling only at zero
+per-row overhead) and kept it alive only as a composition inside H3's design.
+`F11` then earned it that place: packing shrinks the payload ~16x while the row
+slot, array header and size-class rounding do not move, so `F8`'s 89.5 / 10.5
+split inverts to roughly 50 / 50 and the arena is worth a further **36%** on top
+of H3. `D5` sequences it as a separately measured second step.
 
 ### H5 -- ancient history can demote to a compressed tier
 
@@ -339,11 +357,23 @@ is not lost.
   by more than one bucket step (~12.5%) to be guaranteed to yield any bytes. It
   also splits `F8`'s 197.5 B/row residual into 160 B of row allocation (32 B
   header + 128 B rounding) and ~37 B of history's own buffer.
+- [x] `DONE` Size styled and multi-scalar content at depth -- the evidence gap
+  `F8`, `F10` and `D3` all named. Closed by `F11`: the committed shape probe gained
+  a composition reduction and a `--saturated` replay mode, because **every styled
+  stimulus in the corpus retains zero rows in one pass** (TUIs paint in place and
+  never scroll). At depth across 94,990 rows of repeated committed content:
+  **22.54% of stored cells are styled but the mean row holds only 1.66 style runs**,
+  **0.119% of cells are multi-scalar**, 1.32% of scalars are non-ASCII, and 0.37%
+  carry a hyperlink. Styled rows are 20.3% of rows and 31.4% of charged bytes --
+  and they cost more only because they are twice as long, since the current cell
+  pays for styling whether or not it uses it. `F11` also prices six candidate
+  representations against those exact rows through the engine's own charge model.
 - [ ] `RESEARCH` Probe saturated-history resize cost at HEAD (H1): where does
   a full-width change on 5,000+ retained rows spend its time, and is it within
   a frame budget? `F7` has the distribution and the committed probe; this task
-  is the profile and the frame-budget reading `F7` deliberately withheld.
-  Destination: `F11`.
+  is the profile and the frame-budget reading `F7` deliberately withheld. Now
+  also a prerequisite risk check for `D5` (depth rises ~9x at the same budget, so
+  reflow processes ~9x more rows). Destination: `F12`.
 
 ### Phase 3 -- direction gates
 
@@ -360,23 +390,80 @@ is not lost.
   and `D1` pitch 3's reopening condition, the four standing ladder guards, the
   resize probe's now-triggered upgrade gate, and the preflight annotation on
   every deciding run.
-- [ ] `TODO` Gate: H2. `F9` measured its ceiling at **0 bytes** across the whole
-  committed corpus and under 350 KB at any blank fraction below 50%, so this is
-  writing the rejection rather than weighing a candidate; `D3` hands it over as a
-  formality and nothing waits on it. The charge-model question dies with it.
-  Destination: `D4`.
+- [x] `REJECTED` Gate: H2. Closed by `D4`: **rejected on sizing.** `F9` measured
+  the ceiling at 0 bytes across the committed corpus and under 350 KB at any blank
+  fraction below 50%, and the reason is structural rather than a corpus accident --
+  canonical trimming already made a blank row cost 80 B against a content row's
+  1,808 B, so blank rows cannot be a meaningful *byte* share until they are an
+  overwhelming *count* share. The charge-model question dies with it. Reopening
+  condition: a recorded stimulus whose retained history is more than ~50% blank
+  rows by count, which `just terminal-retained-row-probe` reports directly.
+- [x] `DONE` Pitch and select the H3 packing representation. Closed by `D5`:
+  **C6 -- a per-row fixed-stride scalar column (1/2/4 bytes, chosen from the row's
+  widest single scalar), a run-length style table, and a 3-byte-per-entry exception
+  list for wide and multi-scalar cells.** Priced at **1,076.9 -> 114.5 B/row
+  (89.4%, 9.41x depth)** at depth and **1,808.0 -> 112.0 B/row (16.14x)** on `F8`'s
+  payload at both widths. Chosen over the cheaper-looking UTF-8 text form because
+  the two cost the same in bytes at 0.903 UTF-8 bytes per cell while only the
+  fixed stride keeps a **column read O(1)** -- and `retained-browse` is the guard
+  `D3` says is most likely to fire. `H4` composes in for a further 36% and lands as
+  a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
-  deep-history footprint on the table. Destination: `D5`.
+  deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
+  dead on sizing, but that is decided on post-landing evidence. Destination: `D6`.
 
 ### Phase 4 -- graduate
 
-- [ ] `TODO` Extract any selected direction into a plan file; record where it
-  went and close, or close with all hypotheses dispositioned.
+- [ ] `RESEARCH` Build and run `H3`'s experiment: implement `D5`'s C6 in the
+  engine (retained rows only -- doc 16's closure keeps the live grid's `GridCell`
+  untouched) and read it against `D3`'s success criterion as written. This is the
+  next hand-off and the first Phase-4 task, because `D5` is a priced design and
+  not yet a measured one. Prerequisites `D5` names: the `saturated-resize` upgrade
+  if a resize claim is made, and the longer `terminal-feed` screen if the predicted
+  feed effect lands under ~2%. Run `D5`'s falsification checks against a prototype
+  before the full ladder.
+- [ ] `TODO` Extract the selected direction into a plan file once the experiment
+  answers; record where it went and close, or close with all hypotheses
+  dispositioned.
 
 ## Rejected
 
-None yet. The shipped plan's rejected ideas and doc 16's closure are inherited
-boundaries (see Investigation rules), not re-litigated here.
+The shipped plan's rejected ideas and doc 16's closure are inherited boundaries
+(see Investigation rules), not re-litigated here.
+
+### H2 -- one shared storage allocation for canonical blank rows (`D4`)
+
+Considered because canonical form makes every blank retained row byte-identical
+and Swift arrays are COW, so a screenful of blank lines could cost one allocation.
+Rejected on sizing, not on mechanism. `F9` measured **0 blank retained rows across
+the whole committed corpus** (0 of 133 recorded, 0 of 4,707 overall, with a
+negative control reporting 49.9% on an alternating stream), and the ceiling is
+under **350 KB at any blank fraction below 50%** -- because the shipped trim
+already made a blank row cost 80 B against a content row's 1,808 B. `H2` is a win
+the trim already collected. The charge-model question it owed (charging every
+sharer overstates; charging once complicates eviction accounting) dies with it,
+and it was never cheap: it would have made the cost of one row depend on how many
+*other* rows happen to be blank.
+
+**Reopening condition:** a recorded stimulus -- committed content, replayed through
+`just terminal-retained-row-probe`, not a generated stream -- whose retained
+history is **more than ~50% blank rows by count**. Not "more blank rows than we
+thought": below that fraction the ceiling stays under ~350 KB, and `F9`'s curve
+shows the byte share cannot get there by any other route. The probe reports
+`blankRowFraction` directly, so re-testing is one command.
+
+### C3/C4 -- UTF-8-text-packed retained rows (`D5`)
+
+The obvious packing shape, and kitty's `PagerHistoryBuf` precedent. Rejected as
+the selected representation because `F11` measured 0.903 UTF-8 bytes per stored
+cell: "one byte per scalar" and "UTF-8" are the same number for nearly every real
+row, so the text form buys nothing in bytes -- it is in fact **dearer** at depth
+(123.3 B/row against C6's 114.5), since it pays a descriptor byte on every cell to
+navigate a variable-width payload. What it costs on top is a column read that
+becomes a scan from the start of the row, on the workload `D3` says is most likely
+to fire. Reopening condition: recorded content at depth whose rows are mostly
+non-ASCII, which is the one regime where variable width wins on bytes
+(`unicode-wrapping` is the example: 343.4 B/row against C6's 544.0).
 
 ## Open questions and caveats
 
@@ -444,11 +531,30 @@ boundaries (see Investigation rules), not re-litigated here.
   the charge dishonest; it would only stale `F10`'s arithmetic.
   `just terminal-retained-row-probe` compares its model against libmalloc on
   every run and prints `MISMATCH` if they part company.
-- Nothing in Phase 2 measured styled or multi-scalar content at depth:
-  `styledCellCount` and `multiScalarCellCount` were zero in both of `F8`'s runs,
-  and `F10` adds only whatever `unicode-wrapping` happens to contain. H3 is an
-  argument about exactly that content, so `D3` makes sizing it the first task of
-  the design work rather than a caveat on it.
+- ~~Nothing in Phase 2 measured styled or multi-scalar content at depth.~~
+  **Closed by `F11`**, which also explains the zeros: every styled stimulus in the
+  corpus retains **zero rows in a single pass**, because TUIs paint in place and
+  nothing scrolls off the top. The gap was a fact about what reaches history, not
+  a hole in the instrument. What replaces this caveat is what the measurement
+  needed: **styled content at depth exists only in the `saturated/` pool**, built
+  by replaying committed bytes until the budget fills. Its *composition* is real;
+  its *mix* is an artifact of which recordings repeat well (`alacritty/history`
+  alone is 40,772 of 94,990 rows). Quote the per-stimulus range, not only the pool
+  mean, when a number has to carry a decision.
+- The two deepest single-pass corpus workloads **staircase**: `scrollback-stream`
+  and `unicode-wrapping` emit bare `\n` with no `\r`, so each line starts where the
+  last ended and 66.4% / 39.8% of their stored cells hold no scalar, at 134 and 129
+  cells per row against ~50 for CRLF content (`F11`). A real program writing through
+  a PTY gets `ONLCR` from the tty driver and does not do this. It does not touch
+  `F8`'s or `F10`'s headline numbers (both used the CRLF `reference/scrollback-plain`
+  payload), but it inflates any pooled figure those two workloads dominate, and it
+  **flatters any scheme that compresses gaps** -- which is exactly the flattery this
+  doc's rules exist to refuse.
+- `D5`'s selection rests on three measured properties of retained content -- 1.66
+  style runs per row, 0.903 UTF-8 bytes per cell, 0.119% multi-scalar cells. Each
+  has a stated falsification threshold in `D5`, and each is one probe command to
+  re-check. A future corpus that moves any of them re-opens the choice between C6
+  and C1/C3 rather than invalidating the direction.
 
 ## Outcome
 
