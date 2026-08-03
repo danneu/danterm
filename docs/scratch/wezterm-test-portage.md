@@ -85,10 +85,12 @@ written:
 ## Primary corpus census
 
 The counts below are exact for `term/src/test/`: 56 `#[test]` functions in six
-files. "Candidate" means worth a focused TDD probe, not pre-approved for
-adoption.
+files. Every one is now adjudicated; the census is frozen. All six tests that
+entered the queue as candidates were adapted, into three Swift tests -- the
+counts differ because upstream splits by transition where DanTerm's resize is
+order-canonical, so several upstream cases collapse into one walk.
 
-| File | Tests | Candidate | Likely superseded or policy-covered | Unsupported / implementation-coupled |
+| File | Tests | Adapted | Superseded or policy-covered | Unsupported / implementation-coupled |
 | --- | ---: | ---: | ---: | ---: |
 | `c0.rs` | 4 | 0 | 4 | 0 |
 | `c1.rs` | 4 | 0 | 4 | 0 |
@@ -97,6 +99,24 @@ adoption.
 | `image.rs` | 3 | 0 | 0 | 3 |
 | `mod.rs` | 27 | 5 | 16 | 6 |
 | Total | 56 | 6 | 41 | 9 |
+
+The six adapted cases and where they landed, all in
+`lib/TerminalCore/Tests/TerminalCoreTests/TerminalWezTermAdaptedTests.swift`:
+
+| Upstream test | DanTerm test |
+| --- | --- |
+| `mod.rs#test_resize_wrap_dectcm_issue_978` | `exactWidthHardBoundarySurvivesInterveningControl` |
+| `mod.rs#test_resize_wrap_escape_code_issue_978` | same, second leg |
+| `mod.rs#test_resize_2162` | `cursorAnchorSurvivesNarrowAndRewidenWalk` |
+| `mod.rs#test_resize_2162_by_2` | same walk |
+| `mod.rs#test_resize_2162_by_2_then_up_1` | same walk |
+| `selection.rs#drag_selection` | `characterDragSnapsWideCellsAndClampsOutOfBounds` |
+
+Yield: one live engine bug, fixed in `Terminal.swift`'s trailing-padding reflow
+anchor and pinned natively by
+`TerminalResizeTests#trailingBlankAnchorDefersWrapWhenContentFillsRow`. The
+other two adapted tests are compositional regression boundaries that passed on
+first run; each says so in its own preamble.
 
 ### `c0.rs` -- 4 tests, all likely superseded
 
@@ -129,7 +149,8 @@ These are 7-bit ESC forms despite the file name.
   `CSICursorMovementTests#axisPositioning`. Its negative-parameter recovery is
   also subsumed by `CSIParserTests#malformedParameterAfterIntermediateRecovery`
   and the movement invalid-input matrix. Confirm the exact `CSI -2 d` stream is
-  swallowed rather than adding a redundant test.
+  swallowed rather than adding a redundant test. **Confirmed swallowed**; see
+  candidate 4 below for the arm-by-arm coverage argument.
 - `test_rep`: REP count behavior is covered by `TerminalRepeatTests` and the
   libvterm REP fixtures.
 - `test_irm`: insert mode is covered by `TerminalModeTests` and libvterm's
@@ -303,7 +324,7 @@ states are already represented by `TerminalResizeTests`, classify them
 superseded. If a distinct transition is missing, retain only the smallest case
 that distinguishes it.
 
-### 4. Negative CSI parameter recovery spot-check
+### 4. Negative CSI parameter recovery spot-check -- **superseded, nothing added**
 
 Source: `term/src/test/csi.rs#test_vpa`.
 
@@ -311,6 +332,26 @@ This is not currently counted among the six candidates because the recent
 kitty-derived malformed-CSI test appears stronger. Still run `CSI -2 d` once
 while adjudicating the CSI group. Add nothing unless it exposes a different
 recovery boundary.
+
+Run, and it does not. DanTerm reproduces all four of WezTerm's VPA legs exactly
+-- `CSI d` -> row 0, `CSI 2 d` -> row 1, and `CSI -2 d` leaving the cursor
+untouched with following text intact -- so there is no behavioral gap.
+
+The recovery path is also fully covered by decomposition rather than by luck.
+`-` is 0x2D, an *intermediate* byte, so `CSI -2 d` is not a negative parameter
+at all: it is `csiEntry -> csiIntermediate` (on `-`), then `csiIntermediate ->
+csiIgnore` (on the param byte `2`). Both arms are already pinned, and the state
+on arrival at the second arm is identical no matter which arm reached it:
+
+- `csiEntry`'s `0x20...0x2F` arm is exercised by DECSTR (`CSI ! p`) in
+  `TerminalQueryTests`, `TerminalSelectionTests`, and `TerminalHyperlinkTests`.
+- `csiIntermediate`'s `0x30...0x3F` arm is exercised by
+  `CSIParserTests#malformedParameterAfterIntermediateRecovery` (`CSI 2-3 @`),
+  which additionally proves the following printable byte survives.
+
+So no single-arm mutation exists that `CSI -2 d` would catch and the current
+suite would miss. VPA itself is covered by `CSICursorMovementTests` and
+`Fixtures/libvterm/state-movecursor.json`. This closes the `csi.rs` group.
 
 ## Ruled-out and superseded groupings
 
@@ -368,24 +409,49 @@ material; translated byte scenarios with independently authored assertions
 still carry the inline citation. Do not create a side manifest solely for
 adopted Swift tests: the inline citation remains the single source of truth.
 
-## Open decisions
+## Open decisions -- all resolved
 
-- Does a supported CSI between a full final cell and CRLF preserve enough
+- **Does a supported CSI between a full final cell and CRLF preserve enough
   deferred-wrap state for the subsequent CR/LF to establish a hard boundary,
-  and is that whole ordering already pinned by existing tests?
-- Does the public pointer-policy suite already combine reverse, out-of-bounds,
-  wide-tail, and multi-line drag behavior, or only prove each mechanism in
-  isolation?
-- Are the three issue 2162 walks observably stronger than the current cursor-
-  anchor matrix, or merely concrete examples of it?
-- If only one or two cases survive, is a dedicated parity lint worth its gate
-  cost? Default answer: yes if inline hashes are adopted as a maintained
-  provenance contract; otherwise omit body hashes and state clearly that pin
-  drift is reviewed manually. Do not write unenforced hash comments.
-- Should the final 56-case disposition remain only in this scratch document, or
-  become a small tracked ledger? Default answer: keep it here unless future
-  WezTerm pin bumps are expected to be routine; a permanent manifest has upkeep
-  cost and should earn it.
+  and is that whole ordering already pinned by existing tests?**
+  Yes it preserves it, and no the ordering was not pinned. DanTerm flags a row
+  soft-wrapped lazily at the next print rather than eagerly at fill time, which
+  removes the bug class structurally; the composition is now pinned end to end.
+- **Does the public pointer-policy suite already combine reverse,
+  out-of-bounds, wide-tail, and multi-line drag behavior, or only prove each
+  mechanism in isolation?** Reverse, wide-tail, and multi-line were each proven
+  and are jointly safe. Out-of-bounds was not proven at all: no
+  interaction-policy test drags to a coordinate outside the grid, and the
+  selection arm has no viewport guard. That gap is what the adapted test holds.
+- **Are the three issue 2162 walks observably stronger than the current
+  cursor-anchor matrix, or merely concrete examples of it?** Stronger. They
+  exposed a live reflow-anchor bug that destroyed a committed character, which
+  the existing matrix missed because its narrow legs start from a pending-wrap
+  cursor or clamp onto a blank.
+- **If only one or two cases survive, is a dedicated parity lint worth its gate
+  cost?** No, and body hashes were correspondingly not written. The plan's own
+  default governs: hashes are the maintained contract a lint would enforce, and
+  a Rust brace-matched body hasher plus a self-test is most of a second
+  274-line script for six citations. Without hashes the lint would reduce to
+  "the cited `fn` still exists at the pin" and "a `Divergence:` line is
+  present" -- worth having, but not worth a duplicated gate step at this scale.
+  **WezTerm pin drift is reviewed manually**, the same standing rule as every
+  other `references/` citation in AGENTS.md. Two consequences to honor: no
+  `body sha256:` comment may be written for a WezTerm citation while this holds,
+  and a `just fetch-references wezterm` pin bump must re-read the six cited
+  functions. Revisit if the corpus grows past roughly a dozen citations, or if
+  the adjacent `vtparse` / `wezterm-escape-parser` clusters are ever mined --
+  at that point generalize `kitty-parity-lint.py` over an upstream-config table
+  rather than forking it.
+- **Should the final 56-case disposition remain only in this scratch document,
+  or become a small tracked ledger?** It has become the ledger, so it stays.
+  The three adapted tests carry their own provenance and divergences inline, but
+  the 41 superseded and 9 unsupported dispositions -- and the reasoning that
+  produced them -- have no other home, and without them a future portage repeats
+  the whole audit. Open question for the owner: whether it should move out of
+  `docs/scratch/` (which implies disposable) to sit beside
+  `agent-docs/reference-sources.md`. Left in place rather than restructured
+  unilaterally.
 
 ## Concrete task plan
 
@@ -525,6 +591,15 @@ mapping.
   pin/resolve round trip, and at `setSelection`, so no single mutation moves
   them. They are retained as the executable statement of divergence (a).
 
+- 2026-08-03: **candidate 4 (`CSI -2 d`) = superseded, nothing added.** DanTerm
+  reproduces all four VPA legs exactly. `-` is 0x2D, an intermediate byte, so
+  the stream is `csiEntry -> csiIntermediate -> csiIgnore`; both arms are
+  already pinned (DECSTR `CSI ! p` and the kitty `CSI 2-3 @` case) and the
+  second arm cannot tell which arm reached it. This closes `csi.rs`.
+- 2026-08-03: **census frozen, all open decisions resolved, done condition met.**
+  Six adapted upstream cases across three Swift tests, one engine bug fixed,
+  no parity lint (manual pin review, so no body hashes were written). Gate green.
+
 ## Done condition
 
 This portage is done when:
@@ -541,3 +616,26 @@ This portage is done when:
   pass; and
 - unsupported features and deliberate policy differences remain explicit
   rather than being silently normalized to WezTerm.
+
+### Status: met, 2026-08-03
+
+Each clause, with its evidence:
+
+- all 56 dispositions are recorded, and the census table above is frozen;
+- the three adapted tests assert only public DanTerm state (`screenText`,
+  `geometry`, `selectedText`, the pointer decision), and each carries an
+  explicit `Divergence:` paragraph;
+- one test was introduced red for the intended reason (issue 2162) and led to
+  an engine fix; the other two are recorded as passing coverage additions with
+  their non-redundancy argued by injected mutation, including the honest note
+  that the wide-cell legs of `drag_selection` do *not* discriminate;
+- `exactWidthHardBoundarySurvivesInterveningControl` runs its stream whole,
+  bytewise, and at every single split point;
+- no body hashes are claimed, so nothing mechanical is owed -- see the parity
+  lint decision above for the standing manual-review rule this commits to;
+- `bash scripts/run-test-suite.sh` passes all 61 steps, `swift test
+  --package-path lib/TerminalCore` passes 813 tests, `git diff --check` clean;
+- the policy differences that survive are named in the tests themselves: wide
+  cells snap outward, off-grid drag ends clamp to retained content, selection
+  coordinates stay in the retained stream, DEC Special Graphics is not
+  implemented, and terminal graphics stay out of scope.
