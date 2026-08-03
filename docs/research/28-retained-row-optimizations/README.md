@@ -120,11 +120,14 @@ Three facts in that finding are this doc's starting evidence:
    footprint by +2.51 MB at 179 columns (+21.8%) and +0.44 MB at 80. Compact
    rows converted the dominant cost from blank cells to per-row overhead --
    which is `15/H7`'s territory, quantified fresh by `15/F18`.
-2. **The feed-path CPU verdict is unresolved.** `benchmark-quick` was
-   inconclusive (+1.13% symmetric median); the escalated `benchmark-confirm`
-   run produced no usable evidence because `scrollback-stream` arm A returned
-   empty stdout instead of JSON. No neutrality claim exists for admission-time
-   trimming (the shipped plan's `AR2`).
+2. **The feed-path CPU verdict is closed as unobtainable, not as neutral**
+   (`F1`). Four valid paired schedules agree on +1.03% to +1.45% against
+   `fa01b66`, which falls in the dead zone between `confirm`'s equivalence band
+   and its directional threshold; the escalation ladder has no third rung. The
+   shipped plan's `AR2` neutrality assumption is therefore neither confirmed
+   nor refuted, and the only defensible statement is a bound: admission-time
+   trimming costs no more than ~2.5% on the feed path, point estimate ~+1%.
+   Later candidates in this doc inherit that bound, not a neutrality claim.
 3. **The browsing measurement is unreproducible by routine tooling.** No
    paired workload displays retained history -- `scrollback-stream` follows
    the bottom and the draw workloads start from live grids. `15/F18`'s result
@@ -211,11 +214,20 @@ is not lost.
 
 ### Phase 1 -- close the shipped change's measurement residue
 
-- [ ] `RESEARCH` Resolve the feed-path verdict at HEAD: rerun
-  `benchmark-quick` on `terminal-feed` against the pre-trim baseline arm per
-  the frozen protocol, escalate to `benchmark-confirm` if inconclusive, and
-  record the verdict in `F1`. Diagnose the `scrollback-stream` empty-stdout
-  confirm failure first if it recurs (tooling; its own finding if nontrivial).
+- [x] `DONE` Resolve the feed-path verdict at HEAD. Closed by `F1`: **no
+  directional verdict is obtainable.** Four valid paired schedules (`15/F18`'s
+  quick and confirm, plus a quick and a confirm at `6da2bb7` on AC power)
+  agree on +1.03% to +1.45% against baseline `fa01b66`, which sits in the dead
+  zone between `confirm`'s 0.75% equivalence band and its 2.5% directional
+  threshold. The escalation ladder is exhausted and re-running is shopping. The
+  defensible bound: admission-time trimming costs no more than ~2.5% on the
+  feed path, point estimate ~+1%, direction slower. The `scrollback-stream`
+  empty-stdout defect did **not** recur -- `15/F18` records it as already
+  diagnosed and repaired (theme-packer status prefix; the tolerance lives in
+  `_load_fresh_replay_result` in `scripts/terminal-benchmark-validation.py`),
+  and all four `scrollback-stream` blocks of this confirm returned JSON. That
+  confirm also produced `F2`, which is unrelated to the trim and is flagged
+  there for another doc.
 - [ ] `TODO` Pitch and decide benchmark coverage for retained history, so
   every later experiment here can end in a verdict rather than a probe
   anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
@@ -236,17 +248,17 @@ is not lost.
 - [ ] `TODO` Split saturated attributable footprint into stored cell bytes vs
   per-row fixed overhead (headers, `GridRow` strides, bucket slack) at both
   179 and 80 columns, using the census plus probe arithmetic. This is the
-  H3-vs-H4 gate input. Destination: `F2`.
+  H3-vs-H4 gate input. Destination: `F3`.
 - [ ] `TODO` Measure blank-row frequency in realistic histories (shell
   sessions, build logs, TUI dumps -- the existing benchmark corpora) to size
-  H2's ceiling. Destination: `F3`.
+  H2's ceiling. Destination: `F4`.
 - [ ] `TODO` Check allocator behavior under ragged row sizes: do
   content-length-distributed allocations fragment size classes measurably, or
   does malloc absorb them? (`15/F7`'s bucket analysis is technique precedent;
-  numbers measured fresh.) Destination: `F4`.
+  numbers measured fresh.) Destination: `F5`.
 - [ ] `RESEARCH` Probe saturated-history resize cost at HEAD (H1): where does
   a full-width change on 5,000+ retained rows spend its time, and is it within
-  a frame budget? Destination: `F5`.
+  a frame budget? Destination: `F6`.
 
 ### Phase 3 -- direction gates
 
@@ -274,6 +286,14 @@ boundaries (see Investigation rules), not re-litigated here.
   deliberately; H4 could claw the overhead back without giving depth up.
 - The browsing -5.79% result has no frozen decision rule behind it; treat it
   as descriptive until `D1` gives the measurement a home.
+- `terminal-feed` cannot resolve a ~1% effect and buys no extra pairs at
+  `confirm` (`F1`). Any later candidate here whose predicted feed effect is
+  around 1% will hit the same wall, so either predict a larger effect or expect
+  to screen `terminal-feed` for a longer schedule before running one.
+- `F2` is an unresolved `slower` signal on all four non-feed workloads against
+  `fa01b66`, measured on a machine that was not idle and therefore not a
+  verdict. It is almost certainly not the trim. It is parked here only so it is
+  not lost; the renderer docs own it.
 - H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
   budget.
