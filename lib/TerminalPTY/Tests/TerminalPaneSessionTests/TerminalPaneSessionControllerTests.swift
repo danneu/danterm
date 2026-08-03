@@ -1481,7 +1481,15 @@ struct TerminalPaneSessionControllerTests {
         let observers = PaneExitCompletionRecorder()
         liveController.terminationHandle.whenQuiescent { observers.signal() }
         closingController.terminationHandle.whenQuiescent { observers.signal() }
-        #expect(await liveHost.waitForOutput(containing: Array("__READY__".utf8)))
+        // The live pane is waited on by its flood, not by `__READY__`: `waitForOutput`
+        // answers only from the host's 64 KiB `recentOutput` window, and the chatty child
+        // writes 4 KiB forever the instant it prints that marker. Once its host drains past
+        // the window the marker is unrecoverable, and because a live pane never quiesces the
+        // wait would suspend to the time limit rather than fail. The flood byte is evidence
+        // the window cannot lose, and "already writing" is what this test needs anyway.
+        #expect(await liveHost.waitForOutput(
+            containing: [UInt8](repeating: UInt8(ascii: "c"), count: 4096)
+        ))
         #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
 
         closingController.tearDown()

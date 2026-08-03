@@ -853,13 +853,29 @@ struct TerminalPTYHostTests {
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         // Named, because these three fail for different reasons: a bare `host` in the message
-        // cannot say which pane never reported ready. The flooding one is the slow case --
+        // cannot say which pane never reported liveness. The flooding one is the slow case --
         // its child saturates its own owner queue, so even answering this call waits behind a
         // read turn (measured 0.03s to 2.6s, against under a millisecond for the quiet two).
-        for (name, host) in [("stalled", stalled), ("chatty", chatty), ("ordinary", ordinary)] {
+        //
+        // That pane is also waited on by its flood rather than by `__READY__`, and the
+        // difference is correctness, not taste. `waitForOutput` can only answer from the
+        // host's 64 KiB `recentOutput` window, and this child writes 4 KiB forever the
+        // instant it prints the marker -- so once its host has drained past the window the
+        // marker is gone and no later output can ever satisfy the wait. A live pane never
+        // quiesces either, so the wait does not fail, it suspends until the test's time
+        // limit. A full write's worth of the flood byte is evidence the window cannot lose,
+        // and it is the stronger claim anyway: what this test needs from this pane is that
+        // it is already flooding.
+        let ready = Array("__READY__".utf8)
+        let flooding = [UInt8](repeating: UInt8(ascii: "c"), count: 4096)
+        for (name, host, liveness) in [
+            ("stalled", stalled, ready),
+            ("chatty", chatty, flooding),
+            ("ordinary", ordinary, ready),
+        ] {
             #expect(
-                await host.waitForOutput(containing: Array("__READY__".utf8)),
-                "the \(name) pane never reported ready"
+                await host.waitForOutput(containing: liveness),
+                "the \(name) pane never reported liveness"
             )
         }
 
