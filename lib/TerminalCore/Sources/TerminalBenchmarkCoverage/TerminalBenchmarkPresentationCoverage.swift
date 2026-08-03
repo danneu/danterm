@@ -6,9 +6,13 @@
 // panel taking focus, a covering window, a space switch -- changes what the app
 // draws and therefore what the profiler attributes, without changing any counter
 // the harness already publishes. This file counts that condition instead of
-// asserting it: the app-side publisher takes one sample per published activity
-// snapshot, and a reader that differences two snapshots learns both how many
-// samples the interval contains and how many of them lapsed.
+// asserting it: the app-side publisher takes one sample per tick of a wall-clock
+// timer -- deliberately not per draw, which would make the sample rate a
+// function of the very activity being measured -- and a reader that differences
+// two snapshots learns both how many samples the interval contains and how many
+// of them lapsed. The reader also divides: a sample count far below the timer's
+// cadence means the interval was too thinly observed for its zero lapses to
+// speak for it.
 //
 // Counting rather than latching is what lets missing measurement stay
 // distinguishable from measured zero: an interval with no samples proves

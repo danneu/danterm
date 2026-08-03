@@ -126,9 +126,11 @@ final class TerminalBenchmarkStateRecorder {
     ///
     /// Exposed from here rather than re-probed by the activity publisher because
     /// this type already owns the window and the full presentation check. The
-    /// caller runs on the 100 ms publish cadence, not per draw, so the
-    /// WindowServer round-trip inside `isWindowVisible()` -- the reason
-    /// `observeDrawState()` uses the cheaper local check -- costs nothing here.
+    /// caller is the observer's 100 ms wall-clock sampling timer, which exists
+    /// only on profiling runs and fires whether or not the app is drawing, so
+    /// the WindowServer round-trip inside `isWindowVisible()` -- the reason
+    /// `observeDrawState()` uses the cheaper local check -- is paid at most ten
+    /// times a second and never on a measured path.
     func presentationCoverageSample() -> (isForeground: Bool, isPresented: Bool) {
         (NSApplication.shared.isActive, isWindowVisible())
     }
@@ -337,11 +339,14 @@ final class TerminalBenchmarkObserver {
     private var observedFullDamageCount = 0
     private var observedDirtyRectFallbackCount = 0
     private var lastActivityWriteNanoseconds: UInt64 = 0
-    /// Lifetime foreground/presentation samples, taken on the activity publish
-    /// cadence so a profiling window can be shown to have been attributable.
+    /// Lifetime foreground/presentation samples, taken on a wall-clock cadence so
+    /// a profiling window can be shown to have been attributable.
     /// Published only when a state recorder exists to produce the samples --
     /// counters nobody fed would report an unsampled run as a clean one.
     private var presentationCoverage = TerminalBenchmarkPresentationCoverageRecorder()
+    /// The wall-clock sampler behind `presentationCoverage`. Absent outside
+    /// profiling runs, and never touched by the draw path.
+    private var presentationSamplingTimer: Timer?
     private weak var measuredController: TerminalPaneSessionController?
     private var fenceBlockPolicy = TerminalPaneFenceBlockPolicy()
     /// Retained for the lifetime of the observer, not built per frame: it holds
@@ -388,6 +393,66 @@ final class TerminalBenchmarkObserver {
             .flatMap { $0.isEmpty ? nil : $0 }
         self.resultPathBytes = resultPath.utf8CString.map { $0 }
         self.startAcknowledgmentPathBytes = startAcknowledgmentPath.utf8CString.map { $0 }
+    }
+
+    deinit {
+        presentationSamplingTimer?.invalidate()
+    }
+
+    /// Starts sampling foreground/presentation on wall-clock time, for profiling
+    /// runs only.
+    ///
+    /// The sample used to be taken inside `publishActivity`, which the draw path
+    /// calls -- so its real rate was `min(draw rate, 10/s)` and the coverage
+    /// section certified exactly the instants the app happened to be busy. A run
+    /// that drew 19 times in 13 seconds reported `lapsedForegroundSamples: 0`
+    /// from 19 observations, and a Cmd-Tab shorter than the ~700 ms between them
+    /// would have been invisible to it. Observing focus requires a clock that
+    /// does not belong to the thing being observed.
+    ///
+    /// A timer of its own rather than `TerminalBenchmarkGeometryController`'s
+    /// 20 ms one: that timer invalidates itself the moment the grid converges,
+    /// seconds before any profiler attaches, so reusing it would sample only the
+    /// window nobody profiles -- and it is deliberately fast for convergence,
+    /// which is 5x more WindowServer round-trips than this needs.
+    ///
+    /// Scheduled in `.common` modes so a tracking or modal run loop -- which a
+    /// GUI capture can enter without the app being wrong -- does not silently
+    /// stop the sampler and reproduce the hole this closes. It stays outside
+    /// every measured bracket for the same reason the draw-path publish did: it
+    /// runs on the run loop between draws, never inside one. It cannot see a
+    /// main-thread hang, though: a blocked main thread stops this timer too, so
+    /// a true hang still yields no samples. That residual is the density floor's
+    /// to catch -- too few samples for the interval is exactly what a hang leaves
+    /// behind, and `presentation_coverage` rejects it.
+    func startPresentationSampling() {
+        guard activityPath != nil, presentationSamplingTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.samplePresentationCoverage()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        presentationSamplingTimer = timer
+    }
+
+    /// Takes one wall-clock foreground/presentation sample and republishes the
+    /// activity snapshot that carries it.
+    ///
+    /// The sample is taken unconditionally and the publish is left to its own
+    /// 100 ms throttle: the sample is the measurement whose cadence has to be
+    /// uniform, while the write is only how a reader sees it, and a write the
+    /// draw path already did a moment ago costs a sample nothing.
+    private func samplePresentationCoverage() {
+        guard let activityPath else { return }
+        if let stateRecorder {
+            let sample = stateRecorder.presentationCoverageSample()
+            presentationCoverage.record(
+                isForeground: sample.isForeground,
+                isPresented: sample.isPresented
+            )
+        }
+        publishActivity(atPath: activityPath)
     }
 
     /// Selects the one pane whose cumulative fence counters define benchmark blocks.
@@ -741,9 +806,13 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Republishes the lifetime counters, at most every 100 ms, so a profiling
-    /// window can be converted into a draw count -- and takes one
-    /// foreground/presentation sample per publish, so the same window can be
-    /// shown to have been attributable to this app at all.
+    /// window can be converted into a draw count.
+    ///
+    /// Takes no sample of its own. The foreground/presentation sample it used to
+    /// take here inherited this method's callers, one of which is the draw path
+    /// -- which made the coverage rate `min(draw rate, 10/s)` and left the
+    /// attributability claim resting on observations that existed only where the
+    /// app was busy. `startPresentationSampling` owns that sample now.
     ///
     /// Each snapshot carries its own clock reading rather than relying on a fixed
     /// publish cadence: the reader differences two snapshots' (count, clock)
@@ -759,13 +828,6 @@ final class TerminalBenchmarkObserver {
         let now = DispatchTime.now().uptimeNanoseconds
         guard now - lastActivityWriteNanoseconds >= 100_000_000 else { return }
         lastActivityWriteNanoseconds = now
-        if let stateRecorder {
-            let sample = stateRecorder.presentationCoverageSample()
-            presentationCoverage.record(
-                isForeground: sample.isForeground,
-                isPresented: sample.isPresented
-            )
-        }
         var object: [String: Any] = [
             "schemaVersion": 2,
             "clock": "dispatch-uptime-nanoseconds",

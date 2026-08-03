@@ -460,13 +460,31 @@ zero -- a section that could not be proved is absent from the identity and its
 reason is listed in `capture.invalidReasons`. **An invalidated run still writes
 its bundle**; that list is what you act on.
 
+**Two of those gates also divide by the measured interval**, because a count
+above zero says only that an observer existed. Foreground/presentation samples
+must reach 5/s of the profiler window, and parsed profiler samples must reach
+5/s as well. The app samples focus on its own 100 ms wall-clock timer -- not on
+the draw path, which would make the sample rate a function of the activity being
+measured -- so a healthy run measures ~10/s (measured: 227 samples over a 20.6s
+window) whatever its frame rate, and the floor still passes a run whose main
+thread was unavailable for half the window. Neither floor grades how fast the
+app drew: damage topology deliberately has no per-second floor, because a low
+draw rate is the finding the diagnostic exists to report, and the honest
+normalizer for drawing is the stimulus that asked for it -- the
+draws-per-key-event ratio above. Together the two answer different failures: a
+main-thread hang stops the focus sampler too, so it surfaces as too few samples
+for the interval rather than as a clean, thinly observed one.
+
 **Artifacts** land in the same `.build/terminal-benchmark-profiles/<run>/` as
 every other profile. `identity.json` is extended in place -- there is no second
 provenance file -- with the btop executable path and version, effective config
 path and digest, owned btop pid/PTY/geometry, input mechanism and permission,
 measured stimulus legs and repeat cadence, the profiler/stimulus overlap,
 topology and presentation coverage deltas, the stimulus-response ratio, machine
-state, and the capture verdict. `loop` additionally publishes `btop-stimulus-live.json` with the
+state, and the capture verdict. The presentation and profiler coverage sections
+each also carry `measuredIntervalSeconds`, `samplesPerSecond`, and the floor
+they were graded against, so a bundle says how densely it was observed and not
+only that it was. `loop` additionally publishes `btop-stimulus-live.json` with the
 direction and start of the leg it is currently holding, so an agent attaching its
 own profiler can bracket and validate its own window.
 

@@ -206,6 +206,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             environment: ProcessInfo.processInfo.environment
         )
         TerminalBenchmarkObserver.shared?.stateRecorder = benchmarkStateRecorder
+        // After the recorder is attached, because the sampler reads through it.
+        // Profiling runs only -- the observer refuses without an activity path.
+        TerminalBenchmarkObserver.shared?.startPresentationSampling()
         #endif
 
         #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK

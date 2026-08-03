@@ -68,6 +68,23 @@ REQUIRED_WORKLOAD_FIELDS = ("executablePath", "version", "config", "process", "i
 # idle repaint, and nothing else). A quarter leaves 4x of headroom for frame
 # coalescing while still rejecting an idle app by an order of magnitude.
 MINIMUM_DRAWS_PER_KEY_EVENT = 0.25
+# The floor on foreground/presentation samples per second of measured interval.
+# The app samples on a 100ms wall-clock cadence, so a nominal run sits at 10/s and
+# the working recorded bundle measured 9.08/s (188 samples over 20.712s) once the
+# main thread's own scheduling is paid for. Half the nominal cadence is the floor:
+# it tolerates the main thread being unavailable for half the window, leaves the
+# working run 1.8x of headroom, and rejects the draw-triggered sampling this gate
+# was built for -- the broken bundle's 19 samples over 13.183s, 1.44/s -- by 3.5x.
+# It is a floor on *observation*, not on the app's speed: nothing here depends on
+# how fast the app drew, which is why a slow-drawing run cannot trip it.
+MINIMUM_PRESENTATION_SAMPLES_PER_SECOND = 5.0
+# The floor on parsed profiler samples per second of measured interval. The two
+# recorded btop bundles parsed 38.3/s (505 over 13.183s) and 107.7/s (2231 over
+# 20.712s) -- both legitimately attached, and differing by 2.8x because the count
+# depends on thread count and template. The floor therefore sits far under the
+# slower of them (7.7x) rather than near either, and still rejects a profiler that
+# attached for the tail of a window -- 3 samples over 20s, 0.15/s -- by 33x.
+MINIMUM_PROFILER_SAMPLES_PER_SECOND = 5.0
 
 _TOC_SCHEMA = re.compile(r'schema="([A-Za-z0-9._-]+)"')
 _ANSI_STYLE = re.compile(r"\x1b\[[0-9;]*m")
@@ -129,6 +146,71 @@ def _subtract_histogram(before, after, what):
     return delta
 
 
+def measured_interval_seconds(capture):
+    """Read the profiler window every sample-density floor is normalized by.
+
+    Taken from the recorded overlap rather than from the two activity snapshots'
+    own clock readings: the snapshots are file copies of a periodically
+    republished counter file, so the span between them is the span between two
+    *publishes* and drifts from the profiled window in both directions (measured
+    on the recorded bundles: 12.945s counted against 13.183s profiled, and
+    22.910s against 20.712s). The profiler window is the interval the report's
+    numbers are attributed to, so it is the one a density has to be stated over.
+
+    Raised as unmeasured, never defaulted: this is the denominator of both
+    floors, so a substituted value would silently decide a verdict.
+    """
+    overlap = capture.get("overlap") if isinstance(capture, dict) else None
+    if not isinstance(overlap, dict):
+        raise CaptureInvalid(
+            "the bounded capture recorded no stimulus/profiler overlap, so the length "
+            "of the measured interval is unmeasured"
+        )
+    bounds = {}
+    for name in ("profilerStartSeconds", "profilerStopSeconds"):
+        value = overlap.get(name)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise CaptureInvalid(
+                f"the recorded overlap carries no numeric `{name}`, so the length of the "
+                "measured interval is unmeasured"
+            )
+        bounds[name] = value
+    seconds = bounds["profilerStopSeconds"] - bounds["profilerStartSeconds"]
+    if seconds <= 0:
+        raise CaptureInvalid(
+            f"the recorded profiler window is {seconds:.3f}s long, so it spans no "
+            "interval any measurement could have been taken over"
+        )
+    return seconds
+
+
+def _grade_sample_density(samples, interval_seconds, floor, *, what, consequence):
+    """Require `samples` to cover `interval_seconds` densely enough to speak for it.
+
+    Shared by the two count-only gates because they fail the same way: a count
+    above zero says an observer existed, and says nothing about whether it
+    observed often enough for the interval's verdict to rest on it. An absent
+    interval reports as unmeasured rather than skipping the check, so a bundle
+    that lost its window fails closed.
+    """
+    if interval_seconds is None:
+        raise CaptureInvalid(
+            f"{what} density is unmeasured: the bundle records no profiler window to "
+            "state a sample rate over"
+        )
+    rate = samples / interval_seconds
+    if rate < floor:
+        raise CaptureInvalid(
+            f"{what} carries {samples} samples across the {interval_seconds:.3f}s "
+            f"measured interval ({rate:.2f}/s, floor {floor}/s); {consequence}"
+        )
+    return {
+        "measuredIntervalSeconds": round(interval_seconds, 4),
+        "samplesPerSecond": round(rate, 4),
+        "minimumSamplesPerSecond": floor,
+    }
+
+
 def damage_topology_coverage(before_snapshot, after_snapshot):
     """Subtract the bracketing snapshots' damage topology and require it to be nonempty.
 
@@ -136,6 +218,15 @@ def damage_topology_coverage(before_snapshot, after_snapshot):
     sample delta is not a weaker topology, it is the absence of one: the
     profiler recorded a window in which the app submitted no damage at all, so
     nothing it attributed belongs to this workload.
+
+    Deliberately carries no per-second floor, unlike presentation and profiler
+    coverage. Those two count *observations of* the run, so a low rate indicts
+    the instrument. This one counts the run's own drawing, so a low rate is a
+    finding about the app -- an unqualified wall-clock floor here would reject a
+    genuinely slow-drawing DanTerm as an invalid capture, which is precisely the
+    result the diagnostic exists to report. The honest normalizer for drawing is
+    the stimulus that asked for it, and that is
+    `stimulus_response_coverage`'s draws-per-key-event.
     """
     before = before_snapshot.get("damageTopology")
     after = after_snapshot.get("damageTopology")
@@ -155,14 +246,20 @@ def damage_topology_coverage(before_snapshot, after_snapshot):
     return delta
 
 
-def presentation_coverage(before_snapshot, after_snapshot):
+def presentation_coverage(before_snapshot, after_snapshot, interval_seconds):
     """Subtract the continuous foreground/presentation counters and require full coverage.
 
-    Three separate failures are distinguished, and that is the point: an app that
+    Four separate failures are distinguished, and that is the point: an app that
     never published the counters (unmeasured), an interval no publish landed in
-    (unsampled), and an interval that was sampled and lapsed (not attributable).
-    Only the last one is about the app's behavior; grading all three the same
-    would let the first two pass as clean runs.
+    (unsampled), an interval too thinly sampled for its length to speak for it
+    (under-observed), and an interval that was sampled and lapsed (not
+    attributable). Only the last one is about the app's behavior; grading them
+    the same would let the first three pass as clean runs.
+
+    The density is graded before the lapse counts because it decides what those
+    counts mean: `lapsedForegroundSamples: 0` over 19 observations of a 13-second
+    window is not a weaker version of the same claim, it is a claim about the 19
+    instants that were looked at.
     """
     before = before_snapshot.get("presentationCoverage")
     after = after_snapshot.get("presentationCoverage")
@@ -178,6 +275,17 @@ def presentation_coverage(before_snapshot, after_snapshot):
             "every lapse count is zero for want of an observation rather than for want "
             "of a lapse"
         )
+    density = _grade_sample_density(
+        delta["sampleCount"],
+        interval_seconds,
+        MINIMUM_PRESENTATION_SAMPLES_PER_SECOND,
+        what="presentation coverage",
+        consequence=(
+            "the interval was sampled too sparsely for its lapse counts to speak for "
+            "it, so a lapse shorter than the gap between samples would leave them at "
+            "zero"
+        ),
+    )
     lapses = {}
     for name, noun in (
         ("foregroundSampleCount", "frontmost"),
@@ -197,6 +305,7 @@ def presentation_coverage(before_snapshot, after_snapshot):
         lapses[name] = lapsed
     return {
         **delta,
+        **density,
         "lapsedForegroundSamples": lapses["foregroundSampleCount"],
         "lapsedPresentedSamples": lapses["presentedSampleCount"],
     }
@@ -205,8 +314,16 @@ def presentation_coverage(before_snapshot, after_snapshot):
 # --- profiler artifact gates ---------------------------------------------------
 
 
-def profiler_sample_coverage(report):
-    """Require the profile report to have parsed at least one sample."""
+def profiler_sample_coverage(report, interval_seconds):
+    """Require the profile report to have sampled the measured interval, not just touched it.
+
+    The count gate alone cannot tell a profiler that covered the window from one
+    that attached for its last few milliseconds, and every percentage the report
+    prints is then computed over a window the profile never saw. The density
+    floor is what separates them; it is set well under the slowest legitimately
+    attached run rather than near it, because sample count varies with thread
+    count and template and this gate has no business grading either.
+    """
     totals = report.get("totals") if isinstance(report, dict) else None
     if not isinstance(totals, dict) or "samples" not in totals:
         raise CaptureInvalid("the profile report carries no sample totals to gate on")
@@ -215,11 +332,22 @@ def profiler_sample_coverage(report):
             "the profiler parsed no samples, so the capture measured nothing regardless "
             "of what the rest of the bundle proves"
         )
+    density = _grade_sample_density(
+        totals["samples"],
+        interval_seconds,
+        MINIMUM_PROFILER_SAMPLES_PER_SECOND,
+        what="the profile report",
+        consequence=(
+            "the profiler cannot have covered the interval it is attributed to, so its "
+            "percentages describe a window it barely observed"
+        ),
+    )
     source = report.get("source") or {}
     return {
         "samples": totals["samples"],
         "weight": totals.get("weight"),
         "weightUnit": source.get("weightUnit"),
+        **density,
     }
 
 
@@ -487,6 +615,17 @@ def summarize_capture(bundle, *, mode):
             container[key] = value
         return value
 
+    capture = bundle.get("stimulusCapture")
+    # Resolved before any section that needs it, because two of them share it as a
+    # denominator. A failure here is recorded once, under its own label, and then
+    # reappears as "unmeasured" in each section it denied -- which is the honest
+    # reading: one missing fact, and the two verdicts it prevents.
+    interval_seconds = None
+    try:
+        interval_seconds = measured_interval_seconds(capture)
+    except CaptureInvalid as error:
+        reasons.append(f"measuredInterval: {error}")
+
     before = bundle.get("activityBefore")
     after = bundle.get("activityAfter")
     # Held across the sections because the stimulus-response gate below is the one
@@ -504,7 +643,7 @@ def summarize_capture(bundle, *, mode):
         )
         record(
             coverage, "presentation", "presentation",
-            lambda: presentation_coverage(before, after),
+            lambda: presentation_coverage(before, after, interval_seconds),
         )
 
     report = bundle.get("profileReport")
@@ -513,7 +652,7 @@ def summarize_capture(bundle, *, mode):
     else:
         record(
             coverage, "profilerSamples", "profilerSamples",
-            lambda: profiler_sample_coverage(report),
+            lambda: profiler_sample_coverage(report, interval_seconds),
         )
 
     record(
@@ -521,7 +660,6 @@ def summarize_capture(bundle, *, mode):
         lambda: machine_state_coverage(bundle.get("machineStateSamples")),
     )
 
-    capture = bundle.get("stimulusCapture")
     if capture is None:
         reasons.append(
             "overlap: the run recorded no bounded stimulus capture, so no arrow input is "

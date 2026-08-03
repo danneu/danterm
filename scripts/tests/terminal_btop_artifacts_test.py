@@ -83,8 +83,16 @@ def valid_bundle():
                 "legs": [{"direction": "down", "repeatCount": 599, "resyncCount": 0}],
                 "directionChanges": 0,
             },
-            "profiler": {"startSeconds": 11.0, "stopSeconds": 31.0, "exitStatus": 0},
-            "overlap": {"contained": True, "leadSeconds": 1.0, "trailSeconds": 1.0},
+            "profiler": {"startSeconds": 11.0, "stopSeconds": 21.0, "exitStatus": 0},
+            # A 10-second profiler window, so the bracket's 90 presentation samples
+            # read as 9/s -- the cadence a wall-clock sampler really achieves.
+            "overlap": {
+                "contained": True,
+                "leadSeconds": 1.0,
+                "trailSeconds": 1.0,
+                "profilerStartSeconds": 11.0,
+                "profilerStopSeconds": 21.0,
+            },
         },
         "workload": {
             "executablePath": "/opt/homebrew/bin/btop",
@@ -147,20 +155,54 @@ class DamageTopologyTests(unittest.TestCase):
         self.assertIn("cumulative", str(caught.exception))
 
 
+class MeasuredIntervalTests(unittest.TestCase):
+    def test_the_profiler_window_comes_from_the_recorded_overlap(self):
+        self.assertAlmostEqual(
+            ARTIFACTS.measured_interval_seconds(
+                {"overlap": {"profilerStartSeconds": 11.0, "profilerStopSeconds": 31.5}}
+            ),
+            20.5,
+        )
+
+    def test_a_capture_without_a_profiler_window_is_unmeasured(self):
+        # Intent: an overlap block that names no profiler window reports the
+        #   interval as unmeasured instead of substituting a default.
+        # Why it exists: the interval is the denominator of both density floors, so
+        #   a fabricated one would silently decide whether a run passes. "Nobody
+        #   recorded the window" has to stay distinguishable from "the window was
+        #   long and thinly sampled".
+        # Scenario: spec-first -- a capture written by an older harness that
+        #   recorded containment but not the endpoints.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.measured_interval_seconds({"overlap": {"contained": True}})
+        self.assertIn("unmeasured", str(caught.exception))
+
+    def test_a_nonpositive_window_is_invalid(self):
+        with self.assertRaises(ARTIFACTS.CaptureInvalid):
+            ARTIFACTS.measured_interval_seconds(
+                {"overlap": {"profilerStartSeconds": 31.0, "profilerStopSeconds": 31.0}}
+            )
+
+
 class PresentationCoverageTests(unittest.TestCase):
     def test_a_fully_covered_interval_counts_its_samples(self):
         delta = ARTIFACTS.presentation_coverage(
-            activity_snapshot(coverage_samples=200), activity_snapshot(coverage_samples=290)
+            activity_snapshot(coverage_samples=200), activity_snapshot(coverage_samples=290), 10.0
         )
         self.assertEqual(delta["sampleCount"], 90)
         self.assertEqual(delta["lapsedForegroundSamples"], 0)
         self.assertEqual(delta["lapsedPresentedSamples"], 0)
+        self.assertEqual(delta["samplesPerSecond"], 9.0)
+        self.assertEqual(
+            delta["minimumSamplesPerSecond"], ARTIFACTS.MINIMUM_PRESENTATION_SAMPLES_PER_SECOND
+        )
 
     def test_a_foreground_lapse_inside_the_interval_invalidates_it(self):
         with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
             ARTIFACTS.presentation_coverage(
                 activity_snapshot(coverage_samples=200, foreground_samples=200),
                 activity_snapshot(coverage_samples=290, foreground_samples=275),
+                10.0,
             )
         self.assertIn("frontmost", str(caught.exception))
 
@@ -169,6 +211,7 @@ class PresentationCoverageTests(unittest.TestCase):
             ARTIFACTS.presentation_coverage(
                 activity_snapshot(coverage_samples=200, presented_samples=200),
                 activity_snapshot(coverage_samples=290, presented_samples=284),
+                10.0,
             )
         self.assertIn("presented", str(caught.exception))
 
@@ -180,14 +223,54 @@ class PresentationCoverageTests(unittest.TestCase):
         # Scenario: spec-first -- the profiler window fit between two publishes.
         with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
             ARTIFACTS.presentation_coverage(
-                activity_snapshot(coverage_samples=200), activity_snapshot(coverage_samples=200)
+                activity_snapshot(coverage_samples=200),
+                activity_snapshot(coverage_samples=200),
+                10.0,
             )
         self.assertIn("no foreground", str(caught.exception))
 
     def test_an_app_that_published_no_coverage_is_unmeasured(self):
         with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
             ARTIFACTS.presentation_coverage(
-                activity_snapshot(with_coverage=False), activity_snapshot()
+                activity_snapshot(with_coverage=False), activity_snapshot(), 10.0
+            )
+        self.assertIn("unmeasured", str(caught.exception))
+
+    def test_a_thinly_sampled_interval_is_rejected_even_with_no_lapse(self):
+        # Intent: an interval whose foreground/presentation samples are far below the
+        #   publisher's wall-clock cadence is rejected, and the message names the
+        #   achieved rate, the floor, and the interval it was measured over.
+        # Why it exists: `lapsedForegroundSamples: 0` is only as strong as the
+        #   sampling that produced it. When the sample was taken from the draw path,
+        #   an app that drew 19 times in 13 seconds certified 13 seconds of continuous
+        #   foreground from 19 observations -- a Cmd-Tab shorter than the ~700ms gap
+        #   between them would have been invisible while the count still read zero.
+        #   The count gate cannot see this: 19 > 0.
+        # Scenario: the recorded 2026-08-03-113912 bundle -- 19 presentation samples
+        #   across a 13.183s profiler window, 1.44/s.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.presentation_coverage(
+                activity_snapshot(coverage_samples=200),
+                activity_snapshot(coverage_samples=219),
+                13.183,
+            )
+        message = str(caught.exception)
+        self.assertIn("1.44", message)
+        self.assertIn(str(ARTIFACTS.MINIMUM_PRESENTATION_SAMPLES_PER_SECOND), message)
+        self.assertIn("19 samples", message)
+
+    def test_an_unmeasured_interval_leaves_the_density_unmeasured(self):
+        # Intent: with no measured interval the density is reported as unmeasured
+        #   rather than skipped, so a bundle missing its profiler window cannot
+        #   collect a clean presentation verdict by default.
+        # Why it exists: the same missing-versus-zero rule the rest of this module
+        #   keeps -- an ungradable denominator must fail closed, not pass silently.
+        # Scenario: spec-first -- a bundle whose stimulus capture never landed.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.presentation_coverage(
+                activity_snapshot(coverage_samples=200),
+                activity_snapshot(coverage_samples=290),
+                None,
             )
         self.assertIn("unmeasured", str(caught.exception))
 
@@ -195,17 +278,40 @@ class PresentationCoverageTests(unittest.TestCase):
 class ProfilerCoverageTests(unittest.TestCase):
     def test_a_report_with_samples_carries_its_unit(self):
         coverage = ARTIFACTS.profiler_sample_coverage(
-            {"totals": {"samples": 5, "weight": 12}, "source": {"weightUnit": "samples"}}
+            {"totals": {"samples": 500, "weight": 12}, "source": {"weightUnit": "samples"}}, 10.0
         )
-        self.assertEqual(coverage, {"samples": 5, "weight": 12, "weightUnit": "samples"})
+        self.assertEqual(coverage["samples"], 500)
+        self.assertEqual(coverage["weight"], 12)
+        self.assertEqual(coverage["weightUnit"], "samples")
+        self.assertEqual(coverage["samplesPerSecond"], 50.0)
 
     def test_a_report_with_no_samples_is_invalid(self):
         with self.assertRaises(ARTIFACTS.CaptureInvalid):
-            ARTIFACTS.profiler_sample_coverage({"totals": {"samples": 0, "weight": 0}})
+            ARTIFACTS.profiler_sample_coverage({"totals": {"samples": 0, "weight": 0}}, 10.0)
 
     def test_a_report_without_totals_is_invalid(self):
         with self.assertRaises(ARTIFACTS.CaptureInvalid):
-            ARTIFACTS.profiler_sample_coverage({"threads": []})
+            ARTIFACTS.profiler_sample_coverage({"threads": []}, 10.0)
+
+    def test_a_profiler_that_caught_a_handful_of_samples_is_rejected(self):
+        # Intent: a profiler whose samples are far too few for the window it claims
+        #   to cover is rejected, naming the rate and the floor.
+        # Why it exists: `samples > 0` grades a profiler that attached for the last
+        #   30ms of a 20-second recording identically to one that covered all of it,
+        #   and every downstream percentage is then computed over a window the
+        #   profile never saw.
+        # Scenario: spec-first -- 3 samples parsed from a 20-second window, against
+        #   the 505 and 2231 the two recorded btop bundles parsed.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.profiler_sample_coverage({"totals": {"samples": 3}}, 20.0)
+        message = str(caught.exception)
+        self.assertIn("0.15", message)
+        self.assertIn(str(ARTIFACTS.MINIMUM_PROFILER_SAMPLES_PER_SECOND), message)
+
+    def test_an_unmeasured_interval_leaves_profiler_density_unmeasured(self):
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.profiler_sample_coverage({"totals": {"samples": 812}}, None)
+        self.assertIn("unmeasured", str(caught.exception))
 
 
 class TraceExportTests(unittest.TestCase):
@@ -502,6 +608,46 @@ class SummaryTests(unittest.TestCase):
         # The single-sided gates still pass, which is what made the run look clean.
         self.assertIn("presentation", identity["coverage"])
         self.assertIn("damageTopology", identity["coverage"])
+
+    def test_a_thinly_sampled_bracket_is_graded_invalid_by_the_summary(self):
+        # Intent: a bundle whose presentation samples are too sparse for its profiler
+        #   window is rejected by the summary, with the section left out of
+        #   `coverage` and the reason recorded.
+        # Why it exists: proves the density floor is wired into the verdict and not
+        #   merely defined. The count gate passes this bundle -- 19 samples, no
+        #   lapses -- which is exactly how a 13-second window came to be certified as
+        #   continuously frontmost from 19 draw-triggered observations.
+        # Scenario: the recorded 2026-08-03-113912 bundle's presentation numbers
+        #   replayed through the summary against its own 13.183s profiler window.
+        bundle = valid_bundle()
+        bundle["activityBefore"] = activity_snapshot(topology_samples=1000, coverage_samples=200)
+        bundle["activityAfter"] = activity_snapshot(topology_samples=3400, coverage_samples=219)
+        bundle["stimulusCapture"]["overlap"]["profilerStopSeconds"] = 24.183
+        identity = ARTIFACTS.summarize_capture(bundle, mode="sample")
+        self.assertFalse(identity["capture"]["valid"])
+        reasons = " | ".join(identity["capture"]["invalidReasons"])
+        self.assertIn("presentation", reasons)
+        self.assertNotIn("presentation", identity["coverage"])
+        # The gates that grade the app's drawing still pass, which is what made a
+        # thinly observed window look like a clean one.
+        self.assertIn("damageTopology", identity["coverage"])
+        self.assertIn("stimulusResponse", identity["coverage"])
+
+    def test_a_bundle_without_a_measured_interval_grades_both_densities_unmeasured(self):
+        # Intent: when no profiler window was recorded, both density-bearing sections
+        #   are absent from `coverage` and the missing interval is named once.
+        # Why it exists: the two floors share a denominator, so losing it must fail
+        #   both sections closed rather than quietly grading them on counts alone.
+        # Scenario: spec-first -- a capture whose overlap block recorded containment
+        #   but no endpoints.
+        bundle = valid_bundle()
+        bundle["stimulusCapture"]["overlap"] = {"contained": True}
+        identity = ARTIFACTS.summarize_capture(bundle, mode="sample")
+        self.assertFalse(identity["capture"]["valid"])
+        reasons = " | ".join(identity["capture"]["invalidReasons"])
+        self.assertIn("measuredInterval", reasons)
+        self.assertNotIn("presentation", identity["coverage"])
+        self.assertNotIn("profilerSamples", identity["coverage"])
 
     def test_a_capture_that_recorded_no_cadence_omits_it_rather_than_nulling_it(self):
         # Intent: a stimulus field the capture never recorded is absent from the
