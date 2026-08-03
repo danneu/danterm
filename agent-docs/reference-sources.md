@@ -112,6 +112,31 @@ citation resolves to a real `def`, the commit is the current pin, the hash
 matches, and the `Divergence:` line exists. It exits 0 with a printed reason when
 `references/kitty` is absent, since a fresh clone has no checkout.
 
+Alacritty has the same arrangement in `scripts/alacritty-parity-lint.py`, with
+two differences. The citation has no release tag, because the pin is not a
+release -- `(alacritty 852e971c, body sha256:...)`. And the hash covers the `fn`
+line through its *balance-matched* closing brace, so edits to neighbouring tests
+and to the attributes between them do not churn it.
+
+That lint also checks a second artifact kitty has no counterpart for:
+`lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/alacritty-inline-manifest.json`
+gives every one of the 135 inline `#[test]` functions under
+`alacritty_terminal/src` a disposition and a rationale. Its whole value is being
+complete -- a grouped rationale like "the storage cases are all internal" is fine,
+but it must not hide a name -- so the lint compares it name-by-name against the
+pinned checkout in both directions, and requires the `adapted` entries and the
+Swift citations to agree about what was ported. Do not confuse it with
+`alacritty-manifest.json`, which classifies the 45 `tests/ref/` *recording*
+directories: different population, different schema.
+
+Adoption there required more than "the scenario is reachable". Each retained
+case had to fail independently: mutate DanTerm to break the behavior, and
+confirm no existing test already caught the mutation. Three of the four probed
+candidates survived that check as `adapted`; the fourth was recorded
+`superseded`, with the mutations existing tests already caught. Prefer that
+method over
+counting ported tests -- the manifest's `method` field states it.
+
 ## Don't-guess rule
 
 Don't guess at API signatures, delegate protocols, enum cases, or framework

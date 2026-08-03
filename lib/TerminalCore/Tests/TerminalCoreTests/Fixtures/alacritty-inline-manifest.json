@@ -1,0 +1,804 @@
+{
+  "source": "alacritty",
+  "license": "Apache-2.0",
+  "pin": "852e971cddfabe222d2d5bcda466e130f53af207",
+  "population": "Every `#[test]` function under alacritty_terminal/src at the pinned commit. This is a different population from alacritty-manifest.json, which classifies the 45 alacritty_terminal/tests/ref recording directories; neither file describes the other's cases.",
+  "dispositions": {
+    "adapted": "A DanTerm test in `destination` tracks this scenario and cites this name.",
+    "superseded": "Reaches DanTerm behavior, but existing DanTerm tests already pin it at least as strongly. Porting would add a duplicate, not a boundary.",
+    "implementation-coupled": "Specifies Alacritty's internal representation. There is no DanTerm behavior underneath it.",
+    "unsupported": "Requires a feature DanTerm does not offer, or lives outside TerminalCore.",
+    "policy-divergence": "Reachable, but DanTerm's contract deliberately produces a different result. Adopting the verdict would mean adopting Alacritty's policy."
+  },
+  "method": "Adoption required more than 'the scenario is reachable': each retained case was checked to fail independently by mutating DanTerm and confirming that no existing test already caught the mutation. Candidates that survived that check are `adapted`; candidates whose mutations existing tests already caught are `superseded`, with the evidence recorded.",
+  "tests": [
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#with_capacity",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#indexing",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#indexing_above_inner_len",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#rotate",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#grow_after_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#grow_before_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#shrink_before_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#shrink_after_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#shrink_before_and_after_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#truncate_invisible_lines",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#truncate_invisible_lines_beginning",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#shrink_then_grow",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#initialize",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/storage.rs#rotate_wrap_zero",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's rotating `Storage` vector -- its capacity, its zero-point rotation, and growth and truncation around that point. DanTerm stores rows in a plain array plus a scrollback deque, so there is no observable behavior under this test to port.",
+      "evidence": "DanTerm's row-storage claims are public: scrollbackRowCount, scrollbackRow(at:), and the budget/eviction behavior in TerminalScrollbackBudgetTests and TerminalScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#scroll_up",
+      "disposition": "superseded",
+      "rationale": "Scrolling rows into and out of history is covered more broadly by DanTerm's own scrolling, scroll-region, and scrollback suites, which assert public projected text rather than grid row identity.",
+      "evidence": "TerminalScrollbackTests, TerminalScrollRegionTests, and TerminalRegionScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#scroll_down",
+      "disposition": "superseded",
+      "rationale": "Scrolling rows into and out of history is covered more broadly by DanTerm's own scrolling, scroll-region, and scrollback suites, which assert public projected text rather than grid row identity.",
+      "evidence": "TerminalScrollbackTests, TerminalScrollRegionTests, and TerminalRegionScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#scroll_down_with_history",
+      "disposition": "superseded",
+      "rationale": "Scrolling rows into and out of history is covered more broadly by DanTerm's own scrolling, scroll-region, and scrollback suites, which assert public projected text rather than grid row identity.",
+      "evidence": "TerminalScrollbackTests, TerminalScrollRegionTests, and TerminalRegionScrollbackTests."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#test_iter",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's grid iterator API -- traversal order and `size_hint` exactness. This is a Rust collection contract, not terminal behavior; DanTerm exposes projections, not iterators."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#accurate_size_hint",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's grid iterator API -- traversal order and `size_hint` exactness. This is a Rust collection contract, not terminal behavior; DanTerm exposes projections, not iterators."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#shrink_reflow",
+      "disposition": "superseded",
+      "rationale": "Ordinary shrink and grow reflow of wrapped lines. DanTerm's width walks drive the same transformation across every width in a range, over narrow, wide, emoji, and space content, and assert conserved logical text plus a structurally valid grid at each step -- a strictly broader claim than one hand-checked width pair.",
+      "evidence": "TerminalResizeTests#widthWalkConservesFullHistory and #heightAndCombinedWalksConserveFullHistory."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#shrink_reflow_twice",
+      "disposition": "superseded",
+      "rationale": "Ordinary shrink and grow reflow of wrapped lines. DanTerm's width walks drive the same transformation across every width in a range, over narrow, wide, emoji, and space content, and assert conserved logical text plus a structurally valid grid at each step -- a strictly broader claim than one hand-checked width pair.",
+      "evidence": "TerminalResizeTests#widthWalkConservesFullHistory and #heightAndCombinedWalksConserveFullHistory."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#grow_reflow",
+      "disposition": "superseded",
+      "rationale": "Ordinary shrink and grow reflow of wrapped lines. DanTerm's width walks drive the same transformation across every width in a range, over narrow, wide, emoji, and space content, and assert conserved logical text plus a structurally valid grid at each step -- a strictly broader claim than one hand-checked width pair.",
+      "evidence": "TerminalResizeTests#widthWalkConservesFullHistory and #heightAndCombinedWalksConserveFullHistory."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#grow_reflow_multiline",
+      "disposition": "superseded",
+      "rationale": "Ordinary shrink and grow reflow of wrapped lines. DanTerm's width walks drive the same transformation across every width in a range, over narrow, wide, emoji, and space content, and assert conserved logical text plus a structurally valid grid at each step -- a strictly broader claim than one hand-checked width pair.",
+      "evidence": "TerminalResizeTests#widthWalkConservesFullHistory and #heightAndCombinedWalksConserveFullHistory."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#shrink_reflow_empty_cell_inside_line",
+      "disposition": "superseded",
+      "rationale": "Probed and rejected rather than assumed. The portable claim -- an unwritten cell between two written cells is text and survives reflow, while unwritten cells after the last written one never are -- holds in DanTerm, but a test asserting it cannot fail independently. Two mutations were injected to try: dropping unwritten cells in the reflow copy, and counting trailing padding as retained content. Existing tests caught both, so a fourth adapted test would have added a duplicate rather than a boundary.",
+      "evidence": "Dropping padding in reflow is caught by TerminalResizeTests#cellAnchorsFollowReflowedCells (which uses this exact interior-gap stimulus), #interleavedResizeAndInputPreservesValidGrid, and the selection-attachment case; counting trailing padding as content is caught by 20+ tests across the selection, viewport, resize, and prompt-anchor suites."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#grow_reflow_disabled",
+      "disposition": "policy-divergence",
+      "rationale": "Requires a configuration in which resize does not reflow. Reflow is a required DanTerm behavior and there is no public switch to disable it, so the scenario has no reachable state."
+    },
+    {
+      "test": "alacritty_terminal/src/grid/tests.rs#shrink_reflow_disabled",
+      "disposition": "policy-divergence",
+      "rationale": "Requires a configuration in which resize does not reflow. Reflow is a required DanTerm behavior and there is no public switch to disable it, so the scenario has no reachable state."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#location_ordering",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#sub",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#sub_wrap",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#sub_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#sub_grid_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#sub_none_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#add",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#add_wrap",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#add_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#add_grid_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/index.rs#add_none_clamp",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Rust operator overloads for wrapped and clamped `Point`/`Line`/`Column` arithmetic. DanTerm addresses text with plain public row/column integers and clamps at the API surface, so there is no arithmetic type whose overflow behavior could be wrong."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#single_cell_left_to_right",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#single_cell_right_to_left",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#between_adjacent_cells_left_to_right",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#between_adjacent_cells_right_to_left",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#across_adjacent_lines_upward_final_cell_exclusive",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#selection_bigger_then_smaller",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#simple_is_empty",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#range_intersection",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies Alacritty's private selection endpoint arithmetic: which `Side` an endpoint sits on, and the inclusive `SelectionRange` that arithmetic produces. DanTerm exposes a half-open `TerminalTextRange` over the logical projection and has no endpoint-side concept, so translating these would encode a representation DanTerm rejected.",
+      "evidence": "TerminalSelectionTests asserts the observable consequences -- selected text, grapheme and wide-cell atomicity, and attachment across mutation -- through that public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#rotate_in_region_up",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies `Selection::rotate`, which shifts a stored selection's private endpoints when the grid scrolls within a region. DanTerm keeps selections attached by pinning them to the logical stream instead, so there is no rotation step to test -- only its outcome.",
+      "evidence": "TerminalSelectionTests covers attachment and invalidation across output, reflow, eviction, and overwrite through the public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#rotate_in_region_down",
+      "disposition": "implementation-coupled",
+      "rationale": "Specifies `Selection::rotate`, which shifts a stored selection's private endpoints when the grid scrolls within a region. DanTerm keeps selections attached by pinning them to the logical stream instead, so there is no rotation step to test -- only its outcome.",
+      "evidence": "TerminalSelectionTests covers attachment and invalidation across output, reflow, eviction, and overwrite through the public range."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#line_selection",
+      "disposition": "implementation-coupled",
+      "rationale": "Combines `Selection::rotate` with an inclusive `SelectionRange` verdict for one selection shape. Both halves are Alacritty representation; additionally, Alacritty's line selection appends a trailing newline, which DanTerm's shared logical projection deliberately does not add merely because a selection ended.",
+      "evidence": "TerminalSelectionUnitTests pins DanTerm's own terminal-token and trimmed-line policies, and TerminalSelectionTests pins the projection's newline behavior."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#semantic_selection",
+      "disposition": "implementation-coupled",
+      "rationale": "Combines `Selection::rotate` with an inclusive `SelectionRange` verdict for one selection shape. Both halves are Alacritty representation; additionally, Alacritty's line selection appends a trailing newline, which DanTerm's shared logical projection deliberately does not add merely because a selection ended.",
+      "evidence": "TerminalSelectionUnitTests pins DanTerm's own terminal-token and trimmed-line policies, and TerminalSelectionTests pins the projection's newline behavior."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#simple_selection",
+      "disposition": "implementation-coupled",
+      "rationale": "Combines `Selection::rotate` with an inclusive `SelectionRange` verdict for one selection shape. Both halves are Alacritty representation; additionally, Alacritty's line selection appends a trailing newline, which DanTerm's shared logical projection deliberately does not add merely because a selection ended.",
+      "evidence": "TerminalSelectionUnitTests pins DanTerm's own terminal-token and trimmed-line policies, and TerminalSelectionTests pins the projection's newline behavior."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#block_selection",
+      "disposition": "unsupported",
+      "rationale": "Requires rectangular block selection, which DanTerm does not currently promise. Adding it would be a capability decision, not a test-port decision."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#block_is_empty",
+      "disposition": "unsupported",
+      "rationale": "Requires rectangular block selection, which DanTerm does not currently promise. Adding it would be a capability decision, not a test-port decision."
+    },
+    {
+      "test": "alacritty_terminal/src/selection.rs#rotate_in_region_up_block",
+      "disposition": "unsupported",
+      "rationale": "Requires rectangular block selection, which DanTerm does not currently promise. Adding it would be a capability decision, not a test-port decision."
+    },
+    {
+      "test": "alacritty_terminal/src/term/cell.rs#cell_size_is_below_cap",
+      "disposition": "implementation-coupled",
+      "rationale": "Asserts `size_of::<Cell>()` against a hard cap -- a claim about Alacritty's struct layout. DanTerm's comparable claim is about total retained memory, not per-cell layout.",
+      "evidence": "TerminalMemoryCensusTests asserts the public memory census."
+    },
+    {
+      "test": "alacritty_terminal/src/term/cell.rs#line_length_works",
+      "disposition": "implementation-coupled",
+      "rationale": "Asserts Alacritty's private occupied-length scan over a row, including how a wrap flag changes it. DanTerm has the same idea internally (`retainedContentEnd`) but publishes only its consequence: which trailing cells are text.",
+      "evidence": "That consequence is asserted throughout, e.g. TerminalResizeTests trailing-padding cases and TerminalViewportTests#viewportTextOmitsGridPadding."
+    },
+    {
+      "test": "alacritty_terminal/src/term/cell.rs#line_length_works_with_wrapline",
+      "disposition": "implementation-coupled",
+      "rationale": "Asserts Alacritty's private occupied-length scan over a row, including how a wrap flag changes it. DanTerm has the same idea internally (`retainedContentEnd`) but publishes only its consequence: which trailing cells are text.",
+      "evidence": "That consequence is asserted throughout, e.g. TerminalResizeTests trailing-padding cases and TerminalViewportTests#viewportTextOmitsGridPadding."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#scroll_display_page_up",
+      "disposition": "superseded",
+      "rationale": "Page-sized viewport navigation clamping at the top and bottom of history. DanTerm's navigation test covers clamping generically over arbitrary distances, including `Int.min` and `Int.max`, and additionally asserts the follow-state transition that Alacritty tracks through a vi cursor DanTerm does not have.",
+      "evidence": "TerminalViewportTests#navigationAndFollowingProjection."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#scroll_display_page_down",
+      "disposition": "superseded",
+      "rationale": "Page-sized viewport navigation clamping at the top and bottom of history. DanTerm's navigation test covers clamping generically over arbitrary distances, including `Int.min` and `Int.max`, and additionally asserts the follow-state transition that Alacritty tracks through a vi cursor DanTerm does not have.",
+      "evidence": "TerminalViewportTests#navigationAndFollowingProjection."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#simple_selection_works",
+      "disposition": "superseded",
+      "rationale": "Serializes one selection shape to a string through `Term`. DanTerm's selection suites assert the same observable -- the selected text -- over a wider set of shapes and mutations, under DanTerm's own fixed token and trimmed-line policies.",
+      "evidence": "TerminalSelectionTests and TerminalSelectionUnitTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#semantic_selection_works",
+      "disposition": "superseded",
+      "rationale": "Serializes one selection shape to a string through `Term`. DanTerm's selection suites assert the same observable -- the selected text -- over a wider set of shapes and mutations, under DanTerm's own fixed token and trimmed-line policies.",
+      "evidence": "TerminalSelectionTests and TerminalSelectionUnitTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#line_selection_works",
+      "disposition": "superseded",
+      "rationale": "Serializes one selection shape to a string through `Term`. DanTerm's selection suites assert the same observable -- the selected text -- over a wider set of shapes and mutations, under DanTerm's own fixed token and trimmed-line policies.",
+      "evidence": "TerminalSelectionTests and TerminalSelectionUnitTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#block_selection_works",
+      "disposition": "unsupported",
+      "rationale": "Requires rectangular block selection, which DanTerm does not currently promise. Adding it would be a capability decision, not a test-port decision."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#grid_serde",
+      "disposition": "implementation-coupled",
+      "rationale": "Round-trips Alacritty's `Grid` through serde. DanTerm's grid is not serialized; its persistence seam is the pure snapshot codec in DanTermCore, a different artifact entirely."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#parse_cargo_version",
+      "disposition": "implementation-coupled",
+      "rationale": "Tests a build-metadata helper that parses Alacritty's Cargo version string. Not terminal behavior."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#input_line_drawing_character",
+      "disposition": "unsupported",
+      "rationale": "Requires legacy SCS DEC line-drawing character-set translation. DanTerm deliberately absorbs the designation without leaking bytes rather than implementing the translation.",
+      "evidence": "TerminalInputStreamTests pins the absorb-without-leak behavior DanTerm chose."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#clearing_viewport_keeps_history_position",
+      "disposition": "adapted",
+      "rationale": "The one inline case that crosses two DanTerm subsystems no existing test crosses together: an in-place full-screen erase while the viewport is parked on retained history. Adopted as a regression guard -- DanTerm already behaves correctly, and a mutation making ED 2 reset browsing was caught by this test and by no other test in the suite.",
+      "evidence": "Mutation check: setting `viewportState = .following` in ED 2 failed exactly 1 of the 821 TerminalCore tests -- the adapted one. Re-confirmed after rebasing onto the reflow trailing-blank-cursor fix and the WezTerm adaptations.",
+      "destination": "lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlacrittyAdaptedTests.swift"
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#clearing_viewport_with_vi_mode_keeps_history_position",
+      "disposition": "superseded",
+      "rationale": "Its portable half is the same ED-2-preserves-the-viewport claim as its non-vi sibling, which is adapted; its distinct half asserts the vi cursor point, which DanTerm has no analogue for. Folding the portable half in would duplicate the sibling exactly.",
+      "evidence": "Covered by the adaptation of #clearing_viewport_keeps_history_position."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#clearing_scrollback_resets_display_offset",
+      "disposition": "policy-divergence",
+      "rationale": "Alacritty snaps the display back to the live bottom when ED 3 clears scrollback. DanTerm deliberately clamps the browsing anchor instead and keeps `isFollowing == false`, so that eviction never yanks a reading user to the prompt. Adopting the verdict would mean adopting Alacritty's interaction policy over DanTerm's.",
+      "evidence": "TerminalViewportTests#evictionClampsBrowsingAnchor pins DanTerm's contrary choice explicitly, including the ED 3 path."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#clearing_scrollback_sets_vi_cursor_into_viewport",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#vi_cursor_keep_pos_on_scrollback_buffer",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#clear_saved_lines",
+      "disposition": "superseded",
+      "rationale": "Asserts that after ED 3 the grid is unchanged by a scroll-to-top, via grid equality. DanTerm asserts the same idea publicly and more specifically: the scrollback row count, the projection anchor, and the retained text after ED 3.",
+      "evidence": "CSIEraseTests#ED3ClearsOnlyScrollback and TerminalViewportTests#evictionClampsBrowsingAnchor."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#grow_lines_updates_active_cursor_pos",
+      "disposition": "superseded",
+      "rationale": "Tracks the cursor's grid coordinates through a height change on the active or the inactive (alternate-parked) grid. DanTerm covers both, and its alternate-screen resize test makes the stronger claim that resizing while parked is equivalent to resizing live, rather than comparing hand-computed coordinates.",
+      "evidence": "TerminalResizeTests height cases and TerminalAlternateScreenTests resize equivalence."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#grow_lines_updates_inactive_cursor_pos",
+      "disposition": "superseded",
+      "rationale": "Tracks the cursor's grid coordinates through a height change on the active or the inactive (alternate-parked) grid. DanTerm covers both, and its alternate-screen resize test makes the stronger claim that resizing while parked is equivalent to resizing live, rather than comparing hand-computed coordinates.",
+      "evidence": "TerminalResizeTests height cases and TerminalAlternateScreenTests resize equivalence."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#shrink_lines_updates_active_cursor_pos",
+      "disposition": "superseded",
+      "rationale": "Tracks the cursor's grid coordinates through a height change on the active or the inactive (alternate-parked) grid. DanTerm covers both, and its alternate-screen resize test makes the stronger claim that resizing while parked is equivalent to resizing live, rather than comparing hand-computed coordinates.",
+      "evidence": "TerminalResizeTests height cases and TerminalAlternateScreenTests resize equivalence."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#shrink_lines_updates_inactive_cursor_pos",
+      "disposition": "superseded",
+      "rationale": "Tracks the cursor's grid coordinates through a height change on the active or the inactive (alternate-parked) grid. DanTerm covers both, and its alternate-screen resize test makes the stronger claim that resizing while parked is equivalent to resizing live, rather than comparing hand-computed coordinates.",
+      "evidence": "TerminalResizeTests height cases and TerminalAlternateScreenTests resize equivalence."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#damage_public_usage",
+      "disposition": "superseded",
+      "rationale": "Asserts Alacritty's `LineDamageBounds` -- per-line left/right column bounds. DanTerm's public damage vocabulary is row-granular by design, and its damage suites assert accumulation and drain, cursor movement, selection and search transitions, scroll and edit confinement, full escalation, and invariance to how bytes are chunked.",
+      "evidence": "TerminalDamageTests and TerminalInspectionInvalidationTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#damage_cursor_movements",
+      "disposition": "superseded",
+      "rationale": "Asserts Alacritty's `LineDamageBounds` -- per-line left/right column bounds. DanTerm's public damage vocabulary is row-granular by design, and its damage suites assert accumulation and drain, cursor movement, selection and search transitions, scroll and edit confinement, full escalation, and invariance to how bytes are chunked.",
+      "evidence": "TerminalDamageTests and TerminalInspectionInvalidationTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#full_damage",
+      "disposition": "superseded",
+      "rationale": "Asserts Alacritty's `LineDamageBounds` -- per-line left/right column bounds. DanTerm's public damage vocabulary is row-granular by design, and its damage suites assert accumulation and drain, cursor movement, selection and search transitions, scroll and edit confinement, full escalation, and invariance to how bytes are chunked.",
+      "evidence": "TerminalDamageTests and TerminalInspectionInvalidationTests."
+    },
+    {
+      "test": "alacritty_terminal/src/term/mod.rs#window_title",
+      "disposition": "policy-divergence",
+      "rationale": "Half of this is covered: DanTerm decodes OSC title changes into semantic events and tests them, including coalescing, limits, UTF-8, and chunking. The other half is the CSI title stack (push/pop and its 4096-entry cap), a capability DanTerm has not decided to support. Whether to implement it is a feature decision that must precede any test port; a test cannot create the requirement.",
+      "evidence": "TerminalSemanticEventTests covers the decoded OSC title event seam."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#regex_right",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#regex_left",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#nested_regex",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#empty_match",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#empty_match_multibyte",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#empty_match_multiline",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#nfa_compile_error",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#runtime_cache_error",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#greed_is_good",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#anchored_empty",
+      "disposition": "policy-divergence",
+      "rationale": "Specifies Alacritty's regex engine: compilation, empty and anchored matches, greed, and DFA cache/NFA failure recovery. DanTerm search is deliberately literal and canonical-caseless, so these outcomes are not goals -- adopting them would mean adopting a regex API.",
+      "evidence": "TerminalSearchTests and CanonicalCaselessTests pin the literal contract DanTerm chose instead."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#skip_dead_cell",
+      "disposition": "implementation-coupled",
+      "rationale": "Guards a DFA dead-state recovery path specific to Alacritty's regex engine -- that the reverse automaton behaves like the forward one. DanTerm's literal scanner has no automaton and no dead state.",
+      "evidence": "TerminalSearchTests covers forward and backward navigation symmetry at the behavior level."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#reverse_search_dead_recovery",
+      "disposition": "implementation-coupled",
+      "rationale": "Guards a DFA dead-state recovery path specific to Alacritty's regex engine -- that the reverse automaton behaves like the forward one. DanTerm's literal scanner has no automaton and no dead state.",
+      "evidence": "TerminalSearchTests covers forward and backward navigation symmetry at the behavior level."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#leading_spacer",
+      "disposition": "implementation-coupled",
+      "rationale": "Reaches into `term.grid[..]` to plant a cell state -- a wide char with no spacer, or a spacer flag with no wide char -- that Alacritty's own parser never produces. The ground rules forbid constructing invalid private grid states to imitate an upstream fixture, and DanTerm's public byte feed cannot reach these states at all.",
+      "evidence": "DanTerm's spacer invariants are asserted structurally by expectValidGrid over every resize, erase, and fuzz test rather than probed from a hand-built grid."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#wide_without_spacer",
+      "disposition": "implementation-coupled",
+      "rationale": "Reaches into `term.grid[..]` to plant a cell state -- a wide char with no spacer, or a spacer flag with no wide char -- that Alacritty's own parser never produces. The ground rules forbid constructing invalid private grid states to imitate an upstream fixture, and DanTerm's public byte feed cannot reach these states at all.",
+      "evidence": "DanTerm's spacer invariants are asserted structurally by expectValidGrid over every resize, erase, and fuzz test rather than probed from a hand-built grid."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#no_spacer_fullwidth_linewrap",
+      "disposition": "implementation-coupled",
+      "rationale": "Reaches into `term.grid[..]` to plant a cell state -- a wide char with no spacer, or a spacer flag with no wide char -- that Alacritty's own parser never produces. The ground rules forbid constructing invalid private grid states to imitate an upstream fixture, and DanTerm's public byte feed cannot reach these states at all.",
+      "evidence": "DanTerm's spacer invariants are asserted structurally by expectValidGrid over every resize, erase, and fuzz test rather than probed from a hand-built grid."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#no_match_right",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#no_match_left",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#include_linebreak_left",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#include_linebreak_right",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#multibyte_unicode",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#end_on_multibyte_unicode",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#wrapping",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#multiline",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#wrap_around_to_another_end",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#inline_word_search",
+      "disposition": "superseded",
+      "rationale": "A literal-reachable search scenario -- no match, matching across a hard or soft line break, multi-scalar Unicode, or wrapping past an end of history -- that DanTerm's search suite already covers under its own literal, canonical-caseless contract.",
+      "evidence": "TerminalSearchTests: #foldingAndUnicodeExactness, #wrapAndBoundaryMatching, #navigationAndOverlaps, and the no-match/status cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#singlecell_fullwidth",
+      "disposition": "adapted",
+      "rationale": "The only inline case that measures a search match range over a double-width grapheme. DanTerm already reports the correct two-column range, but nothing pinned it: a mutation making wide projection units report one column was caught only by the two adapted wide-search tests.",
+      "evidence": "Mutation check: narrowing wide projection units to one column failed exactly 2 of the 821 TerminalCore tests, both adapted. Re-confirmed after rebasing onto the reflow trailing-blank-cursor fix and the WezTerm adaptations.",
+      "destination": "lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlacrittyAdaptedTests.swift"
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#wrapping_into_fullwidth",
+      "disposition": "adapted",
+      "rationale": "The wide-grapheme-at-a-line-break edge. Adapted with a changed stimulus: upstream builds two hard-separated rows, while DanTerm feeds one logical line and lets the width wrap it, so the test actually exercises the soft wrap and the padding column a pushed wide grapheme leaves behind.",
+      "evidence": "Same mutation check as #singlecell_fullwidth.",
+      "destination": "lib/TerminalCore/Tests/TerminalCoreTests/TerminalAlacrittyAdaptedTests.swift"
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#fullwidth",
+      "disposition": "superseded",
+      "rationale": "A wide-grapheme search scenario in the same family as the two adapted wide cases -- a wide unit at a row end, at a soft wrap, or adjacent to a narrow one. Once the range covering a wide unit and the crossing of a wrap are pinned, these differ only in which side of the boundary the wide unit sits on.",
+      "evidence": "Covered by the adaptations of #singlecell_fullwidth and #wrapping_into_fullwidth in TerminalAlacrittyAdaptedTests, plus TerminalSelectionTests wide-atomicity cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#end_on_fullwidth",
+      "disposition": "superseded",
+      "rationale": "A wide-grapheme search scenario in the same family as the two adapted wide cases -- a wide unit at a row end, at a soft wrap, or adjacent to a narrow one. Once the range covering a wide unit and the crossing of a wrap are pinned, these differ only in which side of the boundary the wide unit sits on.",
+      "evidence": "Covered by the adaptations of #singlecell_fullwidth and #wrapping_into_fullwidth in TerminalAlacrittyAdaptedTests, plus TerminalSelectionTests wide-atomicity cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#fullwidth_across_lines",
+      "disposition": "superseded",
+      "rationale": "A wide-grapheme search scenario in the same family as the two adapted wide cases -- a wide unit at a row end, at a soft wrap, or adjacent to a narrow one. Once the range covering a wide unit and the crossing of a wrap are pinned, these differ only in which side of the boundary the wide unit sits on.",
+      "evidence": "Covered by the adaptations of #singlecell_fullwidth and #wrapping_into_fullwidth in TerminalAlacrittyAdaptedTests, plus TerminalSelectionTests wide-atomicity cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#fullwidth_into_halfwidth_across_lines",
+      "disposition": "superseded",
+      "rationale": "A wide-grapheme search scenario in the same family as the two adapted wide cases -- a wide unit at a row end, at a soft wrap, or adjacent to a narrow one. Once the range covering a wide unit and the crossing of a wrap are pinned, these differ only in which side of the boundary the wide unit sits on.",
+      "evidence": "Covered by the adaptations of #singlecell_fullwidth and #wrapping_into_fullwidth in TerminalAlacrittyAdaptedTests, plus TerminalSelectionTests wide-atomicity cases."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#newline_breaking_semantic",
+      "disposition": "policy-divergence",
+      "rationale": "Depends on Alacritty's user-configurable semantic separator set. DanTerm has a fixed, shell-oriented separator contract and no configuration point, so the upstream verdict is parameterized on something DanTerm does not expose.",
+      "evidence": "TerminalSelectionUnitTests pins DanTerm's fixed terminal-token boundaries."
+    },
+    {
+      "test": "alacritty_terminal/src/term/search.rs#fullwidth_semantic",
+      "disposition": "policy-divergence",
+      "rationale": "Depends on Alacritty's user-configurable semantic separator set. DanTerm has a fixed, shell-oriented separator contract and no configuration point, so the upstream verdict is parameterized on something DanTerm does not expose.",
+      "evidence": "TerminalSelectionUnitTests pins DanTerm's fixed terminal-token boundaries."
+    },
+    {
+      "test": "alacritty_terminal/src/tty/unix.rs#test_get_pw_entry",
+      "disposition": "unsupported",
+      "rationale": "Parses a Unix passwd entry inside Alacritty's PTY-spawning layer. DanTerm's PTY and process layer is outside TerminalCore, which is a pure byte-to-grid reduction with no process lookup."
+    },
+    {
+      "test": "alacritty_terminal/src/tty/windows/child.rs#event_is_emitted_when_child_exits",
+      "disposition": "unsupported",
+      "rationale": "Windows-only process, command-line quoting, or child-exit machinery. DanTerm is a macOS-only product, and this is outside TerminalCore regardless."
+    },
+    {
+      "test": "alacritty_terminal/src/tty/windows/mod.rs#test_escape",
+      "disposition": "unsupported",
+      "rationale": "Windows-only process, command-line quoting, or child-exit machinery. DanTerm is a macOS-only product, and this is outside TerminalCore regardless."
+    },
+    {
+      "test": "alacritty_terminal/src/tty/windows/mod.rs#test_cmdline",
+      "disposition": "unsupported",
+      "rationale": "Windows-only process, command-line quoting, or child-exit machinery. DanTerm is a macOS-only product, and this is outside TerminalCore regardless."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_simple",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#simple_wide",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_start_end",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_first_occupied",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_high_middle_low",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_bracket",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_semantic_right_end",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_semantic_left_start",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_semantic_right_start",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_semantic_left_end",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#scroll_semantic",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#semantic_wide",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#motion_word",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#scroll_word",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#word_wide",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#scroll_simple",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#scroll_over_top",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#scroll_over_bottom",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    },
+    {
+      "test": "alacritty_terminal/src/vi_mode.rs#wide_semantic_char",
+      "disposition": "unsupported",
+      "rationale": "Requires Alacritty's in-emulator vi mode. DanTerm's interaction model is AppKit selection and local viewport browsing, and it does not offer a vi cursor, vi motions, or vi-mode scrolling.",
+      "evidence": "TerminalInteractionPolicyTests and TerminalSelectionTests cover DanTerm's actual interaction model."
+    }
+  ]
+}

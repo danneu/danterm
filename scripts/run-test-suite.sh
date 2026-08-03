@@ -65,6 +65,8 @@ STEPS=(
     './scripts/research-index-lint.sh'
     './scripts/kitty-parity-lint.py'
     './scripts/tests/kitty-parity-lint_test.sh'
+    './scripts/alacritty-parity-lint.py'
+    './scripts/tests/alacritty-parity-lint_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_validation_test.py'
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'
