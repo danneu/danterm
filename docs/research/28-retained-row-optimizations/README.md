@@ -309,10 +309,15 @@ is not lost.
 
 ### Phase 2 -- size the remaining costs at HEAD
 
-- [ ] `TODO` Split saturated attributable footprint into stored cell bytes vs
+- [x] `DONE` Split saturated attributable footprint into stored cell bytes vs
   per-row fixed overhead (headers, `GridRow` strides, bucket slack) at both
-  179 and 80 columns, using the census plus probe arithmetic. This is the
-  H3-vs-H4 gate input. Destination: `F8`.
+  179 and 80 columns, using the census plus probe arithmetic. Closed by `F8`:
+  **stored cell bytes are 89.5% at 179 columns and 89.3% at 80**, per-row
+  overhead 10.5%/10.7% at ~197 bytes per row allocation, and the split does not
+  vary with pane width. The malloc block delta matches the row allocation count
+  to within 64 blocks at both widths, so the residual is per-row overhead rather
+  than an unattributed mixture. **H3 is the larger target by roughly 9x**; H4's
+  ceiling is 1.16 MB at 179 columns and only at zero per-row overhead.
 - [ ] `TODO` Measure blank-row frequency in realistic histories (shell
   sessions, build logs, TUI dumps -- the existing benchmark corpora) to size
   H2's ceiling. Destination: `F9`.
@@ -329,7 +334,10 @@ is not lost.
 ### Phase 3 -- direction gates
 
 - [ ] `TODO` Gate: H3 vs H4 -- pick the larger target from `F8`, or conclude
-  both/neither clears the bar. Destination: `D3`.
+  both/neither clears the bar. `F8` supplies the split (89.5% cells vs 10.5%
+  per-row overhead) and points at H3; what it does not settle is whether H3
+  clears the bar at all, which needs a design with a stated depth effect and a
+  browsing verdict under `D2`'s now-frozen rule. Destination: `D3`.
 - [ ] `TODO` Gate: H2 -- viable only if `F9` shows blank rows matter and the
   charge-model question has a clean answer. Destination: `D4`.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
@@ -347,9 +355,12 @@ boundaries (see Investigation rules), not re-litigated here.
 
 ## Open questions and caveats
 
-- Is +2.51 MB attributable footprint at 179-column saturation an accepted cost
-  of 3.41x depth, or itself a target? The shipped plan chose depth
-  deliberately; H4 could claw the overhead back without giving depth up.
+- ~~Is +2.51 MB attributable footprint at 179-column saturation an accepted cost
+  of 3.41x depth, or itself a target?~~ **Sized by `F8`:** per-row overhead is
+  1.16 MB of an 11.00 MB attributable total, 10.5%. `15/F18`'s +2.51 MB is a
+  delta against the pre-trim representation, not a share of the current one, and
+  the two are not in tension. H4 could at best reclaim that 1.16 MB and only by
+  driving per-row overhead to zero, which nothing does.
 - ~~The browsing -5.79% result has no frozen decision rule behind it; treat it
   as descriptive until `D1` gives the measurement a home.~~ **Resolved by `D2`:**
   the workload is calibrated and future browsing claims can be verdicts. The

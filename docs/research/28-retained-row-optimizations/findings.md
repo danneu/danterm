@@ -1,6 +1,6 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F8**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F9**. Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -584,3 +584,73 @@ cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
   reconstructions.
 - Next action: Phase 2's `RESEARCH` task reads this distribution against a frame
   budget and against a profile. Nothing in this entry does either.
+
+### F8 -- stored cell bytes dominate at both widths: per-row overhead is ~10.5%, and it does not vary with pane width
+
+- Status: recorded. This is Phase 2's H3-vs-H4 gate input, and it selects.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `51927ce`, clean tree apart from five untracked
+  prose paths. Release configuration, headless.
+- Method: `just terminal-memory-probe "--json --payload scrollback-plain"` at
+  179x66, and the same binary at `--columns 80 --rows 24`. Two numbers per width,
+  from two different instruments deliberately: `census.cellStorageBytes` is
+  **exact** (a sum over rows of `cells.count * MemoryLayout<GridCell>.stride`),
+  and the attributable total is the malloc `bytesInUse` delta across the feed,
+  which **includes** array headers and bucket rounding. The residual between them
+  is therefore the per-row fixed overhead the census cannot see -- which is
+  exactly the split this task asked for, and the reason the census documents
+  itself as excluding those terms rather than absorbing them.
+- Results:
+
+  | quantity | 179x66 | 80x24 |
+  | --- | ---: | ---: |
+  | attributable (malloc `bytesInUse` delta) | 11,000,160 B (11.00 MB) | 10,667,424 B (10.67 MB) |
+  | stored cell bytes (exact) | 9,842,016 B (**89.5%**) | 9,525,408 B (**89.3%**) |
+  | residual / per-row overhead | 1,158,144 B (**10.5%**) | 1,142,016 B (**10.7%**) |
+  | row storage allocations | 5,865 | 5,823 |
+  | residual per row allocation | 197.5 B | 196.1 B |
+  | retained rows | 5,799 | 5,799 |
+  | mean stored cells per row | 52.4 | 51.1 |
+
+- Observation 1, and it is the gate answer: **stored cell bytes dominate,
+  roughly 9:1, at both widths.** H3 (store the cells smaller) attacks 89.5% of
+  attributable footprint; H4 (fewer, larger allocations) attacks 10.5%. That
+  ordering is the same at 80 columns as at 179, which the shipped change's own
+  logic predicts -- content dominates the charge now, so depth converges across
+  pane widths and so does this split.
+- Observation 2, and it is why the residual can be attributed rather than merely
+  named: the malloc **block** delta is 5,929 at 179 columns against 5,865 row
+  storage allocations, and 5,887 against 5,823 at 80. Sixty-four blocks separate
+  them at both widths. Essentially every allocation the payload creates is a row
+  array, so the residual is per-row overhead rather than a mixture of that and
+  something unmeasured.
+- Observation 3, arithmetic that makes the 197 B/row plausible rather than
+  merely observed: a mean row holds 52.4 cells at 32 B stride = 1,678 B of
+  payload. A Swift array header is 32 B, and macOS malloc's size class above
+  1,710 B rounds up by roughly another 100-160 B. The two together land near the
+  measured 197 B. Stated as a consistency check, not as an attribution -- nothing
+  here measured the size class directly.
+- Observation 4, reconciling this with `15/F18` because the two look like they
+  disagree and do not: `15/F18` reported per-row overhead **growing by +2.51 MB**
+  at 179 columns when compact rows replaced full-width ones. That is a delta
+  against a different representation; this is a **share** of the current one.
+  Both are true. Compact rows traded a large blank-cell cost for a smaller
+  per-row cost and bought 3.41x depth doing it; what remains is 10.5%.
+- Inference for the Phase 3 gate: **H3 is the larger target by roughly 9x and
+  should be designed first**, and H4's ceiling is now a number rather than a
+  suspicion -- 1.16 MB at 179 columns, and only if per-row overhead went to
+  *zero*, which no aggregate-storage scheme achieves. H4 as a standalone
+  candidate looks hard to justify against that ceiling; composed with H3 (which
+  changes what a row costs and therefore what its bucket rounds to) it may still
+  earn its place. That adjudication is `D3`'s, not this entry's.
+- Uncertainty: one payload (`scrollback-plain`) at two geometries. Real histories
+  are not uniformly ~52-cell plain ASCII rows, and the residual per row depends
+  on where mean row length falls relative to a malloc size class -- a payload
+  whose rows land just above a boundary would show a larger share. Sizing that
+  is `F10`'s task (allocator behavior under ragged row sizes), which this
+  finding makes concrete rather than speculative. Nothing here measures styled
+  or multi-scalar content: `styledCellCount` is 0 and `multiScalarCellCount` is 0
+  in both runs, so H3's packing argument is untested against the content that
+  would stress it.
+- Next action: `F9` (blank-row frequency, H2's ceiling) and `F10` (allocator
+  behavior under ragged rows) remain. `D3` gates H3 vs H4 on this split.
