@@ -131,3 +131,15 @@ complexity fallback at the calibrated 179x66 maximum topology.
 The investigation is closed. Reopen as a new research doc only if larger-grid
 evidence produces a separated regression or if permanent workload calibration
 reveals that whole-process CPU cannot support a stable verdict.
+
+**Flagged from doc 28 (2026-08-03), not a reopening.** `28/F4` localizes a
+`style-churn` regression of roughly 3-7% to `dd51a12..e4556c0`, the range that
+contains this doc's shipped work (`d378096`, `f3c774d`, `24c3d03`, `3fbd487`).
+Two independent `confirm` runs at two baselines agree in direction, and the
+competing explanation -- that the benchmark's own accepted-draw instrumentation
+was billing itself to what it observes -- was tested against `13f82c8~1` and
+failed, so this is not a measurement artifact. `style-churn` freezes text and
+varies only attributes, which is a workload this doc's calibration did not
+weigh against the btop-scroll win it shipped on. Whether that meets the
+separated-regression bar above is this doc's owner's call, not doc 28's; the
+evidence and both bounding runs are recorded in `28/F4`.

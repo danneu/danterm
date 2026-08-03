@@ -1,6 +1,6 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F4**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F6**. Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -283,3 +283,167 @@ Pair values, this run: `terminal-feed` -0.85, -0.52; `scrollback-stream` -2.92,
   cause is the renderer work it belongs to their owners, and this session
   stopped short of the bisect rather than guess. `D1` carries the idleness-guard
   pitch and the `terminal-feed` screening question.
+
+**The bisect named above was run; see `F4`.** It closes interpretation 2:
+`13f82c8..HEAD` is a 4.05% *speedup* on `style-churn`, so the instrumentation
+cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
+
+### F4 -- the named bisect exonerates the instrumentation: `style-churn` is 4% *faster* since `13f82c8~1`, so `F3`'s survivor predates it
+
+- Status: recorded. Resolves `F3`'s open attribution and closes interpretation 2
+  (benchmark instrumentation on the accepted-draw path). The residual cost is
+  handed to docs 29/30 unfixed, per this doc's boundary.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: baseline `13f82c8~1` = `e4556c0`, commit
+  `e4556c035168db8524f08fe4cde8b560007423af`, tree
+  `368def17e75ac2169319efdc1f03a173978650bc`. Candidate base `b332843`,
+  candidate tree `e05aa52ff89ebaccccb460c190014fcce159eabd`, capturing five
+  untracked prose paths (`TODO.md` and four `plans/wip/*.md`), none reachable
+  from any measured binary.
+- Why this baseline is the one that separates app from instrument: all four
+  sparse-damage renderer commits (`d378096`, `f3c774d`, `24c3d03`, `3fbd487`)
+  are *already in* `e4556c0`. So this run holds the renderer work fixed on both
+  arms and varies only `13f82c8` onward -- the accepted-draw topology recorder,
+  the coverage publication, and the two later repairs to it.
+- Method: `just benchmark-confirm baseline=13f82c8~1`, one invocation, no
+  reruns. `decisionEligible: true`, `invalidationReasons: []`. Conditions: AC
+  power (100%, charged), no `DANTERM_BENCHMARK_ALLOW_BATTERY` override, 179x66.
+- Pre-launch host reading, recorded because `F3` made it a stated obligation:
+  load 2.88/3.47/4.24 at 14:06:02, `WindowServer` at 1.2%, no second agent
+  session, and a transient `signpost_reporter` burst (27% CPU, load ~4.4) waited
+  out before launch. This is within 0.5 of the ~2.4 floor `F3` established for
+  this machine.
+- Results:
+
+  | workload | verdict | estimate | pairs |
+  | --- | --- | ---: | --- |
+  | `terminal-feed` | equivalent | -0.26% | -0.09, -0.44 |
+  | `scrollback-stream` | equivalent | -0.18% | -1.20, +3.41, -2.17, +0.83 |
+  | `content-churn` | **faster** | **-4.46%** | -3.54, -4.86, -4.06, -5.77 |
+  | `style-churn` | **faster** | **-4.05%** | -6.32, -0.84, -3.31, -4.78 |
+  | `incremental-mixed` | inconclusive | +1.29% | +12.02, -18.53, -8.80, +7.79, +14.92, -5.21 |
+
+- Observation 1, and it is the finding: **`style-churn` is 4.05% faster at
+  `HEAD` than at `13f82c8~1`, on four of four pairs, all negative.** A range
+  that is a net speedup cannot be the source of a regression measured at its
+  own endpoint. `13f82c8`'s accepted-draw instrumentation is therefore **not**
+  the explanation for `F3`'s +3.09%, and this doc's measurement-machinery rule
+  did **not** recur. `F3`'s interpretation 2 is closed.
+- Observation 2, mechanism, and it agrees: a source audit of `13f82c8` reaching
+  `HEAD` shows `TerminalBenchmarkSparseSpanRecorder.init?(workload:)` returns
+  nil for every workload but `sparse-spans-few`/`-max`, and every added site in
+  `app/TerminalBenchmark.swift` is guarded by `sparseSpanRecorder != nil` or
+  `?.`. What `style-churn` actually gained is two nil checks and one restructured
+  branch. The commit's own claim -- "nothing here runs for the other five
+  workloads" -- is what the measurement independently found.
+- Observation 3: `content-churn` is also 4.46% faster over the same range, on
+  four of four negative pairs. Two independent draw workloads agreeing in
+  direction and magnitude points at a shared draw-path improvement in
+  `13f82c8..HEAD`; the strongest candidates are `6747e82` and `2eaac68`, which
+  are precisely the two commits that moved earlier instrumentation *off* the
+  draw path. That is this doc's measurement-machinery rule paying out rather
+  than being violated. Not claimed as attributed -- no run isolates it.
+- Inference, and it is cross-run rather than a verdict: `F3` measured `HEAD`
+  +3.09% against `dd51a12`; this run measures `HEAD` -4.05% against `e4556c0`.
+  Composing them localizes the regression to **`dd51a12..e4556c0`** -- the four
+  sparse-damage renderer commits plus `e4556c0`'s benchmark-only stimulus.
+  Stated as an inference, deliberately: the two runs are separate invocations on
+  separate hosts-in-time, and the protocol does not let a difference of
+  differences carry a verdict. The *within-run* claim -- that `13f82c8..HEAD`
+  contains no `style-churn` regression -- needs no composition and is what
+  Observation 1 rests on.
+- Uncertainty: the residual cost is localized to a five-commit range, not to a
+  commit. A confirm against `d378096~1` would bound the renderer work's own
+  contribution, and one against `3fbd487` would separate the coalescing change
+  from the sharing refactor. Neither was run: attributing renderer cost is not
+  this doc's, and guessing between four commits is not evidence.
+- `incremental-mixed` remains sign-mixed (+14.92 to -18.53 here, -8.03 to +8.95
+  in `F3`) and is again not directional. `F3`'s disqualification holds across
+  both runs; the harness classified it `inconclusive` here, which is the right
+  answer for this stimulus.
+- **For docs 29/30's owners, flagged:** the shipped sparse-damage renderer work
+  carries a `style-churn` cost of roughly 3-7% that survived two independent
+  confirm runs at two baselines. It is not an artifact of the benchmark's own
+  instrumentation -- that hypothesis was tested here and failed. Doc 29 records
+  the sparse-clip work as shipped on the strength of the btop-scroll result;
+  this is the counterweight on the styled-attribute workload, and neither doc's
+  outcome currently names it.
+- Next action: none in this doc. `D1`'s admitted items proceed; the renderer
+  attribution is handed over with the range and the two bounding runs named
+  above.
+
+### F5 -- the browsing workload screens as the quietest on the ladder, and one screen is not graduation
+
+- Status: recorded. Implements and screens `D1` pitch 1. The workload is
+  **admitted as a candidate**; no threshold was frozen and none may be until a
+  second independent screen agrees, per `D1`'s own gate.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: screened at tree
+  `8eca2daf7b09aba5700662f1280ca27733017ad7` (`415fbd1`, the commit that adds
+  the workload). Both physical arms bound to that one immutable root, so every
+  measured difference is noise by construction.
+- Conditions, sampled before launch: AC power (100%, charged), load
+  2.62/4.36/4.38 at 14:26:00, falling to 2.39 during collection -- the quietest
+  this machine reached all session, against the ~2.4 floor `F3` established.
+- Method: `scripts/terminal-benchmark-candidate-screen.py --workload
+  retained-browse --revision HEAD`, 12 balanced ABBA/BAAB quartets, 50,000
+  resampling trials per condition, seed 20260730. Pair count searched
+  cheapest-first alongside the threshold -- which `17/F15` records an auxiliary
+  metric cannot do and a workload can, because it owns its blocks. **12 of 12
+  quartets kept, 0 discarded.**
+- The stimulus, resurrected from `15/F18` rather than reinvented: 179x66, 10,000
+  short hard-terminated lines, viewport parked at the oldest retained row (6,756
+  rows survive the production budget), 20 warm and 2,000 measured `planFrame`
+  calls per block, with a cell-coverage checksum that invalidates the whole
+  invocation if two arms did not plan the same frame.
+- A/A spread: **24 pairs, median +0.19%, SD 0.99% (trimmed 0.90%, 22 pairs),
+  range -1.42%..+2.00%.** No pair required discarding and no outlier drove the
+  spread -- contrast `20/F11`'s screen 1, where one block of 24 set the SD and
+  had to be thrown out.
+- Proposed cells, neither frozen:
+
+  | mode | pairs | threshold | A/A false positives | detection (+/-) | wrong direction |
+  | --- | ---: | ---: | ---: | --- | ---: |
+  | quick | 2 | +/-1.05% | 0.0000 | 1.0000 / 1.0000 | 0.0000 |
+  | confirm | 2 | +/-1.05% | 0.0000 | 1.0000 / 1.0000 | 0.0000 |
+
+- Observation 1, and it is the finding: **this is the cheapest and tightest cell
+  any workload on the ladder has produced.** `confirm` would decide on 2 pairs at
+  +/-1.05% where `style-churn` needs 4 at 2.00%, `scrollback-stream` 4 at 1.85%,
+  and `incremental-mixed` 6 at 1.85%. The mechanism is not subtlety, it is
+  scope: this workload is headless. No window, no compositor, no PTY, no
+  WindowServer -- and `F2`/`F3` established that those are where the ladder's
+  noise lives.
+- Observation 2, and it is the caveat the table above does not show:
+  **`confirm`'s A/A `inconclusive` rate is 41.4%.** `select_candidate` applies
+  `maximum_inconclusive_rate` to the effect conditions only, never to A/A, so
+  that number is real and ungated. In practice a genuinely equivalent change
+  would read `inconclusive` two times in five at the selected `confirm` cell,
+  because the 0.75% band and the 1.05% threshold leave a narrow dead zone that a
+  2-pair median lands in often. `quick`'s equivalent figure is 8.2%. This is the
+  same structural dead zone `F1` hit on `terminal-feed` -- there it was fatal
+  because escalation could not buy pairs; here it is not, because this workload
+  owns its blocks and a screen may propose 4.
+- Inference: if a second screen replicates, the honest rule to freeze is
+  probably **not** the cheapest cell. Buying the next pair count up would trade
+  machine time for a much lower A/A inconclusive rate, and `20/F11`'s precedent
+  is to take the conservative envelope across replicates rather than the
+  cheapest single result. That is a decision for whoever runs screen 2, stated
+  here so it is not re-derived.
+- Uncertainty, and it is the reason nothing is frozen: **one screen cannot
+  distinguish an unlucky series from an unstable workload.** `20/F11` is the
+  precedent and it is not hypothetical -- its screen 1 proposed 12 pairs and its
+  screens 2 and 3 proposed 6 and 4 at three times the threshold. `D1` requires
+  two independent screens clearing A/A false positives under 1% at 90%
+  detection; this is screen 1 of 2. Until screen 2 lands, every browsing claim
+  in this doc stays a paired descriptive measurement, exactly as `15/F18`'s was.
+- Sanity check against the result being replaced: this harness measures 342,263
+  ns per browsing frame plan at 300 measured calls, against `15/F18`'s 319,461
+  ns candidate median. Same regime, so the resurrected recipe is measuring the
+  quantity the deleted probe measured. The line content differs slightly (the
+  payloads are not byte-identical), so the two numbers are not directly
+  comparable and no comparison is claimed.
+- Next action: run screen 2 on an independent occasion. If it replicates, freeze
+  the conservative envelope across both, move `retained-browse` from
+  `CANDIDATE_WORKLOADS` into `WORKLOADS`, and add its rule to `DECISION_RULES`.
+  Only then can `H1`, `H3`, `H4`, and `H5` end in a verdict.

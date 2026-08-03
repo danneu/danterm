@@ -238,19 +238,47 @@ is not lost.
   bisect named (`confirm` against `13f82c8~1` separates the renderer work from
   its accepted-draw-path instrumentation). Not fixed here: the cause may be the
   renderer work, which this doc does not own.
+- [x] `DONE` Run the `13f82c8~1` bisect and attribute `F3`'s survivor. Closed
+  by `F4`: `style-churn` is **4.05% faster** at HEAD than at `13f82c8~1` (four
+  of four negative pairs), so the accepted-draw-path instrumentation is **not**
+  the cause and this doc's measurement-machinery rule did not recur. `13f82c8`'s
+  recorder is nil for every workload but the two sparse-span ones, which is the
+  mechanism. The residual cost localizes to `dd51a12..e4556c0` -- the sparse
+  damage renderer work -- and is handed to docs 29/30 unfixed, with both
+  bounding runs named. `content-churn` is also 4.46% faster over the same range,
+  plausibly `6747e82`/`2eaac68` paying out.
 - [x] `DONE` Pitch and decide benchmark coverage for retained history.
   Closed by `D1`, which dispositions four pitches: admit the retained-history
   browsing workload as a candidate; freeze the saturated-resize probe recipe
   rather than admitting it (H1's question is absolute, not paired); reject a
   longer-schedule `terminal-feed` screening tier with a stated reopening
   condition; and admit a host-idleness preflight annotation, sequenced first.
-- [ ] `TODO` Implement `D1`'s admitted items, in its stated order: (a) the
-  preflight host-idleness annotation in the comparison driver -- **it must
-  sample before launch, since `F3` measured in-run load rising 3.23 -> 9.68
-  from the benchmark's own work**; (b) the retained-history browsing candidate
-  workload, from `15/F18`'s recipe; (c) the committed saturated-resize probe.
-  Benchmark-only code; any app or engine hook takes the no-`slower` treatment
-  and a gate lint.
+- [x] `DONE` Implement `D1`'s admitted item (a), the preflight host-idleness
+  annotation. `sample_host_conditions` in
+  `scripts/terminal-benchmark-compare.py` reads load average, per-processor
+  load, and the busiest **non-harness** processes at two points -- at invocation
+  and immediately before the first block -- and records both under
+  `summary.hostConditions` in `run.json`, rendered beside the verdicts. It
+  excludes the driver's own descendants (`F3`'s confound), reports "not
+  measured" as a state distinct from "measured idle", and applies **no
+  threshold**, per `D1`'s refusal to invent an uncalibrated gate. Off every
+  measured path by construction: it runs before collection starts.
+- [x] `DONE` Implement `D1`'s admitted item (b), the retained-history browsing
+  candidate workload. `lib/TerminalCore/Sources/TerminalBrowseBenchmarkSupport`
+  plus the `TerminalBrowseBenchmark` executable resurrect `15/F18`'s recipe
+  (179x66, 10,000 hard-terminated lines, parked at the oldest retained row, 20
+  warm and 2,000 measured `planFrame` calls, coverage checksum). Registered as
+  `retained-browse` in `CANDIDATE_WORKLOADS` with a block contract and the
+  `planNanosecondsPerFrame` metric -- **no frozen rule**, per `D1`'s gate.
+  Headless, so it needs no window: it plans frames and never draws one. Screen
+  result in `F5`.
+- [ ] `TODO` Implement `D1`'s admitted item (c), the committed saturated-resize
+  probe recipe. Benchmark-only code; any app or engine hook takes the
+  no-`slower` treatment and a gate lint.
+- [ ] `TODO` Run the **second** independent browsing screen `D1` requires before
+  a threshold may be frozen. One screen is not graduation; until a second one
+  selects a compatible cell, every browsing claim stays a paired descriptive
+  measurement.
 - [ ] ~~`TODO` Pitch and decide benchmark coverage for retained history, so
   every later experiment here can end in a verdict rather than a probe
   anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
@@ -316,14 +344,31 @@ boundaries (see Investigation rules), not re-litigated here.
   to screen `terminal-feed` for a longer schedule before running one.
 - `F2`'s four `slower` verdicts are resolved by `F3`: three were artifacts of a
   15-commit-wide baseline plus host load, and **`style-churn`'s ~3% survives**,
-  living in `dd51a12..HEAD`. The renderer docs own it; the bisect is one
-  `confirm` against `13f82c8~1`.
+  living in `dd51a12..HEAD`. `F4` then ran the bisect and narrowed it to
+  `dd51a12..e4556c0` -- the sparse-damage renderer work -- while clearing the
+  benchmark instrumentation. The renderer docs own it; neither doc 29's nor doc
+  30's outcome currently names this cost.
+- A wide baseline is a smoke alarm, not a diagnosis. Three of `F2`'s four
+  verdicts evaporated under the correct adjacent baseline, so per-commit A/B is
+  the discipline. Its one structural blind spot is the reason to run a wide
+  baseline occasionally anyway: `F1` established that `terminal-feed` cannot
+  resolve ~1% and cannot buy pairs, so a series of individually sub-threshold
+  regressions would each read `equivalent` while the range total did not. Run
+  wide baselines to detect accumulation, never to attribute it.
 - `F1`'s ~+1% feed cost is now attributed to the trim itself, not to later
   commits (`F3` reads `equivalent` on `terminal-feed` across `dd51a12..HEAD`).
   The bound is unchanged; only the attribution sharpened.
-- The harness has no idleness guard and graded a load-contaminated run
-  `decisionEligible: true` (`F2`). `D1` admits a preflight annotation; until it
-  exists, record host load alongside any verdict this doc rests on.
+- The harness graded a load-contaminated run `decisionEligible: true` (`F2`).
+  `D1`'s preflight annotation now exists and every `run.json` carries two
+  pre-launch host readings. It is an annotation, **not a gate**: it will not
+  stop a contaminated run, so reading it before trusting a verdict is still the
+  operator's job. What load actually perturbs a verdict remains uncalibrated,
+  and that is the evidence a refusal threshold would need.
+- The browsing workload is admitted as a **candidate** only. One screen is not
+  graduation -- `D1` requires two independent screens selecting a cell that
+  clears A/A false positives under 1% at 90% detection. Until then every
+  browsing number in this doc is a paired descriptive measurement, exactly as
+  `15/F18`'s was.
 - H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
   budget.
