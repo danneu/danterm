@@ -68,6 +68,20 @@ public extension TerminalPTYHost {
     /// bytes are matched as they stream, and only the partial match is kept. Everything the
     /// host still retains is matched first, so a child that printed and exited before this
     /// call is answered too.
+    ///
+    /// The cost of that guarantee, and the thing to know before writing a wait: if the host
+    /// has discarded ANY output and the needle is not in what it still retains, this fails
+    /// immediately -- even when the child is about to print the needle a moment from now and
+    /// matching from here would have caught it. The check cannot tell those two cases apart,
+    /// because whether the needle was in the discarded bytes is exactly what was discarded.
+    /// So "flood, then wait for a new marker" fails; arm before the flood instead.
+    ///
+    /// That is deliberately stricter than necessary. The alternative -- match forward and
+    /// stay silent -- is indistinguishable from the bug this replaced for the case that
+    /// matters, a live pane that never quiesces, where staying silent means suspending until
+    /// the test's time limit and then blaming the wait instead of the discard. A false
+    /// failure that names its own remedy costs a test author a minute; that hang cost a
+    /// green CI run an hour and pointed at the wrong line.
     nonisolated func expectOutput(
         containing bytes: [UInt8],
         sourceLocation: SourceLocation = #_sourceLocation
@@ -111,6 +125,13 @@ public extension TerminalPTYHost {
     }
 
     /// Arms a match on the child's output and waits for it, keeping cancellation test-local.
+    ///
+    /// Correct when the wait is armed before the output it asks about, which is the ordinary
+    /// case: the child prints a marker and the test waits for it. If output the host cannot
+    /// still retain may already have gone by -- anything past a flooding child, a big paste,
+    /// a scrollback replay -- this fails rather than answering; arm with `expectOutput` first
+    /// and await the result later. See `expectOutput` for why that case fails loudly instead
+    /// of matching forward.
     nonisolated func waitForOutput(
         containing bytes: [UInt8],
         sourceLocation: SourceLocation = #_sourceLocation
@@ -119,6 +140,9 @@ public extension TerminalPTYHost {
     }
 
     /// Blocks a non-host queue on callback wakeups so a test can keep main deliberately stalled.
+    ///
+    /// Carries `waitForOutput`'s discard rule -- see it and `expectOutput` before waiting on
+    /// a marker that a busy host may already have discarded.
     nonisolated func waitForOutputSynchronously(
         containing bytes: [UInt8],
         timeout: DispatchTimeInterval,
