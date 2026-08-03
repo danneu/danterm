@@ -17,8 +17,10 @@ invocation's complete evidence lands in its own artifact directory.
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import statistics
+import subprocess
 import sys
 import time
 
@@ -69,6 +71,13 @@ BLOCK_METRICS = {
     # threshold for them.
     "sparse-spans-few": "drawNanosecondsPerDraw",
     "sparse-spans-max": "processCPUNanosecondsPerDraw",
+    # The browsing candidate, and the only deciding metric on the ladder that is
+    # plan time rather than draw or replay time. That is the point rather than an
+    # exception: `15/F18` measured compact retained rows at -5.79% on frame
+    # *planning* over history, and no draw bracket can observe that -- planning
+    # runs on the PTY-output path, outside the bracket the four draw workloads
+    # measure. Stays out of DECISION_RULES until a screen freezes a threshold.
+    "retained-browse": "planNanosecondsPerFrame",
 }
 # Reported beside the draw verdict and decided separately from it. The
 # serialized-draw metric above brackets only clipping and drawing, so it
@@ -406,7 +415,132 @@ def decide_workload(mode, workload, differences):
     )
 
 
-def summarize_comparison(mode, evidence):
+def _default_process_table():
+    """Read every process as (pid, ppid, cpu percent, command), busiest first."""
+    result = subprocess.run(
+        ["ps", "-A", "-o", "pid=,ppid=,pcpu=,comm=", "-r"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    table = []
+    for line in result.stdout.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) != 4:
+            continue
+        pid, parent, cpu, command = fields
+        try:
+            table.append((int(pid), int(parent), float(cpu), command.strip()))
+        except ValueError:
+            continue
+    return table
+
+
+def sample_host_conditions(
+    *,
+    load_average=os.getloadavg,
+    processor_count=os.cpu_count,
+    list_processes=_default_process_table,
+    driver_pid=None,
+    top_count=5,
+):
+    """Read what else the machine is doing, for the artifact to carry beside the verdict.
+
+    This exists because of one incident (28/F2): a confirm run taken on a loaded
+    host reported four `slower` verdicts with `invalidations: []`, and three of
+    them did not survive re-measurement against the same trees. Host load is a
+    stated condition of every frozen rule and the only one the harness could not
+    observe, so it went unrecorded exactly when it mattered.
+
+    Two properties are deliberate. It reports "not measured" as a distinct state
+    from "measured idle", because a dropped key reads as a clean machine to the
+    next person. And it excludes the driver's own descendants, because 28/F3
+    measured that the harness's builds and GUI app are most of the load during a
+    run -- a reading that counted those would condemn every run and be ignored.
+
+    It sets no threshold and returns no verdict: 28/D1 admitted this scoped to
+    annotate-and-record precisely because nobody has calibrated what load
+    actually perturbs a decision, and a wrong refusal gate is worse than none.
+    """
+    driver_pid = os.getpid() if driver_pid is None else driver_pid
+    try:
+        one, five, fifteen = load_average()
+        processors = processor_count() or 1
+        table = list(list_processes())
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return {"available": False, "reason": f"host probe failed: {error}"}
+
+    parents = {pid: parent for pid, parent, _, _ in table}
+    harness = set()
+    for pid in parents:
+        walker, seen = pid, set()
+        while walker and walker not in seen:
+            seen.add(walker)
+            if walker == driver_pid:
+                harness.add(pid)
+                break
+            walker = parents.get(walker)
+    external = [
+        {"pid": pid, "command": command, "cpuPercent": cpu}
+        for pid, _, cpu, command in table
+        if pid not in harness
+    ]
+    external.sort(key=lambda entry: entry["cpuPercent"], reverse=True)
+    return {
+        "available": True,
+        "loadAverage": {"one": one, "five": five, "fifteen": fifteen},
+        "processorCount": processors,
+        "loadPerProcessor": one / processors,
+        "topExternalProcesses": external[:top_count],
+        "excludedHarnessProcessCount": len(harness),
+    }
+
+
+def _render_host_reading(label, reading):
+    """Render one pre-launch reading as an observation, never as a gate."""
+    if not reading:
+        return [f"  {label}: not measured (no reading was taken)"]
+    if not reading.get("available"):
+        return [f"  {label}: not measured -- {reading.get('reason', 'unknown')}"]
+    load = reading["loadAverage"]
+    lines = [
+        f"  {label}: load {load['one']:.2f}/{load['five']:.2f}/{load['fifteen']:.2f}"
+        f" ({reading['loadPerProcessor']:.2f} per processor"
+        f" across {reading['processorCount']}; descriptive, no verdict)"
+    ]
+    # Basename for the operator, full path in the artifact: a nix-store or
+    # framework path is most of a terminal line and buries the number beside it.
+    busiest = ", ".join(
+        f"{entry['command'].rsplit('/', 1)[-1]} {entry['cpuPercent']:.1f}%"
+        for entry in reading["topExternalProcesses"][:3]
+    )
+    if busiest:
+        lines.append(f"    busiest external: {busiest}")
+    return lines
+
+
+def render_host_conditions(conditions):
+    """Render both pre-launch readings, naming which one the builds confounded."""
+    if not conditions:
+        return ""
+    lines = ["Host conditions (sampled before any block; no threshold is applied):"]
+    lines.extend(_render_host_reading("at invocation", conditions.get("atInvocation")))
+    lines.extend(
+        _render_host_reading(
+            "before first block", conditions.get("beforeFirstBlock")
+        )
+    )
+    # Said here rather than left for the reader to infer, because 28/F3 found the
+    # confound by measuring it: the second reading follows this command's own
+    # arm builds, so it is the harness's floor, not the operator's machine.
+    lines.append(
+        "    the second reading follows this run's own builds and is "
+        "confounded by them; the first is the operator's idle machine"
+    )
+    return "\n".join(lines)
+
+
+def summarize_comparison(mode, evidence, host_conditions=None):
     """Decide a complete invocation, or none of it, and keep every raw block either way."""
     reasons = list(evidence.get("invalidationReasons", []))
     eligible = bool(evidence.get("valid")) and not reasons
@@ -446,6 +580,7 @@ def summarize_comparison(mode, evidence):
         "decisionEligible": eligible,
         "invalidationReasons": reasons,
         "workloads": workloads,
+        "hostConditions": host_conditions,
     }
 
 
@@ -458,6 +593,9 @@ def render_decisions(summary):
             "complete invocation.",
         ]
         lines.extend(f"  {reason}" for reason in summary["invalidationReasons"])
+        conditions = render_host_conditions(summary.get("hostConditions"))
+        if conditions:
+            lines.append(conditions)
         return "\n".join(lines)
     lines = [f"{summary['mode']}: candidate versus baseline"]
     for workload, result in summary["workloads"].items():
@@ -517,6 +655,9 @@ def render_decisions(summary):
                     f"    draw tail ({arm}): {values['tailNanoseconds'] / 1e6:.1f} ms "
                     f"({values['tailPercent']:.1f}% of block)"
                 )
+    conditions = render_host_conditions(summary.get("hostConditions"))
+    if conditions:
+        lines.append(conditions)
     return "\n".join(lines)
 
 
@@ -582,6 +723,7 @@ def run_comparison(
     make_collectors=production_collectors,
     emit=print,
     monotonic=time.monotonic,
+    sample_host_conditions=sample_host_conditions,
 ):
     """Perform one complete comparison: report the sources, measure, decide once, record."""
     resolve_baseline = resolve_baseline or SNAPSHOT.resolve_baseline
@@ -590,6 +732,10 @@ def run_comparison(
     workloads = resolve_workloads(mode, workload)
 
     started = monotonic()
+    # Taken before the snapshot rather than beside the blocks: this is the only
+    # moment the machine is the operator's rather than this command's, and it is
+    # the reading 28/F2's contaminated run needed and did not have.
+    host_conditions = {"atInvocation": sample_host_conditions()}
     baseline = resolve_baseline(repository_root, baseline_revision)
     candidate = snapshot_candidate(repository_root)
     # Before either build: what each arm will contain, so a wrong baseline or a
@@ -622,6 +768,10 @@ def run_comparison(
         mode, workloads, physical_candidate_arm=candidate_arm
     )
     artifacts = _run_directory(artifacts_root, mode, candidate["tree"])
+    # The last instant before collection begins, and still off every measured
+    # path. Kept separate from the invocation reading because the arm builds sit
+    # between them, so this one is the harness's own floor.
+    host_conditions["beforeFirstBlock"] = sample_host_conditions()
     collectors, close = make_collectors(
         schedule,
         artifacts,
@@ -634,7 +784,7 @@ def run_comparison(
         close()
     comparison_finished = monotonic()
 
-    summary = summarize_comparison(mode, evidence)
+    summary = summarize_comparison(mode, evidence, host_conditions=host_conditions)
     emit(render_decisions(summary))
     timings = {
         "snapshotSeconds": snapshot_finished - started,

@@ -559,7 +559,8 @@ class RunComparisonTests(unittest.TestCase):
         }
 
     def _run(self, *, artifacts_root, cache_root, difference_percent=0.0,
-             reasons_by_workload=None, mode="quick", workload="content-churn"):
+             reasons_by_workload=None, mode="quick", workload="content-churn",
+             sample_host_conditions=None):
         reasons_by_workload = reasons_by_workload or {}
         self.collector_calls = []
 
@@ -594,6 +595,12 @@ class RunComparisonTests(unittest.TestCase):
             make_collectors=make_collectors,
             emit=lambda text: self.events.append(("emit", text)),
             monotonic=lambda: float(next(clock)),
+            # A stub by default: the real probe forks `ps`, and no unit test
+            # should depend on the host it happens to run on.
+            sample_host_conditions=(
+                sample_host_conditions
+                or (lambda: {"available": False, "reason": "stubbed in tests"})
+            ),
         )
 
     def test_both_source_identities_are_reported_before_anything_is_built(self):
@@ -828,26 +835,39 @@ class RunComparisonTests(unittest.TestCase):
 
 
 class FeedPrebuildContractTests(unittest.TestCase):
-    def test_the_cache_prebuilds_the_package_the_feed_workload_runs(self):
-        # Intent: the arm cache compiles the terminal-feed benchmark product with
+    def test_the_cache_prebuilds_every_product_a_headless_workload_runs(self):
+        # Intent: the arm cache compiles every headless benchmark product with
         #   exactly the package, configuration, and build path `swift run` will
         #   look in when the workload executes.
-        # Why it exists: terminal-feed measures a separate package through
-        #   `swift run`, which uses SwiftPM's default build path. If the prebuild
-        #   diverges, every "cache hit" silently compiles inside the timed phase
-        #   and the 60-second quick budget measures a build.
-        # Scenario: the cache's prebuild is compared against the feed runner.
-        runner_source = inspect.getsource(VALIDATION.make_terminal_feed_runner)
+        # Why it exists: the headless workloads measure a separate package
+        #   through `swift run`, which uses SwiftPM's default build path. If the
+        #   prebuild diverges, or a newly added product is left out of it, every
+        #   "cache hit" silently compiles inside the timed phase and the
+        #   60-second quick budget measures a build.
+        # Scenario: the cache's prebuild list is compared against each headless
+        #   runner. Generalized from terminal-feed alone when 28/D1 pitch 1 added
+        #   `retained-browse` as a second product out of the same package.
         build_source = inspect.getsource(COMPARE.SNAPSHOT.build_arm)
+        headless_runners = {
+            COMPARE.SNAPSHOT.TERMINAL_FEED_PRODUCT: (
+                VALIDATION.make_terminal_feed_runner
+            ),
+            "TerminalBrowseBenchmark": VALIDATION.make_retained_browse_runner,
+        }
 
-        self.assertIn('"lib" / "TerminalCore"', runner_source)
         self.assertEqual(COMPARE.SNAPSHOT.TERMINAL_FEED_PACKAGE, "lib/TerminalCore")
-        self.assertIn(COMPARE.SNAPSHOT.TERMINAL_FEED_PRODUCT, runner_source)
-        self.assertIn("TERMINAL_FEED_PRODUCT", build_source)
+        self.assertEqual(
+            set(COMPARE.SNAPSHOT.HEADLESS_PRODUCTS), set(headless_runners)
+        )
+        self.assertIn("HEADLESS_PRODUCTS", build_source)
         self.assertIn("TERMINAL_FEED_PACKAGE", build_source)
-        # `swift run` resolves the default build path, so the prebuild must not
-        # redirect this package's products with --build-path.
-        self.assertNotIn("--build-path", runner_source)
+        for product, factory in headless_runners.items():
+            runner_source = inspect.getsource(factory)
+            self.assertIn('"lib" / "TerminalCore"', runner_source, product)
+            self.assertIn(product, runner_source)
+            # `swift run` resolves the default build path, so the prebuild must
+            # not redirect this package's products with --build-path.
+            self.assertNotIn("--build-path", runner_source, product)
         feed_build = build_source.split("TERMINAL_FEED_PACKAGE")[1].split("]")[0]
         self.assertNotIn("--build-path", feed_build)
         self.assertIn(COMPARE.SNAPSHOT.CONFIGURATION, runner_source)
@@ -1457,6 +1477,182 @@ class ThroughputCompositionTests(unittest.TestCase):
                 COMPARE.AUXILIARY_BLOCK_METRICS
             )
         )
+
+
+class HostIdlenessPreflightTests(unittest.TestCase):
+    """The pre-launch host reading that 28/D1 pitch 4 admitted, and its placement."""
+
+    def _processes(self):
+        return [
+            (453, 1, 43.9, "WindowServer"),
+            (4185, 1, 19.1, "claude"),
+            (900, 4185, 12.0, "python3"),
+            (901, 900, 8.0, "swift-frontend"),
+            (77, 1, 2.0, "bluetoothd"),
+        ]
+
+    def test_a_reading_names_the_load_and_the_external_processes_behind_it(self):
+        # Intent: one sample reports the load average, the per-processor load, and
+        #   the busiest processes that are not this comparison's own children.
+        # Why it exists: 28/F2 is the incident -- a confirm run taken at load
+        #   4.73/5.89/8.92 with WindowServer at ~49% reported four `slower`
+        #   verdicts with `invalidations: []`, and three did not survive
+        #   re-measurement. The harness could not see the one stated condition it
+        #   had violated, so the reading has to name both the number and who
+        #   caused it; a bare load average would not have identified WindowServer.
+        # Scenario: spec-first -- a host at load 4.73 with a known process table.
+        reading = COMPARE.sample_host_conditions(
+            load_average=lambda: (4.73, 5.89, 8.92),
+            processor_count=lambda: 10,
+            list_processes=self._processes,
+            driver_pid=900,
+        )
+
+        self.assertTrue(reading["available"])
+        self.assertEqual(reading["loadAverage"]["one"], 4.73)
+        self.assertEqual(reading["loadAverage"]["fifteen"], 8.92)
+        self.assertAlmostEqual(reading["loadPerProcessor"], 0.473, places=3)
+        commands = [entry["command"] for entry in reading["topExternalProcesses"]]
+        self.assertEqual(commands[0], "WindowServer")
+        self.assertIn("claude", commands)
+
+    def test_the_harness_own_process_tree_is_excluded_from_the_external_list(self):
+        # Intent: the driver and its descendants never appear as external load.
+        # Why it exists: 28/F3 measured the confound directly -- load sampled
+        #   during a run climbed 3.23 -> 9.68 because the benchmark's own builds
+        #   and GUI app were most of it. A reading that counted the harness
+        #   against itself would report every run as contaminated and be ignored,
+        #   which is worse than no reading at all.
+        # Scenario: the driver (pid 900) has one build child (pid 901).
+        reading = COMPARE.sample_host_conditions(
+            load_average=lambda: (1.0, 1.0, 1.0),
+            processor_count=lambda: 10,
+            list_processes=self._processes,
+            driver_pid=900,
+        )
+
+        commands = [entry["command"] for entry in reading["topExternalProcesses"]]
+        self.assertNotIn("python3", commands)
+        self.assertNotIn("swift-frontend", commands)
+        self.assertEqual(reading["excludedHarnessProcessCount"], 2)
+
+    def test_a_probe_failure_reports_not_measured_rather_than_an_idle_host(self):
+        # Intent: when the probe cannot read the host, the reading says so
+        #   explicitly instead of omitting the field or reporting zero.
+        # Why it exists: the measurement-discipline rule this doc binds itself to
+        #   requires an instrument that can say "not measured" distinctly from
+        #   "measured idle". Those two collapse into the same artifact if a failed
+        #   probe just drops the key, and a future reader would then read silence
+        #   as a clean machine.
+        # Scenario: `ps` is unavailable, as it is in a restricted sandbox.
+        def explode():
+            raise OSError("ps: command not found")
+
+        reading = COMPARE.sample_host_conditions(
+            load_average=lambda: (1.0, 1.0, 1.0),
+            processor_count=lambda: 10,
+            list_processes=explode,
+            driver_pid=900,
+        )
+
+        self.assertFalse(reading["available"])
+        self.assertIn("ps", reading["reason"])
+        self.assertNotIn("loadPerProcessor", reading)
+
+    def test_the_preflight_samples_before_the_blocks_and_never_between_them(self):
+        # Intent: host sampling happens twice -- once at invocation and once after
+        #   the builds, immediately before collection -- and never once collection
+        #   has started.
+        # Why it exists: this doc's measurement-machinery rule (precedents
+        #   `6747e82`, `2eaac68`) forbids instrumentation on a measured path. A
+        #   `ps` fork between blocks would be exactly that, and it would perturb
+        #   the very quantity it claims to observe.
+        # Scenario: a quick comparison records the order of its own phases.
+        runner = RunComparisonTests("test_confirm_collects_all_five_workloads_in_one_invocation")
+        runner.setUp()
+        samples = []
+
+        def sample():
+            samples.append(len(runner.events))
+            return COMPARE.sample_host_conditions(
+                load_average=lambda: (1.0, 1.0, 1.0),
+                processor_count=lambda: 10,
+                list_processes=self._processes,
+                driver_pid=900,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = runner._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+                sample_host_conditions=sample,
+            )
+
+        kinds = [kind for kind, _ in runner.events]
+        collect_index = kinds.index("collect")
+        self.assertEqual(len(samples), 2)
+        self.assertTrue(all(index <= collect_index for index in samples))
+        conditions = result["summary"]["hostConditions"]
+        self.assertIn("atInvocation", conditions)
+        self.assertIn("beforeFirstBlock", conditions)
+
+    def test_an_invalid_run_still_carries_its_host_reading(self):
+        # Intent: the conditions annotation survives an invocation that produced
+        #   no decision.
+        # Why it exists: an invalid run is exactly when a reader most needs to
+        #   know what else the machine was doing -- the reading is the evidence
+        #   that separates "the harness caught a real defect" from "the host was
+        #   busy". Dropping it on the invalid path would lose it when it matters.
+        # Scenario: the only scheduled workload reports an occluded window.
+        runner = RunComparisonTests("test_confirm_collects_all_five_workloads_in_one_invocation")
+        runner.setUp()
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = runner._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+                reasons_by_workload={"content-churn": ["block-2-window-occluded"]},
+            )
+            record = json.loads(
+                pathlib.Path(result["artifacts"], "run.json").read_text()
+            )
+
+        self.assertFalse(record["summary"]["decisionEligible"])
+        self.assertIn("atInvocation", record["summary"]["hostConditions"])
+
+    def test_the_rendered_verdict_reports_the_reading_and_claims_no_threshold(self):
+        # Intent: the operator sees the load and the busiest external process
+        #   beside the verdicts, marked as an observation rather than a gate.
+        # Why it exists: 28/D1 admitted this scoped to annotate-and-record and
+        #   explicitly refused a refusal threshold, because no evidence exists yet
+        #   for what load actually perturbs a verdict. Rendering it as a pass/fail
+        #   would smuggle in the uncalibrated gate the decision declined.
+        # Scenario: a summary carrying a busy pre-launch reading is rendered.
+        workload = "content-churn"
+        schedule = COMPARE.make_schedule(
+            "quick", [workload], physical_candidate_arm="b"
+        )[workload]
+        values = constant_pair_values(workload, schedule, 0.0)
+        summary = COMPARE.summarize_comparison(
+            "quick",
+            collection({workload: workload_evidence(workload, schedule, values)}),
+            host_conditions={
+                "atInvocation": COMPARE.sample_host_conditions(
+                    load_average=lambda: (4.73, 5.89, 8.92),
+                    processor_count=lambda: 10,
+                    list_processes=self._processes,
+                    driver_pid=900,
+                ),
+                "beforeFirstBlock": {"available": False, "reason": "probe failed"},
+            },
+        )
+
+        rendered = COMPARE.render_decisions(summary)
+
+        self.assertIn("4.73", rendered)
+        self.assertIn("WindowServer", rendered)
+        self.assertIn("not measured", rendered)
+        self.assertIn("no verdict", rendered)
 
 
 if __name__ == "__main__":
