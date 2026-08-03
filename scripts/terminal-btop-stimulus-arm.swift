@@ -58,18 +58,27 @@ final class ArrowPoster {
 
     func press(_ direction: ArrowDirection) {
         queue.sync {
-            post(direction, keyDown: true, autorepeat: false)
+            post(direction, keyDown: true)
             held = direction
         }
     }
 
+    /// A repeat in the held-key train, posted as an ordinary key-down.
+    ///
+    /// Not flagged `kCGKeyboardEventAutorepeat`: measured against an AppKit
+    /// probe, a repeat-flagged key-down sent with `postToPid` is filtered before
+    /// it ever reaches `NSApplication.sendEvent`, so a press plus twenty
+    /// repeat-flagged events delivered exactly one key-down and the profiled app
+    /// sat idle. Twenty-one unflagged key-downs all arrive. The held key is
+    /// defined by this arm's cadence and its matching key-up, not by a flag the
+    /// window server drops.
     func repeatKey(_ direction: ArrowDirection) {
-        queue.sync { post(direction, keyDown: true, autorepeat: true) }
+        queue.sync { post(direction, keyDown: true) }
     }
 
     func release(_ direction: ArrowDirection) {
         queue.sync {
-            post(direction, keyDown: false, autorepeat: false)
+            post(direction, keyDown: false)
             if held == direction { held = nil }
         }
     }
@@ -78,12 +87,12 @@ final class ArrowPoster {
     func releaseHeldKey() {
         queue.sync {
             guard let direction = held else { return }
-            post(direction, keyDown: false, autorepeat: false)
+            post(direction, keyDown: false)
             held = nil
         }
     }
 
-    private func post(_ direction: ArrowDirection, keyDown: Bool, autorepeat: Bool) {
+    private func post(_ direction: ArrowDirection, keyDown: Bool) {
         guard let event = CGEvent(
             keyboardEventSource: source,
             virtualKey: direction.keyCode,
@@ -91,11 +100,6 @@ final class ArrowPoster {
         ) else {
             fail("could not create a keyboard event for \(direction.rawValue)")
         }
-        // A synthesized key-down does not auto-repeat the way real HID input
-        // does, so the driver emits the repeat train itself; this field is what
-        // makes the app see those events as a held key rather than as N distinct
-        // presses.
-        event.setIntegerValueField(.keyboardEventAutorepeat, value: autorepeat ? 1 : 0)
         // Targeted at one pid, never posted to the session tap: the run owns
         // exactly one app (I3), and a session-wide post would reach whatever the
         // operator happens to have in front.

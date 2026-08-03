@@ -4,8 +4,9 @@
 The btop diagnostic profiles a live, input-driven app, so a report is only worth
 reading if the measured interval can be shown to have been the one the operator
 asked for: the app frontmost with its window presented, damage actually drawn,
-arrow input held across the whole recording, a profiler that parsed samples, and
-a host that did not throttle underneath it. Every one of those is a subtraction
+arrow input held across the whole recording, that input visibly driving the
+drawing rather than merely coinciding with it, a profiler that parsed samples,
+and a host that did not throttle underneath it. Every one of those is a subtraction
 between two lifetime counters or a gate over one artifact, so all of it lives
 here -- separately invocable, hermetically testable -- rather than inside the
 GUI run where a missing counter and a genuinely idle app look identical.
@@ -59,6 +60,14 @@ TOPOLOGY_HISTOGRAMS = (
 COVERAGE_COUNTERS = ("sampleCount", "foregroundSampleCount", "presentedSampleCount")
 # What a btop workload identity must carry before it can claim to say what ran.
 REQUIRED_WORKLOAD_FIELDS = ("executablePath", "version", "config", "process", "input")
+# The floor on damage samples per delivered key event, below which the stimulus
+# provably did not drive the app. A held arrow scrolling btop redraws once per
+# key event, and the host cadence (30/s) is under the display's refresh rate, so
+# a working capture sits near 1.0; the silent-input regression this gate was
+# built for sat at 0.042 (19 samples against 450 key events -- btop's own ~1.5/s
+# idle repaint, and nothing else). A quarter leaves 4x of headroom for frame
+# coalescing while still rejecting an idle app by an order of magnitude.
+MINIMUM_DRAWS_PER_KEY_EVENT = 0.25
 
 _TOC_SCHEMA = re.compile(r'schema="([A-Za-z0-9._-]+)"')
 _ANSI_STYLE = re.compile(r"\x1b\[[0-9;]*m")
@@ -253,6 +262,77 @@ def validate_stimulus_overlap(capture):
     return overlap
 
 
+def count_delivered_key_events(capture):
+    """Count the key-downs the stimulus posted inside the measured window.
+
+    One per leg for the press, plus that leg's repeats. Raised as unmeasured
+    rather than returned as zero when a leg cannot say how many repeats it
+    posted: "the stimulus delivered nothing" and "nobody counted" are the two
+    claims this whole module exists to keep apart.
+    """
+    stimulus = capture.get("stimulus") if isinstance(capture, dict) else None
+    legs = stimulus.get("legs") if isinstance(stimulus, dict) else None
+    if not isinstance(legs, list) or not legs:
+        raise CaptureInvalid(
+            "the bounded capture recorded no stimulus legs, so the number of key "
+            "events it delivered is unmeasured"
+        )
+    total = 0
+    for leg in legs:
+        repeats = leg.get("repeatCount") if isinstance(leg, dict) else None
+        if not isinstance(repeats, int) or isinstance(repeats, bool) or repeats < 0:
+            raise CaptureInvalid(
+                "a stimulus leg published no `repeatCount`, so the key events it "
+                "delivered are unmeasured"
+            )
+        total += 1 + repeats
+    return total
+
+
+def stimulus_response_coverage(capture, topology):
+    """Require the app to have drawn in proportion to the key events it was sent.
+
+    Every other gate here grades one side of the run in isolation: input was
+    posted, the app was frontmost, the profiler parsed samples, the app drew
+    *something*. A run can satisfy all of them and still have measured nothing,
+    because "input was posted" is a claim about this harness and "the app drew"
+    is a claim about btop's own idle repaint -- neither one connects the two. The
+    silent-input regression that motivated this gate did exactly that: 450 key
+    events posted, 19 idle-rate damage samples, and a clean verdict on a profile
+    of an app sitting still.
+
+    So this is the one gate that crosses the seam, and it is deliberately
+    coarse: it asks only whether the drawing was of the same order as the
+    stimulus, which is the most a bundle of counters can honestly support.
+    """
+    if topology is None:
+        raise CaptureInvalid(
+            "the stimulus response is unmeasured: the damage topology it must be "
+            "compared against was not itself measured"
+        )
+    samples = topology.get("sampleCount")
+    if not isinstance(samples, int) or isinstance(samples, bool):
+        raise CaptureInvalid(
+            "the damage topology delta carries no `sampleCount`, so the app's "
+            "response to the stimulus is unmeasured"
+        )
+    key_events = count_delivered_key_events(capture)
+    ratio = samples / key_events
+    if ratio < MINIMUM_DRAWS_PER_KEY_EVENT:
+        raise CaptureInvalid(
+            f"the app drew {samples} damage samples against {key_events} delivered key "
+            f"events ({ratio:.3f} per event, floor {MINIMUM_DRAWS_PER_KEY_EVENT}); the "
+            "stimulus reached the recording without reaching the app, so the profile is "
+            "of an app that was not being driven"
+        )
+    return {
+        "keyEventCount": key_events,
+        "damageSampleCount": samples,
+        "drawsPerKeyEvent": round(ratio, 4),
+        "minimumDrawsPerKeyEvent": MINIMUM_DRAWS_PER_KEY_EVENT,
+    }
+
+
 def machine_state_coverage(samples):
     """Count the machine-state samples taken during the interval and reject a throttled host.
 
@@ -409,13 +489,16 @@ def summarize_capture(bundle, *, mode):
 
     before = bundle.get("activityBefore")
     after = bundle.get("activityAfter")
+    # Held across the sections because the stimulus-response gate below is the one
+    # that reads two of them together; absent means unmeasured, never zero drawing.
+    topology = None
     if before is None or after is None:
         reasons.append(
             "activity: the run did not bracket its profiler window with two activity "
             "snapshots, so neither topology nor presentation coverage exists"
         )
     else:
-        record(
+        topology = record(
             coverage, "damageTopology", "damageTopology",
             lambda: damage_topology_coverage(before, after),
         )
@@ -456,6 +539,11 @@ def summarize_capture(bundle, *, mode):
             if capture.get(source_key) is not None:
                 identity[identity_key] = capture[source_key]
         record(identity, "overlap", "overlap", lambda: validate_stimulus_overlap(capture))
+
+    record(
+        coverage, "stimulusResponse", "stimulusResponse",
+        lambda: stimulus_response_coverage(capture, topology),
+    )
 
     record(
         identity, "btop", "workloadIdentity",

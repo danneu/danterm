@@ -75,7 +75,14 @@ def valid_bundle():
         ],
         "stimulusCapture": {
             "direction": "down",
-            "stimulus": {"cadence": {"source": "host"}, "legs": [], "directionChanges": 0},
+            "stimulus": {
+                "cadence": {"source": "host"},
+                # 600 key events against the 2400 topology samples the bracket
+                # above subtracts to: an app drawing four frames per keypress,
+                # which is what a driven scroll looks like.
+                "legs": [{"direction": "down", "repeatCount": 599, "resyncCount": 0}],
+                "directionChanges": 0,
+            },
             "profiler": {"startSeconds": 11.0, "stopSeconds": 31.0, "exitStatus": 0},
             "overlap": {"contained": True, "leadSeconds": 1.0, "trailSeconds": 1.0},
         },
@@ -235,6 +242,89 @@ class StimulusOverlapTests(unittest.TestCase):
             ARTIFACTS.validate_stimulus_overlap({"overlap": {"contained": False}})
 
 
+def stimulus_capture(*, repeats, legs=1):
+    """A bounded capture that delivered `repeats` repeats on each of `legs` legs."""
+    return {
+        "direction": "down",
+        "stimulus": {
+            "legs": [
+                {"direction": "down", "repeatCount": repeats, "resyncCount": 0}
+                for _ in range(legs)
+            ]
+        },
+    }
+
+
+class StimulusResponseTests(unittest.TestCase):
+    def test_drawing_in_proportion_to_the_key_events_is_accepted(self):
+        coverage = ARTIFACTS.stimulus_response_coverage(
+            stimulus_capture(repeats=449), {"sampleCount": 450}
+        )
+        self.assertEqual(coverage["keyEventCount"], 450)
+        self.assertEqual(coverage["damageSampleCount"], 450)
+        self.assertEqual(coverage["drawsPerKeyEvent"], 1.0)
+
+    def test_a_press_counts_as_a_key_event_alongside_its_repeats(self):
+        # Intent: each leg contributes its press plus its repeats, so a run whose
+        #   repeat train never started is still credited with the press it posted.
+        # Why it exists: counting repeats alone would make a two-leg capture look
+        #   like it delivered two fewer events than it did, and the gate's ratio is
+        #   only as honest as its denominator.
+        # Scenario: spec-first -- two legs of a loop-style alternation.
+        coverage = ARTIFACTS.stimulus_response_coverage(
+            stimulus_capture(repeats=9, legs=2), {"sampleCount": 20}
+        )
+        self.assertEqual(coverage["keyEventCount"], 20)
+
+    def test_an_idle_app_under_a_full_repeat_train_is_invalid(self):
+        # Intent: a run that posted a long repeat train and drew at btop's idle
+        #   rate is rejected, naming both numbers.
+        # Why it exists: this is the regression the gate was built for. Every other
+        #   gate passed that run -- input granted and posted, app frontmost and
+        #   presented for all 19 samples, profiler parsed 505 samples, host nominal --
+        #   because each one grades a single side of the seam. Without this the
+        #   harness reports a clean profile of an app nothing was driving.
+        # Scenario: the 2026-08-03 silent-input run, whose autorepeat-flagged
+        #   CGEvents were filtered before AppKit ever saw them: 449 repeats posted,
+        #   19 damage samples observed.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.stimulus_response_coverage(
+                stimulus_capture(repeats=449), {"sampleCount": 19}
+            )
+        message = str(caught.exception)
+        self.assertIn("19 damage samples", message)
+        self.assertIn("450 delivered key events", message)
+
+    def test_a_capture_with_no_legs_is_unmeasured_not_unresponsive(self):
+        # Intent: a capture that recorded no legs is graded as unmeasured rather
+        #   than as a stimulus that delivered zero events.
+        # Why it exists: zero key events would make the ratio a division by zero or,
+        #   worse, an arbitrary pass; "nobody counted the input" and "the input did
+        #   nothing" are different verdicts and only one of them indicts the app.
+        # Scenario: spec-first -- a capture aborted before its first leg closed.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.stimulus_response_coverage({"stimulus": {"legs": []}}, {"sampleCount": 500})
+        self.assertIn("unmeasured", str(caught.exception))
+
+    def test_a_leg_without_a_repeat_count_is_unmeasured(self):
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.stimulus_response_coverage(
+                {"stimulus": {"legs": [{"direction": "down"}]}}, {"sampleCount": 500}
+            )
+        self.assertIn("unmeasured", str(caught.exception))
+
+    def test_an_unmeasured_topology_leaves_the_response_unmeasured(self):
+        # Intent: when the damage topology itself could not be subtracted, this gate
+        #   reports that it has nothing to compare against.
+        # Why it exists: the gate's whole job is a comparison, and a missing right
+        #   operand must not be read as "the app drew nothing" -- that would turn one
+        #   unmeasured section into a second, louder accusation the bundle cannot back.
+        # Scenario: spec-first -- an activity snapshot published no damage topology.
+        with self.assertRaises(ARTIFACTS.CaptureInvalid) as caught:
+            ARTIFACTS.stimulus_response_coverage(stimulus_capture(repeats=449), None)
+        self.assertIn("unmeasured", str(caught.exception))
+
+
 class MachineStateTests(unittest.TestCase):
     def test_nominal_samples_are_counted(self):
         state = ARTIFACTS.machine_state_coverage(
@@ -391,6 +481,27 @@ class SummaryTests(unittest.TestCase):
         identity = ARTIFACTS.summarize_capture(bundle, mode="sample")
         self.assertNotIn("damageTopology", identity["coverage"])
         self.assertFalse(identity["capture"]["valid"])
+
+    def test_a_bundle_whose_stimulus_reached_nothing_is_graded_invalid(self):
+        # Intent: a bundle that passes every single-sided gate but drew at an idle
+        #   rate under a full repeat train is rejected, with the reason recorded and
+        #   the unproven section left out of `coverage`.
+        # Why it exists: proves the cross-seam gate is wired into the verdict and not
+        #   merely defined. The run this reproduces graded `valid: true` with an empty
+        #   `invalidReasons`, which is the exact output an operator cannot act on.
+        # Scenario: the 2026-08-03 silent-input run replayed through the summary --
+        #   19 damage samples across the bracket against 450 delivered key events.
+        bundle = valid_bundle()
+        bundle["activityBefore"] = activity_snapshot(topology_samples=1000, coverage_samples=200)
+        bundle["activityAfter"] = activity_snapshot(topology_samples=1019, coverage_samples=290)
+        identity = ARTIFACTS.summarize_capture(bundle, mode="sample")
+        self.assertFalse(identity["capture"]["valid"])
+        reasons = " | ".join(identity["capture"]["invalidReasons"])
+        self.assertIn("stimulusResponse", reasons)
+        self.assertNotIn("stimulusResponse", identity["coverage"])
+        # The single-sided gates still pass, which is what made the run look clean.
+        self.assertIn("presentation", identity["coverage"])
+        self.assertIn("damageTopology", identity["coverage"])
 
     def test_a_capture_that_recorded_no_cadence_omits_it_rather_than_nulling_it(self):
         # Intent: a stimulus field the capture never recorded is absent from the

@@ -448,9 +448,14 @@ starts recording and released only after it stops.
 **What makes a run valid.** The bounded modes grade themselves and exit nonzero
 if they cannot stand behind what they recorded: the profiler window must lie
 wholly inside the held key, the profiler must have parsed samples, the app must
-have submitted damage, and it must have stayed frontmost and fully presented for
-every sampled instant of the measured interval. A `trace` additionally proves its
-template exported a time-profile table. Missing measurement is never reported as
+have submitted damage, it must have stayed frontmost and fully presented for
+every sampled instant of the measured interval, and its drawing must be of the
+same order as the input it was sent -- at least one damage sample per four
+delivered key events. That last gate is the only one that crosses the seam
+between "input was posted" and "the app drew": every other gate grades one side
+alone, so a run whose keystrokes never reached the app passes all of them while
+profiling btop's idle repaint. A `trace` additionally proves its template
+exported a time-profile table. Missing measurement is never reported as
 zero -- a section that could not be proved is absent from the identity and its
 reason is listed in `capture.invalidReasons`. **An invalidated run still writes
 its bundle**; that list is what you act on.
@@ -460,8 +465,8 @@ every other profile. `identity.json` is extended in place -- there is no second
 provenance file -- with the btop executable path and version, effective config
 path and digest, owned btop pid/PTY/geometry, input mechanism and permission,
 measured stimulus legs and repeat cadence, the profiler/stimulus overlap,
-topology and presentation coverage deltas, machine state, and the capture
-verdict. `loop` additionally publishes `btop-stimulus-live.json` with the
+topology and presentation coverage deltas, the stimulus-response ratio, machine
+state, and the capture verdict. `loop` additionally publishes `btop-stimulus-live.json` with the
 direction and start of the leg it is currently holding, so an agent attaching its
 own profiler can bracket and validate its own window.
 
