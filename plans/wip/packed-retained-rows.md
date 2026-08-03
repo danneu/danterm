@@ -169,6 +169,12 @@ A retained row stores three things:
 - **A `contentIdentity` encoding**: per contiguous run (`D6`), with a per-cell
   fallback for a row whose run table would outgrow its cells. It is not droppable
   (`I3`).
+- **The two row-level `GridRow` fields, carried whole**: `isSoftWrapped` and
+  `semanticPrompt`. Neither is derivable from cells -- `isSoftWrapped` is what
+  width reflow uses to rejoin a wrapped line out of history, and
+  `semanticPrompt` is what OSC 133 prompt navigation anchors on -- so a packed
+  row that lost either would change observable content after a resize or break
+  prompt jumps, while passing every cell-wise check. PO3 pins both.
 
 **Why this shape and not the two obvious alternatives** -- both were priced, and
 the reasoning is what the plan must preserve:
@@ -250,7 +256,7 @@ classification pass over each admitted row's stored prefix (widest scalar, style
 runs, exceptions, identity runs). That is
 the same *kind* of work canonical trimming added, which `F1` bounded across four
 schedules at a ~+1% point estimate and no more than ~2.5%. It is partially
-offset by allocating and writing ~112 B where the current path allocates and
+offset by allocating and writing ~128 B where the current path allocates and
 copies ~1,808 B.
 
 **This prediction is under ~2%, so `D1` pitch 3's reopening condition fires.**
@@ -296,7 +302,13 @@ unnecessary and `F1`'s wall is not load-bearing for this change.
   three paths, not just admission: **admission**, **width reflow**, and **height
   transfer back into the live grid**. Concretely, an OSC 8 cell that scrolls into
   history and returns still resolves its target, and a link armed across it is
-  still adjudicated by whatever `PR1` decided about `contentIdentity`.
+  still adjudicated by whatever `PR1` decided about `contentIdentity`. Two
+  further axes are row-shaped rather than cell-shaped: a soft-wrapped
+  multi-row line survives admission plus width reflow rejoined (and a
+  prompt-marked row read back from history keeps its `semanticPrompt` mark),
+  and a fragmented-identity row -- assembled by cursor moves so its run table
+  would outgrow its cells -- round-trips through the per-cell fallback with
+  `activationIdentity` still adjudicating correctly over it.
 - **PO4 (I4)** -- the retained-row probe's `derivationMatchesCensus` reconstructs
   the census exactly, which trips loudly if the derived shape stops describing
   the representation.
