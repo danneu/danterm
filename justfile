@@ -137,6 +137,26 @@ terminal-resize-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalResizeProbe
     lib/TerminalCore/.build/release/TerminalResizeProbe {{flags}}
 
+# Report the shape of retained rows across the committed stimulus corpus: how many are
+# blank, how long the rest are, and what malloc's size classes charge for them.
+#
+# The instrument behind doc 28's `F9` (blank-row frequency, sizing `H2`'s ceiling) and
+# `F10` (whether ragged rows' paper savings survive the allocator). A probe, not a
+# benchmark: one arm, no threshold, no verdict.
+#
+# The stimulus is supplied from committed bytes -- the five benchmark-corpus workloads
+# and every neutral recording fixture -- rather than generated, so the blank-row number
+# cannot be shaped after the fact. Two generated stimuli are reported and excluded from
+# the pools: `bound/all-blank-saturation` (`H2`'s best case, which flatters it maximally
+# and is labelled as a ceiling) and `reference/scrollback-plain` (`F8`'s payload,
+# replayed so its measured per-row residual can be re-explained from size classes).
+#
+#   just terminal-retained-row-probe          # table
+#   just terminal-retained-row-probe "--json" # machine-readable
+terminal-retained-row-probe flags="":
+    swift build -c release --package-path lib/TerminalCore --product TerminalRetainedRowProbe
+    python3 ./scripts/terminal-retained-row-shape.py {{flags}}
+
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}

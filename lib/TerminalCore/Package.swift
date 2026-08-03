@@ -20,6 +20,7 @@ let package = Package(
         .executable(name: "TerminalOccupancyProbe", targets: ["TerminalOccupancyProbe"]),
         .executable(name: "TerminalBrowseBenchmark", targets: ["TerminalBrowseBenchmark"]),
         .executable(name: "TerminalResizeProbe", targets: ["TerminalResizeProbe"]),
+        .executable(name: "TerminalRetainedRowProbe", targets: ["TerminalRetainedRowProbe"]),
     ],
     targets: [
         .target(
@@ -121,6 +122,24 @@ let package = Package(
             name: "TerminalResizeProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalResizeProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "TerminalRetainedRowProbe",
+            dependencies: ["TerminalRetainedRowProbeSupport", "TerminalCoreBenchmarkSupport"],
+            path: "Sources/TerminalRetainedRowProbe",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalRetainedRowProbeSupport",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalRetainedRowProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalRetainedRowProbeSupportTests",
+            dependencies: ["TerminalRetainedRowProbeSupport", "TerminalCore"],
+            path: "Tests/TerminalRetainedRowProbeSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(

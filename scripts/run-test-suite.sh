@@ -77,6 +77,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_profile_report_test.py'
     'python3 ./scripts/tests/terminal_headless_draw_compare_test.py'
     'python3 ./scripts/tests/terminal_benchmark_fixtures_test.py'
+    'python3 ./scripts/tests/terminal_retained_row_shape_test.py'
     'python3 ./scripts/tests/terminal_memory_profile_test.py'
     'python3 ./scripts/tests/terminal_btop_stimulus_test.py'
     'python3 ./scripts/tests/terminal_btop_artifacts_test.py'
