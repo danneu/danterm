@@ -28,7 +28,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Why stacked prompts survive a resize storm |
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
-| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | H2 rejected, H3 packing selected; next is its experiment |
+| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | H2 rejected, H3 packing selected; next is plan review of `plans/wip/packed-retained-rows.md` |
 | 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | D1: single clip(to:) call, gated on incremental-mixed |
 
 ## Closed

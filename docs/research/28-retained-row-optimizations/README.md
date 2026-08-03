@@ -422,6 +422,13 @@ is not lost.
   if a resize claim is made, and the longer `terminal-feed` screen if the predicted
   feed effect lands under ~2%. Run `D5`'s falsification checks against a prototype
   before the full ladder.
+  **Graduated to [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md),
+  which is awaiting human plan review before any engine code.** The plan writes
+  the predicted feed effect down as **~+1%, bounded at +2%** -- under the ~2%
+  line, so `D1` pitch 3's screening reopen fires and the longer `terminal-feed`
+  schedule is screened *before* the deciding run. It also settles `D1` pitch 2's
+  gate affirmatively: C6 changes what reflow unpacks, so `F7`'s probe converts to
+  a two-armed comparison.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
