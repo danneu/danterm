@@ -1,7 +1,8 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D3**. The Phase 3 direction gates in [README.md](README.md) are
-renumbered `D3`-`D5` accordingly, `D2` having been spent on the browsing freeze.
+Next free ID: **D4**. The remaining Phase 3 direction gates in
+[README.md](README.md) are `D4` (H2) and `D5` (H5); `D2` was spent on the
+browsing freeze and `D3` on the H3-vs-H4 direction.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -209,3 +210,152 @@ five, and the sixth is the cheapest one on the ladder.
   each other.
 - Quantitative verification: two independent screens, 24 pairs each, 0 quartets
   discarded in either, recorded in `F5` and `F6` with their host conditions.
+
+### D3 -- H3 proceeds to a design and an experiment; H4 does not stand alone; and the criterion every deciding run will be read against
+
+- Status: **decided as a direction gate.** It selects the hypothesis, states the
+  bar its experiment must clear, and names the rules that bar is read under. It
+  does **not** contain the design, and no experiment starts here -- the packing
+  design is the next hand-off, and it is a plan-shaped piece of work rather than
+  a decision entry.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Evidence used: `F8` (the 89.5% / 10.5% split at both widths, and `H4`'s
+  1.16 MB ceiling), `F10` (ragged savings survive the allocator; the ~12.5%
+  bucket step; ~37 B/row belongs to history's buffer rather than to rows),
+  `F9` (`H2`'s ceiling is 0 bytes on measured content), `F1` (the feed path
+  cannot resolve ~1% and cannot buy pairs at `confirm`), `D2` (the frozen
+  browsing rule), `D1` pitch 2 and `F7` (the committed resize probe and its
+  upgrade gate), `D1` pitch 4 (the preflight annotation).
+
+#### The selection
+
+**`H3` proceeds first.** `F8` put 89.5% of saturated attributable footprint in
+stored cell bytes at 179 columns and 89.3% at 80, against 10.5%/10.7% in per-row
+overhead -- a 9:1 ordering that does not vary with pane width. `H3` is the
+hypothesis pointed at the large side.
+
+**`H4` does not proceed as a standalone candidate.** Its ceiling is 1.16 MB at
+179 columns and only at *zero* per-row overhead, which no aggregate-storage
+scheme reaches. `F10` sharpens why: about 37 B of the 197.5 B `F8` measured per
+row belongs to history's own buffer (a 16 B `GridRow` slot plus its capacity
+slack), which an aggregate cell store does not remove -- an aggregate scheme
+still needs a per-row descriptor. `H4` stays live only as a *composition* with
+`H3`, because `H3` changes what a row requests and therefore which size class it
+rounds into; that composition is evaluated inside `H3`'s design, not as a
+separate experiment.
+
+**`H2` is handed to `D4` as a formality.** `F9` measured zero blank retained rows
+across the whole committed corpus and showed the ceiling is under 350 KB at any
+blank fraction below 50%, because canonical trimming already made a blank row
+cost 80 B. `D4` still has to write the rejection -- this entry does not dispose
+of a hypothesis it did not gate -- but no design work should wait on it.
+
+**`H5` stays gated on `D5`**, unchanged: it is strictly more mechanism than `H3`
+for the same bytes, so it is live only if `H3` lands and leaves deep-history
+footprint on the table.
+
+#### Does `F10` undercut the `F8` selection? No -- and here is the answer stated rather than assumed
+
+The task that produced `F10` was posed as a threat to `H3`: if malloc rounded on
+a fixed quantum, a packing scheme could shrink a row's request and deliver zero
+bytes. Measured, the opposite holds. macOS malloc's classes above 256 B are four
+buckets per octave -- **~12.5% granularity, geometric rather than quantized** --
+so rounding is proportional to the request. Ragged storage realizes 70.8% against
+71.1% on paper for `F8`'s payload, the worst gap across all stimuli is 0.9
+percentage points, and two stimuli realize *more* than paper. `F8`'s selection
+stands unmodified, and `F10` is the reason it can be trusted rather than a
+qualification on it.
+
+What `F10` does add is a **design admission test**, and it is cheap enough that
+skipping it would be indefensible: a packing scheme must shrink a row's request
+by more than one bucket step (~12.5%) to be *guaranteed* to yield any bytes at
+all. Below that it can round back into the same class and deliver exactly zero,
+however clean its arithmetic looks. `just terminal-retained-row-probe` already
+reports the per-row stored-extent distribution for the whole corpus, so a
+candidate packing can be priced against real rows -- request before, request
+after, class before, class after -- **before a line of engine code is written**.
+Any `H3` design that has not been through that arithmetic is not ready for an
+experiment.
+
+#### The success criterion, stated before the experiment exists
+
+`H3` is a memory claim and a CPU claim at once, per this doc's rules, so it
+clears the bar only if the memory claim is *measured* and neither CPU path
+answers `slower`. Concretely:
+
+1. **The win, and it is the deciding measurement.** Attributable footprint at
+   saturation must fall, measured with `just terminal-memory-probe` at **both
+   179x66 and 80x24** (the doc's standing rule for memory claims), reported as
+   the same split `F8` used -- stored cell bytes against per-row overhead --
+   with `just terminal-retained-row-probe` supplying the allocation
+   decomposition. Absolute bytes and a percentage, both widths, both stated.
+2. **The depth effect is stated and decided, never discovered.** Any byte change
+   is a depth change: the same 10 MiB budget will admit a different number of
+   retained rows. The proposal states retained row count before and after at both
+   widths, and if the trade is anything other than "strictly more depth for
+   strictly fewer bytes", it is decided in its own `D` entry as numbers -- not
+   noticed after landing.
+3. **The browsing guard, under `D2`'s frozen rule.** `retained-browse` must not
+   answer `slower`: `quick` at **2 pairs, +/-1.05%, band 1.0%**; `confirm` at
+   **4 pairs, +/-1.05%, band 0.75%**. `inconclusive` is an acceptable pass here
+   and is *expected* -- `D2` wrote the 0.30-point dead zone into the rule itself,
+   and reaching for a rerun on seeing it is the shopping `F1`'s protocol forbids.
+   A packing scheme that re-inflates on read is exactly the change this workload
+   exists to catch, so this is the guard most likely to fire.
+4. **The admission guard, and its known wall.** `terminal-feed` must not answer
+   `slower`: `quick` at 2 pairs, +/-4.5%, band 1.0%; `confirm` at 2 pairs,
+   +/-2.5%, band 0.75%. `F1` established that this workload cannot resolve ~1%
+   and cannot buy extra pairs at `confirm`. So if the design's *predicted* feed
+   effect is under ~2% and graduation turns on that number, `D1` pitch 3's
+   reopening condition fires first:
+   `scripts/terminal-benchmark-candidate-screen.py --workload terminal-feed` for
+   a longer schedule, before the deciding run rather than after an ambiguous one.
+5. **The presentation and damage guards, unchanged from the standing ladder.**
+   `confirm` runs `scrollback-stream` (4 pairs, +/-1.85%), `content-churn`
+   (4, +/-2.15%), `style-churn` (4, +/-2.0%), and `incremental-mixed`
+   (6, +/-1.85%); none may answer `slower`. `style-churn`'s ~3% residual from
+   `F3`/`F4` is not an exemption and does not need one -- it lives in
+   `dd51a12..e4556c0` and will sit in *both* arms of an adjacent-baseline
+   comparison. If `H3` alters damage topology, the sparse-span pair is collected
+   descriptively; neither has a frozen rule, so neither can produce a verdict.
+6. **Resize is now a two-armed question, which changes `F7`'s status.** `H3`
+   changes what reflow unpacks and repacks, so it is exactly the "change
+   *expected* to move resize cost" that `D1` pitch 2 named as the gate for
+   upgrading the committed probe to a paired candidate workload. That upgrade --
+   screening `saturated-resize` toward a frozen rule via the standard pipeline --
+   becomes a prerequisite task of `H3`'s experiment if a resize claim is to be
+   made. If no resize claim is made, `just terminal-resize-probe` is re-run
+   descriptively on both arms and reported as a distribution, as `F7` did.
+7. **Every deciding run carries its preflight annotation.** `summary.hostConditions`
+   must be present with both pre-launch readings, and read before the verdict is
+   trusted. `D1` pitch 4 admitted this as an **annotation, not a gate**: it will
+   not refuse a contaminated run, and `F2` is the standing incident where the
+   harness graded one `decisionEligible: true` under load average 4.73/5.89/8.92.
+   A run whose host conditions are absent or unread is not a deciding run.
+8. **Framing, per the doc's evidence floor.** Baseline is the adjacent commit,
+   not a wide range (`F3`: three of four `slower` verdicts evaporated when the
+   baseline narrowed). AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`. Every
+   number at or after `dd51a12`.
+
+Graduation is unchanged and deliberately strict: `faster` on a workload that
+*contains the moved cost*, nothing else `slower`, or a trade stated as numbers
+and decided in a `D` entry before it lands.
+
+#### What this does not decide
+
+The packing representation itself -- packed scalars, run-length styles, a style
+side-table, or something else -- is not chosen here, and neither is whether `H4`
+composes into it. `F8`'s stated gap is the reason: `styledCellCount` and
+`multiScalarCellCount` were **zero** in both of its runs, and `F10` adds nothing
+on that axis beyond what `unicode-wrapping` happens to contain. A packing design
+is an argument about styled and multi-scalar content, and the corpus has not been
+measured for it. Sizing that is the first task of the design work, not a caveat
+on it.
+
+- Behavioral verification: nothing here changes engine or app behavior. The
+  probes this entry leans on are benchmark-only code already in the gate
+  (`just test` passes, including the new retained-row shape tests).
+- Quantitative verification: the selection rests on `F8`'s two-width split and
+  `F10`'s paper-versus-realized comparison, both reproducible from committed
+  probes (`just terminal-memory-probe`, `just terminal-retained-row-probe`). The
+  criterion above is the verification plan for the work this gate authorizes.

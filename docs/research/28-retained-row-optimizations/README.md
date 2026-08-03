@@ -347,13 +347,24 @@ is not lost.
 
 ### Phase 3 -- direction gates
 
-- [ ] `TODO` Gate: H3 vs H4 -- pick the larger target from `F8`, or conclude
-  both/neither clears the bar. `F8` supplies the split (89.5% cells vs 10.5%
-  per-row overhead) and points at H3; what it does not settle is whether H3
-  clears the bar at all, which needs a design with a stated depth effect and a
-  browsing verdict under `D2`'s now-frozen rule. Destination: `D3`.
-- [ ] `TODO` Gate: H2 -- viable only if `F9` shows blank rows matter and the
-  charge-model question has a clean answer. Destination: `D4`.
+- [x] `DONE` Gate: H3 vs H4. Closed by `D3`: **H3 proceeds first**, on `F8`'s
+  9:1 split at both widths; **H4 does not stand alone** (1.16 MB ceiling, and
+  `F10` shows ~37 B/row of it belongs to history's buffer rather than to rows)
+  and survives only as a composition inside H3's design. `F10` does **not**
+  undercut the selection -- rounding is proportional, so ragged savings survive
+  -- but it adds a design admission test: a packing scheme must shrink a row's
+  request by more than one bucket step (~12.5%) to be guaranteed to yield bytes,
+  and the committed probe prices that before any engine change. `D3` also states
+  the full success criterion: two-width memory probe, a stated depth effect,
+  `retained-browse` under `D2`'s frozen rule, `terminal-feed` with `F1`'s wall
+  and `D1` pitch 3's reopening condition, the four standing ladder guards, the
+  resize probe's now-triggered upgrade gate, and the preflight annotation on
+  every deciding run.
+- [ ] `TODO` Gate: H2. `F9` measured its ceiling at **0 bytes** across the whole
+  committed corpus and under 350 KB at any blank fraction below 50%, so this is
+  writing the rejection rather than weighing a candidate; `D3` hands it over as a
+  formality and nothing waits on it. The charge-model question dies with it.
+  Destination: `D4`.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. Destination: `D5`.
 
@@ -422,9 +433,22 @@ boundaries (see Investigation rules), not re-litigated here.
   machine. Reading them against a frame budget is Phase 2's `RESEARCH` task, and
   upgrading the probe to a paired candidate workload needs `D1`'s stated gate --
   a change *expected* to move resize cost, which is what supplies a second arm.
-- H2's charge-model question (how shared storage is charged) may itself be the
+- ~~H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
-  budget.
+  budget.~~ **Moot after `F9`:** the question never gets asked, because the
+  population is empty. H2's ceiling is 0 bytes on measured content and under
+  350 KB at any blank fraction below 50%.
+- `F10`'s size-class ladder is a libmalloc implementation detail, not a contract.
+  The budget is insulated -- doc 15's `D4` charges `Array.capacity`, the
+  allocator's own answer -- so a future macOS changing the classes would not make
+  the charge dishonest; it would only stale `F10`'s arithmetic.
+  `just terminal-retained-row-probe` compares its model against libmalloc on
+  every run and prints `MISMATCH` if they part company.
+- Nothing in Phase 2 measured styled or multi-scalar content at depth:
+  `styledCellCount` and `multiScalarCellCount` were zero in both of `F8`'s runs,
+  and `F10` adds only whatever `unicode-wrapping` happens to contain. H3 is an
+  argument about exactly that content, so `D3` makes sizing it the first task of
+  the design work rather than a caveat on it.
 
 ## Outcome
 
