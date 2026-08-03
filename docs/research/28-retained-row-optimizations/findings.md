@@ -1,6 +1,6 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F3**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F4**. Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -184,3 +184,102 @@ The frozen rules the estimates were graded against, read from each run's
   construction mechanics) own the renderer commits in this range; whichever
   picks it up should start from the `dd51a12` baseline above. No fix should be
   attempted before the isolating run exists.
+- **Resolved by `F3`.** The isolating run was taken; three of the four `slower`
+  verdicts did not survive it. Read `F3` before citing anything above.
+
+### F3 -- the isolating run: three of `F2`'s four `slower` verdicts were baseline-width artifacts, and one survives
+
+- Status: recorded. **Resolves `F2`** and refines `F1`'s competing
+  interpretations. Closes the `F2` follow-up task.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: baseline `dd51a12` (compact retained-row storage,
+  i.e. the trim itself), tree `a73d8c5b1628bf44ec5e8e3dd4457059aaa3eca1`.
+  Candidate base `30ecfab`, candidate tree
+  `61df251a49d5339a3f24ab4e7c8cef1e7bdc46dc`, same five untracked prose paths
+  as `F1`. Command: `just benchmark-confirm baseline=dd51a12`. Artifact:
+  `.build/terminal-benchmark-comparisons/confirm/61df251a49d5-0000/run.json`.
+- Why this baseline: `F2`'s run spanned `fa01b66..HEAD`, which contains both
+  the trim and 15 later commits. Moving the baseline to `dd51a12` removes the
+  trim from the range, so this run measures **only** the post-trim renderer and
+  instrumentation work. Comparing the two runs attributes each signal to one
+  side or the other.
+- Conditions: AC power, no thermal or performance warning. Pre-run host load
+  was driven down from 5.52 to a plateau of ~2.4 by idling this session for six
+  minutes before launch (samples: 4.82, 4.69, 4.18, 3.63, 3.41, 3.24, 2.83,
+  2.90, 2.63, 2.24, then 2.37-3.11 for a further three minutes). That is this
+  machine's floor with the user's desktop running; `WindowServer` alone holds
+  ~45% and did not go quiet.
+
+#### The two runs side by side
+
+| workload | vs `fa01b66` (`F2`) | vs `dd51a12` (this) | survives? |
+| --- | --- | --- | --- |
+| `terminal-feed` | +1.03% inconclusive | **-0.69% equivalent** | no |
+| `scrollback-stream` | +4.46% **slower** | **-0.11% equivalent** | **no** |
+| `content-churn` | +4.02% **slower** | **+1.48% inconclusive** | **no** |
+| `style-churn` | +3.47% **slower** | **+3.09% slower** | **yes** |
+| `incremental-mixed` | +7.96% **slower** | +2.95% slower | see below |
+
+Pair values, this run: `terminal-feed` -0.85, -0.52; `scrollback-stream` -2.92,
++0.25, -0.46, +2.53; `content-churn` +2.71, +0.65, +2.32, +0.50; `style-churn`
++3.13, +4.06, +3.05, +2.53; `incremental-mixed` +6.92, -4.93, -8.03, +2.61,
++8.95, +3.30.
+
+- Observation 1: **`scrollback-stream` and `content-churn` collapsed.** A
+  +4.46% `slower` became `equivalent` at -0.11% with sign-mixed pairs, and
+  +4.02% became `inconclusive`. Neither signal is attributable to the post-trim
+  commits.
+- Observation 2, and it disqualifies one of `F2`'s four: **`incremental-mixed`
+  is noise-dominated.** Its six pairs run -8.03% to +8.95% with mixed signs.
+  The median crosses the 1.85% threshold and the harness prints `slower`, but a
+  sign-mixed series with a 17-point spread is not a directional result. The
+  protocol already flags this workload as the noisiest on the ladder.
+- Observation 3, the survivor: **`style-churn` reproduces.** +3.47% against
+  `fa01b66` and +3.09% against `dd51a12`, with tight, uniformly positive pairs
+  (+2.53% to +4.06%) in both runs. Nearly identical estimates across the two
+  baselines place the cost in `dd51a12..HEAD`, not in the trim.
+- Inference 1, refining `F1`: `terminal-feed` reads **-0.69% equivalent**
+  across the post-trim range, so the persistent ~+1% of `F1` sits in
+  `fa01b66..dd51a12` -- the trim itself. This **strengthens `F1`'s competing
+  interpretation 1** (a real, small admission cost of trimming) and
+  **effectively eliminates interpretation 3** (that the ~+1% belonged to the
+  later commits). `F1`'s bound is unchanged and no verdict becomes available;
+  only the attribution sharpens.
+- Inference 2: `F2` was mostly an artifact of a 15-commit-wide baseline
+  compounded by host load. Three of four verdicts vanished under the correct
+  adjacent baseline. **A wide-baseline comparison is a smoke alarm, not a
+  diagnosis** -- it says "something in this range", and only a narrower baseline
+  says what.
+- Inference 3, on why the wide run was still worth taking: per-commit A/B
+  cannot see accumulation below its own threshold. `F1` established that
+  `terminal-feed` cannot resolve ~1% and cannot buy extra pairs, so fifteen
+  consecutive 1% regressions would each read `equivalent`/`inconclusive` while
+  the range total reached ~16%. The wide baseline is the only instrument on the
+  ladder that detects sub-threshold drift. It should be run periodically, never
+  as a decision instrument.
+- **Instrumentation note, and it changes the guard design.** Host load was
+  sampled every 5 s across this invocation: it rose monotonically from 3.23 at
+  launch to 9.68 at the end (n=51, median 3.80). That rise is the benchmark's
+  own builds and GUI app, not competing load. **Load average measured during a
+  run is therefore confounded by the run itself and cannot serve as an
+  idleness gate.** A usable guard has to sample before launch, or exclude the
+  harness's own process tree. This is the concrete input to `D1`'s guard pitch.
+- Competing interpretations for the `style-churn` survivor, unresolved:
+  1. Real cost in the sparse-damage renderer work (`d378096`, `f3c774d`,
+     `24c3d03`, `3fbd487`).
+  2. Benchmark instrumentation added to the accepted-draw path (`13f82c8`,
+     `de377f1`) billing itself to what it observes -- doc 28's
+     measurement-machinery rule recurring, with `6747e82`/`2eaac68` as
+     precedent. `style-churn` freezes text and varies only attributes, so a
+     fixed per-accepted-draw cost is a larger share of its smaller frame.
+  3. Residual host load. Weakened: the pairs are tight and uniformly positive
+     across two independent runs at different baselines.
+- Uncertainty: this run did not bisect, so `style-churn`'s ~3% is not yet
+  attributed between the renderer work and its instrumentation. That bisect is
+  one confirm against `13f82c8~1`, which separates the app from its instrument
+  in a single run.
+- Next action: hand the `style-churn` survivor to the renderer docs (29/30)
+  with the `13f82c8~1` bisect named above. **Not this doc's to fix**: if the
+  cause is the renderer work it belongs to their owners, and this session
+  stopped short of the bisect rather than guess. `D1` carries the idleness-guard
+  pitch and the `terminal-feed` screening question.

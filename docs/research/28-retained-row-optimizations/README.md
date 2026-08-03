@@ -228,7 +228,30 @@ is not lost.
   and all four `scrollback-stream` blocks of this confirm returned JSON. That
   confirm also produced `F2`, which is unrelated to the trim and is flagged
   there for another doc.
-- [ ] `TODO` Pitch and decide benchmark coverage for retained history, so
+- [x] `DONE` Isolate `F2`'s draw-path signal against the adjacent baseline.
+  Closed by `F3`: `just benchmark-confirm baseline=dd51a12` collapsed three of
+  the four `slower` verdicts (`scrollback-stream` +4.46% -> `equivalent`,
+  `content-churn` +4.02% -> `inconclusive`, and `incremental-mixed` is
+  sign-mixed across -8.03%..+8.95% and so not directional). **`style-churn`
+  survives at +3.09%** with tight positive pairs, reproducing `F2`'s +3.47%,
+  which places it in `dd51a12..HEAD`. Handed to docs 29/30 with the isolating
+  bisect named (`confirm` against `13f82c8~1` separates the renderer work from
+  its accepted-draw-path instrumentation). Not fixed here: the cause may be the
+  renderer work, which this doc does not own.
+- [x] `DONE` Pitch and decide benchmark coverage for retained history.
+  Closed by `D1`, which dispositions four pitches: admit the retained-history
+  browsing workload as a candidate; freeze the saturated-resize probe recipe
+  rather than admitting it (H1's question is absolute, not paired); reject a
+  longer-schedule `terminal-feed` screening tier with a stated reopening
+  condition; and admit a host-idleness preflight annotation, sequenced first.
+- [ ] `TODO` Implement `D1`'s admitted items, in its stated order: (a) the
+  preflight host-idleness annotation in the comparison driver -- **it must
+  sample before launch, since `F3` measured in-run load rising 3.23 -> 9.68
+  from the benchmark's own work**; (b) the retained-history browsing candidate
+  workload, from `15/F18`'s recipe; (c) the committed saturated-resize probe.
+  Benchmark-only code; any app or engine hook takes the no-`slower` treatment
+  and a gate lint.
+- [ ] ~~`TODO` Pitch and decide benchmark coverage for retained history, so
   every later experiment here can end in a verdict rather than a probe
   anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
   workload -- saturate history, scroll to the oldest row, then run serialized
@@ -241,7 +264,8 @@ is not lost.
   reject with reason. Either workload lives in benchmark-only code per the
   measurement-machinery rule; any hook it needs in app or engine code gets
   the no-`slower` treatment and, where pinnable, a gate lint. Destination:
-  `D1`.
+  `D1`.~~ (superseded by the two entries above; kept for the reasoning it
+  carries)
 
 ### Phase 2 -- size the remaining costs at HEAD
 
@@ -290,10 +314,16 @@ boundaries (see Investigation rules), not re-litigated here.
   `confirm` (`F1`). Any later candidate here whose predicted feed effect is
   around 1% will hit the same wall, so either predict a larger effect or expect
   to screen `terminal-feed` for a longer schedule before running one.
-- `F2` is an unresolved `slower` signal on all four non-feed workloads against
-  `fa01b66`, measured on a machine that was not idle and therefore not a
-  verdict. It is almost certainly not the trim. It is parked here only so it is
-  not lost; the renderer docs own it.
+- `F2`'s four `slower` verdicts are resolved by `F3`: three were artifacts of a
+  15-commit-wide baseline plus host load, and **`style-churn`'s ~3% survives**,
+  living in `dd51a12..HEAD`. The renderer docs own it; the bisect is one
+  `confirm` against `13f82c8~1`.
+- `F1`'s ~+1% feed cost is now attributed to the trim itself, not to later
+  commits (`F3` reads `equivalent` on `terminal-feed` across `dd51a12..HEAD`).
+  The bound is unchanged; only the attribution sharpened.
+- The harness has no idleness guard and graded a load-contaminated run
+  `decisionEligible: true` (`F2`). `D1` admits a preflight annotation; until it
+  exists, record host load alongside any verdict this doc rests on.
 - H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
   budget.
