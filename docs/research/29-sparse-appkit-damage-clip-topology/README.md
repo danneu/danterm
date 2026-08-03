@@ -1,6 +1,9 @@
 # Sparse AppKit damage clip topology
 
-Research started: 2026-08-01.
+Research started: 2026-08-01. Continued by
+[30-cg-clip-construction-mechanics](../30-cg-clip-construction-mechanics/README.md),
+which owns the clip-construction mechanics inside the shipped implementation
+(CG dispatch fast paths, the second dirtyRect clip, and span derivation).
 
 - [findings.md](findings.md) -- the migrated investigation notebook and full
   profiling evidence chain.

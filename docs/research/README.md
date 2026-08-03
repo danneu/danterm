@@ -29,6 +29,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
 | 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | Close 15/F18's feed verdict, then size overhead vs cell bytes |
+| 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | D1: single clip(to:) call, gated on incremental-mixed |
 
 ## Closed
 

@@ -1,6 +1,6 @@
 # Retained-row optimization opportunities
 
-Research started: 2026-08-01.
+Research started: 2026-08-03.
 Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/H6`,
 `15/H7`, `15/F18`).
 
@@ -45,6 +45,40 @@ was a one-off probe that no routine workload can reproduce.
   name the benchmark, commit, and compatibility conditions; profiled or probe
   timings are diagnostic, never benchmark verdicts, until a frozen decision
   rule exists.
+- **An experiment ends in a verdict, and a candidate graduates only on
+  `faster` (or a deliberate, quantified trade).** A hypothesis leaves this doc
+  for a plan only when a calibrated workload that *contains the moved cost*
+  answers `faster` under its frozen rule, and nothing else the change
+  plausibly touches answers `slower`: `terminal-feed` and `scrollback-stream`
+  for anything on the admission path, the serialized-draw ladder for anything
+  on presentation, and the sparse-span candidates (`sparse-spans-few`/`-max`)
+  for anything that alters damage topology. Memory claims ride the probe at
+  both 179 and 80 columns. A trade (e.g. H4 giving back depth for footprint)
+  is admissible only stated as numbers and decided in a `D` entry, never
+  discovered after landing.
+- **A cost no calibrated workload contains gets a workload before it gets an
+  experiment.** The ladder's recent growth is the precedent: btop's
+  `synchronized-frames` and the sparse-span pair entered as candidates and are
+  screened toward frozen rules via
+  `scripts/terminal-benchmark-candidate-screen.py` and the winsorized freeze
+  pipeline (per
+  [agent-docs/measurement-discipline.md](../../../agent-docs/measurement-discipline.md)).
+  An unfrozen workload produces numbers, not decisions -- `23/D4`'s demotion
+  of `synchronized-frames` is the standing example. If a hypothesis here moves
+  a cost the ladder cannot see, building and screening that measurement is a
+  prerequisite task of the hypothesis, not optional tooling.
+- **Measurement machinery must not perturb what it measures -- or anything
+  else.** The standing incident: the benchmark's activity-snapshot write ran
+  inside AppKit's `draw(_:)` and billed 71 ms of a 20 s btop-scroll trace to
+  the path it exists to observe, fixed in `6747e82` and pinned by
+  `scripts/terminal-benchmark-draw-path-lint.sh` in the test gate (its sibling
+  `2eaac68` moved coverage observation onto a clock for the same reason). Any
+  workload, probe, or coverage instrumentation this doc adds obeys the same
+  law: its cost stays off the measured hot paths (run-loop timers and
+  benchmark-only code, never draw/feed/admission callbacks); if it must touch
+  app or engine code, that change gets the same no-`slower` paired treatment
+  as an optimization candidate; and where the boundary is mechanically
+  pinnable, pin it with a lint in the gate rather than a convention in prose.
 - **The shipped invariants are the boundary, not an obstacle course.** Any
   candidate must preserve canonical trimmed form (stored cells are a pure
   function of observable content), budget-charge coherence, and the
@@ -95,6 +129,14 @@ Three facts in that finding are this doc's starting evidence:
    paired workload displays retained history -- `scrollback-stream` follows
    the bottom and the draw workloads start from live grids. `15/F18`'s result
    came from a temporary probe that was deleted after measurement.
+4. **The benchmark system just grew in the right direction, but not far
+   enough for this doc.** The ladder now carries btop's `synchronized-frames`
+   workload, the `sparse-spans-few`/`sparse-spans-max` candidates for
+   non-contiguous damage, and the live btop-scroll GUI diagnostic
+   (`just test-terminal-btop-gui`) -- all presentation/damage coverage. The
+   two paths this doc's hypotheses move remain uncovered: nothing displays
+   retained history, and nothing resizes a deep history. Both gaps are named
+   workload pitches in the Phase 1 ledger.
 
 ## Current hypotheses
 
@@ -174,10 +216,20 @@ is not lost.
   the frozen protocol, escalate to `benchmark-confirm` if inconclusive, and
   record the verdict in `F1`. Diagnose the `scrollback-stream` empty-stdout
   confirm failure first if it recurs (tooling; its own finding if nontrivial).
-- [ ] `TODO` Decide whether retained-history browsing becomes a routine paired
-  workload. `15/F18`'s probe was deleted; every hypothesis here will need the
-  measurement again. Destination: `D1` (add a workload, or freeze a documented
-  probe recipe).
+- [ ] `TODO` Pitch and decide benchmark coverage for retained history, so
+  every later experiment here can end in a verdict rather than a probe
+  anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
+  workload -- saturate history, scroll to the oldest row, then run serialized
+  updates while the viewport sits in history (`15/F18`'s deleted probe is the
+  recipe; the sparse-span pair is the precedent for admitting it as a
+  candidate and screening it toward a frozen rule); (b) a
+  **saturated-history resize** workload or documented probe -- repeated width
+  changes against 5,000+ retained rows, timed like the serialized-draw
+  blocks. Decide each as: admit as candidate, freeze a probe recipe, or
+  reject with reason. Either workload lives in benchmark-only code per the
+  measurement-machinery rule; any hook it needs in app or engine code gets
+  the no-`slower` treatment and, where pinnable, a gate lint. Destination:
+  `D1`.
 
 ### Phase 2 -- size the remaining costs at HEAD
 
