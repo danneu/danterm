@@ -367,7 +367,11 @@ cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
   instrumentation -- that hypothesis was tested here and failed. Doc 29 records
   the sparse-clip work as shipped on the strength of the btop-scroll result;
   this is the counterweight on the styled-attribute workload, and neither doc's
-  outcome currently names it.
+  outcome currently names it. The +3.09% endpoint figure likely **understates**
+  the `dd51a12..e4556c0` effect, because the commits after `e4556c0` netted a
+  speedup on this same workload, so the renderer range's own cost is partly
+  masked at HEAD; a single `confirm` of `dd51a12` against `e4556c0` is the run
+  that would size it directly, and that run is doc 29's owner's to make.
 - Next action: none in this doc. `D1`'s admitted items proceed; the renderer
   attribution is handed over with the range and the two bounding runs named
   above.

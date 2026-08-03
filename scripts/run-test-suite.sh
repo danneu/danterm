@@ -61,6 +61,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_btop_gui_proof_test.py'
     'python3 ./scripts/tests/terminal_benchmark_workloads_test.py'
     'python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py'
+    'python3 ./scripts/tests/terminal_benchmark_candidate_screen_test.py'
     './scripts/core-purity-lint.sh'
     './scripts/research-index-lint.sh'
     './scripts/kitty-parity-lint.py'

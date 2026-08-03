@@ -172,8 +172,15 @@ def describe_series(quartets):
 
 def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
                cache_root, artifacts_root, maximum_attempts=4, emit=print,
-               monotonic=time.monotonic):
+               monotonic=time.monotonic,
+               sample_host_conditions=COMPARE.sample_host_conditions):
     """Collect one A/A series for a screenable workload and report its implied rule."""
+    # A screen is a measurement like any other, and 28/F5's screen 1 had to state
+    # its host conditions in prose because nothing recorded them. The comparison
+    # driver's preflight is reused verbatim here so a screen's conditions live in
+    # its own artifact and a replicate can be compared against them: two readings,
+    # no threshold, "not measured" distinct from "measured idle" (28/D1 pitch 4).
+    host_conditions = {"atInvocation": sample_host_conditions()}
     # Calibrated workloads are screenable too, and deliberately: re-screening one
     # is how a frozen rule gets revisited when the workload's inputs change
     # (`20/D5` lengthens a replay to test whether its threshold can be bought
@@ -200,6 +207,7 @@ def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
         arm_roots={"a": arm["root"], "b": arm["root"]},
         repository_root=arm["root"],
     )
+    host_conditions["beforeFirstBlock"] = sample_host_conditions()
     try:
         kept, discarded = collect_quartets(
             workload, collectors[workload], quartets=quartets,
@@ -228,6 +236,7 @@ def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
         "quartetsDiscarded": discarded,
         "trials": trials,
         "seed": seed,
+        "hostConditions": host_conditions,
         "series": describe_series(series),
         "modes": modes,
         "elapsedSeconds": round(monotonic() - started, 3),
@@ -252,6 +261,9 @@ def render_report(report):
         f"range {report['series']['minimumPercent']:+.2f}%.."
         f"{report['series']['maximumPercent']:+.2f}%",
     ]
+    conditions = COMPARE.render_host_conditions(report.get("hostConditions"))
+    if conditions:
+        lines.extend(conditions.splitlines())
     for mode, proposal in report["modes"].items():
         if proposal is None:
             lines.append(f"  {mode}: no threshold clears the gates at any searched "
