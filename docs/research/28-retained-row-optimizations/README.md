@@ -373,7 +373,7 @@ is not lost.
   a frame budget? `F7` has the distribution and the committed probe; this task
   is the profile and the frame-budget reading `F7` deliberately withheld. Now
   also a prerequisite risk check for `D5` (depth rises ~9x at the same budget, so
-  reflow processes ~9x more rows). Destination: `F12`.
+  reflow processes ~9x more rows). Destination: `F13`.
 
 ### Phase 3 -- direction gates
 
@@ -410,7 +410,7 @@ is not lost.
   a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence. Destination: `D6`.
+  dead on sizing, but that is decided on post-landing evidence. Destination: `D7`.
 
 ### Phase 4 -- graduate
 
@@ -429,6 +429,15 @@ is not lost.
   schedule is screened *before* the deciding run. It also settles `D1` pitch 2's
   gate affirmatively: C6 changes what reflow unpacks, so `F7`'s probe converts to
   a two-armed comparison.
+  **Plan review sent it back for an evidence-only Phase 0 (`PR1`), now closed by
+  `F12`/`D6`.** Review found C6's pricing charged hyperlink metadata nowhere and
+  no candidate charged `contentIdentity` at all, on a false premise that a
+  retained cell's `contentIdentity` has no reader. `F12` measured what `F11` had
+  only inferred -- **85.14% of retained rows at depth are printed contiguously**,
+  100% on the CRLF reference payload -- so the field encodes per run rather than
+  per cell. `D6` preserves every field and keeps C6, which is cheapest under
+  *both* identity variants; the yield falls to **128.0 B/row and 14.12x** on the
+  CRLF payload (from 112.0 and 16.14x). Phase 1 may begin.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
@@ -465,7 +474,9 @@ The obvious packing shape, and kitty's `PagerHistoryBuf` precedent. Rejected as
 the selected representation because `F11` measured 0.903 UTF-8 bytes per stored
 cell: "one byte per scalar" and "UTF-8" are the same number for nearly every real
 row, so the text form buys nothing in bytes -- it is in fact **dearer** at depth
-(123.3 B/row against C6's 114.5), since it pays a descriptor byte on every cell to
+(`D6`'s corrected 137.4 B/row against C6's 121.5; 123.3 against 114.5 on `D5`'s
+uncharged pricing, so the correction widened the gap), since it pays a descriptor
+byte on every cell to
 navigate a variable-width payload. What it costs on top is a column read that
 becomes a scan from the start of the row, on the workload `D3` says is most likely
 to fire. Reopening condition: recorded content at depth whose rows are mostly

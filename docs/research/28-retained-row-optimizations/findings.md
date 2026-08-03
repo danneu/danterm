@@ -1,8 +1,8 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F12**, which Phase 2's open resize-profile task claims (it was
-written down as `F11` before this entry existed; IDs go in the order findings are
-recorded, not in the order tasks were listed). Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F13**, which Phase 2's open resize-profile task claims (it was
+written down as `F11`, then as `F12`, before the entries ahead of it existed; IDs
+go in the order findings are recorded, not in the order tasks were listed). Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -1038,3 +1038,142 @@ globally.
     feed path or the browse path, which is what `D3`'s success criterion exists for.
 - Next action: `D5` selects a representation on this evidence and states the risks
   its experiment must watch.
+
+### F12 -- retained rows are printed contiguously, so `contentIdentity` costs 8 bytes rather than 4 per cell; the corrected table keeps C6 and cuts its yield from 16.1x to 14.1x
+
+- Status: recorded, and it closes `PR1`, the evidence-only Phase 0 the C6 plan was
+  sent back for. It corrects a pricing omission that reached `F11` and `D5`; the
+  representation selection it feeds is `D6`'s. No engine packing code exists.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `c656dfc` plus the probe extension and pricing
+  correction recorded with this finding. Release configuration, headless. Every
+  number at or after the evidence floor `dd51a12`.
+- Why it exists: plan review found that
+  `scripts/terminal-retained-row-shape.py#pack_stride_runs_exceptions` charged
+  `wide + multiScalar` only. Hyperlink cells were named in C6's design and charged
+  nowhere, and **no** candidate charged `contentIdentity` at all -- on the strength
+  of a docstring claiming a retained cell's `contentIdentity` "has no reader here".
+  That claim is false: `Terminal.swift#activationIdentity` takes a max over a
+  `ProjectionRows` range, and `ProjectionRows` indexes scrollback before live, so
+  link activation reads the field out of history. Every candidate in `F11` was
+  therefore priced against incomplete storage, and `D5`'s 114.5-against-123.3 B/row
+  margin was undecided rather than narrow.
+- Method: the shape probe gains one axis, `contentIdentityRunCounts` /
+  `identifiedCellCounts`, read through a new **read-only** row-scoped accessor
+  (`Terminal.scrollbackRowContentIdentityShape(at:)`). Row-scoped rather than a
+  field on `TerminalCell`: per
+  [`docs/design/2026-07-29-cross-module-value-dispatch.md`](../../design/2026-07-29-cross-module-value-dispatch.md),
+  widening a hot value type that crosses a target boundary is the mechanism to
+  avoid at design time, and the accessor keeps the per-cell walk inside
+  `TerminalCore`. `TerminalCell`'s layout was measured before and after and is
+  unchanged (stride 72, size 72, align 8), so this is instrument, not
+  representation. `just test` passes (70 steps).
+
+#### Observation 1 -- `contentIdentity` is allocated per printed cell, not per link run
+
+`Terminal.swift#allocateContentIdentity` is called from `printNarrow` and
+`printWide` -- every printed cell -- and its own doc comment says so: "One identity
+per printed cell means 32 bits is a few minutes of maximal output." So the field is
+a **uniquely valued 4-byte quantity on every content cell**, not sparse link
+metadata. Preserved naively that is 4 bytes against C6's 1-byte modal scalar slot,
+which would be more than the payload it decorates.
+
+But the counter increments by exactly one in print order, and `printWide` stamps a
+head and its tail with a single identity. A row printed left to right therefore
+holds an arithmetic sequence, which a per-run base plus extent encodes in 8 bytes
+however long the row is. A row assembled by cursor moves, overwrites, or insert
+mode fragments into several runs and converges on the per-cell cost. **Which price
+a packed row pays is a property of recorded content, not of the design** -- so both
+were charged and the measurement selects.
+
+#### Observation 2 -- recorded content is overwhelmingly contiguous
+
+| pool | rows | single-run rows | identity runs/row |
+| --- | ---: | ---: | ---: |
+| `reference/scrollback-plain` (CRLF) | 5,799 | **100.00%** | 1.000 |
+| recordings (single pass) | 133 | 87.97% | 1.13 |
+| **saturated replays** | 94,990 | **85.14%** | **1.20** |
+
+`F11` inferred this from the other side -- TUI-painted rows largely do not reach
+scrollback, because TUIs paint in place and nothing scrolls off -- and never
+measured it. It is now measured, and the inference holds: the fragmenting
+constructs are concentrated in exactly the content that stays on screen. The run
+variant is the one recorded content actually pays.
+
+The instrument can report the opposite: a row built with a cursor jump comes back
+as two runs, and a row whose cells are all identified but issued out of column
+order comes back as more than one. Both are pinned by unit tests, because a reader
+that returned one run for every row would make this fraction 1.0 by construction
+and price the cheap variant into existence.
+
+#### Observation 3 -- the corrected table, both variants
+
+Every candidate now carries what none of them encode in their cells: 4 B per
+hyperlink cell (2 B column + 2 B `HyperlinkId`), and `contentIdentity` under either
+variant. C6's exception entries are also per kind rather than a uniform 3 B -- a
+multi-scalar entry additionally carries the reference that reaches its spill
+allocation.
+
+Saturated pool, current cost 1,076.9 B/row (9,736 rows at 10 MiB):
+
+| candidate | `F11` (uncharged) | corrected, run-encoded | corrected, per-cell floor |
+| --- | ---: | ---: | ---: |
+| C1 | 304.6 | 317.5 | 435.2 |
+| C2 | 225.0 | 233.9 | 351.6 |
+| C3 | 123.3 | 137.4 | 256.1 |
+| C4 | 122.2 | 129.8 | 249.2 |
+| C5 | 143.9 | 158.0 | 277.8 |
+| **C6** | **114.5** | **121.5** | **238.4** |
+
+`F8`'s CRLF reference payload, current cost 1,808.0 B/row (5,799 rows), which is
+the headline the plan quotes:
+
+| candidate | `F11` (uncharged) | corrected, run-encoded | corrected, per-cell floor |
+| --- | ---: | ---: | ---: |
+| C3 | 160.0 | 176.0 | 400.0 |
+| **C6** | **112.0** | **128.0** | **336.0** |
+| C6 depth at 10 MiB | 93,622 (16.14x) | **81,920 (14.12x)** | 31,207 (5.38x) |
+
+#### Observation 4 -- the selection survives, and survives under both variants
+
+C6 remains cheapest on the saturated pool and on the CRLF reference payload under
+**both** identity variants. That is the load-bearing result: the ranking does not
+depend on how the adjudication came out, only the headline does. The C6-against-C3
+margin widened rather than narrowed -- 8.8 B/row uncharged, 15.9 B/row corrected on
+the saturated pool, 48.0 B/row on the reference payload -- because the metadata
+charge is a constant per row that C3's larger payload cannot amortize.
+
+- Inference for `D6`: preserve every field; charge `contentIdentity` run-encoded
+  with a per-cell fallback; select C6. `D5`'s selection stands and its yield
+  figures do not.
+- Competing interpretation, checked rather than argued: on the "benchmark +
+  recordings" pool C3 is cheaper than C6 (301.5 against 372.3 B/row). That
+  inversion is **pre-existing, not caused by this correction** -- under `F11`'s own
+  uncharged pricing the same pool reads 290.5 against 363.3. It is the
+  `unicode-wrapping` failure mode `F11` observation 6 already named, concentrated:
+  that pool is 28.8% multi-scalar rows, and C6 promotes a whole row to a wider
+  stride for one wide scalar. Neither `F11` nor `D5` headlined that pool, and this
+  finding does not either.
+- Confidence check on the reconstruction: re-running the *old* pricing against
+  these same rows reproduces `D5`'s published 123.3 and 114.5 B/row exactly, so the
+  before/after comparison above is a like-for-like difference in accounting rather
+  than in corpus, geometry, or method.
+- Uncertainty, stated plainly:
+  - **The encoding widths are proposals.** 4 B per hyperlink entry and 8 B per
+    identity run are the honest shapes of the fields, but no encoder exists; a real
+    implementation may find a cheaper packing or discover it needs more. The charge
+    is deliberately not optimistic, and the floor variant bounds how wrong it can
+    be in the expensive direction.
+  - **`isSoftWrapped` and `semanticPrompt` are not charged separately.** They live
+    in the `GridRow` slot every candidate already pays for, identically, so they
+    cancel in the comparison. That is an accounting decision, not an omission --
+    `D6` records it as one.
+  - **The single-run fraction is a corpus property.** 85.14% at depth is measured
+    over committed content replayed to saturation; a user whose sessions are
+    dominated by cursor-addressed line editing would sit lower. The floor variant
+    is what that user's C6 would cost, and it still selects C6.
+  - Everything here is arithmetic over measured rows. No packing exists, so nothing
+    here says what C6 costs the feed path or the browse path -- which is what
+    `D3`'s success criterion exists for.
+- Next action: `D6` records the field adjudications and the selection; the plan's
+  yield and depth figures are restated against this table.

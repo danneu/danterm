@@ -1,10 +1,11 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D6**, which the remaining Phase 3 direction gate in
+Next free ID: **D7**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
-on the H3-vs-H4 direction, `D4` on rejecting H2, and `D5` on selecting H3's
-packing representation. IDs are allocated in the order entries are written, not
-reserved in advance -- the H5 gate moved from `D5` to `D6` for that reason.
+on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
+representation, and `D6` on correcting its pricing. IDs are allocated in the order
+entries are written, not reserved in advance -- the H5 gate has now moved from
+`D5` to `D6` to `D7` for that reason.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -657,3 +658,84 @@ that is a decision to make on post-landing evidence rather than here.
   `just terminal-retained-row-probe "--saturated"` at this commit, per stimulus and
   pooled. The verification plan for the work this entry authorizes is `D3`'s
   success criterion, unchanged, plus the falsification checks listed above.
+
+### D6 -- every retained-row field is preserved, `contentIdentity` run-encoded; C6 stands as the selection on corrected pricing
+
+- Status: **decided, and it closes `PR1`.** It records what a packed retained row
+  must preserve, how each field is charged, and which representation the corrected
+  table selects. It **supersedes `D5`'s pricing**, not `D5`'s selection: the
+  representation is unchanged and the yield figures are restated. Phase 1 of
+  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  may begin. No engine packing code exists; the only engine change is a read-only
+  measurement accessor.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Evidence used: `F12` (the contiguity measurement and the corrected table -- the
+  whole basis of this entry), `F11` (composition at depth), `F8`/`F9`/`F10` (the
+  charge model, the 1,808 B content row, the bucket step), `D3` (the admission test
+  and the success criterion), `D5` (the representation this entry re-prices).
+
+#### What a retained row must preserve, field by field
+
+`D5` selected a representation without an inventory, which is how a field with a
+real reader came to be charged nowhere. The inventory is the entry's first output.
+
+| field | width | adjudication | charged as |
+| --- | --- | --- | --- |
+| `GridCell.scalars` | 1-4 B, or spill | preserved | per-row fixed-stride scalar column; multi-scalar cells spill, as today |
+| `GridCell.kind` | tag | preserved | free for padding (a zero slot *is* "never written"); wide geometry takes an exception entry |
+| `GridCell.styleId` | 4 B | preserved | run-length style table, 6 B/run |
+| `GridCell.hyperlinkId` | 2 B | preserved | 4 B side-table entry per hyperlink cell (2 B column + 2 B id) |
+| `GridCell.contentIdentity` | 4 B | **preserved, run-encoded** | 8 B per contiguous run (4 B base + 2 B start column + 2 B extent), capped at 4 B/cell |
+| `GridRow.isSoftWrapped` | 1 bit | preserved, unchanged | already inside the `GridRow` slot every candidate pays |
+| `GridRow.semanticPrompt` | tag | preserved, unchanged | as above |
+
+**Nothing is dropped.** The one field where a drop was arguable is
+`contentIdentity`, and it is closed rather than open: `activationIdentity` reads
+zero as "this run has no identity", so dropping it would silently stop adjudicating
+links that live in scrollback. No reader tolerates that, which makes it an `I3`
+violation rather than a trade; `linkArmTracksRunIdentity` pins the adjacent case.
+
+The last two rows are an accounting decision worth stating: they are identical
+across all six candidates and inside a cost every candidate already pays, so they
+cancel in the comparison. Charging them would move every row of the table by the
+same amount and change nothing.
+
+#### The selection: C6, unchanged, on numbers that changed
+
+C6 is cheapest on the saturated pool (121.5 B/row against C3's 137.4) and on `F8`'s
+CRLF reference payload (128.0 against 176.0), **under both identity variants**. The
+selection therefore never depended on how the `contentIdentity` adjudication came
+out -- only the headline did. That is a stronger result than `D5` had: `D5` picked
+C6 on an 8.8 B/row margin computed without the metadata; the corrected margin is
+15.9 B/row on the same pool and 48.0 B/row on the reference payload.
+
+`D5`'s reasoning for C6 over C3 is untouched by this entry and remains the reason:
+at 0.903 UTF-8 bytes per stored cell the text form buys nothing in bytes, so the
+tiebreak is that C6's column read is a multiplication and C3's is a scan.
+
+#### What this supersedes
+
+- **`D5`'s 114.5 B/row and 9.41x depth are withdrawn.** The corrected figures are
+  **121.5 B/row and 8.86x** on the saturated pool, and **128.0 B/row and 14.12x**
+  (81,920 rows at 10 MiB) on the CRLF reference payload that the plan headlines --
+  down from 112.0 B/row and 16.14x.
+- **`D5`'s claim that a retained cell's `contentIdentity` has no reader is
+  withdrawn**, along with the C1 docstring it came from. It has a reader:
+  `activationIdentity`, over a `ProjectionRows` range that spans retained rows.
+- `D5`'s `H4` composition still holds and is re-priced with it: C6 + `H4` is
+  **81.0 B/row, 129,453 rows** on the reference payload.
+
+#### What is not decided here
+
+The resize question. Depth still rises by roughly an order of magnitude at the same
+budget, so reflow still processes far more retained rows than `F7` measured, and
+gate item 6 of the plan -- convert `F7`'s probe to a two-armed comparison and
+*decide* it -- is untouched by this entry. If anything the corrected depth makes it
+marginally less severe (14.1x rather than 16.1x), which is not a reason to soften
+the gate.
+
+- Reopening condition: a measured single-run fraction materially below `F12`'s
+  85.14% on content that reaches depth -- which would push C6 toward the per-cell
+  floor (238.4 B/row saturated, 336.0 B/row reference) and make the `H4`
+  composition, not the packing, the larger remaining win. C6 would still be the
+  selection; the plan's expected yield would not survive.

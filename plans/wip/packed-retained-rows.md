@@ -22,7 +22,7 @@ browsing path.
 - **A packing scheme must shrink a row's request by more than one ~12.5% bucket
   step** or the saving can round back to zero (`F10`, adopted by `D3` as a
   design admission test). C6 clears it at 100% of rows in the committed corpus,
-  on pre-`PR1` pricing.
+  on `D6`'s corrected pricing.
 - **Content composition at depth** (`F11`, 94,990 rows): 22.54% of stored cells
   styled but only **1.66 style runs per mean row**; 0.119% multi-scalar; 1.32%
   of scalars non-ASCII at **0.903 UTF-8 bytes per stored cell**; 0.37% carrying
@@ -43,19 +43,28 @@ representation is chosen -- `I5`, PO3, and PO5 name a slot/run/exception shape
 and would be restated in the chosen form, but their contracts (no row scan on a
 random read, metadata survives every path, the win is measured) do not change.
 
-**Not decided:** *which* representation. `D5` selected C6, but on pricing that
-omits required metadata (Phase 0 below), so that selection is a **standing
-candidate**, not a decision. Phase 0's output is the decision.
+**Decided by Phase 0, which has run.** `D5` selected C6 on pricing that omitted
+required metadata, so that selection was a standing candidate. `PR1` corrected the
+accounting and re-selected: `F12`/`D6` keep **C6**, and keep it under *both*
+`contentIdentity` variants, so the selection never depended on how that
+adjudication came out. The yield did, and is restated below.
 
-This plan is therefore two phases with a hard boundary. **Phase 0 is
-evidence-only** -- no engine code -- and ends when the corrected pricing and the
-selected representation are recorded in a `D` entry. **Phase 1 implements the
-selected representation.** Everything in Phase 1 below is written against C6 as
-the standing candidate; if Phase 0 selects otherwise, Phase 1's representation
-shape, expected yield, feed prediction, rejected ideas, and `H4` composition are
-rewritten and re-reviewed before implementation begins.
+This plan is therefore two phases with a hard boundary. **Phase 0 was
+evidence-only** -- no engine code -- and closed when the corrected pricing and the
+selected representation were recorded in `D6`. **Phase 1 implements the selected
+representation**, and may begin.
 
-## Phase 0 -- complete the metadata accounting and select the representation
+## Phase 0 -- complete the metadata accounting and select the representation (CLOSED by `F12`/`D6`)
+
+**Outcome.** Every field is preserved and none dropped; `contentIdentity` is
+charged per contiguous run, because `F12` measured **85.14%** of retained rows at
+depth (and 100% of the CRLF reference payload) as printed contiguously. C6 remains
+cheapest on both headline pools under both variants, and the C6-against-C3 margin
+widened from 8.8 to 15.9 B/row on the saturated pool. `D6` carries the field-by-
+field adjudication table and supersedes `D5`'s byte figures.
+
+The rest of this section is the specification `PR1` ran against, kept because the
+reasoning is what makes the corrected table auditable.
 
 `D5` priced C6 from `scripts/terminal-retained-row-shape.py#pack_stride_runs_exceptions`,
 which charges `wide + multiScalar` only. Hyperlink cells are named in the design
@@ -63,8 +72,8 @@ and charged nowhere. And `pack_narrow_cell`'s premise that a retained cell's
 `contentIdentity` "has no reader here" is wrong:
 `Terminal.swift#activationIdentity` takes `max(contentIdentity)` over a
 `ProjectionRows` range, which spans retained rows, so safe link activation reads
-it out of history. Every candidate is therefore priced against incomplete
-storage, and C6's 114.5 B/row against C3's 123.3 is not yet a decided margin.
+it out of history. Every candidate was therefore priced against incomplete
+storage, and C6's 114.5 B/row against C3's 123.3 was not a decided margin.
 
 The stakes are not rounding: `contentIdentity` is allocated **once per printed
 cell** (`Terminal.swift#allocateContentIdentity`, called from both print paths),
@@ -131,21 +140,15 @@ that tolerates it, and `linkArmTracksRunIdentity` already pins the adjacent case
 6. **Re-run** `just terminal-retained-row-probe "--saturated"` and select from
    the corrected table.
 
-**Phase 0 exits** when the corrected per-candidate table under both
+**Phase 0 exited** when the corrected per-candidate table under both
 `contentIdentity` variants, the measured single-run fraction that selects between
-them, step 2's field adjudications, and the selected representation are recorded
-in a `D` entry in
-`docs/research/28-retained-row-optimizations/decisions.md` -- which also
-supersedes `D5`'s uncorrected 114.5 B/row figure and its claim that a retained
-cell's `contentIdentity` has no reader. Phase 1 does not begin before that entry
-exists.
-
-Until it does, every byte figure in Phase 1 is provisional.
+them, step 2's field adjudications, and the selected representation were recorded
+in `D6` -- which also supersedes `D5`'s uncorrected 114.5 B/row figure and its
+claim that a retained cell's `contentIdentity` has no reader.
 
 ## Phase 1 -- implement the selected representation
 
-Written against C6, the standing candidate. A different Phase 0 selection
-rewrites this section before implementation.
+Written against C6, which `D6` confirmed as the selection.
 
 A retained row stores three things:
 
@@ -163,8 +166,9 @@ A retained row stores three things:
   3 bytes**: a column plus a kind tag covers wide-cell geometry, but a
   multi-scalar entry must carry its spill reference and a hyperlink entry must
   carry the `HyperlinkId` that resolves its target. `PR1` fixes the encoding.
-- **A `contentIdentity` encoding**, in whichever of `PR1`'s two variants the
-  measured contiguity selects. It is not droppable (`I3`).
+- **A `contentIdentity` encoding**: per contiguous run (`D6`), with a per-cell
+  fallback for a row whose run table would outgrow its cells. It is not droppable
+  (`I3`).
 
 **Why this shape and not the two obvious alternatives** -- both were priced, and
 the reasoning is what the plan must preserve:
@@ -180,14 +184,14 @@ the reasoning is what the plan must preserve:
   read. `retained-browse` is the guard `D3` named as most likely to fire.
 - **Not a narrower cell** (`C1`/`C2`), though it is the smallest change. It
   leaves a style id on every cell, which 1.66 style runs per row says is
-  redundant almost everywhere: 3.54x depth against C6's 9.41x, for a design
+  redundant almost everywhere: 3.39x depth against C6's 8.86x, for a design
   simpler by roughly one table.
 
 ### Sequencing -- two separately measured steps
 
 1. **C6 lands first and is measured alone**, against the full gate below.
 2. **`H4` (aggregate storage for the packed payload) is a second, separately
-   measured step.** Packing shrinks the payload ~16x while the fixed per-row
+   measured step.** Packing shrinks the payload ~14x while the fixed per-row
    cost does not move, so `F8`'s 89.5/10.5 split inverts to roughly **50/50**
    after C6 -- which is what earns `H4` the composition `D3` left it alive for,
    worth a further ~36%.
@@ -201,20 +205,31 @@ This ordering is a contract, not a preference: landing both at once makes an
 The headline figure is `F8`'s payload, `reference/scrollback-plain`, which is
 **CRLF content**:
 
-| quantity | now | C6 |
-| --- | ---: | ---: |
-| charge per retained row | 1,808.0 B | **112.0 B** |
-| retained rows at 10 MiB | 5,799 | **93,622** |
-| depth multiple | 1.00x | **16.14x** |
+Priced on `D6`'s corrected accounting, which charges every field a retained row
+must preserve. `D5`'s uncorrected figures are shown beside them because the plan
+quoted them before `PR1` ran.
+
+| quantity | now | C6 (`D6`) | C6 as `D5` had it |
+| --- | ---: | ---: | ---: |
+| charge per retained row | 1,808.0 B | **128.0 B** | 112.0 B |
+| retained rows at 10 MiB | 5,799 | **81,920** | 93,622 |
+| depth multiple | 1.00x | **14.12x** | 16.14x |
 
 Identical at both 179x66 and 80x24 -- content-sized rows already made depth
 width-independent, and `F11` re-measured that rather than assuming it.
 
 A secondary mixed-content estimate across the saturated pool is
-**1,076.9 -> 114.5 B/row (89.4%, 9.41x)**, per-stimulus ranging from 65.7% to
-93.8%. It is secondary on purpose: `F11` records that the pool's *mix* is an
-artifact of which recordings repeat well (`alacritty/history` alone contributes
-40,772 of 94,990 rows at 4.7 stored cells per row).
+**1,076.9 -> 121.5 B/row (88.7%, 8.86x)**. It is secondary on purpose: `F11`
+records that the pool's *mix* is an artifact of which recordings repeat well
+(`alacritty/history` alone contributes 40,772 of 94,990 rows at 4.7 stored cells
+per row).
+
+**The floor these figures sit above.** `D6` charges `contentIdentity` per
+contiguous run because `F12` measured 85.14% of retained rows at depth (100% of
+the CRLF payload) as printed contiguously. On content that fragments, C6 pays the
+per-cell floor instead: **336.0 B/row and 5.38x** on the reference payload,
+238.4 B/row on the saturated pool. C6 is still the cheapest candidate there -- the
+selection does not depend on the contiguity, only the yield does.
 
 **Pricing honesty (`F11`'s staircase caveat).** `benchmark/scrollback-stream`
 and `benchmark/unicode-wrapping` emit bare LF with no CR, so rows accumulate
@@ -226,9 +241,13 @@ this plan may rest on those two stimuli.**
 
 ### Predicted feed effect, stated so the screening check is decidable
 
-**Predicted: ~+1% slower, bounded at +2%.** Packing happens where trimming
-already happens -- at admission -- and adds one classification pass over each
-admitted row's stored prefix (widest scalar, style runs, exceptions). That is
+**Predicted: ~+1% slower, bounded at +2%.** Unchanged by `D6`: the corrected
+encoding adds an identity-contiguity check to the same per-cell walk the
+classification pass already makes, which does not change its order of magnitude.
+
+Packing happens where trimming already happens -- at admission -- and adds one
+classification pass over each admitted row's stored prefix (widest scalar, style
+runs, exceptions, identity runs). That is
 the same *kind* of work canonical trimming added, which `F1` bounded across four
 schedules at a ~+1% point estimate and no more than ~2.5%. It is partially
 offset by allocating and writing ~112 B where the current path allocates and
@@ -352,7 +371,7 @@ stated threshold and a named consequence.
   slot + style run + exception measurably costs more than a struct load -- `I5`'s
   logarithmic term swamping the O(1) one -- C6's whole advantage over the text
   form evaporates and the choice reopens toward `C1`/`C2`, which keep a real cell
-  and give up 3.54x instead of 9.41x.
+  and give up 3.39x instead of 8.86x.
 - **Rows carrying many style runs.** The selection rests on 1.66 runs per row.
   Above roughly **8 runs per mean row** at depth, the style table stops being
   nearly free and `C1`'s per-cell style id becomes competitive again.
@@ -393,7 +412,7 @@ checks; the measured-yield obligation (PO6) is the deciding run and comes last.
 - Changing the live grid's `GridCell` (doc 16's closure).
 - `H2` blank-row sharing -- rejected in `D4` on sizing; nothing blank-related
   composes in.
-- `H5`, a compressed ancient tier -- gated on `D6`, and after a 9.41x depth
+- `H5`, a compressed ancient tier -- gated on `D7`, and after an 8.86x depth
   improvement very likely dead on sizing.
 - Renderer measurement, which belongs to doc 18.
 
@@ -411,14 +430,17 @@ checks; the measured-yield obligation (PO6) is the deciding run and comes last.
 
 ## Rejected ideas
 
-`RI1` and `RI2` are rejections *relative to C6* on pre-`PR1` pricing. Phase 0 may
-overturn either; nothing else here depends on the representation.
+`RI1` and `RI2` are rejections *relative to C6*, re-confirmed on `D6`'s corrected
+pricing -- the metadata charge is a per-row constant that C3's larger payload
+cannot amortize, so correcting it widened both margins rather than narrowing them.
 
 - **RI1 -- a UTF-8 text form for the scalar payload.** Same bytes at 0.903 UTF-8
-  bytes per cell, dearer on the saturated pool, and it makes a column read a
-  scan. Reopens only if depth content turns out mostly non-ASCII.
+  bytes per cell, dearer on the saturated pool (137.4 against 121.5 B/row), and it
+  makes a column read a scan. Reopens only if depth content turns out mostly
+  non-ASCII -- which is the one pool where it does win, and which `F11` and `D6`
+  both decline to headline for the reason `AR2` states.
 - **RI2 -- a narrower fixed cell keeping a per-cell style id.** 1.66 style runs
-  per row makes the per-cell field redundant; 3.54x against 9.41x.
+  per row makes the per-cell field redundant; 3.39x against 8.86x.
 - **RI3 -- landing `H4`'s aggregate storage together with C6.** Makes an
   expected `inconclusive` browsing result unattributable.
 
