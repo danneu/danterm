@@ -39,6 +39,7 @@ let package = Package(
                 .product(name: "TerminalRenderExecution", package: "TerminalCore"),
                 .product(name: "TerminalBenchmarkMarkers", package: "TerminalCore"),
                 .product(name: "TerminalBenchmarkTopology", package: "TerminalCore"),
+                .product(name: "TerminalBenchmarkCoverage", package: "TerminalCore"),
             ],
             path: "app",
             exclude: ["Info.plist"],

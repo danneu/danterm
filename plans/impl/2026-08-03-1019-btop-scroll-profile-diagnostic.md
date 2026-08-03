@@ -174,7 +174,7 @@ rejected.
 
 ## Commit progress
 - [x] 1. feat(benchmark): add a held-arrow stimulus with measured overlap
-- [ ] 2. feat(benchmark): publish foreground and presentation coverage
+- [x] 2. feat(benchmark): publish foreground and presentation coverage
 - [ ] 3. feat(benchmark): add btop workload identity and coverage artifacts
 - [ ] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
 - [ ] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
@@ -199,6 +199,23 @@ rejected.
   required `profiler_timeout_seconds`. I5 asks that every exit release the key,
   and an unbounded wait on a wedged profiler is not an exit at all: it holds an
   arrow down in the operator's live session indefinitely.
+
+- **Coverage counting is its own module (commit 2).** The counting rules went
+  into a new `TerminalBenchmarkCoverage` target rather than into
+  `TerminalBenchmarkTopology`, whose file header scopes it to sparse-span damage
+  topology. Same split as commit 1: the pure counters are headlessly tested, and
+  the app-side observer keeps only the two AppKit probes
+  (`NSApplication.shared.isActive` and the existing full window-presentation
+  check) that produce the booleans.
+- **Three cumulative counters, not a lapse flag (commit 2).** The activity
+  snapshot publishes lifetime `sampleCount`, `foregroundSampleCount`, and
+  `presentedSampleCount`; a bounded capture differences two snapshots, so a
+  lapse inside the measured interval shows up as a foreground/presented delta
+  short of the sample delta, and an interval nobody sampled shows up as a zero
+  sample delta. The `presentationCoverage` key is omitted entirely when no state
+  recorder exists to feed it, so "not measured" never renders as clean zeros.
+  The activity snapshot's `schemaVersion` moved to 2 for the added vocabulary;
+  nothing currently reads that field.
 
 ## Implementation discretion
 

@@ -2,6 +2,7 @@
 // It resizes the window to a requested grid, then observes the exact Swift frame
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
+import TerminalBenchmarkCoverage
 import TerminalBenchmarkMarkers
 import TerminalBenchmarkTopology
 import TerminalCore
@@ -118,6 +119,18 @@ final class TerminalBenchmarkStateRecorder {
               screenVisibleFrame.contains(window.frame)
         else { return false }
         return true
+    }
+
+    /// Samples the two conditions a profiled input-driven workload must hold for:
+    /// this app is the frontmost one, and its window is really on screen.
+    ///
+    /// Exposed from here rather than re-probed by the activity publisher because
+    /// this type already owns the window and the full presentation check. The
+    /// caller runs on the 100 ms publish cadence, not per draw, so the
+    /// WindowServer round-trip inside `isWindowVisible()` -- the reason
+    /// `observeDrawState()` uses the cheaper local check -- costs nothing here.
+    func presentationCoverageSample() -> (isForeground: Bool, isPresented: Bool) {
+        (NSApplication.shared.isActive, isWindowVisible())
     }
 
     private func isWindowVisible() -> Bool {
@@ -324,6 +337,11 @@ final class TerminalBenchmarkObserver {
     private var observedFullDamageCount = 0
     private var observedDirtyRectFallbackCount = 0
     private var lastActivityWriteNanoseconds: UInt64 = 0
+    /// Lifetime foreground/presentation samples, taken on the activity publish
+    /// cadence so a profiling window can be shown to have been attributable.
+    /// Published only when a state recorder exists to produce the samples --
+    /// counters nobody fed would report an unsampled run as a clean one.
+    private var presentationCoverage = TerminalBenchmarkPresentationCoverageRecorder()
     private weak var measuredController: TerminalPaneSessionController?
     private var fenceBlockPolicy = TerminalPaneFenceBlockPolicy()
     /// Retained for the lifetime of the observer, not built per frame: it holds
@@ -723,7 +741,9 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Republishes the lifetime counters, at most every 100 ms, so a profiling
-    /// window can be converted into a draw count.
+    /// window can be converted into a draw count -- and takes one
+    /// foreground/presentation sample per publish, so the same window can be
+    /// shown to have been attributable to this app at all.
     ///
     /// Each snapshot carries its own clock reading rather than relying on a fixed
     /// publish cadence: the reader differences two snapshots' (count, clock)
@@ -739,8 +759,15 @@ final class TerminalBenchmarkObserver {
         let now = DispatchTime.now().uptimeNanoseconds
         guard now - lastActivityWriteNanoseconds >= 100_000_000 else { return }
         lastActivityWriteNanoseconds = now
-        let object: [String: Any] = [
-            "schemaVersion": 1,
+        if let stateRecorder {
+            let sample = stateRecorder.presentationCoverageSample()
+            presentationCoverage.record(
+                isForeground: sample.isForeground,
+                isPresented: sample.isPresented
+            )
+        }
+        var object: [String: Any] = [
+            "schemaVersion": 2,
             "clock": "dispatch-uptime-nanoseconds",
             "uptimeNanoseconds": now,
             "drawCount": observedDrawCount,
@@ -760,6 +787,13 @@ final class TerminalBenchmarkObserver {
                 "dirtyRectFallbackCount": observedDirtyRectFallbackCount,
             ],
         ]
+        // Present only when something sampled it. An absent key says "not
+        // measured", which is the one thing all-zero counters could not say --
+        // and a bounded capture must reject an interval it cannot prove was
+        // attributable rather than read silence as a clean run.
+        if stateRecorder != nil {
+            object["presentationCoverage"] = presentationCoverage.artifact()
+        }
         guard let data = try? JSONSerialization.data(
             withJSONObject: object,
             options: [.sortedKeys]
