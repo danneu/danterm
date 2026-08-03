@@ -18,6 +18,7 @@ let package = Package(
         .executable(name: "GlyphPreview", targets: ["GlyphPreview"]),
         .executable(name: "TerminalMemoryProbe", targets: ["TerminalMemoryProbe"]),
         .executable(name: "TerminalOccupancyProbe", targets: ["TerminalOccupancyProbe"]),
+        .executable(name: "TerminalBrowseBenchmark", targets: ["TerminalBrowseBenchmark"]),
     ],
     targets: [
         .target(
@@ -104,6 +105,18 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
+            name: "TerminalBrowseBenchmark",
+            dependencies: ["TerminalBrowseBenchmarkSupport"],
+            path: "Sources/TerminalBrowseBenchmark",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalBrowseBenchmarkSupport",
+            dependencies: ["TerminalCore", "TerminalRenderPlanning"],
+            path: "Sources/TerminalBrowseBenchmarkSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
             name: "GlyphPreview",
             dependencies: ["TerminalCore", "TerminalRenderPlanning", "TerminalRenderExecution"],
             path: "Sources/GlyphPreview",
@@ -148,6 +161,14 @@ let package = Package(
             name: "TerminalBenchmarkMarkersTests",
             dependencies: ["TerminalBenchmarkMarkers", "TerminalCore", "TerminalRenderPlanning"],
             path: "Tests/TerminalBenchmarkMarkersTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalBrowseBenchmarkSupportTests",
+            dependencies: [
+                "TerminalBrowseBenchmarkSupport", "TerminalCore", "TerminalRenderPlanning",
+            ],
+            path: "Tests/TerminalBrowseBenchmarkSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

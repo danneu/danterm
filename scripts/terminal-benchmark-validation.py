@@ -30,7 +30,14 @@ CANDIDATE_WORKLOADS = (
     "synchronized-frames",
     "sparse-spans-few",
     "sparse-spans-max",
+    "retained-browse",
 )
+# The browsing stimulus's frozen identity, named beside the workload registries
+# rather than at the runner because the collector validates the same string the
+# Swift harness claims: an arm that changed the geometry or the line count would
+# have to change this too, so a block collected under an older shape cannot pass
+# as one collected under the current one.
+RETAINED_BROWSE_IDENTITY = "retained-browse-v1-10000-lines-oldest-row-179x66"
 # The two sparse-span workloads' fixture identities, named here rather than at
 # the runner because the collector validates the same string the runner claims.
 # The topology is in the name: an arm that changed the stimulus would have to
@@ -120,6 +127,18 @@ BLOCK_CONTRACTS = {
         "reset": "settled-dense-screen-before-block",
         "engineDamagedRowCount": 17,
         "engineSpanCount": 17,
+    },
+    # The only workload that plans a frame whose rows come out of retained
+    # storage. `28/D1` pitch 1 admitted it because H1/H3/H4/H5 all make browsing
+    # claims and none could previously end in better than the descriptive
+    # anecdote `15/F18` was reduced to. Headless: it plans, never draws.
+    "retained-browse": {
+        "metric": "plan-nanoseconds-per-browsing-frame",
+        "measuredUnit": "full-planFrame-over-retained-history",
+        "measuredFrames": 2000,
+        "warmupFrames": 20,
+        "reset": "fresh-179x66-terminal-parked-at-the-oldest-retained-row",
+        "stimulusIdentity": RETAINED_BROWSE_IDENTITY,
     },
 }
 DECISION_RULES = {
@@ -734,6 +753,108 @@ def make_terminal_feed_runner(arm_roots, framed_fixture):
             ) from error
 
     return run
+
+
+def make_retained_browse_runner(arm_roots, *, measured_count=2000):
+    """Bind physical arms to the headless browsing harness.
+
+    Headless like `terminal-feed` and unlike the four draw workloads: it plans
+    frames and never draws one, so it needs no app, no window, and no
+    WindowServer. That is deliberate -- the quantity `15/F18` measured and this
+    workload resurrects is frame *planning* over retained history, and routing it
+    through a real draw would bury it under compositing it does not care about.
+    """
+    roots = {arm: pathlib.Path(root) for arm, root in arm_roots.items()}
+    if set(roots) != {"a", "b"}:
+        raise ValueError("retained-browse runner requires physical arms a and b")
+
+    def run(arm):
+        if arm not in roots:
+            raise ValueError(f"unknown retained-browse physical arm {arm}")
+        completed = subprocess.run(
+            [
+                "swift", "run",
+                "--package-path", str(roots[arm] / "lib" / "TerminalCore"),
+                "--configuration", "release",
+                "TerminalBrowseBenchmark",
+                "--measured", str(measured_count),
+            ],
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            message = completed.stderr.decode(errors="replace").strip()
+            raise RuntimeError(
+                f"retained-browse arm {arm} benchmark failed: {message}"
+            )
+        try:
+            return json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                f"retained-browse arm {arm} returned invalid JSON"
+            ) from error
+
+    return run
+
+
+def collect_retained_browse(blocks, *, run_benchmark, sample_state):
+    """Collect one browsing-plan series, invalidating on a divergent frame.
+
+    The checksum comparison is the part that matters and the part `15/F18` had to
+    assert by hand: two arms whose plans cover different cell counts did not plan
+    the same frame, so a paired difference between them is not a speed
+    measurement at all. That is an invalidation rather than a warning, because
+    the whole invocation's evidence is worthless if it holds.
+    """
+    if not blocks:
+        raise ValueError("retained-browse collection requires at least one block")
+    raw_blocks = []
+    reasons = []
+    checksums = set()
+    for index, planned in enumerate(blocks):
+        start_state = sample_state()
+        measured = run_benchmark(planned["physicalArm"])
+        completion_state = sample_state()
+        prefix = f"block-{index}"
+        identity = measured.get("stimulusIdentity")
+        if identity != RETAINED_BROWSE_IDENTITY:
+            _append_reason(reasons, f"{prefix}-unexpected-stimulus-{identity}")
+        checksums.add(measured.get("planCellChecksum"))
+        raw_blocks.append({
+            "index": index,
+            **planned,
+            "stimulusIdentity": identity,
+            "retainedRowCount": measured.get("retainedRowCount"),
+            "planCellChecksum": measured.get("planCellChecksum"),
+            "warmupCount": measured.get("warmupCount"),
+            "measuredCount": measured.get("measuredCount"),
+            "planDurationNanoseconds": measured.get("planDurationNanoseconds"),
+            "planNanosecondsPerFrame": measured.get("planNanosecondsPerFrame"),
+            "machineStateSamples": [start_state, completion_state],
+        })
+        if start_state.get("powerSource") != completion_state.get("powerSource"):
+            _append_reason(reasons, f"{prefix}-power-source-changed")
+        elif (
+            start_state.get("powerSource") not in (None, "AC Power")
+            and not _battery_runs_allowed()
+        ):
+            _append_reason(reasons, f"{prefix}-not-on-ac-power")
+        for state in (start_state, completion_state):
+            if state.get("lowPowerMode"):
+                _append_reason(reasons, f"{prefix}-low-power-mode")
+            if state.get("thermalState") not in (None, "nominal"):
+                _append_reason(
+                    reasons,
+                    f"{prefix}-thermal-pressure-{state['thermalState']}",
+                )
+    if len(checksums) > 1:
+        _append_reason(reasons, "arms-planned-different-frames")
+
+    return {
+        "workload": "retained-browse",
+        "rawBlocks": raw_blocks,
+        "valid": not reasons,
+        "invalidationReasons": reasons,
+    }
 
 
 def collect_fixture_replay(blocks, *, workload, fixture_identity, run_block):
@@ -1673,6 +1794,7 @@ def make_production_collectors(
     sample_state,
     load_feed_fixture=terminal_feed_fixture,
     feed_runner_factory=make_terminal_feed_runner,
+    browse_runner_factory=make_retained_browse_runner,
     scrollback_runner_factory=make_scrollback_stream_runner,
     lifecycle_factory=PersistentDrawArms,
     draw_runner_factory=make_persistent_draw_runner,
@@ -1721,6 +1843,13 @@ def make_production_collectors(
                     "terminal-feed"
                 ]["minimumBlockNanoseconds"],
                 run_benchmark=feed_runner,
+                sample_state=sample_state,
+            )
+        if "retained-browse" in plan:
+            browse_runner = browse_runner_factory(arm_roots)
+            collectors["retained-browse"] = lambda blocks: collect_retained_browse(
+                blocks,
+                run_benchmark=browse_runner,
                 sample_state=sample_state,
             )
         for replay_workload, collector in (

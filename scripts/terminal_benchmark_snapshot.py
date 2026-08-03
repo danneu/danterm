@@ -32,6 +32,11 @@ IGNORED_PREREQUISITES = ("lib/GhosttyKit.xcframework", "lib/ghostty-themes")
 # the app bundle, so an arm is only fully cached once it is compiled too.
 TERMINAL_FEED_PACKAGE = "lib/TerminalCore"
 TERMINAL_FEED_PRODUCT = "TerminalCoreBenchmark"
+# Every headless product an arm launches out of `lib/TerminalCore` rather than
+# the app bundle. One list because they share a package and a build path: a
+# product missing here compiles inside the timed phase instead of the cache
+# population phase, which charges one arm for a compile the other already paid.
+HEADLESS_PRODUCTS = (TERMINAL_FEED_PRODUCT, "TerminalBrowseBenchmark")
 
 
 def _git(repository_root, *arguments, check=True):
@@ -299,7 +304,8 @@ def build_arm(root):
         "--package-path", str(root / TERMINAL_FEED_PACKAGE),
         "--configuration", CONFIGURATION,
     ]
-    subprocess.run([*feed, "--product", TERMINAL_FEED_PRODUCT], check=True)
+    for product in HEADLESS_PRODUCTS:
+        subprocess.run([*feed, "--product", product], check=True)
     feed_bin_path = pathlib.Path(
         subprocess.run(
             [*feed, "--show-bin-path"], check=True, capture_output=True, text=True
@@ -309,7 +315,7 @@ def build_arm(root):
         bin_path / "DanTerm",
         bin_path / "DanTermCLI",
         bootstrap_bin_path / "PTYSessionBootstrap",
-        feed_bin_path / TERMINAL_FEED_PRODUCT,
+        *(feed_bin_path / product for product in HEADLESS_PRODUCTS),
     ]
 
 
