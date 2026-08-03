@@ -284,6 +284,45 @@ struct TerminalResizeTests {
         #expect(narrower.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: true))
     }
 
+    @Test("a squeezed-out trailing-blank cursor defers its wrap instead of eating a cell")
+    func trailingBlankAnchorDefersWrapWhenContentFillsRow() throws {
+        // Intent: when the cursor rests on the blank just past the end of a line and a
+        //   narrow removes that blank, the cursor keeps meaning "after the text" -- as a
+        //   deferred wrap on the last column -- rather than sliding back onto the last
+        //   character.
+        // Why it exists: the trailing-padding anchor clamps its column to the right margin,
+        //   and when the reflowed content fills the row exactly that clamp lands on
+        //   committed output. Nothing downstream can tell that apart from the cursor
+        //   legitimately sitting there, so the next printed scalar silently destroys a
+        //   character. Sibling anchor tests miss it: they either start from a pending-wrap
+        //   cursor or clamp onto a blank, where the same bug is harmless.
+        // Scenario: found while replaying WezTerm issue 2162 (see
+        //   TerminalWezTermAdaptedTests). Typing at a shell prompt after narrowing the
+        //   window overwrote the final character of the prompt line.
+        var terminal = try #require(Terminal(columns: 20, rows: 4))
+        terminal.feed(Array("some long long text".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 19, isPendingWrap: false))
+
+        terminal.resize(columns: 19, rows: 4)
+
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 18, isPendingWrap: true))
+
+        // The behavioral consequence, and the reason this is a bug rather than a
+        // representation quibble: printing must not overwrite committed output.
+        terminal.feed(Array("X".utf8))
+        #expect(terminal.geometry.rows[0].isSoftWrapped == true)
+        #expect(terminal.fullHistoryText == "some long long textX")
+
+        // A cursor clamped onto a *blank* keeps its plain column, with no deferred wrap:
+        // there is no committed cell to protect, and `trailingPaddingAnchorPreservesDistance`
+        // pins that neighboring case.
+        var padded = try #require(Terminal(columns: 6, rows: 2))
+        padded.feed(Array("ab".utf8))
+        padded.moveCursor(row: 0, column: 5)
+        padded.resize(columns: 4, rows: 2)
+        #expect(padded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+    }
+
     @Test("width shrink uses viewport blanks before displacing content")
     func widthShrinkDoesNotSelfPush() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 3))

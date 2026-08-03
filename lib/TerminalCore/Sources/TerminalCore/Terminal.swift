@@ -4135,10 +4135,25 @@ public struct Terminal: Equatable, Sendable {
                         isPendingWrap: false
                     )
                 } else {
+                    // `contentEnd.column` is one past the line's last committed cell, so the
+                    // cursor wants to sit at `contentEnd.column + distance`. That can land
+                    // past the right margin and has to clamp. Clamping onto a blank is
+                    // harmless, but when the reflowed content fills the row exactly the
+                    // clamp would park the cursor *on* the final character, and the next
+                    // printed scalar would overwrite committed output rather than wrap --
+                    // e.g. 19 columns of text narrowed to a 19-column grid turned the next
+                    // keystroke into "some long long texX".
+                    //
+                    // DanTerm has no one-past-the-end cursor column: everywhere else, "past
+                    // the last cell of a full row" is spelled as the last column plus a
+                    // deferred wrap (`printNarrow` arms `isPendingWrap` instead of moving to
+                    // a column that does not exist). Reflow has to use that same spelling,
+                    // or the distinction is lost in the clamp.
+                    let desired = packed.contentEnd.column + distance
                     cursorDestination = ReflowDestination(
                         row: baseRow + packed.contentEnd.row,
-                        column: min(packed.contentEnd.column + distance, newColumnCount - 1),
-                        isPendingWrap: false
+                        column: min(desired, newColumnCount - 1),
+                        isPendingWrap: distance == 0 && packed.contentEnd.column == newColumnCount
                     )
                 }
             case let .boundary(line, offset) where line == lineIndex:
