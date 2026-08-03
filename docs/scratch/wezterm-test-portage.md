@@ -149,7 +149,10 @@ These are 7-bit ESC forms despite the file name.
 
 ### `selection.rs` -- 5 tests, one composite candidate
 
-- `drag_selection` is a candidate only for its combined pointer-policy shape:
+- `drag_selection` = **adapted** as
+  `TerminalWezTermAdaptedTests#characterDragSnapsWideCellsAndClampsOutOfBounds`,
+  with two policy divergences (wide-tail snapping, off-grid clamping) recorded in
+  its preamble. It was a candidate only for its combined pointer-policy shape:
   reverse drag, a start on a wide tail, multi-line serialization, and a drag
   beyond the viewport. The individual text behaviors are already covered by
   `TerminalSelectionTests`; use the public pointer-decision seam so the adapted
@@ -493,6 +496,34 @@ mapping.
   nor by `trailingPaddingAnchorPreservesDistance`, which only ever narrows.
   Fix not yet attempted -- reflow anchoring is engine behavior, so it is being
   raised before any change is made.
+- 2026-08-03: **candidate 3 fixed** in `Terminal.swift`'s trailing-padding anchor
+  branch, using DanTerm's existing deferred-wrap spelling rather than adopting
+  WezTerm's one-past-end cursor: when the reflowed content fills the row exactly
+  and the squeezed-out blank was the cursor's own cell, the clamped column now
+  carries `isPendingWrap: true`. A native regression test
+  (`TerminalResizeTests#trailingBlankAnchorDefersWrapWhenContentFillsRow`) pins
+  the `some long long textX` oracle directly, and was confirmed to fail without
+  the fix. Full gate green afterward.
+- 2026-08-03: **candidate 2 (`drag_selection`) = adapted, no bug.** Replayed the
+  whole upstream composite through `decideTerminalPointer` (down / move / up at
+  character granularity), asserting both the policy range and `selectedText`.
+  Two legs diverge from WezTerm, both deliberately:
+  (a) a drag anchored on a wide cell's second column selects the whole cluster
+  (`"\u{1F480}skul"`), where WezTerm drops the emoji and yields `"skul"`. Ours is
+  the rule `clusterAtomicity` already pins for every other entry point, and
+  WezTerm's makes a wide character unselectable from its right half.
+  (b) a drag past the last row clamps to the last retained content, where WezTerm
+  picks up the blank row and copies a trailing `"\n"`. Ours is the rule
+  `a stripped trailing blank endpoint clamps to retained content` already states.
+  Neither panics, which is what the upstream case is actually guarding.
+  Non-tautology: the off-grid legs discriminate -- dropping the row clamp in
+  `normalizedCellPosition` traps on "Index out of range" here while all of
+  TerminalInteractionPolicyTests, TerminalSelectionTests,
+  TerminalSelectionUnitTests, and TerminalHyperlinkInteractionTests still pass.
+  The wide-cell legs do **not** discriminate and the preamble says so: snapping
+  is enforced independently at `normalizedCellPosition`, at the drag anchor's
+  pin/resolve round trip, and at `setSelection`, so no single mutation moves
+  them. They are retained as the executable statement of divergence (a).
 
 ## Done condition
 
