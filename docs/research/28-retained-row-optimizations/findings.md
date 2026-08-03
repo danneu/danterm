@@ -1,6 +1,6 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F6**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F8**. Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -451,3 +451,136 @@ cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
   the conservative envelope across both, move `retained-browse` from
   `CANDIDATE_WORKLOADS` into `WORKLOADS`, and add its rule to `DECISION_RULES`.
   Only then can `H1`, `H3`, `H4`, and `H5` end in a verdict.
+
+### F6 -- screen 2 replicates, quieter than screen 1, and the browsing workload graduates
+
+- Status: recorded. This is the second independent screen `D1` pitch 1 required,
+  and it clears the gate. The freeze itself is `D2`; this entry is the evidence
+  under it.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: screened at tree
+  `19442eaf843050b060d0f5011109417c25a6cd79`, whose base is `e036521` (the
+  preflight-annotation commit). Both physical arms bound to that one immutable
+  root, so every measured difference is noise by construction. Screen 1 ran at
+  tree `8eca2daf7b09` (`415fbd1`).
+- Independence, stated because it is the whole claim: a **separate invocation**,
+  at a different tree, 16 minutes later, after the host had been allowed to
+  settle back to its floor. That is the standard `20/F11`'s replicating screens
+  2 and 3 met -- separate invocations on one machine, trees differing only in
+  script-level code the measured binary does not contain. It is not a different
+  machine or a different day, and the Uncertainty bullet below says so.
+- Conditions, and this is the **preflight's first real consumer**: the screen now
+  records them itself rather than leaving them to prose. At invocation, load
+  2.22/3.81/3.76 (0.22 per processor across 10), busiest external `claude` 18.8%,
+  `node` 13.1%, `com.apple.DriverKit-AppleBCMWLAN` 12.0%. Before the first block,
+  load 2.28/3.48/3.63, busiest external `claude` 7.7%. Both readings sit within
+  0.2 of the ~2.4 floor `F3` established for this machine. AC power, 100%,
+  charged. The readings live in `candidate-screen.json` under `hostConditions`;
+  no threshold was applied to them, per `D1` pitch 4.
+- Method: `scripts/terminal-benchmark-candidate-screen.py --workload
+  retained-browse --revision HEAD`, 12 balanced ABBA/BAAB quartets, 50,000
+  resampling trials per condition, seed 20260730 -- **identical to screen 1**.
+  The seed is deliberately unchanged: a different one would confound "different
+  data" with "different resampling", and the independence being tested is
+  physical collection, not the resampler. **12 of 12 quartets kept, 0 discarded**,
+  as in screen 1.
+- Results, against screen 1:
+
+  | screen | pairs | median | SD | trimmed SD | range | quick | confirm |
+  | --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+  | 1 (`8eca2daf7b09`) | 24 | +0.19% | 0.99% | 0.90% | -1.42 .. +2.00 | 2p @1.05% | 2p @1.05% |
+  | 2 (`19442eaf8430`) | 24 | -0.06% | 0.51% | 0.33% | -1.33 .. +1.45 | 2p @1.05% | 2p @0.80% |
+
+- Observation 1, and it is the finding: **the screens replicate, and screen 2 is
+  the quieter of the two** -- SD 0.51% against 0.99%, trimmed 0.33% against
+  0.90%, median a third the size and of the opposite sign. Both propose the same
+  `quick` cell outright. Neither discarded a quartet, and neither has an outlier
+  doing the work: this is `20/F11`'s screen-1 failure mode *not* occurring,
+  twice. A/A false positives are 0.0000 and detection 1.0000/1.0000 at every
+  cell either screen proposes.
+- Observation 2, and it is why the freeze is not the cheapest cell: the two
+  screens **disagree on `confirm`'s threshold** -- 1.05% against 0.80% -- because
+  screen 2's tighter spread lets a tighter threshold clear. Taking screen 2's
+  0.80% would be fitting the rule to the quieter of two samples. `20/F11`'s
+  precedent is the conservative envelope across replicates (max pair count, max
+  threshold), which is 1.05%.
+- Observation 3, the dead zone, re-measured at the frozen cell: `F5` reported
+  `confirm`'s A/A strict-`inconclusive` rate at 41.4% on 2 pairs, and that
+  reproduces exactly. Buying one pair-count step drops it to **28.4%** at 4
+  pairs and 20.5% at 6. It never reaches zero at any pair count, and the reason
+  is structural rather than statistical: `confirm`'s equivalence band is 0.75%
+  and the envelope threshold is 1.05%, so a true difference inside that
+  0.30-point gap is unclassifiable by construction. This is the same gap that
+  made `F1`'s feed verdict unobtainable. On screen 2's own series the rate is
+  0.0% at every cell -- its spread is entirely inside the band -- which is
+  precisely why one screen could not have established this.
+- Observation 4: `quick`'s dead zone is narrow by comparison (band 1.0% against
+  threshold 1.05%) and its A/A strict-`inconclusive` rate is 8.2% at 2 pairs on
+  screen 1, already inside the standard 10% gate. `quick` therefore freezes at
+  the cheapest cell and `confirm` does not; the two modes are treated differently
+  because their bands differ, not by preference.
+- Uncertainty: two screens, one machine, one afternoon, roughly 20 minutes apart.
+  That is the same exposure `20/D4` accepted for `synchronized-frames` and it
+  carries the same limit -- neither screen samples a different thermal state, a
+  different macOS build, or a different background population. What the pair
+  does rule out is `20/F11`'s screen-1 failure: a single unlucky series
+  masquerading as a workload property.
+- Next action: `D2` freezes the envelope. `H1`, `H3`, `H4`, and `H5` may now end
+  in a browsing verdict rather than a descriptive measurement.
+
+### F7 -- a saturated 179-column history resizes in ~98 ms, and the two directions are separable
+
+- Status: recorded, **descriptive by decision**. `D1` pitch 2 froze this as a
+  probe rather than a candidate workload, so there is no threshold here, no
+  second arm, and no verdict -- including no frame-budget verdict. That reading
+  is `H1`'s to make in Phase 2.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: run at `e036521` plus the uncommitted probe sources
+  this finding introduces (`lib/TerminalCore/Sources/TerminalResizeProbe*`,
+  `just terminal-resize-probe`). Release configuration, headless, no window.
+- Conditions: AC power, 100%, charged. Load 2.66/5.04/4.49 at 14:52, within
+  0.3 of the ~2.4 floor `F3` established. A first run taken at load 11.17 --
+  immediately after the probe's own release build -- produced a median of 99.03
+  ms against this run's 97.98 ms, and is reported here rather than discarded
+  because a 1% shift under 4x the load is itself the useful observation about
+  how load-sensitive this measurement is.
+- The recipe, stated because `D1` pitch 2 made stating it a condition of freezing
+  it: identity `saturated-resize-v1-10000-lines-179x66-to-100`. 179x66, 10,000
+  short hard-terminated ASCII lines, production scrollback budget (10,485,760
+  bytes), **6,756 rows retained** after eviction and after the warm resizes, 4
+  untimed warm resizes, 40 timed samples alternating 179 -> 100 -> 179.
+- Distribution, which is what the probe reports instead of a number:
+
+  | quantity | value |
+  | --- | ---: |
+  | samples | 40 |
+  | minimum | 95.77 ms |
+  | median | 97.98 ms |
+  | p90 | 99.67 ms |
+  | p99 / maximum | 101.38 ms |
+  | mean | 97.97 ms |
+
+- Observation 1: **the distribution is tight.** Max/min is 1.059 -- the whole
+  spread of 40 samples is under 6%, with no tail and no outlier. Whatever a
+  saturated resize costs, it costs it consistently, which is the property that
+  makes a 40-sample probe adequate here and would not have been safe to assume.
+- Observation 2, and it is the part a single number would have hidden: **the two
+  directions separate cleanly.** Narrowing 179 -> 100 has a median of 96.52 ms
+  (20 samples, 95.77-98.11); widening 100 -> 179 has a median of 99.33 ms (20
+  samples, 97.72-101.38). The two sub-distributions barely overlap. The pooled
+  median sits between them and describes neither. Recorded, not explained --
+  attributing the ~2.8 ms difference is `H1`'s Phase 2 work, and the direction is
+  the opposite of the naive expectation stated in the recipe's own comment (that
+  narrowing, which reflows, would be the expensive one).
+- Observation 3: 6,756 retained rows survive the budget here, against the 6,756
+  `F5`'s browsing workload reports at the same geometry and payload. The two
+  measurements are looking at the same history, which is why the stimulus was
+  copied rather than reinvented.
+- Uncertainty: one machine, one occasion, one geometry, one alternate width.
+  Nothing here measures 80 columns, a partially-filled history, or a resize
+  concurrent with feed -- and nothing here decomposes the ~98 ms into reflow,
+  allocation, and eviction, which is the second half of `H1`'s question. The
+  probe is committed and re-runnable, so those are runs rather than
+  reconstructions.
+- Next action: Phase 2's `RESEARCH` task reads this distribution against a frame
+  budget and against a profile. Nothing in this entry does either.

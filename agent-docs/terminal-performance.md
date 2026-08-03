@@ -60,6 +60,7 @@ you are trying to move; a workload that does not contain it will answer
 | `content-churn` | Did replacing screen *content* get cheaper? | 50 serialized full-screen 179x66 frames; text changes every frame, style is frozen. | Glyph lookup, shaping, or text-run construction is hot. |
 | `style-churn` | Did replacing *attributes* get cheaper? | 50 serialized full-screen frames; text is frozen, only truecolor fg/bg change. | Attribute or color handling is hot and no new glyphs are involved. |
 | `incremental-mixed` | Does small damage stay small? | 50 serialized updates touching 4 rows of an already-settled dense screen. | You suspect localized updates are doing full-window work. |
+| `retained-browse` | Did planning a frame over *retained history* get cheaper? | 2,000 headless `planFrame` calls with the viewport parked at the oldest of ~6,756 retained rows (179x66, 10,000 fed lines). No PTY, no window, no drawing. | Scrollback storage, retained-row representation, or frame planning over history is hot. Nothing else on the ladder displays history at all. |
 | `synchronized-frames` | Did absorbing a real TUI's output get cheaper when it coalesces its frames? | A fresh app and terminal session per block replays 95 captured btop frames through a real PTY, timed to the final completed draw. Every byte sits inside a `DECSET 2026` bracket. | Parsing, damage tracking, or the synchronized-output path is hot, or a change touches what happens while drawing is suppressed. |
 
 Every draw block is serialized: one write, then wait for that exact completed
@@ -71,6 +72,16 @@ The three draw workloads deliberately freeze one axis each. A change that helps
 moved something under them. `incremental-mixed` is the only workload that can
 catch damage-scoping regressions, and it carries the most pairs (6 in `confirm`)
 because it is also the noisiest.
+
+`retained-browse` is the opposite case and needs one warning attached. It is by
+far the quietest workload here -- headless, so no window, compositor, PTY, or
+WindowServer -- and it decides on a +/-1.05% threshold where the draw workloads
+need 2.0-2.15%. That tightness has a cost: `confirm`'s equivalence band is 0.75%
+and this threshold is 1.05%, so a real difference landing in that 0.30-point gap
+reads `inconclusive` by construction, which its A/A series did 28.4% of the time
+at the frozen 4 pairs. **`inconclusive` here means the difference is smaller than
+the ladder resolves, not that the run was bad.** Rerunning does not fix it (doc
+28 `F1`/`D2`).
 
 Each mode lays out its complete position-balanced schedule at the frozen pair
 count before the first block runs, then applies the frozen median symmetric rule

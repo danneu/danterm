@@ -272,13 +272,25 @@ is not lost.
   `planNanosecondsPerFrame` metric -- **no frozen rule**, per `D1`'s gate.
   Headless, so it needs no window: it plans frames and never draws one. Screen
   result in `F5`.
-- [ ] `TODO` Implement `D1`'s admitted item (c), the committed saturated-resize
-  probe recipe. Benchmark-only code; any app or engine hook takes the
-  no-`slower` treatment and a gate lint.
-- [ ] `TODO` Run the **second** independent browsing screen `D1` requires before
-  a threshold may be frozen. One screen is not graduation; until a second one
-  selects a compatible cell, every browsing claim stays a paired descriptive
-  measurement.
+- [x] `DONE` Implement `D1`'s admitted item (c), the committed saturated-resize
+  probe recipe. `lib/TerminalCore/Sources/TerminalResizeProbeSupport` plus the
+  `TerminalResizeProbe` executable and `just terminal-resize-probe` freeze the
+  recipe `D1` pitch 2 specified: geometry, budget, retained row count, warm
+  count, and sample count all stated in the emitted report, and a distribution
+  reported rather than a single number. Benchmark-only code, no app or engine
+  hook, so no lint was needed. First run recorded descriptively in `F7`: ~98 ms
+  median over 6,756 retained rows, with narrowing and widening separable. **No
+  verdict** -- `D1` scoped this probe to an absolute question with one arm.
+- [x] `DONE` Run the **second** independent browsing screen `D1` requires.
+  Closed by `F6`: a separate invocation at a separate tree replicates screen 1
+  and is quieter (SD 0.51% against 0.99%, 0 of 12 quartets discarded in both).
+  Frozen by `D2` at the **conservative envelope** rather than the cheapest cell
+  -- `quick` 2 pairs at +/-1.05%, `confirm` **4** pairs at +/-1.05% -- and
+  `retained-browse` moved from `CANDIDATE_WORKLOADS` into `WORKLOADS`. Both
+  rules carry the A/A dead zone in their own comment, so a reader who sees
+  `inconclusive` here knows it is structural rather than a bad run. This screen
+  is also the host-condition preflight's first real consumer: the screen script
+  now records both pre-launch readings into `candidate-screen.json`.
 - [ ] ~~`TODO` Pitch and decide benchmark coverage for retained history, so
   every later experiment here can end in a verdict rather than a probe
   anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
@@ -300,26 +312,28 @@ is not lost.
 - [ ] `TODO` Split saturated attributable footprint into stored cell bytes vs
   per-row fixed overhead (headers, `GridRow` strides, bucket slack) at both
   179 and 80 columns, using the census plus probe arithmetic. This is the
-  H3-vs-H4 gate input. Destination: `F3`.
+  H3-vs-H4 gate input. Destination: `F8`.
 - [ ] `TODO` Measure blank-row frequency in realistic histories (shell
   sessions, build logs, TUI dumps -- the existing benchmark corpora) to size
-  H2's ceiling. Destination: `F4`.
+  H2's ceiling. Destination: `F9`.
 - [ ] `TODO` Check allocator behavior under ragged row sizes: do
   content-length-distributed allocations fragment size classes measurably, or
   does malloc absorb them? (`15/F7`'s bucket analysis is technique precedent;
-  numbers measured fresh.) Destination: `F5`.
+  numbers measured fresh.) Destination: `F10`.
 - [ ] `RESEARCH` Probe saturated-history resize cost at HEAD (H1): where does
   a full-width change on 5,000+ retained rows spend its time, and is it within
-  a frame budget? Destination: `F6`.
+  a frame budget? `F7` has the distribution and the committed probe; this task
+  is the profile and the frame-budget reading `F7` deliberately withheld.
+  Destination: `F11`.
 
 ### Phase 3 -- direction gates
 
-- [ ] `TODO` Gate: H3 vs H4 -- pick the larger target from `F2`, or conclude
-  both/neither clears the bar. Destination: `D2`.
-- [ ] `TODO` Gate: H2 -- viable only if `F3` shows blank rows matter and the
-  charge-model question has a clean answer. Destination: `D3`.
+- [ ] `TODO` Gate: H3 vs H4 -- pick the larger target from `F8`, or conclude
+  both/neither clears the bar. Destination: `D3`.
+- [ ] `TODO` Gate: H2 -- viable only if `F9` shows blank rows matter and the
+  charge-model question has a clean answer. Destination: `D4`.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
-  deep-history footprint on the table. Destination: `D4`.
+  deep-history footprint on the table. Destination: `D5`.
 
 ### Phase 4 -- graduate
 
@@ -336,8 +350,11 @@ boundaries (see Investigation rules), not re-litigated here.
 - Is +2.51 MB attributable footprint at 179-column saturation an accepted cost
   of 3.41x depth, or itself a target? The shipped plan chose depth
   deliberately; H4 could claw the overhead back without giving depth up.
-- The browsing -5.79% result has no frozen decision rule behind it; treat it
-  as descriptive until `D1` gives the measurement a home.
+- ~~The browsing -5.79% result has no frozen decision rule behind it; treat it
+  as descriptive until `D1` gives the measurement a home.~~ **Resolved by `D2`:**
+  the workload is calibrated and future browsing claims can be verdicts. The
+  -5.79% itself stays descriptive -- a rule is not retroactive, and `15/F18`'s
+  probe no longer exists to re-run under it.
 - `terminal-feed` cannot resolve a ~1% effect and buys no extra pairs at
   `confirm` (`F1`). Any later candidate here whose predicted feed effect is
   around 1% will hit the same wall, so either predict a larger effect or expect
@@ -364,11 +381,22 @@ boundaries (see Investigation rules), not re-litigated here.
   stop a contaminated run, so reading it before trusting a verdict is still the
   operator's job. What load actually perturbs a verdict remains uncalibrated,
   and that is the evidence a refusal threshold would need.
-- The browsing workload is admitted as a **candidate** only. One screen is not
-  graduation -- `D1` requires two independent screens selecting a cell that
-  clears A/A false positives under 1% at 90% detection. Until then every
-  browsing number in this doc is a paired descriptive measurement, exactly as
-  `15/F18`'s was.
+- ~~The browsing workload is admitted as a **candidate** only.~~ **Closed by
+  `F6`/`D2`:** two independent screens replicate and the envelope is frozen.
+  What replaces this caveat is a subtler one -- **expect `inconclusive` on this
+  workload and do not treat it as a defect.** `confirm`'s band is 0.75% and its
+  frozen threshold 1.05%, so a true difference inside that 0.30-point gap is
+  unclassifiable by construction; screen 1's A/A series landed there 28.4% of
+  the time at the frozen 4 pairs. Being the quietest workload on the ladder is
+  exactly what makes it prone to this: its real effects are small enough to fall
+  in the gap. The rule entries in `DECISION_RULES` say so in place, so nobody
+  reaches for the rerun `F1`'s protocol forbids.
+- `F7`'s resize distribution is a **probe**, not a verdict, and `D1` pitch 2
+  chose that deliberately: `H1`'s question has one arm. The ~98 ms median and
+  the narrow/widen split are descriptive facts about one geometry on one
+  machine. Reading them against a frame budget is Phase 2's `RESEARCH` task, and
+  upgrading the probe to a paired candidate workload needs `D1`'s stated gate --
+  a change *expected* to move resize cost, which is what supplies a second arm.
 - H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
   budget.

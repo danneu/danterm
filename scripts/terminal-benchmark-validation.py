@@ -19,6 +19,7 @@ WORKLOADS = (
     "content-churn",
     "style-churn",
     "incremental-mixed",
+    "retained-browse",
 )
 # Collectable, but deliberately not in WORKLOADS: that tuple is the *calibrated*
 # set, and everything downstream of it -- the predeclared manifest, the paired
@@ -30,7 +31,6 @@ CANDIDATE_WORKLOADS = (
     "synchronized-frames",
     "sparse-spans-few",
     "sparse-spans-max",
-    "retained-browse",
 )
 # The browsing stimulus's frozen identity, named beside the workload registries
 # rather than at the runner because the collector validates the same string the
@@ -167,6 +167,20 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 3.8,
             },
+            # Source: two independent A/A screens (28/F5, 28/F6), 24 pairs each,
+            # 50,000 resampling trials per condition. Both proposed exactly this
+            # cell, so the conservative envelope and the cheapest cell coincide
+            # here. A/A false positives 0.0000 and detection 1.0000 in both.
+            #
+            # Read `inconclusive` at this workload as ordinary, not as a symptom:
+            # the band is 1.0% and the threshold 1.05%, so a true difference
+            # landing in that 0.05-point gap is unclassifiable by construction.
+            # In screen 1's A/A series that happened 8.2% of the time. See the
+            # confirm entry, where the gap is much wider and the rate much higher.
+            "retained-browse": {
+                "pairCount": 2,
+                "directionalThresholdPercent": 1.05,
+            },
         },
         # Plan-time rules, calibrated separately from the draw rules above and
         # applied to the same blocks. A workload appears here only if a threshold
@@ -218,6 +232,29 @@ DECISION_RULES = {
             "incremental-mixed": {
                 "pairCount": 6,
                 "directionalThresholdPercent": 1.85,
+            },
+            # Source: the same two screens (28/F5, 28/F6). This is the
+            # *conservative envelope* across them, not either one's proposal --
+            # 28/D2 froze it that way deliberately. Screen 1 proposed 2 pairs at
+            # 1.05% and screen 2 proposed 2 at 0.80%; the envelope takes the
+            # looser threshold, and buys one pair-count step above the cheapest
+            # cell for the reason the next paragraph gives. A/A false positives
+            # 0.0000 and detection 1.0000 on both screens at this cell.
+            #
+            # **Expect `inconclusive` here, and do not read it as a defect.** The
+            # confirm band is 0.75% and this threshold is 1.05%, so any true
+            # difference landing in that 0.30-point dead zone is unclassifiable
+            # by construction -- the same structural gap that made 28/F1's feed
+            # verdict unobtainable. On screen 1's A/A series the rate was 41.4%
+            # at 2 pairs and 28.4% at the 4 frozen here. Buying pairs narrows the
+            # estimator's spread but never closes the gap, so no pair count
+            # drives it to zero, and a workload this quiet is *more* prone to it
+            # rather than less. An `inconclusive` browsing result means the
+            # difference is smaller than this ladder resolves; it does not mean
+            # the run was bad.
+            "retained-browse": {
+                "pairCount": 4,
+                "directionalThresholdPercent": 1.05,
             },
         },
     },

@@ -1,7 +1,7 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D2**. Direction gates D2-D4 named by the Phase 3 tasks in
-[README.md](README.md) shift accordingly if `D1` spawns siblings.
+Next free ID: **D3**. The Phase 3 direction gates in [README.md](README.md) are
+renumbered `D3`-`D5` accordingly, `D2` having been spent on the browsing freeze.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -133,3 +133,79 @@ than the descriptive anecdote `15/F18` was reduced to.
 - Quantitative verification: Pitch 1's graduation is gated on the screening
   criterion stated under it; Pitch 4's is a run whose `run.json` carries
   pre-launch host readings that a reader can check against the verdict.
+
+### D2 -- freeze the browsing workload's rule at the conservative envelope, and name its dead zone in the rule itself
+
+- Status: **decided and implemented.** `retained-browse` moves from
+  `CANDIDATE_WORKLOADS` into `WORKLOADS`, and a rule enters `DECISION_RULES` for
+  both modes. This closes `D1` pitch 1's graduation gate.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Evidence used: `F5` (screen 1, and its stated inference that the honest rule is
+  probably not the cheapest cell), `F6` (screen 2, replicating and quieter),
+  `20/F11`/`20/D4` (the conservative-envelope precedent across replicates),
+  `F1` (the structural dead zone this rule inherits).
+
+#### The frozen rule
+
+| mode | pairs | threshold | band | source |
+| --- | ---: | ---: | ---: | --- |
+| quick | 2 | +/-1.05% | 1.0% | both screens propose this cell outright |
+| confirm | 4 | +/-1.05% | 0.75% | envelope: looser of two thresholds, one pair-count step above cheapest |
+
+A/A false positives 0.0000 and detection 1.0000/1.0000 on both screens at both
+cells, against gates of 0.01 and 0.90.
+
+#### Why the envelope and not the cheapest cell
+
+The two screens agree on `quick` and disagree on `confirm`: screen 1 proposes
++/-1.05%, screen 2 the tighter +/-0.80%, because screen 2's A/A spread is half
+screen 1's (SD 0.51% against 0.99%). Freezing 0.80% would fit the rule to the
+quieter of two samples and leave no margin the next occasion is guaranteed to
+have. `20/F11` set the precedent when its three `synchronized-frames` screens
+disagreed -- take the maximum pair count and maximum threshold across the
+replicates -- and this follows it.
+
+The pair count is then bought one step above the cheapest cell, which the
+envelope alone would not do, because `F5` named the reason before screen 2 ran:
+at 2 pairs the `confirm` A/A strict-`inconclusive` rate is 41.4%, and at 4 it is
+28.4%. Two pairs is 15 percentage points of avoidable indecision for one extra
+pair of blocks on the cheapest workload on the ladder. `quick` is left at 2
+pairs deliberately -- its dead zone is 0.05 points wide rather than 0.30, and its
+A/A rate is already 8.2%, inside the standard 10% gate. The modes differ because
+their bands differ.
+
+#### The dead zone is written into the rule, not left in a research doc
+
+`select_candidate` applies `maximum_inconclusive_rate` to the effect conditions
+only and never to A/A, so this rate is real and ungated at any cell the search
+can return. It is also **not closable**: `confirm`'s band is 0.75% and the
+threshold is 1.05%, so a true difference inside that 0.30-point gap is
+unclassifiable by construction, exactly as `F1`'s ~+1% feed effect was. More
+pairs narrow the estimator's spread; they do not move the band or the threshold.
+
+The consequence is counter-intuitive enough to belong at the rule rather than
+here: **the quietest workload on the ladder is the one most likely to return
+`inconclusive`**, because its true effects are small enough to land in the gap.
+Both `DECISION_RULES` entries therefore carry a comment stating that an
+`inconclusive` browsing result means the difference is smaller than this ladder
+resolves, and is not a symptom of a bad run. A future reader who reaches for a
+rerun on seeing `inconclusive` here is doing the shopping `F1`'s protocol
+forbids.
+
+#### What this licenses, and what it does not
+
+`H1`, `H3`, `H4`, and `H5` may now end in a browsing verdict rather than the
+descriptive measurement `15/F18` was reduced to. `D1`'s fallback wording -- every
+browsing claim stated as a paired descriptive measurement -- is retired.
+
+It does not license reading `15/F18`'s -5.79% or `F5`'s 342,263 ns as verdicts:
+both predate the rule, and a rule is not retroactive. It also does not change
+`confirm`'s cost story silently -- `confirm` now runs six workloads rather than
+five, and the sixth is the cheapest one on the ladder.
+
+- Behavioral verification: no engine or app behavior changes. The moved workload
+  and its rule are benchmark tooling; `just test` passes, including the workload-
+  set test that pins the producer, validation, and comparison registries against
+  each other.
+- Quantitative verification: two independent screens, 24 pairs each, 0 quartets
+  discarded in either, recorded in `F5` and `F6` with their host conditions.
