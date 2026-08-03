@@ -57,6 +57,7 @@ STEPS=(
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/build-lib-stale-guard_test.sh'
     './scripts/tests/terminal-benchmark-commands_test.sh'
+    'python3 ./scripts/tests/terminal_btop_gui_proof_test.py'
     'python3 ./scripts/tests/terminal_benchmark_workloads_test.py'
     'python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py'
     './scripts/core-purity-lint.sh'

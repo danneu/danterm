@@ -56,6 +56,32 @@ fi
 
 # The opt-in GUI proof surface is a stable recipe alongside test-terminal-viability.
 grep -q '^test-terminal-benchmark-gui:' "$JUSTFILE"
+grep -qE '^test-terminal-btop-gui( |:)' "$JUSTFILE"
+
+# The live btop diagnostic is reached through the three profiling recipes and no
+# front-end of its own (RI3), so the exact positional invocations an operator is
+# told to type are checked here rather than described anywhere else.
+btop_sample="$(dry_run benchmark-sample btop-scroll 20)"
+expect_contains "$btop_sample" 'terminal-benchmark-profile.sh sample "btop-scroll" swift "20"'
+btop_trace="$(dry_run benchmark-trace btop-scroll "Time Profiler" 20)"
+expect_contains "$btop_trace" \
+    'terminal-benchmark-profile.sh trace "btop-scroll" swift "20" "Time Profiler"'
+btop_loop="$(dry_run benchmark-loop btop-scroll)"
+expect_contains "$btop_loop" 'terminal-benchmark-profile.sh loop "btop-scroll"'
+
+# The operator instructions have to carry those same three lines: the workload is
+# admitted to nothing else, so a reader who guesses at a fourth mode gets refused.
+PERFORMANCE_DOC="$ROOT/agent-docs/terminal-performance.md"
+for documented in \
+    'just benchmark-sample btop-scroll 20' \
+    'just benchmark-trace btop-scroll "Time Profiler" 20' \
+    'just benchmark-loop btop-scroll' \
+    'just test-terminal-btop-gui'; do
+    grep -qF -- "$documented" "$PERFORMANCE_DOC" || {
+        echo "the performance guide does not document: $documented" >&2
+        exit 1
+    }
+done
 
 # The retained diagnostic surface: profiling and the two microbenchmarks.
 for recipe in benchmark-loop benchmark-sample benchmark-trace benchmark-draw benchmark-draw-app; do

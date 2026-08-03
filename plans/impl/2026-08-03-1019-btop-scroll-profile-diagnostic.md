@@ -177,7 +177,7 @@ rejected.
 - [x] 2. feat(benchmark): publish foreground and presentation coverage
 - [x] 3. feat(benchmark): add btop workload identity and coverage artifacts
 - [x] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
-- [ ] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
+- [x] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
 
 ## Implementation notes
 
@@ -268,6 +268,29 @@ rejected.
   workloads still invoke the profiler directly; btop hands the same argv to the
   capture driver. The bracketing contract test moved with them, so the two
   attaches are still asserted to sit between their activity snapshots.
+
+- **The proof grades, the script only drives (commit 5).** Every rule
+  `scripts/terminal-btop-gui-proof.py` decides a live run by is a pure `judge_*`
+  function over artifacts, fixture-tested in
+  `scripts/tests/terminal_btop_gui_proof_test.py`, which joins `just test`. An
+  opt-in proof whose judgments are only ever exercised by the opt-in run would go
+  green exactly when the diagnostic broke.
+- **The deliberate foreground theft waits for the measured interval (commit 5).**
+  The first live run stole the foreground on a fixed timer a few seconds after
+  the harness started -- during the release build, tens of seconds before the
+  profiler attached -- and the capture came back valid. The theft now waits for
+  `activity-before.json` to land in the new bundle, which is the harness's own
+  mark that the interval coverage is differenced over has opened. Before that
+  moment no theft is observable, so the phase was failing while the gate it
+  tests was working.
+- **What the live run actually observed (commit 5).** Bounded `sample` and
+  `Time Profiler` `trace` both graded valid at a live 179x66 PTY under a held
+  Down arrow, with parsed profiler samples, positive damage topology, and the
+  profiler window contained by the stimulus with ~1s of lead and trail. The
+  spoiled run exited 1 and preserved "the app was not frontmost for 17 of 18
+  samples inside the measured interval". Loop published alternating `down`/`up`
+  legs 10s apart. Teardown left no stimulus arm and did not signal the bystander
+  btop.
 
 ## Implementation discretion
 

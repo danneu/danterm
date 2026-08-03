@@ -409,6 +409,76 @@ in System Settings and retry. The benchmark app is ad-hoc signed with
 also uses `--no-prompt`, so a permission problem fails with diagnostics instead
 of waiting for UI.
 
+## Profile live btop scrolling
+
+The sparse AppKit damage regression was found by profiling a real btop under a
+held arrow key, not by any workload above -- so that stimulus is a workload of
+the three profiling commands. It is the only one whose content is the host's live
+process table.
+
+```sh
+just benchmark-sample btop-scroll 20
+just benchmark-trace btop-scroll "Time Profiler" 20
+just benchmark-loop btop-scroll
+```
+
+`sample` and `trace` take a whole-number recording window of **1 to 20 seconds**,
+positionally, and require it: there is no default. `loop` takes no duration --
+it alternates Down and Up in 10-second legs until you Ctrl-C it.
+
+**Preconditions, all checked before anything is compiled, built, or launched.**
+`btop` must be on PATH, and the invoking shell must already hold Accessibility
+permission to synthesize keyboard input (System Settings > Privacy & Security >
+Accessibility). A missing binary or a refused permission ends the run in
+seconds rather than after a release build.
+
+**Leave the machine alone for the length of a bounded capture.** The app has to
+stay frontmost and fully presented for every sampled instant of the measured
+interval, so switching windows -- Cmd-Tab, clicking another app, a full-screen
+notification -- invalidates the run. That is the gate working, not a flake: the
+identity will name how many samples lapsed.
+
+**What a run does.** It builds the isolated optimized app under a fresh
+HOME/TMPDIR/ZDOTDIR, `exec`s the resolved absolute btop in the owned pane so the
+PTY has exactly one foreground process, waits until the device's live `stty size`
+reports the canonical 179x66, activates the app, then holds one arrow key with
+CGEvent input at the host's own repeat cadence -- pressed before the profiler
+starts recording and released only after it stops.
+
+**What makes a run valid.** The bounded modes grade themselves and exit nonzero
+if they cannot stand behind what they recorded: the profiler window must lie
+wholly inside the held key, the profiler must have parsed samples, the app must
+have submitted damage, and it must have stayed frontmost and fully presented for
+every sampled instant of the measured interval. A `trace` additionally proves its
+template exported a time-profile table. Missing measurement is never reported as
+zero -- a section that could not be proved is absent from the identity and its
+reason is listed in `capture.invalidReasons`. **An invalidated run still writes
+its bundle**; that list is what you act on.
+
+**Artifacts** land in the same `.build/terminal-benchmark-profiles/<run>/` as
+every other profile. `identity.json` is extended in place -- there is no second
+provenance file -- with the btop executable path and version, effective config
+path and digest, owned btop pid/PTY/geometry, input mechanism and permission,
+measured stimulus legs and repeat cadence, the profiler/stimulus overlap,
+topology and presentation coverage deltas, machine state, and the capture
+verdict. `loop` additionally publishes `btop-stimulus-live.json` with the
+direction and start of the leg it is currently holding, so an agent attaching its
+own profiler can bracket and validate its own window.
+
+**This workload can never decide anything.** It is refused by `benchmark-quick`,
+`benchmark-confirm`, `benchmark-memory`, calibration, and every other
+decision-bearing path, and every artifact it writes carries
+`decisionEligible: false`. Its content is whatever processes happen to be running,
+so two runs are not comparable and `sample`'s counts are not whole-process CPU.
+Use it to find out *where* time goes in a real interactive TUI; use a calibrated
+workload to decide whether a change helped.
+
+Two limits worth knowing before you read a result. The stimulus follows the
+host's own key-repeat settings and records them, so event rates differ between
+machines. And a loop leg can reach the end of a short process list and idle out
+the rest of its 10 seconds -- loop issues no coverage verdict at all, which is
+why an attaching agent must validate its own window.
+
 ## Read a profile without Instruments
 
 Every profiling mode writes `profile-report.json` and `profile-folded.txt`
@@ -797,3 +867,19 @@ reset and damage evidence, process-scoped activation, and ownership limited to
 the apps the run launched. It needs a logged-in GUI session with Accessibility
 access and takes several minutes, so it stays out of `just test` alongside
 `just test-terminal-viability`.
+
+`just test-terminal-btop-gui` is the matching opt-in proof for the live btop
+diagnostic above. It runs a bounded `sample` and a `Time Profiler` `trace` and
+requires each to come back with parsed samples, positive damage topology, a
+contained overlap, and a live 179x66 PTY; it then steals the foreground
+mid-capture and requires that run to be rejected, by exit status and by a
+preserved reason naming the lapse; it watches `loop` turn a leg around; and it
+checks that teardown left no stimulus arm running and did not signal an
+unrelated btop it started alongside. It additionally needs `btop` on PATH and
+Accessibility permission, and it drives four real profiling runs, so it is
+slower still. Name phases to run one: `just test-terminal-btop-gui loop`.
+
+Its judgments are pure functions graded against fixtures in
+`scripts/tests/terminal_btop_gui_proof_test.py`, which does run in `just test` --
+an opt-in proof whose rules are only exercised live would go green exactly when
+the diagnostic breaks.
