@@ -114,6 +114,29 @@ terminal-occupancy-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalOccupancyProbe
     lib/TerminalCore/.build/release/TerminalOccupancyProbe {{flags}}
 
+# Time width changes on a budget-saturated scrollback, and report the spread.
+#
+# A probe, not a benchmark: `28/D1` pitch 2 refused to admit this as a candidate workload
+# because `28/H1`'s question is absolute ("does a saturated resize fit in a frame budget,
+# and where does its time go"), not comparative, and doc 28's evidence floor forbids
+# wanting a pre-trim arm to pair against. So there is no threshold here, no verdict, and
+# no second arm -- it prints a distribution and a reader interprets it.
+#
+# It is committed rather than run-and-deleted on purpose. `15/F18`'s browsing probe was
+# deleted right after it was read, which cost doc 28 an entire re-implementation task
+# (`28/F5`) to get the same measurement back.
+#
+# Upgrading it to a paired candidate workload is a separate decision, and `D1` states its
+# gate: a change that is *expected* to move resize cost, which is what finally gives the
+# comparison two arms.
+#
+#   just terminal-resize-probe                             # 40 samples, 179x66 <-> 100
+#   just terminal-resize-probe "--samples 100"             # tighter tail
+#   just terminal-resize-probe "--alternate-columns 80"
+terminal-resize-probe flags="":
+    swift build -c release --package-path lib/TerminalCore --product TerminalResizeProbe
+    lib/TerminalCore/.build/release/TerminalResizeProbe {{flags}}
+
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}

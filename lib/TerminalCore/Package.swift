@@ -19,6 +19,7 @@ let package = Package(
         .executable(name: "TerminalMemoryProbe", targets: ["TerminalMemoryProbe"]),
         .executable(name: "TerminalOccupancyProbe", targets: ["TerminalOccupancyProbe"]),
         .executable(name: "TerminalBrowseBenchmark", targets: ["TerminalBrowseBenchmark"]),
+        .executable(name: "TerminalResizeProbe", targets: ["TerminalResizeProbe"]),
     ],
     targets: [
         .target(
@@ -110,6 +111,18 @@ let package = Package(
             path: "Sources/TerminalBrowseBenchmark",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .executableTarget(
+            name: "TerminalResizeProbe",
+            dependencies: ["TerminalResizeProbeSupport"],
+            path: "Sources/TerminalResizeProbe",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalResizeProbeSupport",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalResizeProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "TerminalBrowseBenchmarkSupport",
             dependencies: ["TerminalCore", "TerminalRenderPlanning"],
@@ -161,6 +174,12 @@ let package = Package(
             name: "TerminalBenchmarkMarkersTests",
             dependencies: ["TerminalBenchmarkMarkers", "TerminalCore", "TerminalRenderPlanning"],
             path: "Tests/TerminalBenchmarkMarkersTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalResizeProbeSupportTests",
+            dependencies: ["TerminalResizeProbeSupport", "TerminalCore"],
+            path: "Tests/TerminalResizeProbeSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
