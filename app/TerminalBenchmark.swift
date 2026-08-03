@@ -419,8 +419,9 @@ final class TerminalBenchmarkObserver {
     /// Scheduled in `.common` modes so a tracking or modal run loop -- which a
     /// GUI capture can enter without the app being wrong -- does not silently
     /// stop the sampler and reproduce the hole this closes. It stays outside
-    /// every measured bracket for the same reason the draw-path publish did: it
-    /// runs on the run loop between draws, never inside one. It cannot see a
+    /// every measured bracket because it runs on the run loop between draws,
+    /// never inside one -- which is also why it, and not `observeCompletedDraw`,
+    /// owns the activity write. It cannot see a
     /// main-thread hang, though: a blocked main thread stops this timer too, so
     /// a true hang still yields no samples. That residual is the density floor's
     /// to catch -- too few samples for the interval is exactly what a hang leaves
@@ -441,8 +442,10 @@ final class TerminalBenchmarkObserver {
     ///
     /// The sample is taken unconditionally and the publish is left to its own
     /// 100 ms throttle: the sample is the measurement whose cadence has to be
-    /// uniform, while the write is only how a reader sees it, and a write the
-    /// draw path already did a moment ago costs a sample nothing.
+    /// uniform, while the write is only how a reader sees it. This is now the
+    /// sole publish path -- the draw path counts but never writes -- so the
+    /// throttle is what keeps a delayed timer from writing twice in a row, not a
+    /// filter against a second publisher.
     private func samplePresentationCoverage() {
         guard let activityPath else { return }
         if let stateRecorder {
@@ -609,14 +612,17 @@ final class TerminalBenchmarkObserver {
         // the app performed -- not only the ones a measured block accepts. In
         // loop mode no block ever opens, so a count taken after these guards
         // would stay at zero for the whole profiling window.
-        if let activityPath {
+        //
+        // Counting is all this does. The snapshot that carries these counters to
+        // disk belongs to `startPresentationSampling`'s timer -- see
+        // `publishActivity` for why the write must not happen here.
+        if activityPath != nil {
             observedDrawCount += 1
             observeDamageTopology(
                 damage,
                 rowCount: plan.rows,
                 usedDirtyRectFallback: usedDirtyRectFallback
             )
-            publishActivity(atPath: activityPath)
         }
         guard completed == false, let startNanoseconds else { return }
         stateRecorder?.observeDrawState()
@@ -820,10 +826,27 @@ final class TerminalBenchmarkObserver {
     /// span and the cadence costs it no accuracy. It only has to be short
     /// relative to a profiling run, which is seconds.
     ///
-    /// Called from `observeCompletedDraw` after the draw timer has already
-    /// stopped, alongside the acknowledgment writes, so it is outside every
-    /// measured bracket -- and it is reached only when a profiling run supplied
-    /// a path, so decision blocks pay one nil check per draw and nothing else.
+    /// Called only from `samplePresentationCoverage`'s timer, never from
+    /// `observeCompletedDraw`. The draw path used to call it too, and being
+    /// throttled to 10/s did not make that safe: the throttle bounds how often
+    /// the write happens, not which stack it happens on, so roughly every tenth
+    /// draw performed a synchronous atomic file write -- `Data.write(to:)`, so
+    /// `createProtectedTemporaryFile` + `open` + rename -- inside AppKit's
+    /// `draw(_:)`, under the CoreAnimation transaction commit. A 20 s
+    /// `btop-scroll` Time Profiler trace attributed 121 ms to
+    /// `observeCompletedDraw`, 71 ms of it that write. That is instrumentation
+    /// billing itself to the thing it exists to measure: it inflates the draw
+    /// bucket every profile of this app reads, and under IO pressure it perturbs
+    /// frame timing rather than merely reporting it.
+    ///
+    /// Moving it costs the reader nothing, because the 100 ms timer already
+    /// publishes at the same throttle interval and every consumer differences
+    /// two snapshots taken outside the profiler window. What it buys is that the
+    /// draw path now only increments counters.
+    ///
+    /// The timer is the only caller by construction: `startPresentationSampling`
+    /// starts it whenever `activityPath` is set, which is exactly the condition
+    /// under which the draw path used to publish.
     private func publishActivity(atPath path: String) {
         let now = DispatchTime.now().uptimeNanoseconds
         guard now - lastActivityWriteNanoseconds >= 100_000_000 else { return }
