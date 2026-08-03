@@ -175,7 +175,7 @@ rejected.
 ## Commit progress
 - [x] 1. feat(benchmark): add a held-arrow stimulus with measured overlap
 - [x] 2. feat(benchmark): publish foreground and presentation coverage
-- [ ] 3. feat(benchmark): add btop workload identity and coverage artifacts
+- [x] 3. feat(benchmark): add btop workload identity and coverage artifacts
 - [ ] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
 - [ ] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
 
@@ -216,6 +216,29 @@ rejected.
   recorder exists to feed it, so "not measured" never renders as clean zeros.
   The activity snapshot's `schemaVersion` moved to 2 for the added vocabulary;
   nothing currently reads that field.
+
+- **One record, not a second one (commit 3).** `terminal_btop_artifacts.py`
+  extends `identity.json` in place rather than writing a `btop-capture.json`
+  beside it, because the Decision asks for one provenance format and a separate
+  verdict file would be a second one. It bumps `schemaVersion` to 3 for the
+  added `btop`/`coverage`/`capture` vocabulary and always writes the file before
+  choosing its exit status, so an invalidated run leaves the reason on disk.
+- **Every gate is graded, not the first failure (commit 3).** The gates are
+  independent, so `summarize_capture` collects all their reasons instead of
+  raising at the first. An operator diagnoses a rejected 20-second GUI capture
+  from one list rather than one relaunch per reason.
+- **btop's config precedence is measured, not recalled (commit 3).** btop 1.4.7
+  was launched under a fresh `HOME` and a fresh `XDG_CONFIG_HOME` and wrote
+  `btop.conf` into `$XDG_CONFIG_HOME/btop`, which is the precedence
+  `btop_config_identity` implements (explicit `--config`, then XDG, then HOME).
+  A config that does not exist yet -- the normal state mid-run, since btop
+  writes it on exit -- reports `exists: false` and carries no digest at all.
+- **Machine state is graded here, sampled by the harness (commit 3).** The
+  plan's discretion clause requires machine-state coverage to be counted and
+  able to invalidate a capture, so `machine_state_coverage` counts the samples
+  and rejects a zero-sample interval, thermal pressure, and low-power mode. The
+  sampling itself stays in the harness (commit 4), which already owns the
+  `terminal-benchmark-state-probe.swift` pattern.
 
 ## Implementation discretion
 

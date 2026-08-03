@@ -74,6 +74,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_fixtures_test.py'
     'python3 ./scripts/tests/terminal_memory_profile_test.py'
     'python3 ./scripts/tests/terminal_btop_stimulus_test.py'
+    'python3 ./scripts/tests/terminal_btop_artifacts_test.py'
     './scripts/core-purity-lint.sh --allow-imports TerminalCore lib/TerminalCore/Sources/TerminalRenderPlanning'
     './scripts/core-purity-lint.sh lib/TerminalPTY/Sources/PaneLifecycle'
     './scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalRenderPlanning'
