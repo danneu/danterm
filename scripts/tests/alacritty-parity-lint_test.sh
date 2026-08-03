@@ -243,6 +243,40 @@ cp -R "$BASE" "$CASE"
 edit_file "$CASE/$SWIFT_REL" '/body sha256:/d'
 expect_fail "$CASE" "a citation with no provenance line should fail"
 
+# --- Nested agent worktrees are not this branch's source. ---
+# `.claude/worktrees/<name>` is a full checkout of the same repository on someone else's
+# branch. Reading it would let an in-progress citation there fail the gate here, for a file
+# that is not on this branch -- and its ledger would disagree with this one besides.
+CASE="$TMP/worktree-ignored"
+cp -R "$BASE" "$CASE"
+mkdir -p "$CASE/.claude/worktrees/other/$(dirname "$SWIFT_REL")"
+cat > "$CASE/.claude/worktrees/other/$SWIFT_REL" <<EOF
+struct InProgress {
+    func halfWritten() throws {
+        // Adapted from alacritty_terminal/src/term/search.rs#ported
+        //   (alacritty 00000000, body sha256:deadbeefdead).
+        // (no Divergence line yet -- still being written on another branch)
+        search()
+    }
+}
+EOF
+expect_pass "$CASE" "a citation inside .claude/worktrees should not be linted from the main checkout"
+
+# The mirror image, and the reason the skip test must run on paths *relative to* the root:
+# linting a worktree directly means the root itself sits under `.claude/worktrees`. If the
+# skip matched absolute components it would skip every file and report a vacuous pass.
+CASE="$TMP/lint-from-inside-a-worktree"
+mkdir -p "$CASE/.claude/worktrees"
+cp -R "$BASE" "$CASE/.claude/worktrees/self"
+expect_pass "$CASE/.claude/worktrees/self" "linting a worktree checkout directly should still work"
+
+# ...and must still catch a real problem there, rather than passing because it saw nothing.
+CASE="$TMP/worktree-root-still-checked"
+mkdir -p "$CASE/.claude/worktrees"
+cp -R "$BASE" "$CASE/.claude/worktrees/self"
+edit_file "$CASE/.claude/worktrees/self/$SWIFT_REL" 's/body sha256:[0-9a-f]+/body sha256:deadbeefdead/'
+expect_fail "$CASE/.claude/worktrees/self" "a bad citation in a directly-linted worktree should still fail"
+
 # --- The gate case: no checkout means exit 0 with a printed reason. ---
 CASE="$TMP/references-absent"
 cp -R "$BASE" "$CASE"
