@@ -30,12 +30,17 @@ shape = _load("terminal_retained_row_shape", "terminal-retained-row-shape.py")
 
 
 def make_report(kind, stored, *, blank=0, columns=80, styled=None, runs=None,
-                multi=None, utf8=None, max_scalar=None):
+                multi=None, utf8=None, max_scalar=None, hyperlinks=None,
+                wide=None, identity_runs=None, identified=None):
     """Build a probe-shaped report for the reductions to chew on.
 
-    Composition defaults to plain single-scalar ASCII, so a test that cares about
-    one axis states only that axis and the rest stay at the shape a plain row
-    really has.
+    Composition defaults to plain single-scalar ASCII printed left to right, so a
+    test that cares about one axis states only that axis and the rest stay at the
+    shape a plain row really has.
+
+    Note what is *not* defaulted to zero any more: `hyperlinkCellCounts` was, and
+    that is precisely how a candidate charging nothing for hyperlink metadata
+    survived review. A default of zero on an axis is a fixture that cannot fail.
     """
     count = len(stored)
     zeros = [0] * count
@@ -57,9 +62,11 @@ def make_report(kind, stored, *, blank=0, columns=80, styled=None, runs=None,
             "utf8ByteCounts": list(utf8) if utf8 else list(stored),
             "styleRunCounts": list(runs) if runs else [1] * count,
             "distinctStyleCounts": [1] * count,
-            "wideCellCounts": zeros,
-            "hyperlinkCellCounts": zeros,
+            "wideCellCounts": list(wide) if wide else zeros,
+            "hyperlinkCellCounts": list(hyperlinks) if hyperlinks else zeros,
             "maxSingleScalarValues": list(max_scalar) if max_scalar else [ord("x")] * count,
+            "contentIdentityRunCounts": list(identity_runs) if identity_runs else [1] * count,
+            "identifiedCellCounts": list(identified) if identified else list(stored),
         },
     }
 
@@ -252,6 +259,183 @@ class PackingTests(unittest.TestCase):
             shape.pack_stride_runs_exceptions(fragmented),
             shape.pack_stride_runs_exceptions(uniform),
         )
+
+
+class MetadataChargeCompletenessTests(unittest.TestCase):
+    """`PR1` step 5: no candidate may be free of a field it has to preserve.
+
+    The corrected table is only a comparison if every candidate is charged for the
+    same storage. The original omission -- hyperlink metadata named in C6's design
+    and charged nowhere -- survived review because the fixture fed
+    `hyperlinkCellCounts` as all zeros, and a fixture that never exercises a field
+    cannot catch a candidate that never charges it. These tests raise each axis
+    from zero and demand every candidate's price move.
+
+    Deltas are asserted against `arenaChargedBytes`, which is the unrounded
+    `slot + payload + spills`. The rounded charge would let a size class swallow a
+    real undercharge and pass.
+    """
+
+    def arena_per_row(self, report, identity="target"):
+        facts = shape.row_facts(report)
+        priced = shape.price_facts(facts, 32, identity=identity)
+        return {
+            name: entry["arenaMeanChargeBytes"]
+            for name, entry in priced.items()
+            if name != "current"
+        }
+
+    def test_every_candidate_charges_hyperlink_metadata(self):
+        """Raising the hyperlink count must move every candidate's price.
+
+        This is the regression the review found, stated as a test. No candidate
+        has room for a `HyperlinkId` in the storage it already describes, so each
+        owes a side-table entry -- and the one that owes nothing is the bug.
+        """
+        without = self.arena_per_row(make_report("recording", [51]))
+        with_links = self.arena_per_row(make_report("recording", [51], hyperlinks=[4]))
+
+        for candidate, base in without.items():
+            self.assertEqual(
+                with_links[candidate] - base,
+                4 * shape.HYPERLINK_ENTRY_BYTES,
+                f"{candidate} does not charge hyperlink metadata",
+            )
+
+    def test_every_candidate_charges_content_identity_under_both_variants(self):
+        """Both `contentIdentity` variants must reach every candidate.
+
+        `activationIdentity` reads the field out of retained rows, so no
+        representation may store a row without it. Charging it in one variant and
+        not the other would let the table report a target price nothing pays.
+        """
+        report = make_report("recording", [51], identity_runs=[1], identified=[51])
+        floor = self.arena_per_row(report, identity="floor")
+        target = self.arena_per_row(report, identity="target")
+
+        for candidate, floor_bytes in floor.items():
+            self.assertEqual(
+                floor_bytes - target[candidate],
+                51 * shape.IDENTITY_CELL_BYTES - 1 * shape.IDENTITY_RUN_ENTRY_BYTES,
+                f"{candidate} prices the two identity variants identically",
+            )
+
+    def test_fragmenting_identities_moves_the_target_variant_toward_the_floor(self):
+        """The run variant must get dearer as rows fragment, and cap at the floor.
+
+        The measurement only decides anything if the cheap variant can stop being
+        cheap. A row printed straight through is one run; a row assembled by cursor
+        moves is many, and at the limit the run table costs more than the field it
+        replaces -- which is the outcome that would send C6 back to the floor.
+        """
+        contiguous = self.arena_per_row(
+            make_report("recording", [80], identity_runs=[1]), identity="target"
+        )
+        fragmented = self.arena_per_row(
+            make_report("recording", [80], identity_runs=[20]), identity="target"
+        )
+
+        for candidate, cheap in contiguous.items():
+            self.assertGreater(fragmented[candidate], cheap)
+
+    def test_the_identity_charge_is_capped_at_the_floor(self):
+        """A pathologically fragmented row must never be charged above per-cell.
+
+        A real encoder would fall back to the flat per-cell form rather than store
+        a run table longer than the cells it describes. Without the cap the table
+        would report the run variant as *worse* than the floor on fragmented
+        content, which is an artifact of the model, not a property of the design.
+        """
+        report = make_report("recording", [80], identity_runs=[80], identified=[80])
+        floor = self.arena_per_row(report, identity="floor")
+        target = self.arena_per_row(report, identity="target")
+
+        for candidate, floor_bytes in floor.items():
+            self.assertLessEqual(target[candidate], floor_bytes)
+
+    def test_a_combined_metadata_row_moves_the_candidates_that_owe_each_axis(self):
+        """One row carrying every axis at once, raised one axis at a time.
+
+        The axes interact -- a multi-scalar cell is also a spill reference, a wide
+        cell is also an exception entry -- so proving each in isolation leaves the
+        combination unproven. This is the fixture `PR1` step 5 asks for.
+
+        Which candidates owe which axis is not uniform, and asserting that it is
+        would be a wrong test rather than a strict one: C1's 8-byte cell already
+        spends a kind byte on every cell, so wide-cell geometry costs it nothing
+        extra, and its per-cell style id makes style runs free. Only the axes no
+        candidate encodes per cell -- hyperlink metadata and `contentIdentity` --
+        are owed by all six, and those are the two the original table omitted.
+        """
+        universal = {
+            "hyperlinks": {"hyperlinks": [3]},
+            "identity fragmentation": {"identity_runs": [7]},
+        }
+        exception_list_only = {
+            "wide cells": ({"wide": [6]}, ["C6 stride+runs+exceptions"]),
+            "multi-scalar cells": ({"multi": [2]}, ["C6 stride+runs+exceptions"]),
+            "style runs": ({"runs": [9]}, [
+                "C3 text+style-runs", "C5 stride+runs+kindbyte",
+                "C6 stride+runs+exceptions",
+            ]),
+        }
+        base_kwargs = dict(
+            stored=[60], styled=[30], runs=[3], multi=[1], wide=[2],
+            hyperlinks=[1], identity_runs=[2], identified=[60],
+        )
+        base = self.arena_per_row(make_report("recording", **base_kwargs))
+
+        for axis, override in universal.items():
+            raised = self.arena_per_row(
+                make_report("recording", **{**base_kwargs, **override})
+            )
+            for candidate, before in base.items():
+                self.assertGreater(
+                    raised[candidate], before,
+                    f"{candidate} does not charge more when {axis} rise",
+                )
+
+        for axis, (override, owed_by) in exception_list_only.items():
+            raised = self.arena_per_row(
+                make_report("recording", **{**base_kwargs, **override})
+            )
+            for candidate in owed_by:
+                self.assertGreater(
+                    raised[candidate], base[candidate],
+                    f"{candidate} does not charge more when {axis} rise",
+                )
+
+    def test_c6_charges_a_multiscalar_exception_more_than_a_wide_one(self):
+        """Exception entries are per kind, not a uniform 3 bytes.
+
+        A wide-cell entry needs a column and a kind tag; a multi-scalar entry also
+        needs the reference that reaches its spill allocation. Pricing them the
+        same is what the original C6 did, and it under-charges precisely the cells
+        a fixed-width scalar slot cannot hold.
+        """
+        wide_row = shape.row_facts(make_report("recording", [40], wide=[4]))[0]
+        multi_row = shape.row_facts(make_report("recording", [40], multi=[4]))[0]
+
+        self.assertGreater(
+            shape.pack_stride_runs_exceptions(multi_row),
+            shape.pack_stride_runs_exceptions(wide_row),
+        )
+
+
+class ContiguityReductionTests(unittest.TestCase):
+    def test_single_run_fraction_counts_rows_not_runs(self):
+        """The fraction `PR1` selects a variant by must be denominated in rows.
+
+        A mean over runs would let one pathologically fragmented row drag the
+        number below the line while every other row remains contiguous, which is
+        the opposite of what the encoding cares about: the encoding is chosen per
+        row, so the question is how many rows are cheap, not how many runs exist.
+        """
+        report = make_report("recording", [10] * 4, identity_runs=[1, 1, 1, 9])
+        composed = shape.compose(report)
+
+        self.assertEqual(composed["singleRunRowFraction"], 0.75)
+        self.assertEqual(composed["meanIdentityRunsPerRow"], 3.0)
 
 
 if __name__ == "__main__":

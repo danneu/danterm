@@ -96,6 +96,35 @@ public struct TerminalScrollbackRow: Equatable, Sendable {
     public let isSoftWrapped: Bool
 }
 
+/// Reports how one retained row's per-cell content identities are laid out, without
+/// exposing the identities themselves.
+///
+/// Exists for doc 28's `PR1`, which has to price preserving `contentIdentity` in a packed
+/// retained row. The counter advances by one per printed cell, so a row printed
+/// left-to-right holds an arithmetic sequence a per-run base encodes in a handful of bytes,
+/// while a row assembled by cursor moves or overwrites fragments into many runs -- and the
+/// two prices differ by enough to decide the representation. Counts rather than values,
+/// because pricing needs the shape and nothing downstream may depend on an identity's
+/// actual number.
+public struct TerminalContentIdentityShape: Equatable, Sendable {
+    /// Maximal spans of stored cells whose identities are contiguous in print order. Cells
+    /// sharing one identity (a wide glyph's head and tail) stay inside a single run.
+    public let runCount: Int
+
+    /// Stored cells carrying an identity -- everything a run-based encoding must cover.
+    public let identifiedCellCount: Int
+
+    /// Stored cells carrying none: interior padding, wide tails of erased content, and cells
+    /// made non-default by a background-erase style rather than by printing.
+    public let unidentifiedCellCount: Int
+
+    public init(runCount: Int, identifiedCellCount: Int, unidentifiedCellCount: Int) {
+        self.runCount = runCount
+        self.identifiedCellCount = identifiedCellCount
+        self.unidentifiedCellCount = unidentifiedCellCount
+    }
+}
+
 /// Describes the local visual-row window without exposing the anchor used to preserve it.
 public struct TerminalScrollProjection: Equatable, Sendable {
     /// Number of currently reflowed rows in the active screen's stream.

@@ -2064,6 +2064,51 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Reports one retained row's content-identity run shape, reading the stored prefix
+    /// directly rather than the materialized row.
+    ///
+    /// Row-scoped on purpose. `contentIdentity` is deliberately absent from `TerminalCell`,
+    /// and doc 28's `PR1` needs it only in aggregate, so this returns counts from one call
+    /// per row instead of widening the per-cell inspection value -- which would add a stored
+    /// property to a hot type crossing a target boundary and change its layout for every
+    /// consumer. That is the shape
+    /// `docs/design/2026-07-29-cross-module-value-dispatch.md` recommends reaching for at
+    /// design time, and the same one `forEachViewportCell(row:_:)` took for the render
+    /// planner. O(stored cells), for measurement only.
+    ///
+    /// Reads `scrollbackRows` unmaterialized because the trailing default cells
+    /// `materialized(to:)` appends were never printed into: counting them would report the
+    /// pane's width as unidentified rather than the row's own content.
+    public func scrollbackRowContentIdentityShape(at index: Int) -> TerminalContentIdentityShape? {
+        guard scrollbackRows.indices.contains(index) else { return nil }
+        var runCount = 0
+        var identified = 0
+        var unidentified = 0
+        var previous: ContentIdentity?
+        for cell in scrollbackRows[index].cells {
+            guard let identity = cell.contentIdentity else {
+                unidentified += 1
+                previous = nil
+                continue
+            }
+            identified += 1
+            // A run continues on the counter's own step of one, or on a repeat -- `printWide`
+            // stamps a head and its tail with a single identity, so demanding a strict step
+            // would fragment every wide glyph's row.
+            if let last = previous, identity == last || identity == last &+ 1 {
+                previous = identity
+                continue
+            }
+            runCount += 1
+            previous = identity
+        }
+        return TerminalContentIdentityShape(
+            runCount: runCount,
+            identifiedCellCount: identified,
+            unidentifiedCellCount: unidentified
+        )
+    }
+
     /// Walks the whole grid and reports exactly what its cell storage costs.
     ///
     /// Lives here rather than beside `TerminalMemoryCensus` because it needs `GridCell` and

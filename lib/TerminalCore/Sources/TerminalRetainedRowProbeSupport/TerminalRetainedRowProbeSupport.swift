@@ -146,6 +146,21 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
     /// is measured rather than assumed because the whole 1-byte tier stands or falls on it.
     public let maxSingleScalarValues: [Int]
 
+    /// Maximal runs of cells whose `contentIdentity` is contiguous in print order.
+    ///
+    /// The axis that decides how a packed row preserves `contentIdentity`. The counter
+    /// advances by one per printed cell, so a row printed straight through is one run and
+    /// encodes in a per-run base plus extent, while a row assembled by cursor moves or
+    /// overwrites fragments into many and approaches 4 bytes per stored cell. `F11` inferred
+    /// the contiguous case was the common one at depth and never measured it; this is the
+    /// measurement.
+    public let contentIdentityRunCounts: [Int]
+
+    /// Stored cells carrying an identity at all -- the population a run-based encoding must
+    /// cover, and the denominator that keeps a run count from flattering rows that are
+    /// mostly unidentified padding.
+    public let identifiedCellCounts: [Int]
+
     public init(
         styledCellCounts: [Int],
         multiScalarCellCounts: [Int],
@@ -157,7 +172,9 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         distinctStyleCounts: [Int],
         wideCellCounts: [Int],
         hyperlinkCellCounts: [Int],
-        maxSingleScalarValues: [Int]
+        maxSingleScalarValues: [Int],
+        contentIdentityRunCounts: [Int],
+        identifiedCellCounts: [Int]
     ) {
         self.styledCellCounts = styledCellCounts
         self.multiScalarCellCounts = multiScalarCellCounts
@@ -170,7 +187,14 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         self.wideCellCounts = wideCellCounts
         self.hyperlinkCellCounts = hyperlinkCellCounts
         self.maxSingleScalarValues = maxSingleScalarValues
+        self.contentIdentityRunCounts = contentIdentityRunCounts
+        self.identifiedCellCounts = identifiedCellCounts
     }
+
+    /// Retained rows whose identities form a single contiguous run -- the fraction `PR1`
+    /// selects the `contentIdentity` encoding by. A row with no identities at all (a blank
+    /// row) is counted as single-run: it costs the run encoding nothing.
+    public var singleRunRowCount: Int { contentIdentityRunCounts.count(where: { $0 <= 1 }) }
 
     /// Retained rows holding at least one styled cell.
     public var styledRowCount: Int { styledCellCounts.count(where: { $0 > 0 }) }
@@ -351,6 +375,8 @@ public func readRetainedRowShape(
     var wideCellCounts: [Int] = []
     var hyperlinkCellCounts: [Int] = []
     var maxSingleScalarValues: [Int] = []
+    var contentIdentityRunCounts: [Int] = []
+    var identifiedCellCounts: [Int] = []
     let defaultStyle = TerminalStyle()
 
     for index in 0..<terminal.scrollbackRowCount {
@@ -404,6 +430,15 @@ public func readRetainedRowShape(
         wideCellCounts.append(wide)
         hyperlinkCellCounts.append(hyperlinks)
         maxSingleScalarValues.append(maxSingleScalar)
+
+        // Read through the engine rather than derived here: `contentIdentity` is deliberately
+        // absent from the public cell, so this is the one axis the probe cannot reconstruct
+        // from a materialized row. The engine reads its own stored prefix, which canonical
+        // form makes identical to the extent derived above -- `derivationMatchesCensus` is
+        // what holds those two together.
+        let identityShape = terminal.scrollbackRowContentIdentityShape(at: index)
+        contentIdentityRunCounts.append(identityShape?.runCount ?? 0)
+        identifiedCellCounts.append(identityShape?.identifiedCellCount ?? 0)
     }
 
     // Live screen rows are always full width -- the grid materializes them at construction
@@ -431,7 +466,9 @@ public func readRetainedRowShape(
             distinctStyleCounts: distinctStyleCounts,
             wideCellCounts: wideCellCounts,
             hyperlinkCellCounts: hyperlinkCellCounts,
-            maxSingleScalarValues: maxSingleScalarValues
+            maxSingleScalarValues: maxSingleScalarValues,
+            contentIdentityRunCounts: contentIdentityRunCounts,
+            identifiedCellCounts: identifiedCellCounts
         ),
         screenRowCount: census.screenRowCount,
         censusCellStorageBytes: census.cellStorageBytes,
