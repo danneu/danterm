@@ -146,7 +146,7 @@ public struct Terminal: Equatable, Sendable {
     /// padding `TerminalStyle` already leaves behind, and the whole 16 bytes come back (doc 15's
     /// `D3`). The price is a finite id space, which is why `allocateHyperlinkId` recycles rather
     /// than counting up; see the invariant stated there.
-    private typealias HyperlinkId = UInt16
+    typealias HyperlinkId = UInt16
 
     /// Distinguishes one printed occurrence of a cell from a later reprint of the same text, so a
     /// link armed at pointer-down can reject a run recreated before release.
@@ -156,7 +156,7 @@ public struct Terminal: Equatable, Sendable {
     /// 15's `H4`). The price is a counter that can exhaust in minutes of maximal output --
     /// `allocateContentIdentity` owns what happens then, and `15/F12` explains why the naive
     /// wrap is not safe.
-    private typealias ContentIdentity = UInt32
+    typealias ContentIdentity = UInt32
 
     /// Indexes `styleTable` from inside a cell, replacing the 19-byte `TerminalStyle` that used to
     /// sit inline in every one (doc 15's `H3`). `15/F11` measured 9-23 million style *writes* per
@@ -169,7 +169,7 @@ public struct Terminal: Equatable, Sendable {
     /// per cell, so one screenful is ~12,000 and a few screens of history exhaust it. There is no
     /// honest fallback at that point: the cell holds nothing but an id, so exceeding the space
     /// means showing the user approximated colors. 32 bits makes the ceiling unreachable instead.
-    private typealias StyleId = UInt32
+    typealias StyleId = UInt32
 
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     ///
@@ -177,7 +177,7 @@ public struct Terminal: Equatable, Sendable {
     /// order, and `scalars` is the only 8-byte-aligned member; declared after `kind` it forced
     /// seven bytes of padding into every cell. Leading with it recovers them, which is what takes
     /// the stride to 32 rather than 40 -- a whole malloc bucket at every width `15/F12` checked.
-    private struct GridCell: Equatable, Sendable {
+    struct GridCell: Equatable, Sendable {
         var scalars = TerminalScalars.empty
         var kind: TerminalCellKind = .padding
         var styleId: StyleId = Terminal.defaultStyleId
@@ -186,7 +186,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
-    private struct GridRow: Equatable, Sendable {
+    struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
         var semanticPrompt = SemanticPromptRow.none
@@ -230,7 +230,7 @@ public struct Terminal: Equatable, Sendable {
     /// reclaimed. Ownership is explicit because empty cells alone cannot distinguish
     /// a repaint grant from user content; see
     /// `docs/design/2026-08-01-osc-133-prompt-anchoring.md`.
-    private enum SemanticPromptRow: Equatable, Sendable {
+    enum SemanticPromptRow: Equatable, Sendable {
         case none
         case prompt
         case continuation
@@ -277,8 +277,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Gives retained rows logical zero-based indices while front eviction stays amortized O(1).
+    ///
+    /// Holds `PackedRetainedRow`, not `GridRow`: history is the only place doc 28's `C6`
+    /// representation lives, and the buffer is the seam. Callers that want cells reach them
+    /// through the packed row's own readers, or pay one `unpacked()` when they inherently
+    /// read the whole row.
     private struct ScrollbackBuffer: Equatable, Sendable {
-        private var storage: [GridRow] = []
+        private var storage: [PackedRetainedRow] = []
         private var storageStart = 0
 
         var count: Int { storage.count - storageStart }
@@ -288,10 +293,10 @@ public struct Terminal: Equatable, Sendable {
         init() {}
 
         init<S: Sequence>(_ rows: S) where S.Element == GridRow {
-            storage = Array(rows)
+            storage = rows.map { PackedRetainedRow.pack($0) }
         }
 
-        subscript(position: Int) -> GridRow {
+        subscript(position: Int) -> PackedRetainedRow {
             get {
                 precondition(indices.contains(position))
                 return storage[storageStart + position]
@@ -306,31 +311,34 @@ public struct Terminal: Equatable, Sendable {
         /// while front eviction actually releases what it drops, which is the invariant it exists
         /// to prove; see doc 15's `F4` for the regression that motivated it.
         var retainedCellStorageRowCount: Int {
-            storage.reduce(0) { $0 + ($1.cells.isEmpty ? 0 : 1) }
+            storage.reduce(0) { $0 + ($1.storedCellCount == 0 ? 0 : 1) }
         }
 
-        mutating func append(_ row: GridRow) {
+        mutating func append(_ row: PackedRetainedRow) {
             storage.append(row)
         }
 
+        /// Unpacks the whole retained stream. Reserved for consumers that inherently read
+        /// all of history -- search, Select All, export, width reflow -- and never reached
+        /// from a point query, which is what `activeProjection()` exists for.
         func asArray() -> [GridRow] {
-            Array(storage[storageStart...])
+            storage[storageStart...].map { $0.unpacked() }
         }
 
         func suffix(from index: Int) -> [GridRow] {
             precondition(indices.contains(index) || index == count)
-            return Array(storage[(storageStart + index)...])
+            return storage[(storageStart + index)...].map { $0.unpacked() }
         }
 
-        mutating func removeFirst() -> GridRow {
+        mutating func removeFirst() -> PackedRetainedRow {
             precondition(isEmpty == false)
             let row = storage[storageStart]
-            // Release the evicted row's cells now rather than at the next compaction. A slot below
-            // `storageStart` owns nothing: it is unreachable through every accessor here, but its
-            // `cells` array is a separate heap allocation that stays live while the slot holds it.
+            // Release the evicted row's storage now rather than at the next compaction. A slot
+            // below `storageStart` owns nothing: it is unreachable through every accessor here,
+            // but its blob is a separate heap allocation that stays live while the slot holds it.
             // Since compaction will not run until dead slots outnumber live ones, skipping this
             // let history retain up to twice the rows it admitted (doc 15's `F4`).
-            storage[storageStart] = GridRow(cells: [])
+            storage[storageStart] = PackedRetainedRow()
             storageStart += 1
             compactIfNeeded()
             return row
@@ -396,7 +404,7 @@ public struct Terminal: Equatable, Sendable {
             guard position < scrollback.count else {
                 return live[position - scrollback.count]
             }
-            var row = scrollback[position]
+            var row = scrollback[position].unpacked()
             if isAlternateScreenActive, position == scrollback.count - 1 {
                 row.isSoftWrapped = false
             }
@@ -739,7 +747,7 @@ public struct Terminal: Equatable, Sendable {
     static let maximumHyperlinkTargetBytes = 65_536
 
     /// Reserved for `TerminalStyle()`. Fixed so an unwritten cell costs no intern and no lookup.
-    private static let defaultStyleId: StyleId = 0
+    static let defaultStyleId: StyleId = 0
 
     /// Smallest table size worth a sweep. Well above the 1-5 distinct styles `15/F11` measured in
     /// ordinary output, so a normal session never sweeps at all.
@@ -2050,7 +2058,7 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes one retained row without allowing callers to mutate terminal storage.
     public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
         guard scrollbackRows.indices.contains(index) else { return nil }
-        let row = scrollbackRows[index].materialized(to: columnCount)
+        let row = scrollbackRows[index].unpacked().materialized(to: columnCount)
         return TerminalScrollbackRow(
             cells: row.cells.map {
                 TerminalCell(
@@ -2082,10 +2090,11 @@ public struct Terminal: Equatable, Sendable {
     public func scrollbackRowContentIdentityShape(at index: Int) -> TerminalContentIdentityShape? {
         guard scrollbackRows.indices.contains(index) else { return nil }
         var runCount = 0
+        var strictRunCount = 0
         var identified = 0
         var unidentified = 0
         var previous: ContentIdentity?
-        for cell in scrollbackRows[index].cells {
+        for cell in scrollbackRows[index].unpacked().cells {
             guard let identity = cell.contentIdentity else {
                 unidentified += 1
                 previous = nil
@@ -2095,7 +2104,12 @@ public struct Terminal: Equatable, Sendable {
             // A run continues on the counter's own step of one, or on a repeat -- `printWide`
             // stamps a head and its tail with a single identity, so demanding a strict step
             // would fragment every wide glyph's row.
-            if let last = previous, identity == last || identity == last &+ 1 {
+            if let last = previous, identity == last &+ 1 {
+                previous = identity
+                continue
+            }
+            strictRunCount += 1
+            if let last = previous, identity == last {
                 previous = identity
                 continue
             }
@@ -2104,6 +2118,7 @@ public struct Terminal: Equatable, Sendable {
         }
         return TerminalContentIdentityShape(
             runCount: runCount,
+            strictRunCount: strictRunCount,
             identifiedCellCount: identified,
             unidentifiedCellCount: unidentified
         )
@@ -2126,6 +2141,8 @@ public struct Terminal: Equatable, Sendable {
             cellCount: 0,
             cellStrideBytes: stride,
             cellStorageBytes: 0,
+            retainedStoredCellCount: 0,
+            retainedPackedPayloadBytes: 0,
             rowStorageAllocationCount: 0,
             retainedRowStorageRowCount: scrollbackRows.retainedCellStorageRowCount,
             styledCellCount: 0,
@@ -2145,10 +2162,25 @@ public struct Terminal: Equatable, Sendable {
         let screens = [rows, inactivePrimaryScreen?.rows].compactMap { $0 }
         census.screenRowCount = screens.reduce(0) { $0 + $1.count }
 
+        // Retained rows are priced by their blob, live rows by the cell stride. Content
+        // counts below are read from the *decoded* row either way, because the census answers
+        // "what is the grid holding" -- and packing changed what a cell costs, not what a row
+        // contains. Unpacking here is affordable for the same reason the whole walk is: this
+        // is a measurement accessor, never a hot path.
+        for index in scrollbackRows.indices {
+            let packed = scrollbackRows[index]
+            if packed.storedCellCount > 0 { census.rowStorageAllocationCount += 1 }
+            census.retainedStoredCellCount += packed.storedCellCount
+            census.retainedPackedPayloadBytes += packed.payloadByteCount
+        }
+        for row in screens.flatMap({ $0 }) where row.cells.isEmpty == false {
+            census.rowStorageAllocationCount += 1
+        }
+        census.cellStorageBytes = census.retainedPackedPayloadBytes
+            + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
+
         for row in scrollbackRows.asArray() + screens.flatMap({ $0 }) {
-            if row.cells.isEmpty == false { census.rowStorageAllocationCount += 1 }
             census.cellCount += row.cells.count
-            census.cellStorageBytes += row.cells.count * stride
             for cell in row.cells {
                 if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }
                 styles.insert(cell.styleId)
@@ -2194,9 +2226,18 @@ public struct Terminal: Equatable, Sendable {
     /// Sizes a compact ordinary row so retention tests can choose exact eviction boundaries.
     static func compactScrollbackRowByteCost(storedCells: Int) -> Int {
         precondition(storedCells >= 1)
-        return scrollbackByteCost(
-            of: GridRow(cells: (0..<storedCells).map { _ in GridCell(kind: .narrow) })
-        )
+        // Modelled as cells that were really *printed*: an ASCII scalar and a contiguous
+        // identity each. Doc 28's packed row charges by content, so a fixture row of bare
+        // `.narrow` cells carrying no scalar would owe a kind exception per cell and price a
+        // shape the terminal never produces -- which is how a budget written in these units
+        // would silently admit a different number of real rows than the test intends.
+        return scrollbackByteCost(of: GridRow(cells: (0..<storedCells).map {
+            GridCell(
+                scalars: .single("a"),
+                kind: .narrow,
+                contentIdentity: ContentIdentity($0 + 1)
+            )
+        }))
     }
 
     /// Sums what history's cell storage *actually reserved*, derived independently of the charge
@@ -2208,10 +2249,18 @@ public struct Terminal: Equatable, Sendable {
     /// recomputes the *cost*. The budget is honest exactly when the second does not exceed it.
     var retainedScrollbackAllocationBytes: Int {
         scrollbackRows.indices.reduce(0) {
-            $0 + MemoryLayout<GridRow>.stride
+            $0 + MemoryLayout<PackedRetainedRow>.stride
                 + Self.arrayStorageHeaderBytes
-                + scrollbackRows[$1].cells.capacity * MemoryLayout<GridCell>.stride
+                + scrollbackRows[$1].storage.capacity
         }
+    }
+
+    /// Hands a test the decoded retained row, so a packed-representation proof can compare
+    /// fields the public reader deliberately omits -- `contentIdentity` above all. Computed
+    /// only when a test asks; production reads packed rows through the buffer.
+    func retainedRowForTesting(at index: Int) -> GridRow? {
+        guard scrollbackRows.indices.contains(index) else { return nil }
+        return scrollbackRows[index].unpacked()
     }
 
     /// Exposes one canonical row cost so tests can pin the representation-neutral literals.
@@ -3028,7 +3077,7 @@ public struct Terminal: Equatable, Sendable {
             return rows.indices.contains(index) ? rows[index] : nil
         }
         if scrollbackRows.indices.contains(index) {
-            return scrollbackRows[index]
+            return scrollbackRows[index].unpacked()
         }
         let liveIndex = index - scrollbackRows.count
         return rows.indices.contains(liveIndex) ? rows[liveIndex] : nil
@@ -3754,20 +3803,35 @@ public struct Terminal: Equatable, Sendable {
     /// This also decouples the budget from the cell's width, which is why `15/F12` needed it: a
     /// narrower cell that leaves the row in the same malloc bucket now admits the same history it
     /// always did, instead of admitting more rows that each cost what they always cost.
-    private static func scrollbackByteCost(of row: GridRow) -> Int {
-        var total = MemoryLayout<GridRow>.stride
+    private static func scrollbackByteCost(of row: PackedRetainedRow) -> Int {
+        var total = MemoryLayout<PackedRetainedRow>.stride
             + arrayStorageHeaderBytes
-            + row.cells.capacity * MemoryLayout<GridCell>.stride
-        for cell in row.cells where cell.scalars.count > 1 {
-            total += arrayStorageHeaderBytes + cell.scalars.count * MemoryLayout<Unicode.Scalar>.stride
+            + row.storage.capacity
+        if row.spillCount > 0 {
+            // The spill directory is a real allocation the packed row owns, charged even
+            // though doc 28's model priced only the spills it points at -- `I4` is that the
+            // charge describes what the row allocates, not what a candidate predicted.
+            total += arrayStorageHeaderBytes + row.spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
+            for spill in row.spills {
+                total += arrayStorageHeaderBytes + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+            }
         }
         return total
+    }
+
+    /// Prices a row the retained buffer has not admitted yet, by packing it. Used by the
+    /// test-facing sizing helpers below, which choose eviction boundaries in whole rows.
+    private static func scrollbackByteCost(of row: GridRow) -> Int {
+        scrollbackByteCost(of: PackedRetainedRow.pack(row))
     }
 
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
     where S.Element == GridRow {
         for sourceRow in newRows {
-            let row = sourceRow.compacted()
+            // Trim first, then pack: canonical form (`I2`) decides what the row stores, and
+            // the encoding decides how. Packing here is what makes history's representation
+            // `C6` while the live grid stays untouched (`I1`).
+            let row = PackedRetainedRow.pack(sourceRow.compacted())
             scrollbackRows.append(row)
             scrollbackByteCount += Self.scrollbackByteCost(of: row)
         }
@@ -6228,11 +6292,11 @@ public struct Terminal: Equatable, Sendable {
 
     /// Mutates logical history while keeping its cached byte charge exact.
     private mutating func setScrollbackCell(_ cell: GridCell, row: Int, column: Int) {
-        var retained = scrollbackRows[row]
-        let oldCost = Self.scrollbackByteCost(of: retained)
+        let oldCost = Self.scrollbackByteCost(of: scrollbackRows[row])
+        var retained = scrollbackRows[row].unpacked()
         retained.setCell(cell, at: column, columns: columnCount)
-        retained = retained.compacted()
-        scrollbackRows[row] = retained
-        scrollbackByteCount += Self.scrollbackByteCost(of: retained) - oldCost
+        let packed = PackedRetainedRow.pack(retained.compacted())
+        scrollbackRows[row] = packed
+        scrollbackByteCount += Self.scrollbackByteCost(of: packed) - oldCost
     }
 }

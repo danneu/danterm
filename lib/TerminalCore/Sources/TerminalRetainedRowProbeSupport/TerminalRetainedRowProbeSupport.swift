@@ -66,6 +66,37 @@ public func allocatedBytes(forRequest request: Int) -> Int {
     request <= 0 ? 0 : malloc_good_size(request)
 }
 
+/// The packed retained row's entry widths, restated here rather than plumbed out of the
+/// engine.
+///
+/// Same rationale as `arrayStorageHeaderBytes` above, and the same discipline: a probe that
+/// asked the engine what its rows cost could not catch the engine getting it wrong. These are
+/// doc 28's `C6` charges -- the ones `scripts/terminal-retained-row-shape.py` priced every
+/// candidate against -- so `packedPayloadMatchesModel` below is a comparison between the
+/// design's arithmetic and the implementation's bytes, not a value against itself.
+public enum PackedRowModel {
+    /// flags(1) + storedCells(2) + five table cardinalities(2 each).
+    ///
+    /// Not a charge any candidate in `D6`'s table carried: the pricing model priced payload
+    /// and side tables and never named a per-row header. It is real, it is charged here, and
+    /// the difference against `D6`'s figure is one of the numbers this probe exists to show.
+    public static let headerBytes = 13
+
+    public static let styleRunEntryBytes = 6
+    public static let kindEntryBytes = 3
+    public static let spillEntryBytes = 7
+    public static let hyperlinkEntryBytes = 4
+    public static let identityRunEntryBytes = 8
+    public static let identityCellBytes = 4
+}
+
+/// Bytes per scalar slot for a row whose widest single-scalar cell holds `maxSingleScalar`.
+public func scalarStrideBytes(maxSingleScalar: Int) -> Int {
+    if maxSingleScalar < 0x100 { return 1 }
+    if maxSingleScalar < 0x1_0000 { return 2 }
+    return 4
+}
+
 /// What one retained row's cell array costs, from its stored cell count.
 public func rowAllocation(storedCells: Int, cellStrideBytes: Int) -> (request: Int, allocated: Int) {
     let request = arrayStorageHeaderBytes + storedCells * cellStrideBytes
@@ -161,6 +192,14 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
     /// mostly unidentified padding.
     public let identifiedCellCounts: [Int]
 
+    /// Runs whose identities step by exactly one -- what the shipped packed row really
+    /// charges, as against `contentIdentityRunCounts`, which is `F12`'s looser definition.
+    ///
+    /// Carried separately rather than replacing it: `F12`'s 85.14% was measured under the
+    /// looser rule and stays re-derivable, while the payload model below has to use this one
+    /// or it would predict a size the encoder does not produce.
+    public let strictContentIdentityRunCounts: [Int]
+
     public init(
         styledCellCounts: [Int],
         multiScalarCellCounts: [Int],
@@ -174,7 +213,8 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         hyperlinkCellCounts: [Int],
         maxSingleScalarValues: [Int],
         contentIdentityRunCounts: [Int],
-        identifiedCellCounts: [Int]
+        identifiedCellCounts: [Int],
+        strictContentIdentityRunCounts: [Int]
     ) {
         self.styledCellCounts = styledCellCounts
         self.multiScalarCellCounts = multiScalarCellCounts
@@ -189,6 +229,7 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         self.maxSingleScalarValues = maxSingleScalarValues
         self.contentIdentityRunCounts = contentIdentityRunCounts
         self.identifiedCellCounts = identifiedCellCounts
+        self.strictContentIdentityRunCounts = strictContentIdentityRunCounts
     }
 
     /// Retained rows whose identities form a single contiguous run -- the fraction `PR1`
@@ -239,11 +280,32 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     /// rather than trusted.
     public let censusCellStorageBytes: Int
 
+    /// What history's packed blobs really hold, straight from the census. The headline
+    /// quantity doc 28's `C6` moved, and the one the byte budget is spent on.
+    public let censusRetainedPackedPayloadBytes: Int
+
+    /// Retained stored cells the census counted, held against the extent this probe derives
+    /// from the public row reader.
+    public let censusRetainedStoredCellCount: Int
+
     /// True when derived scrollback cells plus full-width screen rows reconstruct the
     /// census exactly. False means the derivation no longer describes the representation,
     /// and every byte below it is unusable -- which is the state this flag exists to make
     /// loud instead of silent.
     public let derivationMatchesCensus: Bool
+
+    /// True when `C6`'s pricing arithmetic, applied to composition this probe read through
+    /// the public API, predicts the engine's packed bytes exactly.
+    ///
+    /// The strong check, and the one that would catch an encoder quietly storing a field it
+    /// is not charged for -- or charging for one it does not store. `derivationMatchesCensus`
+    /// only proves the *extent* still follows from canonical form; this proves the encoding
+    /// does too. False means `packedPayloadModelBytes` and the engine disagree, and the
+    /// engine is the fact.
+    public let packedPayloadMatchesModel: Bool
+
+    /// What `C6`'s arithmetic says these rows' blobs should hold, header included.
+    public let packedPayloadModelBytes: Int
 
     /// What malloc really hands back for these rows' requests -- the quantity a footprint
     /// measurement sees, and the one `F10` asks about.
@@ -267,6 +329,8 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         composition: RetainedRowComposition,
         screenRowCount: Int,
         censusCellStorageBytes: Int,
+        censusRetainedPackedPayloadBytes: Int,
+        censusRetainedStoredCellCount: Int,
         derivationMatchesCensus: Bool
     ) {
         self.stimulus = stimulus
@@ -281,10 +345,42 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         self.composition = composition
         self.screenRowCount = screenRowCount
         self.censusCellStorageBytes = censusCellStorageBytes
+        self.censusRetainedPackedPayloadBytes = censusRetainedPackedPayloadBytes
+        self.censusRetainedStoredCellCount = censusRetainedStoredCellCount
         self.derivationMatchesCensus = derivationMatchesCensus
         self.allocatedBytes = storedCellCounts.reduce(0) {
             $0 + rowAllocation(storedCells: $1, cellStrideBytes: cellStrideBytes).allocated
         }
+
+        var modelled = 0
+        for index in storedCellCounts.indices {
+            let stored = storedCellCounts[index]
+            let runs = composition.strictContentIdentityRunCounts[index]
+            modelled += PackedRowModel.headerBytes
+                + stored * scalarStrideBytes(
+                    maxSingleScalar: composition.maxSingleScalarValues[index]
+                )
+                + composition.styleRunCounts[index] * PackedRowModel.styleRunEntryBytes
+                + composition.wideCellCounts[index] * PackedRowModel.kindEntryBytes
+                + composition.multiScalarCellCounts[index] * PackedRowModel.spillEntryBytes
+                + composition.hyperlinkCellCounts[index] * PackedRowModel.hyperlinkEntryBytes
+                // The per-cell fallback, stated as the minimum it is: an encoder facing a row
+                // whose run table would outgrow its cells writes the cells instead.
+                + min(
+                    stored * PackedRowModel.identityCellBytes,
+                    runs * PackedRowModel.identityRunEntryBytes
+                )
+        }
+        self.packedPayloadModelBytes = modelled
+        self.packedPayloadMatchesModel = modelled == censusRetainedPackedPayloadBytes
+    }
+
+    /// Packed payload bytes per retained row -- the figure `D6` priced at 128.0 on the CRLF
+    /// reference payload.
+    public var packedPayloadBytesPerRow: Double {
+        retainedRowCount == 0
+            ? 0
+            : Double(censusRetainedPackedPayloadBytes) / Double(retainedRowCount)
     }
 
     /// Fraction of retained rows that are entirely blank -- `F9`'s headline number.
@@ -377,6 +473,7 @@ public func readRetainedRowShape(
     var maxSingleScalarValues: [Int] = []
     var contentIdentityRunCounts: [Int] = []
     var identifiedCellCounts: [Int] = []
+    var strictContentIdentityRunCounts: [Int] = []
     let defaultStyle = TerminalStyle()
 
     for index in 0..<terminal.scrollbackRowCount {
@@ -439,12 +536,21 @@ public func readRetainedRowShape(
         let identityShape = terminal.scrollbackRowContentIdentityShape(at: index)
         contentIdentityRunCounts.append(identityShape?.runCount ?? 0)
         identifiedCellCounts.append(identityShape?.identifiedCellCount ?? 0)
+        strictContentIdentityRunCounts.append(identityShape?.strictRunCount ?? 0)
     }
 
     // Live screen rows are always full width -- the grid materializes them at construction
-    // and reflow -- so the census total is the derived scrollback cells plus that block.
-    // Reconstructing it is what turns the derivation from an assumption into a check.
-    let derivedCells = storedCellCounts.reduce(0, +) + census.screenRowCount * columns
+    // and reflow -- so the census's cell-storage total is the live block at the cell stride
+    // plus what history's packed blobs hold. Reconstructing both halves is what turns the
+    // derivation from an assumption into a check.
+    //
+    // Retained rows no longer contribute cell-stride bytes at all (doc 28's `C6`), so the
+    // scrollback half of this check is now an *extent* claim -- the derived stored cells are
+    // the ones the engine really stores -- while the byte claim moved to
+    // `packedPayloadMatchesModel`, which prices that extent through `C6`'s own arithmetic.
+    let derivedRetainedCells = storedCellCounts.reduce(0, +)
+    let derivedStorageBytes = census.screenRowCount * columns * census.cellStrideBytes
+        + census.retainedPackedPayloadBytes
     return RetainedRowShapeReport(
         stimulus: stimulus,
         columns: columns,
@@ -468,11 +574,15 @@ public func readRetainedRowShape(
             hyperlinkCellCounts: hyperlinkCellCounts,
             maxSingleScalarValues: maxSingleScalarValues,
             contentIdentityRunCounts: contentIdentityRunCounts,
-            identifiedCellCounts: identifiedCellCounts
+            identifiedCellCounts: identifiedCellCounts,
+            strictContentIdentityRunCounts: strictContentIdentityRunCounts
         ),
         screenRowCount: census.screenRowCount,
         censusCellStorageBytes: census.cellStorageBytes,
-        derivationMatchesCensus: derivedCells * census.cellStrideBytes == census.cellStorageBytes
+        censusRetainedPackedPayloadBytes: census.retainedPackedPayloadBytes,
+        censusRetainedStoredCellCount: census.retainedStoredCellCount,
+        derivationMatchesCensus: derivedRetainedCells == census.retainedStoredCellCount
+            && derivedStorageBytes == census.cellStorageBytes
     )
 }
 

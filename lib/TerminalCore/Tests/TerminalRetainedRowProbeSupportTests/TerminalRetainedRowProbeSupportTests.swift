@@ -39,6 +39,47 @@ struct TerminalRetainedRowProbeSupportTests {
         #expect(report.storedCellCounts.count == report.retainedRowCount)
     }
 
+    @Test("C6's pricing arithmetic predicts the packed rows' bytes exactly")
+    func packedPayloadMatchesModel() {
+        // Intent: applying doc 28's `C6` charges to composition the probe read through the
+        //   public API reproduces, to the byte, what the engine's packed rows really hold --
+        //   across styled runs, wide cells, combining sequences, hyperlinks, every scalar
+        //   stride tier, and rows combining them.
+        // Why it exists: `derivationMatchesCensus` proves only that the stored *extent* still
+        //   follows from canonical form. After packing, the extent is no longer the price, so
+        //   an encoder could keep every extent right and still store a field it is not charged
+        //   for -- or charge for one it does not store -- with every byte figure downstream
+        //   silently wrong. This is the check that the design's arithmetic and the
+        //   implementation's bytes are the same thing.
+        // Scenario: spec-first; the content is deliberately the union of the axes `D6` prices
+        //   separately, because a plain-ASCII corpus would match under almost any encoding.
+        var terminal = Terminal(columns: 40, rows: 3)!
+        for index in 0..<40 {
+            terminal.feed(Array("\u{1B}[3\(index % 8)mstyled-\(index) ".utf8))
+            terminal.feed(Array("\u{1B}[0m plain \u{754C}\u{2500} e\u{0301} ".utf8))
+            terminal.feed(Array("\u{1B}]8;;https://danterm.test/\(index)\u{1B}\\link\u{1B}]8;;\u{1B}\\".utf8))
+            terminal.feed(Array("\r\n".utf8))
+        }
+        // A row assembled out of print order, so at least one row takes the per-cell
+        // `contentIdentity` fallback rather than the run table.
+        for column in stride(from: 30, through: 0, by: -6) {
+            terminal.feed(Array("\u{1B}[3;\(column + 1)Hfrag".utf8))
+        }
+        terminal.feed(Array("\r\n\r\n\r\n".utf8))
+
+        let report = readRetainedRowShape(of: terminal, stimulus: "mixed-metadata", fedByteCount: 0)
+        #expect(report.retainedRowCount > 0)
+        #expect(report.composition.styledRowCount > 0)
+        #expect(report.composition.multiScalarRowCount > 0)
+        #expect(report.composition.hyperlinkCellCounts.contains { $0 > 0 })
+        #expect(report.composition.wideCellCounts.contains { $0 > 0 })
+        #expect(report.derivationMatchesCensus)
+        #expect(
+            report.packedPayloadMatchesModel,
+            "model \(report.packedPayloadModelBytes) B, engine \(report.censusRetainedPackedPayloadBytes) B"
+        )
+    }
+
     @Test("A blank retained row counts as blank, and stores one cell")
     func blankRowsAreCountedAndCostOneCell() {
         // Intent: rows fed as bare newlines are counted in `blankRowCount`, and their

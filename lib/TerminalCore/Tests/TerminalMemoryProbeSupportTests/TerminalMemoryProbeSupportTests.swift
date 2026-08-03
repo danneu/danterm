@@ -123,8 +123,15 @@ struct TerminalMemoryProbeSupportTests {
         let totalRows = census.screenRowCount + census.scrollbackRowCount
         #expect(census.cellCount >= census.screenRowCount * Self.geometry.columns)
         #expect(census.cellCount < totalRows * Self.geometry.columns)
-        #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
-        #expect(census.bytesPerCell == Double(census.cellStrideBytes))
+        // Exactness survives doc 28's packing; the arithmetic it is exact *in* changed. Live
+        // rows are still stride times extent, and retained rows are now the exact byte count
+        // of their packed blobs -- neither sampled nor bucket-rounded, which is the property
+        // this test exists to hold.
+        #expect(census.cellStorageBytes
+            == census.screenRowCount * Self.geometry.columns * census.cellStrideBytes
+                + census.retainedPackedPayloadBytes)
+        // The headline: a retained cell now costs a small fraction of the live-grid stride.
+        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 4)
     }
 
     @Test("a run deep enough to evict retains nothing it evicted")

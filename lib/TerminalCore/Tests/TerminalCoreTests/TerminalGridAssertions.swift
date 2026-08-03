@@ -1,4 +1,5 @@
 // Shared structural assertions for viewport and retained terminal rows.
+import Darwin
 import Testing
 
 @testable import TerminalCore
@@ -260,14 +261,56 @@ private func expectValidRow(
 /// expression in a column count can reproduce that, and one written from a stride would silently
 /// under-size every budget at real pane widths.
 ///
-/// Blank and single-scalar cells cost the same -- only a multi-scalar cluster adds a spill
-/// allocation, so `spilledClusterScalars` lists the scalar count of each such cluster.
+/// Sized on a row of *printed* cells since doc 28's packing. The packed retained row charges
+/// by content -- a scalar column, a style run, an identity run -- so a full-width row of
+/// never-written cells is both cheaper and a shape history does not hold at full width
+/// (canonical trimming collapses it to one cell). A budget written in blank rows would admit
+/// a different number of real rows than the test that wrote it intends.
+///
+/// Only a multi-scalar cluster adds a spill allocation, so `spilledClusterScalars` lists the
+/// scalar count of each such cluster.
 func historyRowCost(columns: Int, spilledClusterScalars: [Int] = []) -> Int {
-    Terminal.blankScrollbackRowByteCost(columns: columns)
+    Terminal.compactScrollbackRowByteCost(storedCells: columns)
         + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
 }
 
 /// Bytes an ordinary compact history row costs for an exact stored-cell extent.
 func compactHistoryRowCost(storedCells: Int) -> Int {
     Terminal.compactScrollbackRowByteCost(storedCells: storedCells)
+}
+
+/// Bytes history charges for a packed retained row whose blob holds `payloadBytes`.
+///
+/// Restates doc 28's `C6` charge -- row slot, array header, the allocator's answer for the
+/// blob, and one allocation per multi-scalar spill -- so a budget fixture can be written as
+/// the arithmetic it means instead of a number recovered from a failing assertion. Asks
+/// libmalloc for the rounding for the same reason `historyRowCost` asks the engine: no
+/// expression in a payload size reproduces a size class.
+func packedHistoryRowCost(payloadBytes: Int, spilledClusterScalars: [Int] = []) -> Int {
+    let arrayHeader = 32
+    var total = MemoryLayout<Terminal.PackedRetainedRow>.stride
+        + arrayHeader
+        + (malloc_good_size(arrayHeader + payloadBytes) - arrayHeader)
+    if spilledClusterScalars.isEmpty == false {
+        // The spill directory, then one allocation per cluster.
+        total += arrayHeader
+            + (malloc_good_size(arrayHeader + spilledClusterScalars.count * 8) - arrayHeader)
+        for scalars in spilledClusterScalars {
+            total += arrayHeader + (malloc_good_size(arrayHeader + scalars * 4) - arrayHeader)
+        }
+    }
+    return total
+}
+
+/// The packed blob's own fixed costs, so a fixture can spell out what a row's payload is
+/// made of. Mirrors `Terminal.PackedRetainedRow.Header` deliberately rather than reading it:
+/// a fixture that asked the encoder what it charges could not pin the encoding.
+enum PackedRowCharge {
+    static let header = 13
+    static let styleRun = 6
+    static let kindException = 3
+    static let spillException = 7
+    static let hyperlinkException = 4
+    static let identityRun = 8
+    static let identityCell = 4
 }

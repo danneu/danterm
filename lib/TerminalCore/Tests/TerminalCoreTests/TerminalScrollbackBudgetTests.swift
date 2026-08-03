@@ -34,7 +34,14 @@ struct TerminalScrollbackBudgetTests {
         // Why it exists: compact storage is useful only if its smaller allocation charge turns
         //   into user-visible history depth rather than merely changing a diagnostic counter.
         // Scenario: equal-width panes stream ten one-cell and ten full-width hard lines.
-        let columns = 8
+        //
+        // Widened from 8 columns to 80 by doc 28's packing. A packed row's cost is a fixed
+        // slot and header plus a payload roughly one byte per stored cell, so at 8 columns a
+        // one-cell row and a full-width row now land in the same malloc size class and retain
+        // identically. That is not a failure of the property -- it is `D3`'s admission test
+        // seen from the other side, and it says the depth difference has to clear a bucket
+        // step to exist at all. At a real pane width it clears it comfortably.
+        let columns = 80
         let budget = historyRowCost(columns: columns) * 2
         var short = try #require(Terminal(
             columns: columns,
@@ -48,7 +55,8 @@ struct TerminalScrollbackBudgetTests {
         ))
         for _ in 0..<10 {
             short.feed(Array("x\r\n".utf8))
-            full.feed(Array("12345678\r\n".utf8))
+            full.feed(Array(String(repeating: "1234567890", count: 8).utf8))
+            full.feed(Array("\r\n".utf8))
         }
 
         #expect(short.scrollbackRowCount > full.scrollbackRowCount)
@@ -104,15 +112,39 @@ struct TerminalScrollbackBudgetTests {
         // Intent: freeze row, cell, and scalar costs across every structural cell shape.
         // Why it exists: eviction points are value semantics and cannot drift with a toolchain.
         // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
+        //
+        // Restated against doc 28's packed retained row (`C6`). Each payload below is spelled
+        // out as the charges the encoding really makes -- a header, a scalar column at the
+        // row's own stride tier, one style run, and an entry per exception -- rather than as
+        // a number, because the point of the fixture is that the *composition* is pinned. A
+        // scheme that stored the same rows in a different mix of tables would still land on
+        // some total; it would not land on these terms.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+        let charge = PackedRowCharge.self
         let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            (4, "", 48 + 1 * 32),
-            // A full ASCII row keeps all four cells, but each scalar stays inline, so there is no
-            // per-cell spill beyond the row allocation.
-            (4, "ABCD", 48 + 4 * 32),
-            (2, "\u{754C}", 48 + 2 * 32),
-            // The only shape that costs more: a five-scalar cluster spills to its own allocation.
-            (2, family, 48 + 2 * 32 + 32 + 5 * 4),
+            // A blank row trims to one padding cell: a 1-byte slot and the default style run.
+            (4, "", packedHistoryRowCost(payloadBytes: charge.header + 1 + charge.styleRun)),
+            // Four ASCII cells are four 1-byte slots, one style run, and one identity run --
+            // the shape the whole scheme is chosen for.
+            (4, "ABCD", packedHistoryRowCost(
+                payloadBytes: charge.header + 4 + charge.styleRun + charge.identityRun
+            )),
+            // A wide glyph promotes the row to a 2-byte stride and owes a kind entry for each
+            // of its head and tail. Head and tail share one identity, which a
+            // `(start, extent, base)` run cannot express, so they are two runs -- and at two
+            // stored cells the per-cell floor is cheaper, so the encoder takes it.
+            (2, "\u{754C}", packedHistoryRowCost(
+                payloadBytes: charge.header + 2 * 2 + charge.styleRun
+                    + 2 * charge.kindException + 2 * charge.identityCell
+            )),
+            // The only shape that costs more: a five-scalar cluster spills to its own
+            // allocation, and the row's slots stay 1 byte because no cell holds a lone scalar.
+            (2, family, packedHistoryRowCost(
+                payloadBytes: charge.header + 2 + charge.styleRun
+                    + 2 * charge.kindException + charge.spillException
+                    + 2 * charge.identityCell,
+                spilledClusterScalars: [5]
+            )),
         ]
 
         for fixture in fixtures {
@@ -129,7 +161,12 @@ struct TerminalScrollbackBudgetTests {
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}".utf8))
         #expect(spacer.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
-        #expect(spacer.scrollbackRowByteCost(at: 0) == 48 + 3 * 32)
+        // Two untouched padding cells, then the spacer: one style run, one kind entry for the
+        // spacer, and the spacer's own identity.
+        #expect(spacer.scrollbackRowByteCost(at: 0) == packedHistoryRowCost(
+            payloadBytes: PackedRowCharge.header + 3 + PackedRowCharge.styleRun
+                + PackedRowCharge.kindException + PackedRowCharge.identityRun
+        ))
 
         let production = try #require(Terminal(columns: 4, rows: 2))
         let overridden = try #require(Terminal(
@@ -265,14 +302,14 @@ struct TerminalScrollbackBudgetTests {
         var width = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+            scrollbackBudgetBytes: historyRowCost(columns: 4) * 3
         ))
         width.feed(Array("ABCDEFGHI".utf8))
         #expect(width.scrollbackByteCount == historyRowCost(columns: 4) * 2)
         let before = width.primaryHistoryText
 
         width.resize(columns: 2, rows: 1)
-        #expect(width.scrollbackByteCount <= historyRowCost(columns: 4) * 2)
+        #expect(width.scrollbackByteCount <= historyRowCost(columns: 4) * 3)
         #expect(width.scrollbackRowCount == 3)
         #expect(before.hasSuffix(width.primaryHistoryText))
         #expect(width.isHistoryHeadTruncated)
@@ -596,9 +633,17 @@ struct TerminalScrollbackBudgetTests {
         // Live rows remain full width, so subtracting their cells leaves the exact compact
         // history-cell storage. Deliberately measured from the census rather than from
         // `scrollbackByteCount`, which is the very thing under test.
-        let historyCellCount = census.cellCount - census.screenRowCount * columns
-        let historyBytes = historyCellCount * census.cellStrideBytes
+        // Read as what history's packed rows really hold, which is what the budget is spent
+        // on since doc 28's `C6`. Multiplying a retained cell count by the live-grid stride
+        // would price a representation history no longer uses -- and would answer ~35 MB for
+        // a 10 MB budget purely because the same budget now admits ~9x the rows.
+        let historyBytes = census.retainedPackedPayloadBytes
         #expect(census.scrollbackRowCount > 0)
         #expect(historyBytes <= Terminal.productionScrollbackBudgetBytes)
+        // The depth the smaller charge bought, stated rather than implied: the same budget
+        // holding far more rows is the whole point, and a regression that silently gave it
+        // back would leave every assertion above still passing.
+        #expect(census.retainedStoredCellCount > 0)
+        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 4)
     }
 }

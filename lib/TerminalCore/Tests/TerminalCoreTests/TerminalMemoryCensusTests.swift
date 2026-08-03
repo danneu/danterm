@@ -30,7 +30,14 @@ struct TerminalMemoryCensusTests {
         #expect(retained.cells.dropFirst(3).allSatisfy { $0.kind == .padding })
         #expect(census.scrollbackRowCount == 1)
         #expect(census.cellCount == 20 + 3)
-        #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
+        // Cell storage is no longer one stride times one count: doc 28's `C6` prices retained
+        // rows by their packed blob and live rows by the struct, so the identity that used to
+        // hold is now a sum of two terms. Both are reported, which is what keeps it checkable.
+        #expect(census.cellStorageBytes
+            == census.screenRowCount * 20 * census.cellStrideBytes
+                + census.retainedPackedPayloadBytes)
+        #expect(census.retainedStoredCellCount == 3)
+        #expect(census.retainedPackedPayloadBytes < 3 * census.cellStrideBytes)
     }
 
     @Test("trimmed retained padding remains readable through inspection and browsing render")
@@ -107,7 +114,9 @@ struct TerminalMemoryCensusTests {
         #expect(census.scrollbackRowCount == 9)
         #expect(census.screenRowCount == 2)
         #expect(census.cellCount == 2 * 20 + 9 * 4)
-        #expect(census.cellStorageBytes == census.cellCount * census.cellStrideBytes)
+        #expect(census.cellStorageBytes
+            == 2 * 20 * census.cellStrideBytes + census.retainedPackedPayloadBytes)
+        #expect(census.retainedStoredCellCount == 9 * 4)
         #expect(census.rowStorageAllocationCount == 11)
     }
 

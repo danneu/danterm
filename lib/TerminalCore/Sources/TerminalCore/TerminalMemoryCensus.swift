@@ -34,17 +34,43 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     public var scrollbackRowCount: Int
 
     /// Cells physically stored across the whole grid; compact history rows may be narrower.
+    ///
+    /// Still a cell count after doc 28's packing, and deliberately so: a retained row stores
+    /// the same *cells* it always did, in a different shape. What changed is what those cells
+    /// cost, which is `cellStorageBytes` -- so a reader that wants "how much content" reads
+    /// this, and one that wants "how many bytes" reads that, and packing moves only the second.
     public var cellCount: Int
 
     /// `MemoryLayout<GridCell>.stride` -- what a cell costs *in an array*, which is the only way
-    /// cells are ever stored. Not `size`: array storage is strided, and the difference is the
-    /// padding doc 12's F1 measured as 65 vs 72.
+    /// *live* cells are ever stored. Not `size`: array storage is strided, and the difference is
+    /// the padding doc 12's F1 measured as 65 vs 72.
+    ///
+    /// Applies to the live screens only since doc 28's packing. A retained row does not store
+    /// `GridCell`s at all, so multiplying a retained cell count by this stride answers a question
+    /// about a representation that no longer exists -- read `retainedPackedPayloadBytes` instead.
     public var cellStrideBytes: Int
 
-    /// Exact bytes of cell storage: the sum over rows of `cells.count * stride`. Excludes malloc
-    /// bucket rounding and the array headers, which are counted separately below so that a caller
-    /// can attribute them rather than silently absorb them.
+    /// Exact bytes of cell storage across the whole grid: live screen cells at their stride, plus
+    /// what retained rows' packed blobs really hold. Excludes malloc bucket rounding and the array
+    /// headers, which are counted separately below so that a caller can attribute them rather than
+    /// silently absorb them.
+    ///
+    /// The two terms are reported separately below, because after packing they are priced by
+    /// different arithmetic and a single total can no longer be decomposed by a reader.
     public var cellStorageBytes: Int
+
+    /// Cells retained rows store, summed over history. The extent canonical trimming produces,
+    /// independent of how those cells are encoded -- which is what makes it the quantity the
+    /// retained-row probe reconstructs from the public row reader.
+    public var retainedStoredCellCount: Int
+
+    /// Exact payload bytes of history's packed blobs, headers and side tables included.
+    ///
+    /// This is what history really holds and what the byte budget is spent on, so it is the number
+    /// a "does history fit its budget" proof reads. Excludes the per-row slot in history's own
+    /// buffer, the blob's array header, and malloc's rounding, all of which the budget charges on
+    /// top and none of which is cell content.
+    public var retainedPackedPayloadBytes: Int
 
     /// Separate heap allocations backing rows -- one per row with cells. Doc 15's H7 is about the
     /// per-allocation overhead this number multiplies.
@@ -79,10 +105,19 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// the observation that killed narrowing the field to 16 bits.
     public var distinctContentIdentityCount: Int
 
-    /// Average bytes per cell. Constant at the stride today; it stops being constant the moment
-    /// any hypothesis in doc 15 moves a field out of the cell, which is the point of reporting it.
+    /// Average bytes per cell across the whole grid. No longer constant at the stride, which is
+    /// exactly what doc 28's packing was for: retained cells are now priced by their encoding and
+    /// live cells by the struct, so this number moved the moment `C6` landed.
     public var bytesPerCell: Double {
         cellCount == 0 ? 0 : Double(cellStorageBytes) / Double(cellCount)
+    }
+
+    /// Average packed payload bytes per retained cell -- the headline `C6` moved, stated per cell
+    /// so it can be held against `cellStrideBytes` directly.
+    public var retainedBytesPerStoredCell: Double {
+        retainedStoredCellCount == 0
+            ? 0
+            : Double(retainedPackedPayloadBytes) / Double(retainedStoredCellCount)
     }
 
     /// True when history holds cell storage for rows it no longer reports.
