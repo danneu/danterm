@@ -318,13 +318,27 @@ is not lost.
   to within 64 blocks at both widths, so the residual is per-row overhead rather
   than an unattributed mixture. **H3 is the larger target by roughly 9x**; H4's
   ceiling is 1.16 MB at 179 columns and only at zero per-row overhead.
-- [ ] `TODO` Measure blank-row frequency in realistic histories (shell
-  sessions, build logs, TUI dumps -- the existing benchmark corpora) to size
-  H2's ceiling. Destination: `F9`.
-- [ ] `TODO` Check allocator behavior under ragged row sizes: do
-  content-length-distributed allocations fragment size classes measurably, or
-  does malloc absorb them? (`15/F7`'s bucket analysis is technique precedent;
-  numbers measured fresh.) Destination: `F10`.
+- [x] `DONE` Measure blank-row frequency in realistic histories to size H2's
+  ceiling. Closed by `F9`: **not one retained row in the committed corpus is
+  blank** -- 0 of 133 recorded rows, 0 of 4,707 overall -- so H2's measured
+  ceiling is **0 bytes**. Its ceiling at the extreme, measured rather than
+  argued, is 8.00 MB, and only for a history that is *entirely* blank; at any
+  blank fraction below 50% it is under 350 KB, because canonical trimming already
+  made a blank row cost 80 B against a content row's 1,808 B. The instrument's
+  negative control reports 49.9% blank on an alternating stream, so the zero is a
+  measurement rather than a broken detector. The new probe
+  (`just terminal-retained-row-probe`) is committed, not deleted.
+- [x] `DONE` Check allocator behavior under ragged row sizes. Closed by `F10`:
+  **rounding does not eat the savings.** macOS malloc's classes above 256 B are
+  four buckets per octave -- ~12.5% granularity, geometric rather than a fixed
+  quantum -- so rounding is proportional and ragged storage keeps what it saves:
+  71.1% on paper against 70.8% realized on `F8`'s payload, with the worst gap
+  across all stimuli 0.9 points and two stimuli realizing *more* than paper.
+  Rounding costs 6.2%-9.6% of allocated bytes and does not rise with length
+  variety. The design constraint it leaves H3: a packing scheme must shrink a row
+  by more than one bucket step (~12.5%) to be guaranteed to yield any bytes. It
+  also splits `F8`'s 197.5 B/row residual into 160 B of row allocation (32 B
+  header + 128 B rounding) and ~37 B of history's own buffer.
 - [ ] `RESEARCH` Probe saturated-history resize cost at HEAD (H1): where does
   a full-width change on 5,000+ retained rows spend its time, and is it within
   a frame budget? `F7` has the distribution and the committed probe; this task

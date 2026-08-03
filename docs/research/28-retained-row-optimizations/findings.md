@@ -1,6 +1,6 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F9**. Inherited baseline: `15/F18` -- the compact retained-row
+Next free ID: **F11**. Inherited baseline: `15/F18` -- the compact retained-row
 validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
@@ -654,3 +654,190 @@ cannot explain the survivor, and the cost localizes to `dd51a12..e4556c0`.
   would stress it.
 - Next action: `F9` (blank-row frequency, H2's ceiling) and `F10` (allocator
   behavior under ragged rows) remain. `D3` gates H3 vs H4 on this split.
+
+### F9 -- retained history holds no blank rows at all across the committed corpus, and H2's ceiling is 0 bytes there
+
+- Status: recorded, and it closes Phase 2's blank-row task. This sizes `H2`; it
+  does not decide it, which is `D4`'s job.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `e1af871`, clean tree apart from five untracked
+  prose paths. Release configuration, headless.
+- Method: `just terminal-retained-row-probe`. The probe derives each retained
+  row's stored extent through the **public** row reader -- canonical form makes
+  the stored extent a pure function of observable content -- and every report
+  reconstructs `memoryCensus.cellStorageBytes` from those extents plus
+  full-width screen rows before any byte below is used. All 39 stimuli
+  reconstructed exactly. No engine change; the probe is off every measured path
+  by construction (it is not timed and nothing schedules it).
+- Corpus, and why it is this corpus: the stimulus bytes are supplied by the
+  driver from **already-committed** content -- the five benchmark-corpus
+  workloads and all 34 neutral recording fixtures under
+  `Fixtures/danterm` (live PTY captures of fish/zsh/bash, several from a real
+  user config with Starship) and `Fixtures/alacritty` (pinned upstream captures
+  of vim, tmux, htop, git log, shell completion). Recordings replay at the
+  geometry they were recorded at. The probe owns no content of its own, so no
+  stimulus here was written after the question was asked.
+- Results:
+
+  | pool | stimuli | retained rows | blank rows | blank fraction | `H2` ceiling |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | recordings only | 34 | 133 | **0** | **0.00%** | **0 B** |
+  | whole corpus | 39 | 4,707 | **0** | **0.00%** | **0 B** |
+
+- Observation 1, and it is the finding: **not one retained row in the corpus is
+  blank.** Not in 133 rows of recorded shell and TUI history, not in 4,574 rows
+  of generated benchmark history. `H2`'s ceiling on this evidence is exactly
+  zero bytes, because the population it proposes to share is empty.
+- Observation 2, the instrument's negative control, because a probe that reports
+  zero must be shown able to report non-zero: fed a stream alternating content
+  and blank lines, the same binary reports 467 blank rows of 935 (49.9%), and
+  the unit suite pins that a bare-newline row counts as blank while a
+  one-character row -- which stores one cell too -- does not. The zero is a
+  measurement, not a broken detector.
+- Observation 3, the mechanism behind the zero, which is worth stating because it
+  is not a sampling accident: rows reach history by scrolling off the top of the
+  live screen, and a blank row only gets there if a session emits blank lines
+  *faster than a screenful*. Interactive shells and TUIs leave blank rows on the
+  screen, where they are overwritten or redrawn, not in history. The one place
+  blank history is easy to produce is a program that prints many blank lines in a
+  row, which nothing in the corpus does.
+- Observation 4, `H2`'s ceiling stated the way `F8` stated `H4`'s -- best case,
+  zero mechanism cost, absolute bytes. Measured at the extreme rather than
+  argued: a generated all-blank stimulus (`bound/all-blank-saturation`, reported
+  and excluded from both pools, and labelled a bound precisely because it
+  flatters `H2` maximally) saturates the 10 MiB budget at **131,072 retained
+  rows**, each charging exactly **80 B** (16 B `GridRow` slot + 32 B array header
+  + 32 B for its one canonical cell) and each holding a **64 B** malloc block.
+  Sharing one storage allocation across all of them reclaims **8,388,544 B
+  (8.00 MB, 80.0% of the budget)**. That is the true ceiling, and it is only
+  reachable by a history that is *entirely* blank.
+- Observation 5, the ceiling between the two extremes, since neither 0% nor 100%
+  is a forecast. At the saturation regime `F8` measured, a content row charges
+  1,808 B (`10,485,760 / 5,799`, and the model reproduces it exactly:
+  16 + 32 + 55 x 32 at the 1,792 B size class). A blank row charges 80 B. So at
+  blank fraction `f`, the ceiling is `f x 64 / (f x 80 + (1-f) x 1808)` of the
+  budget:
+
+  | blank fraction | `H2` ceiling | share of a 10 MiB budget |
+  | ---: | ---: | ---: |
+  | 1% | 3.7 KB | 0.036% |
+  | 5% | 19.0 KB | 0.186% |
+  | 10% | 40.1 KB | 0.391% |
+  | 25% | 119.1 KB | 1.16% |
+  | 50% | 347.1 KB | 3.39% |
+  | 100% | 8.00 MB | 80.0% |
+
+  The curve is convex and nearly flat below 50% for one structural reason:
+  **canonical trimming already made a blank row cheap.** A blank row costs 80 B
+  against a content row's 1,808 B, so blank rows cannot be a large *byte* share
+  until they are an overwhelming *count* share. `H2` is not a small win awaiting
+  a better corpus; it is a win the shipped trim already took.
+- Inference for the Phase 3 gate: **`H2` is dead on sizing.** Its measured
+  ceiling is 0 B, its ceiling at a blank fraction nothing in the corpus
+  approaches is tens of KB, and it would still owe an answer to the charge-model
+  question the README flags (charging each sharer for shared bytes overstates;
+  charging once complicates eviction accounting). Recommending its rejection is
+  `D4`'s to make, and this entry does not make it.
+- Uncertainty, stated plainly because it is the weak part of this finding: the
+  recorded pool is **133 retained rows**. Most recordings never fill a screen,
+  and the two that dominate the row count are generated workloads whose templates
+  contain no blank lines by construction -- so the whole-corpus 0.00% is a much
+  weaker fact than its denominator suggests. What carries the conclusion is not
+  the sample but the arithmetic in Observation 5: the ceiling is small at every
+  blank fraction a real session could plausibly hold. A corpus of long real
+  sessions would sharpen `f`; it could not move the curve. Reopening condition:
+  a recorded stimulus whose retained history is more than ~50% blank rows, which
+  would put `H2` back above a hundred KB and make the charge-model question worth
+  answering.
+- Next action: `D4` disposes of `H2` on this evidence. `F10` is the remaining
+  Phase 2 sizing.
+
+### F10 -- malloc's size classes are proportional, not quantized, so ragged rows keep their savings: 71.1% on paper, 70.8% realized
+
+- Status: recorded, and it closes Phase 2's allocator task. This is the
+  measurement `F8` said would make its stated uncertainty concrete.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `e1af871`, clean tree apart from five untracked
+  prose paths. Release configuration, headless.
+- Method: the same run as `F9`. Per retained row the probe computes the real
+  request (`32 B array header + storedCells x 32 B stride`) and asks
+  **`malloc_good_size`** what the allocator returns for it -- libmalloc's own
+  answer, not a size-class table written from memory, which is the same choice
+  doc 15's `D4` made when it charged `Array.capacity` instead of predicting
+  buckets. The driver independently models the classes in Python and the two are
+  compared per stimulus; all 39 agreed. The gate test sweeps the model against
+  `malloc_good_size` directly, and that sweep already caught a real divergence
+  above the small zone's 32 KB limit (irrelevant to rows, fixed anyway).
+- Results, for the stimuli that produce retained history:
+
+  | stimulus | rows | mean stored cells | rounding | paper saving | realized saving | B/row overhead |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `reference/scrollback-plain` (`F8`'s payload) | 5,799 | 51.0 | 7.1% | 71.1% | **70.8%** | 160.0 |
+  | `benchmark/scrollback-stream` | 2,267 | 134.0 | 6.2% | 25.0% | **25.0%** | 320.0 |
+  | `benchmark/unicode-wrapping` | 2,307 | 128.6 | 7.4% | 28.0% | **27.1%** | 364.4 |
+  | `danterm/milestone-4-viability` | 55 | 31.7 | 9.6% | 59.7% | **62.4%** | 142.5 |
+  | `alacritty/history` | 74 | 4.4 | 2.4% | 94.9% | **95.1%** | 36.3 |
+  | pooled (benchmark + recordings) | 4,707 | -- | 6.84% | -- | -- | -- |
+
+  "Paper saving" is ragged storage against full-width storage before either side
+  meets the allocator; "realized" is the same comparison after both do.
+- Observation 1, and it is the answer to the task's question: **size-class
+  rounding does not eat the savings.** The worst gap between paper and realized
+  is 0.9 percentage points (`unicode-wrapping`, 28.0% -> 27.1%), and on two
+  stimuli the realized saving is *larger* than the paper one -- because the
+  full-width row being compared against rounds up harder than the ragged rows do.
+  `H3`'s savings survive contact with the allocator.
+- Observation 2, the mechanism, and it is why the answer comes out this way
+  rather than by luck: macOS malloc's classes above 256 B are **four buckets per
+  octave** -- 320/384/448/512, then 640/768/896/1024, then 1280/1536/1792/2048,
+  and so on. That is ~12.5% granularity, and it is **geometric, not a fixed
+  quantum**. Rounding is therefore proportional to the request: a row that
+  shrinks by 60% keeps roughly 60% of that as real bytes, at any size. Had the
+  allocator used a flat 512 B quantum in this range -- the shape it is easy to
+  assume -- a shrink smaller than 512 B per row would have delivered nothing, and
+  the answer to this task would have been the opposite one.
+- Observation 3, the consequence for `H3`, stated as a design constraint rather
+  than a caveat: **a packing scheme must shrink a row's request by more than one
+  bucket step (~12.5%) to be guaranteed to yield any bytes at all.** Below that
+  it may round back into the same class and deliver exactly zero, however clean
+  the arithmetic looks. Above it, savings scale. `15/H6`'s packing proposals
+  (packed scalars, run-length styles) target multiples of that step, so this is a
+  floor `H3` clears rather than a wall it hits -- but it is a floor any specific
+  `H3` design has to be checked against before it is built.
+- Observation 4, ragged rows do **not** fragment: rounding costs 6.2%-9.6% of
+  allocated bytes across stimuli whose stored extents range from 1 to 179 cells,
+  with 29 distinct lengths in `unicode-wrapping` and 25 in
+  `milestone-4-viability`. Uniform-length `scrollback-plain` sits at 7.1%, in the
+  middle of that band. Variety in row length is not what drives the overhead;
+  where the mean length falls inside its octave is.
+- Observation 5, reconciling with `F8`, which measured this residual by a
+  completely different route and left it as a "consistency check, not an
+  attribution". `F8` reported 197.5 B of per-row overhead at 179 columns from a
+  malloc `bytesInUse` delta. Replaying its exact payload here: every row stores
+  51 cells, requests 1,664 B, and gets the 1,792 B class -- **32 B header +
+  128 B rounding = 160.0 B per row**, uniform. The model reproduces `F8`'s census
+  exactly (retained 9,463,968 B + screen 66 x 179 x 32 = 9,842,016 B, matching to
+  the byte) and accounts for 10,797,312 B of `F8`'s 11,000,160 B attributable
+  total -- **98.2%**. The remaining 202,848 B is ~37 B per row that the row
+  arrays do not explain: history's own buffer holds a 16 B `GridRow` slot per row
+  plus its capacity slack. So `F8`'s 197.5 B/row is now split: 160 B belongs to
+  the row's cell allocation, ~37 B to the container holding the rows. `F8`'s
+  guess of "roughly another 100-160 B" of rounding was right at the top of its
+  range.
+- Observation 6, and it matters for `H4` rather than `H3`: that ~37 B per row is
+  **not** reclaimable by `H3` (it is not cell bytes) and only partly by `H4` (an
+  aggregate-storage scheme still needs a per-row descriptor). It is 2.0% of a
+  saturated 179-column footprint. `F8`'s `H4` ceiling of 1.16 MB stands; this
+  finding says where about a fifth of it lives.
+- Uncertainty: one allocator on one platform, which is the only one DanTerm ships
+  on -- but the class ladder is a libmalloc implementation detail, not a
+  contract, and a future macOS could change it. That risk is bounded by the fact
+  that the *budget* reads `Array.capacity` rather than modelling classes, so the
+  charge stays honest even if this model goes stale; only this finding's
+  arithmetic would need re-running (`just terminal-retained-row-probe`, which
+  compares the model against libmalloc on every run and would show a
+  `MISMATCH`). Nothing here measures styled or multi-scalar content beyond what
+  `unicode-wrapping` contains, so `H3`'s packing argument remains untested against
+  the content that would stress it -- the same gap `F8` named.
+- Next action: `D3` gates H3 vs H4 on `F8`'s split plus this finding's
+  survival check.
