@@ -138,11 +138,20 @@ terminal-resize-probe flags="":
     lib/TerminalCore/.build/release/TerminalResizeProbe {{flags}}
 
 # Report the shape of retained rows across the committed stimulus corpus: how many are
-# blank, how long the rest are, and what malloc's size classes charge for them.
+# blank, how long the rest are, what their cells contain, and what malloc's size classes
+# charge for them -- then price each candidate packing representation against those exact
+# rows.
 #
-# The instrument behind doc 28's `F9` (blank-row frequency, sizing `H2`'s ceiling) and
-# `F10` (whether ragged rows' paper savings survive the allocator). A probe, not a
-# benchmark: one arm, no threshold, no verdict.
+# The instrument behind doc 28's `F9` (blank-row frequency, sizing `H2`'s ceiling),
+# `F10` (whether ragged rows' paper savings survive the allocator) and `F11` (what
+# retained rows are made of, and what a packing scheme can therefore charge). A probe,
+# not a benchmark: one arm, no threshold, no verdict.
+#
+# Pass `--saturated` to also replay each stimulus until its retained history fills the
+# production budget. That is how styled and multi-scalar content is read *at depth*: the
+# corpus's styled content lives in recordings that retain a screenful or less per pass.
+# Repeated replays are pooled separately, because repetition manufactures depth and would
+# otherwise be read as evidence about how often such content reaches history.
 #
 # The stimulus is supplied from committed bytes -- the five benchmark-corpus workloads
 # and every neutral recording fixture -- rather than generated, so the blank-row number
@@ -151,8 +160,9 @@ terminal-resize-probe flags="":
 # and is labelled as a ceiling) and `reference/scrollback-plain` (`F8`'s payload,
 # replayed so its measured per-row residual can be re-explained from size classes).
 #
-#   just terminal-retained-row-probe          # table
-#   just terminal-retained-row-probe "--json" # machine-readable
+#   just terminal-retained-row-probe               # table
+#   just terminal-retained-row-probe "--json"      # machine-readable
+#   just terminal-retained-row-probe "--saturated" # + depth by replay
 terminal-retained-row-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalRetainedRowProbe
     python3 ./scripts/terminal-retained-row-shape.py {{flags}}

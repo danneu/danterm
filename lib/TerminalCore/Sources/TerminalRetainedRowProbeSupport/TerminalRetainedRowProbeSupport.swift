@@ -1,5 +1,5 @@
-// The retained-row shape probe: how long retained rows are, how many are blank, and what
-// the allocator actually charges for them.
+// The retained-row shape probe: how long retained rows are, what they are made of, how
+// many are blank, and what the allocator actually charges for them.
 //
 // This is the instrument doc 28's Phase 2 needs for `F9` (blank-row frequency, sizing
 // `H2`'s ceiling) and `F10` (allocator behavior under ragged rows, sizing whether `H3`'s
@@ -7,6 +7,15 @@
 // two facts about a history -- the distribution of *stored* cells per retained row, and
 // what malloc hands back for a request of that size -- so they share one instrument
 // rather than two that could disagree.
+//
+// Phase 3 added the third fact, for `F11`: what a retained row's cells actually *contain*.
+// `F8` and `F10` both closed on the same stated gap -- `styledCellCount` and
+// `multiScalarCellCount` were zero in every run, so `H3`'s packing argument had never met
+// the content that would stress it. A packing scheme is priced against composition, not
+// against length: a representation that compresses what real rows do not contain wins
+// nothing. `RetainedRowComposition` is that measurement, carried as parallel per-row
+// arrays alongside `storedCellCounts` so every reduction stays re-derivable from raw
+// counts.
 //
 // Why it can read stored extents without touching the engine: canonical form means a
 // retained row's stored cells are a pure function of its observable content, so the
@@ -63,6 +72,113 @@ public func rowAllocation(storedCells: Int, cellStrideBytes: Int) -> (request: I
     return (request, allocatedBytes(forRequest: request))
 }
 
+/// UTF-8 bytes one scalar encodes to, which is what a text-packed row would store per
+/// scalar.
+///
+/// Spelled out rather than taken from `String(scalar).utf8.count` so the probe does not
+/// allocate a `String` per cell across a saturated history, and so the boundaries a packing
+/// scheme would care about (1/2/3/4 bytes) are visible where they are used.
+public func utf8ByteCount(of scalar: Unicode.Scalar) -> Int {
+    switch scalar.value {
+    case 0..<0x80: 1
+    case 0x80..<0x800: 2
+    case 0x800..<0x1_0000: 3
+    default: 4
+    }
+}
+
+/// What retained rows are made of, per row, oldest first and index-aligned with
+/// `RetainedRowShapeReport.storedCellCounts`.
+///
+/// Parallel arrays rather than an array of structs: every element is a bare integer, so the
+/// JSON stays compact across a saturated history, and each axis can be pooled independently
+/// without the reader having to trust a summary. The axes are deliberately *orthogonal*
+/// (style, scalar count, scalar width, cell kind, hyperlink) instead of a single "row type"
+/// enum, because a packing scheme prices each axis separately -- run-length styles care
+/// about `styleRunCounts`, a text-packed payload about `utf8ByteCounts`, a narrow scalar
+/// slot about `nonASCIIScalarCounts` -- and a row that is styled *and* multi-scalar must be
+/// countable in both. Row-level classification is the driver's reduction, not this type's.
+public struct RetainedRowComposition: Codable, Equatable, Sendable {
+    /// Stored cells whose style differs from the default -- what a style side-table or a
+    /// run-length style encoding has to represent.
+    public let styledCellCounts: [Int]
+
+    /// Stored cells carrying more than one scalar (a combining sequence, an emoji ZWJ
+    /// cluster). These are the cells no fixed-width scalar slot can hold inline.
+    public let multiScalarCellCounts: [Int]
+
+    /// Stored cells carrying no scalar at all: interior padding, wide tails, and cells that
+    /// exist only because a background-erase style or a later column made them non-default.
+    public let emptyScalarCellCounts: [Int]
+
+    /// Total scalars across the row's stored cells -- the element count a packed scalar
+    /// buffer would hold.
+    public let scalarCounts: [Int]
+
+    /// Scalars at or above U+0080. The share that decides whether a one-byte-per-scalar
+    /// packed form needs an escape hatch or is simply wrong.
+    public let nonASCIIScalarCounts: [Int]
+
+    /// Total UTF-8 bytes across the row's stored scalars -- the payload size of a
+    /// text-packed row.
+    public let utf8ByteCounts: [Int]
+
+    /// Maximal runs of equal style across the stored prefix, counting the leading run. A row
+    /// of one uniform style has 1; this is the length of a run-length style encoding.
+    public let styleRunCounts: [Int]
+
+    /// Distinct styles present in the stored prefix -- the size of a per-row style table.
+    public let distinctStyleCounts: [Int]
+
+    /// Stored cells participating in wide-cell geometry (`wideHead`, `wideTail`,
+    /// `spacerHead`). A packed form still owes the observability contract for these.
+    public let wideCellCounts: [Int]
+
+    /// Stored cells carrying OSC 8 hyperlink metadata.
+    public let hyperlinkCellCounts: [Int]
+
+    /// The largest scalar value held by a *single-scalar* cell in the row, or 0 when the row
+    /// has none.
+    ///
+    /// Single-scalar cells only, because a fixed-width scalar slot is a question about the
+    /// cells that fit in one: a multi-scalar cell needs an indirection whatever the slot
+    /// width is. This is what decides whether a row can use a 1-, 2-, or 4-byte slot, and it
+    /// is measured rather than assumed because the whole 1-byte tier stands or falls on it.
+    public let maxSingleScalarValues: [Int]
+
+    public init(
+        styledCellCounts: [Int],
+        multiScalarCellCounts: [Int],
+        emptyScalarCellCounts: [Int],
+        scalarCounts: [Int],
+        nonASCIIScalarCounts: [Int],
+        utf8ByteCounts: [Int],
+        styleRunCounts: [Int],
+        distinctStyleCounts: [Int],
+        wideCellCounts: [Int],
+        hyperlinkCellCounts: [Int],
+        maxSingleScalarValues: [Int]
+    ) {
+        self.styledCellCounts = styledCellCounts
+        self.multiScalarCellCounts = multiScalarCellCounts
+        self.emptyScalarCellCounts = emptyScalarCellCounts
+        self.scalarCounts = scalarCounts
+        self.nonASCIIScalarCounts = nonASCIIScalarCounts
+        self.utf8ByteCounts = utf8ByteCounts
+        self.styleRunCounts = styleRunCounts
+        self.distinctStyleCounts = distinctStyleCounts
+        self.wideCellCounts = wideCellCounts
+        self.hyperlinkCellCounts = hyperlinkCellCounts
+        self.maxSingleScalarValues = maxSingleScalarValues
+    }
+
+    /// Retained rows holding at least one styled cell.
+    public var styledRowCount: Int { styledCellCounts.count(where: { $0 > 0 }) }
+
+    /// Retained rows holding at least one multi-scalar cell.
+    public var multiScalarRowCount: Int { multiScalarCellCounts.count(where: { $0 > 0 }) }
+}
+
 /// One stimulus's retained-row shape, plus every quantity `F9` and `F10` are reduced from.
 ///
 /// Raw counts are retained alongside the reductions -- `storedCellCounts` is the whole
@@ -86,6 +202,10 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
 
     /// Stored cells per retained row, oldest first. The distribution `F10` needs.
     public let storedCellCounts: [Int]
+
+    /// What those stored cells contain, index-aligned with `storedCellCounts`. The
+    /// measurement `F11` needs, and the one `F8` and `F10` both named as missing.
+    public let composition: RetainedRowComposition
 
     /// Live screen rows the census also counts, so a reader can see why the derived
     /// scrollback total is smaller than `census.cellStorageBytes`.
@@ -120,6 +240,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         retainedRowCount: Int,
         blankRowCount: Int,
         storedCellCounts: [Int],
+        composition: RetainedRowComposition,
         screenRowCount: Int,
         censusCellStorageBytes: Int,
         derivationMatchesCensus: Bool
@@ -133,6 +254,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         self.retainedRowCount = retainedRowCount
         self.blankRowCount = blankRowCount
         self.storedCellCounts = storedCellCounts
+        self.composition = composition
         self.screenRowCount = screenRowCount
         self.censusCellStorageBytes = censusCellStorageBytes
         self.derivationMatchesCensus = derivationMatchesCensus
@@ -218,11 +340,70 @@ public func readRetainedRowShape(
     storedCellCounts.reserveCapacity(terminal.scrollbackRowCount)
     var blankRowCount = 0
 
+    var styledCellCounts: [Int] = []
+    var multiScalarCellCounts: [Int] = []
+    var emptyScalarCellCounts: [Int] = []
+    var scalarCounts: [Int] = []
+    var nonASCIIScalarCounts: [Int] = []
+    var utf8ByteCounts: [Int] = []
+    var styleRunCounts: [Int] = []
+    var distinctStyleCounts: [Int] = []
+    var wideCellCounts: [Int] = []
+    var hyperlinkCellCounts: [Int] = []
+    var maxSingleScalarValues: [Int] = []
+    let defaultStyle = TerminalStyle()
+
     for index in 0..<terminal.scrollbackRowCount {
         guard let row = terminal.scrollbackRow(at: index) else { continue }
         let lastContentColumn = row.cells.lastIndex(where: { $0 != defaultTerminalCell })
         if lastContentColumn == nil { blankRowCount += 1 }
-        storedCellCounts.append((lastContentColumn ?? 0) + 1)
+        let storedCount = (lastContentColumn ?? 0) + 1
+        storedCellCounts.append(storedCount)
+
+        // Composition is read over the *stored* prefix only. The public reader materializes
+        // the row to full width, and the trailing default cells it appends are exactly the
+        // ones canonical form does not store -- counting them would report the pane's width
+        // rather than the row's content.
+        var styled = 0, multiScalar = 0, emptyScalar = 0, scalars = 0
+        var nonASCII = 0, utf8Bytes = 0, wide = 0, hyperlinks = 0, runs = 0
+        var maxSingleScalar = 0
+        var distinctStyles: Set<TerminalStyle> = []
+        var previousStyle: TerminalStyle?
+        for cell in row.cells.prefix(storedCount) {
+            if cell.style != defaultStyle { styled += 1 }
+            let scalarCount = cell.scalars.count
+            scalars += scalarCount
+            if scalarCount == 0 { emptyScalar += 1 }
+            if scalarCount > 1 { multiScalar += 1 }
+            if scalarCount == 1, let scalar = cell.scalars.first {
+                maxSingleScalar = max(maxSingleScalar, Int(scalar.value))
+            }
+            for scalar in cell.scalars {
+                if scalar.value >= 0x80 { nonASCII += 1 }
+                utf8Bytes += utf8ByteCount(of: scalar)
+            }
+            switch cell.kind {
+            case .wideHead, .wideTail, .spacerHead: wide += 1
+            case .narrow, .padding: break
+            }
+            if cell.hyperlink != nil { hyperlinks += 1 }
+            if previousStyle != cell.style {
+                runs += 1
+                previousStyle = cell.style
+            }
+            distinctStyles.insert(cell.style)
+        }
+        styledCellCounts.append(styled)
+        multiScalarCellCounts.append(multiScalar)
+        emptyScalarCellCounts.append(emptyScalar)
+        scalarCounts.append(scalars)
+        nonASCIIScalarCounts.append(nonASCII)
+        utf8ByteCounts.append(utf8Bytes)
+        styleRunCounts.append(runs)
+        distinctStyleCounts.append(distinctStyles.count)
+        wideCellCounts.append(wide)
+        hyperlinkCellCounts.append(hyperlinks)
+        maxSingleScalarValues.append(maxSingleScalar)
     }
 
     // Live screen rows are always full width -- the grid materializes them at construction
@@ -239,6 +420,19 @@ public func readRetainedRowShape(
         retainedRowCount: terminal.scrollbackRowCount,
         blankRowCount: blankRowCount,
         storedCellCounts: storedCellCounts,
+        composition: RetainedRowComposition(
+            styledCellCounts: styledCellCounts,
+            multiScalarCellCounts: multiScalarCellCounts,
+            emptyScalarCellCounts: emptyScalarCellCounts,
+            scalarCounts: scalarCounts,
+            nonASCIIScalarCounts: nonASCIIScalarCounts,
+            utf8ByteCounts: utf8ByteCounts,
+            styleRunCounts: styleRunCounts,
+            distinctStyleCounts: distinctStyleCounts,
+            wideCellCounts: wideCellCounts,
+            hyperlinkCellCounts: hyperlinkCellCounts,
+            maxSingleScalarValues: maxSingleScalarValues
+        ),
         screenRowCount: census.screenRowCount,
         censusCellStorageBytes: census.cellStorageBytes,
         derivationMatchesCensus: derivedCells * census.cellStrideBytes == census.cellStorageBytes

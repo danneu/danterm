@@ -1,11 +1,13 @@
 // Behavioral tests for the retained-row shape probe.
 //
-// These pin the two properties that make the probe's numbers usable: the public-API
-// derivation of stored extents reconstructs the engine's own exact census (otherwise every
-// byte the probe reports is a guess dressed as a measurement), and blank rows are counted
-// as blank rather than as one-cell rows (which is the whole of `28/F9`). Nothing here
-// asserts a blank frequency or a size class -- the corpus supplies the first and libmalloc
-// the second, and a unit test that pinned either would be inventing evidence.
+// These pin the properties that make the probe's numbers usable: the public-API derivation
+// of stored extents reconstructs the engine's own exact census (otherwise every byte the
+// probe reports is a guess dressed as a measurement), blank rows are counted as blank
+// rather than as one-cell rows (which is the whole of `28/F9`), and the composition axes
+// `28/F11` prices a packing scheme against count what they say they count. Nothing here
+// asserts a blank frequency, a styled fraction, or a size class -- the corpus supplies the
+// first two and libmalloc the third, and a unit test that pinned any of them would be
+// inventing evidence.
 import Testing
 import TerminalCore
 @testable import TerminalRetainedRowProbeSupport
@@ -101,5 +103,92 @@ struct TerminalRetainedRowProbeSupportTests {
 
         #expect(report.sharedBlankCeilingBytes == (report.blankRowCount - 1) * perBlank)
         #expect(report.sharedBlankCeilingBytes < report.allocatedBytes)
+    }
+
+    @Test("Composition is read over the stored prefix, index-aligned with it")
+    func compositionCoversOnlyStoredCells() {
+        // Intent: every composition array has one entry per retained row, and a row's
+        //   scalar count never exceeds its stored cell count for single-scalar content.
+        // Why it exists: the public row reader materializes rows to full width, so the
+        //   easy mistake is to read composition across the pane rather than across the
+        //   row. That would report a styled *fraction* diluted by the pane width and a
+        //   plain-row cost that grew with the window -- both plausible-looking, both
+        //   wrong, and neither visible in a total.
+        let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
+        let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
+        let report = readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
+        let composition = report.composition
+
+        #expect(composition.styledCellCounts.count == report.retainedRowCount)
+        #expect(composition.scalarCounts.count == report.retainedRowCount)
+        #expect(composition.maxSingleScalarValues.count == report.retainedRowCount)
+        for (index, stored) in report.storedCellCounts.enumerated() {
+            #expect(composition.scalarCounts[index] == stored)
+            #expect(composition.styleRunCounts[index] == 1)
+            #expect(composition.maxSingleScalarValues[index] == Int(UnicodeScalar("x").value))
+        }
+    }
+
+    @Test("A styled run is counted as one run, and its cells as styled")
+    func styledRunsAreCountedAsRuns() {
+        // Intent: a row of plain text with a coloured middle reports its styled cells and
+        //   the number of maximal style runs, not the number of style changes or cells.
+        // Why it exists: `F11`'s run-length pricing is denominated in runs. Counting
+        //   transitions rather than runs would under-price a row by one entry; counting
+        //   styled cells as runs would over-price a uniformly styled row by its whole
+        //   length, which is the difference between run-length styles winning and losing.
+        var terminal = Terminal(columns: 40, rows: 4)!
+        for _ in 0..<20 {
+            terminal.feed(Array("aa\u{1B}[31mbbb\u{1B}[0mcc\r\n".utf8))
+        }
+        let report = readRetainedRowShape(of: terminal, stimulus: "styled", fedByteCount: 0)
+        let composition = report.composition
+
+        #expect(report.retainedRowCount > 0)
+        for index in 0..<report.retainedRowCount {
+            #expect(report.storedCellCounts[index] == 7)
+            #expect(composition.styledCellCounts[index] == 3)
+            #expect(composition.styleRunCounts[index] == 3)
+            #expect(composition.distinctStyleCounts[index] == 2)
+        }
+    }
+
+    @Test("A combining sequence is one multi-scalar cell, and widens the row's scalar tier")
+    func multiScalarCellsAreCountedOnce() {
+        // Intent: a base scalar plus a combining mark is one cell holding two scalars, and
+        //   the row's widest *single-scalar* cell is unaffected by it.
+        // Why it exists: the fixed-width scalar slot `F11` prices takes its tier from
+        //   single-scalar cells only, because a multi-scalar cell is an indirection at any
+        //   tier. If the tier were taken from every scalar, one combining mark would push
+        //   an otherwise-ASCII row to a wide slot and silently erase the saving the
+        //   candidate is chosen for.
+        var terminal = Terminal(columns: 40, rows: 4)!
+        for _ in 0..<20 { terminal.feed(Array("cafe\u{0301}\r\n".utf8)) }
+        let report = readRetainedRowShape(of: terminal, stimulus: "combining", fedByteCount: 0)
+        let composition = report.composition
+
+        #expect(report.retainedRowCount > 0)
+        for index in 0..<report.retainedRowCount {
+            #expect(report.storedCellCounts[index] == 4)
+            #expect(composition.multiScalarCellCounts[index] == 1)
+            #expect(composition.scalarCounts[index] == 5)
+            #expect(composition.nonASCIIScalarCounts[index] == 1)
+            #expect(composition.maxSingleScalarValues[index] < 0x80)
+        }
+    }
+
+    @Test("UTF-8 byte counts follow the encoding's own boundaries")
+    func utf8ByteCountsMatchTheEncoding() {
+        // Intent: `utf8ByteCount` returns 1/2/3/4 at the encoding's real boundaries.
+        // Why it exists: it is spelled out rather than delegated to `String`, so nothing
+        //   but a test holds it to the encoding. A text-packed row's whole payload size is
+        //   this function summed, so an off-by-one boundary would misprice a candidate.
+        #expect(utf8ByteCount(of: "a") == 1)
+        #expect(utf8ByteCount(of: "\u{7F}") == 1)
+        #expect(utf8ByteCount(of: "\u{80}") == 2)
+        #expect(utf8ByteCount(of: "\u{7FF}") == 2)
+        #expect(utf8ByteCount(of: "\u{800}") == 3)
+        #expect(utf8ByteCount(of: "\u{FFFF}") == 3)
+        #expect(utf8ByteCount(of: "\u{10000}") == 4)
     }
 }

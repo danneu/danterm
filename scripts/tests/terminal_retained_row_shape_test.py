@@ -29,6 +29,41 @@ def _load(name, filename):
 shape = _load("terminal_retained_row_shape", "terminal-retained-row-shape.py")
 
 
+def make_report(kind, stored, *, blank=0, columns=80, styled=None, runs=None,
+                multi=None, utf8=None, max_scalar=None):
+    """Build a probe-shaped report for the reductions to chew on.
+
+    Composition defaults to plain single-scalar ASCII, so a test that cares about
+    one axis states only that axis and the rest stay at the shape a plain row
+    really has.
+    """
+    count = len(stored)
+    zeros = [0] * count
+    return {
+        "stimulus": f"synthetic/{kind}",
+        "kind": kind,
+        "columns": columns,
+        "rows": 24,
+        "cellStrideBytes": 32,
+        "blankRowCount": blank,
+        "storedCellCounts": list(stored),
+        "allocatedBytes": sum(shape.good_size(32 + n * 32) for n in stored),
+        "composition": {
+            "styledCellCounts": list(styled) if styled else zeros,
+            "multiScalarCellCounts": list(multi) if multi else zeros,
+            "emptyScalarCellCounts": zeros,
+            "scalarCounts": list(stored),
+            "nonASCIIScalarCounts": zeros,
+            "utf8ByteCounts": list(utf8) if utf8 else list(stored),
+            "styleRunCounts": list(runs) if runs else [1] * count,
+            "distinctStyleCounts": [1] * count,
+            "wideCellCounts": zeros,
+            "hyperlinkCellCounts": zeros,
+            "maxSingleScalarValues": list(max_scalar) if max_scalar else [ord("x")] * count,
+        },
+    }
+
+
 class SizeClassModelTests(unittest.TestCase):
     def test_model_matches_the_allocator_the_probe_asks(self):
         """The Python size-class model must agree with libmalloc's own answer.
@@ -102,12 +137,9 @@ class StimulusTests(unittest.TestCase):
         summary that pooled it would state the opposite of what was measured.
         """
         reports = [
-            {"kind": "recording", "blankRowCount": 0, "storedCellCounts": [5, 5],
-             "cellStrideBytes": 32, "columns": 80, "allocatedBytes": 2 * shape.good_size(32 + 5 * 32)},
-            {"kind": "bound", "blankRowCount": 100, "storedCellCounts": [1] * 100,
-             "cellStrideBytes": 32, "columns": 80, "allocatedBytes": 100 * 64},
-            {"kind": "reference", "blankRowCount": 0, "storedCellCounts": [51],
-             "cellStrideBytes": 32, "columns": 179, "allocatedBytes": shape.good_size(32 + 51 * 32)},
+            make_report("recording", [5, 5], blank=0, columns=80),
+            make_report("bound", [1] * 100, blank=100, columns=80),
+            make_report("reference", [51], blank=0, columns=179),
         ]
         summary = shape.summarize(reports)
 
@@ -120,6 +152,106 @@ class StimulusTests(unittest.TestCase):
         (bound,) = list(shape.bound_stimuli())
         self.assertEqual(bound["kind"], "bound")
         self.assertEqual(set(b"".join(bound["chunks"])), set(b"\r\n"))
+
+    def test_saturated_replays_are_pooled_apart_from_recorded_evidence(self):
+        """A repeated replay is depth, not frequency, and must not pool as evidence.
+
+        `F11` reads styled content at depth off replays that were repeated until
+        the budget filled. Their *content* is committed, but how often such content
+        reaches depth is manufactured by the repetition -- so pooling them with the
+        recordings would turn a question about cost into a claim about incidence.
+        """
+        reports = [
+            make_report("recording", [5]),
+            make_report("saturated", [5] * 100),
+        ]
+        summary = shape.summarize(reports)
+
+        self.assertEqual(summary["recording"]["retainedRowCount"], 1)
+        self.assertEqual(summary["all"]["retainedRowCount"], 1)
+        self.assertEqual(summary["saturated"]["retainedRowCount"], 100)
+
+
+class ChargeModelTests(unittest.TestCase):
+    def test_row_charge_reproduces_the_engine_charges_the_findings_quote(self):
+        """`row_charge` must be the budget's charge, not a lookalike.
+
+        `F9` states two charges measured against the engine: a blank retained row
+        costs 80 B and a 55-cell content row at saturation costs 1,808 B. Every
+        depth number `F11` and `D5` state is this function divided into the budget,
+        so if it drifts from the engine's `scrollbackByteCost` the savings stay
+        plausible while the depths become fiction.
+        """
+        blank = make_report("recording", [1])
+        content = make_report("recording", [55])
+
+        self.assertEqual(shape.charged_bytes(blank), 80)
+        self.assertEqual(shape.charged_bytes(content), 1808)
+
+    def test_misaligned_composition_fails_loudly(self):
+        """A composition array that stops matching the row count must raise.
+
+        Silent misalignment is the failure mode that would produce a complete,
+        plausible, wrong table -- styled fractions attributed to the wrong rows.
+        """
+        report = make_report("recording", [5, 5])
+        report["composition"]["styleRunCounts"] = [1]
+
+        with self.assertRaises(RuntimeError):
+            shape.row_facts(report)
+
+
+class PackingTests(unittest.TestCase):
+    def test_scalar_width_tier_follows_the_widest_single_scalar(self):
+        """1/2/4-byte tiers, chosen from single-scalar cells only."""
+        for widest, expected in ((ord("x"), 1), (0xFF, 1), (0x2500, 2), (0x1F600, 4)):
+            fact = shape.row_facts(make_report("recording", [4], max_scalar=[widest]))[0]
+            self.assertEqual(shape.row_scalar_width(fact), expected)
+
+    def test_a_candidate_that_saves_nothing_drops_no_size_class(self):
+        """`D3`'s admission test must be able to answer no.
+
+        The test is only meaningful if a candidate that fails it is reported as
+        failing. A "packing" that returns the current payload unchanged must show
+        zero rows dropping a class and a zero saving -- otherwise the column is
+        decoration rather than a gate.
+        """
+        report = make_report("recording", [51] * 10)
+        facts = shape.row_facts(report)
+        original = dict(shape.PACKINGS)
+        try:
+            shape.PACKINGS.clear()
+            shape.PACKINGS["identity"] = lambda fact: fact["stored"] * 32
+            priced = shape.price_facts(facts, 32)
+        finally:
+            shape.PACKINGS.clear()
+            shape.PACKINGS.update(original)
+
+        self.assertEqual(priced["identity"]["rowsDroppingAClass"], 0)
+        self.assertEqual(priced["identity"]["savingFraction"], 0.0)
+
+    def test_run_length_styles_are_priced_per_run_not_per_styled_cell(self):
+        """A uniformly styled row must cost one run, not one entry per cell.
+
+        This is the whole reason run-length styles are a candidate: if the price
+        scaled with styled cells, `C3`/`C6` would collapse toward the per-cell
+        forms on exactly the styled content `F11` went looking for.
+        """
+        uniform = shape.row_facts(
+            make_report("recording", [80], styled=[80], runs=[1])
+        )[0]
+        fragmented = shape.row_facts(
+            make_report("recording", [80], styled=[80], runs=[40])
+        )[0]
+
+        self.assertEqual(
+            shape.pack_stride_runs_exceptions(uniform),
+            80 * 1 + 1 * 6,
+        )
+        self.assertGreater(
+            shape.pack_stride_runs_exceptions(fragmented),
+            shape.pack_stride_runs_exceptions(uniform),
+        )
 
 
 if __name__ == "__main__":
