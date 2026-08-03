@@ -202,7 +202,20 @@ public actor TerminalPTYHost {
     private var pendingEvents: [PaneLifecycleEvent] = []
     private var isReducing = false
 
-    private var recentOutput: [UInt8] = []
+    #if DEBUG
+    /// Bounded lookback so a test-support wait armed after the fact can still be
+    /// answered from output the child already produced. Capped at
+    /// `testOutputWindowLimit`; every byte pushed out is counted, never forgotten.
+    private var testOutputWindow: [UInt8] = []
+    /// How much output has fallen out of `testOutputWindow`. This is the number that
+    /// separates "these bytes never arrived" from "this host can no longer know",
+    /// which is the difference between a failing wait and a hanging one.
+    private var testOutputDiscardedByteCount = 0
+    /// Chunk observers, each dropped as soon as it reports it is done, so a satisfied
+    /// wait costs nothing afterwards. Bounded by the number of live waits on this host.
+    private var testOutputObservers: [@Sendable ([UInt8]) -> Bool] = []
+    private static let testOutputWindowLimit = 64 * 1024
+    #endif
     private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
@@ -227,8 +240,7 @@ public actor TerminalPTYHost {
     private var consumerWorkWasSignaled = false
     private var updateHandler: (@Sendable () -> Void)?
     private var testUpdateHandler:
-        (@Sendable ([UInt8], PaneLifecycleResult?) -> Void)?
-    private var testOutputHandler: (@Sendable ([UInt8]) -> Void)?
+        (@Sendable (PaneLifecycleResult?) -> Void)?
     private var productionFenceEntryCount: UInt64 = 0
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
@@ -829,9 +841,8 @@ public actor TerminalPTYHost {
 
     /// Installs the test-support wakeup separately so adapters do not displace the pane consumer.
     package nonisolated func setTestUpdateHandler(
-        _ handler: @escaping @Sendable ([UInt8], PaneLifecycleResult?) -> Void
+        _ handler: @escaping @Sendable (PaneLifecycleResult?) -> Void
     ) -> (
-        recentOutput: [UInt8],
         result: PaneLifecycleResult?,
         hasEmittedUpdate: Bool
     ) {
@@ -840,31 +851,37 @@ public actor TerminalPTYHost {
                 owner.testUpdateHandler = handler
             }
             return (
-                recentOutput: owner.recentOutput,
                 result: owner.reportedResult,
                 hasEmittedUpdate: owner.emittedUpdateSignalCount > 0
             )
         }.value
     }
 
-    /// Returns whether retained test evidence already contains the requested byte sequence.
-    package nonisolated func observedOutputContains(_ bytes: [UInt8]) -> Bool {
+    #if DEBUG
+    /// Subscribes a test-support observer to child output, in one owner transaction that
+    /// first replays everything still retained.
+    ///
+    /// The observer sees the retained lookback as its first chunk and every later chunk in
+    /// stream order, with no gap in between -- that ordering is the point of doing this
+    /// under the fence, and it is what lets a caller match incrementally instead of
+    /// rescanning a window that can drop bytes underneath it. Returning `false` unsubscribes.
+    ///
+    /// The returned count is how much output this host has already discarded. A caller that
+    /// has not matched by the time this returns and sees a non-zero count has asked a
+    /// question this host cannot answer, and must say so rather than wait for an answer that
+    /// can never arrive.
+    package nonisolated func observeTestOutput(
+        _ observer: @escaping @Sendable ([UInt8]) -> Bool
+    ) -> Int {
         fence(countsAsProduction: false) { owner in
-            owner.recentOutput.containsSubsequence(bytes)
-        }.value
-    }
-
-    /// Installs a test-support observer for every raw-output callback and returns prior evidence.
-    package nonisolated func setTestOutputHandler(
-        _ handler: @escaping @Sendable ([UInt8]) -> Void
-    ) -> [UInt8] {
-        fence(countsAsProduction: false) { owner in
-            if owner.teardownFinished == false {
-                owner.testOutputHandler = handler
+            let wantsMore = observer(owner.testOutputWindow)
+            if wantsMore, owner.teardownFinished == false {
+                owner.testOutputObservers.append(observer)
             }
-            return owner.recentOutput
+            return owner.testOutputDiscardedByteCount
         }.value
     }
+    #endif
 
     /// Applies output synchronously so delivery-fence tests can queue callbacks without yielding main.
     package nonisolated func deliverOutputForTesting(_ bytes: [UInt8]) {
@@ -1587,6 +1604,30 @@ public actor TerminalPTYHost {
         process(.outputEOF)
     }
 
+    #if DEBUG
+    /// Feeds child output to the test-support lookback and to every live observer.
+    ///
+    /// Debug-only on purpose: this is the only retention the host does for tests, and a
+    /// shipping build must not pay an append and a window trim on every PTY read.
+    private func recordTestOutput(_ bytes: [UInt8]) {
+        let limit = Self.testOutputWindowLimit
+        testOutputWindow.append(contentsOf: bytes)
+        if testOutputWindow.count > limit {
+            let overflow = testOutputWindow.count - limit
+            testOutputWindow.removeFirst(overflow)
+            testOutputDiscardedByteCount += overflow
+        }
+        guard testOutputObservers.isEmpty == false else { return }
+        // Emptied before the calls, refilled after, so an observer subscribed from within
+        // one -- or one that unsubscribes itself by returning false -- is not lost.
+        let observers = testOutputObservers
+        testOutputObservers.removeAll(keepingCapacity: true)
+        for observer in observers where observer(bytes) {
+            testOutputObservers.append(observer)
+        }
+    }
+    #endif
+
     private func applyOutput(_ bytes: [UInt8]) {
         let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
         flightTape?.record(.feed(bytes))
@@ -1604,11 +1645,9 @@ public actor TerminalPTYHost {
         {
             markUpdatePending()
         }
-        recentOutput.append(contentsOf: bytes)
-        if recentOutput.count > 64 * 1024 {
-            recentOutput.removeFirst(recentOutput.count - 64 * 1024)
-        }
-        testOutputHandler?(recentOutput)
+        #if DEBUG
+        recordTestOutput(bytes)
+        #endif
         if captureTransitions {
             capturedOutput.append(contentsOf: bytes)
             appliedTransitions.append(.feed(bytes))
@@ -1889,28 +1928,23 @@ public actor TerminalPTYHost {
         if updatePending {
             updatePending = false
             updateHandler?()
-            testUpdateHandler?(recentOutput, reportedResult)
+            testUpdateHandler?(reportedResult)
             emittedUpdateSignalCount += 1
         }
         guard shouldFinishUpdates else { return }
         shouldFinishUpdates = false
         updateHandler = nil
         testUpdateHandler = nil
-        testOutputHandler = nil
+        #if DEBUG
+        // The lookback survives teardown -- a wait armed afterwards can still be answered
+        // from it -- but nothing stays subscribed to a host that will never deliver again.
+        testOutputObservers.removeAll()
+        #endif
         updateSignalFinished = true
         // Last, and on this queue: quiescence is only irreversible once every
         // callback is detached, and the exit path treats completion as exactly that.
         let observers = quiescenceObservers
         quiescenceObservers.removeAll()
         for observer in observers { observer() }
-    }
-}
-
-private extension Array where Element == UInt8 {
-    func containsSubsequence(_ needle: [UInt8]) -> Bool {
-        guard needle.isEmpty == false, needle.count <= count else { return false }
-        return indices.dropLast(needle.count - 1).contains { start in
-            self[start..<(start + needle.count)].elementsEqual(needle)
-        }
     }
 }

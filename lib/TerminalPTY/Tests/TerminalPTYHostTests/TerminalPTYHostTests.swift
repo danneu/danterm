@@ -857,15 +857,13 @@ struct TerminalPTYHostTests {
         // its child saturates its own owner queue, so even answering this call waits behind a
         // read turn (measured 0.03s to 2.6s, against under a millisecond for the quiet two).
         //
-        // That pane is also waited on by its flood rather than by `__READY__`, and the
-        // difference is correctness, not taste. `waitForOutput` can only answer from the
-        // host's 64 KiB `recentOutput` window, and this child writes 4 KiB forever the
-        // instant it prints the marker -- so once its host has drained past the window the
-        // marker is gone and no later output can ever satisfy the wait. A live pane never
-        // quiesces either, so the wait does not fail, it suspends until the test's time
-        // limit. A full write's worth of the flood byte is evidence the window cannot lose,
-        // and it is the stronger claim anyway: what this test needs from this pane is that
-        // it is already flooding.
+        // That pane is also waited on by its flood rather than by `__READY__`, because the
+        // marker is not a question this test can ask here: the child writes 4 KiB forever
+        // the instant it prints it, and all three panes are started before any of them is
+        // waited on, so by the time the wait is armed the host has long since discarded it.
+        // A full write's worth of the flood byte is evidence no discard can lose, and it is
+        // the stronger claim anyway -- what this test needs from this pane is that it is
+        // already flooding.
         let ready = Array("__READY__".utf8)
         let flooding = [UInt8](repeating: UInt8(ascii: "c"), count: 4096)
         for (name, host, liveness) in [
@@ -1862,6 +1860,69 @@ struct TerminalPTYHostTests {
             absences += 1
         }
         #expect(absences == 0)
+    }
+
+    @Test("waiting on output the host already discarded reports why, immediately", .timeLimit(.minutes(1)))
+    func waitForDiscardedOutputFailsImmediately() async throws {
+        // Intent: a wait whose answer can no longer be inside the host's bounded
+        //   evidence resolves at once, as a recorded issue naming the discard, instead
+        //   of suspending on a live pane that will never quiesce.
+        // Why it exists: `waitForOutput` reads a bounded window but reads like an
+        //   unbounded "was this ever printed?" question. When the answer had already
+        //   been discarded the wait was not slow, it was unsatisfiable -- and because a
+        //   live pane never quiesces it burned the whole test time limit before
+        //   reporting anything, pointing at the wait line rather than at the discard.
+        // Scenario: the 2026-08-03 gate hang in
+        //   `applicationTerminationClosesMultipleLivePanes`, where the chatty probe
+        //   printed `__READY__` once and then wrote 4 KiB forever, so sixteen writes
+        //   discarded the marker before the wait for it was armed (fix fdb9ec6).
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        // The flood, deterministically: enough output through the host's own path that
+        // the marker cannot still be retained, on an idle machine as much as a loaded one.
+        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
+        for _ in 0..<16 { host.deliverOutputForTesting(flood) }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        var answer: Bool??
+        await withKnownIssue("the wait must say it cannot be answered") {
+            answer = await value(
+                of: Task { await host.waitForOutput(containing: Array("__READY__".utf8)) },
+                withinMilliseconds: 3000
+            )
+        }
+        // `nil` is the pre-fix outcome: the wait never resumed at all.
+        #expect(answer == .some(.some(false)))
+        #expect(clock.now - start < .seconds(1))
+        await host.close()
+    }
+
+    @Test("a match armed before a flood still sees a marker printed after it", .timeLimit(.minutes(1)))
+    func armedExpectationSurvivesFloodedOutput() async throws {
+        // Intent: once armed, a match is decided by the whole stream from that point on --
+        //   no volume of intervening output, and no chunk boundary inside the marker,
+        //   can lose it.
+        // Why it exists: this is the escape hatch the "already discarded" failure points
+        //   at, so it has to actually work; and it is the property that makes retaining
+        //   output unnecessary in the first place.
+        // Scenario: the shape a chatty pane forces -- the interesting marker arrives after
+        //   megabytes of noise that no bounded window could have held.
+        let host = try makeHost(captureTransitions: false)
+        let expectation = host.expectOutput(containing: Array("__LATE__".utf8))
+
+        let flood = [UInt8](repeating: UInt8(ascii: "f"), count: 64 * 1024)
+        for _ in 0..<16 { host.deliverOutputForTesting(flood) }
+        // Split across chunks, because a PTY read boundary lands wherever it lands.
+        host.deliverOutputForTesting(Array("__LA".utf8))
+        host.deliverOutputForTesting(Array("TE__".utf8))
+
+        #expect(await expectation.satisfied())
+        await host.close()
     }
 }
 
