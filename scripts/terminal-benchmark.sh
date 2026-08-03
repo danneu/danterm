@@ -39,6 +39,10 @@ TARGET_COLUMNS="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-179}"
 TARGET_ROWS="${DANTERM_TERMINAL_BENCHMARK_ROWS:-66}"
 LOCALIZED_UPDATES="${DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES:-0}"
 REDRAW_UPDATES="${DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES:-0}"
+# Set only by the profiling harness, and only after it has resolved btop to one
+# absolute path: the live workload must never inherit whatever `btop` the pane's
+# own PATH would find.
+BTOP_EXECUTABLE="${DANTERM_TERMINAL_BENCHMARK_BTOP:-}"
 CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
 case "$BACKEND" in
     swift|ghostty) ;;
@@ -82,6 +86,20 @@ case "$WORKLOAD" in
     | full-screen-incremental-mixed-churn \
     | sparse-spans-few \
     | sparse-spans-max) ;;
+    btop-scroll)
+        # Live, profiling-only, and never measured: the workload's content is the
+        # host's process table, so admitting it to the measuring mode -- the one
+        # every paired comparison collects blocks through -- would put an
+        # uncontrolled workload behind a decision (I1).
+        [[ "$MODE" != "measure" ]] || {
+            echo "btop-scroll is a profiling-only workload and is never measured" >&2
+            exit 2
+        }
+        [[ -n "$BTOP_EXECUTABLE" && -x "$BTOP_EXECUTABLE" ]] || {
+            echo "btop-scroll requires DANTERM_TERMINAL_BENCHMARK_BTOP to name an executable btop" >&2
+            exit 2
+        }
+        ;;
     *)
         jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
             echo "Unknown workload: $WORKLOAD" >&2
@@ -237,19 +255,34 @@ done
 record_phase "app-ready"
 front_owned_app "$APP_PID"
 
-printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
+if [[ "$WORKLOAD" == "btop-scroll" ]]; then
+    # `exec` so the pane's shell becomes btop: the PTY then has exactly one
+    # foreground process, which is what makes the ownership and live-geometry
+    # checks below decidable rather than a guess about job control.
+    printf -v command 'exec %q' "$BTOP_EXECUTABLE"
+else
+    printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
+fi
 "$CLI" pane input --pane "$PANE_ID" --literal -- "$command"
 "$CLI" pane input --pane "$PANE_ID" -- Enter
 if [[ "$MODE" == "loop" || "$MODE" == "persistent" ]]; then
-    deadline=$((SECONDS + 20))
-    while [[ ! -f "$GEOMETRY_READY" ]]; do
-        if [[ -f "$PRODUCER_RESULT" ]]; then
-            producer_error="$(jq -r '.error // empty' "$PRODUCER_RESULT")"
-            [[ -z "$producer_error" ]] || { echo "$producer_error" >&2; exit 1; }
-        fi
-        (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark geometry" >&2; exit 1; }
-        sleep 0.05
-    done
+    if [[ "$WORKLOAD" == "btop-scroll" ]]; then
+        # The live workload has no producer to converge geometry, so readiness is
+        # the owned btop's own PTY reporting the canonical size (I4).
+        python3 "$SCRIPT_DIR/terminal_btop_workload.py" readiness --app-pid "$APP_PID" \
+            --executable "$BTOP_EXECUTABLE" --home "$HOME_DIR" \
+            --output "$ARTIFACTS/btop-readiness.json" >&2
+    else
+        deadline=$((SECONDS + 20))
+        while [[ ! -f "$GEOMETRY_READY" ]]; do
+            if [[ -f "$PRODUCER_RESULT" ]]; then
+                producer_error="$(jq -r '.error // empty' "$PRODUCER_RESULT")"
+                [[ -z "$producer_error" ]] || { echo "$producer_error" >&2; exit 1; }
+            fi
+            (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark geometry" >&2; exit 1; }
+            sleep 0.05
+        done
+    fi
     record_phase "converge-complete"
     identity_tmp="$PROFILE_IDENTITY_PATH.tmp.$$"
     mkdir -p "$(dirname "$PROFILE_IDENTITY_PATH")"

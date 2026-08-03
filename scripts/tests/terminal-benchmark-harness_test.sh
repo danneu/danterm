@@ -71,7 +71,7 @@ def rows(pattern):
 
 befores = rows(r'^\s+capture_activity before$')
 afters = rows(r'^\s+capture_activity after$')
-attaches = rows(r'^\s+if ! (sample|xcrun xctrace record)')
+attaches = rows(r'^\s+run_profiler (sample|xcrun xctrace record)')
 assert len(befores) == len(afters) == len(attaches) == 2, (
     f"expected two bracketed profilers, got {len(befores)}/{len(attaches)}/{len(afters)}"
 )
@@ -192,6 +192,28 @@ awk '
 # writes an update, so the run would look valid and measure an idle app.
 grep -q 'DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES="$localized_updates"' "$PROFILE"
 grep -q 'localized-draw-acceptance)' "$PROFILE"
+
+# The live btop workload's preflight must precede the harness launch, which is
+# what builds and launches the app. Asserted on line order because a preflight
+# that ran afterwards would still grep clean while costing an operator a release
+# build and a GUI launch before telling them btop is not installed.
+python3 - "$PROFILE" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1]).read().splitlines()
+def row(pattern):
+    matches = [i for i, line in enumerate(lines) if re.search(pattern, line)]
+    assert len(matches) == 1, f"expected exactly one {pattern!r}, got {len(matches)}"
+    return matches[0]
+
+preflight = row(r'terminal_btop_workload\.py" preflight')
+launch = row(r'^\s+"\$SCRIPT_DIR/terminal-benchmark\.sh"')
+assert preflight < launch, "the btop preflight must run before the app is built and launched"
+PY
+grep -q 'DANTERM_TERMINAL_BENCHMARK_BTOP="$BTOP_EXECUTABLE"' "$PROFILE"
+grep -q 'BTOP_EXECUTABLE="${DANTERM_TERMINAL_BENCHMARK_BTOP:-}"' "$HARNESS"
+grep -q 'terminal_btop_workload.py" readiness' "$HARNESS"
+grep -q 'terminal_btop_artifacts.py' "$PROFILE"
 
 # Provenance: `fixtureIdentity` must carry the geometry actually measured. The
 # harness takes DANTERM_TERMINAL_BENCHMARK_COLUMNS/_ROWS, so a hardcoded 179x66

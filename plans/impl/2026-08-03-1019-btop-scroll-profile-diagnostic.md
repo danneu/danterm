@@ -176,7 +176,7 @@ rejected.
 - [x] 1. feat(benchmark): add a held-arrow stimulus with measured overlap
 - [x] 2. feat(benchmark): publish foreground and presentation coverage
 - [x] 3. feat(benchmark): add btop workload identity and coverage artifacts
-- [ ] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
+- [x] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
 - [ ] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
 
 ## Implementation notes
@@ -239,6 +239,35 @@ rejected.
   and rejects a zero-sample interval, thermal pressure, and low-power mode. The
   sampling itself stays in the harness (commit 4), which already owns the
   `terminal-benchmark-state-probe.swift` pattern.
+
+- **Admission is a module, not a `case` arm (commit 4).** Mode admission,
+  duration bounds, owned-process selection, live-PTY readiness, and the capture
+  driver went into `scripts/terminal_btop_workload.py`, which the two shell
+  scripts call. The profiling harness is bash; expressing "one owned btop
+  descended from this app, at this live geometry, or say which condition failed"
+  there would have been untestable. The shell keeps only what a shell is good
+  at: which env var to set and which command to run.
+- **Admission and preflight are two commands, not one (commit 4).** `admit`
+  decides the mode and duration and costs nothing; `preflight` resolves btop,
+  reads its version, and compiles the stimulus arm and state probe. Splitting
+  them is what lets `sample btop-scroll 21` be refused without a `swiftc` run,
+  and both still precede the release build and the app launch.
+- **`exec btop` in the pane (commit 4).** The pane's shell is replaced rather
+  than made btop's parent, so the PTY has exactly one foreground process and
+  ownership is a lineage question instead of a job-control one. Readiness then
+  reads the winsize from the device (`stty -f /dev/ttysNNN size`) rather than
+  from inside the pane: an in-pane probe reports the size before btop started,
+  and I4 is a claim about the geometry the profiled process is drawing at now.
+- **An invalid capture is recorded, not raised (commit 4).** The driver turns a
+  profiler window outside the stimulus -- and a profiler that never exited --
+  into a recorded `contained: false` with its reason, and the trace path no
+  longer exits on a missing time-profile table when the workload is btop. The
+  grader from commit 3 owns every verdict, and it can only name one from a
+  bundle that survived to disk.
+- **Two profiler call sites became one `run_profiler` (commit 4).** The corpus
+  workloads still invoke the profiler directly; btop hands the same argv to the
+  capture driver. The bracketing contract test moved with them, so the two
+  attaches are still asserted to sit between their activity snapshots.
 
 ## Implementation discretion
 
