@@ -2077,6 +2077,16 @@ measuring the wrong thing, which is what a precondition on a stimulus is for.
     nothing in `D2` or here turns on the choice. Recorded because `D2`'s derived
     1,048,576 rests on it and because a probe crashed on the assumption. A
     human's to revisit; the record format is Phase 3's.
+
+    **Amended 2026-08-04 by the external design review: a zero-cell record needs
+    a fold *floor* to be worth what `D2` counts it.** A record's display-row count
+    is `max(1, ceil((cells + spacers) / width))`. Without the `max(1, ...)` a
+    blank logical line folds to **zero** display rows, a blank history folds to
+    nothing at all, and `D2` Decision 1's 1,048,576-records-to-**rows** reading --
+    together with this entry's own ladder, which counts one row per blank
+    record -- is off by the whole quantity. The floor is what makes a zero-cell
+    record read as the blank line the user printed, and it is stated in the plan's
+    `I9`.
 - Next action: `D2`'s open question is closed and its reopening condition 1 is
   spent -- the graduation task inherits no record-count bound. Two things this
   entry hands forward: the counting pass's cost is governed by **stride, not

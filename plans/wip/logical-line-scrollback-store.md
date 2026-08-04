@@ -32,9 +32,13 @@ obligation below:
   (`31/F3`);
 - 28 catalogued edge cases, none requiring width-dependent data in history
   (`31/F4`);
-- the simplification inequality holds on invariants -- currently 4.5
-  cross-cutting contracts deleted against 4.5 local ones added
-  (`31/F5` as amended by `31/D3`).
+- the simplification inequality holds on invariants, and it holds on their
+  *shape* rather than their count: the contracts deleted are cross-cutting --
+  between the store and every reader, or between a resize and every anchor
+  holder -- while the ones added are local to the store, each with a single
+  enforcing site and testable by one gate (`31/F5` as amended by `31/D3`). The
+  tally itself is too close to carry the argument, which is why `31/DD8` is
+  re-read against the landed implementation rather than quoted (Gates below).
 
 Every Phase 1 number is a microbenchmark. `31/D1`'s `go` licenses design work,
 not a production storage change; what licenses landing is Acceptance below.
@@ -50,10 +54,14 @@ tail record; eviction is byte-driven and display-row granular at the head; the
 byte budget is the only bound and the arena's capacity is that budget.
 
 Behavioral scope: retained history and the call sites that address it by display
-row (69 enumerated in `31/F6`). Out of scope by construction: the live grid's
-refold, which survives; the alternate screen, which has no scrollback; the
-checkpoint/persistence path, which serializes history as text; and the C1 cell
-format (`28/D9`, `28/D10`), which is not reopened.
+row (69 enumerated in `31/F6`). One of them changes denomination rather than
+address: `scrollbackRowContentIdentityShape` becomes per record rather than per
+display row (`31/D3` Decision 6, `31/DD17`), so `31/DD9`'s "the public coordinate
+does not change" holds everywhere except in that reader's sample unit, whose
+consumers are two test suites and doc 28's `PR1`. Out of scope by construction:
+the live grid's refold, which survives; the alternate screen, which has no
+scrollback; the checkpoint/persistence path, which serializes history as text;
+and the C1 cell format (`28/D9`, `28/D10`), which is not reopened.
 
 **Milestone 1 -- the store.** Arena, derived index with eager whole-index
 recompute at a width change, open-line admission, head-granular eviction, the
@@ -75,11 +83,15 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 - **I1 -- nothing width-dependent is stored.** A record's bytes are a function of
   content alone. Every width-dependent quantity is a cache that a flush can
   rebuild from the arena.
-- **I2 -- one bound, and it holds by construction.** Arena bytes in use plus
-  index plus side tables never exceed the scrollback byte budget; the arena is
-  allocated once at that capacity and is never grown, compacted or shrunk. The
-  budget constant does not change at migration, and no content class loses depth
-  (`31/D2` Decision 1).
+- **I2 -- one *charged* bound, and it holds by construction.** Charged bytes --
+  arena bytes in use plus index plus side tables -- never exceed the scrollback
+  byte budget; the arena is allocated once at that capacity and is never grown,
+  compacted or shrunk. **Resident bytes are a different quantity and this
+  invariant does not bound them**: they are bounded by capacity plus metadata,
+  because once the ring cursor has cycled every arena page has been touched, so
+  the blank-record regime is a 16 MiB arena plus ~8 MiB of index resident against
+  a 16 MiB charged bound (`31/D2` Decision 1 as amended). The budget constant
+  does not change at migration, and no content class loses depth.
 - **I3 -- a width change evicts nothing**, at any width down to the engine
   minimum. The lossiness `28/D8`'s row cap could not avoid becomes
   unrepresentable.
@@ -89,7 +101,8 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
   semantic mark.
 - **I5 -- the middle is immutable.** The head record's header and the tail record
   are the only writable bytes; the arena has exactly the five mutating
-  operations `31/D2` Decision 2 enumerates, as amended by `31/D3`.
+  operations `31/D2` Decision 2 enumerates, as amended by `31/D3` and `31/DD20`
+  (the seam split is operation 1, not a sixth operation).
 - **I6 -- the fold reproduces today's output.** Reading history at a width emits
   the same cells, kinds, styles, spacer placement, continuation stamping and
   soft-wrap marking today's stored rows do -- including the styled blank a
@@ -104,10 +117,16 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
   links, the drag pin and the browsing anchor all survive a resize.
 - **I9 -- the index agrees with the arena.** The grand display-row total matches
   an independent recount after each of the six trigger points -- width change,
-  admission, head eviction, tail truncation, forced split, clear-all.
+  admission, head eviction, tail truncation, forced split, clear-all. The fold
+  arithmetic underneath it is `max(1, ceil((cells + spacers) / width))` per
+  record: the floor is what makes a zero-cell record (`31/DD15`) one display row,
+  and without it a blank history folds to nothing and the blank-line regime's
+  1,048,576-records-to-rows reading (`31/F7`, `31/D2` Decision 1) breaks.
 - **I10 -- no record exceeds 1/32 of the budget.** A logical line past that cap is
   hard-split with a marker, and readers rejoin split records by adjacency
-  (`31/D3`-ratified `31/F4` derivation: the cap moves if the budget does).
+  (`31/D3`-ratified `31/F4` derivation: the cap moves if the budget does). The
+  same split fires at a second trigger: when the open tail record reaches the
+  arena's physical end (`31/DD20`).
 - **I11 -- the open tail record ends on a display-row boundary at the current
   width**, so a resize leaves no short display row in the middle of a logical
   line that continues in the live grid (`31/D3` Decision 4).
@@ -153,16 +172,20 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
   hyperlink-heavy and identity-heavy content, with the charge totalled worst-case
   per class over records, index and every side table. This is what graduates the
   record format: a class that retains less does not ship.
-- **PO12 (I5, I6).** Cycling variable-length records -- including near-cap records
-  and an open tail that grows across the wrap seam -- through several full
-  physical wraps of the arena, with head trims interleaved, leaves every reader
-  returning exactly the expected retained suffix, cell for cell and in order,
-  after each cycle.
+- **PO12 (I5, I6, I10).** Cycling variable-length records -- including near-cap
+  records and an open tail that grows across the wrap seam, which `31/DD20`
+  forced-splits at the physical end and pads only to the next sub-row boundary --
+  through several full physical wraps of the arena, with head trims interleaved,
+  leaves every reader returning exactly the expected retained suffix, cell for
+  cell and in order, after each cycle.
 - **PO13 (record fidelity).** Multi-scalar spills, hyperlink ids and targets,
   content identity and semantic marks survive admission, a width change, a forced
   split and a head trim: a split logical line's mark appears exactly once and on
   the piece that starts it, and spill and hyperlink content read back identically
-  on both sides of the split. (A trimmed head's mark clearing is PO5's.)
+  on both sides of the split. Evicting the whole first piece of a forced-split
+  pair leaves the follower reading as a mid-line continuation carrying no mark --
+  not as a fresh logical line (`31/D2` Decision 2 step 2 as amended). (A trimmed
+  head's mark clearing is PO5's.)
 - **PO14 (gate).** `just test` passes, and the deletion list `31/F5` names is
   actually gone from the tree rather than relocated.
 
@@ -198,6 +221,20 @@ Open conditions that the implementation, not the design, has to discharge:
   head removal against this design's head-trim -- whose per-step fold walk is
   the new term -- under a rule frozen before the comparison is read. Owed before
   the ladder verdict is read, since a real pane evicts on every admitted row.
+  **Freeze the rule against this complexity reading**, not a worse one: `31/D2`
+  Decision 2's steps 1 and 4 persist the head cell offset, so one trim step folds
+  **one display row** from that offset -- `O(width)`, or `O(cells in that row)` on
+  the wide path -- rather than re-folding the record, and the per-record cost is
+  therefore linear in its display rows across a full drain, not quadratic.
+- **Resident pages are unmeasured** (`AR6`, promoted from an accepted risk by the
+  external review of `31/D2` Decision 1). `I2` bounds charged bytes, and `PO3`'s
+  census can only see those; resident is capacity plus metadata once the ring
+  cursor has cycled. Measure resident pages through `TerminalMemoryProbe`
+  (`phys_footprint`, `--vmmap`) on an empty, a partially filled, a saturated and a
+  cycled pane. Sequenced with the eviction measurement, because cycling the ring
+  is what makes the two quantities diverge. If the overshoot matters, the remedy
+  is sizing the arena's capacity below the budget -- a change to be taken on that
+  reading, not before it.
 - **The wide-content counting pass is unmeasured** (`31/D1` condition 1). Its
   probe, stimulus ladder, width changes and three-way decision rule are frozen in
   `31/D3` Decision 7; run it mechanically. Neither outcome changes the design --
@@ -234,9 +271,13 @@ Open conditions that the implementation, not the design, has to discharge:
 ## Accepted risks
 
 - **AR1 -- eviction's cost is unknown on both sides.** The head-trim adds a fold
-  walk per step that today's removal does not pay. Mitigation is the measurement
-  gate above; the fallback is whole-record eviction with its anchor jump accepted
-  as a behavior change.
+  walk per step that today's removal does not pay, but a bounded one: the head
+  cell offset persists across steps (`31/D2` Decision 2 steps 1 and 4), so a step
+  folds one display row -- `O(width)`, or `O(cells in that row)` on the wide
+  path -- and draining a record costs one pass over it rather than one per step.
+  Mitigation is the measurement gate above. The whole-record fallback would
+  reintroduce `31/F6-HR5`'s anchor jump as an accepted behavior change, and on
+  this reading it is unlikely to be needed.
 - **AR2 -- the wide-record fold is bracketed by arithmetic, not measured.** It is
   `O(display rows)` with an O(1) test per boundary, bounded by a total the budget
   already bounds, and the bracket clears one frame by ~3x on an unmeasured
@@ -251,12 +292,12 @@ Open conditions that the implementation, not the design, has to discharge:
 - **AR5 -- I7 is a discipline, not a mechanism.** Nothing in the type system stops
   a future call site from reaching the index inside a per-row loop; the locate
   counter is the only guard.
-- **AR6 -- first-touch residency is an assumption about the allocator.** If the
-  arena is allocated in a way that touches every page, an idle pane costs its
-  whole capacity resident. PO3's census cannot see this -- it reports capacity and
-  logical bytes-in-use, not pages dirtied -- so the check is a resident-page
-  measurement through `TerminalMemoryProbe` (`phys_footprint`, `--vmmap`) on an
-  empty, a partially filled and a saturated pane.
+- **AR6 -- first-touch residency was an assumption about the allocator, and it is
+  no longer an accepted risk.** It bounds an idle pane only: a pane whose ring
+  cursor has cycled has touched every page by construction, so resident is
+  capacity plus metadata and `I2` does not bound it. PO3's census cannot see this
+  -- it reports capacity and logical bytes-in-use, not pages dirtied -- so the
+  resident-page measurement is a **gate** above rather than a risk carried here.
 - **AR7 -- the seam rule (I11) was discovered, not designed**, and no probe has
   exercised a width change with a logical line straddling the seam.
 
@@ -289,16 +330,18 @@ Open conditions that the implementation, not the design, has to discharge:
 
 - Exact record, header, index and side-table byte layout, and the index's block
   size.
-- How the fold computes a cut offset, and how the ring's wrap seam is kept from
-  splitting a record, provided a record stays contiguous and the waste is bounded
-  and charged.
+- How the fold computes a cut offset, and how a **closed** record's placement is
+  kept off the ring's wrap seam (`31/DD14`'s pad), provided a record stays
+  contiguous and the waste is bounded and charged. The **open tail** at the seam
+  is not discretionary: `31/DD20` forced-splits it at the physical end and pads
+  only the sub-row remainder.
 
 ## Commit progress
 
-- [ ] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists
+- [ ] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
 - [ ] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
 - [ ] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
-- [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict
+- [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read

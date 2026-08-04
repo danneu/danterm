@@ -472,8 +472,9 @@ work, that list is the constraint on it.
 - [x] `DONE` **Graduate: the design is in
   [`plans/wip/logical-line-scrollback-store.md`](../../../plans/wip/logical-line-scrollback-store.md).**
   Written 2026-08-04 under the `simplify-plan` admission test, so it carries the
-  contract and cites this doc for everything else: eleven invariants, eleven
-  proof obligations, the two milestones `D3` named (milestone 1 the store with
+  contract and cites this doc for everything else: eleven invariants, fourteen
+  proof obligations (eleven when this entry was written; `PO11`-`PO14` were added
+  by the plan's revise cycles), the two milestones `D3` named (milestone 1 the store with
   the materializing facade, milestone 2 the borrowing cursor under `D3`
   Decision 5's frozen 121 us drag-move rule), and the paired ladder as the
   acceptance criterion with the -2% / -7% conversions labelled as the hypotheses
@@ -498,6 +499,49 @@ work, that list is the constraint on it.
     because a real pane evicts on every admitted row, so a ladder verdict read
     with eviction unpriced would attribute a term nobody has looked at. Reopen
     either if the implementation's slicing wants it: neither is a design change.
+
+    **Amended 2026-08-04 by the external design review: the first half is
+    stale.** The plan's revise cycles moved milestone 2 out of it -- the Decision
+    section scopes the borrowing cursor to a follow-up plan and the projection
+    rewrite is a Non-goal -- so `DD19` reads: **one plan file covers milestone 1;
+    milestone 2 is a follow-up plan, written after milestone 1 lands, with its
+    priority rule already frozen (`D3` Decision 5's 121 us drag-move
+    re-measure).** The second half is unchanged and still carried in the plan's
+    Gates section.
+
+- [x] `DONE` **Fold the external review of the deferred decisions and the plan.**
+  An external review of `DD1`-`DD19` and
+  [the plan](../../../plans/wip/logical-line-scrollback-store.md) was adjudicated
+  by the human and folded in on 2026-08-04, **before the plan's first slice ran**,
+  so the eviction rule that slice freezes is written against the corrected
+  reading. Nine points, each verified against the tree or the doc before it was
+  folded, each recorded as a marked amendment at the entry it corrects rather
+  than as a rewrite. Three are substantive. (1) **`D2` Decision 1's residency
+  claim covers charged bytes only** -- once the ring cursor cycles, resident is
+  capacity plus metadata, which in the blank-record regime is 24 MiB against a
+  16 MiB bound -- so the plan's `AR6` is promoted from an accepted risk to a gate
+  sequenced with the eviction measurement, and sizing capacity below the budget
+  is the remedy only if that reading shows the overshoot matters. (2) **`D2`
+  Decision 2's step 2 loses a forced split's continuation**: dropping a whole
+  record that carries `forcedSplit` leaves its follower reading as a fresh
+  logical line, diverging from today's
+  `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` (`Terminal.swift:3999`);
+  the step now propagates the continuation bit and clears the follower's mark,
+  and the plan's `PO13` covers it. (3) **`DD14`'s pad has no mechanism for the
+  growing open tail**, which is why `PO12` tested a case with no decision behind
+  it; **`DD20`** decides it -- forced-split the open record at the arena's
+  physical end and pad only the sub-row remainder -- with the cap-sized
+  reservation recorded as the alternative it beats, because the reservation's
+  charge would evict ~3.1% of history on one admitted row and that is `HR5`'s
+  hazard again. Seven smaller ones: `DD19` restated above; `DD15` given its
+  `max(1, ...)` fold floor, without which the 1,048,576-records-to-rows
+  arithmetic breaks; `DD17`/`DD9`'s denomination tension named at `DD17` and in
+  the plan's behavioral scope; step 4's stale `HR1` anchor cache noted at the
+  step; this entry's "eleven proof obligations" corrected to fourteen; the plan's
+  premise 5 restated as the cross-cutting-versus-local asymmetry rather than
+  quoting the 4.5-versus-4.5 tie as a result (`DD8`'s re-read gate unchanged);
+  and the plan's `AR1` corrected to the per-step complexity `D2` Decision 2
+  actually specifies -- one display row per step, not a walk of the record.
 
 ## Rejected
 

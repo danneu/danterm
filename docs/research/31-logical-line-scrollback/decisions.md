@@ -920,6 +920,25 @@ model of allocations checked against reality by a second model
 (`Terminal.swift:2307 recomputedScrollbackByteCount`); under the arena the
 arena's share of that identity is the distance between two pointers.
 
+**Amended 2026-08-04 by the external design review of `DD12` and the plan's
+`I2`; the paragraph above stands as written for *charged* bytes and is
+overstated for *resident* ones.** Charged bytes -- arena bytes in use plus index
+plus side tables -- are bounded by the budget by construction, and that is what
+the census and the plan's `PO3` check. Resident bytes are a different quantity,
+bounded by **capacity plus metadata**: the first-touch reading two paragraphs up
+holds only until the ring's write cursor has cycled once, after which every arena
+page has been touched and stays touched, and the index is a separate allocation
+outside the arena. In the blank-record regime that is a 16 MiB arena plus ~8 MiB
+of index resident against a 16 MiB charged bound -- **24 MiB, 1.5x the number
+this entry reads as a residency bound**. Nothing else in this decision moves: the
+charge model, the depth table, the two rejected allocation policies and the
+capacity-versus-in-use census requirement are unchanged. What moves is the plan's
+`AR6`, promoted from an accepted risk to a gate sequenced with the eviction
+measurement, because cycling the ring is exactly what makes the two quantities
+differ. Sizing the arena's capacity **below** the budget is the remedy if -- and
+only if -- that reading shows the overshoot matters; it is not taken here,
+because no page count has been measured.
+
 **What is charged, answering `X13` and inherited condition 9.** Everything
 retained history allocates, and the side tables are **inside** the budget rather
 than beside it:
@@ -990,6 +1009,31 @@ anchors and the scrollbar, and `F4` case 27 priced only its memory consequence.
 4. Update, in the same step: the head record's index offset, the head block's
    cached display-row total, the grand display-row total (`HR8`), the cached
    browsing-anchor display row (`HR1`), `evictedRowCount`, and the charge.
+
+**Amended 2026-08-04 by the external design review, in two steps of the list
+above and in neither case by adding an operation.**
+
+- **Step 2 drops a forced split's continuation on the floor.** Dropping a whole
+  record is right only when the record is the whole of its logical line. When the
+  dropped record carries `forcedSplit` (`DD3`, and `DD6`: the follower is the
+  same logical line, rejoined by adjacency with no back-pointer), dropping it
+  without stamping leaves the follower reading as a **fresh** logical line -- a
+  divergence from today's `Terminal.swift:3999`
+  `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`, which is true exactly when
+  the row now at the head continues the line above it, and which inherited
+  condition 10 exists to prevent diverging from. Step 2 therefore reads: drop the
+  record, and **if it carried `forcedSplit`, propagate the mid-line/continuation
+  bit to the follower and clear the follower's semantic-mark slot** -- the same
+  two edits step 3 makes for a trim, for the reason `DD13` gives. The follower's
+  header sits at the new head, so the write is the head re-head Decision 5
+  already pays for, and `DD20` below reaches the same follower from the admission
+  side. The plan's `PO13` gains this case; its `PO5` covers trims only.
+- **Step 4 cites a cache that no longer exists.** "the cached browsing-anchor
+  display row (`HR1`)" was removed by [`D3`](decisions.md) Decision 1: the
+  browsing anchor **is** an absolute display row, so eviction needs no anchor
+  edit at all and `evictedRowCount` plus the subtraction absorb it. Read step 4
+  as: the head record's index offset, the head block's cached display-row total,
+  the grand display-row total (`HR8`), `evictedRowCount`, and the charge.
 
 **Termination measure is display rows, not bytes.** A trim of a one-cell display
 row frees 8 bytes and spends 8 on the rewritten header, so a step can free
@@ -1281,6 +1325,61 @@ Named so a later reader can tell a gap from a silence:
   pad record.** The alternatives are splitting the record (every reader handles
   two segments, and `F1`'s win is contiguity) or copying it down (a copy on the
   admission path). The pad wastes bounded bytes and is charged.
+
+  **Amended 2026-08-04 by the external design review.** A pad needs the record's
+  length at the moment it is placed. That is true of a closed record and **false
+  of the open tail**: admission opens the record and grows it one display row at
+  a time (operation 1), so it can grow into the seam long after it was placed,
+  with splitting, copying down and compacting all already rejected above. The
+  pad rule stands for closed records; the open tail at the seam is `DD20`, and
+  the plan's `PO12` -- which already tests an open tail growing across the seam --
+  is the obligation that had no decision behind it until now.
+- **DD20 (added 2026-08-04 by the external design review) -- the open tail record
+  is forced-split at the arena's physical end, not reserved for.** When the next
+  display row admission would append does not fit before the physical end: close
+  the open record at its current end with the `forcedSplit` bit (`DD3`'s bit, at
+  a second trigger), write a `DD14` pad over the sub-row remainder, open the
+  continuation record at offset 0, and append the row there. Readers rejoin the
+  pair by adjacency (`DD6`); a head eviction that drops the first piece is
+  Decision 2 step 2's amendment. Two edges, stated so they are not discovered
+  later: an **empty** open record needs no split -- the pad covers the remainder
+  and the record is simply (re)opened at offset 0 with no bit set -- and the pad
+  is omitted when the remainder is zero, which it can be, since every record and
+  cell is an 8-byte multiple.
+
+  **Three properties checked rather than assumed.** (i) The split point is the
+  record's current end, which is a **display-row boundary at the admitting
+  width**, because admission appends whole display rows and measures a
+  soft-wrapped row to full width (`F4` case 17, `DD5`). So nothing is copied, and
+  `D3` Decision 4 / `DD16`'s "the open tail ends on a display-row boundary" holds
+  for the piece being closed and trivially for the empty one being opened.
+  (ii) The arena gains **no sixth mutating operation**: closing a record, writing
+  a pad and opening the next are what operation 1 already does at a cap-driven
+  forced split, all at the write cursor, and the middle stays immutable.
+  (iii) The waste is one sub-row remainder -- at most one display row's bytes,
+  ~1.4 KB at 179 columns -- charged like any other pad.
+
+  **The recorded alternative, and why it lost.** Reserve a `DD3` cap-sized span
+  (1/32 of the arena, 524,288 B) whenever a record is opened that could straddle,
+  so the record provably fits and `DD3`'s forced split fires on overflow. It is
+  the tidier rule and it wastes no display row to raggedness -- but the
+  reservation is **charged**, so a single admitted row would push up to 3.1% of
+  the arena over the budget and evict that much in one step: ~360 display rows at
+  `full`. That is exactly the per-admission anchor jump `HR5` found and Decision 2
+  refused ("no anchor moves further per admitted row than it does today"), so the
+  variant that buys tidiness reintroduces the hazard this entry closed. The split
+  variant's extra eviction is the pad, i.e. under one display row.
+
+  **What it costs, stated rather than buried.** A forced split ends a display row
+  early (`D3` Decision 1, trigger 5), so at any width other than the admitting one
+  the closed piece's final display row is short **in the middle of a logical
+  line** -- the raggedness `DD16` refused at the history/live seam, accepted here
+  at a record/record seam only because `DD3`'s cap already accepts it. What
+  changes is frequency: from "no measured input reaches the cap" to **once per
+  full wrap of the ring**, which at steady state leaves one such join (two
+  transiently) alive in a full history. Reopen if that is judged user-visible, or
+  if the cap's own raggedness is reconsidered; the reservation above is the
+  fallback and pays in depth rather than in a display row.
 
 #### Conditions discharged and advanced
 
@@ -2013,6 +2112,15 @@ Named so a later reader can tell a gap from a silence:
   choose the row's cells by the current width, which is the width-dependent
   question `HR7` found the contract cannot answer. Reopen if doc 28's `PR1` needs
   per-display-row samples, which no consumer asks for today.
+
+  **Qualified 2026-08-04 by the external design review.** This is the one place
+  `DD9`'s "the public coordinate does not change" is not unqualified: no
+  coordinate changes, but `scrollbackRowContentIdentityShape`'s **denomination**
+  does -- per display row to per record -- so its samples change meaning. Its
+  consumers are `TerminalContentIdentityShapeTests`,
+  `TerminalPackedRetainedRowTests` and doc 28's `PR1`, never production, and the
+  plan names it in its behavioral scope so the migration surface is not read as
+  empty.
 - **DD18 -- milestone 1 keeps a materializing `ProjectionRows`.** The alternative
   is rewriting fourteen readers before any ladder verdict exists. Reopen on
   Decision 5's frozen drag-move rule, which is the only measurement that can make
