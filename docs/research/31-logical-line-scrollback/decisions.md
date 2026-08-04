@@ -200,5 +200,109 @@ other deletion on the list descends from.
   by this verdict, and `28/H7` remains the fallback until D1 closes. The
   disposition of Phase 1 -- whether to continue funding it on this evidence --
   is a human decision.
-</content>
-</invoke>
+
+#### Part B, frozen rule for F2 (the eager counting pass)
+
+**Frozen 2026-08-04 at `9b2f37a`, before the F2 probe existed in the tree and
+before any counting-pass number was produced.** F2 is a Part B input: it prices
+the eager block-total recompute the human chose for milestone 1, against H2's
+bounds.
+
+**What F2 can and cannot decide.** H2's reject condition reopens the *lazy
+per-block recompute* recorded in Rejected; it does not falsify the logical-line
+store. **F2 therefore cannot make D1 no-go.** Its outcomes are: eager confirmed
+for milestone 1, eager confirmed with a recorded depth condition, or eager
+rejected and the index-refresh strategy reopened -- the last of which changes
+Phase 2's design, not D1's direction.
+
+**Instrument.** A standalone probe in
+`lib/TerminalCore/Tests/TerminalCoreTests/`, release configuration, headless,
+env-gated, in its own file so Part A's probe bodies are not edited. **9 measured
+rounds** per (content class, depth, count-source, width change), plus 2 warmup
+rounds; statistic = **median over rounds of wall time for one whole pass**, min
+and max and the round count reported alongside. There are no two arms to
+interleave: F2 measures an absolute cost against a frozen bound, not a ratio.
+
+**What is timed.** Exactly one call of the eager recompute: discard every cached
+block total and rebuild `blockPrefix` for a new width by reading one cell count
+per logical line and doing one divide. Nothing else -- no arena construction, no
+allocation of the stimulus, no read walk.
+
+**Two count-sources, because the sketch and the prototype disagree and the
+difference is the whole cost.**
+
+1. `arena` (**primary**): the count is read from each line's record header
+   through `lineOffsets`, which is what the candidate direction describes -- the
+   index holds offsets, the count lives in the record. This is a pointer chase
+   over the whole arena.
+2. `counts` (**alternative**): the count is read from a dense parallel array,
+   which is what F1's prototype happens to do. This is a sequential scan of
+   `8 x lineCount` bytes and buys its speed with 8 bytes per line of extra index
+   state.
+
+F2 reports both. If the primary clears H2 the alternative is unnecessary; if
+only the alternative clears it, that is a priced design change for Phase 2, not
+a free result to quote.
+
+**Depths and classes.** 10,000 and 100,000 logical lines, at both `mix` and
+`full` (the same two classes and the same generators D1 Part A froze), at 179
+columns. `28/D11`'s trial depth is ~10,000 *display* rows, which these
+generators reach in roughly 3,300-3,700 logical lines, so the 10,000-line figure
+bounds the trial depth from above and is the figure the reject condition is read
+against.
+
+**Width changes.** `179 -> 100` (narrow; display-row count rises) and
+`179 -> 200` (widen). The same-width recompute is recorded as a floor. All three
+do identical work per line, so a large spread between them is itself a finding.
+
+**Validity gates. Any failure voids the invocation, and a void invocation is not
+a verdict and does not become one by re-running.**
+
+1. **Non-elision.** Every timed pass's result is consumed, and the resulting
+   total display-row count is cross-checked against an independently computed
+   sum of `ceil(cells / width)` over the same lines. A mismatch, or a total of
+   zero, voids the run. A counting pass is exactly the shape of loop an
+   optimizer can delete, and a deleted loop reports a very good number.
+2. **Synthetic-stimulus fidelity.** A 100,000-line arena of wide content cannot
+   be built by feeding a real `Terminal` at this probe's cost, so it is built
+   synthetically: the same generators supply the cell counts, headers are
+   written, and cell payload bytes are allocated but not populated -- admissible
+   only because the counting pass provably never reads a cell byte. **Control:**
+   at 10,000 lines, both arenas are built -- the real-engine one through Part
+   A's `buildStimulus`, and the synthetic one from the same cell counts -- and
+   the pass is measured on each. Their medians must agree within **15%**. Wider
+   than that, and the synthetic depth extension is void: F2 reports the
+   10,000-line real figure only and records 100,000 as not measured.
+3. **Host conditions**, as Part A gated them: AC power, low-power mode off,
+   one-minute load average below 2.5 read before and after.
+4. **Coverage.** Every aggregate is printed beside its sample count, and a
+   quantity that could not be measured is reported absent rather than as 0.
+
+**Thresholds, and where each number comes from.**
+
+- **Confirm H2** -- median pass at **100,000 lines <= 10.0 ms**, on both content
+  classes and both width changes, for the primary count-source.
+  *Derivation:* this is H2's own bound, written into `README.md` at `de17e95`
+  when the doc was opened and before any probe existed; F2 adopts it unchanged
+  rather than restating it after seeing a number.
+- **Reject H2, reopening lazy per-block recompute** -- median pass at
+  **10,000 lines >= 16.67 ms**, one whole 60 Hz frame, on either class.
+  *Derivation:* `28/D11`'s shipped trial depth is the depth a user runs at
+  today, 10,000 logical lines bounds it from above (see Depths), and one frame
+  is the project's standing unit for "this is now visible"
+  (`28/F23`'s resize discussion reads 1.43 s as ~86 frames). A resize also has
+  to refold the live screen; a counting pass that alone costs a frame is the
+  dominant term rather than the rounding error H2 claims it is.
+- **Narrow confirm** -- 100,000 lines exceeds 10.0 ms but 10,000 lines stays
+  under **1.67 ms** (10% of a frame). *Derivation:* at a tenth of a frame the
+  pass cannot be the term a user perceives at trial depth, so eager survives
+  milestone 1; F2 then records the depth at which the 10 ms bound is crossed as
+  a condition on growing the store's depth, and lazy stays available rather
+  than adopted.
+
+**What F2 does not measure**, stated so the entry is not over-read: the rest of
+a resize (refolding the live screen, which this design does not remove), the
+lookup cost after a recompute (Part A's `random seek`, already measured), the
+cost of building or evicting from the arena (F3's), and anything about
+correctness of wrapping at a width other than 179 beyond the cross-check in
+gate 1.
