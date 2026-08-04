@@ -1,9 +1,9 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F22**. Phase 2's open resize-*profile* task has now been renumbered
-nine times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`, `F21`) without being
+Next free ID: **F23**. Phase 2's open resize-*profile* task has now been renumbered
+ten times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`, `F21`, `F22`) without being
 written, because IDs go in the order findings are recorded and each time something more
-urgent was measured first; it is still owed and now claims `F22`. The scratch-reusing encoder
+urgent was measured first; it is still owed and now claims `F23`. The scratch-reusing encoder
 lead that `F17` Observation 4 left open is **not** carried forward with it -- `D9`
 declined it on the ground that even its success leaves browsing over
 threshold. `F14` measured how
@@ -2476,3 +2476,177 @@ across the full range. It is not consistent with the two being the same number.
   went.
 - Next action: none taken. This joins the decision package rather than starting
   a fix, per the instruction not to change code before the table exists.
+
+### F22 -- the campaign's first wide-baseline reading: against pre-campaign DanTerm, HEAD feeds 2.4x faster and browses 2.2x faster while retaining 4.2x the history. Four of six workloads cannot reach that baseline at all
+
+- Status: recorded. **Wide-baseline descriptive.** No verdict is issued and none
+  may be quoted as one: the frozen per-workload thresholds were calibrated for
+  adjacent comparisons and do not apply across a range this wide, so every
+  number here is a direction and a magnitude, not a classification. It also may
+  not be cited as adjacent evidence for any change inside the range. This is the
+  smoke alarm `F2`/`F3` said the campaign needed and had never run. Phase 2's
+  resize-*profile* task is renumbered a tenth time and now claims `F23`.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: candidate `ba13d18` (tree
+  `dc0404b3831f91fe5554ce4eb50787374d500f5f`), capturing one untracked
+  working-tree path (`TODO.md`, prose, in no build). Baseline: the synthetic
+  audit commit `98600c004309d88442a6ac9914e1f38cdae25d62` (tree
+  `3626d5fdd83ee6051e9275c3b28bd222eb1d18f6`), built in a detached worktree and
+  on no branch. Observation 1 pins what it is and Observation 2 what had to be
+  added to compile it.
+- Conditions: AC power, low-power mode off, thermal state nominal in every
+  sampled block. `terminal-feed` load at invocation 1.20/1.29/1.65 (0.12 per
+  processor across 10), 2.24 before the first block (confounded by this run's
+  own builds); busiest external `claude` 28.4%. `retained-browse` 1.81/1.68/1.75
+  (0.18 per processor) at both readings; busiest external `bluetoothd` 2.3%. No
+  concurrent agent session other than this one.
+- Commands:
+
+      git worktree add --detach <scratch>/base-6c58c45 ba13d18
+      git -C <scratch>/base-6c58c45 checkout 6c58c45 -- \
+          lib/TerminalCore/Sources/TerminalCore \
+          lib/TerminalCore/Sources/TerminalRenderPlanning \
+          lib/TerminalCore/Sources/TerminalRenderExecution
+      python3 ./scripts/terminal-benchmark-compare.py quick \
+          --baseline 98600c004309d88442a6ac9914e1f38cdae25d62 --workload terminal-feed
+      python3 ./scripts/terminal-benchmark-compare.py quick \
+          --baseline 98600c004309d88442a6ac9914e1f38cdae25d62 --workload retained-browse
+
+- Artifacts (disposable `.build/`, pointers only):
+  `.build/terminal-benchmark-comparisons/quick/dc0404b3831f-0000` (feed) and
+  `-0001` (browse).
+
+#### Observation 1 -- the baseline is `6c58c45`, and it is the docs' own pre-change revision
+
+`6c58c45` ("docs(design): record the damage-render benchmark routing decision",
+2026-07-27) is the parent of `07c0cd3 perf(terminal): store cell scalars inline
+instead of one array per cell`, the campaign's first shipped engine change.
+`07c0cd3`'s own commit message reads "Measured against 6c58c45", and doc 9's
+Phase 5 ledger names the same revision, so this baseline is quoted from the
+record rather than reconstructed.
+
+One shipped engine change is **inside** the baseline and therefore outside this
+audit: `8188b9a perf(terminal): plan only the rows the terminal damaged`
+(2026-07-27) is an ancestor of `6c58c45`. `17/F5` credits it with implementing
+doc 9's H2. Everything this audit reports is net of damage-scoped planning, and
+a reader comparing to an even earlier tree would see a larger win than the one
+below.
+
+#### Observation 2 -- what "the baseline arm" contains, exactly
+
+The arm is not pre-campaign DanTerm whole. It is `6c58c45`'s
+`TerminalCore` + `TerminalRenderPlanning` + `TerminalRenderExecution` with
+**everything else at `ba13d18`** -- harness, stimulus fixtures, producer, app,
+and PTY are common-mode across both arms by construction. That scopes the audit
+to the core engine's accumulated drift and excludes the app-side render work
+(docs 13, 29, 30) and the PTY work (docs 19, 20, 23), which sit identically in
+both arms.
+
+Four additions were required to compile it. None is on a measured path, and each
+is named here so a later reader can price it rather than trust it:
+
+1. `TerminalDefaultColors.swift` copied verbatim, plus a `Terminal` extension
+   whose `init` and `setDefaultColors` accept the value and ignore it.
+   `b5197a0 feat(terminal): answer default color queries` postdates the baseline;
+   ignoring it reproduces the baseline's behavior, which is to answer no OSC
+   10/11 query. Neither measured stimulus contains one.
+2. `TerminalDamageSpans.swift` copied verbatim into `TerminalRenderPlanning`.
+   Three pure functions over a `Set<Int>`, read by HEAD's benchmark instrument.
+3. A `RenderTheme.defaultColors` projection, placed in `TerminalPaneSession`
+   rather than in an engine target, that reads two fields the baseline already
+   has.
+4. App-side shims for `39abdbf feat(renderer): support complete theme
+   presentation`: `ThemeRenderBridge` returns the single `RenderTheme.dark` the
+   pre-campaign renderer had, and `TerminalRenderMetrics` gains initializers that
+   discard the font size and family HEAD added and delegate to the baseline's.
+
+Item 4 is the reason Observation 3 stops where it does. Those shims *execute* on
+any workload that runs the app, so on those workloads the comparison would be
+measuring the shims.
+
+#### Observation 3 -- the comparability table
+
+Comparable means the stimulus bytes and the measured code path are identical
+across the range. Established by compiling and by reading each block's own
+identity fields, not by inspection.
+
+| workload | class | basis |
+| --- | --- | --- |
+| `terminal-feed` | **comparable** | headless `TerminalCoreBenchmark`, built unmodified from HEAD's harness; fixtures and producer come from the baseline arm, so both arms are driven by one immutable copy |
+| `retained-browse` | **comparable** | headless `TerminalBrowseBenchmark`, built unmodified; both arms report `stimulusIdentity` `retained-browse-v1-10000-lines-oldest-row-179x66` and the *same* `planCellChecksum` 5,940,000, so the frame planned is identical content |
+| `content-churn` | **not comparable** | drives the real app, so Observation 2's item-4 shims run |
+| `style-churn` | **not comparable** | same |
+| `incremental-mixed` | **not comparable** | same |
+| `scrollback-stream` | **not comparable** | same; `reset` is `fresh-optimized-app-and-terminal-session-per-block` |
+| memory probe (both geometries) | **not measured** | `TerminalMemoryCensus` does not exist at the baseline; `TerminalMemoryProbe` does not build there |
+| resize probes (all three regimes) | **not measured** | `TerminalResizeProbeSupport` needs `productionScrollbackBudgetBytes`, which is `internal` at the baseline; making it `public` is an engine edit |
+
+The four app-driven workloads have a second, independent blocker:
+`app/TerminalBenchmark.swift` is 538 lines behind HEAD's block contract at the
+baseline, so its published blocks would not satisfy HEAD's validation even if
+the engine API matched. A full-ladder wide run needs a baseline no older than
+`39abdbf` (2026-07-31) -- roughly docs 27-30 -- which is close enough to HEAD
+that it would mostly re-measure ground the adjacent runs already cover. Whether
+`39abdbf` exactly suffices was not tested.
+
+#### Observation 4 -- the descriptive results
+
+Two pairs per workload, `quick` mode. Percentages are the harness's symmetric
+form, `(candidate - baseline) / mean`; the ordinary form is given beside it
+because the two differ a lot at this magnitude and a reader must not mistake one
+for the other.
+
+| workload | baseline | HEAD | symmetric | ordinary | pair spread |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `terminal-feed` | 3,200.3 / 3,194.4 ms | 1,345.2 / 1,345.1 ms | **-81.55%** | **-57.9%** (2.38x faster) | 0.15 pp |
+| `retained-browse` | 739.8 / 738.5 us/frame | 335.6 / 335.7 us/frame | **-75.09%** | **-54.6%** (2.20x faster) | 0.18 pp |
+
+Both pair spreads are under 0.2 percentage points against effects of 75-82%, so
+neither reading is close to anything the instrument could confuse with noise.
+
+Depth, measured in the same blocks rather than modeled: the browse arms report
+`retainedRowCount` **1,717 at the baseline and 7,281 at HEAD** from the identical
+10,000-line stimulus at 179 columns -- **4.24x the history**, retained while
+planning the same frame in less than half the time. Both are under `D8`'s 16,384
+row cap, so neither arm is clipped by it.
+
+No memory number is reported. `15/F1`'s pre-campaign census (222.0 MB process
+footprint, 48.2 MB of `[GridCell]` row storage) is a *different instrument* on a
+different scenario and is not convertible into the retained-bytes figure
+`F20`'s probe reports; quoting the two side by side would invent a comparison
+neither measured.
+
+#### Observation 5 -- the smoke alarm reading
+
+**Empty.** There is no comparable workload on which HEAD is slower than
+pre-campaign DanTerm, so no bisect is opened and no follow-up work is filed
+under this observation.
+
+The honest limit on that sentence: it covers two of six workloads. The four it
+does not cover are the draw-path workloads, and they are exactly where an
+accumulation drift would be least visible to these two. What the audit
+establishes is that the parse/feed path and the browse/plan path did not
+accumulate a regression; it says nothing either way about the draw path, and no
+instrument in this run could have.
+
+#### Observation 6 -- the decision input for `H3`
+
+`F21` left `H3`'s disposition with the human on `F20`'s table, where C1's
+residuals are `scrollback-stream` +4.13% and `terminal-feed` +4.55%. This audit
+prices those residuals against where HEAD actually sits:
+
+- `terminal-feed` is the one residual this run can place absolutely. HEAD feeds
+  a fixed batch in 1,345 ms against pre-campaign 3,197 ms. C1's +4.55% is
+  ~61 ms on that batch -- it gives back about **3.3% of a 1,855 ms win**, and
+  leaves the feed path 2.30x faster than it started rather than 2.38x.
+- `scrollback-stream` **cannot** be placed absolutely: it is one of the four
+  not-comparable workloads. Its +4.13% remains a purely adjacent number, and
+  nothing here says whether sustained plain output is above or below its
+  pre-campaign cost.
+- `retained-browse` is where C1 was supposed to pay off, and the absolute
+  reading is the strongest number in this audit: browsing is 2.20x faster than
+  pre-campaign while holding 4.24x the history.
+
+So the accept-as-trade option spends a slice of a large win on the one residual
+that can be checked, and an unknown on the other. That asymmetry is the finding;
+which way it should decide the disposition is not.

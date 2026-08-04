@@ -663,6 +663,19 @@ consequence of it.
   `slower` at +2.15%** against 1.85%, plan time +5.99%, attributable by
   construction to the reader rewiring. The disposition returns to the human as a
   decision package, with `H8` registered as the funded-work option.
+- [x] `DONE` Run the campaign's first wide-baseline audit. Closed by `F22`,
+  which is **wide-baseline descriptive** and carries no verdict: against
+  pre-campaign `6c58c45`, HEAD feeds **2.38x faster** (3,197 -> 1,345 ms) and
+  browses **2.20x faster** (739 -> 336 us/frame) while retaining **4.24x the
+  history** (1,717 -> 7,281 rows from one 10,000-line stimulus). The smoke alarm
+  is **empty**: no comparable workload is slower than pre-campaign, so no bisect
+  is opened. Coverage is the finding's real content -- the four app-driven
+  workloads and both probes cannot reach that baseline, because HEAD's app only
+  compiles against the pre-campaign engine through shims that would then run
+  inside the measurement, and `app/TerminalBenchmark.swift` is 538 lines behind
+  HEAD's block contract there. A full-ladder wide run needs a baseline no older
+  than `39abdbf` (2026-07-31), which is close enough to HEAD to mostly duplicate
+  the adjacent runs; that is why it is not proposed here.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
