@@ -1137,6 +1137,17 @@ unbuilt, not unavailable, and it is the fallback the open question below names.
 
 #### Decision 4 -- what happens to `28/D11`'s trial bounds at migration
 
+**Status 2026-08-04: discharged.** The amendment this decision demands is
+written -- `28/D11`'s "Amendment 2026-08-04 -- exit 4, *the cause is removed*",
+landed by the plan's slice 6. It records the human's exit-1 verdict, records it
+as **still unratified** when the store removed the cost it accepted, and carries
+the re-taken resize measurement: on the committed `saturated-wide-resize-v1`
+recipe at the trial's own depth and content shape, the same width change reads
+**576.19 ms at 9,860 retained rows** at `de17e95` and **1.58 ms at 10,735** at
+`9ad7cc5` -- deeper history at 0.011x `28/D8`'s ~150 ms budget instead of 3.84x.
+`28/D11` is therefore no longer a live trial, and this doc's implementation may
+be read as having closed it. Everything below stands as written.
+
 `28/D11` shipped three bounds as a dogfood trial with an explicit exit
 condition -- "this entry is provisional by construction and expires when the
 human picks exit 1, 2, or 3". Two of the three bounds are deleted by this design
@@ -1171,6 +1182,14 @@ things follow, and this entry states both rather than assuming either:
 The depth the human has been dogfooding is preserved: 10,000 display rows of
 full-width content becomes 11,650 (Decision 1's table), so exit 1's subjective
 verdict is not being reversed by a depth cut smuggled in with the store change.
+
+**Measured 2026-08-04, and the direction holds while the number does not.** The
+same recipe retains **9,860** display rows at `de17e95` and **10,735** at
+`9ad7cc5` -- deeper, which is what this paragraph promised, but 10,735 rather
+than the derived 11,650. The gap is `DD36`'s metadata reserve, which did not
+exist when Decision 1's table was written: 11,650 x 15/16 is 10,922, within 2%
+of what the probe reads. The claim that survives is the one this paragraph
+actually makes -- no depth cut -- and it survives measured rather than derived.
 
 #### Decision 5 -- the head-trim's read semantics, and what this decision adds
 

@@ -1226,7 +1226,10 @@ a large win rather than digging below the starting line.
 ### D11 -- reopen `D8`'s resize budget for a dogfood trial of `F23` candidate (b): ship the ~10,000-row bounds and feel the 600 ms
 
 - Status: **decided as a provisional trial with an exit condition, on an explicit
-  human choice.** `D8`'s ~150 ms resize budget is reopened -- deliberately, not by
+  human choice** -- and **closed 2026-08-04 on a fourth exit, "the cause is
+  removed", that this entry did not offer. See the marked amendment at the end;
+  everything between here and it stands as written.** `D8`'s ~150 ms resize
+  budget is reopened -- deliberately, not by
   omission -- and the three production bounds are raised to `F23`'s candidate (b).
   This is not a claim that 600 ms is acceptable; it is a decision to find out
   whether it is, by feeling it, before spending on either of the two mitigations
@@ -1323,3 +1326,147 @@ cheap and narrow, `H7` is the structural fix.
   reopens early on any measured regression the raise causes that `F23` did not
   price -- in particular a `scrollback-stream` or memory-probe reading that moves
   because deeper history changed eviction frequency rather than reflow cost.
+
+#### Amendment 2026-08-04 -- exit 4, *the cause is removed*, taken with exit 1 still unratified
+
+- Status: **the trial is closed, on a fourth exit this entry never offered.**
+  `D11` gave the human three exits and expires on the verdict; what happened
+  instead is that the successor deleted the cost the verdict was about. Written
+  because [doc 31](../31-logical-line-scrollback/README.md)'s `D2` Decision 4
+  forbids the migration from taking `D11`'s decision by side effect -- *"until
+  that amendment exists, `D11` is an open trial and this doc's implementation
+  must not be read as closing it"*. This is that amendment. Nothing above is
+  rewritten except the entry's Status bullet, which gains a pointer down here so
+  the closure is not missable: the three exits, the bounds table and the trade
+  table are the historical record of a trial that ran, and the "What changed"
+  table describes constants two of which no longer exist.
+- Date and investigator: 2026-08-04, Claude (agent), on slice 6 of
+  [`plans/impl/2026-08-04-1137-logical-line-scrollback-store.md`](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md).
+- Evidence used: the resize measurement below (this entry's own, taken for it);
+  `F23` (the 600.5 ms the trial was asked to feel, and the calibration the before
+  arm is read against); `31/D2` Decision 4 (the disposition of the three bounds,
+  and the obligation this entry discharges); `31/F10` and `31/F9` (the landed
+  store's costs, which this entry does not re-adjudicate).
+
+##### The human's verdict, recorded here for the first time -- and recorded as still open
+
+The dogfood verdict was **exit 1**: keep the caps, a ~600 ms per-pane stall on an
+infrequent user-initiated gesture is livable for 10,000 lines of history. It was
+held in conversation and never written back as a doc 28 amendment, which is
+exactly what `31/D2` Decision 4 flagged.
+
+It is recorded now, and it is recorded **unratified at the moment the cause was
+removed**. Two things are true and neither is an inference: no further dogfood
+session is recorded between the verdict and `9ad7cc5`, and no successor entry
+ever formally superseded `D8`'s budget the way exit 1 says a keep-the-caps
+successor would (`D11` is still the last decision in this doc). So this entry
+does **not** claim the trial answered its subjective question. It claims the
+question stopped having a subject.
+
+##### Exit 4, stated
+
+*The cause is removed.* `9ad7cc5` stores retained history as one record per
+logical line and derives wrapping at read, so a width change refolds the live
+screen and recomputes a derived index and **touches no retained row**. Reflow of
+history is deleted, not deferred and not made lazy -- `28/H7`, the mitigation
+exit 3 would have funded, is superseded by that deletion. The two caps this entry
+raised went with it: `productionScrollbackCellCap` and
+`productionScrollbackRowCap` are **deleted with no analogue**, because both bound
+reflow's row and cell terms and there is no reflow of history to bound.
+`productionScrollbackBudgetBytes` survives at the same 16,777,216 on a new
+derivation (`31/D2` Decision 1); `D11`'s derivation is deleted with the caps that
+produced it.
+
+So the question "is 600 ms livable at this depth" is not answered here. It is
+unrepresentable: no input to this engine produces a 600 ms width change at this
+depth any more.
+
+##### The rule, frozen before either number was read
+
+Written before the probe was run, because a closure record that picks its line
+after seeing the numbers proves nothing:
+
+- **Instrument.** `just terminal-resize-probe --recipe wide` -- the committed
+  frozen probe `saturated-wide-resize-v1`
+  (`lib/TerminalCore/Sources/TerminalResizeProbeSupport/TerminalResizeProbeSupport.swift#wideSaturating`),
+  unmodified, at the production budget. Chosen rather than defined because its
+  recipe **is** the trial's own shape: 179-column full-width lines at 179x66, fed
+  until the budget saturates, alternating 179 <-> 100 columns, 4 warmup and 20
+  timed resizes. It is `F23`'s own calibration harness (Observation 4), so the
+  before arm is checkable against a number already on the record.
+- **Arms.** Same machine, same session, AC power, low-power mode off. *Before* =
+  `de17e95`, the last revision carrying `D11`'s shipped bounds; *after* =
+  `9ad7cc5`, the landed store.
+- **Read.** `retainedRowCountAtStart` and the resize distribution (median, min,
+  max) over the recipe's 20 samples.
+- **What counts as the cause being removed.** At a retained depth **not below**
+  the before arm's, the after arm's **median and maximum both fall under `D8`'s
+  ~150 ms resize budget** -- the budget this entry reopened to buy the depth.
+- **The two failure readings, named in advance so neither is available after the
+  fact.** After-arm depth *below* the before arm's is not a clean exit but a
+  depth cut, and would have to be recorded as one (`31/D2` Decision 1 predicts a
+  depth *increase*, 11,650 against 10,000). After-arm median or maximum at or
+  above ~150 ms means the cause is not removed and exits 1-3 stay the only ways
+  out.
+- **What it is not.** A probe: one recipe, one arm per revision, no pairing, no
+  calibration gate. It carries no benchmark verdict, and the paired ladder that
+  decides whether the store lands at all is a separate obligation (`31`'s Phase 3
+  ledger).
+
+##### The measurement
+
+| `saturated-wide-resize-v1`, 179x66 <-> 100 | before (`de17e95`, `D11`'s bounds) | after (`9ad7cc5`, logical-line store) |
+| --- | ---: | ---: |
+| retained rows when timing began | 9,860 | **10,735** |
+| median resize | 576.19 ms | **1.58 ms** |
+| min / max | 572.84 / 587.94 ms | **1.46 / 2.75 ms** |
+| ... as a multiple of `D8`'s ~150 ms budget | 3.84x | **0.011x** (max 0.018x) |
+| ... as a multiple of the 99.5 ms pre-packing baseline | 5.79x | **0.016x** |
+
+**Calibration.** The before arm reproduces `F23` candidate (b) -- 600.5 ms at
+9,968 rows -- within **4.1%** on the median and **1.1%** on depth. `F23` read
+that number off `TerminalHistoryDepthSizingProbe`, this reads it off the
+committed probe, and `F23` Observation 4 had already established the two agree
+within 2.5%. The ~600 ms the human was asked to feel is what the before arm
+measures.
+
+**Verdict against the rule: both clauses hold, and neither is close.** Depth is
+**1.089x** the before arm's, so this is a depth increase, not a cut. Median and
+maximum sit at 0.011x and 0.018x of `D8`'s budget -- under it by more than two
+orders of magnitude, and **364x** and **214x** faster than the before arm on the
+same recipe. **The cause is removed.**
+
+One line on the shape of what is left, because it is no longer flat: the after
+arm's samples alternate **2.65 ms** (179 -> 100) and **1.46 ms** (100 -> 179),
+where the before arm is ~576 ms in *both* directions. Narrowing costs more
+because the live screen refolds into more rows; neither direction walks retained
+history, which is why depth stopped setting the price.
+
+##### Three things this amendment deliberately does not do
+
+1. **It does not formally supersede `D8`'s ~150 ms budget**, which is what exit 1
+   said a keep-the-caps successor would do. Resize cost stopped being a function
+   of history depth, so the quantity `D8` bounded no longer exists in the form it
+   bounded; a resize budget is now a live-screen question and wants to be derived
+   against that, not inherited. Left open rather than resolved by side effect --
+   the same error this amendment exists to correct.
+2. **It does not claim `D10`'s banked memory came back.** The 16 MiB budget
+   survives unchanged, so a deep pane still costs what `D11` accepted. What
+   changed is what a *resize* costs, and nothing else in this entry's trade
+   table.
+3. **It does not re-adjudicate the store.** Whether the store lands is the paired
+   ladder's, in doc 31. If wrap-at-read were ever reverted, the ~600 ms hitch
+   returns with it and `D11`'s three exits become live again -- which is this
+   entry's only remaining reopening condition, and it is doc 31's `H7`-reopening
+   clause that would trigger it.
+
+- Behavioral verification: none new; this amendment changes no code.
+  `scripts/research-index-lint.sh`, `swift test --package-path lib/TerminalCore`
+  (940 tests) and `just test` (70 steps) green with it in the tree.
+- Quantitative verification: the two arms above.
+- Artifacts: disposable. Both numbers are reproduced by
+  `just terminal-resize-probe --recipe wide` at the two named revisions.
+  `TerminalHistoryDepthSizingProbe.swift`, the harness `F23` added and this
+  entry's ledger row names, was **deleted by `9ad7cc5`** -- it is written against
+  the two caps, which no longer exist. The committed probe is what stays
+  re-runnable, which is the whole reason `28/D1` pitch 2 insisted on one.

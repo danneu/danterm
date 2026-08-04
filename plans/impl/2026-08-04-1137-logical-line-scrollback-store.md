@@ -303,7 +303,22 @@ Open conditions that the implementation, not the design, has to discharge:
   `31/D3` Decision 7; run it mechanically. Neither outcome changes the design --
   a reject picks between a per-record cached count and lazy per-block recompute,
   and that choice is a human's.
-- **`28/D11` is a live trial** (`31/D1` condition 4). Its two caps are deleted
+- **`28/D11` is a live trial** (`31/D1` condition 4). **Discharged 2026-08-04 by
+  slice 6**: `28/D11` carries the amendment, closing the trial on the fourth exit
+  *the cause is removed*, with the human's exit-1 verdict recorded and recorded
+  as still **unratified** when the store deleted the cost it accepted. The resize
+  measurement is the committed frozen probe `saturated-wide-resize-v1` -- which
+  is `28/F23`'s own calibration harness and the trial's exact shape -- run
+  unmodified at `de17e95` and `9ad7cc5` under a rule frozen before either number
+  was read (*the cause is removed iff, at a depth not below the before arm's,
+  median and maximum both fall under `28/D8`'s ~150 ms budget*). Read:
+  **576.19 ms at 9,860 retained rows -> 1.58 ms at 10,735**, max 2.75 ms, so
+  depth is 1.089x and cost is 0.011x `28/D8`'s budget against the trial's 3.84x;
+  the before arm reproduces `28/F23` candidate (b)'s 600.5 ms within 4.1%. Left
+  open on purpose and named as a fresh question rather than resolved by side
+  effect: `28/D8`'s ~150 ms budget is not formally superseded, because resize
+  cost stopped being a function of history depth. The original statement of the
+  gate follows. Its two caps are deleted
   with no analogue and its budget survives unchanged; landing this store without
   a doc 28 amendment recording the human's exit-1 verdict *and* the new
   "the cause is removed" exit would retire a live trial by side effect. The
@@ -413,7 +428,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 4a. perf(terminal): spend `31/F8`'s attributed headroom on the arena's write path, and ship `31/D4`'s residency remedy
 - [x] 4b. test(terminal): re-run `31/D4`'s frozen rule against the optimized store and record the verdict
 - [x] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
-- [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
+- [x] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
 
 ## Implementation notes
@@ -881,3 +896,45 @@ Open conditions that the implementation, not the design, has to discharge:
   at 16 slots that floor was 384 B, which made a small history unrepresentable rather than
   merely shallow. Production depth grows both rings past 16 within one screenful, so the
   steady-state charge every `31/F8`/`31/F10` number was measured against is unchanged.
+
+- **Slice 6 defined no new instrument, because an existing frozen one is the trial's own
+  shape.** `28/F23` priced candidate (b) with `TerminalHistoryDepthSizingProbe`, which slice 5
+  deleted along with the two caps it is written against -- but `F23` Observation 4 had
+  *calibrated* that harness against the committed `saturated-wide-resize-v1` recipe (179-column
+  full-width lines at 179x66 <-> 100, budget-saturated, 4 warmup + 20 timed resizes) and found
+  the two agree within 2.5%. So the measurement is that committed probe, unmodified, run at
+  `de17e95` and at `9ad7cc5`; nothing new was frozen. What the slice *did* write first was the
+  reading rule, before either arm ran. Both arms, the rule and its two named failure readings
+  are in `28/D11`'s amendment.
+- **One judgment call, recorded as `31/DD48` continuing `DD47`'s numbering**, taken as the
+  obvious simple option and a human's to revisit:
+  - **DD48 -- the exit's measurement lives inline in `28/D11`'s amendment rather than as a new
+    doc 28 finding.** Doc 28's next free finding id is `F25` (`F24` is reserved for Phase 2's
+    resize *profile*, which `F23` renumbered onto it), so a finding was available. Three
+    reasons it is not one. `31/D2` Decision 4 prescribes the shape -- "a doc 28 amendment that
+    records the human's exit-1 verdict **and** notes that the successor removed the cost the
+    verdict accepted, **with the resize measurement re-taken**" -- so the measurement is
+    written as part of the closure, not as evidence a later entry consumes. `D11` already
+    carries `Behavioral verification` and `Quantitative verification` bullets, which is where a
+    decision entry's own numbers belong in this doc's format. And the reading is one committed
+    recipe with one arm per revision and no pairing or calibration gate -- a finding id would
+    advertise it as evidence for future decisions to cite, which would overstate what a
+    two-point probe supports. The cost of the choice, stated: a reader who greps doc 28's
+    findings for "resize measurement against the new store" will not find one, which is why
+    both README ledger rows and doc 31's Phase 3 ledger name the amendment by its heading.
+
+## Follow Up
+
+- **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
+  README entry still states the old one.** It asks where inside reflow's dominant
+  per-cell term the time goes, and names itself "the prerequisite for `D8`'s cell
+  cap ever rising" -- but slice 5 deleted reflow of history and the cell cap both.
+  What survives is the live screen's refold, which slice 6's after arm prices at
+  1.46 ms (widening) and 2.65 ms (narrowing) on a 179x66 pane. Either restate the
+  task against the live refold or close it; it is currently a live ledger item
+  nobody can run as written. `docs/research/28-retained-row-optimizations/README.md`
+  Outcome item 1 and the Phase 2 ledger row are the two places that say it.
+- **`28/D8`'s ~150 ms resize budget is unowned.** `D11`'s amendment deliberately
+  does not supersede it (exit 1 said a keep-the-caps successor would), because
+  resize cost stopped being a function of history depth and a successor budget
+  wants deriving against the live screen. Nothing currently bounds resize cost.

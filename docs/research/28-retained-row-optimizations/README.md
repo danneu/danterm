@@ -736,18 +736,27 @@ implementation without that funding decision.
   `987927a`..`f364cd9`. The doc does **not** close with it: `H5`'s gate is
   undecided, `H7`'s reference read has not been done, and Phase 2 still owes the
   resize *profile* (`F24`). See `## Outcome` for the liveness reading.
-- [ ] `RESEARCH` Size the history-depth defaults against a stated line-count
-  target. `F23` measured what today's bounds retain at 179 columns (1,830 rows of
-  full-width content, 7,281 of program output, 16,384 of shell history), priced
-  two candidate bound sets for ~10,000 rows through `D8`'s model, and changed no
-  default. **`D11` then shipped candidate (b)** -- cell cap 1,790,000, row cap
-  89,500, budget 16 MiB -- as a provisional dogfood trial, reopening `D8`'s
-  ~150 ms budget by explicit human choice and paying a measured 600.5 ms
-  worst-case reflow and ~14.8 MB per deep pane. What is left is the trial's
-  verdict and the exit it selects: keep as-is, keep plus resize coalescing, or
-  fund `H7`. Deliberately no mitigation ships with the raise. The harness is
-  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift`,
-  env-gated out of the `just test` gate.
+- [x] `DONE` (trial closed 2026-08-04 on exit 4) Size the history-depth defaults
+  against a stated line-count target. `F23` measured what today's bounds retain
+  at 179 columns (1,830 rows of full-width content, 7,281 of program output,
+  16,384 of shell history), priced two candidate bound sets for ~10,000 rows
+  through `D8`'s model, and changed no default. **`D11` then shipped candidate
+  (b)** -- cell cap 1,790,000, row cap 89,500, budget 16 MiB -- as a provisional
+  dogfood trial, reopening `D8`'s ~150 ms budget by explicit human choice and
+  paying a measured 600.5 ms worst-case reflow and ~14.8 MB per deep pane.
+  Deliberately no mitigation shipped with the raise. **`D11`'s amendment closes
+  it on a fourth exit, *the cause is removed*:** the human's exit-1 verdict is
+  recorded, and recorded as still unratified, because
+  [doc 31](../31-logical-line-scrollback/README.md)'s store deleted reflow of
+  history before it was acted on. Re-measured on the committed
+  `saturated-wide-resize-v1` recipe at both revisions, the same width change at
+  the trial's own depth went **576.19 ms at 9,860 retained rows -> 1.58 ms at
+  10,735**: deeper history, and 0.011x `D8`'s budget instead of 3.84x. Both caps
+  are deleted with no analogue; the 16 MiB budget survives on a new derivation.
+  `F23`'s harness
+  (`lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift`)
+  is deleted with the caps it was written against; `just terminal-resize-probe
+  --recipe wide` is what stays re-runnable.
 
 ## Rejected
 
@@ -919,8 +928,10 @@ C6 is rejected on measurement (`D9`), and C3/C4 on pricing plus read shape
 (`D5`/`D6`). `D8`'s dual caps and `F17`'s streaming readers are the two shipped
 byproducts that outlive the representation contest.
 
-**Live, and why each is work rather than a parked lead.** Three items are
-unanswered questions with named next steps, so this doc stays in `## Live`:
+**Live, and why each is work rather than a parked lead.** Items 1-3 are
+unanswered questions with named next steps, so this doc stays in `## Live`. Item
+4 is kept in place and **marked closed** rather than deleted, because it is the
+one item that ended by having its subject removed and that is worth reading:
 
 1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
    reflow's dominant per-cell term the time goes. Renumbered eleven times and
@@ -930,17 +941,26 @@ unanswered questions with named next steps, so this doc stays in `## Live`:
    read-time wrapping), which removes what `H7` would have deferred. What `F23`
    and `D11` established still stands and now motivates doc 31: reaching 10,000
    retained rows of full-width content at 179 columns costs a measured 600.5 ms
-   resize (4.00x `D8`'s budget) and ~15 MiB, and those bounds ship today, so the
-   cost being removed is one a user can feel. `H7` remains only as doc 31's
-   fallback if `31/D1` answers no-go.
+   resize (4.00x `D8`'s budget) and ~15 MiB, and those bounds shipped and were
+   dogfooded, so the cost being removed was one a user could feel. It is now
+   measured removed rather than predicted removed: `D11`'s amendment reads the
+   same recipe at **1.58 ms** against the trial's 576.19 ms, at greater depth.
+   `H7` remains only as doc 31's fallback if wrap-at-read is ever reverted.
 3. **`H5`'s gate** (`TODO`, destination `D12`) -- undecided, and the post-landing
    evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
    rather than C6's 0.78 MB.
-4. **The history-depth default** (`RESEARCH`, opened by `F23`, shipped
-   provisionally by `D11`) -- candidate (b)'s bounds are live as a dogfood trial
-   with `D8`'s budget reopened by explicit human choice. The open item is the
-   trial's verdict and which of its three exits it selects (keep / coalesce /
-   `H7`), not which definition of "10,000 lines" to pick.
+4. **The history-depth default** (opened by `F23`, shipped provisionally by
+   `D11`) -- **CLOSED 2026-08-04 on a fourth exit, *the cause is removed*, by
+   `D11`'s amendment.** The trial ran with `D8`'s budget reopened by explicit
+   human choice; the human's verdict was exit 1 (keep the caps, the hitch is
+   livable) and it was **still unratified** when doc 31's store deleted reflow of
+   history out from under it. Re-measured on the same committed recipe at the
+   trial's own depth, the width change went **576.19 ms at 9,860 retained rows ->
+   1.58 ms at 10,735**, so the subjective question the trial existed to answer no
+   longer has a subject. Both caps are deleted with no analogue; the 16 MiB
+   budget survives on a new derivation. What the amendment deliberately leaves
+   open is `D8`'s ~150 ms *budget*, which now wants deriving against the live
+   screen rather than inheriting -- that is a fresh question, not this trial's.
 
 **Parked with stated conditions, not live.** `H4` (re-price before running --
 `D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore

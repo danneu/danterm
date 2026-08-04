@@ -633,8 +633,29 @@ licenses a production storage change; landing is the paired ladder's.
   budget admits
   -- `D3` Decision 7's own arithmetic bracket said 3.2x before the constant
   existed. Two deferred decisions added (`DD23`, `DD24`).
-- [ ] `TODO` **The paired ladder verdict, the `28/D11` exit and the `DD8`
-  re-read.** The acceptance dimension, owed against a real implementation.
+- [x] `DONE` **`28/D11`'s exit, recorded against the new store's resize
+  measurement** (`D1` condition 4, the plan's slice 6). The amendment `D2`
+  Decision 4 demands is written, in **doc 28** where the trial lives:
+  [`28/D11`'s "Amendment 2026-08-04 -- exit 4"](../28-retained-row-optimizations/decisions.md).
+  The human's verdict was **exit 1** (keep the caps, the ~600 ms hitch is
+  livable) and it is recorded as **still unratified** when the store deleted the
+  cost it accepted, so the entry claims the question lost its subject rather than
+  that the trial answered it. The measurement is the committed frozen probe
+  `saturated-wide-resize-v1` -- `28/F23`'s own calibration harness, and the
+  trial's exact shape (179-column lines at 179x66 <-> 100, budget-saturated) --
+  run unmodified at both revisions, under a rule frozen before either number was
+  read: *the cause is removed iff, at a depth not below the before arm's, median
+  and maximum both fall under `28/D8`'s ~150 ms budget*. Read: **576.19 ms at
+  9,860 retained rows** (`de17e95`) -> **1.58 ms at 10,735** (`9ad7cc5`), max
+  2.75 ms, so depth is 1.089x and cost is 0.011x `D8`'s budget against the
+  trial's 3.84x. The before arm reproduces `28/F23` candidate (b)'s 600.5 ms
+  within 4.1%, which is what makes it the trial's number and not a new one. Both
+  caps are deleted with no analogue; the 16 MiB budget survives on `D2`
+  Decision 1's derivation. **Not a verdict on the store** -- one recipe, one arm
+  per revision, no pairing, no calibration gate. One deferred decision added
+  (`DD48`).
+- [ ] `TODO` **The paired ladder verdict and the `DD8` re-read.** The acceptance
+  dimension, owed against a real implementation.
 
 ## Rejected
 
@@ -788,15 +809,17 @@ add detail to it.
 - `28/H8` (deferred packing) shares the amortized-background-work idea; a
   logical line is a natural compression unit if H8 is ever funded on top of
   this store. Noted as synergy, not a dependency in either direction.
-- The `28/D11` trial verdict (human: keep the caps, hitch is livable) is
-  recorded in conversation but not yet as a doc 28 decision amendment; this
-  doc does not depend on which exit D11 records, since it removes the
-  machinery all three exits negotiate with. **`D2` Decision 4 states the
-  migration's side of it**: the two caps are deleted with no analogue, the
-  budget survives at the same number on a new derivation, the trial keeps
-  running until doc 28 records an exit, and the migration creates a fourth exit
-  -- *the cause is removed* -- that doc 28 owes an amendment for. Landing this
-  store without that amendment retires a live trial by side effect.
+- ~~The `28/D11` trial verdict (human: keep the caps, hitch is livable) is
+  recorded in conversation but not yet as a doc 28 decision amendment.~~
+  **Discharged 2026-08-04**: `28/D11` carries the amendment, closing on exit 4
+  (*the cause is removed*) with the exit-1 verdict recorded and recorded as
+  unratified, and with the resize re-measured on the trial's own recipe at
+  **576.19 ms / 9,860 rows -> 1.58 ms / 10,735 rows**. `D2` Decision 4's status
+  line and the Phase 3 ledger carry the full reading. What the amendment
+  deliberately left open, and this doc does not own: `28/D8`'s ~150 ms resize
+  budget is not formally superseded, because resize cost stopped being a
+  function of history depth and a successor budget wants deriving against the
+  live screen rather than inherited.
 
 ## Outcome
 
@@ -864,6 +887,17 @@ could re-derive, one display row in 14,486, predating both measurements and now
 fixed -- and gate 7 became **unreadable**, because the step it times fell below
 the probe's clock. Landing is still the paired ladder's, and `I2`'s restatement
 is still the human's to ratify.
+
+**`28/D11` is no longer a live trial.** The store landed (`9ad7cc5`) and deleted
+both caps, so `D2` Decision 4's obligation came due: doc 28 now carries the
+amendment, closing the trial on the fourth exit *the cause is removed*, with the
+human's exit-1 verdict recorded and recorded as **unratified** at the moment the
+cost it accepted stopped existing. The measurement behind it is the trial's own
+committed recipe run at both revisions -- **576.19 ms at 9,860 retained rows ->
+1.58 ms at 10,735**, greater depth at 0.011x `28/D8`'s ~150 ms budget instead of
+3.84x. That discharges `D1` condition 4 and removes the last gate that could
+have been retired by side effect rather than on the record. It settles nothing
+about whether the store ships.
 
 What this doc still owns after graduation is the verdict, not the work. `D1`'s
 scoping stands: no production storage change is licensed by any entry here, and
