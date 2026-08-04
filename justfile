@@ -137,8 +137,14 @@ terminal-occupancy-probe flags="":
 # cover a fraction of the depth a real saturated pane holds. The versions are distinct
 # names, not an edit in place, because their numbers are not comparable.
 #
+# `sparse` (`saturated-sparse-resize-v1`) is `v2`'s geometry and budget fed short
+# shell-history lines instead of program output. Retained rows are content-sized, so
+# the same 10 MiB buys ~19x more of them -- which makes the dense payload the shallow
+# end of the depth range rather than a representative point, in both representations.
+#
 #   just terminal-resize-probe                             # v1, 40 samples, 179x66 <-> 100
 #   just terminal-resize-probe "--recipe saturating"       # v2, budget-saturated, 20 samples
+#   just terminal-resize-probe "--recipe sparse"           # sparse-v1, budget-saturated
 #   just terminal-resize-probe "--samples 100"             # tighter tail
 #   just terminal-resize-probe "--alternate-columns 80"
 terminal-resize-probe flags="":

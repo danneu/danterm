@@ -25,6 +25,41 @@
 import Foundation
 import TerminalCore
 
+/// What a recipe feeds, because content density decides retained depth and depth
+/// decides resize cost.
+///
+/// A retained row has been content-sized since doc 15, so the byte budget buys a
+/// number of rows that varies by an order of magnitude with how long the rows are:
+/// the corpus prices `benchmark/scrollback-stream` at 4,607 B/row and
+/// `alacritty/history` at 186 B/row, which is 2,276 rows against 56,273 at the same
+/// 10 MiB. A probe that only ever fed one density would report one point on that
+/// range and read as though it were the whole of it -- which is exactly how
+/// `saturated-resize-v1`'s 6,756-row baseline came to stand in for "a saturated
+/// pane" when it is near the shallow end.
+public enum ResizeProbePayload: String, Equatable, Sendable {
+    /// A ~50-column line: program output, and what `v1` and `v2` both feed.
+    case dense
+    /// Short shell-history lines, the regime where content-sized rows retain
+    /// deepest. Stands in for `alacritty/history` (4.7 stored cells per row).
+    case sparse
+
+    /// Real short shell commands rather than a synthetic short string, so the row
+    /// widths this recipe saturates with are widths a shell history really holds.
+    private static let sparseCommands = [
+        "ls", "cd ..", "git status", "make", "vim .", "pwd", "top", "git log",
+    ]
+
+    /// The line this payload emits at `index`, without its terminator.
+    public func line(_ index: Int) -> String {
+        switch self {
+        case .dense:
+            return "DANTERM-RESIZE-\(String(format: "%05d", index)) plain ascii retained row"
+        case .sparse:
+            return Self.sparseCommands[index % Self.sparseCommands.count]
+        }
+    }
+}
+
 /// The probe's recipe, frozen as data so every number it prints names its shape.
 ///
 /// `D1` pitch 2 required the recipe to state its geometry, budget, row count,
@@ -42,6 +77,8 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public let columns: Int
     public let rows: Int
     public let lineCount: Int
+    /// What the saturation stimulus writes. See `ResizeProbePayload`.
+    public let payload: ResizeProbePayload
     /// Reported, not configurable. The budget-taking initializer is internal to
     /// `TerminalCore` (it exists to give deterministic tests a small budget), so
     /// this probe runs at the production budget and says so -- which is the
@@ -87,12 +124,36 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
         name: "saturated-resize-v2"
     )
 
+    /// The sparse saturating recipe: `v2`'s geometry and budget, fed short
+    /// shell-history lines instead of program output.
+    ///
+    /// Exists because `v1` and `v2` both feed a ~50-column line, and a content-sized
+    /// row representation retains an order of magnitude more of a *short* row at the
+    /// same budget. That makes the dense payload's depth the shallow end of the
+    /// range rather than a representative point, and resize cost scales with depth
+    /// -- so the deepest content is also the most expensive to reflow, in **both**
+    /// representations. Reading a resize cost off dense content alone answers the
+    /// question for the cheapest regime and reports it as the answer.
+    ///
+    /// Geometry, budget, and alternation are `v2`'s exactly, so content density is
+    /// the only variable between the two and their numbers subtract. The line count
+    /// is much larger because these rows are much cheaper;
+    /// `sparseRecipeReachesTheBudgetCeiling` pins that it still saturates.
+    public static let sparseSaturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 250_000,
+        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-sparse-resize-v1", payload: .sparse
+    )
+
     public init(
         columns: Int, rows: Int, lineCount: Int, scrollbackBudgetBytes: Int,
         alternateColumns: Int, sampleCount: Int, warmupCount: Int,
-        name: String = "saturated-resize-custom"
+        name: String = "saturated-resize-custom",
+        payload: ResizeProbePayload = .dense
     ) {
         self.name = name
+        self.payload = payload
         self.columns = columns
         self.rows = rows
         self.lineCount = lineCount
@@ -207,11 +268,7 @@ public func makeSaturatedTerminal(recipe: ResizeProbeRecipe = .standard) -> Term
     // is a bug in the constant, not a runtime condition.
     var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)!
     for line in 0..<recipe.lineCount {
-        terminal.feed(
-            Array(
-                "DANTERM-RESIZE-\(String(format: "%05d", line)) plain ascii retained row\r\n".utf8
-            )
-        )
+        terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
     }
     return terminal
 }

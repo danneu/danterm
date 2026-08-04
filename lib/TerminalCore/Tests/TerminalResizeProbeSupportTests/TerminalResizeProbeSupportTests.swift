@@ -51,6 +51,52 @@ struct TerminalResizeProbeSupportTests {
         #expect(terminal.scrollbackRowCount == atCeiling)
     }
 
+    @Test("The sparse recipe's rows are a fraction of the dense recipe's width")
+    func sparsePayloadIsShorterThanDense() {
+        // Intent: `.sparse` emits short shell-history-shaped lines, where `.dense`
+        //   emits the ~50-column line `saturated-resize-v1` and `v2` both feed.
+        // Why it exists: the sparse recipe exists to measure the content regime
+        //   where a *content-sized* row representation retains its deepest history
+        //   -- `alacritty/history` priced at 186.3 B/row and 56,273 rows at 10 MiB
+        //   against the dense payload's 6,756. If this payload ever drifted long,
+        //   the recipe would keep saturating and keep printing a distribution while
+        //   silently measuring the dense regime a second time.
+        // Scenario: the corpus recording this payload stands in for is a shell
+        //   history -- `ls`, `cd ..`, `git status` -- not program output.
+        let sparse = (0..<64).map { ResizeProbePayload.sparse.line($0).count }
+        let dense = (0..<64).map { ResizeProbePayload.dense.line($0).count }
+        let meanSparse = Double(sparse.reduce(0, +)) / 64.0
+        let meanDense = Double(dense.reduce(0, +)) / 64.0
+
+        #expect(meanSparse < meanDense / 4.0)
+        #expect(sparse.allSatisfy { $0 > 0 })
+    }
+
+    @Test("The sparse recipe fills the budget: feeding more lines buys no more rows")
+    func sparseRecipeReachesTheBudgetCeiling() {
+        // Intent: `.sparseSaturating`'s line count is enough that retained depth is
+        //   decided by the byte budget rather than by how many lines were fed.
+        // Why it exists: same hazard `saturatingRecipeReachesTheBudgetCeiling`
+        //   guards, and sharper here -- sparse rows are the cheapest content in the
+        //   corpus, so this recipe needs the most lines of any of the three to reach
+        //   the ceiling, and it is the one most likely to stop saturating when a
+        //   future representation makes a row cheaper again.
+        let recipe = ResizeProbeRecipe.sparseSaturating
+        var terminal = makeSaturatedTerminal(recipe: recipe)
+        let atCeiling = terminal.scrollbackRowCount
+
+        // Overfed with the recipe's *own* payload, not a longer marker line. A
+        // denser overfeed evicts more cheap rows than it admits and the count
+        // falls, which reads as a failure while actually confirming saturation.
+        for line in recipe.lineCount..<(recipe.lineCount + 200) {
+            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
+        }
+
+        #expect(atCeiling > 0)
+        #expect(atCeiling < recipe.lineCount)
+        #expect(terminal.scrollbackRowCount == atCeiling)
+    }
+
     @Test("A recipe's identity names its version, so v2's numbers cannot be read as v1's")
     func recipeIdentityNamesItsVersion() {
         // Intent: the two frozen recipes carry distinct, self-describing identities.
@@ -59,7 +105,14 @@ struct TerminalResizeProbeSupportTests {
         //   make `F7`'s recorded distribution and this one look comparable.
         #expect(ResizeProbeRecipe.standard.identity.hasPrefix("saturated-resize-v1-"))
         #expect(ResizeProbeRecipe.saturating.identity.hasPrefix("saturated-resize-v2-"))
-        #expect(ResizeProbeRecipe.standard.identity != ResizeProbeRecipe.saturating.identity)
+        #expect(
+            ResizeProbeRecipe.sparseSaturating.identity
+                .hasPrefix("saturated-sparse-resize-v1-")
+        )
+        let identities = Set(
+            [ResizeProbeRecipe.standard, .saturating, .sparseSaturating].map(\.identity)
+        )
+        #expect(identities.count == 3)
     }
 
     @Test("The probe alternates widths, so no sample times a no-op resize")
