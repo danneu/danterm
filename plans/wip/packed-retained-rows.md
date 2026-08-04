@@ -1,27 +1,32 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- BLOCKED at Phase 1 chunk B on gate item 6
+## Status -- GATE FAILED on the read path; profiling in progress (`F17`)
 
 Chunk A landed the packing at `efa549f`. `PO1`-`PO5` are green and the memory
 claim held to the byte: **128.0 B/row** on the CRLF reference payload, **81,920**
 retained rows at 10 MiB, exactly `D6`'s figure.
 
 Chunk B ran gate item 6 first, because it was the likeliest failure, and it
-failed. On a re-versioned saturating recipe (`saturated-resize-v2`, 120,000 lines
--- `v1`'s 10,000 stopped saturating once rows packed), a saturated 179x66 resize
-costs **1,425.8 ms** at `efa549f` against **100.2 ms** at the adjacent baseline
-`678bfe9`: **12.13x** the retained rows at **1.17x** the per-row reflow cost,
-14.2x the wall clock. `F14` is the measurement, `D7` states the trade.
+failed at **14.2x** (`F14`, `D7`). `D8` took the cap exit and fixed it: `F15`
+found the pre-packing byte budget had been bounding stored *cells* implicitly at
+`10 MiB / 32 B`, so `D8` restates that bound explicitly (**327,680 cells**)
+beside a **16,384-row** cap derived from the fitted two-term reflow model. A row
+cap alone was measured unsound -- wide content stayed at 2.66x and a
+narrow-then-widen round trip destroyed half the history (8,192 -> 4,095). With
+both bounds, all three content regimes resize within **1.19x** of pre-packing.
 
-**The remaining gate runs were deliberately not run** -- the longer
-`terminal-feed` screen, the `terminal-feed` and `retained-browse` deciding runs,
-the four ladder guards, and the two-width memory read. All three exits `D7` names
-(cap retained depth, cheapen reflow, accept the trade) change the depth those runs
-would measure against, so running them now would spend a deciding-run budget on a
-shape that may not ship.
+The full deciding ladder then ran at the capped HEAD and **failed** (`F16`):
+four `slower` verdicts of six, worst **`retained-browse` at +19.83% against a
+1.05% threshold**. Neither cap binds on that workload, so the cost is the packed
+row's read -- `C6`'s own named falsification, on the constant factor `PO5` never
+bounded. Memory is unambiguously won: 69 B/row and 1.27 MB live heap at 179x66,
+1.12x deeper than pre-packing at roughly an eighth of the bytes.
 
-`H3` does not graduate. What resumes this plan is a human decision among `D7`'s
-three exits; the accounting corrections that decision rests on are in `F13`.
+`H3` does not graduate, and its disposition is **open**. The human decision is to
+**profile before choosing** -- `F17` reads where the ~20% goes, and only then do
+revert, the `C1`/`C2` pivot, or a stated-trade acceptance get adjudicated.
+Accepting +19.83% is off the table; reverting now would discard measured
+information. This block records the failure, not a verdict.
 
 ## Problem and desired outcome
 

@@ -196,12 +196,18 @@ per-row fixed-stride scalar column, a run-length style table, and an exception
 list, priced at 9.41x depth at saturation. The experiment is the next hand-off,
 against `D3`'s success criterion.
 
-**Implemented at `efa549f`, and blocked by `D7`.** The memory claim held --
-128.0 B/row on the CRLF reference payload, 81,920 retained rows at 10 MiB, `D6`'s
-figure to the byte -- and gate item 6's resize comparison then measured a **14.2x**
-saturated-resize regression (`F14`: 1,425.8 ms against 100.2 ms). `H3` does not
-graduate. The trade is stated as numbers in `D7` and awaits a human design decision
-among capping depth, cheapening reflow, and accepting the cost.
+**Implemented at `efa549f`; resize fixed by `D8`; the deciding gate then failed.**
+The memory claim held at both geometries (`F16`: 69 B/row, 1.27 MB live heap at
+179x66, 1.12x deeper than pre-packing at roughly an eighth of the memory), and
+`D8`'s dual bounds returned every content regime to within **1.19x** of
+pre-packing resize, closing `F14`'s 14.2x. The deciding ladder then answered
+`slower` on four of six calibrated workloads, worst **`retained-browse` at
++19.83% against a 1.05% threshold** -- and `F16` Observation 2 shows neither cap
+binds on that workload, so the cost is the packed row's read, which is `C6`'s own
+named falsification. **`H3` does not graduate, and its disposition is open pending
+`F17`**: the human decision is to profile where the constant goes before choosing
+among revert, the `C1`/`C2` pivot, and accepting the trade. Accepting +19.83% is
+off the table.
 
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
@@ -518,10 +524,23 @@ is a ledger entry opening an investigation, not a plan.
   move `D6`'s 128.0 B/row headline, which was reproduced to the byte. `F14` then
   ran gate item 6's two-armed resize comparison on a re-versioned saturating
   recipe and measured **1,425.8 ms against 100.2 ms** -- 12.13x the retained rows
-  at 1.17x the per-row reflow cost. `D7` states the trade as numbers and **`H3`
-  does not graduate**: the remaining deciding runs are deliberately unrun,
-  because all three exits (cap depth, cheapen reflow, accept the trade) change
-  the shape those runs would measure. **Awaiting a human design decision.**
+  at 1.17x the per-row reflow cost. `D7` states the trade as numbers and stopped
+  the gate there, because all three exits change the shape the remaining runs
+  would measure.
+  **`D8` took the cap exit, and the resumed gate then failed on the read side.**
+  `F15` measured what `D7` could only assume: the pre-packing byte budget had been
+  bounding stored *cells* implicitly at `10 MiB / 32 B`, and a ~1 B packed cell
+  removed that bound -- so `D8` restates it explicitly as a **327,680-cell cap**
+  beside a **16,384-row cap** derived from the fitted two-term reflow model
+  (`1.85 us/row + 0.352 us/cell`). A row cap alone was measured unsound: it leaves
+  wide content at 2.66x and destroys history across a narrow-then-widen round trip
+  (8,192 -> 4,095), now pinned by `narrowThenWidenPreservesCappedHistory`. With
+  both bounds, resize lands within 1.19x of pre-packing in all three regimes.
+  `F16` then ran the full deciding ladder and **the gate failed**: four `slower`
+  verdicts, worst `retained-browse` at **+19.83%** against 1.05%, with neither cap
+  binding on that workload. **`H3` does not graduate; disposition open pending
+  `F17`**, which profiles where the constant factor goes before revert, `C1`/`C2`
+  pivot, or acceptance is chosen. Profiling is in progress.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
