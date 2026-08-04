@@ -1,9 +1,12 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F13**, which Phase 2's open resize-profile task claims (it was
-written down as `F11`, then as `F12`, before the entries ahead of it existed; IDs
-go in the order findings are recorded, not in the order tasks were listed). Inherited baseline: `15/F18` -- the compact retained-row
-validation at `dd51a12`/`54d4d2d` -- is cited, not copied; read it there.
+Next free ID: **F15**, which Phase 2's open resize-*profile* task claims (it was
+written down as `F11`, then `F12`, then `F13`, before the entries ahead of it
+existed; IDs go in the order findings are recorded, not in the order tasks were
+listed). `F14` measured how much a saturated resize costs; `F15` is still owed
+the read of *where inside reflow* that cost goes. Inherited baseline: `15/F18` --
+the compact retained-row validation at `dd51a12`/`54d4d2d` -- is cited, not
+copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
 
@@ -1177,3 +1180,263 @@ charge is a constant per row that C3's larger payload cannot amortize.
     `D3`'s success criterion exists for.
 - Next action: `D6` records the field adjudications and the selection; the plan's
   yield and depth figures are restated against this table.
+
+### F13 -- five accounting facts the C6 implementation forced, and which of them move `D6`'s model
+
+- Status: recorded. It is an **accounting correction to `F11`/`F12`/`D6`'s pricing
+  instruments**, not a new sizing claim: `D6`'s headline of **128.0 B/row on the
+  CRLF reference payload stands as measured** at the packing commit. What changes
+  is which of the probe's other numbers may still be quoted at HEAD, and it
+  retires several of them.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: candidate `efa549f` (packed retained rows) against
+  the adjacent baseline `678bfe9`, both run from the same clean tree state.
+  Release configuration, headless. Every number at or after the evidence floor
+  `dd51a12`.
+- Conditions: AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`. These are exact
+  arithmetic over recorded rows -- no wall-clock is claimed here, so host load
+  cannot perturb them.
+- Commands:
+
+      just terminal-retained-row-probe "--saturated --json"    # at efa549f
+      just terminal-retained-row-probe "--saturated --json"    # at 678bfe9, worktree
+
+- Artifacts (disposable scratch, cited as pointers): the two `--saturated --json`
+  dumps. Both are reproducible by the two commands above.
+
+#### Observation 1 -- the saturated pool changed under packing, and `F12`'s 85.14% is a pool fact rather than a definitional one
+
+Packing changes how many rows each replay retains at the same 10 MiB, so the
+`--saturated` pool is **not the same population** before and after. Run side by
+side:
+
+| quantity | `678bfe9` | `efa549f` |
+| --- | ---: | ---: |
+| saturated pool rows | 94,990 | 96,617 |
+| single-run rows (lenient) | **85.14%** | **83.96%** |
+| identity runs per row (lenient) | 1.1953 | 1.2069 |
+| style runs per row | 1.662 | 1.653 |
+| C6 model charge on the pool | 121.5 B/row | 108.5 B/row |
+
+The baseline column reproduces `F12`'s published 94,990 / 85.14% / 1,076.9 /
+121.5 exactly, which is what makes this a like-for-like read. So the 85.14% ->
+83.96% drift is **re-weighting, not disagreement**: the same instrument on a pool
+that packing itself reshaped. The C6 column moves the same way and for the same
+reason -- the pool's rows got shorter on average, not the encoding cheaper.
+
+**A separate and genuinely definitional step sits underneath it.** The encoder
+charges identity runs as *strict* steps of one, because `(start, extent, base)`
+is the only triple that reconstructs exactly; `F12` counted a repeat as
+continuing a run, which `printWide` produces when it stamps a head and its tail
+with one identity. Both counts are now reported. On `efa549f`'s pool:
+
+| definition | single-run rows | runs/row |
+| --- | ---: | ---: |
+| lenient (`F12`'s, what the pricing script still charges) | 83.96% | 1.2069 |
+| strict (what the encoder writes) | **82.71%** | **1.2453** |
+
+The gap is worth **0.31 B/row** -- 0.0385 extra 8-byte run entries per row. Real,
+and far below the ~12.5% bucket step `F10` set as the floor for a byte claim, so
+it changes no selection and no headline. It does mean a CJK-heavy row prices
+above `D6`'s model rather than below it, which is the direction that matters for
+a bound.
+
+#### Observation 2 -- the encoder pays a 13-byte per-row header that `D6`'s table charges nowhere
+
+`PackedRetainedRow.Header.byteCount` is 13: flags(1) plus six 2-byte table
+counts. `scripts/terminal-retained-row-shape.py#pack_stride_runs_exceptions` --
+the function every published C6 figure comes from -- has no per-row constant term
+at all. On the CRLF reference payload's 78.0 payload B/row that omission is
+**16.7% of the payload**.
+
+It did not surface in the headline because malloc rounding absorbed it: the
+payload lands in the same size class either way, and the charged figure came back
+at `D6`'s 128.0 B/row to the byte. That is a coincidence of one payload, not a
+property. The corrected model now lives in the probe's Swift side as
+`packedPayloadModelBytes` -- header, strict runs, and per-kind exception entries
+included -- and `packedPayloadMatchesModel` holds it against the engine's real
+bytes on every stimulus in the corpus. **The Python candidate table has not been
+corrected**, because correcting it would move all six candidates by the same
+per-row constant and change no ranking; it is recorded here as a stated bias
+rather than repaired silently.
+
+#### Observation 3 -- the spill directory is charged by the engine and priced by nobody
+
+`Terminal.swift#scrollbackByteCost(of:)` charges a row carrying any multi-scalar
+cell for **the directory as well as the spills**: an array header plus
+`spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride` on top of each spill
+allocation. `D6`'s model charged only the spill arrays the references point at.
+This is `I4` working as designed -- the charge describes what the row allocates,
+not what a candidate predicted -- and it prices 0.81% of retained rows in the
+saturated pool above their modelled cost.
+
+#### Observation 4 -- the probe's `current` arm now prices a representation nothing stores
+
+`price_facts` builds its `current` arm as `stored cells x 32 B` plus row overhead,
+and the report-level `allocatedBytes` is the same model. At `678bfe9` that was the
+truth. At `efa549f` it is a **fiction**: history holds packed blobs, and no row in
+the process has that shape. Worse, the fiction moved -- 1,076.9 B/row at the
+baseline against 921.8 at HEAD -- because the pool re-weighted under it, so it is
+not even a stable stand-in for the old cost.
+
+Everything derived from that arm is therefore unquotable at HEAD:
+`savingFraction`, `depthMultiple`, `roundingBytes`, `rowsDroppingAClass`, and the
+whole packing table's "against current" framing. The probe's still-valid outputs
+are the ones that read the engine rather than model it: `composition`,
+`derivationMatchesCensus`, `packedPayloadMatchesModel`,
+`censusRetainedPackedPayloadBytes`, and `blankRowFraction`. **Any before/after
+byte claim at HEAD comes from a two-arm run like this one, not from a single
+arm's `current` column.**
+
+#### Observation 5 -- at narrow widths the depth difference between row shapes collapses into one bucket
+
+`TerminalScrollbackBudgetTests`'s short-vs-full-width depth test moved from 8
+columns to 80. At 8 columns a packed one-cell row and a packed full-width row now
+land in the same malloc size class -- a fixed slot plus a 13-byte header plus
+roughly one byte per stored cell leaves too little between them to clear a step --
+so they retain identically and the test's premise evaporates. At 80 columns it
+clears comfortably.
+
+This is `D3`'s admission test seen from the other side: a scheme must move a row
+by more than one ~12.5% bucket step to yield bytes, and at a narrow enough width
+*no* content difference does. It is not a lost property, but it does bound where a
+depth claim can be read: **narrow-pane depth arithmetic is bucket-dominated, and
+`F8`'s two-width discipline (179 and 80) is the reason nothing here was read at 8.**
+
+- Inference: `D6`'s selection and its 128.0 B/row headline are untouched. What is
+  retired is the single-arm framing -- the `current` column, `depthMultiple`, and
+  `savingFraction` at HEAD -- and what is added is a stated upward bias in the
+  Python C6 price (no header, lenient runs, no spill directory) totalling roughly
+  13 B/row plus 0.31 B/row plus a 0.81%-of-rows term.
+- Competing interpretation, checked rather than argued: that the 85.14% -> 83.96%
+  drift was the strict/lenient change. It is not -- the baseline arm reproduces
+  85.14% under the *same lenient* rule, and strict on the candidate pool is a
+  further step to 82.71%. The two effects are separable and both are reported.
+- Uncertainty, stated plainly:
+  - The Python candidate table is knowingly optimistic for C6 by a per-row
+    constant. Left uncorrected on purpose (it moves every candidate alike), but a
+    future reader pricing a *new* candidate against it must add the header term
+    themselves or the comparison tilts.
+  - The saturated pool's mix remains `AR2`, and it is now additionally
+    representation-dependent: the pool a probe builds at HEAD is not the pool it
+    built at the baseline. Two-arm reads are the only way to compare across the
+    change.
+- Next action: none of these five moves the packing decision. They constrain how
+  the probe may be quoted at HEAD, which `F14`'s resize comparison and any later
+  memory read depend on.
+
+### F14 -- a saturated resize costs 1.43 s after packing against 100 ms before: 12.1x the rows at 1.17x per row, and 14.2x the wall clock
+
+- Status: recorded, and it is the **two-armed comparison gate item 6 of
+  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  demanded**, run before landing rather than after. It is the risk that plan's
+  own risk list named as "the largest blast radius, and what this evidence says
+  least about", and it fired. `D7` adjudicates it; this entry is the measurement.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: baseline `678bfe9` (the commit before packing, in a
+  detached worktree), candidate `efa549f` (packed retained rows). The probe's
+  recipe extension is **byte-identical in both arms** -- the same two source files
+  were copied into the baseline worktree, so the only difference between the arms
+  is the retained-row representation.
+- Conditions: AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`, no low-power mode.
+  Load average 2.26/3.21/4.26 before the baseline arm, 2.24/3.19/4.25 between
+  arms, 2.81/3.20/4.21 after -- the busiest non-harness process was under 7% CPU.
+  Read before trusting the verdict, per gate item 7. The arms are 14x apart; no
+  load this machine was under explains a factor of fourteen.
+- Commands:
+
+      just terminal-resize-probe "--recipe saturating"    # at 678bfe9, worktree
+      just terminal-resize-probe "--recipe saturating"    # at efa549f
+
+#### Observation 1 -- the recipe had to be re-versioned, because `v1` stopped saturating
+
+`saturated-resize-v1` feeds 10,000 lines, which saturated the pre-packing
+representation (`F7`: 6,756 retained rows at the 10 MiB budget). Packed rows admit
+~82,000 at the same budget, so at HEAD `v1`'s history is bounded by its **line
+count** rather than by the budget -- it retains ~9,940 rows, 1.47x the baseline's
+depth instead of the ~12x a saturated pane really holds. A `v1` run at HEAD
+therefore understates the cost by most of an order of magnitude while printing a
+perfectly well-formed distribution.
+
+`saturated-resize-v2` feeds 120,000 lines. It is a **new frozen recipe, not an
+edit of `v1`**, so `F7`'s recorded distribution and this one cannot be misread as
+two arms of one comparison. `saturatingRecipeReachesTheBudgetCeiling` pins the
+premise the way it is actually claimed: after setup, feeding a further 200 lines
+adds no retained row.
+
+#### Observation 2 -- the comparison
+
+`saturated-resize-v2-120000-lines-179x66-to-100`, 20 timed samples per arm after
+4 untimed, alternating 179 <-> 100 columns at the production 10 MiB budget:
+
+| arm | retained rows | median | min | p90 | p99 / max | per row |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `678bfe9` (unpacked) | 6,756 | **100.2 ms** | 98.2 | 100.9 | 104.5 | 14.84 us |
+| `efa549f` (packed) | 81,920 | **1,425.8 ms** | 1,397.3 | 1,447.3 | 1,449.3 | 17.40 us |
+
+Both distributions are tight -- max/min is 1.06 at the baseline and 1.04 at the
+candidate -- so the difference is not a tail artifact. Split by direction:
+
+| arm | narrow 179 -> 100 | widen 100 -> 179 |
+| --- | ---: | ---: |
+| `678bfe9` | 98.5 ms | 100.8 ms |
+| `efa549f` | 1,414.0 ms | 1,442.5 ms |
+
+Neither direction escapes: `F7`'s observation that narrowing is the reflowing
+direction survives as a ~2% asymmetry in both arms and explains none of the gap.
+
+#### Observation 3 -- the factorization, which is what makes this decidable
+
+The 14.2x wall-clock ratio decomposes cleanly:
+
+- **12.13x more rows** (81,920 against 6,756) at the same byte budget. This is the
+  win, working exactly as `D6` priced it -- 14.12x was the prediction on the CRLF
+  reference payload, and the probe's own stimulus is CRLF ASCII.
+- **1.17x more cost per row** (17.40 us against 14.84 us). Reflow now unpacks a
+  blob to cells and repacks the result, where before it moved cells to cells.
+
+So packing did **not** make per-row reflow cheaper, which `H1` had left as
+genuinely unknown; it made it moderately dearer, and then multiplied it by the
+depth the same change bought. `12.13 x 1.17 = 14.2`, which is the measured ratio.
+
+The baseline arm is also an internal control: 100.2 ms over 6,756 rows reproduces
+`F7`'s ~98 ms over 6,756 rows at the same geometry, on a probe binary built from
+different source. Nothing about the recipe extension moved the number it inherited.
+
+#### Observation 4 -- what 1.43 s means, stated as the responsiveness question rather than a threshold
+
+The plan wrote the failure condition down in advance: "`F7`'s ~98 ms median
+becoming most of a second would pass every other gate here while breaking the
+responsiveness contract". The measured median is **1.43 s** -- past that line, not
+near it. At 60 Hz it is ~86 frames. A window drag issues a resize per step, and
+the shipped resize coalescing bounds how many survive, not how long one takes.
+
+No frozen rule is invoked, because this workload has none and `D1` pitch 2
+deliberately left it a probe. Gate item 6 offered exactly two exits -- screen it
+toward a frozen rule and clear it, or state the trade as numbers and decide it --
+and a 14x wall-clock difference is not a threshold question. This is the second
+exit, and `D7` takes it.
+
+- Inference for `D7`: the depth win and the resize cost are the *same* fact
+  measured twice. Any mitigation that keeps the depth keeps most of the resize
+  cost, and any mitigation that caps the depth gives back the win in proportion.
+  That is a design decision, not a measurement one.
+- Competing interpretation, checked rather than argued: that this is the probe's
+  synthetic stimulus rather than the representation. It is not -- the per-row
+  factor is 1.17x on the same content in both arms, and the remaining 12.1x is
+  the row count the budget admits, which is the plan's own headline claim. A
+  different stimulus changes both factors together.
+- Uncertainty, stated plainly:
+  - **One geometry, one machine, one payload.** 179x66 <-> 100 on ASCII CRLF
+    content. The factorization is what generalizes; the absolute 1.43 s is not
+    claimed beyond this recipe.
+  - **No profile.** Where inside reflow the 17.40 us/row goes is not measured
+    here -- unpack, repack, or the allocation traffic between them. Phase 2's open
+    resize task is where that read belongs, and it is now a prerequisite of any
+    mitigation rather than a curiosity.
+  - **`v2` is one run per arm.** A probe, not a paired benchmark: no pairs, no
+    interleaving, no frozen rule. At 14x that is enough to decide the direction
+    and not enough to quote a percentage.
+- Next action: `D7`. Per the plan's own instruction, the remaining gate runs
+  (`terminal-feed` screen, the deciding ladder, the two-width memory read) were
+  **not** run -- they would measure a shape the design decision may change.

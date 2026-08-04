@@ -1,11 +1,12 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D7**, which the remaining Phase 3 direction gate in
+Next free ID: **D8**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
 on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
-representation, and `D6` on correcting its pricing. IDs are allocated in the order
-entries are written, not reserved in advance -- the H5 gate has now moved from
-`D5` to `D6` to `D7` for that reason.
+representation, `D6` on correcting its pricing, and `D7` on the resize-for-depth
+trade. IDs are allocated in the order entries are written, not reserved in
+advance -- the H5 gate has now moved from `D5` to `D6` to `D7` to `D8` for that
+reason.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -739,3 +740,99 @@ the gate.
   floor (238.4 B/row saturated, 336.0 B/row reference) and make the `H4`
   composition, not the packing, the larger remaining win. C6 would still be the
   selection; the plan's expected yield would not survive.
+
+### D7 -- the resize-for-depth trade, stated as numbers: `H3` does not graduate on this evidence, and the choice among three exits is a human design decision
+
+- Status: **decided as far as measurement can decide it, and deliberately no
+  further.** Gate item 6 of
+  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  is **not cleared**. This entry states the trade as numbers, which is the second
+  of the two exits that gate allows; it does not pick which way to take the trade,
+  because every option changes the shape the remaining gate runs would measure.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Evidence used: `F14` (the two-armed saturating resize comparison -- the whole
+  basis of this entry), `F13` (which of the probe's numbers may be quoted at
+  HEAD), `F7` (the one-armed baseline this replaces and reproduces), `D6` (the
+  depth the packing buys), `D3` (the success criterion), `D1` pitch 2 (the gate
+  that made the probe two-armed at all).
+
+#### The trade, in one table
+
+At the production 10 MiB budget, 179x66, ASCII CRLF content:
+
+| quantity | `678bfe9` | `efa549f` | ratio |
+| --- | ---: | ---: | ---: |
+| retained rows at saturation | 6,756 | 81,920 | **12.13x deeper** |
+| charge per retained row (CRLF reference payload) | 1,808.0 B | 128.0 B | 14.12x cheaper |
+| saturated resize, median | 100.2 ms | 1,425.8 ms | **14.2x slower** |
+| saturated resize, per retained row | 14.84 us | 17.40 us | 1.17x slower |
+
+The two headline numbers are the same fact. Depth rose 12.13x because the bytes
+per row fell, and the resize cost rose 14.2x because reflow visits every retained
+row -- multiplied by a per-row reflow that packing made 1.17x dearer rather than
+cheaper. `H1` left that per-row direction genuinely open; it is now measured, and
+it is the smaller of the two terms.
+
+#### Why this is a decision entry and not a `slower` verdict
+
+`retained-browse`, `terminal-feed` and the four ladder guards have frozen rules;
+`saturated-resize` has none, by `D1` pitch 2's deliberate refusal. Gate item 6
+anticipated exactly this and offered two exits -- screen the workload toward a
+frozen rule and clear it, or **state the measured resize-for-depth trade as
+numbers and decide it in a `D` entry**. A 14x difference is not a threshold
+question, so screening would be ceremony: no rule this doc could freeze would call
+1,425.8 ms against 100.2 ms anything but a regression.
+
+The plan's graduation rule is `faster` on a workload containing the moved cost,
+nothing else `slower`, **or every trade stated as numbers and decided**. The trade
+is stated. It is not decided here, and the reason is scope rather than caution:
+each of the three exits below changes what the remaining gate runs would be
+measuring, so running them now would spend a deciding-run budget on a shape that
+may not ship.
+
+#### The three exits, and what each costs, so the decision is made on evidence
+
+None of these is chosen here. Each is stated with the number that governs it.
+
+1. **Cap retained depth.** A row cap restores resize cost in direct proportion and
+   gives back exactly that much of the win: a cap at ~2x the old depth returns
+   resize to ~230 ms and keeps 2x deeper history at a 14x cheaper per-row charge,
+   which the byte budget then never reaches. This makes the budget nominally
+   byte-denominated and actually row-denominated, which is a coherence question
+   doc 15's `D4` would want answered rather than a free knob.
+2. **Make reflow cheaper.** The 1.17x per-row term is the only part of the 14.2x
+   that is a cost rather than a consequence, and it is unprofiled -- Phase 2's open
+   resize task (`RESEARCH`, destination `F15`) is the read that would say whether
+   unpack/repack, allocation traffic, or something else holds it. Even eliminating
+   the term entirely leaves **12.13x**, so this is a necessary-but-insufficient
+   route on its own; it becomes decisive only combined with (1) or with reflow that
+   does not visit every row.
+3. **Accept the trade.** Defensible only against a use question this doc cannot
+   answer from its own evidence: how often a user resizes a *saturated* pane, and
+   whether the shipped resize coalescing makes 1.43 s a one-time cost at the end of
+   a drag rather than a per-step one. Coalescing bounds how many resizes survive a
+   drag; it does not shorten one. The honest form of this exit is a stated
+   user-visible cost, not an assumption that nobody hits it.
+
+#### What this blocks, and what it does not
+
+- **`H3` does not graduate** on this evidence. The packing is landed, measured, and
+  correct -- `PO1`-`PO5` are green and `D6`'s 128.0 B/row headline was reproduced
+  to the byte -- but the gate it must clear is not cleared.
+- **The remaining deciding runs are not run**: the longer `terminal-feed` screen,
+  the `terminal-feed`/`retained-browse` deciding runs, the four ladder guards, and
+  the two-width memory read. Not skipped on judgement -- the plan instructs
+  stopping here, and exits (1) and (2) would both change the depth those runs
+  measure against.
+- **`H4` stays sequenced behind this** (`RI3` unchanged). It composes with whatever
+  shape C6 settles into and would make an already-unattributable browsing result
+  worse.
+- **Nothing here reopens the representation.** `D6`'s selection is untouched: C6 is
+  still the cheapest candidate under both identity variants, and the text form
+  would reflow no faster. This is a depth consequence, not a packing-shape one --
+  every candidate that bought this much depth would buy this much resize with it.
+
+- Reopening condition: a resize path that does not visit every retained row (lazy
+  or incremental reflow), or a measured per-drag cost showing coalescing reduces
+  the user-visible figure to one 1.43 s event per drag rather than a stall per
+  step. Either changes the arithmetic above rather than the judgement about it.

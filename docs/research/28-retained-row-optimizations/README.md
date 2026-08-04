@@ -149,7 +149,9 @@ Reflow unpacks and repacks every retained row on a width change. Both sides of
 that operation now touch the content prefix instead of `columnCount` cells per
 row, so a saturated-history resize should move roughly a content-to-width
 ratio less data -- while also processing ~2-3x more rows at the same budget,
-which cuts against it. Net direction is genuinely unknown. Window-drag latency
+which cuts against it. Net direction is genuinely unknown. **Answered by `F14`:
+per-row reflow got 1.17x *dearer*, not cheaper, and the row count rose 12.13x, so
+a saturated resize costs 14.2x more wall clock.** Window-drag latency
 on a deep pane is user-visible and composes with the shipped resize
 coalescing. Confirm or reject with a paired before/after-style probe at HEAD
 (there is no pre-trim arm to compare against and the rules forbid wanting one;
@@ -190,6 +192,13 @@ at both widths) and **designed by `D5`** on `F11`'s composition evidence: a
 per-row fixed-stride scalar column, a run-length style table, and an exception
 list, priced at 9.41x depth at saturation. The experiment is the next hand-off,
 against `D3`'s success criterion.
+
+**Implemented at `efa549f`, and blocked by `D7`.** The memory claim held --
+128.0 B/row on the CRLF reference payload, 81,920 retained rows at 10 MiB, `D6`'s
+figure to the byte -- and gate item 6's resize comparison then measured a **14.2x**
+saturated-resize regression (`F14`: 1,425.8 ms against 100.2 ms). `H3` does not
+graduate. The trade is stated as numbers in `D7` and awaits a human design decision
+among capping depth, cheapening reflow, and accepting the cost.
 
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
@@ -373,7 +382,12 @@ is not lost.
   a frame budget? `F7` has the distribution and the committed probe; this task
   is the profile and the frame-budget reading `F7` deliberately withheld. Now
   also a prerequisite risk check for `D5` (depth rises ~9x at the same budget, so
-  reflow processes ~9x more rows). Destination: `F13`.
+  reflow processes ~9x more rows). Destination: `F15`.
+  **Half-answered and sharply promoted by `F14`/`D7`.** The frame-budget reading
+  is in: a saturated resize costs **1,425.8 ms** after packing against 100.2 ms
+  before, 12.13x the rows at 1.17x per row. What this task still owes is the
+  *profile* -- where inside reflow the 17.40 us/row goes -- and it is no longer a
+  curiosity: `D7` exit 2 (make reflow cheaper) cannot be evaluated without it.
 
 ### Phase 3 -- direction gates
 
@@ -410,7 +424,7 @@ is not lost.
   a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence. Destination: `D7`.
+  dead on sizing, but that is decided on post-landing evidence. Destination: `D8`.
 
 ### Phase 4 -- graduate
 
@@ -438,6 +452,21 @@ is not lost.
   per cell. `D6` preserves every field and keeps C6, which is cheapest under
   *both* identity variants; the yield falls to **128.0 B/row and 14.12x** on the
   CRLF payload (from 112.0 and 16.14x). Phase 1 may begin.
+  **Phase 1 chunk A landed the packing (`efa549f`); chunk B's first gate run
+  stopped it.** `F13` records five accounting corrections the implementation
+  forced -- the saturated pool re-weights under packing (so `F12`'s 85.14% reads
+  83.96% at HEAD, and 82.71% under the strict run rule the encoder actually
+  writes), the encoder pays a 13 B per-row header the candidate table charges
+  nowhere, the spill directory is charged by the engine and priced by nobody, the
+  probe's `current` arm now prices a representation nothing stores, and
+  narrow-width depth differences collapse into one malloc bucket. None of them
+  move `D6`'s 128.0 B/row headline, which was reproduced to the byte. `F14` then
+  ran gate item 6's two-armed resize comparison on a re-versioned saturating
+  recipe and measured **1,425.8 ms against 100.2 ms** -- 12.13x the retained rows
+  at 1.17x the per-row reflow cost. `D7` states the trade as numbers and **`H3`
+  does not graduate**: the remaining deciding runs are deliberately unrun,
+  because all three exits (cap depth, cheapen reflow, accept the trade) change
+  the shape those runs would measure. **Awaiting a human design decision.**
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
@@ -532,12 +561,25 @@ non-ASCII, which is the one regime where variable width wins on bytes
   exactly what makes it prone to this: its real effects are small enough to fall
   in the gap. The rule entries in `DECISION_RULES` say so in place, so nobody
   reaches for the rerun `F1`'s protocol forbids.
-- `F7`'s resize distribution is a **probe**, not a verdict, and `D1` pitch 2
-  chose that deliberately: `H1`'s question has one arm. The ~98 ms median and
-  the narrow/widen split are descriptive facts about one geometry on one
-  machine. Reading them against a frame budget is Phase 2's `RESEARCH` task, and
-  upgrading the probe to a paired candidate workload needs `D1`'s stated gate --
-  a change *expected* to move resize cost, which is what supplies a second arm.
+- ~~`F7`'s resize distribution is a **probe**, not a verdict, and `D1` pitch 2
+  chose that deliberately: `H1`'s question has one arm.~~ **Superseded by `F14`:**
+  packing supplied the second arm `D1` pitch 2 was waiting for, and the comparison
+  ran on a re-versioned recipe. What replaces this caveat is sharper -- **`F7`'s
+  `saturated-resize-v1` no longer saturates.** 10,000 lines bounded the pre-packing
+  representation at the budget; packed rows admit ~82,000, so a `v1` run at HEAD
+  retains ~9,940 rows and understates resize cost by most of an order of magnitude
+  while printing a well-formed distribution. `saturated-resize-v2` (120,000 lines)
+  is the recipe that still saturates, and it is a **new name, not an edit**, so the
+  two sets of numbers cannot be read as one comparison. Any future recipe here
+  inherits that hazard: a representation change silently un-saturates a
+  line-count-bounded stimulus.
+- **A depth win is a reflow cost, and they cannot be separated by measurement**
+  (`F14`/`D7`). Reflow visits every retained row, so anything that multiplies depth
+  at a fixed budget multiplies resize cost by the same factor -- 12.13x here, on
+  top of a per-row term packing moved the wrong way (1.17x). This is not specific
+  to C6: every candidate in `F11`'s table that bought this depth would buy this
+  resize with it. A future hypothesis in this doc that proposes more depth owes a
+  resize number in the same breath as its byte number.
 - ~~H2's charge-model question (how shared storage is charged) may itself be the
   reason to reject it; cheapness of the trick does not excuse an incoherent
   budget.~~ **Moot after `F9`:** the question never gets asked, because the

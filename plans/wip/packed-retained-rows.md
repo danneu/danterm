@@ -1,5 +1,28 @@
 # Packed retained rows (doc 28 / H3)
 
+## Status -- BLOCKED at Phase 1 chunk B on gate item 6
+
+Chunk A landed the packing at `efa549f`. `PO1`-`PO5` are green and the memory
+claim held to the byte: **128.0 B/row** on the CRLF reference payload, **81,920**
+retained rows at 10 MiB, exactly `D6`'s figure.
+
+Chunk B ran gate item 6 first, because it was the likeliest failure, and it
+failed. On a re-versioned saturating recipe (`saturated-resize-v2`, 120,000 lines
+-- `v1`'s 10,000 stopped saturating once rows packed), a saturated 179x66 resize
+costs **1,425.8 ms** at `efa549f` against **100.2 ms** at the adjacent baseline
+`678bfe9`: **12.13x** the retained rows at **1.17x** the per-row reflow cost,
+14.2x the wall clock. `F14` is the measurement, `D7` states the trade.
+
+**The remaining gate runs were deliberately not run** -- the longer
+`terminal-feed` screen, the `terminal-feed` and `retained-browse` deciding runs,
+the four ladder guards, and the two-width memory read. All three exits `D7` names
+(cap retained depth, cheapen reflow, accept the trade) change the depth those runs
+would measure against, so running them now would spend a deciding-run budget on a
+shape that may not ship.
+
+`H3` does not graduate. What resumes this plan is a human decision among `D7`'s
+three exits; the accounting corrections that decision rests on are in `F13`.
+
 ## Problem and desired outcome
 
 Retained history is the dominant term in DanTerm's terminal memory footprint,
