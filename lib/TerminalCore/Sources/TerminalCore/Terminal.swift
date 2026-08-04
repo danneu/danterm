@@ -207,6 +207,11 @@ public struct Terminal: Equatable, Sendable {
         }
 
         /// Returns the canonical retained representation without default trailing padding.
+        ///
+        /// The independent statement of `I2`. `PackedRetainedRow.pack` applies the same trim
+        /// as it encodes -- so nothing on the admission path calls this -- and the tests hold
+        /// the two spellings equal. Keeping it is what makes that a comparison against a
+        /// definition rather than against the encoder's own arithmetic.
         func compacted() -> GridRow {
             let lastStoredColumn = cells.lastIndex(where: { $0 != GridCell() }) ?? 0
             let storedCount = lastStoredColumn + 1
@@ -3944,10 +3949,10 @@ public struct Terminal: Equatable, Sendable {
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
     where S.Element == GridRow {
         for sourceRow in newRows {
-            // Trim first, then pack: canonical form (`I2`) decides what the row stores, and
-            // the encoding decides how. Packing here is what makes history's representation
-            // `C6` while the live grid stays untouched (`I1`).
-            let row = PackedRetainedRow.pack(sourceRow.compacted())
+            // `pack` trims to canonical form (`I2`) as it encodes, so admission never
+            // materializes the trimmed row -- see the note on `pack`. This is what makes
+            // history's representation `C1` while the live grid stays untouched (`I1`).
+            let row = PackedRetainedRow.pack(sourceRow)
             scrollbackRows.append(row)
             scrollbackByteCount += Self.scrollbackByteCost(of: row)
             scrollbackStoredCellCount += row.storedCellCount
@@ -4497,7 +4502,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         let viewportStart = rebuiltRows.count - rowCount
-        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart].map { $0.compacted() })
+        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart])
         scrollbackByteCount = recomputedScrollbackByteCount
         scrollbackStoredCellCount = recomputedScrollbackStoredCellCount
         rows = Array(rebuiltRows[viewportStart...])
@@ -6441,7 +6446,7 @@ public struct Terminal: Equatable, Sendable {
         let oldCells = scrollbackRows[row].storedCellCount
         var retained = scrollbackRows[row].unpacked()
         retained.setCell(cell, at: column, columns: columnCount)
-        let packed = PackedRetainedRow.pack(retained.compacted())
+        let packed = PackedRetainedRow.pack(retained)
         scrollbackRows[row] = packed
         scrollbackByteCount += Self.scrollbackByteCost(of: packed) - oldCost
         scrollbackStoredCellCount += packed.storedCellCount - oldCells

@@ -196,6 +196,60 @@ struct TerminalPackedRetainedRowTests {
         }
     }
 
+    @Test("The encoder trims to canonical extent itself, matching what compacted() produced")
+    func packTrimsToCanonicalExtent() {
+        // Intent: `pack` applied to an untrimmed row produces exactly the packed row that
+        //   `pack(row.compacted())` produced -- same stored extent, same bytes, same reads.
+        // Why it exists: admission used to materialize `compacted()` first, which copied the
+        //   whole cell array (and retained every `TerminalScalars` in it) purely to drop a
+        //   suffix the encoder was about to bound anyway. Folding the trim into the encoder
+        //   removes that copy, and this pins the two spellings as the same row so the
+        //   removal cannot quietly change what history stores -- which is `I2`.
+        // Scenario: spec-first.
+        let content = "hi".unicodeScalars.enumerated().map {
+            cell($0.element, identity: Terminal.ContentIdentity($0.offset + 1))
+        }
+        let padded = Terminal.GridRow(
+            cells: content + Array(repeating: Terminal.GridCell(), count: 10)
+        )
+        let packed = Terminal.PackedRetainedRow.pack(padded)
+        #expect(packed == Terminal.PackedRetainedRow.pack(padded.compacted()))
+        #expect(packed.storedCellCount == content.count)
+        #expect(packed.unpacked() == padded.compacted())
+
+        // An all-default row still stores one cell: canonical extent is floored at one, and
+        // trimming to zero would make a blank retained row indistinguishable from an evicted
+        // slot in the buffer's own accounting.
+        let blank = Terminal.GridRow(cells: Array(repeating: Terminal.GridCell(), count: 8))
+        #expect(Terminal.PackedRetainedRow.pack(blank).storedCellCount == 1)
+    }
+
+    @Test("Interior runs of never-written cells read back as the default cells they were")
+    func interiorBlankRunsRoundTrip() {
+        // Intent: a row whose content is separated by long interior runs of never-written
+        //   cells round-trips cell for cell, including the blanks.
+        // Why it exists: the encoder writes into a zero-filled blob and skips any cell whose
+        //   word is zero, so a default cell is encoded by *not writing it*. That is only
+        //   sound while a default `GridCell` and a zero word mean the same thing -- give
+        //   `GridCell` a non-zero default (a style id, a kind) and the skip silently starts
+        //   erasing cells. This is the test that would catch it.
+        // Scenario: spec-first, but the shape is `benchmark/scrollback-stream`'s: bare LF
+        //   leaves a staircase whose rows are mostly columns nobody ever wrote.
+        var cells = Array(repeating: Terminal.GridCell(), count: 100)
+        for (offset, scalar) in "tail".unicodeScalars.enumerated() {
+            cells[80 + offset] = cell(scalar, identity: Terminal.ContentIdentity(offset + 1))
+        }
+        cells[40] = cell("m", styleId: 3, identity: 900)
+        let row = Terminal.GridRow(cells: cells)
+
+        let packed = Terminal.PackedRetainedRow.pack(row)
+        #expect(packed.storedCellCount == 84)
+        #expect(packed.unpacked() == row.compacted())
+        for column in 0..<packed.storedCellCount {
+            #expect(packed.cell(at: column) == cells[column], "column \(column)")
+        }
+    }
+
     // MARK: - PO2, through the terminal
 
     @Test("Packing leaves a retained row's stored extent exactly where canonical trim put it")

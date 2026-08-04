@@ -417,136 +417,168 @@ extension Terminal {
 
         // MARK: - Packing
 
-        /// Encodes an already-trimmed row. Called at scrollback admission, where canonical
-        /// trimming already runs, so the caller owns `I2` and this owns only the encoding.
+        /// Encodes a row into its retained form, trimming it to canonical extent on the way.
         ///
-        /// Two passes and **one allocation**, which is what admission cost turned out to be
-        /// about rather than how much classifying a row takes.
+        /// **Trimming belongs here, not at the call site.** Admission used to hand this
+        /// `sourceRow.compacted()`, which allocated a second cell array and copied every
+        /// `GridCell` into it -- retaining each one's `TerminalScalars` -- purely to drop a
+        /// suffix the encoder was about to stop at anyway. `28/F20` measured that copy, with
+        /// the encoder's own two walks over the same cells, at 19.7% of the drain thread on
+        /// `benchmark/scrollback-stream`. Trimming is a decision about `storedCellCount`,
+        /// which is this type's field; making it the encoder's removes the copy. `I2` is
+        /// unchanged and now enforced in one place rather than promised at three call sites.
         ///
-        /// Pass 1 collects only what the blob's size depends on -- the hyperlink entries,
-        /// the `contentIdentity` runs, and the spills. Pass 2 writes every byte into a blob
-        /// allocated at its exact final size, through one unsafe buffer, with no `append`
-        /// anywhere. `28/F17` had measured `C6`'s encoder at 9.2% of feed self time and this
-        /// design's whole claim on admission was that a translate-copy is cheaper than a
+        /// Two walks over a borrowed buffer and **one allocation**, which is what admission
+        /// cost turned out to be about rather than how much classifying a row takes. Walk 1
+        /// collects what the blob's size depends on -- the hyperlink entries, the
+        /// `contentIdentity` runs, the spills -- and finds the trim boundary. Walk 2 writes
+        /// every byte into a blob allocated at its exact final size, through one unsafe
+        /// buffer, with no `append` anywhere.
+        ///
+        /// `28/F17` had measured `C6`'s encoder at 9.2% of feed self time and this design's
+        /// whole claim on admission was that a translate-copy is cheaper than a
         /// classification pass -- but the first version of it measured **+6.19%** on
         /// `terminal-feed`, *worse* than `C6`, because it appended each cell byte by byte:
         /// eight `Array.append` calls per stored cell, each with a capacity and uniqueness
-        /// check. Writing the same encoding into a pre-sized buffer took it to +2.05%, and
-        /// removing the last intermediate array is the rest of it. **The cost was never the
-        /// encoding; it was how the bytes got written.**
+        /// check. **The cost was never the encoding; it was how the bytes got written** --
+        /// and the same lesson, applied to the bytes the encoder does *not* need to write,
+        /// is the blank-run skip in walk 2.
         static func pack(_ row: GridRow) -> PackedRetainedRow {
-            let cells = row.cells
-            let stored = cells.count
-
             var hyperlinkEntries: [(column: Int, id: HyperlinkId)] = []
             var identityRuns: [(start: Int, extent: Int, base: ContentIdentity)] = []
             var spills: [[Unicode.Scalar]] = []
-            var previousIdentity: ContentIdentity?
 
-            for (column, cell) in cells.enumerated() {
-                if cell.scalars.count > 1 {
-                    spills.append(Array(cell.scalars))
-                }
-                if let id = cell.hyperlinkId {
-                    hyperlinkEntries.append((column, id))
-                }
-                if let identity = cell.contentIdentity {
-                    // A run is a strict step of one, because that is the only shape a
-                    // (base, start, extent) triple can reconstruct exactly. `printWide`
-                    // stamps a head and its tail with a single identity, so a wide glyph
-                    // opens a new run here -- which prices CJK-heavy rows above `D6`'s
-                    // model, and is recorded as such rather than papered over.
-                    if let last = previousIdentity,
-                       identity == last &+ 1,
-                       let open = identityRuns.last,
-                       open.start + open.extent == column {
-                        identityRuns[identityRuns.count - 1].extent += 1
+            return row.cells.withUnsafeBufferPointer { cells in
+                var previousIdentity: ContentIdentity?
+                // The canonical extent (`I2`): one past the last cell that differs from a
+                // default one, floored at one. Tracked here rather than found by a separate
+                // reverse scan, since this walk already reads every field the comparison
+                // would.
+                var lastWritten = 0
+
+                for column in 0..<cells.count {
+                    let scalarCount = cells[column].scalars.count
+                    if scalarCount > 1 {
+                        spills.append(Array(cells[column].scalars))
+                    }
+                    if let id = cells[column].hyperlinkId {
+                        hyperlinkEntries.append((column, id))
+                        lastWritten = column
+                    }
+                    if let identity = cells[column].contentIdentity {
+                        lastWritten = column
+                        // A run is a strict step of one, because that is the only shape a
+                        // (base, start, extent) triple can reconstruct exactly. `printWide`
+                        // stamps a head and its tail with a single identity, so a wide glyph
+                        // opens a new run here -- which prices CJK-heavy rows above `D6`'s
+                        // model, and is recorded as such rather than papered over.
+                        if let last = previousIdentity,
+                           identity == last &+ 1,
+                           let open = identityRuns.last,
+                           open.start + open.extent == column {
+                            identityRuns[identityRuns.count - 1].extent += 1
+                        } else {
+                            identityRuns.append((column, 1, identity))
+                        }
+                        previousIdentity = identity
                     } else {
-                        identityRuns.append((column, 1, identity))
+                        previousIdentity = nil
                     }
-                    previousIdentity = identity
-                } else {
-                    previousIdentity = nil
-                }
-            }
-
-            // The per-cell fallback, per `D6`: a row fragmented enough that its run table
-            // costs more than four bytes on every stored cell writes the cells instead.
-            let perCell = identityRuns.count * Header.identityRunEntryBytes
-                > stored * Header.identityCellBytes
-            let identityBytes = perCell
-                ? stored * Header.identityCellBytes
-                : identityRuns.count * Header.identityRunEntryBytes
-
-            var flags: UInt8 = 0
-            if row.isSoftWrapped { flags |= Header.softWrapBit }
-            flags |= row.semanticPrompt.packedCode << Header.promptShift
-            if perCell { flags |= Header.identityPerCellBit }
-
-            let cellBase = Header.byteCount
-            let linkBase = cellBase + stored * Header.cellBytes
-            let identityBase = linkBase
-                + hyperlinkEntries.count * Header.hyperlinkEntryBytes
-
-            var blob = [UInt8](repeating: 0, count: identityBase + identityBytes)
-            blob.withUnsafeMutableBufferPointer { bytes in
-                func put16(_ at: Int, _ value: Int) {
-                    bytes[at] = UInt8(truncatingIfNeeded: value)
-                    bytes[at + 1] = UInt8(truncatingIfNeeded: value >> 8)
-                }
-                func put32(_ at: Int, _ value: UInt32) {
-                    for byte in 0..<4 {
-                        bytes[at + byte] = UInt8(truncatingIfNeeded: value >> (8 * byte))
+                    if scalarCount > 0
+                        || cells[column].kind != .padding
+                        || cells[column].styleId != Terminal.defaultStyleId
+                    {
+                        lastWritten = column
                     }
                 }
 
-                bytes[0] = flags
-                put16(1, stored)
-                put16(3, hyperlinkEntries.count)
-                put16(5, perCell ? stored : identityRuns.count)
+                let stored = min(max(lastWritten + 1, 1), cells.count)
 
-                var spillIndex = 0
-                for (column, cell) in cells.enumerated() {
-                    var word = UInt64(cell.kind.packedCode) << Header.cellKindShift
-                    word |= UInt64(cell.styleId) << Header.cellStyleShift
-                    if cell.scalars.count == 1 {
-                        word |= UInt64(cell.scalars[0].value)
-                    } else if cell.scalars.count > 1 {
-                        word |= Header.cellSpillBit | UInt64(spillIndex)
-                        spillIndex += 1
+                // The per-cell fallback, per `D6`: a row fragmented enough that its run table
+                // costs more than four bytes on every stored cell writes the cells instead.
+                let perCell = identityRuns.count * Header.identityRunEntryBytes
+                    > stored * Header.identityCellBytes
+                let identityBytes = perCell
+                    ? stored * Header.identityCellBytes
+                    : identityRuns.count * Header.identityRunEntryBytes
+
+                var flags: UInt8 = 0
+                if row.isSoftWrapped { flags |= Header.softWrapBit }
+                flags |= row.semanticPrompt.packedCode << Header.promptShift
+                if perCell { flags |= Header.identityPerCellBit }
+
+                let cellBase = Header.byteCount
+                let linkBase = cellBase + stored * Header.cellBytes
+                let identityBase = linkBase
+                    + hyperlinkEntries.count * Header.hyperlinkEntryBytes
+
+                var blob = [UInt8](repeating: 0, count: identityBase + identityBytes)
+                blob.withUnsafeMutableBufferPointer { bytes in
+                    func put16(_ at: Int, _ value: Int) {
+                        bytes[at] = UInt8(truncatingIfNeeded: value)
+                        bytes[at + 1] = UInt8(truncatingIfNeeded: value >> 8)
                     }
-                    let at = cellBase + column * Header.cellBytes
-                    for byte in 0..<Header.cellBytes {
-                        bytes[at + byte] = UInt8(truncatingIfNeeded: word >> (8 * byte))
-                    }
-                }
-
-                for (index, entry) in hyperlinkEntries.enumerated() {
-                    let at = linkBase + index * Header.hyperlinkEntryBytes
-                    put16(at, entry.column)
-                    put16(at + 2, Int(entry.id))
-                }
-
-                if perCell {
-                    for run in identityRuns {
-                        for offset in 0..<run.extent {
-                            put32(
-                                identityBase + (run.start + offset) * Header.identityCellBytes,
-                                run.base &+ ContentIdentity(offset)
-                            )
+                    func put32(_ at: Int, _ value: UInt32) {
+                        for byte in 0..<4 {
+                            bytes[at + byte] = UInt8(truncatingIfNeeded: value >> (8 * byte))
                         }
                     }
-                } else {
-                    for (index, run) in identityRuns.enumerated() {
-                        let at = identityBase + index * Header.identityRunEntryBytes
-                        put16(at, run.start)
-                        put16(at + 2, run.extent)
-                        put32(at + 4, run.base)
+
+                    bytes[0] = flags
+                    put16(1, stored)
+                    put16(3, hyperlinkEntries.count)
+                    put16(5, perCell ? stored : identityRuns.count)
+
+                    var spillIndex = 0
+                    for column in 0..<stored {
+                        var word = UInt64(cells[column].kind.packedCode) << Header.cellKindShift
+                        word |= UInt64(cells[column].styleId) << Header.cellStyleShift
+                        let scalarCount = cells[column].scalars.count
+                        if scalarCount == 1 {
+                            word |= UInt64(cells[column].scalars[0].value)
+                        } else if scalarCount > 1 {
+                            word |= Header.cellSpillBit | UInt64(spillIndex)
+                            spillIndex += 1
+                        }
+                        // A never-written cell encodes to a zero word, and the blob is
+                        // already zero -- so the cheapest way to write it is not to. On the
+                        // staircase rows `28/F11` found in `scrollback-stream`, two thirds of
+                        // stored columns take this branch. `interiorBlankRunsRoundTrip` is
+                        // what holds "default cell" and "zero word" to the same meaning.
+                        if word == 0 { continue }
+                        let at = cellBase + column * Header.cellBytes
+                        for byte in 0..<Header.cellBytes {
+                            bytes[at + byte] = UInt8(truncatingIfNeeded: word >> (8 * byte))
+                        }
+                    }
+
+                    for (index, entry) in hyperlinkEntries.enumerated() {
+                        let at = linkBase + index * Header.hyperlinkEntryBytes
+                        put16(at, entry.column)
+                        put16(at + 2, Int(entry.id))
+                    }
+
+                    if perCell {
+                        for run in identityRuns {
+                            for offset in 0..<run.extent {
+                                put32(
+                                    identityBase + (run.start + offset) * Header.identityCellBytes,
+                                    run.base &+ ContentIdentity(offset)
+                                )
+                            }
+                        }
+                    } else {
+                        for (index, run) in identityRuns.enumerated() {
+                            let at = identityBase + index * Header.identityRunEntryBytes
+                            put16(at, run.start)
+                            put16(at + 2, run.extent)
+                            put32(at + 4, run.base)
+                        }
                     }
                 }
-            }
 
-            return PackedRetainedRow(storage: blob, spills: spills)
+                return PackedRetainedRow(storage: blob, spills: spills)
+            }
         }
 
         // MARK: - Accounting
