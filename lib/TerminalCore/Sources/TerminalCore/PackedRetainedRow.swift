@@ -618,7 +618,10 @@ extension TerminalCellKind {
     /// taken from a `RawRepresentable` conformance because the raw value would then be
     /// public API, and the blob's encoding is not something outside `TerminalCore` may
     /// depend on. Must stay within three bits -- see `Header`'s layout diagram.
-    fileprivate var packedCode: UInt8 {
+    ///
+    /// Module-internal rather than file-private because doc 31's `LogicalLineStore` stores the
+    /// same C1 cell word: one coding, two stores, so the two can never drift.
+    var packedCode: UInt8 {
         switch self {
         case .padding: 0
         case .narrow: 1
@@ -628,7 +631,7 @@ extension TerminalCellKind {
         }
     }
 
-    fileprivate init(packedCode: UInt8) {
+    init(packedCode: UInt8) {
         switch packedCode {
         case 1: self = .narrow
         case 2: self = .wideHead
@@ -640,7 +643,7 @@ extension TerminalCellKind {
 }
 
 extension Terminal.SemanticPromptRow {
-    fileprivate var packedCode: UInt8 {
+    var packedCode: UInt8 {
         switch self {
         case .none: 0
         case .prompt: 1
@@ -650,7 +653,7 @@ extension Terminal.SemanticPromptRow {
         }
     }
 
-    fileprivate init(packedCode: UInt8) {
+    init(packedCode: UInt8) {
         switch packedCode {
         case 1: self = .prompt
         case 2: self = .continuation

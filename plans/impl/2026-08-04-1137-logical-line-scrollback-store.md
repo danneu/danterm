@@ -340,7 +340,7 @@ Open conditions that the implementation, not the design, has to discharge:
 
 - [x] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
 - [x] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
-- [ ] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
+- [x] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
 - [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
@@ -378,6 +378,78 @@ Open conditions that the implementation, not the design, has to discharge:
   charge against a 16.8 MB budget; those two cannot both be verdict-bearing. The
   resolution was written into the probe file's header before the probe was first
   run, so it is visible in the same commit as the numbers it governs.
+- **Slice 3 lands the store as two files beside today's, unwired.**
+  `lib/TerminalCore/Sources/TerminalCore/LogicalLineRecord.swift` holds the record
+  header's bit layout and the pure width-derived fold;
+  `lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift` holds the arena,
+  its ring discipline, the five mutating operations, the derived index and the
+  reads. The one edit outside them widens `TerminalCellKind.packedCode` and
+  `SemanticPromptRow.packedCode` from `fileprivate` to internal so the two stores
+  share one C1 cell coding rather than transcribing it -- which is the fidelity
+  limit every doc 31 probe recorded against itself.
+- **`31/D3` Decision 1's reader contract is expressed as `locate` + `advance`,
+  and the locate *counter* `PO7` asks for is deferred to the wiring slice.** The
+  obligation is about what one planned *frame* does, and there is no frame until
+  the store is wired; a counter on a `Sendable` value type would need a
+  refcounted box, which is exactly the kind of member
+  `docs/design/2026-07-29-cross-module-value-dispatch.md` warns off a hot type.
+  What slice 3 owes is the API shape that makes one locate natural, and that is
+  what landed.
+- **The index's block size is 64 records**, from `31/F1` Observation 4's measured
+  ladder (677 ns at 32, 697 at 64, 801 at 128, 870 at 256 per display row): small
+  blocks read faster because the in-block scan shortens faster than the binary
+  search lengthens, and 64 costs 0.25 B per record against the 8 B the offsets
+  cost. Block size is named implementation discretion, so this is a note rather
+  than a decision.
+- **Four genuine judgment calls, each taken as the obvious simple option and
+  recorded here continuing `31/DD24`'s numbering.** None blocked, and each is a
+  human's to revisit:
+  - **DD25 -- admission measures a hard-ended row to its *content* end, not to
+    `PackedRetainedRow.pack`'s canonical extent.** This is `31/F4` case 17's
+    stated rule, and it is a real choice rather than a restatement: today's
+    `pack` keeps a trailing background-erase-styled blank past the content and
+    today's `reconstructLogicalLines` drops it, so the two disagree and a record
+    can hold only one. As a *display row* that blank is one painted column; as
+    *line content* it is a cell the fold re-wraps, so keeping it would turn a
+    painted tail on a hard-ended line into whole blank display rows at a narrower
+    width. The consequence, stated rather than buried: at the admitting width the
+    store's fold emits a default cell where today's stored row holds a styled
+    one, past the content end of a hard-ended row. `31/D3` Decision 3's measured
+    case is untouched -- it is a *soft-wrapped* row measured to full width, plus
+    an explicit repair append.
+  - **DD26 -- a hard-ended row with no content, appended to a record that already
+    has cells, stores one default cell.** Without it `31/DD5`'s counted row and
+    the fold's derived count disagree by one for that record, and `31/I9` is
+    stated as their agreement. The case is reachable only by erasing a row whose
+    predecessor soft-wrapped. `31/DD15`'s zero-cell record is untouched: that is
+    an *empty* record, this is an empty *append*.
+  - **DD27 -- the trimmed head's "cleared" mark reads as `.continuation` when the
+    logical line carried a mark and as `.none` when it did not.** `31/D2`
+    Decision 5 asks for both "the slot is cleared" and "stamped `.continuation`
+    exactly as today's retained rows are"; today's rows carry `.continuation` on
+    a marked line's continuation rows and nothing on an unmarked line's, so this
+    is the reading that satisfies both at once and costs no extra bit. The same
+    rule stamps a forced-split follower whose predecessor is evicted.
+  - **DD28 -- condition 9's side-table shapes.** The hyperlink table
+    (`(offset, id)` pairs) and the identity table (`(start, extent, base)` runs,
+    with `pack`'s per-cell fallback) live **in** the arena immediately after the
+    record's cells, keyed by cell offset within the record; the spill table lives
+    outside it, in a dictionary keyed by absolute record sequence, because a
+    multi-scalar payload is variable-width and `28/F11` puts it on 0.12% of rows.
+    Two consequences the layout buys: a head trim moves the header forward by
+    exactly the bytes it drops, so `header + cellCount * 8` still addresses the
+    tables and they need no rewrite (the middle stays immutable, `31/I5`); and a
+    blank logical line still costs eight arena bytes, which `31/D2` Decision 1's
+    1,048,576-record depth rests on. The open tail's two in-arena tables are held
+    in scratch until it closes, because admission would otherwise append cells
+    over them.
+- **The fidelity suite names one acknowledged divergence rather than hiding it.**
+  The open tail's final display row is short by exactly the `.spacerHead`
+  admission dropped, until the wide head that follows is admitted -- which is the
+  same fact `31/D3` Decision 3 step 1 relies on to find the cleared spacer's
+  column ("for an open record that is the only way a final display row can be
+  short"). `assertOpenTailSeam` pins the shortfall to that one column instead of
+  excluding the row.
 - **Promoting the plan moved its path**, so the five research-doc references to
   `plans/wip/logical-line-scrollback-store.md` were repointed in the same commit;
   the `docs/research/README.md` index row drops the path entirely rather than

@@ -1,0 +1,758 @@
+// Behavioral proof suite for doc 31's logical-line record arena (`31/D2`, `31/D3`).
+//
+// What belongs here: the store's own contracts -- the charged-byte bound (`I2`/`PO3`), the
+// five mutating operations (`I5`), the derived index's agreement with the arena (`I9`), the
+// forced split and its rejoin (`I10`/`PO9`), ring cycling (`PO12`) and record-level fidelity
+// for spills, hyperlinks, identity and semantic marks (`PO13`). What does not: anything about
+// the terminal wiring the store to its readers, which is a later slice, and the fold's
+// row-for-row reproduction of today's output, which is `TerminalLogicalLineFoldTests`.
+//
+// Every assertion is against the store's public behavior -- what it retains, what it charges,
+// what it folds -- never against a byte offset or a header bit, so the record layout stays
+// implementation discretion (`31/D2` "Scoped out of this decision").
+
+import Testing
+
+@testable import TerminalCore
+
+@Suite("Logical-line record arena")
+struct TerminalLogicalLineStoreTests {
+    // MARK: - Fixtures
+
+    /// A narrow content cell carrying one scalar, so a test row reads back distinguishably.
+    private static func narrow(
+        _ scalar: Unicode.Scalar,
+        styleId: Terminal.StyleId = Terminal.defaultStyleId,
+        hyperlinkId: Terminal.HyperlinkId? = nil,
+        contentIdentity: Terminal.ContentIdentity? = nil
+    ) -> Terminal.GridCell {
+        Terminal.GridCell(
+            scalars: TerminalScalars(scalar),
+            kind: .narrow,
+            styleId: styleId,
+            hyperlinkId: hyperlinkId,
+            contentIdentity: contentIdentity
+        )
+    }
+
+    /// One display row of `width` narrow cells whose scalars step through a repeating
+    /// alphabet, so a retained suffix can be identified by content alone.
+    private static func filledRow(
+        width: Int,
+        seed: Int,
+        softWrapped: Bool,
+        semanticPrompt: Terminal.SemanticPromptRow = .none
+    ) -> Terminal.GridRow {
+        var row = Terminal.GridRow(cells: (0..<width).map { column in
+            let value = UInt32(97 + (seed &+ column) % 26)
+            return narrow(Unicode.Scalar(value)!)
+        })
+        row.isSoftWrapped = softWrapped
+        row.semanticPrompt = semanticPrompt
+        return row
+    }
+
+    /// A hard-ended row of `count` narrow cells padded out to `width`, which is the shape the
+    /// live grid hands admission for a line that ends before the right margin.
+    private static func shortRow(
+        width: Int,
+        count: Int,
+        seed: Int,
+        semanticPrompt: Terminal.SemanticPromptRow = .none
+    ) -> Terminal.GridRow {
+        var cells = (0..<count).map { column -> Terminal.GridCell in
+            let value = UInt32(97 + (seed &+ column) % 26)
+            return narrow(Unicode.Scalar(value)!)
+        }
+        cells.append(contentsOf: repeatElement(Terminal.GridCell(), count: width - count))
+        var row = Terminal.GridRow(cells: cells)
+        row.semanticPrompt = semanticPrompt
+        return row
+    }
+
+    /// The scalars of every retained display row, in order, as the store folds them today.
+    private static func foldedScalars(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar?]] {
+        (0..<store.grandDisplayRowTotal).map { index in
+            store.displayRow(at: index)!.cells.map { $0.scalars.first }
+        }
+    }
+
+    // MARK: - I9: the index agrees with the arena
+
+    @Test("A zero-cell record folds to one display row at every width")
+    func zeroCellRecordFoldsToOneDisplayRow() {
+        // Intent: a blank logical line occupies exactly one display row however narrow the
+        //   pane gets.
+        // Why it exists: `31/DD15` stores a blank line as a *zero-cell* record, dropping the
+        //   one-cell canonical floor `PackedRetainedRow.pack` applies. Without `31/I9`'s
+        //   `max(1, ...)` floor in the fold, a blank history would fold to nothing and
+        //   `31/D2` Decision 1's 1,048,576-records-to-rows reading would break.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for _ in 0..<5 {
+            store.admit(Self.shortRow(width: 8, count: 0, seed: 0))
+        }
+
+        #expect(store.recordCount == 5)
+        #expect(store.grandDisplayRowTotal == 5)
+        for width in [2, 4, 8, 80] {
+            _ = store.setWidth(width)
+            #expect(store.grandDisplayRowTotal == 5)
+            #expect(store.independentDisplayRowRecount() == 5)
+        }
+    }
+
+    @Test("The grand total agrees with an independent recount after each of the six triggers")
+    func grandTotalAgreesWithRecountAfterEveryTrigger() {
+        // Intent: the derived index's grand display-row total matches a recount from the
+        //   arena alone after a width change, an admission, a head eviction, a tail
+        //   truncation, a forced split and a clear-all.
+        // Why it exists: `31/AR4` names a stale index as the one new failure mode with no
+        //   analogue today -- six invalidation points against an eagerly maintained truth --
+        //   and this recount is the only thing that catches a missed one.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 16)
+
+        func check(_ label: Comment) {
+            #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount(), label)
+        }
+
+        for line in 0..<12 {
+            store.admit(Self.filledRow(width: 16, seed: line, softWrapped: true))
+            store.admit(Self.filledRow(width: 16, seed: line + 1, softWrapped: true))
+            store.admit(Self.shortRow(width: 16, count: 5, seed: line + 2))
+        }
+        check("admission")
+
+        for width in [16, 9, 40, 2] {
+            _ = store.setWidth(width)
+            check("width change to \(width)")
+        }
+        _ = store.setWidth(16)
+
+        store.evictOneDisplayRow()
+        check("head eviction")
+
+        _ = store.truncateTail(displayRows: 2)
+        check("tail truncation")
+
+        store.admit(Self.filledRow(width: 16, seed: 3, softWrapped: true))
+        store.forceSplitOpenRecord()
+        check("forced split")
+
+        store.removeAll()
+        check("clear all")
+        #expect(store.grandDisplayRowTotal == 0)
+        #expect(store.recordCount == 0)
+    }
+
+    @Test("Clearing all history adds the retained rows to the evicted count")
+    func clearingAllHistoryAdvancesTheEvictedRowCount() {
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for line in 0..<4 {
+            store.admit(Self.shortRow(width: 8, count: 3, seed: line))
+        }
+        let retained = store.grandDisplayRowTotal
+        let evictedBefore = store.evictedRowCount
+
+        store.removeAll()
+
+        #expect(store.evictedRowCount == evictedBefore + retained)
+    }
+
+    // MARK: - I1: nothing width-dependent is stored
+
+    @Test("A width change rewrites no retained bytes and evicts nothing")
+    func widthChangeIsANoOpOnRetainedStorage() {
+        // Intent: cycling the width down to the engine minimum and back leaves the arena's
+        //   bytes and every retained logical line exactly as they were.
+        // Why it exists: `31/I1` and `31/I3` are the design's whole premise -- a record's
+        //   bytes are a function of content alone, so a narrow-then-widen cycle is
+        //   unrepresentable as a loss rather than merely tested against.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 20)
+        for line in 0..<10 {
+            store.admit(Self.filledRow(width: 20, seed: line, softWrapped: true))
+            store.admit(Self.shortRow(width: 20, count: 7, seed: line))
+        }
+        store.closeOpenRecord()
+
+        let recordsBefore = (0..<store.recordCount).map { store.recordCells(at: $0)! }
+        let bytesBefore = store.census.arenaBytesInUse
+        let capacityBefore = store.census.capacityBytes
+
+        for width in [2, 3, 5, 100, 20] {
+            _ = store.setWidth(width)
+        }
+
+        #expect(store.recordCount == recordsBefore.count)
+        #expect(store.census.arenaBytesInUse == bytesBefore)
+        #expect(store.census.capacityBytes == capacityBefore)
+        for index in recordsBefore.indices {
+            #expect(store.recordCells(at: index)! == recordsBefore[index])
+        }
+    }
+
+    // MARK: - PO3 / I2: the charged-byte bound
+
+    @Test("Feeding past the budget leaves charged bytes at or under it, on content and on blanks")
+    func chargedBytesStayUnderTheBudget() {
+        // Intent: however much is fed, arena-in-use plus index plus side tables stays within
+        //   the configured budget, and capacity never grows.
+        // Why it exists: `31/I2` is the store's only bound, and `31/DD11`'s restatement of
+        //   `15/F4`'s leak proof is exactly "bytes-in-use falls when records are evicted, and
+        //   capacity does not grow" -- a charge that describes a model rather than an
+        //   allocation was wrong by 2.2x once already.
+        for blankHistory in [false, true] {
+            var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 24)
+            let capacity = store.census.capacityBytes
+            var peakInUse = 0
+
+            for line in 0..<4_000 {
+                if blankHistory {
+                    store.admit(Self.shortRow(width: 24, count: 0, seed: 0))
+                } else {
+                    store.admit(Self.filledRow(width: 24, seed: line, softWrapped: true))
+                    store.admit(Self.shortRow(width: 24, count: 11, seed: line))
+                }
+                #expect(store.census.chargedBytes <= capacity)
+                #expect(store.census.capacityBytes == capacity)
+                peakInUse = max(peakInUse, store.census.arenaBytesInUse)
+            }
+
+            #expect(store.recordCount > 0)
+            let saturated = store.census.arenaBytesInUse
+            store.removeAll()
+            #expect(store.census.arenaBytesInUse < saturated)
+            #expect(store.census.capacityBytes == capacity)
+            #expect(peakInUse <= capacity)
+        }
+    }
+
+    @Test("The census reports capacity and bytes-in-use as separate quantities")
+    func censusSeparatesCapacityFromBytesInUse() {
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 16)
+        #expect(store.census.capacityBytes == 1 << 16)
+        #expect(store.census.arenaBytesInUse == 0)
+
+        store.admit(Self.filledRow(width: 16, seed: 0, softWrapped: false))
+        #expect(store.census.arenaBytesInUse > 0)
+        #expect(store.census.arenaBytesInUse < store.census.capacityBytes)
+        #expect(
+            store.census.chargedBytes
+                == store.census.arenaBytesInUse + store.census.indexBytes
+                    + store.census.sideTableBytes
+        )
+    }
+
+    // MARK: - I4 / PO5 (store half): head-granular eviction
+
+    @Test("Eviction under a head record spanning many display rows drops one row per step")
+    func evictionIsDisplayRowGranularAtTheHead() {
+        // Intent: evicting under a single logical line that spans many display rows advances
+        //   the retained history by exactly one display row per step.
+        // Why it exists: `31/D2` Decision 2 took `31/DD2`'s recorded alternative precisely so
+        //   that no anchor moves further per admitted row than it does today; a whole-record
+        //   step would drop the entire line at once, which `31/F6` `HR5` found user-visible in
+        //   four anchors and the scrollbar.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for chunk in 0..<10 {
+            store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
+        }
+        store.admit(Self.shortRow(width: 8, count: 4, seed: 99))
+
+        #expect(store.recordCount == 1)
+        let total = store.grandDisplayRowTotal
+        #expect(total == 11)
+
+        for step in 1...5 {
+            #expect(evictOne(&store))
+            #expect(store.grandDisplayRowTotal == total - step)
+            #expect(store.evictedRowCount == step)
+            #expect(store.independentDisplayRowRecount() == total - step)
+        }
+        #expect(store.recordCount == 1)
+    }
+
+    @Test("A trimmed head record reads as a mid-line continuation carrying no semantic mark")
+    func trimmedHeadReadsAsAContinuation() {
+        // Intent: after the head record's prefix is trimmed, its first display row reports a
+        //   continuation and no prompt mark, and its remaining rows fold identically to the
+        //   untrimmed record's tail.
+        // Why it exists: `31/D2` Decision 5 and `31/DD13` chose this to *reproduce today's
+        //   output* -- it is what `isHistoryHeadTruncated` described -- rather than the one
+        //   bit cheaper alternative of folding the trimmed head as a fresh line start.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for chunk in 0..<4 {
+            store.admit(
+                Self.filledRow(
+                    width: 8,
+                    seed: chunk,
+                    softWrapped: true,
+                    semanticPrompt: chunk == 0 ? .prompt : .none
+                )
+            )
+        }
+        store.admit(Self.shortRow(width: 8, count: 3, seed: 4))
+
+        let before = Self.foldedScalars(store)
+        #expect(store.displayRow(at: 0)!.semanticPrompt == .prompt)
+
+        #expect(evictOne(&store))
+
+        #expect(store.recordSummary(at: 0)!.startsMidLine)
+        #expect(store.displayRow(at: 0)!.semanticPrompt == .continuation)
+        #expect(Self.foldedScalars(store) == Array(before.dropFirst()))
+    }
+
+    @Test("Trimming the head of a line with no prompt mark leaves no mark behind")
+    func trimmedHeadOfAnUnmarkedLineCarriesNoMark() {
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for chunk in 0..<3 {
+            store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
+        }
+        store.admit(Self.shortRow(width: 8, count: 2, seed: 3))
+
+        #expect(evictOne(&store))
+        #expect(store.displayRow(at: 0)!.semanticPrompt == .none)
+        #expect(store.recordSummary(at: 0)!.startsMidLine)
+    }
+
+    // MARK: - I10 / PO9: the forced split
+
+    @Test("A logical line driven past the cap splits, and the pair rejoins by adjacency")
+    func logicalLinePastTheCapSplits() {
+        // Intent: a single logical line longer than the record cap becomes two adjacent
+        //   records, the first carrying the forced-split marker and reading as soft-wrapped,
+        //   and the two together hold every cell in order.
+        // Why it exists: `31/I10` and `31/DD3` bound a record at 1/32 of the budget; `31/DD6`
+        //   leaves no back-pointer, so a reader rejoining the pair has only adjacency and the
+        //   marker to go on.
+        let capacity = 1 << 16
+        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 32)
+        let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
+
+        var admitted = 0
+        while admitted < cap + 64 {
+            store.admit(Self.filledRow(width: 32, seed: admitted, softWrapped: true))
+            admitted += 32
+        }
+
+        #expect(store.recordCount == 2)
+        let first = store.recordSummary(at: 0)!
+        let second = store.recordSummary(at: 1)!
+        #expect(first.isForcedSplit)
+        #expect(first.cellCount == cap)
+        #expect(second.isForcedSplit == false)
+        #expect(second.isOpen)
+        #expect(first.cellCount + second.cellCount == admitted)
+
+        // The join reads as one logical line: the predecessor's last display row is
+        // soft-wrapped, so a reader walking display rows never sees a line end there.
+        let lastRowOfFirst = store.displayRow(at: first.displayRowCount - 1)!
+        #expect(lastRowOfFirst.isSoftWrapped)
+    }
+
+    @Test("Evicting the first piece of a forced-split pair leaves the follower a continuation")
+    func evictingASplitsFirstPieceStampsTheFollower() {
+        // Intent: dropping the whole first record of a forced-split pair leaves the follower
+        //   reading as a mid-line continuation with no semantic mark, not as a fresh line.
+        // Why it exists: `31/D2` Decision 2 step 2 was amended by the external design review
+        //   for exactly this -- dropping a `forcedSplit` record without stamping diverges from
+        //   today's `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`, which inherited
+        //   condition 10 exists to prevent.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
+        store.forceSplitOpenRecord()
+        store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
+        store.admit(Self.shortRow(width: 8, count: 4, seed: 2))
+
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        #expect(store.recordSummary(at: 1)!.startsMidLine == false)
+        #expect(store.recordSummary(at: 1)!.semanticPrompt == .none)
+
+        // The first piece is exactly one display row, so one step drops it whole.
+        #expect(evictOne(&store))
+        #expect(store.recordCount == 1)
+        #expect(store.recordSummary(at: 0)!.startsMidLine)
+        #expect(store.displayRow(at: 0)!.semanticPrompt == .none)
+    }
+
+    @Test("A split logical line's semantic mark appears exactly once, on the piece that starts it")
+    func splitLineCarriesItsMarkOnlyOnTheFirstPiece() {
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
+        store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
+        store.forceSplitOpenRecord()
+        store.admit(Self.filledRow(width: 8, seed: 2, softWrapped: true))
+        store.admit(Self.shortRow(width: 8, count: 3, seed: 3))
+
+        #expect(store.recordSummary(at: 0)!.semanticPrompt == .prompt)
+        #expect(store.recordSummary(at: 1)!.semanticPrompt == .none)
+        #expect(store.displayRow(at: 0)!.semanticPrompt == .prompt)
+        #expect(store.displayRow(at: 1)!.semanticPrompt == .continuation)
+        #expect(store.displayRow(at: 2)!.semanticPrompt == .none)
+    }
+
+    // MARK: - PO12: cycling the ring
+
+    @Test("Cycling variable-length records through several full wraps preserves the retained suffix")
+    func cyclingTheRingPreservesTheRetainedSuffix() {
+        // Intent: after the write cursor has wrapped the arena several times, with head trims
+        //   interleaved, every reader returns exactly the expected retained suffix, cell for
+        //   cell and in order.
+        // Why it exists: `31/PO12` is the obligation the ring's wrap seam is built against --
+        //   `31/DD14`'s pad for a closed record and `31/DD20`'s forced split for the open
+        //   tail are both only correct if the retained suffix survives the seam untouched.
+        let capacity = 1 << 15
+        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 12)
+
+        // A shadow model of everything admitted, so "expected retained suffix" is derived
+        // from the input rather than from the store's own arithmetic.
+        var admittedLines: [[Unicode.Scalar]] = []
+
+        var seed = 0
+        for line in 0..<900 {
+            let wrapped = line % 5
+            var scalars: [Unicode.Scalar] = []
+            for _ in 0..<wrapped {
+                let row = Self.filledRow(width: 12, seed: seed, softWrapped: true)
+                store.admit(row)
+                scalars.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+                seed += 1
+            }
+            let tailCount = 1 + (line % 11)
+            let last = Self.shortRow(width: 12, count: tailCount, seed: seed)
+            store.admit(last)
+            scalars.append(contentsOf: last.cells.prefix(tailCount).compactMap { $0.scalars.first })
+            seed += 1
+            admittedLines.append(scalars)
+
+            if line % 7 == 0 {
+                store.evictOneDisplayRow()
+            }
+            #expect(store.census.chargedBytes <= capacity)
+        }
+
+        // Read the store back as logical lines and match it against the tail of the shadow.
+        let readBack = Self.readLogicalLines(store)
+        #expect(readBack.count > 0)
+        #expect(readBack.count <= admittedLines.count)
+        let expected = Array(admittedLines.suffix(readBack.count))
+        // The oldest retained line may be a trimmed suffix of its original; every line after
+        // it must match whole.
+        #expect(Array(readBack.dropFirst()) == Array(expected.dropFirst()))
+        #expect(Self.isSuffix(readBack.first!, of: expected.first!))
+    }
+
+    @Test("An open tail that grows across the physical end forced-splits and keeps every cell")
+    func openTailForcedSplitsAtThePhysicalEnd() {
+        // Intent: an open record that reaches the arena's physical end is closed with the
+        //   forced-split marker, the sub-row remainder is padded, and the continuation opens
+        //   at offset 0 with no cell lost.
+        // Why it exists: `31/DD20` was added by the external design review because `31/DD14`'s
+        //   pad needs a record's length at placement time, which is false of the open tail;
+        //   `31/PO12` already tested this shape and had no decision behind it until then.
+        let capacity = 1 << 14
+        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 16)
+
+        var expected: [Unicode.Scalar] = []
+        var seed = 0
+        var splits = 0
+        for _ in 0..<400 {
+            let row = Self.filledRow(width: 16, seed: seed, softWrapped: true)
+            store.admit(row)
+            expected.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+            seed += 1
+            splits = max(splits, (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit })
+            #expect(store.census.chargedBytes <= capacity)
+        }
+
+        #expect(splits >= 1, "the open tail must have crossed the physical end at least once")
+
+        let lines = Self.readLogicalLines(store)
+        // Every record is one piece of the same never-terminated logical line, so the rejoin
+        // by adjacency yields exactly one line.
+        #expect(lines.count == 1)
+        #expect(Self.isSuffix(lines[0], of: expected))
+    }
+
+    @Test("An empty open record at the physical end is reopened at offset zero without a split")
+    func emptyOpenRecordAtTheSeamNeedsNoSplit() {
+        // Intent: when the record that meets the physical end holds no cells yet, no
+        //   forced-split marker is set -- the pad covers the remainder and the record is
+        //   simply (re)opened at offset 0.
+        // Why it exists: `31/DD20` names this edge explicitly ("an empty open record needs no
+        //   split") so it is not discovered later as a spurious split marker on a fresh line.
+        let capacity = 1 << 13
+        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 16)
+
+        // Hard-ended lines only: every record closes immediately, so the record that meets the
+        // seam is always freshly opened and empty when the fit test runs.
+        for line in 0..<600 {
+            store.admit(Self.shortRow(width: 16, count: 9, seed: line))
+            #expect(store.census.chargedBytes <= capacity)
+        }
+
+        let splitCount = (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit }
+        #expect(splitCount == 0)
+        #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
+    }
+
+    // MARK: - I5: the middle is immutable
+
+    @Test("Admission, a head trim and a tail truncation leave every middle record untouched")
+    func onlyTheHeadHeaderAndTheTailAreWritable() {
+        // Intent: after an admission, a head trim and a tail truncation, every record that is
+        //   neither the head nor the tail folds to exactly the cells it folded to before.
+        // Why it exists: `31/I5` is what makes the arena's cost model honest -- if the middle
+        //   were writable, no operation's cost would be bounded by the head and tail alone.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 12)
+        for line in 0..<20 {
+            store.admit(Self.filledRow(width: 12, seed: line, softWrapped: true))
+            store.admit(Self.shortRow(width: 12, count: 5, seed: line))
+        }
+
+        let before = (0..<store.recordCount).map { store.recordCells(at: $0)! }
+        // Everything but the first and last record: the head and the tail are the only two the
+        // three operations below are allowed to touch.
+        let middle = 1..<(before.count - 1)
+
+        store.admit(Self.shortRow(width: 12, count: 4, seed: 99))
+        store.evictOneDisplayRow()
+        _ = store.truncateTail(displayRows: 1)
+
+        for index in middle {
+            #expect(store.recordCells(at: index)! == before[index], "record \(index)")
+        }
+    }
+
+    // MARK: - PO13 / condition 9: record-level fidelity of the side tables
+
+    @Test("Spills, hyperlink ids and content identity survive admission, a width change and a trim")
+    func sideTablesSurviveEveryRecordOperation() {
+        // Intent: a multi-scalar cluster, a hyperlink id and a content-identity run read back
+        //   identically after the record is admitted, refolded at three widths and head-trimmed.
+        // Why it exists: `31/D1` condition 9 left the spill, hyperlink and semantic-mark
+        //   formats owed, and `31/D3` Decision 6 keyed identity by *cell offset in the logical
+        //   line* rather than by column -- so a trim, which shifts the record's start, is
+        //   exactly where a naive key would silently lose a value.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 6)
+
+        var cells: [Terminal.GridCell] = []
+        for column in 0..<6 {
+            var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column))!)
+            cell.contentIdentity = Terminal.ContentIdentity(500 + column)
+            if column == 2 {
+                cell.scalars = TerminalScalars([Unicode.Scalar(0x1F600)!, Unicode.Scalar(0xFE0F)!])
+            }
+            if column == 4 {
+                cell.hyperlinkId = 7
+            }
+            cells.append(cell)
+        }
+        var first = Terminal.GridRow(cells: cells)
+        first.isSoftWrapped = true
+        store.admit(first)
+        store.admit(Self.shortRow(width: 6, count: 3, seed: 40))
+
+        func assertSurvives(_ label: Comment, offsetBy trimmed: Int) {
+            let record = store.recordCells(at: 0)!
+            #expect(record.count == 9 - trimmed, label)
+            for column in 0..<6 where column - trimmed >= 0 {
+                let cell = record[column - trimmed]
+                #expect(cell.contentIdentity == Terminal.ContentIdentity(500 + column), label)
+                if column == 2 {
+                    #expect(cell.scalars.count == 2, label)
+                    #expect(cell.scalars.first == Unicode.Scalar(0x1F600), label)
+                }
+                #expect(cell.hyperlinkId == (column == 4 ? 7 : nil), label)
+            }
+        }
+
+        assertSurvives("as admitted", offsetBy: 0)
+        for width in [3, 12, 6] {
+            _ = store.setWidth(width)
+            assertSurvives("at width \(width)", offsetBy: 0)
+        }
+
+        _ = store.setWidth(6)
+        #expect(evictOne(&store))
+        assertSurvives("after a head trim", offsetBy: 6)
+    }
+
+    @Test("A record fragmented enough to outgrow its identity run table still round-trips")
+    func fragmentedIdentityFallsBackPerCellWithoutLoss() {
+        // Intent: alternating identified and unidentified cells -- the shape whose run table
+        //   costs more than four bytes per stored cell -- reads back every value.
+        // Why it exists: `31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
+        //   and `28/I3` requires that neither encoding lose a value, because
+        //   `activationIdentity` reads this out of history.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 16)
+        var cells: [Terminal.GridCell] = []
+        for column in 0..<16 {
+            var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column % 26))!)
+            if column % 2 == 0 {
+                cell.contentIdentity = Terminal.ContentIdentity(1_000 + column * 13)
+            }
+            cells.append(cell)
+        }
+        var row = Terminal.GridRow(cells: cells)
+        row.isSoftWrapped = false
+        store.admit(row)
+
+        let read = store.recordCells(at: 0)!
+        #expect(read.count == 16)
+        for column in 0..<16 {
+            #expect(
+                read[column].contentIdentity
+                    == (column % 2 == 0 ? Terminal.ContentIdentity(1_000 + column * 13) : nil)
+            )
+        }
+    }
+
+    // MARK: - Operations 2 and 4
+
+    @Test("Closing and reopening the tail record flips only the line's continuation reading")
+    func closeAndReopenTheTailRecord() {
+        // Intent: closing the open tail ends the logical line without touching a cell, and
+        //   reopening it resumes the same record.
+        // Why it exists: `31/D2` Decision 2's operation 2 is `severScrollbackWrapClaim` and
+        //   `restoreWrapClaimBeforeCursor` under the new store; both must stay header-only so
+        //   the "middle immutable" premise and the charge both hold.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true))
+        let cells = store.recordCells(at: 0)!
+        #expect(store.displayRow(at: 0)!.isSoftWrapped)
+        let bytes = store.census.arenaBytesInUse
+
+        store.closeOpenRecord()
+        #expect(store.displayRow(at: 0)!.isSoftWrapped == false)
+        #expect(store.recordCells(at: 0)! == cells)
+        #expect(store.census.arenaBytesInUse == bytes)
+
+        store.reopenTailRecord()
+        #expect(store.displayRow(at: 0)!.isSoftWrapped)
+        #expect(store.recordCells(at: 0)! == cells)
+        #expect(store.census.arenaBytesInUse == bytes)
+    }
+
+    @Test("Truncating the tail hands the last display rows back and leaves the totals consistent")
+    func truncatingTheTailHandsRowsBack() {
+        // Intent: a `resizeHeight` grow pulls the right display rows out of history, and the
+        //   grand total, the recount and the charge all agree afterwards.
+        // Why it exists: `31/D2` operation 4 is the only operation that shrinks the arena from
+        //   the back, and `31/PO6` asks for exactly this consistency check.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for chunk in 0..<3 {
+            store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
+        }
+        store.admit(Self.shortRow(width: 8, count: 5, seed: 3))
+        store.admit(Self.shortRow(width: 8, count: 6, seed: 9))
+
+        let before = Self.foldedScalars(store)
+        let total = store.grandDisplayRowTotal
+
+        let handedBack = store.truncateTail(displayRows: 2)
+
+        #expect(handedBack.count == 2)
+        #expect(store.grandDisplayRowTotal == total - 2)
+        #expect(store.independentDisplayRowRecount() == total - 2)
+        #expect(Self.foldedScalars(store) == Array(before.dropLast(2)))
+        #expect(handedBack.map { $0.cells.map(\.scalars.first) } == Array(before.suffix(2)))
+    }
+
+    @Test("A width change pulls the open tail's partial display row back into the live refold")
+    func widthChangePullsBackTheOpenTailsPartialRow() {
+        // Intent: widening while a logical line straddles the history/live seam hands the
+        //   open tail's sub-row remainder back, so no short display row is left inside that
+        //   line.
+        // Why it exists: `31/D3` Decision 4 and `31/DD16` -- today `reconstructLogicalLines`
+        //   repacks the retained tail with the live rows so no such row exists; under this
+        //   store history does not refold, so it would.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 10)
+        for chunk in 0..<3 {
+            store.admit(Self.filledRow(width: 10, seed: chunk, softWrapped: true))
+        }
+        #expect(store.recordCount == 1)
+        #expect(store.recordSummary(at: 0)!.isOpen)
+
+        let pulled = store.setWidth(16)
+
+        // 30 cells at width 16 is one whole display row plus a 14-cell remainder.
+        #expect(pulled.count == 14)
+        #expect(store.recordSummary(at: 0)!.cellCount == 16)
+        #expect(store.grandDisplayRowTotal == 1)
+        #expect(store.independentDisplayRowRecount() == 1)
+    }
+
+    @Test("A width change leaves a closed tail record alone")
+    func widthChangeLeavesAClosedTailAlone() {
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 10)
+        for chunk in 0..<3 {
+            store.admit(Self.filledRow(width: 10, seed: chunk, softWrapped: true))
+        }
+        store.closeOpenRecord()
+
+        let pulled = store.setWidth(16)
+
+        #expect(pulled.isEmpty)
+        #expect(store.recordSummary(at: 0)!.cellCount == 30)
+    }
+
+    // MARK: - Reader contract shape (`31/D3` Decision 1)
+
+    @Test("A forward cursor walks the retained display rows with one locate")
+    func forwardCursorWalksWithOneLocate() {
+        // Intent: `locate` converts one display row into a record address, and `advance`
+        //   carries it forward without another conversion.
+        // Why it exists: `31/D3` Decision 1 rule 2 -- a planned frame performs at most one
+        //   display-row-to-record locate -- is a contract the API shape has to make natural,
+        //   because nothing in the type system stops a per-row lookup (`31/AR5`).
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for line in 0..<6 {
+            store.admit(Self.filledRow(width: 8, seed: line, softWrapped: true))
+            store.admit(Self.shortRow(width: 8, count: 3, seed: line))
+        }
+
+        var cursor = store.locate(displayRow: 2)
+        var walked: [[Unicode.Scalar?]] = []
+        while let position = cursor {
+            walked.append(store.gridRow(at: position).cells.map { $0.scalars.first })
+            cursor = store.advance(position)
+        }
+
+        #expect(walked == Array(Self.foldedScalars(store).dropFirst(2)))
+        #expect(store.locate(displayRow: store.grandDisplayRowTotal) == nil)
+        #expect(store.locate(displayRow: -1) == nil)
+    }
+
+    // MARK: - Helpers
+
+    /// Steps eviction outside `#expect`, whose macro expansion binds its operand immutably and
+    /// so cannot call a mutating member.
+    private func evictOne(_ store: inout Terminal.LogicalLineStore) -> Bool {
+        store.evictOneDisplayRow()
+    }
+
+    /// Whether `candidate` is a trailing subsequence of `whole`.
+    private static func isSuffix(_ candidate: [Unicode.Scalar], of whole: [Unicode.Scalar]) -> Bool {
+        candidate.count <= whole.count && Array(whole.suffix(candidate.count)) == candidate
+    }
+
+    /// Reads the store back as logical lines, rejoining forced-split and mid-line records by
+    /// adjacency exactly as `31/DD6` requires a reader to.
+    private static func readLogicalLines(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar]] {
+        var lines: [[Unicode.Scalar]] = []
+        for index in 0..<store.recordCount {
+            let summary = store.recordSummary(at: index)!
+            let scalars = store.recordCells(at: index)!.compactMap { $0.scalars.first }
+            if summary.startsMidLine, lines.isEmpty == false {
+                lines[lines.count - 1].append(contentsOf: scalars)
+            } else if index > 0, store.recordSummary(at: index - 1)!.isForcedSplit {
+                lines[lines.count - 1].append(contentsOf: scalars)
+            } else {
+                lines.append(scalars)
+            }
+        }
+        return lines
+    }
+}
