@@ -238,6 +238,61 @@ struct TerminalLogicalLineFoldTests {
         #expect(store.displayRow(at: 0)!.cell(at: 2).kind == .spacerHead)
     }
 
+    @Test("A spacer at a forced split is re-derived from the follower record's wide head")
+    func spacerAtAForcedSplitIsRederivedAcrossTheSeam() {
+        // Intent: when a logical line is cut by a forced split exactly where a `.spacerHead`
+        //   was dropped, the earlier piece's last display row still reads with the spacer, and
+        //   the spacer carries the wide head that now begins the follower record.
+        // Why it exists: `31/F8`'s re-run found this as a **gate 1 failure on `wide`** -- one
+        //   retained display row in 14,486 read 178 cells where today's store holds 179 with a
+        //   trailing spacer. `31/F4` case 1 refuses to store a spacer and the fold re-derives it
+        //   from the wide head it defers; a split moves that head into the *next* record, so
+        //   without this the column is simply lost, permanently, inside retained history. It is
+        //   not the acknowledged open-tail divergence, which is transient and ends at the live
+        //   seam; `31/DD6` says readers rejoin split records by adjacency, and this is a reader
+        //   doing exactly that.
+        // Scenario: the ring's write cursor reached the arena's physical end mid-line
+        //   (`31/DD20`) on CJK content, which is how the probe produced it.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        var wrapped = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
+            Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
+            Terminal.GridCell(scalars: .empty, kind: .spacerHead),
+        ])
+        wrapped.isSoftWrapped = true
+        store.admit(wrapped)
+        #expect(store.recordSummary(at: 0)!.cellCount == 2)
+
+        // The cut lands between the dropped spacer and the wide head that explains it.
+        store.forceSplitOpenRecord()
+
+        var head = Terminal.GridCell(
+            scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
+            kind: .wideHead,
+            styleId: 9
+        )
+        head.hyperlinkId = 4
+        head.contentIdentity = 77
+        var next = Terminal.GridRow(cells: [
+            head,
+            Terminal.GridCell(scalars: .empty, kind: .wideTail, styleId: 9),
+            Terminal.GridCell(),
+        ])
+        next.isSoftWrapped = false
+        store.admit(next)
+
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        let seam = store.displayRow(at: 0)!
+        #expect(seam.cells.count == 3)
+        #expect(seam.cell(at: 2).kind == .spacerHead)
+        #expect(seam.cell(at: 2).styleId == 9)
+        #expect(seam.cell(at: 2).hyperlinkId == 4)
+        #expect(seam.cell(at: 2).contentIdentity == 77)
+        #expect(seam.isSoftWrapped)
+        #expect(store.displayRow(at: 1)!.cell(at: 0).kind == .wideHead)
+    }
+
     // MARK: - `31/DD25` as amended: the trailing background-erase fill
 
     @Test("A hard-ended row's painted tail becomes a fill style, and repaints at every width")

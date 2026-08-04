@@ -1110,16 +1110,21 @@ extension Terminal {
             var cells = (start..<end).map { cell(recordIndex: recordIndex, cellOffset: $0) }
             if spacer, end < record.cellCount {
                 // `Terminal.pack`'s rule: the spacer inherits the wide head it defers.
-                let deferred = cell(recordIndex: recordIndex, cellOffset: end)
-                cells.append(
-                    Terminal.GridCell(
-                        scalars: .empty,
-                        kind: .spacerHead,
-                        styleId: deferred.styleId,
-                        hyperlinkId: deferred.hyperlinkId,
-                        contentIdentity: deferred.contentIdentity
-                    )
-                )
+                cells.append(spacerDeferring(cell(recordIndex: recordIndex, cellOffset: end)))
+            } else if record.isForcedSplit,
+                      end == record.cellCount,
+                      cells.count == width - 1,
+                      recordIndex + 1 < offsets.count
+            {
+                // The split cut the line exactly where admission dropped a spacer, so the wide
+                // head that explains the column is the *follower's* first cell rather than this
+                // record's next one. Readers rejoin split pieces by adjacency (`31/DD6`) and this
+                // is one doing it: without the reach across the seam the column is lost for good,
+                // which is what `31/F8`'s re-run caught as a gate 1 failure on `wide`. The open
+                // tail is deliberately not covered -- its short final row is the acknowledged
+                // divergence that ends as soon as the next row is admitted.
+                let follower = cell(recordIndex: recordIndex + 1, cellOffset: 0)
+                if follower.kind == .wideHead { cells.append(spacerDeferring(follower)) }
             }
 
             var row = Terminal.GridRow(cells: cells)
@@ -1130,6 +1135,18 @@ extension Terminal {
                 row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
             }
             return row
+        }
+
+        /// The `.spacerHead` a wide head defers, carrying the head's attributes exactly as
+        /// `Terminal.pack(line:columns:)` gives them to it.
+        private func spacerDeferring(_ head: Terminal.GridCell) -> Terminal.GridCell {
+            Terminal.GridCell(
+                scalars: .empty,
+                kind: .spacerHead,
+                styleId: head.styleId,
+                hyperlinkId: head.hyperlinkId,
+                contentIdentity: head.contentIdentity
+            )
         }
 
         // MARK: - Cell decoding
