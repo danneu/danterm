@@ -166,7 +166,7 @@ struct TerminalResetTests {
 
         #expect(terminal.primaryHistoryText == "abc")
         #expect(terminal.memoryCensus.cellCount == before)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        #expect(terminal.scrollbackRowCount == terminal.independentScrollbackRowRecount)
         expectValidGrid(terminal)
     }
 

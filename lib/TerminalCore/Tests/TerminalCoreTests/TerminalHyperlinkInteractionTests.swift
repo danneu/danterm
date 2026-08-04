@@ -160,7 +160,7 @@ struct TerminalHyperlinkInteractionTests {
         var terminal = try #require(Terminal(
             columns: 16,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 12) - 1
+            scrollbackBudgetBytes: historyBudget(lineCells: [12])
         ))
         terminal.feed(Array("https://a.co\r\nnext".utf8))
         let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 2)))

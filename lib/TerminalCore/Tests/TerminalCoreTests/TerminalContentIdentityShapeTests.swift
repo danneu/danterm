@@ -27,7 +27,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("abcdef\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
 
         #expect(shape.runCount == 1)
         #expect(shape.identifiedCellCount == 6)
@@ -45,7 +45,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("ab\u{1B}[6Gcd\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
 
         #expect(shape.runCount == 2)
         #expect(shape.identifiedCellCount == 4)
@@ -62,7 +62,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("abcd\u{1B}[2Gx\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
 
         #expect(shape.identifiedCellCount == 4)
         #expect(shape.unidentifiedCellCount == 0)
@@ -79,7 +79,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("a\u{4E00}b\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
 
         #expect(shape.runCount == 1)
         #expect(shape.identifiedCellCount == 4)
@@ -95,7 +95,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
 
         #expect(shape.runCount == 0)
         #expect(shape.identifiedCellCount == 0)
@@ -106,7 +106,7 @@ struct TerminalContentIdentityShapeTests {
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array("abc\r\n".utf8))
 
-        #expect(terminal.scrollbackRowContentIdentityShape(at: terminal.scrollbackRowCount) == nil)
-        #expect(terminal.scrollbackRowContentIdentityShape(at: -1) == nil)
+        #expect(terminal.scrollbackRecordContentIdentityShape(at: terminal.scrollbackRecordCount) == nil)
+        #expect(terminal.scrollbackRecordContentIdentityShape(at: -1) == nil)
     }
 }

@@ -163,7 +163,7 @@ struct TerminalHyperlinkTests {
     func identityCarry() {
         // Sized at the *widest* geometry this test reaches (it resizes 5 -> 3 -> 6), because the
         // budget is denominated in bytes: a budget that holds a row at 5 columns holds none at 6.
-        var terminal = Terminal(columns: 5, rows: 2, scrollbackBudgetBytes: historyRowCost(columns: 6) * 2)!
+        var terminal = Terminal(columns: 5, rows: 2, scrollbackBudgetBytes: historyBudget(lines: 4, cells: 6, paneColumns: 6))!
         terminal.feed(osc8(params: "id=wide", uri: "https://wide.test"))
         terminal.feed(Array("abc界z\nnext\nlast".utf8))
         terminal.resize(columns: 3, rows: 2)

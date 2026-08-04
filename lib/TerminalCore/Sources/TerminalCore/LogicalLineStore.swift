@@ -26,13 +26,48 @@
 // deliberately reachable without `Terminal`'s 6,000 lines of parser state -- the store's
 // contracts are testable as a store.
 
+/// Counts display-row-to-record locates, so `31/PO7` can assert what one planned frame spends.
+///
+/// A free global rather than a member: `31/I7` is a claim about a *frame*, which spans several
+/// reads of a `Sendable` value type, and a counter inside the store would have to be either a
+/// refcounted box on a hot type -- what
+/// `docs/design/2026-07-29-cross-module-value-dispatch.md` warns off -- or a mutation on a read
+/// path that has none. `31/AR5` already records that `I7` is a discipline the counter guards
+/// rather than a mechanism that enforces it.
+enum LocateCounter {
+    /// The tally one `measure` is collecting. A class so the dynamic scope below can hand the
+    /// same box to every synchronous callee without copying it back out.
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    /// Dynamically scoped rather than global: the test suite runs in parallel, and a process-wide
+    /// counter would tally every terminal every other test is driving at the same time.
+    @TaskLocal static var active: Tally?
+
+    /// Records one locate against whatever `measure` is in scope, and nothing otherwise.
+    @inline(__always)
+    static func record() {
+        active?.count += 1
+    }
+
+    /// Runs `body` and reports the locates it spent.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///
     /// Owns its own width, because the derived index's totals are only meaningful at one
     /// (`31/D3` Decision 1). Callers change it through `setWidth(_:)`, which is the only entry
     /// point that recomputes the whole index; every other operation maintains it in O(1).
-    struct LogicalLineStore: Sendable {
+    struct LogicalLineStore: Sendable, Equatable {
         // MARK: - Nested types
 
         /// One index block's cached display-row total (`31/D3` Decision 1).
@@ -148,6 +183,10 @@ extension Terminal {
         /// the whole budget derivation rests on.
         private var headTrimmedCells = 0
 
+        /// Set when eviction dropped an open record whose line has no follower yet, so the next
+        /// record opened continues that line rather than starting one (`31/D2` Decision 2).
+        private var pendingStartsMidLine = false
+
         private(set) var grandDisplayRowTotal = 0
 
         /// Display rows dropped at the head, at the width in force when they were dropped, and
@@ -216,7 +255,8 @@ extension Terminal {
         /// makes the bound hold by construction rather than by a model checked against a second
         /// model.
         init(budgetBytes: Int = Terminal.productionScrollbackBudgetBytes, width: Int) {
-            precondition(budgetBytes >= 1024 && budgetBytes % 8 == 0)
+            precondition(budgetBytes >= Terminal.minimumScrollbackBudgetBytes)
+            precondition(budgetBytes % 8 == 0)
             precondition(width >= 1)
             budget = budgetBytes
             arenaCapacity = budgetBytes - Self.metadataReserveBytes(forBudget: budgetBytes)
@@ -357,6 +397,16 @@ extension Terminal {
         /// paint as the record's **trailing fill style**, not as cells (`31/DD25` as amended).
         mutating func admit(_ row: Terminal.GridRow) {
             let admission = admissionExtent(row)
+
+            // A budget too small to hold one display row of this width retains nothing rather
+            // than trapping. The arena is reserved once and never grown (`31/I2`), so there is
+            // no room to make for a row that does not fit an empty arena; the honest answer is
+            // that such a pane has no history, and the degenerate configuration stays reachable
+            // instead of being a crash.
+            let worstCase = LogicalLineRecord.Header.byteCount
+                + max(1, admission.contentEnd) * LogicalLineRecord.cellBytes
+                + projectedTableBytes(addingCells: max(1, admission.contentEnd))
+            guard worstCase <= arenaCapacity else { return }
 
             // A hard-ended row with no content still occupies a display row when the line
             // already has cells, and a zero-cell append would fold that row away. One blank
@@ -558,9 +608,12 @@ extension Terminal {
         /// Asymmetric on purpose: today's `pack` trims a default-styled trailing blank and keeps
         /// a non-default one, so storing nothing in the default case is what *reproduces* today's
         /// output rather than a shortcut.
-        mutating func repairClearedSpacer(styleId: Terminal.StyleId) {
-            guard styleId != Terminal.defaultStyleId else { return }
-            guard let record = openTailRecord() else { return }
+        /// Returns whether the repair stored anything, so a caller can invalidate exactly the
+        /// display row whose painted content changed and no other.
+        @discardableResult
+        mutating func repairClearedSpacer(styleId: Terminal.StyleId) -> Bool {
+            guard styleId != Terminal.defaultStyleId else { return false }
+            guard let record = openTailRecord() else { return false }
             let offset = offsets[offsets.count - 1]
             var lastRowColumns = 0
             LogicalLineFold.enumerateRows(
@@ -570,8 +623,9 @@ extension Terminal {
             ) { _, start, end, _ in
                 lastRowColumns = end - start
             }
-            guard lastRowColumns == width - 1 else { return }
+            guard lastRowColumns == width - 1 else { return false }
             appendCell(Terminal.GridCell(scalars: .empty, kind: .padding, styleId: styleId))
+            return true
         }
 
         /// Cuts the open logical line here and lets the next admission continue it in a new
@@ -660,16 +714,21 @@ extension Terminal {
         }
 
         private mutating func dropHeadRecord(_ record: LogicalLineRecord, at offset: Int) {
-            // `31/D2` Decision 2 step 2 as amended: a dropped forced-split piece must stamp its
-            // follower, or the follower reads as a fresh logical line -- the divergence from
-            // `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` that inherited condition 10
-            // exists to prevent.
-            if record.isForcedSplit, offsets.count > 1 {
+            // `31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
+            // must stamp what follows it, or the follower reads as a fresh logical line -- the
+            // divergence from `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` that inherited
+            // condition 10 exists to prevent. A forced split's follower is already a record; an
+            // *open* record's continuation has not been admitted yet, so the stamp is pending
+            // until the next record opens.
+            let continues = record.isForcedSplit || record.isOpen
+            if continues, offsets.count > 1 {
                 let followerOffset = offsets[1]
                 var follower = self.record(at: followerOffset)
                 follower.startsMidLine = true
                 follower.semanticPrompt = .none
                 writeHeader(follower, at: followerOffset)
+            } else if continues {
+                pendingStartsMidLine = true
             }
 
             // Probing an empty table costs a hash of a key that cannot be there, and a store whose
@@ -743,16 +802,28 @@ extension Terminal {
         /// are not lost: they keep their absolute stream positions and merely change which side
         /// of the history/live seam they sit on, which is why `evictedRowCount` does not move.
         mutating func truncateTail(displayRows: Int) -> [Terminal.GridRow] {
+            let count = min(displayRows, grandDisplayRowTotal)
+            guard count > 0 else { return [] }
+
+            // Folded first, cut after -- and that order is the whole of it. A display row's
+            // trailing `.spacerHead` is re-derived from the wide head that *follows* it, so
+            // folding a row once the row below it has already been cut away loses the column
+            // the spacer occupied. Cutting from the back one row at a time and folding as it
+            // went dropped exactly that cell on a height grow.
             var handedBack: [Terminal.GridRow] = []
-            for _ in 0..<displayRows {
-                guard offsets.count > 0 else { break }
-                guard let row = removeLastDisplayRow() else { break }
+            handedBack.reserveCapacity(count)
+            for index in (grandDisplayRowTotal - count)..<grandDisplayRowTotal {
+                guard let row = paintedDisplayRow(at: index) else { break }
                 handedBack.append(row)
             }
-            return Array(handedBack.reversed())
+            for _ in 0..<count {
+                guard offsets.count > 0 else { break }
+                removeLastDisplayRow()
+            }
+            return handedBack
         }
 
-        private mutating func removeLastDisplayRow() -> Terminal.GridRow? {
+        private mutating func removeLastDisplayRow() {
             let index = offsets.count - 1
             let offset = offsets[index]
             let record = self.record(at: offset)
@@ -768,12 +839,6 @@ extension Terminal {
                 lastEnd = end
                 rows = rowIndex + 1
             }
-            // Painted rather than content: the row is going back to the live grid, where the
-            // erase paint is cells again, and re-admitting it re-derives the fill.
-            let materialized = paintedRow(
-                at: DisplayRowCursor(recordIndex: index, rowWithinRecord: rows - 1)
-            )
-
             if rows == 1 {
                 dropTailRecord(record, at: offset)
             } else {
@@ -787,7 +852,6 @@ extension Terminal {
             if blocks.count > 0 {
                 blocks[blocks.count - 1].rowCount -= 1
             }
-            return materialized
         }
 
         private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
@@ -952,6 +1016,7 @@ extension Terminal {
         /// One binary search over the block totals, then a scan inside the block. A reader plans
         /// a frame with **one** of these and `advance(_:)` for the rest (`31/D3` Decision 1).
         func locate(displayRow: Int) -> DisplayRowCursor? {
+            LocateCounter.record()
             guard displayRow >= 0, displayRow < grandDisplayRowTotal else { return nil }
             let target = evictedRowCount + displayRow
 
@@ -1029,17 +1094,18 @@ extension Terminal {
         /// terminal of that width running the same bytes would show. A line with a fill and no
         /// content paints its whole single row, which is the ED-with-background case.
         func paintedRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
-            var row = gridRow(at: cursor)
-            guard let fill = trailingFillStyle(at: cursor.recordIndex),
-                  cursor.rowWithinRecord == displayRowCount(recordIndex: cursor.recordIndex) - 1,
-                  row.cells.count < width
-            else { return row }
-            row.cells.append(
-                contentsOf: repeatElement(
-                    Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fill),
-                    count: width - row.cells.count
-                )
-            )
+            let record = self.record(at: offsets[cursor.recordIndex])
+            var cells: [Terminal.GridCell] = []
+            cells.reserveCapacity(width)
+            forEachFoldedCell(at: cursor, includeFill: true) { _, cell in cells.append(cell) }
+
+            var row = Terminal.GridRow(cells: cells)
+            row.isSoftWrapped = isSoftWrapped(at: cursor)
+            if cursor.rowWithinRecord == 0 {
+                row.semanticPrompt = record.semanticPrompt
+            } else {
+                row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
+            }
             return row
         }
 
@@ -1075,6 +1141,193 @@ extension Terminal {
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
+        /// Whether the last logical line is still being printed, which is the store's spelling of
+        /// "the last retained display row soft-wraps into the live grid".
+        var hasOpenTailRecord: Bool { openTailRecord() != nil }
+
+        /// A copy of this store at a different byte budget, holding exactly the same records.
+        ///
+        /// The only way to build an eviction oracle, and the reason it is a record-level copy
+        /// rather than a replay: the arena reserves its whole capacity at construction
+        /// (`31/I2`), so a store cannot be re-bounded in place, and re-admitting its folded rows
+        /// would not reproduce it -- admission measures a soft-wrapped row to full width, which
+        /// the open tail's deliberately short final display row is not.
+        func rebased(toBudgetBytes newBudget: Int) -> LogicalLineStore {
+            var copy = LogicalLineStore(budgetBytes: newBudget, width: width)
+            for index in 0..<offsets.count {
+                let record = self.record(at: offsets[index])
+                let cells = (0..<record.cellCount).map {
+                    cell(recordIndex: index, cellOffset: $0)
+                }
+                copy.makeRoom(forCells: cells.count)
+                copy.openRecordIfNeeded(mark: record.semanticPrompt)
+                if record.startsMidLine { copy.markTailStartsMidLine() }
+                cells.withUnsafeBufferPointer { copy.appendCells($0) }
+                copy.addDisplayRowsToTail(displayRowCount(recordIndex: index))
+                copy.setTrailingFillOnTail(trailingFillStyle(at: index))
+                if record.isForcedSplit {
+                    copy.forceSplitOpenRecord()
+                } else if record.isOpen == false {
+                    copy.closeOpenRecord()
+                }
+            }
+            return copy
+        }
+
+        private mutating func markTailStartsMidLine() {
+            guard offsets.count > 0 else { return }
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
+            record.startsMidLine = true
+            writeHeader(record, at: offset)
+        }
+
+        /// Compares what history *holds*, not where it holds it.
+        ///
+        /// Two panes fed the same bytes *at the same budget* are the same history however the
+        /// ring cursor got there --
+        /// the arena's byte offsets, its pads and its unwritten tail are placement, not content.
+        /// So this compares the retained logical lines and the counters a reader can observe, on
+        /// the same principle `Terminal`'s own `Equatable` states about equal screen state.
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            guard lhs.budget == rhs.budget,
+                  lhs.width == rhs.width,
+                  lhs.evictedRowCount == rhs.evictedRowCount,
+                  lhs.grandDisplayRowTotal == rhs.grandDisplayRowTotal,
+                  lhs.offsets.count == rhs.offsets.count
+            else { return false }
+            for index in 0..<lhs.offsets.count {
+                guard lhs.recordSummary(at: index) == rhs.recordSummary(at: index),
+                      lhs.recordCells(at: index) == rhs.recordCells(at: index)
+                else { return false }
+            }
+            return true
+        }
+
+        /// Every retained display row, oldest first, as the renderer must paint it.
+        ///
+        /// The whole-history materialization `31/D3` Decision 5 keeps for milestone 1: search,
+        /// Select All and history export all read all of history, and this walks the records once
+        /// instead of paying `locate(displayRow:)` per row the way a subscript would.
+        func allPaintedDisplayRows() -> [Terminal.GridRow] {
+            var result: [Terminal.GridRow] = []
+            result.reserveCapacity(grandDisplayRowTotal)
+            for index in 0..<offsets.count {
+                for row in 0..<displayRowCount(recordIndex: index) {
+                    result.append(
+                        paintedRow(at: DisplayRowCursor(recordIndex: index, rowWithinRecord: row))
+                    )
+                }
+            }
+            return result
+        }
+
+        /// Visits one display row's painted cells without materializing a `GridRow`.
+        ///
+        /// The frame path's read, and the reason milestone 1 lands the arena on exactly the path
+        /// `31/F1` measured (`31/D3` Decision 5): `28/F17` found the per-row `GridRow` allocation
+        /// to be the dominant term of the browsing regression, and a facade that materialized here
+        /// would put it straight back. Columns ascend from zero and stop at the row's painted
+        /// extent; the caller pads the rest, exactly as the packed-row reader's contract did.
+        func forEachPaintedCell(
+            at cursor: DisplayRowCursor,
+            _ body: (_ column: Int, _ scalars: TerminalScalars, _ styleId: Terminal.StyleId) -> Void
+        ) {
+            forEachFoldedCell(at: cursor, includeFill: true) { column, cell in
+                body(column, cell.scalars, cell.styleId)
+            }
+        }
+
+        /// Visits one display row's cell kinds, which is all a geometry projection carries.
+        func forEachKind(
+            at cursor: DisplayRowCursor,
+            _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
+        ) {
+            forEachFoldedCell(at: cursor, includeFill: true) { column, cell in
+                body(column, cell.kind)
+            }
+        }
+
+        /// The record address a display row's column names, under the fold in force now.
+        ///
+        /// One half of `31/D3` Decision 2's function pair: an anchor is captured through this
+        /// before a width change and restated through `position(ofRecord:cellOffset:)` after, which
+        /// is the whole of what replaces the reflow attachment machinery on the history side. The
+        /// address is a transient -- it is never stored in an anchor and never leaves this module.
+        func address(ofDisplayRow row: Int, column: Int) -> (recordIndex: Int, cellOffset: Int)? {
+            guard let cursor = locate(displayRow: row) else { return nil }
+            let offset = offsets[cursor.recordIndex]
+            let record = self.record(at: offset)
+            var start = 0
+            var end = record.cellCount
+            LogicalLineFold.enumerateRows(
+                cellCount: record.cellCount,
+                width: width,
+                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
+            ) { rowIndex, cellStart, cellEnd, _ in
+                guard rowIndex == cursor.rowWithinRecord else { return }
+                start = cellStart
+                end = cellEnd
+            }
+            return (cursor.recordIndex, min(start + max(0, column), end))
+        }
+
+        /// Where a record's cell offset folds to, under the fold in force now.
+        ///
+        /// Nil when the offset is no longer in the record, which a width change can produce for
+        /// exactly one region: the open tail's partial last display row, whose cells `setWidth`
+        /// hands back to the live grid.
+        func position(
+            ofRecord recordIndex: Int,
+            cellOffset: Int
+        ) -> (displayRow: Int, column: Int)? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            let offset = offsets[recordIndex]
+            let record = self.record(at: offset)
+            guard cellOffset >= 0, cellOffset <= record.cellCount else { return nil }
+            var localRow = 0
+            var column = 0
+            var resolved = false
+            LogicalLineFold.enumerateRows(
+                cellCount: record.cellCount,
+                width: width,
+                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
+            ) { rowIndex, start, end, _ in
+                guard resolved == false else { return }
+                // The last row claims the record's end boundary, which is the one offset that is
+                // past every row's content and still names a position.
+                if cellOffset < end || end == record.cellCount {
+                    localRow = rowIndex
+                    column = cellOffset - start
+                    resolved = cellOffset < end
+                }
+            }
+            return (firstDisplayRow(ofRecord: recordIndex) + localRow, max(0, column))
+        }
+
+        /// The record's first display row, counted from the oldest retained one.
+        private func firstDisplayRow(ofRecord recordIndex: Int) -> Int {
+            let sequence = firstRecordSequence + recordIndex
+            let blockIndex = sequence / Self.blockSize - firstBlockNumber
+            guard blockIndex >= 0, blockIndex < blocks.count else { return 0 }
+            var total = blocks[blockIndex].rowStart - evictedRowCount
+            let blockFirst = max(
+                firstRecordSequence,
+                (firstBlockNumber + blockIndex) * Self.blockSize
+            ) - firstRecordSequence
+            for index in blockFirst..<recordIndex {
+                total += displayRowCount(recordIndex: index)
+            }
+            return total
+        }
+
+        /// Whether this display row wraps into the next one, without folding its cells.
+        func isSoftWrapped(at cursor: DisplayRowCursor) -> Bool {
+            let record = self.record(at: offsets[cursor.recordIndex])
+            let rows = displayRowCount(recordIndex: cursor.recordIndex)
+            return cursor.rowWithinRecord + 1 < rows || record.isOpen || record.isForcedSplit
+        }
+
         // MARK: - Fold
 
         private func displayRowCount(recordIndex: Int) -> Int {
@@ -1089,6 +1342,40 @@ extension Terminal {
         }
 
         private func gridRow(recordIndex: Int, rowWithinRecord: Int) -> Terminal.GridRow {
+            let record = self.record(at: offsets[recordIndex])
+            var cells: [Terminal.GridCell] = []
+            cells.reserveCapacity(width)
+            forEachFoldedCell(
+                at: DisplayRowCursor(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord),
+                includeFill: false
+            ) { _, cell in
+                cells.append(cell)
+            }
+
+            var row = Terminal.GridRow(cells: cells)
+            row.isSoftWrapped = isSoftWrapped(
+                at: DisplayRowCursor(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord)
+            )
+            if rowWithinRecord == 0 {
+                row.semanticPrompt = record.semanticPrompt
+            } else {
+                row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
+            }
+            return row
+        }
+
+        /// The one definition of what a display row's columns are, so the materializing reads and
+        /// the borrowing ones cannot drift apart on a spacer, a split seam, or a trailing fill.
+        ///
+        /// `includeFill` is the content/painted split (`31/DD25` as amended): the content walk
+        /// stops at the line's cells because the fill is paint rather than text, and the painted
+        /// walk runs it out to the right margin on the line's last display row.
+        private func forEachFoldedCell(
+            at cursor: DisplayRowCursor,
+            includeFill: Bool,
+            _ body: (_ column: Int, _ cell: Terminal.GridCell) -> Void
+        ) {
+            let recordIndex = cursor.recordIndex
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
             var start = 0
@@ -1101,19 +1388,24 @@ extension Terminal {
                 isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
             ) { rowIndex, cellStart, cellEnd, spacerAtEnd in
                 rows = rowIndex + 1
-                guard rowIndex == rowWithinRecord else { return }
+                guard rowIndex == cursor.rowWithinRecord else { return }
                 start = cellStart
                 end = cellEnd
                 spacer = spacerAtEnd
             }
 
-            var cells = (start..<end).map { cell(recordIndex: recordIndex, cellOffset: $0) }
+            var column = 0
+            for cellOffset in start..<end {
+                body(column, cell(recordIndex: recordIndex, cellOffset: cellOffset))
+                column += 1
+            }
             if spacer, end < record.cellCount {
                 // `Terminal.pack`'s rule: the spacer inherits the wide head it defers.
-                cells.append(spacerDeferring(cell(recordIndex: recordIndex, cellOffset: end)))
+                body(column, spacerDeferring(cell(recordIndex: recordIndex, cellOffset: end)))
+                column += 1
             } else if record.isForcedSplit,
                       end == record.cellCount,
-                      cells.count == width - 1,
+                      column == width - 1,
                       recordIndex + 1 < offsets.count
             {
                 // The split cut the line exactly where admission dropped a spacer, so the wide
@@ -1124,17 +1416,25 @@ extension Terminal {
                 // tail is deliberately not covered -- its short final row is the acknowledged
                 // divergence that ends as soon as the next row is admitted.
                 let follower = cell(recordIndex: recordIndex + 1, cellOffset: 0)
-                if follower.kind == .wideHead { cells.append(spacerDeferring(follower)) }
+                if follower.kind == .wideHead {
+                    body(column, spacerDeferring(follower))
+                    column += 1
+                }
             }
 
-            var row = Terminal.GridRow(cells: cells)
-            row.isSoftWrapped = rowWithinRecord + 1 < rows || record.isOpen || record.isForcedSplit
-            if rowWithinRecord == 0 {
-                row.semanticPrompt = record.semanticPrompt
-            } else {
-                row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
+            // `31/DD15`'s floor: a zero-cell record folds to one display row, and the
+            // enumeration emits nothing for it -- so the record's last row is row 0, not row -1.
+            // Missing this drops the fill on exactly the ED-with-background case it exists for.
+            guard includeFill,
+                  column < width,
+                  cursor.rowWithinRecord == max(1, rows) - 1,
+                  let fill = trailingFillStyle(at: recordIndex)
+            else { return }
+            let painted = Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fill)
+            while column < width {
+                body(column, painted)
+                column += 1
             }
-            return row
         }
 
         /// The `.spacerHead` a wide head defers, carrying the head's attributes exactly as
@@ -1260,13 +1560,19 @@ extension Terminal {
 
         private mutating func openRecordIfNeeded(mark: Terminal.SemanticPromptRow) {
             if openTailRecord() != nil { return }
+            let inherited = pendingStartsMidLine
+            pendingStartsMidLine = false
             // A record opened after a forced split continues the previous line, so the mark
             // stays on the piece that started it (`31/PO13`).
             var effectiveMark = mark
             if offsets.count > 0, record(at: offsets[offsets.count - 1]).isForcedSplit {
                 effectiveMark = .none
             }
-            let record = LogicalLineRecord(semanticPrompt: effectiveMark, isOpen: true)
+            var record = LogicalLineRecord(semanticPrompt: effectiveMark, isOpen: true)
+            if inherited {
+                record.startsMidLine = true
+                record.semanticPrompt = .none
+            }
             writeHeader(record, at: writeCursor)
             appendRecordOffset(writeCursor)
             writeCursor += LogicalLineRecord.Header.byteCount
@@ -1705,7 +2011,11 @@ extension Terminal {
         private(set) var count = 0
         private let filler: Element
 
-        init(filler: Element, minimumCapacity: Int = 16) {
+        /// The floor is small on purpose: the index is charged at what its rings *allocated*
+        /// (`31/DD37`), so an empty store's charge is a fixed cost every budget pays, and a
+        /// generous floor would make a small history unrepresentable rather than merely
+        /// shallow. Production depth grows both rings far past this within one screenful.
+        init(filler: Element, minimumCapacity: Int = 4) {
             precondition(minimumCapacity > 0)
             var capacity = 1
             while capacity < minimumCapacity { capacity <<= 1 }

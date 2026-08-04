@@ -262,7 +262,7 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 1) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1)
         ))
         terminal.feed(Array("hit\r\na".utf8))
 
@@ -428,8 +428,7 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 3) * 2
-                + compactHistoryRowCost(storedCells: 1)
+            scrollbackBudgetBytes: historyBudget(lineCells: [3, 3, 1])
         ))
         terminal.feed(Array("hit\r\nhit\r\na".utf8))
 

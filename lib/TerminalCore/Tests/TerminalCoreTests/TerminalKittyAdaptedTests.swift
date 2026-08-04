@@ -110,7 +110,7 @@ struct TerminalKittyAdaptedTests {
         //   Divergence: kitty degrades the same anchor via `clear_scrollback` and checks it
         //   through `scroll_to_prompt` returning False; DanTerm reaches the state through
         //   `scrollbackBudgetBytes` eviction and asserts on the text a resize leaves behind.
-        var terminal = try #require(Terminal(columns: 8, rows: 3, scrollbackBudgetBytes: 256))
+        var terminal = try #require(Terminal(columns: 8, rows: 3, scrollbackBudgetBytes: historyBudget(lines: 2, cells: 8, paneColumns: 8)))
         terminal.feed(Array("\u{1B}]133;A\u{7}HEAD$ \r\n".utf8))
         for index in 0..<12 { terminal.feed(Array("L\(index)\r\n".utf8)) }
         #expect(terminal.fullHistoryText.contains("HEAD$") == false)

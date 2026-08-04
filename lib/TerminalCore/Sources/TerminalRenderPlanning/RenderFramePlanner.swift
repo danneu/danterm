@@ -170,6 +170,15 @@ struct FramePlanner {
         text.reserveCapacity(rowCount)
         decorations.reserveCapacity(rowCount)
 
+        // One traversal for every replanned row rather than one per row: retained history is
+        // addressed once and carried forward, which is the contract `31/I7` states and the
+        // mechanism `31/D3` Decision 1 rule 2 requires of a frame.
+        let cells = inspectedCells(
+            rows: 0..<rowCount,
+            replanning: { reusable == nil || damage.rows.contains($0) },
+            geometry: geometry,
+            cursorSpan: cursorSpan
+        )
         for row in 0..<rowCount {
             if let reusable, damage.rows.contains(row) == false {
                 background.append(reusable.background[row])
@@ -177,10 +186,9 @@ struct FramePlanner {
                 decorations.append(reusable.decorations[row])
                 continue
             }
-            let cells = inspectedCells(row: row, geometry: geometry, cursorSpan: cursorSpan)
-            background.append(backgroundRuns(row: row, cells: cells))
-            text.append(textRuns(row: row, cells: cells))
-            decorations.append(decorationRuns(row: row, cells: cells))
+            background.append(backgroundRuns(row: row, cells: cells[row]))
+            text.append(textRuns(row: row, cells: cells[row]))
+            decorations.append(decorationRuns(row: row, cells: cells[row]))
         }
 
         let plan = RenderFramePlan(
@@ -283,26 +291,40 @@ struct FramePlanner {
         }
     }
 
+    /// Inspects every row `replanning` selects, in one traversal of the terminal's viewport.
+    ///
+    /// One traversal rather than one per row because addressing retained history costs a
+    /// display-row-to-record locate, and paying one per visible row is exactly the per-frame cost
+    /// `31/I7` exists to forbid. Rows the caller reuses are stepped over rather than inspected,
+    /// so a damage-clipped frame still pays only for what it redraws; they come back empty.
     private func inspectedCells(
-        row: Int,
+        rows: Range<Int>,
+        replanning: (Int) -> Bool,
         geometry: TerminalGeometry,
         cursorSpan: CursorSpan?
-    ) -> [PlannedCell] {
+    ) -> [[PlannedCell]] {
         // Both row-scoped lookups are hoisted deliberately. `terminal.cell(row:column:)`
         // re-resolved the viewport row on every column, and `isHovered` re-read
         // `hoveredLink` and `scrollProjection` on every column; a profile put the
         // resulting per-cell traffic at ~20% of `planFrame` (see
         // docs/research/14-live-scroll-workload-profile.md, F10). Resolve each once per
         // row, then walk the columns.
-        let kinds = geometry.rows[row].cells
-        let hovered = hoveredColumns(row: row, columns: geometry.columns)
-        let selected = selectedColumns(row: row, columns: geometry.columns)
+        var result = [[PlannedCell]](repeating: [], count: rows.count)
+        var hovered: Range<Int>?
+        var selected: Range<Int>?
+        var lastResolvedRow = -1
 
-        var result: [PlannedCell] = []
-        result.reserveCapacity(kinds.count)
-        terminal.forEachViewportCell(row: row) { column, scalars, semanticStyle in
+        terminal.forEachViewportCell(rows: rows, where: replanning) {
+            row, column, scalars, semanticStyle in
+            let kinds = geometry.rows[row].cells
             guard column < kinds.count else { return }
-            result.append(plannedCell(
+            if row != lastResolvedRow {
+                hovered = hoveredColumns(row: row, columns: geometry.columns)
+                selected = selectedColumns(row: row, columns: geometry.columns)
+                lastResolvedRow = row
+                result[row].reserveCapacity(kinds.count)
+            }
+            result[row].append(plannedCell(
                 row: row,
                 column: column,
                 kind: kinds[column].kind,
@@ -313,19 +335,26 @@ struct FramePlanner {
                 cursorSpan: cursorSpan
             ))
         }
+
         // Columns the terminal row does not cover keep the empty/default content the
         // previous `terminal.cell(...) -> nil` path produced for them.
-        while result.count < kinds.count {
-            result.append(plannedCell(
-                row: row,
-                column: result.count,
-                kind: kinds[result.count].kind,
-                scalars: .empty,
-                semanticStyle: TerminalStyle(),
-                hovered: hovered,
-                selected: selected,
-                cursorSpan: cursorSpan
-            ))
+        for row in rows where replanning(row) {
+            let kinds = geometry.rows[row].cells
+            guard result[row].count < kinds.count else { continue }
+            let hovered = hoveredColumns(row: row, columns: geometry.columns)
+            let selected = selectedColumns(row: row, columns: geometry.columns)
+            while result[row].count < kinds.count {
+                result[row].append(plannedCell(
+                    row: row,
+                    column: result[row].count,
+                    kind: kinds[result[row].count].kind,
+                    scalars: .empty,
+                    semanticStyle: TerminalStyle(),
+                    hovered: hovered,
+                    selected: selected,
+                    cursorSpan: cursorSpan
+                ))
+            }
         }
         return result
     }

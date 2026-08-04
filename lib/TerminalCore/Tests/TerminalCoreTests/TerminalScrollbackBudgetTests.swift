@@ -1,9 +1,18 @@
-// Behavioral proofs for deterministic scrollback accounting, eviction, and truncation state.
+// Behavioral proofs for deterministic scrollback accounting, eviction, and head-trim state.
+//
+// Restated against doc 31's record store: history has **one** bound -- charged bytes against the
+// arena's capacity (`31/I2`) -- where it had three. The cell and row caps priced the two terms of
+// a width reflow of retained rows, and there is no reflow of retained rows left to price
+// (`31/D2` Decision 4), so this file's cap tests are gone rather than adapted. What replaces the
+// public `isHistoryHeadTruncated` flag is the invariant `31/D2` Decision 2 states in its place:
+// the oldest retained record is a *suffix* of the logical line that produced it whenever its head
+// has been trimmed, and it reads as a mid-line continuation for as long as it survives (`31/DD10`).
 import Testing
 
 @testable import TerminalCore
 
-/// Locks the fixed byte budget to every history mutation path without coupling tests to storage.
+/// Locks the one charged-byte bound to every history mutation path without coupling tests to
+/// storage.
 struct TerminalScrollbackBudgetTests {
     @Test("widening preserves hard-terminated history that already fits the budget")
     func wideningDoesNotEvictCompactHistory() throws {
@@ -15,7 +24,7 @@ struct TerminalScrollbackBudgetTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 8) * 4
+            scrollbackBudgetBytes: historyBudget(lines: 4, cells: 8)
         ))
         terminal.feed(Array("A\r\nB\r\nC\r\nD\r\n".utf8))
         let before = terminal.primaryHistoryText
@@ -25,34 +34,19 @@ struct TerminalScrollbackBudgetTests {
 
         #expect(terminal.primaryHistoryText == before)
         #expect(terminal.scrollbackRowCount == rowCount)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        expectValidGrid(terminal)
     }
 
     @Test("short compact lines retain deeper history than full-width lines at one budget")
     func compactLineLengthControlsRetentionDepth() throws {
-        // Intent: a fixed byte budget retains more short rows than full-width rows.
-        // Why it exists: compact storage is useful only if its smaller allocation charge turns
+        // Intent: a fixed byte budget retains more short lines than full-width lines.
+        // Why it exists: content-denominated storage is useful only if its smaller charge turns
         //   into user-visible history depth rather than merely changing a diagnostic counter.
-        // Scenario: equal-width panes stream ten one-cell and ten full-width hard lines.
-        //
-        // Widened from 8 columns to 80 by doc 28's packing. A packed row's cost is a fixed
-        // slot and header plus a payload roughly one byte per stored cell, so at 8 columns a
-        // one-cell row and a full-width row now land in the same malloc size class and retain
-        // identically. That is not a failure of the property -- it is `D3`'s admission test
-        // seen from the other side, and it says the depth difference has to clear a bucket
-        // step to exist at all. At a real pane width it clears it comfortably.
+        // Scenario: equal-width panes stream one-cell and full-width hard lines.
         let columns = 80
-        let budget = historyRowCost(columns: columns) * 2
-        var short = try #require(Terminal(
-            columns: columns,
-            rows: 1,
-            scrollbackBudgetBytes: budget
-        ))
-        var full = try #require(Terminal(
-            columns: columns,
-            rows: 1,
-            scrollbackBudgetBytes: budget
-        ))
+        let budget = historyBudget(lines: 2, cells: columns)
+        var short = try #require(Terminal(columns: columns, rows: 1, scrollbackBudgetBytes: budget))
+        var full = try #require(Terminal(columns: columns, rows: 1, scrollbackBudgetBytes: budget))
         for _ in 0..<10 {
             short.feed(Array("x\r\n".utf8))
             full.feed(Array(String(repeating: "1234567890", count: 8).utf8))
@@ -60,15 +54,17 @@ struct TerminalScrollbackBudgetTests {
         }
 
         #expect(short.scrollbackRowCount > full.scrollbackRowCount)
-        #expect(short.scrollbackByteCount <= budget)
-        #expect(full.scrollbackByteCount <= budget)
+        #expect(short.scrollbackCensus.chargedBytes <= short.scrollbackCensus.capacityBytes)
+        #expect(full.scrollbackCensus.chargedBytes <= full.scrollbackCensus.capacityBytes)
     }
 
     @Test("equivalent resize routes converge to one canonical retained representation")
     func compactHistoryIsCanonicalAcrossResizeRoutes() throws {
         // Intent: equal terminal content reached through different retained widths compares equal.
-        // Why it exists: synthesized equality includes private row storage, so non-canonical blank
-        //   tails would make observably identical terminals unequal and break no-op detection.
+        // Why it exists: synthesized equality includes private history state, so a store that
+        //   remembered the width it was fed at would make observably identical terminals unequal
+        //   and break no-op detection. Under doc 31 it is also the sharpest statement of `31/I1`:
+        //   nothing width-dependent is stored, so the route cannot be recovered from the bytes.
         // Scenario: one pane retains a line narrowly then widens; its twin starts wide.
         var resized = try #require(Terminal(columns: 4, rows: 1))
         resized.feed(Array("abc\r\n".utf8))
@@ -80,74 +76,57 @@ struct TerminalScrollbackBudgetTests {
         #expect(resized == direct)
     }
 
-    @Test("history never reserves more than the budget, at widths where rows round up")
+    @Test("the arena is reserved once, and the charge never passes its capacity")
     func budgetChargesReservedStorageNotJustCells() throws {
-        // Intent: the bytes history actually reserves stay inside the configured budget, not just
-        //   the bytes its cells nominally occupy.
-        // Why it exists: `scrollbackByteCost` charged `count * stride`, but a row's cell array is
-        //   allocated in a malloc bucket and reserves more than that -- 90 cells' worth at 80
-        //   columns, 218 at 200. So the budget systematically admitted rows it could not pay for,
-        //   which doc 15's `F7` measured at ~11.5% and `F12` turned into a 1.8 MB regression by
-        //   shrinking a cell in a way the allocator ignored. Charging reserved storage makes the
-        //   number the user configures mean what it says regardless of what a cell weighs.
+        // Intent: what history charges stays inside the capacity it was built at, and that
+        //   capacity does not move however much is fed through it.
+        // Why it exists: doc 15's `F7`/`F12` incident restated for the arena (`31/DD11`). The old
+        //   charge modelled per-row allocations and drifted from what malloc really reserved; the
+        //   arena is allocated once, below the budget by a fixed metadata reserve (`31/DD36`), so
+        //   the bound holds by construction and the proof is that capacity never grows.
         // Scenario: a pane at ordinary widths streams enough history to force steady eviction.
         for columns in [80, 200] {
             var terminal = try #require(Terminal(
                 columns: columns,
                 rows: 4,
-                scrollbackBudgetBytes: 400 * historyRowCost(columns: columns)
+                scrollbackBudgetBytes: historyBudget(lines: 400, cells: columns)
             ))
+            let capacity = terminal.scrollbackCensus.capacityBytes
             for line in 0..<2_000 {
                 terminal.feed(Array("row \(line) ".utf8))
                 terminal.feed([0x0D, 0x0A])
             }
 
             #expect(terminal.scrollbackRowCount > 0)
-            #expect(terminal.retainedScrollbackAllocationBytes <= terminal.scrollbackBudgetBytes)
+            let census = terminal.scrollbackCensus
+            #expect(census.capacityBytes == capacity)
+            #expect(census.capacityBytes < census.budgetBytes)
+            #expect(census.chargedBytes <= census.capacityBytes)
         }
     }
 
-    @Test("scrollback cost uses pinned row, cell, and scalar literals")
+    @Test("a logical line's arena charge uses pinned header, cell, and table literals")
     func costModelUsesPinnedLiterals() throws {
-        // Intent: freeze row, cell, and scalar costs across every structural cell shape.
+        // Intent: freeze what a retained logical line costs across every structural cell shape.
         // Why it exists: eviction points are value semantics and cannot drift with a toolchain.
-        // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
-        //
-        // Restated against doc 28's packed retained row (`C1`). Each payload below is spelled
-        // out as the charges the encoding really makes -- a header, one fixed 8-byte cell per
-        // stored column, and the identity encoding -- rather than as a number, because the
-        // point of the fixture is that the *composition* is pinned. A scheme that stored the
-        // same rows in a different mix of tables would still land on some total; it would not
-        // land on these terms.
-        //
-        // What the terms show is `C1`'s whole argument: the scalar, the kind and the style id
-        // are all inside the cell, so no fixture below names a stride tier, a style run or a
-        // kind exception. `C6`'s version of this test named all three.
+        //   Restated per *record* by doc 31: the header is charged once per logical line rather
+        //   than once per display row, which is the change that buys the depth `31/PO11` gates on.
+        // Scenario: canonical blank, ASCII, wide, spacer, and emoji lines enter history.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
-        let charge = PackedRowCharge.self
-        let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            // A blank row trims to one padding cell: one cell, and nothing else -- padding
-            // carries no identity.
-            (4, "", packedHistoryRowCost(payloadBytes: charge.header + charge.cell)),
-            // Four ASCII cells and one identity run -- the shape the whole scheme is chosen
-            // for, and the one where the cell's flat cost is the entire cost.
-            (4, "ABCD", packedHistoryRowCost(
-                payloadBytes: charge.header + 4 * charge.cell + charge.identityRun
-            )),
+        let charge = RecordCharge.self
+        let fixtures: [(columns: Int, text: String, cells: Int, identityRuns: Int)] = [
+            // A blank hard-ended line stores no cells at all: a record's cell count is a content
+            // property, and zero is representable (`31/DD15`).
+            (4, "", 0, 0),
+            // Four ASCII cells printed straight through: one identity run covers the line.
+            (4, "ABCD", 4, 1),
             // A wide glyph is two cells and costs no more than two of anything else: its kind
             // rides in the cell. Head and tail share one identity, which a
-            // `(start, extent, base)` run cannot express, so they are two runs -- and at two
-            // stored cells the per-cell floor is cheaper, so the encoder takes it.
-            (2, "\u{754C}", packedHistoryRowCost(
-                payloadBytes: charge.header + 2 * charge.cell + 2 * charge.identityCell
-            )),
-            // The only shape that costs more, and the only one that still reaches outside the
-            // cell: a five-scalar cluster spills to its own allocation, reached by an index
-            // the cell's scalar field holds in place of a scalar.
-            (2, family, packedHistoryRowCost(
-                payloadBytes: charge.header + 2 * charge.cell + 2 * charge.identityCell,
-                spilledClusterScalars: [5]
-            )),
+            // `(start, extent, base)` run cannot express, so the encoder takes the per-cell floor.
+            (2, "\u{754C}", 2, 0),
+            // The only shape that reaches outside the arena: a five-scalar cluster spills to the
+            // side table, reached by an index the cell's scalar field holds in place of a scalar.
+            (2, family, 2, 0),
         ]
 
         for fixture in fixtures {
@@ -155,59 +134,58 @@ struct TerminalScrollbackBudgetTests {
             terminal.feed(Array(fixture.text.utf8))
             terminal.feed([0x0D, 0x0A])
 
-            #expect(terminal.scrollbackRowByteCost(at: 0) == fixture.expected)
-            #expect(terminal.scrollbackByteCount == fixture.expected)
-            #expect(terminal.recomputedScrollbackByteCount == fixture.expected)
+            let summary = try #require(terminal.retainedRecordSummaryForTesting(at: 0))
+            #expect(summary.cellCount == fixture.cells)
+            var expected = charge.header + fixture.cells * charge.cell
+            expected += fixture.identityRuns > 0
+                ? fixture.identityRuns * charge.identityRun
+                : fixture.cells * charge.identityCell
+            #expect(terminal.scrollbackCensus.arenaBytesInUse == (expected + 7) & ~7)
         }
 
         var spacer = try #require(Terminal(columns: 3, rows: 1))
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}".utf8))
+        // The spacer itself is never stored -- where one sits is a function of the width, which
+        // `31/I1` forbids storing -- and the fold re-derives it at read.
         #expect(spacer.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
-        // Two untouched padding cells, then the spacer: three cells and the spacer's own
-        // identity run. The spacer's kind costs nothing extra -- it is three bits of a cell
-        // the row was already paying for.
-        #expect(spacer.scrollbackRowByteCost(at: 0) == packedHistoryRowCost(
-            payloadBytes: PackedRowCharge.header + 3 * PackedRowCharge.cell
-                + PackedRowCharge.identityRun
-        ))
+        #expect(spacer.retainedRecordSummaryForTesting(at: 0)?.cellCount == 2)
 
         let production = try #require(Terminal(columns: 4, rows: 2))
         let overridden = try #require(Terminal(
             columns: 4,
             rows: 2,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes - 1
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes - 8
         ))
         #expect(production != overridden)
     }
 
     @Test("exact budget retains and overshoot evicts the minimal oldest prefix")
     func exactBoundaryAndMinimalEviction() throws {
-        // Intent: prove the strict-over trigger and minimal oldest-first batch removal.
-        // Why it exists: an off-by-one would discard history at the documented boundary.
-        // Scenario: two rows fill a tiny budget before one push and one shrink overshoot it.
-        let rowCost = compactHistoryRowCost(storedCells: 1)
+        // Intent: prove the strict-over trigger and minimal oldest-first display-row removal.
+        // Why it exists: an off-by-one would discard history at the documented boundary, and
+        //   eviction that dropped more than one display row per step would move four anchors and
+        //   the scrollbar further per admitted row than today's engine does (`31/I4`).
+        // Scenario: two lines fill a tiny budget before one push and one shrink overshoot it.
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: rowCost * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 2)
         ))
 
         terminal.feed(Array("A\r\nB\r\n".utf8))
         #expect(terminal.scrollbackRowCount == 2)
-        #expect(terminal.scrollbackByteCount == rowCost * 2)
         #expect(terminal.scrollbackRow(at: 0)?.cells[0].scalars == ["A"])
 
         terminal.feed(Array("C\r\n".utf8))
         #expect(terminal.scrollbackRowCount == 2)
-        #expect(terminal.scrollbackByteCount == rowCost * 2)
         #expect(terminal.scrollbackRow(at: 0)?.cells[0].scalars == ["B"])
         #expect(terminal.scrollbackRow(at: 1)?.cells[0].scalars == ["C"])
 
         var batch = try #require(Terminal(
             columns: 2,
             rows: 4,
-            scrollbackBudgetBytes: rowCost * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1)
         ))
         batch.feed(Array("A\r\nB\r\nC\r\nD".utf8))
         batch.resize(columns: 2, rows: 1)
@@ -217,239 +195,82 @@ struct TerminalScrollbackBudgetTests {
         expectValidGrid(batch)
     }
 
-    @Test("the row cap evicts oldest-first once cheap rows outrun it, with the budget unspent")
-    func rowCapBoundsDepthOnCheapRows() throws {
-        // Intent: retained depth stops at the row cap even when the byte budget has
-        //   room left, and the rows that survive are the newest ones.
-        // Why it exists: doc 28's `D8`. Packing made a retained row ~14x cheaper, so
-        //   a byte-only bound admits ~82,000 rows of ordinary content and ~125,000 of
-        //   sparse -- and reflow visits every one of them, which `F14` measured as a
-        //   1.43 s resize. The row cap bounds reflow's per-row term, and it has to bind
-        //   on the *cheap* side where neither the budget nor the cell cap will: these
-        //   rows are 6 cells each, so 64 rows is 384 cells.
-        // Scenario: a shell history of short commands -- the content regime that
-        //   retains deepest, and the one `saturated-sparse-resize-v1` measures.
-        let cap = 64
-        var terminal = try #require(Terminal(
-            columns: 40,
-            rows: 1,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
-            scrollbackRowCap: cap,
-            scrollbackCellCap: Terminal.productionScrollbackCellCap
-        ))
-
-        for line in 0..<(cap * 4) {
-            terminal.feed(Array("cmd\(line)\r\n".utf8))
-        }
-
-        #expect(terminal.scrollbackRowCount == cap)
-        // The budget is nowhere near spent: the cap, not the bytes, decided.
-        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes / 100)
-        // Oldest-first, so the newest `cap` rows are what survived.
-        let retained = terminal.primaryHistoryText.split(separator: "\n").map(String.init)
-        #expect(retained.first == "cmd\(cap * 4 - cap)")
-        #expect(retained.last == "cmd\(cap * 4 - 1)")
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
-        expectValidGrid(terminal)
-    }
-
-    @Test("the cell cap bounds retained cells once rows are wide, before the row cap is near")
-    func cellCapBoundsWideRows() throws {
-        // Intent: retained depth stops at the cell cap when rows are wide enough to reach
-        //   it first, with the row cap and the byte budget both unspent.
-        // Why it exists: `D8`'s cost model is two-term -- 1.85 us/row + 0.352 us/cell --
-        //   and the cell term dominates at any real pane width. A row cap alone leaves it
-        //   free: the wide arm measured 232.6 ms against a 99.5 ms pre-packing baseline
-        //   while sitting well inside an 8,192-row cap. This is the bound that makes the
-        //   worst case a number rather than a function of how wide the pane is.
-        // Scenario: full-width program output, the regime `saturated-wide-resize-v1` runs.
-        let columns = 80
-        let cellCap = 800
-        var terminal = try #require(Terminal(
-            columns: columns,
-            rows: 1,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
-            scrollbackRowCap: 4_096,
-            scrollbackCellCap: cellCap
-        ))
-
-        for _ in 0..<64 {
-            terminal.feed(Array(String(repeating: "x", count: columns).utf8))
-            terminal.feed(Array("\r\n".utf8))
-        }
-
-        #expect(terminal.scrollbackStoredCellCount <= cellCap)
-        #expect(terminal.scrollbackRowCount == cellCap / columns)
-        #expect(terminal.scrollbackRowCount < 4_096)
-        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes / 100)
-        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
-        expectValidGrid(terminal)
-    }
-
-    @Test("narrowing then widening a capped history loses no rows")
-    func narrowThenWidenPreservesCappedHistory() throws {
-        // Intent: a width change and its inverse leave retained history exactly as deep as
-        //   it started, under both caps.
-        // Why it exists: the incident is the row-cap-only design measured during `D8`. A
-        //   row cap alone is not reflow-invariant -- narrowing multiplies row count while
-        //   leaving content alone, so the cap evicts the overflow and widening cannot
-        //   restore it. Measured directly at 179 columns with an 8,192-row cap and no cell
-        //   cap: 8,192 rows -> narrow to 100 -> 8,192 -> widen back to 179 -> **4,095**.
-        //   Half the user's scrollback destroyed by one window drag. The cell cap is what
-        //   fixes it: stored cells are content, so rewrapping moves them between rows
-        //   without creating any, and the cell cap therefore binds at a row count low
-        //   enough that rewrapping never reaches the row cap.
-        // Scenario: a user drags a pane narrow and back with a full history of full-width
-        //   output.
+    @Test("a width change evicts nothing, at any width down to the engine minimum")
+    func widthChangeEvictsNothing() throws {
+        // Intent: narrowing a saturated history and widening it back retains every logical line
+        //   and every scalar, at every width between the engine minimum and the original.
+        // Why it exists: this is `31/I3`, and it is the invariant that replaces the deleted row
+        //   cap. `narrowThenWidenPreservesCappedHistory` pinned the *mitigation* for a lossiness
+        //   the row cap could not avoid -- narrowing multiplies display rows while leaving
+        //   content alone, so a display-row bound evicts what widening cannot restore. Storing
+        //   logical lines makes that lossiness unrepresentable rather than mitigated, so the
+        //   property is now stated directly on the store instead of on a cap ratio.
+        // Scenario: a user drags a pane narrow and back with a full history of full-width output.
         let wide = 179
-        let narrow = 100
-        // A one-row viewport, left blank by the trailing newline. A taller viewport holding
-        // full-width content would rewrap into more rows than it can show and spill the
-        // remainder into a history already sitting exactly at its cap, evicting a row for a
-        // reason that has nothing to do with the caps being reflow-safe.
         var terminal = try #require(Terminal(
             columns: wide,
             rows: 1,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
-            scrollbackRowCap: 512,
-            scrollbackCellCap: 128 * wide
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes
         ))
         for index in 0..<4_000 {
             let line = String(String(repeating: "abcdefgh\(index % 10)", count: 20).prefix(wide))
             terminal.feed(Array((line + "\r\n").utf8))
         }
 
-        let atWide = terminal.scrollbackRowCount
+        let records = terminal.scrollbackRecordCount
         let textAtWide = terminal.primaryHistoryText
-        terminal.resize(columns: narrow, rows: 1)
-        let atNarrow = terminal.scrollbackRowCount
+        let rowsAtWide = terminal.scrollbackRowCount
+
+        for narrow in [100, 40, 2] {
+            terminal.resize(columns: narrow, rows: 1)
+            // Not one logical line lost, at any width -- and the display-row count grows, which
+            // is what made a display-row bound lossy in the first place.
+            #expect(terminal.scrollbackRecordCount == records)
+            #expect(terminal.scrollbackRowCount > rowsAtWide)
+            expectValidGrid(terminal)
+        }
+
         terminal.resize(columns: wide, rows: 1)
-
-        #expect(atWide > 0)
-        // The mechanism, not just the outcome: narrowing roughly doubles row count, and the
-        // cell cap is what keeps that doubling clear of the row cap. Under a row cap alone
-        // this is where the eviction happened.
-        #expect(atNarrow > atWide)
-        #expect(atNarrow <= terminal.scrollbackRowCap)
-        #expect(terminal.scrollbackRowCount == atWide)
+        #expect(terminal.scrollbackRecordCount == records)
+        #expect(terminal.scrollbackRowCount == rowsAtWide)
         #expect(terminal.primaryHistoryText == textAtWide)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
     }
 
-    @Test("whichever bound is reached first decides, so dense rows still evict on bytes")
-    func byteBudgetStillBindsBeforeTheRowCap() throws {
-        // Intent: the byte budget keeps deciding depth for content expensive enough to
-        //   reach it before the row cap does.
-        // Why it exists: the cap is an *additional* bound, not a replacement. A cap
-        //   that silently became the only bound would let pathological rows -- long,
-        //   multi-scalar, wide -- allocate without limit as long as they stayed under
-        //   the row count, which is the memory bound `I4` and doc 15 exist to hold.
-        // Scenario: full-width rows of program output against a generous row cap.
-        let columns = 200
-        let rowCost = historyRowCost(columns: columns)
-        let cap = 64
-        var terminal = try #require(Terminal(
-            columns: columns,
-            rows: 1,
-            scrollbackBudgetBytes: rowCost * 8,
-            scrollbackRowCap: cap,
-            scrollbackCellCap: Terminal.productionScrollbackCellCap
-        ))
-
-        for _ in 0..<(cap * 2) {
-            terminal.feed(Array(String(repeating: "x", count: columns).utf8))
-            terminal.feed(Array("\r\n".utf8))
-        }
-
-        #expect(terminal.scrollbackRowCount == 8)
-        #expect(terminal.scrollbackRowCount < cap)
-        #expect(terminal.scrollbackByteCount <= rowCost * 8)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-    }
-
-    @Test("cap-driven eviction marks a severed soft-wrapped line just as budget eviction does")
-    func rowCapEvictionMarksTruncation() throws {
-        // Intent: history-head truncation state is set by eviction the *cap* triggered,
-        //   not only by eviction the byte budget triggered.
-        // Why it exists: `isHistoryHeadTruncated` is what tells a reader the retained
-        //   stream was cut inside a logical line. Adding a second eviction trigger that
-        //   skipped it would leave a rejoined-looking wrapped line that is actually
-        //   severed -- a wrong answer no byte accounting would catch.
-        // Scenario: a soft-wrapped line scrolls off the top because the cap, not the
-        //   budget, forced it out.
-        let cap = 4
-        var terminal = try #require(Terminal(
-            columns: 4,
-            rows: 1,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
-            scrollbackRowCap: cap,
-            scrollbackCellCap: Terminal.productionScrollbackCellCap
-        ))
-
-        // A single logical line long enough to soft-wrap across several retained rows.
-        terminal.feed(Array(String(repeating: "w", count: 24).utf8))
-        terminal.feed(Array("\r\n".utf8))
-        for line in 0..<8 {
-            terminal.feed(Array("h\(line)\r\n".utf8))
-        }
-
-        #expect(terminal.scrollbackRowCount == cap)
-        #expect(terminal.isHistoryHeadTruncated == false)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-    }
-
-    @Test("public initializer enforces the fixed production row cap")
-    func publicProductionRowCapCrossing() throws {
-        // Intent: prove the public initializer alone wires the literal production cap.
-        // Why it exists: the same gap `publicProductionBudgetCrossing` closes for the
-        //   byte budget. Tiny injected caps cannot catch an omitted or wrong public
-        //   default, and at ordinary pane widths the cap is now the bound that actually
-        //   decides -- a short packed row costs ~108 B, so `D11`'s 89,500 rows is ~9.7 MB
-        //   against a 16 MiB budget this content does not reach.
-        // Scenario: sustained short-line output at a narrow width, which is exactly
-        //   where a byte-only bound used to retain tens of thousands of rows.
-        // The exact literals are pinned by `publicProductionBoundsCrossing`; this test
-        // asks whether the public initializer crosses whatever that constant is.
-        let cap = Terminal.productionScrollbackRowCap
-        var terminal = try #require(Terminal(columns: 8, rows: 1))
-
-        for line in 0..<(cap + 500) {
-            terminal.feed(Array("c\(line % 10)\r\n".utf8))
-        }
-
-        #expect(terminal.scrollbackRowCount == cap)
-        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-    }
-
-    @Test("eviction marks only a soft-wrapped cut and preserves retained structure")
+    @Test("a trimmed head reads as a mid-line continuation and carries no mark")
     func truncationTracksLastEvictedBoundary() throws {
-        // Intent: derive truncation from the last removed row without editing retained cells.
-        // Why it exists: only the deleted predecessor records whether the head is mid-line.
-        // Scenario: soft, hard, spacer/wide, and over-budget cluster cuts cross the seam.
-        let oneASCII = historyRowCost(columns: 2)
+        // Intent: when eviction cuts inside a logical line, what survives is a suffix that reads
+        //   as a continuation; when it cuts at a line boundary, the new head is a line start.
+        // Why it exists: `31/DD10` deletes the public `isHistoryHeadTruncated` -- it had no
+        //   production consumer and `31/DD2` made it constant -- and `31/D2` Decision 2 states
+        //   the fact it asserted as a property of what the fold emits at the top of history.
+        //   This is that property, asserted where the flag used to be.
+        // Scenario: soft, hard, and over-budget cluster cuts cross the seam.
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         var soft = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: oneASCII
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 6, paneColumns: 2)
         ))
-        soft.feed(Array("ABCDE".utf8))
+        // One logical line long enough that the budget has to cut *inside* it.
+        soft.feed(Array(alphabet.utf8))
 
-        #expect(soft.scrollbackRowCount == 1)
-        #expect(soft.scrollbackRow(at: 0)?.cells.map(\.scalars) == [["C"], ["D"]])
-        #expect(soft.primaryHistoryText == "CDE")
-        #expect(soft.isHistoryHeadTruncated)
+        #expect(soft.scrollbackRowCount >= 1)
+        #expect(soft.retainedRecordSummaryForTesting(at: 0)?.startsMidLine == true)
+        // What survives is a suffix of the line, and the head that survives reads as one.
+        #expect(alphabet.hasSuffix(soft.primaryHistoryText))
+        #expect(soft.primaryHistoryText.count < alphabet.count)
 
-        soft.feed(Array("\r\nF\r\n".utf8))
-        #expect(soft.isHistoryHeadTruncated == false)
+        // A hard newline gives history a line boundary to cut at instead, and the record that
+        // starts there is a line start rather than a continuation.
+        soft.feed(Array("\r\n".utf8))
+        for index in 0..<8 { soft.feed(Array("\(index)\r\n".utf8)) }
+        #expect(soft.retainedRecordSummaryForTesting(at: 0)?.startsMidLine == false)
         expectValidGrid(soft)
 
         var spacer = try #require(Terminal(
             columns: 3,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 3)
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 3)
         ))
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}ABCD".utf8))
@@ -459,17 +280,14 @@ struct TerminalScrollbackBudgetTests {
         var giant = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 2)
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 2)
         ))
         giant.feed(Array((family + "Z").utf8))
-        #expect(giant.scrollbackRowCount == 0)
-        #expect(giant.scrollbackByteCount == 0)
         #expect(giant.screenText == "Z ")
-        #expect(giant.isHistoryHeadTruncated)
         expectValidGrid(giant)
     }
 
-    @Test("ED 3 clears truncation and accounting before history restarts")
+    @Test("ED 3 clears accounting before history restarts")
     func eraseDisplayThreeResetsBudgetState() throws {
         // Intent: reset both derived byte state and eviction metadata with explicit erasure.
         // Why it exists: stale accounting would corrupt every later enforcement decision.
@@ -477,96 +295,82 @@ struct TerminalScrollbackBudgetTests {
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 2)
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 2)
         ))
         terminal.feed(Array("ABCDE".utf8))
-        #expect(terminal.isHistoryHeadTruncated)
-        #expect(terminal.scrollbackByteCount > 0)
+        #expect(terminal.scrollbackCensus.arenaBytesInUse > 0)
 
         terminal.feed(Array("\u{1B}[3J".utf8))
         #expect(terminal.scrollbackRowCount == 0)
-        #expect(terminal.scrollbackByteCount == 0)
-        #expect(terminal.recomputedScrollbackByteCount == 0)
-        #expect(terminal.isHistoryHeadTruncated == false)
+        #expect(terminal.scrollbackRecordCount == 0)
+        #expect(terminal.scrollbackCensus.arenaBytesInUse == 0)
 
         terminal.feed(Array("\r\nX\r\n".utf8))
         #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        expectValidGrid(terminal)
     }
 
     @Test("height and width resize enforce the budget after preserving retained suffixes")
     func resizePathsEnforceBudget() throws {
-        // Intent: enforce after height displacement and width reflow at the new row cost.
+        // Intent: enforce after height displacement and width refold at the new charge.
         // Why it exists: both paths can exceed the budget without a parser-driven scroll.
-        // Scenario: a pane shrinks, narrows, regrows, and reflows an already-truncated head.
-        let oneCellRowCost = historyRowCost(columns: 2)
-        var height = try #require(Terminal(
-            columns: 2,
-            rows: 4,
-            scrollbackBudgetBytes: oneCellRowCost * 2
-        ))
+        // Scenario: a pane shrinks, narrows, regrows, and refolds an already-trimmed head.
+        let twoLines = historyBudget(lines: 2, cells: 1, paneColumns: 2)
+        var height = try #require(Terminal(columns: 2, rows: 4, scrollbackBudgetBytes: twoLines))
         height.feed(Array("A\r\nB\r\nC\r\nD".utf8))
         height.resize(columns: 2, rows: 1)
         #expect(height.primaryHistoryText == "B\nC\nD")
-        #expect(height.scrollbackByteCount <= oneCellRowCost * 2)
+        expectValidGrid(height)
 
         var width = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 3
+            scrollbackBudgetBytes: historyBudget(lines: 3, cells: 4)
         ))
         width.feed(Array("ABCDEFGHI".utf8))
-        #expect(width.scrollbackByteCount == historyRowCost(columns: 4) * 2)
         let before = width.primaryHistoryText
 
         width.resize(columns: 2, rows: 1)
-        #expect(width.scrollbackByteCount <= historyRowCost(columns: 4) * 3)
-        #expect(width.scrollbackRowCount == 3)
-        #expect(before.hasSuffix(width.primaryHistoryText))
-        #expect(width.isHistoryHeadTruncated)
+        // A width change evicts nothing (`31/I3`), so the retained text is unchanged rather than
+        // a suffix of what it was -- which is what the caps could not promise.
+        #expect(width.primaryHistoryText == before)
         expectValidGrid(width)
 
         width.resize(columns: 2, rows: 4)
-        #expect(width.scrollbackRowCount == 0)
-        #expect(width.isHistoryHeadTruncated)
-        #expect(width.scrollbackByteCount == 0)
+        expectValidGrid(width)
 
-        var truncated = try #require(Terminal(
+        var trimmed = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 2) * 2
+            scrollbackBudgetBytes: twoLines
         ))
-        truncated.feed(Array("ABCDEFG".utf8))
-        #expect(truncated.isHistoryHeadTruncated)
-        let truncatedText = truncated.primaryHistoryText
-        truncated.resize(columns: 3, rows: 1)
-        #expect(truncated.primaryHistoryText == truncatedText)
-        #expect(truncated.isHistoryHeadTruncated)
-        expectValidGrid(truncated)
+        trimmed.feed(Array("ABCDEFG".utf8))
+        let trimmedText = trimmed.primaryHistoryText
+        trimmed.resize(columns: 3, rows: 1)
+        #expect(trimmed.primaryHistoryText == trimmedText)
+        expectValidGrid(trimmed)
     }
 
     @Test("truncating resize advances primary history generation on either screen")
     func truncatingResizeAdvancesPrimaryHistoryGeneration() throws {
-        // Intent: signal recovery whenever resize eviction changes retained primary history.
-        // Why it exists: generation-based recovery observation can otherwise miss a truncated
-        //   history head and keep stale text after resize.
+        // Intent: signal recovery whenever a resize changes retained primary history.
+        // Why it exists: generation-based recovery observation can otherwise keep stale text
+        //   after a resize moved the history/live seam.
         // Scenario: a budget-filled shell narrows either directly or behind a full-screen app.
         for entersAlternateScreen in [false, true] {
             var terminal = try #require(Terminal(
                 columns: 4,
                 rows: 1,
-                scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+                scrollbackBudgetBytes: historyBudget(lines: 2, cells: 4)
             ))
             terminal.feed(Array("ABCDEFGHI".utf8))
             if entersAlternateScreen {
                 terminal.feed(Array("\u{1B}[?1047h".utf8))
             }
-            let textBeforeResize = terminal.primaryHistoryText
             let generationBeforeResize = terminal.primaryHistoryGeneration
 
             terminal.resize(columns: 2, rows: 1)
 
-            #expect(terminal.primaryHistoryText != textBeforeResize)
             #expect(terminal.primaryHistoryGeneration != generationBeforeResize)
         }
     }
@@ -579,22 +383,19 @@ struct TerminalScrollbackBudgetTests {
         var active = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 4)
         ))
         active.feed(Array("ABCDEFGHI".utf8))
         var alternate = active
 
         alternate.feed(Array("\u{1B}[?1047h123456789012".utf8))
         #expect(alternate.scrollbackRowCount == active.scrollbackRowCount)
-        #expect(alternate.scrollbackByteCount == active.scrollbackByteCount)
-        #expect(alternate.isHistoryHeadTruncated == active.isHistoryHeadTruncated)
+        #expect(alternate.scrollbackCensus == active.scrollbackCensus)
 
         active.resize(columns: 2, rows: 1)
         alternate.resize(columns: 2, rows: 1)
         #expect(alternate.primaryHistoryText == active.primaryHistoryText)
         #expect(alternate.scrollbackRowCount == active.scrollbackRowCount)
-        #expect(alternate.scrollbackByteCount == active.scrollbackByteCount)
-        #expect(alternate.isHistoryHeadTruncated == active.isHistoryHeadTruncated)
         alternate.feed(Array("\u{1B}[?1047l".utf8))
         #expect(alternate.primaryHistoryText == active.primaryHistoryText)
         expectValidGrid(alternate)
@@ -605,6 +406,10 @@ struct TerminalScrollbackBudgetTests {
         // Intent: isolate eviction from cursor, saved state, modes, wrap, and cluster behavior.
         // Why it exists: later input must observe only the enclosing operation's state changes.
         // Scenario: each eviction path is compared immediately with its no-eviction twin.
+        //
+        // The twin is a separately constructed terminal at the production budget rather than a
+        // copy with its bound raised: the arena reserves its capacity once, at construction, so
+        // "the same terminal with an unlimited budget" is not a value that exists (`31/I2`).
         let paths: [(Terminal, Terminal) throws -> (Terminal, Terminal)] = [
             { bounded, unbounded in
                 var bounded = bounded
@@ -630,9 +435,15 @@ struct TerminalScrollbackBudgetTests {
         ]
 
         let setup: [(columns: Int, rows: Int, bytes: String, budget: Int)] = [
-            (2, 1, "A\r\n", historyRowCost(columns: 2)),
-            (2, 4, "A\r\nB\r\nC\r\nDE", historyRowCost(columns: 2) * 2),
-            (4, 1, "ABCDEFGHI", historyRowCost(columns: 4) * 2),
+            (2, 1, "A\r\n", historyBudget(lines: 1, cells: 2)),
+            (
+                2, 4, "A\r\nB\r\nC\r\nDE",
+                historyBudget(lines: 2, cells: 2)
+            ),
+            (
+                4, 1, "ABCDEFGHI",
+                historyBudget(lines: 2, cells: 4)
+            ),
         ]
 
         for index in paths.indices {
@@ -641,14 +452,9 @@ struct TerminalScrollbackBudgetTests {
                 rows: setup[index].rows,
                 scrollbackBudgetBytes: setup[index].budget
             ))
-            var unbounded = try #require(Terminal(
-                columns: setup[index].columns,
-                rows: setup[index].rows,
-                scrollbackBudgetBytes: .max
-            ))
             let prefix = "\u{1B}[4h\u{1B}7"
             bounded.feed(Array((prefix + setup[index].bytes).utf8))
-            unbounded.feed(Array((prefix + setup[index].bytes).utf8))
+            let unbounded = bounded.withUnlimitedScrollbackForTesting()
 
             var pair = try paths[index](bounded, unbounded)
             #expect(pair.0.geometry == pair.1.geometry)
@@ -664,7 +470,7 @@ struct TerminalScrollbackBudgetTests {
         var cluster = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 2)
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 2)
         ))
         cluster.feed(Array("ABCD".utf8))
         var clusterOracle = cluster.withUnlimitedScrollbackForTesting()
@@ -679,16 +485,19 @@ struct TerminalScrollbackBudgetTests {
 
     @Test("seeded budget oracle remains a suffix and replay is chunk invariant")
     func seededTwinOracleAndChunkInvariance() throws {
-        // Intent: sweep all mutation families against a fresh operation-local unlimited twin.
-        // Why it exists: cached totals and eviction metadata must remain coherent in composition.
+        // Intent: sweep all mutation families against a fresh operation-local unbounded twin.
+        // Why it exists: the maintained totals, the derived index and the charge must remain
+        //   coherent in composition -- `31/AR4`'s stale index is the failure mode with no
+        //   analogue in the old store, and only a recount against the arena catches it.
         // Scenario: random input, single-axis resizes, and ED 3 replay whole and bytewise.
         let tokens = ["a", "b", " ", "\u{754C}", "\u{1F642}", "\r\n", "\n", "\u{1B}[3J"]
+        let budget = historyBudget(lines: 2, cells: 5)
         for seed in UInt64(1)...32 {
             var generator = Generator(state: seed)
             var bounded = try #require(Terminal(
                 columns: 5,
                 rows: 2,
-                scrollbackBudgetBytes: historyRowCost(columns: 5) * 5 / 2
+                scrollbackBudgetBytes: budget
             ))
             var actions: [Action] = []
 
@@ -710,7 +519,6 @@ struct TerminalScrollbackBudgetTests {
                     action = .feed(Array(tokens[Int(generator.next() % UInt64(tokens.count))].utf8))
                 }
                 actions.append(action)
-                let previousFlag = bounded.isHistoryHeadTruncated
                 var unbounded = bounded.withUnlimitedScrollbackForTesting()
                 apply(action, to: &bounded, bytewise: false)
                 apply(action, to: &unbounded, bytewise: false)
@@ -723,33 +531,14 @@ struct TerminalScrollbackBudgetTests {
                 )
                 #expect(bounded.geometry == unbounded.geometry)
                 #expect(bounded.screenText == unbounded.screenText)
-                let removedCount = unbounded.scrollbackRowCount - bounded.scrollbackRowCount
-                #expect(removedCount >= 0)
-                if removedCount > 0 {
-                    #expect(
-                        bounded.isHistoryHeadTruncated
-                            == unbounded.scrollbackRow(at: removedCount - 1)?.isSoftWrapped,
-                        "seed \(seed), action \(actions.count), script \(actions)"
-                    )
-                } else if case let .feed(bytes) = action,
-                          bytes == Array("\u{1B}[3J".utf8)
-                {
-                    #expect(bounded.isHistoryHeadTruncated == false)
-                } else {
-                    #expect(
-                        bounded.isHistoryHeadTruncated == previousFlag,
-                        "seed \(seed), action \(actions.count), script \(actions)"
-                    )
-                }
-                #expect(bounded.scrollbackByteCount <= historyRowCost(columns: 5) * 5 / 2)
-                #expect(bounded.scrollbackByteCount == bounded.recomputedScrollbackByteCount)
+                #expect(bounded.scrollbackRowCount <= unbounded.scrollbackRowCount)
                 expectValidGrid(bounded)
             }
 
             var bytewise = try #require(Terminal(
                 columns: 5,
                 rows: 2,
-                scrollbackBudgetBytes: historyRowCost(columns: 5) * 5 / 2
+                scrollbackBudgetBytes: budget
             ))
             for action in actions {
                 apply(action, to: &bytewise, bytewise: true)
@@ -758,38 +547,27 @@ struct TerminalScrollbackBudgetTests {
         }
     }
 
-    @Test("public initializer wires all three bounds, and the caps bind before the budget")
+    @Test("public initializer wires the one production bound")
     func publicProductionBoundsCrossing() throws {
-        // Intent: prove the public initializer alone wires the three literal production
-        //   bounds, and that on ordinary content the caps are what decide depth.
-        // Why it exists: tiny injected bounds cannot catch an omitted or incorrect public
-        //   default, and these three literals are a deliberate ruling rather than a
-        //   detail -- `D8` derived them from a ~150 ms resize budget, and `D11` re-sized
-        //   the caps from a depth target (10,000 full-width rows at 179 columns) and
-        //   raised the budget to cover them. A silent edit to any of the three moves both
-        //   the memory footprint and the worst-case reflow, so they are pinned literally
-        //   here and nowhere else. `byteBudgetStillBindsBeforeTheRowCap` covers the
-        //   byte-expensive side; this one pins that the constants are wired and that the
-        //   budget is not silently doing the caps' work on ordinary content.
+        // Intent: prove the public initializer alone wires the literal production budget, and
+        //   that the arena's capacity is held below it by the metadata reserve.
+        // Why it exists: a tiny injected budget cannot catch an omitted or incorrect public
+        //   default, and this literal is a deliberate ruling rather than a detail -- `28/D11`
+        //   raised it to cover two caps that doc 31 deletes, and `31/D2` Decision 1 re-derived
+        //   the same number on new grounds. The two caps it used to be pinned beside are gone
+        //   with the reflow of history they priced (`31/D2` Decision 4).
         // Scenario: sustained ordinary output at a narrow width.
         var terminal = try #require(Terminal(columns: 8, rows: 1))
 
-        for line in 0..<(Terminal.productionScrollbackRowCap + 500) {
+        for line in 0..<20_000 {
             terminal.feed(Array("c\(line % 10)\r\n".utf8))
         }
 
-        #expect(terminal.scrollbackBudgetBytes == 16_777_216)
-        #expect(terminal.scrollbackRowCap == 89_500)
-        #expect(terminal.scrollbackCellCap == 1_790_000)
-        // `D8`'s losslessness property, restated as the arithmetic that keeps it: below
-        // `cellCap / rowCap` columns the row cap evicts what widening cannot restore.
-        #expect(terminal.scrollbackCellCap / terminal.scrollbackRowCap == 20)
-        // The row cap decided here: these rows hold 2 stored cells, so the cell cap is far away.
-        #expect(terminal.scrollbackRowCount == Terminal.productionScrollbackRowCap)
-        #expect(terminal.scrollbackStoredCellCount < Terminal.productionScrollbackCellCap)
-        #expect(terminal.scrollbackByteCount < terminal.scrollbackBudgetBytes)
-        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
-        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
+        let census = terminal.scrollbackCensus
+        #expect(census.budgetBytes == 16_777_216)
+        #expect(census.capacityBytes == 16_777_216 - 16_777_216 / 16)
+        #expect(census.chargedBytes <= census.capacityBytes)
+        #expect(terminal.scrollbackRowCount == 20_000)
     }
 
     private enum Action {
@@ -825,13 +603,12 @@ struct TerminalScrollbackBudgetTests {
 
     @Test("history holds no more real memory than the budget it was given")
     func historyRespectsItsBudgetInRealBytes() throws {
-        // Intent: after sustained output, the cell storage history actually holds fits inside the
-        //   byte budget the terminal was configured with.
-        // Why it exists: the cost model charged 40 bytes for an ordinary cell whose real cost is a
-        //   72-byte stride, so a 10 MB budget admitted ~22 MB of scrollback -- a user who asks for
-        //   10 MB of history got more than twice that (doc 15's H1, confirmed in magnitude by
-        //   `15/F2`). Every other test here checks the model against itself and so could not see
-        //   it; this one checks the model against what the grid is really holding.
+        // Intent: after sustained output, what history actually holds fits inside the byte
+        //   budget the terminal was configured with.
+        // Why it exists: the pre-doc-15 cost model charged 40 bytes for a cell whose real cost
+        //   was a 72-byte stride, so a 10 MB budget admitted ~22 MB of scrollback. Every other
+        //   test here checks the model against itself and so could not see it; this one checks
+        //   the model against what the store is really holding.
         // Scenario: any long-running session that has filled its history.
         let columns = 179
         var terminal = try #require(Terminal(columns: columns, rows: 66))
@@ -840,23 +617,15 @@ struct TerminalScrollbackBudgetTests {
         }
 
         let census = terminal.memoryCensus
-        // Live rows remain full width, so subtracting their cells leaves the exact compact
-        // history-cell storage. Deliberately measured from the census rather than from
-        // `scrollbackByteCount`, which is the very thing under test.
-        // Read as what history's packed rows really hold, which is what the budget is spent
-        // on since doc 28's packing. Multiplying a retained cell count by the live-grid stride
-        // would price a representation history no longer uses -- and would answer ~35 MB for
-        // a 10 MB budget purely because the same budget now admits ~9x the rows.
-        let historyBytes = census.retainedPackedPayloadBytes
         #expect(census.scrollbackRowCount > 0)
-        #expect(historyBytes <= Terminal.productionScrollbackBudgetBytes)
-        // The depth the smaller charge bought, stated rather than implied: the same budget
-        // holding far more rows is the whole point, and a regression that silently gave it
-        // back would leave every assertion above still passing.
+        #expect(census.retainedChargedBytes <= census.retainedArenaCapacityBytes)
+        #expect(census.retainedArenaCapacityBytes < Terminal.productionScrollbackBudgetBytes)
+        #expect(census.hasRetainedStorageOverdraft == false)
+        // The depth the smaller charge bought, stated rather than implied.
         #expect(census.retainedStoredCellCount > 0)
-        // Bounded on both sides: `C1`'s cell is 8 bytes (`D9`), so the floor says a retained
-        // cell really is packed, and the ceiling says the header and side tables have not
-        // grown into a second cell's worth.
+        // Bounded on both sides: a record's cell is 8 bytes, so the floor says a retained cell
+        // really is packed, and the ceiling says the header and side tables have not grown into
+        // a second cell's worth.
         #expect(census.retainedBytesPerStoredCell > 8)
         #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 3)
     }

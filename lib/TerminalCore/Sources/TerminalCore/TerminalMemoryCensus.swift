@@ -30,8 +30,16 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// where the retained primary screen is counted too and this exceeds it.
     public var screenRowCount: Int
 
-    /// Rows retained in history, after budget eviction.
+    /// Display rows retained history folds to at the current width, after budget eviction.
+    ///
+    /// Derived rather than stored since doc 31: history holds one record per logical line, and a
+    /// display row is what a width makes of one. A narrower pane reports more of these for the
+    /// same retained content, and evicts none of it (`31/I3`).
     public var scrollbackRowCount: Int
+
+    /// Logical lines retained in history -- the unit the store actually holds, and the one that
+    /// does not move when the pane is resized.
+    public var scrollbackRecordCount: Int
 
     /// Cells physically stored across the whole grid; compact history rows may be narrower.
     ///
@@ -47,7 +55,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     ///
     /// Applies to the live screens only since doc 28's packing. A retained row does not store
     /// `GridCell`s at all, so multiplying a retained cell count by this stride answers a question
-    /// about a representation that no longer exists -- read `retainedPackedPayloadBytes` instead.
+    /// about a representation that no longer exists -- read `retainedArenaBytesInUse` instead.
     public var cellStrideBytes: Int
 
     /// Exact bytes of cell storage across the whole grid: live screen cells at their stride, plus
@@ -64,21 +72,33 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// retained-row probe reconstructs from the public row reader.
     public var retainedStoredCellCount: Int
 
-    /// Exact payload bytes of history's packed blobs, headers and side tables included.
+    /// Arena bytes history's records occupy right now -- headers, cells and in-arena side tables.
     ///
-    /// This is what history really holds and what the byte budget is spent on, so it is the number
-    /// a "does history fit its budget" proof reads. Excludes the per-row slot in history's own
-    /// buffer, the blob's array header, and malloc's rounding, all of which the budget charges on
-    /// top and none of which is cell content.
-    public var retainedPackedPayloadBytes: Int
+    /// This is what history really holds, so it is the number a "does history fit its budget"
+    /// proof reads, together with the index and out-of-arena side-table terms below.
+    public var retainedArenaBytesInUse: Int
 
-    /// Separate heap allocations backing rows -- one per row with cells. Doc 15's H7 is about the
-    /// per-allocation overhead this number multiplies.
+    /// The arena's allocated capacity, held below the byte budget by a fixed metadata reserve so
+    /// the index and the side tables are resident *inside* the bound (`31/DD36`).
+    ///
+    /// Allocated once and never grown, compacted or shrunk, which is what makes doc 15's `F4`
+    /// leak unrepresentable: there are no per-row allocations left for eviction to strand, and
+    /// the proof is "bytes-in-use falls when records are evicted, and this does not grow"
+    /// (`31/DD11`).
+    public var retainedArenaCapacityBytes: Int
+
+    /// The derived index's charge: per-record offsets plus per-block display-row totals.
+    public var retainedIndexBytes: Int
+
+    /// Side tables held outside the arena -- multi-scalar spills and trailing fill styles --
+    /// charged at what their allocator gave rather than at what their live entries weigh
+    /// (`31/DD37`).
+    public var retainedSideTableBytes: Int
+
+    /// Separate heap allocations backing *live* rows -- one per row with cells. Doc 15's H7 is
+    /// about the per-allocation overhead this number multiplies. History contributes none: its
+    /// cells all live in the one arena.
     public var rowStorageAllocationCount: Int
-
-    /// Rows for which storage is still held. Equals `scrollbackRowCount` unless eviction is
-    /// retaining rows it dropped, which is the defect doc 15's F4 found and D1 fixed.
-    public var retainedRowStorageRowCount: Int
 
     /// Cells whose style differs from the default. Sizes doc 15's H3.
     public var styledCellCount: Int
@@ -112,19 +132,24 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
         cellCount == 0 ? 0 : Double(cellStorageBytes) / Double(cellCount)
     }
 
-    /// Average packed payload bytes per retained cell -- the headline `C6` moved, stated per cell
-    /// so it can be held against `cellStrideBytes` directly.
+    /// Average arena bytes per retained cell -- the headline `C6` moved, stated per cell so it can
+    /// be held against `cellStrideBytes` directly.
     public var retainedBytesPerStoredCell: Double {
         retainedStoredCellCount == 0
             ? 0
-            : Double(retainedPackedPayloadBytes) / Double(retainedStoredCellCount)
+            : Double(retainedArenaBytesInUse) / Double(retainedStoredCellCount)
     }
 
-    /// True when history holds cell storage for rows it no longer reports.
-    ///
-    /// A census that could not see this could report a confidently wrong number, since the waste
-    /// is invisible to the byte budget -- exactly what happened before doc 15's D1.
-    public var hasRetainedRowStorageLeak: Bool {
-        retainedRowStorageRowCount > scrollbackRowCount
+    /// Everything history charges against its byte budget: the arena in use plus the derived index
+    /// plus every side table (`31/I2`).
+    public var retainedChargedBytes: Int {
+        retainedArenaBytesInUse + retainedIndexBytes + retainedSideTableBytes
+    }
+
+    /// True when history charges more than the capacity it was built at, which the one bound
+    /// `31/I2` states makes unreachable. Replaces doc 15's per-row leak flag, whose subject --
+    /// a heap allocation per retained row -- no longer exists.
+    public var hasRetainedStorageOverdraft: Bool {
+        retainedChargedBytes > retainedArenaCapacityBytes
     }
 }

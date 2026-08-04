@@ -52,9 +52,7 @@ func buildBlankStimulus(lineCount: Int, columns: Int = 179, rows: Int = 66) -> R
     var terminal = Terminal(
         columns: columns,
         rows: rows,
-        scrollbackBudgetBytes: 1 << 30,
-        scrollbackRowCap: 1_000_000,
-        scrollbackCellCap: 1 << 30
+        scrollbackBudgetBytes: 1 << 28
     )!
 
     let chunk = Array(String(repeating: "\r\n", count: 256).utf8)

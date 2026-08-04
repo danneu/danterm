@@ -117,7 +117,7 @@ struct TerminalViewportTests {
         var terminal = try #require(Terminal(
             columns: 4,
             rows: 3,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 1) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 4)
         ))
         terminal.feed(Array("a\r\nb\r\nc\r\nd\r\ne".utf8))
         terminal.scroll(toTopRow: 0)
@@ -136,7 +136,7 @@ struct TerminalViewportTests {
         var reflow = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 8) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 8)
         ))
         reflow.feed(Array("abcdefghijklmnopqrstuvwxyz012345".utf8))
         reflow.scroll(toTopRow: 0)

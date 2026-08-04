@@ -220,15 +220,6 @@ public struct Terminal: Equatable, Sendable {
             row.cells = Array(cells.prefix(storedCount))
             return row
         }
-
-        /// Writes anywhere in the logical row, materializing omitted padding first when needed.
-        mutating func setCell(_ cell: GridCell, at column: Int, columns: Int) {
-            precondition(column >= 0 && column < columns)
-            if cells.count < columns {
-                cells.append(contentsOf: repeatElement(GridCell(), count: columns - cells.count))
-            }
-            cells[column] = cell
-        }
     }
 
     /// Tracks a shell-redraw prompt row through prompt -> vacated -> repainted or
@@ -281,105 +272,6 @@ public struct Terminal: Equatable, Sendable {
         var cursorPresentation: TerminalPresentation
     }
 
-    /// Gives retained rows logical zero-based indices while front eviction stays amortized O(1).
-    ///
-    /// Holds `PackedRetainedRow`, not `GridRow`: history is the only place doc 28's `C6`
-    /// representation lives, and the buffer is the seam. Callers that want cells reach them
-    /// through the packed row's own readers, or pay one `unpacked()` when they inherently
-    /// read the whole row.
-    private struct ScrollbackBuffer: Equatable, Sendable {
-        private var storage: [PackedRetainedRow] = []
-        private var storageStart = 0
-
-        var count: Int { storage.count - storageStart }
-        var isEmpty: Bool { count == 0 }
-        var indices: Range<Int> { 0..<count }
-
-        init() {}
-
-        init<S: Sequence>(_ rows: S) where S.Element == GridRow {
-            storage = rows.map { PackedRetainedRow.pack($0) }
-        }
-
-        subscript(position: Int) -> PackedRetainedRow {
-            get {
-                precondition(indices.contains(position))
-                return storage[storageStart + position]
-            }
-            set {
-                precondition(indices.contains(position))
-                storage[storageStart + position] = newValue
-            }
-        }
-
-        /// Reports how many rows this buffer still holds cell storage for. Equals `count` only
-        /// while front eviction actually releases what it drops, which is the invariant it exists
-        /// to prove; see doc 15's `F4` for the regression that motivated it.
-        var retainedCellStorageRowCount: Int {
-            storage.reduce(0) { $0 + ($1.storedCellCount == 0 ? 0 : 1) }
-        }
-
-        mutating func append(_ row: PackedRetainedRow) {
-            storage.append(row)
-        }
-
-        /// Unpacks the whole retained stream. Reserved for consumers that inherently read
-        /// all of history -- search, Select All, export, width reflow -- and never reached
-        /// from a point query, which is what `activeProjection()` exists for.
-        func asArray() -> [GridRow] {
-            storage[storageStart...].map { $0.unpacked() }
-        }
-
-        func suffix(from index: Int) -> [GridRow] {
-            precondition(indices.contains(index) || index == count)
-            return storage[(storageStart + index)...].map { $0.unpacked() }
-        }
-
-        mutating func removeFirst() -> PackedRetainedRow {
-            precondition(isEmpty == false)
-            let row = storage[storageStart]
-            // Release the evicted row's storage now rather than at the next compaction. A slot
-            // below `storageStart` owns nothing: it is unreachable through every accessor here,
-            // but its blob is a separate heap allocation that stays live while the slot holds it.
-            // Since compaction will not run until dead slots outnumber live ones, skipping this
-            // let history retain up to twice the rows it admitted (doc 15's `F4`).
-            storage[storageStart] = PackedRetainedRow()
-            storageStart += 1
-            compactIfNeeded()
-            return row
-        }
-
-        mutating func removeLast(_ count: Int) {
-            precondition(count >= 0 && count <= self.count)
-            storage.removeLast(count)
-            if isEmpty {
-                storage.removeAll(keepingCapacity: true)
-                storageStart = 0
-            }
-        }
-
-        mutating func removeAll(keepingCapacity: Bool) {
-            storage.removeAll(keepingCapacity: keepingCapacity)
-            storageStart = 0
-        }
-
-        static func == (lhs: Self, rhs: Self) -> Bool {
-            guard lhs.count == rhs.count else { return false }
-            return lhs.indices.allSatisfy { lhs[$0] == rhs[$0] }
-        }
-
-        private mutating func compactIfNeeded() {
-            if storageStart == storage.count {
-                storage.removeAll(keepingCapacity: false)
-                storageStart = 0
-                return
-            }
-            guard storageStart >= 1_024, storageStart * 2 >= storage.count else { return }
-            storage = Array(storage[storageStart...])
-            storageStart = 0
-        }
-    }
-
     /// Indexed view of the active text projection -- retained scrollback followed by the live
     /// rows -- so a point-local query reads only the rows it touches instead of materializing a
     /// copy of the whole retained stream on every pointer event.
@@ -390,28 +282,55 @@ public struct Terminal: Equatable, Sendable {
     /// reader match the materialized projection row for row.
     ///
     /// Constructing one is O(1): both row collections are copy-on-write and nothing here mutates
-    /// them, so the whole type is two retained buffers and a flag.
+    /// them, so the whole type is a store, a row array and a flag.
+    ///
+    /// Materializes a `GridRow` per history subscript, which is `31/D3` Decision 5's deliberate
+    /// scope line for milestone 1: today's subscript already unpacks one row per access, so the
+    /// facade is a wash against it, and the per-frame path never comes through here at all.
+    /// Replacing it with a borrowing cursor is the follow-up plan's.
     private struct ProjectionRows: RandomAccessCollection {
-        private let scrollback: ScrollbackBuffer
+        private let history: LogicalLineStore
+        private let historyRows: Int
         private let live: [GridRow]
+        private let columns: Int
         private let isAlternateScreenActive: Bool
 
-        init(scrollback: ScrollbackBuffer, live: [GridRow], isAlternateScreenActive: Bool) {
-            self.scrollback = scrollback
+        init(
+            history: LogicalLineStore,
+            live: [GridRow],
+            columns: Int,
+            isAlternateScreenActive: Bool
+        ) {
+            self.history = history
+            historyRows = history.grandDisplayRowTotal
             self.live = live
+            self.columns = columns
             self.isAlternateScreenActive = isAlternateScreenActive
         }
 
         var startIndex: Int { 0 }
-        var endIndex: Int { scrollback.count + live.count }
+        var endIndex: Int { historyRows + live.count }
 
         subscript(position: Int) -> GridRow {
-            guard position < scrollback.count else {
-                return live[position - scrollback.count]
+            guard position < historyRows else {
+                return live[position - historyRows]
             }
-            var row = scrollback[position].unpacked()
-            if isAlternateScreenActive, position == scrollback.count - 1 {
-                row.isSoftWrapped = false
+            guard var row = history.paintedDisplayRow(at: position) else {
+                preconditionFailure("the projection addressed a display row history does not hold")
+            }
+            if isAlternateScreenActive {
+                if position == historyRows - 1 { row.isSoftWrapped = false }
+                return row
+            }
+            if position == historyRows - 1,
+               let spacer = Terminal.seamSpacer(
+                   inHistory: history,
+                   row: row,
+                   live: live,
+                   columns: columns
+               )
+            {
+                row.cells.append(spacer)
             }
             return row
         }
@@ -556,13 +475,6 @@ public struct Terminal: Equatable, Sendable {
         case scalars([Unicode.Scalar])
     }
 
-    /// Reuses cursor reflow keys and logical-line boundaries for inspection anchors.
-    private enum ReflowTextAttachment {
-        case cell(key: Int, width: Int, usesStart: Bool)
-        case lineStart(Int)
-        case lineEnd(Int)
-    }
-
     /// Keeps the one DECSC slot independent from live cursor and mode mutation.
     private struct SavedCursorState: Equatable, Sendable {
         var position = CellPosition(row: 0, column: 0)
@@ -611,6 +523,9 @@ public struct Terminal: Equatable, Sendable {
     /// Relates an old visual row to its transient logical line and boundary.
     private struct ReflowRowMetadata {
         var line: Int
+        /// The logical offset this row's first cell sits at in its line, which is what turns a
+        /// live (row, column) anchor into the boundary key `pack` produces destinations for.
+        var startOffset: Int
         var boundaryOffset: Int
         var retainedEnd: Int
         var firstSourceKey: Int?
@@ -640,7 +555,20 @@ public struct Terminal: Equatable, Sendable {
 
     private var columnCount: Int
     private var rowCount: Int
-    private var scrollbackRows = ScrollbackBuffer()
+
+    /// Retained history, as one record per logical line printed (doc 31).
+    ///
+    /// Assigned in `init` rather than defaulted: the store owns the width its derived index is
+    /// meaningful at, and there is no width until the terminal has one.
+    private var history: LogicalLineStore
+
+    /// The store's monotone eviction counter as this terminal last saw it.
+    ///
+    /// Separate from `evictedRowCount`, which a hard reset restarts while history survives it, and
+    /// which therefore cannot double as a high-water mark. The difference between the two counters
+    /// is what `syncHistoryEvictions` hands `handleEviction`, so admission's own eviction and an
+    /// explicit budget pass are reported through exactly one path.
+    private var historyEvictionsObserved = 0
     private var rows: [GridRow]
     private var inactivePrimaryScreen: InactivePrimaryScreen?
     private var scrollRegion: Range<Int>?
@@ -760,59 +688,14 @@ public struct Terminal: Equatable, Sendable {
     /// enforcing this fixed value is an invariant with its own test.
     public static let productionScrollbackBudgetBytes = 16_777_216
 
-    /// The retained-history cell bound, and the one that actually bounds a resize.
+    /// The smallest budget the arena can be built at, which is the store's own precondition.
     ///
-    /// Reflow cost is two-term. Doc 28's `D8` fits it at **1.85 us/row + 0.352 us/cell** on the
-    /// packed representation, across three content regimes, and the cell term dominates at any
-    /// real pane width. Being denominated in *content* is what makes this bound safe under
-    /// reflow: rewrapping a row moves stored cells between rows but does not create or destroy
-    /// them, so a narrow-then-widen cycle evicts nothing. A row cap alone does not have that
-    /// property -- see `productionScrollbackRowCap`.
-    ///
-    /// **What sizes it now is a depth target, not the resize budget.** Through `D8` this value
-    /// was 327,680, derived so that the simultaneous worst case fit `D8`'s ~150 ms budget (1.5x
-    /// the 99.5 ms pre-packing baseline). `D11` reopens that budget by explicit human choice and
-    /// sizes the cap from `F23`'s candidate (b) instead: **10,000 retained rows of full-width
-    /// content at 179 columns**, i.e. `10,000 x 179 = 1,790,000` stored cells. The old
-    /// derivation does not produce this number and is no longer what justifies it.
-    ///
-    /// The price is measured, not modelled away. `F23` timed a saturated resize at this cap and
-    /// row cap at **600.5 ms** (min 594.1, max 632.9) -- 6.04x the 99.5 ms baseline and 4.00x
-    /// `D8`'s budget. That cost is accepted *provisionally*, for a dogfood trial with an exit
-    /// condition; `D11` states the trial and the three ways out of it. Nothing here supersedes
-    /// `D8`'s cost model, which still predicts this correctly (it overreads by 7.7-12.0%).
-    public static let productionScrollbackCellCap = 1_790_000
+    /// Named so a test that wants the byte bound to bind early can size against it rather than
+    /// discovering the floor as a failed initializer. Low enough that a fixture can ask for a
+    /// two-line history: the arena's fixed costs -- the metadata reserve and the index rings'
+    /// allocation -- are what a floor really buys, and both are small.
+    static let minimumScrollbackBudgetBytes = 128
 
-    /// The retained-history row bound: a backstop for content the cell cap cannot see.
-    ///
-    /// The cell cap bounds the dominant reflow term but is blind to the degenerate regime `F9`
-    /// describes -- a retained row can hold ~zero stored cells (a blank line costs 80 B and
-    /// stores nothing), so a history of blank rows would satisfy any cell cap while making row
-    /// count, and with it the `1.85 us/row` term, unbounded.
-    ///
-    /// Sized to hold the losslessness property below against the cell cap, rather than chosen as
-    /// a round number: `cellCap / 20` = `1,790,000 / 20` = **89,500**. Through `D8` the same
-    /// ratio fell out of the resize budget (16,384 against a 327,680 cell cap); under `D11` the
-    /// cell cap is sized from a depth target instead, and this cap follows it to keep the ratio
-    /// at 20. It sits far above the 1,000-10,000 rows every mainstream terminal defaults to
-    /// (`xterm` 1,024, `foot` 1,000, `kitty` 2,000, `tmux` 2,000, `alacritty` 10,000).
-    ///
-    /// **The one place this bound is lossy.** Narrowing a pane multiplies row count while
-    /// leaving cells alone, so below `cellCap / rowCap` = 20 columns the row cap can bind on the
-    /// way down and evict content that widening cannot restore. Above 20 columns the cell cap
-    /// holds row count low enough that rewrapping never reaches this bound, which is what
-    /// `narrowThenWidenPreservesCappedHistory` pins. Raising `rowCap` to make even a 10-column
-    /// pane lossless would cost the cell cap most of its budget, and `D8` takes the trade
-    /// deliberately rather than by omission.
-    ///
-    /// The ratio is not cosmetic, and `F23` measured what breaking it costs: the same cell cap
-    /// with `rowCap` left at 10,000 (ratio 179) looks cheaper to resize -- 296.3 ms -- but the
-    /// first narrowing to 100 columns **evicted 5,032 of its 10,000 rows**. A row cap set to the
-    /// depth target rather than to `cellCap / 20` does not hold that depth.
-    ///
-    /// Public for the same reason the budget is: measurement tools report the bound they ran
-    /// against, and the public initializer enforcing this value is an invariant with its own test.
-    public static let productionScrollbackRowCap = 89_500
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
 
@@ -847,23 +730,21 @@ public struct Terminal: Equatable, Sendable {
     var retainedStyleCount: Int { styleTable.count }
 
     /// Makes the active bound visible to shared structural test assertions.
-    private(set) var scrollbackBudgetBytes: Int
+    ///
+    /// The one bound history has since doc 31: the cell and row caps priced a width reflow of
+    /// retained rows, and history is no longer reflowed (`31/D2` Decision 4).
+    var scrollbackBudgetBytes: Int { history.budgetBytes }
 
-    /// The active row cap. See `productionScrollbackRowCap` for why there are three bounds.
-    private(set) var scrollbackRowCap: Int
+    /// The store's own accounting, with budget, capacity and bytes-in-use reported separately so
+    /// a proof can hold each against the others (`31/PO3`, `31/DD11`).
+    var scrollbackCensus: LogicalLineStore.Census { history.census }
 
-    /// The active cell cap. See `productionScrollbackCellCap`.
-    private(set) var scrollbackCellCap: Int
-
-    /// Caches retained stored cells so the line-feed path never re-walks history to enforce the
-    /// cell cap. Maintained exactly like `scrollbackByteCount`, at the same two sites.
-    private(set) var scrollbackStoredCellCount = 0
-
-    /// Caches retained-row cost so the line-feed path never scans full history.
-    private(set) var scrollbackByteCount = 0
-
-    /// Records whether eviction severed the retained stream inside a logical line.
-    public private(set) var isHistoryHeadTruncated = false
+    /// Display rows retained history currently folds to at this width.
+    ///
+    /// Derived rather than counted since doc 31 -- it is the index's maintained grand total, not
+    /// an array length -- which is why `31/D3` Decision 1 insists it stay O(1): the tree reads it
+    /// around every `feed` and roughly 200 times per planned frame.
+    private var historyRowCount: Int { history.grandDisplayRowTotal }
 
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
     ///
@@ -966,7 +847,7 @@ public struct Terminal: Equatable, Sendable {
         let projection = scrollProjection
         let cursorStreamRow = isAlternateScreenActive
             ? cursor.row
-            : scrollbackRows.count + cursor.row
+            : historyRowCount + cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return DamageActionSnapshot(
             cursor: (0..<rowCount).contains(cursorWindowRow)
@@ -1184,7 +1065,7 @@ public struct Terminal: Equatable, Sendable {
                 for cell in row.cells { live.insert(cell.styleId) }
             }
         }
-        collect(scrollbackRows.asArray(), into: &live)
+        collect(history.allPaintedDisplayRows(), into: &live)
         collect(rows, into: &live)
         if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
         return live
@@ -1216,39 +1097,35 @@ public struct Terminal: Equatable, Sendable {
             columns: columns,
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
-            scrollbackRowCap: Self.productionScrollbackRowCap,
-            scrollbackCellCap: Self.productionScrollbackCellCap,
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors
         )
     }
 
-    /// Gives deterministic tests a small budget while production remains fixed at 10 MiB.
+    /// Gives deterministic tests a small budget while production remains fixed at 16 MiB.
     ///
-    /// `scrollbackRowCap` defaults to the production cap rather than to "unbounded": a test that
-    /// asks for a small budget is asking to reach the *byte* bound sooner, not to opt out of the
-    /// row bound, and defaulting it away would let a fixture retain a depth production never can.
+    /// The lower bound is the arena's: the store reserves its whole capacity at construction and
+    /// holds it below the budget by a fixed metadata reserve (`31/DD36`), so a budget too small to
+    /// hold a record plus its index is not a shallower history but an unusable one.
     init?(
         columns: Int,
         rows: Int,
         scrollbackBudgetBytes: Int,
-        scrollbackRowCap: Int = Terminal.productionScrollbackRowCap,
-        scrollbackCellCap: Int = Terminal.productionScrollbackCellCap,
         machineHostname: String? = nil,
         programVersion: String = "dev",
         defaultColors: TerminalDefaultColors = .baked
     ) {
-        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0, scrollbackRowCap >= 0,
-            scrollbackCellCap >= 0
+        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= Self.minimumScrollbackBudgetBytes
         else {
             return nil
         }
         columnCount = columns
         rowCount = rows
-        self.scrollbackBudgetBytes = scrollbackBudgetBytes
-        self.scrollbackRowCap = scrollbackRowCap
-        self.scrollbackCellCap = scrollbackCellCap
+        history = LogicalLineStore(
+            budgetBytes: scrollbackBudgetBytes & ~7,
+            width: columns
+        )
         self.machineHostname = machineHostname
         self.programVersion = programVersion
         self.defaultColors = defaultColors
@@ -1829,7 +1706,7 @@ public struct Terminal: Equatable, Sendable {
                 }
             }
         }
-        collect(scrollbackRows.asArray(), into: &live)
+        collect(history.allPaintedDisplayRows(), into: &live)
         collect(rows, into: &live)
         if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
@@ -2087,7 +1964,7 @@ public struct Terminal: Equatable, Sendable {
                 isFollowing: true
             )
         }
-        let totalRows = scrollbackRows.count + rows.count
+        let totalRows = historyRowCount + rows.count
         let maximumTop = max(0, totalRows - rowCount)
         let topRow: Int
         let isFollowing: Bool
@@ -2122,7 +1999,7 @@ public struct Terminal: Equatable, Sendable {
     public mutating func scroll(toTopRow requestedRow: Int) {
         guard isAlternateScreenActive == false else { return }
         let previous = viewportState
-        let maximumTop = max(0, scrollbackRows.count + rows.count - rowCount)
+        let maximumTop = max(0, historyRowCount + rows.count - rowCount)
         let topRow = min(max(requestedRow, 0), maximumTop)
         if topRow == maximumTop {
             viewportState = .following
@@ -2146,13 +2023,24 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns retained primary rows in oldest-first order.
     public var scrollbackRowCount: Int {
-        scrollbackRows.count
+        historyRowCount
     }
 
     /// Exposes one retained row without allowing callers to mutate terminal storage.
     public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
-        guard scrollbackRows.indices.contains(index) else { return nil }
-        let row = scrollbackRows[index].unpacked().materialized(to: columnCount)
+        guard var folded = history.paintedDisplayRow(at: index) else { return nil }
+        if index == historyRowCount - 1,
+           isAlternateScreenActive == false,
+           let spacer = Self.seamSpacer(
+               inHistory: history,
+               row: folded,
+               live: rows,
+               columns: columnCount
+           )
+        {
+            folded.cells.append(spacer)
+        }
+        let row = folded.materialized(to: columnCount)
         return TerminalScrollbackRow(
             cells: row.cells.map {
                 TerminalCell(
@@ -2166,29 +2054,33 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Reports one retained row's content-identity run shape, reading the stored prefix
-    /// directly rather than the materialized row.
+    /// Logical lines retained in history. The denominator of the record-scoped readers below.
+    public var scrollbackRecordCount: Int { history.recordCount }
+
+    /// Reports one retained **logical line**'s content-identity run shape.
     ///
-    /// Row-scoped on purpose. `contentIdentity` is deliberately absent from `TerminalCell`,
-    /// and doc 28's `PR1` needs it only in aggregate, so this returns counts from one call
-    /// per row instead of widening the per-cell inspection value -- which would add a stored
-    /// property to a hot type crossing a target boundary and change its layout for every
-    /// consumer. That is the shape
-    /// `docs/design/2026-07-29-cross-module-value-dispatch.md` recommends reaching for at
-    /// design time, and the same one `forEachViewportCell(row:_:)` took for the render
-    /// planner. O(stored cells), for measurement only.
+    /// Record-scoped since doc 31 (`31/D3` Decision 6, `31/DD17`), where the old row-scoped
+    /// reader's contract stops being expressible: a display row is a slice the current width
+    /// chooses, so "the row's own content, not the pane's width" has no meaning at a fold
+    /// boundary. A record's stored cells are width-free by construction, so the contract is
+    /// now literally true and the "reads the unmaterialized prefix" caveat is gone with the
+    /// materialization. Doc 28's `PR1` consumes the quantity in aggregate, so what changed for
+    /// it is the sample unit: one sample per logical line rather than per display row.
     ///
-    /// Reads `scrollbackRows` unmaterialized because the trailing default cells
-    /// `materialized(to:)` appends were never printed into: counting them would report the
-    /// pane's width as unidentified rather than the row's own content.
-    public func scrollbackRowContentIdentityShape(at index: Int) -> TerminalContentIdentityShape? {
-        guard scrollbackRows.indices.contains(index) else { return nil }
+    /// `contentIdentity` stays deliberately absent from `TerminalCell`, so this returns counts
+    /// from one call per record instead of widening the per-cell inspection value -- the shape
+    /// `docs/design/2026-07-29-cross-module-value-dispatch.md` recommends at design time.
+    /// O(stored cells), for measurement only.
+    public func scrollbackRecordContentIdentityShape(
+        at index: Int
+    ) -> TerminalContentIdentityShape? {
+        guard let cells = history.recordCells(at: index) else { return nil }
         var runCount = 0
         var strictRunCount = 0
         var identified = 0
         var unidentified = 0
         var previous: ContentIdentity?
-        for cell in scrollbackRows[index].unpacked().cells {
+        for cell in cells {
             guard let identity = cell.contentIdentity else {
                 unidentified += 1
                 previous = nil
@@ -2224,21 +2116,29 @@ public struct Terminal: Equatable, Sendable {
     /// `GridRow`, which stay `private`. That split is the point: the census ships as reusable
     /// public evidence without widening the grid types, which is what forced doc 12's censuses to
     /// be throwaway probes. O(cells) -- for measurement, not for a hot path.
+    ///
+    /// History is arena-denominated since doc 31 (`31/F6` `R16`, `31/DD11`): there is one region
+    /// rather than a heap allocation per retained row, so the per-row leak proof doc 15's `F4`
+    /// motivated is restated as bytes-in-use against a capacity that never grows.
     public var memoryCensus: TerminalMemoryCensus {
         // Distinct styles are counted by id rather than by value: ids are canonical (equal styles
         // always intern to the same one), so this is the same number doc `12/F3` reported, reached
         // without re-deriving a hash for a type the table already hashes.
         let stride = MemoryLayout<GridCell>.stride
+        let arena = history.census
         var census = TerminalMemoryCensus(
             screenRowCount: 0,
-            scrollbackRowCount: scrollbackRows.count,
+            scrollbackRowCount: historyRowCount,
+            scrollbackRecordCount: history.recordCount,
             cellCount: 0,
             cellStrideBytes: stride,
             cellStorageBytes: 0,
             retainedStoredCellCount: 0,
-            retainedPackedPayloadBytes: 0,
+            retainedArenaBytesInUse: arena.arenaBytesInUse,
+            retainedArenaCapacityBytes: arena.capacityBytes,
+            retainedIndexBytes: arena.indexBytes,
+            retainedSideTableBytes: arena.sideTableBytes,
             rowStorageAllocationCount: 0,
-            retainedRowStorageRowCount: scrollbackRows.retainedCellStorageRowCount,
             styledCellCount: 0,
             distinctStyleCount: 0,
             multiScalarCellCount: 0,
@@ -2256,24 +2156,19 @@ public struct Terminal: Equatable, Sendable {
         let screens = [rows, inactivePrimaryScreen?.rows].compactMap { $0 }
         census.screenRowCount = screens.reduce(0) { $0 + $1.count }
 
-        // Retained rows are priced by their blob, live rows by the cell stride. Content
-        // counts below are read from the *decoded* row either way, because the census answers
-        // "what is the grid holding" -- and packing changed what a cell costs, not what a row
-        // contains. Unpacking here is affordable for the same reason the whole walk is: this
-        // is a measurement accessor, never a hot path.
-        for index in scrollbackRows.indices {
-            let packed = scrollbackRows[index]
-            if packed.storedCellCount > 0 { census.rowStorageAllocationCount += 1 }
-            census.retainedStoredCellCount += packed.storedCellCount
-            census.retainedPackedPayloadBytes += packed.payloadByteCount
-        }
+        // Only live rows have a per-row allocation left to count: history's cells all live in the
+        // one arena, which is exactly why it can no longer leak a row's storage.
         for row in screens.flatMap({ $0 }) where row.cells.isEmpty == false {
             census.rowStorageAllocationCount += 1
         }
-        census.cellStorageBytes = census.retainedPackedPayloadBytes
+        census.cellStorageBytes = arena.arenaBytesInUse
             + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
 
-        for row in scrollbackRows.asArray() + screens.flatMap({ $0 }) {
+        for index in 0..<history.recordCount {
+            census.retainedStoredCellCount += history.recordSummary(at: index)?.cellCount ?? 0
+        }
+
+        for row in history.allPaintedDisplayRows() + screens.flatMap({ $0 }) {
             census.cellCount += row.cells.count
             for cell in row.cells {
                 if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }
@@ -2295,77 +2190,32 @@ public struct Terminal: Equatable, Sendable {
         return census
     }
 
-    /// Counts rows whose cell storage history still owns, so leak proofs can assert it equals
-    /// `scrollbackRowCount` without naming how the buffer evicts. Deliberately phrased as the
-    /// invariant rather than as buffer internals: doc 15's `D1` defers a ring-buffer rewrite that
-    /// would answer this trivially, and this accessor must survive it.
-    var retainedCellStorageRowCount: Int {
-        scrollbackRows.retainedCellStorageRowCount
-    }
-
-    /// Recomputes retained-row cost for coherence proofs without affecting enforcement.
-    var recomputedScrollbackByteCount: Int {
-        scrollbackRows.indices.reduce(0) {
-            $0 + Self.scrollbackByteCost(of: scrollbackRows[$1])
-        }
-    }
-
-    /// The cell-cap sibling of `recomputedScrollbackByteCount`, for the same coherence proofs.
-    var recomputedScrollbackStoredCellCount: Int {
-        scrollbackRows.indices.reduce(0) { $0 + scrollbackRows[$1].storedCellCount }
-    }
-
-    /// Charges one blank row of `columns` cells, so tests can size budgets in whole rows without
-    /// restating the cost model. Since `D4` charges reserved rather than occupied storage, that
-    /// model is no longer arithmetic a test can safely rewrite from a column count.
-    static func blankScrollbackRowByteCost(columns: Int) -> Int {
-        scrollbackByteCost(of: GridRow(cells: (0..<columns).map { _ in GridCell() }))
-    }
-
-    /// Sizes a compact ordinary row so retention tests can choose exact eviction boundaries.
-    static func compactScrollbackRowByteCost(storedCells: Int) -> Int {
-        precondition(storedCells >= 1)
-        // Modelled as cells that were really *printed*: an ASCII scalar and a contiguous
-        // identity each. Doc 28's packed row charges by content, so a fixture row of bare
-        // `.narrow` cells carrying no scalar would owe a kind exception per cell and price a
-        // shape the terminal never produces -- which is how a budget written in these units
-        // would silently admit a different number of real rows than the test intends.
-        return scrollbackByteCost(of: GridRow(cells: (0..<storedCells).map {
-            GridCell(
-                scalars: .single("a"),
-                kind: .narrow,
-                contentIdentity: ContentIdentity($0 + 1)
-            )
-        }))
-    }
-
-    /// Sums what history's cell storage *actually reserved*, derived independently of the charge
-    /// model so a test can hold one against the other.
+    /// Recounts history's display rows straight off the arena, ignoring every cached total.
     ///
-    /// `Array.capacity` is the allocator's own answer -- Swift sets it from the block malloc really
-    /// returned -- so this counts bucket rounding without modelling a single size class. Kept
-    /// separate from `recomputedScrollbackByteCount`, which recomputes the *charge*; this one
-    /// recomputes the *cost*. The budget is honest exactly when the second does not exceed it.
-    var retainedScrollbackAllocationBytes: Int {
-        scrollbackRows.indices.reduce(0) {
-            $0 + MemoryLayout<PackedRetainedRow>.stride
-                + Self.arrayStorageHeaderBytes
-                + scrollbackRows[$1].storage.capacity
-        }
-    }
+    /// The independent oracle `31/I9` is stated against: the maintained grand total must equal
+    /// this after each of the six trigger points, and nothing else catches a missed invalidation
+    /// (`31/AR4`).
+    var independentScrollbackRowRecount: Int { history.independentDisplayRowRecount() }
 
-    /// Hands a test the decoded retained row, so a packed-representation proof can compare
-    /// fields the public reader deliberately omits -- `contentIdentity` above all. Computed
-    /// only when a test asks; production reads packed rows through the buffer.
+    /// Hands a test the folded display row as the *renderer* sees it, fill included.
     func retainedRowForTesting(at index: Int) -> GridRow? {
-        guard scrollbackRows.indices.contains(index) else { return nil }
-        return scrollbackRows[index].unpacked()
+        history.paintedDisplayRow(at: index)
     }
 
-    /// Exposes one canonical row cost so tests can pin the representation-neutral literals.
-    func scrollbackRowByteCost(at index: Int) -> Int? {
-        guard scrollbackRows.indices.contains(index) else { return nil }
-        return Self.scrollbackByteCost(of: scrollbackRows[index])
+    /// Hands a test one live-grid row.
+    ///
+    /// The independent oracle the fold's fidelity proof needs now that retained history *is*
+    /// the record store: the live grid's wrapping is the printer's own and shares no code with
+    /// the fold, so a terminal tall enough to hold its whole transcript answers "what does a
+    /// pane of this width display" without asking the thing under test.
+    func liveRowForTesting(at index: Int) -> GridRow? {
+        rows.indices.contains(index) ? rows[index] : nil
+    }
+
+    /// Exposes one retained line's record-level shape -- open, split, trimmed, filled -- so the
+    /// store's contracts are assertable through the terminal that drives it.
+    func retainedRecordSummaryForTesting(at index: Int) -> LogicalLineStore.RecordSummary? {
+        history.recordSummary(at: index)
     }
 
     /// Drives the content-identity counter to the last value before it wraps, so a test can reach
@@ -2383,11 +2233,16 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
+    ///
+    /// Rebases history onto an arena at the production budget rather than raising a bound in
+    /// place: the arena reserves its whole capacity at construction and is never grown
+    /// (`31/I2`), so "this terminal with an unlimited budget" is not a value that exists.
     func withUnlimitedScrollbackForTesting() -> Self {
         var copy = self
-        copy.scrollbackBudgetBytes = .max
-        copy.scrollbackRowCap = .max
-        copy.scrollbackCellCap = .max
+        copy.history = history.rebased(
+            toBudgetBytes: Terminal.productionScrollbackBudgetBytes
+        )
+        copy.historyEvictionsObserved = copy.history.evictedRowCount
         return copy
     }
 
@@ -2413,7 +2268,7 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
         guard isAlternateScreenActive else { return primaryHistoryText }
-        var stream = scrollbackRows.asArray()
+        var stream = history.allPaintedDisplayRows()
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
@@ -2424,7 +2279,7 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
         let primaryRows = inactivePrimaryScreen?.rows ?? rows
-        return projectedHistoryText(from: scrollbackRows.asArray() + primaryRows)
+        return projectedHistoryText(from: history.allPaintedDisplayRows() + primaryRows)
     }
 
     /// Returns the current half-open selection endpoints in stream coordinates.
@@ -3185,18 +3040,29 @@ public struct Terminal: Equatable, Sendable {
     private var presentedRowGeometry: [TerminalRowGeometry] {
         let topRow = scrollProjection.topRow
         let blankKind = GridCell().kind
+        var cursor = historyCursor(atStreamRow: topRow)
         return (topRow..<(topRow + rowCount)).map { index in
             var kinds = [TerminalCellGeometry](
                 repeating: TerminalCellGeometry(kind: blankKind),
                 count: columnCount
             )
-            if isAlternateScreenActive == false, scrollbackRows.indices.contains(index) {
-                let packed = scrollbackRows[index]
-                packed.forEachKind { column, kind in
+            if let at = cursor {
+                var stored = 0
+                history.forEachKind(at: at) { column, kind in
                     guard column < columnCount else { return }
                     kinds[column] = TerminalCellGeometry(kind: kind)
+                    stored = column + 1
                 }
-                return TerminalRowGeometry(cells: kinds, isSoftWrapped: packed.isSoftWrapped)
+                let wrapped = history.isSoftWrapped(at: at)
+                cursor = history.advance(at)
+                // The seam's re-derived spacer, so geometry and the cell readers agree about
+                // what the last retained row's final column is.
+                if cursor == nil, stored == columnCount - 1,
+                   history.hasOpenTailRecord, rows.first?.cells.first?.kind == .wideHead
+                {
+                    kinds[stored] = TerminalCellGeometry(kind: .spacerHead)
+                }
+                return TerminalRowGeometry(cells: kinds, isSoftWrapped: wrapped)
             }
             guard let row = viewportStreamRow(at: index) else {
                 preconditionFailure("viewport projection exceeded the active stream")
@@ -3208,16 +3074,76 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Addresses a stream row inside retained history, or nil when it names a live row.
+    ///
+    /// The one `locate` a viewport traversal is allowed (`31/I7`, `31/D3` Decision 1 rule 2):
+    /// callers take one of these for the top row and carry it forward with
+    /// `LogicalLineStore.advance(_:)`, so the number of locates a frame spends is a small
+    /// constant rather than one per visible row.
+    private func historyCursor(atStreamRow index: Int) -> LogicalLineStore.DisplayRowCursor? {
+        guard isAlternateScreenActive == false, index >= 0, index < historyRowCount else {
+            return nil
+        }
+        return history.locate(displayRow: index)
+    }
+
     private func viewportStreamRow(at index: Int) -> GridRow? {
         guard index >= 0 else { return nil }
         if isAlternateScreenActive {
             return rows.indices.contains(index) ? rows[index] : nil
         }
-        if scrollbackRows.indices.contains(index) {
-            return scrollbackRows[index].unpacked()
+        if var row = history.paintedDisplayRow(at: index) {
+            if index == historyRowCount - 1,
+               let spacer = Self.seamSpacer(
+                   inHistory: history,
+                   row: row,
+                   live: rows,
+                   columns: columnCount
+               )
+            {
+                row.cells.append(spacer)
+            }
+            return row
         }
-        let liveIndex = index - scrollbackRows.count
+        let liveIndex = index - historyRowCount
         return rows.indices.contains(liveIndex) ? rows[liveIndex] : nil
+    }
+
+    /// Whether the last retained display row's final column is the seam's derived spacer.
+    ///
+    /// Read where a live write can invalidate that column without touching a retained byte: the
+    /// spacer is a function of the live grid's first cell, so overwriting it changes what the
+    /// row above displays.
+    private var seamRowIsShortOfItsSpacer: Bool {
+        guard historyRowCount > 0, history.hasOpenTailRecord else { return false }
+        return history.paintedDisplayRow(at: historyRowCount - 1)?.cells.count == columnCount - 1
+    }
+
+    /// The `.spacerHead` the open tail's final display row is missing, when it is missing one.
+    ///
+    /// History never stores a spacer -- where one sits is a function of the width, which `31/I1`
+    /// forbids storing -- and the fold re-derives it from the wide head that follows. For the
+    /// **last** retained display row that head is the live grid's first cell, which the store
+    /// cannot see, so the row comes back one column short. Only `Terminal` sees both sides of
+    /// this seam, which is why the reach lives here; the store makes the same reach across a
+    /// forced split's seam, where both pieces are records it holds.
+    fileprivate static func seamSpacer(
+        inHistory history: LogicalLineStore,
+        row: GridRow,
+        live: [GridRow],
+        columns: Int
+    ) -> GridCell? {
+        guard row.cells.count == columns - 1,
+              history.hasOpenTailRecord,
+              let head = live.first?.cells.first,
+              head.kind == .wideHead
+        else { return nil }
+        return GridCell(
+            kind: .spacerHead,
+            styleId: head.styleId,
+            hyperlinkId: head.hyperlinkId,
+            contentIdentity: head.contentIdentity
+        )
     }
 
     private mutating func revealSearchMatchIfNeeded() {
@@ -3240,24 +3166,43 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Rows the active text projection spans, for the clamps that need only its extent.
-    private var projectionRowCount: Int { scrollbackRows.count + rows.count }
+    private var projectionRowCount: Int { historyRowCount + rows.count }
 
     /// The active text projection as an indexed sequence. Every point-local query reads through
     /// this rather than `activeProjectionRows()`, which is what keeps a pointer gesture's cost
     /// independent of how much history is retained.
     private func activeProjection() -> ProjectionRows {
         ProjectionRows(
-            scrollback: scrollbackRows,
+            history: history,
             live: rows,
+            columns: columnCount,
             isAlternateScreenActive: isAlternateScreenActive
         )
     }
 
     /// Materializes the whole projection. Reserved for consumers that inherently read all of
-    /// history -- search, Select All, history export, width reflow, selected-text serialization.
-    /// A query that only touches the clicked point must use `activeProjection()` instead.
+    /// history -- search, Select All, history export, selected-text serialization. A query that
+    /// only touches the clicked point must use `activeProjection()` instead.
+    ///
+    /// Walks history's records once rather than subscripting the facade per row: the facade
+    /// locates a display row per access, which is right for a point query and quadratic-ish for
+    /// all of history.
     private func activeProjectionRows() -> [GridRow] {
-        Array(activeProjection())
+        var stream = history.allPaintedDisplayRows()
+        if let last = stream.indices.last {
+            if isAlternateScreenActive {
+                stream[last].isSoftWrapped = false
+            } else if let spacer = Self.seamSpacer(
+                inHistory: history,
+                row: stream[last],
+                live: rows,
+                columns: columnCount
+            ) {
+                stream[last].cells.append(spacer)
+            }
+        }
+        stream.append(contentsOf: rows)
+        return stream
     }
 
     private func projectionUnits() -> [ProjectionUnit] {
@@ -3335,8 +3280,16 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// One past the last column a row projects text for.
+    ///
+    /// A soft-wrapped row is measured to its own extent rather than to the pane width, which is
+    /// the same number for every live row and for every folded row except at a seam: the open
+    /// tail's final display row is short by the `.spacerHead` admission dropped, and a forced
+    /// split's last row is short whenever the split offset is not a multiple of the current
+    /// width. Measuring those to `columnCount` would project the padding past them as spaces the
+    /// program never printed.
     private func projectedCellEnd(in row: GridRow) -> Int {
-        row.isSoftWrapped ? columnCount : retainedContentEnd(in: row)
+        row.isSoftWrapped ? min(columnCount, row.cells.count) : retainedContentEnd(in: row)
     }
 
     private func text(in range: TextAnchorRange) -> String {
@@ -3395,7 +3348,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {
         let base = evictedRowCount
-        let streamCount = scrollbackRows.count + rows.count
+        let streamCount = historyRowCount + rows.count
         guard range.start.row >= base,
               range.end.row >= base,
               range.start.row < base + streamCount,
@@ -3683,112 +3636,6 @@ public struct Terminal: Equatable, Sendable {
         return .scalars(key)
     }
 
-    private func attachments(
-        for range: TextAnchorRange,
-        in units: [ProjectionUnit],
-        rowMetadata: [ReflowRowMetadata],
-        oldColumnCount: Int
-    ) -> (start: ReflowTextAttachment, end: ReflowTextAttachment) {
-        (
-            attachment(
-                for: range.start,
-                prefersStart: true,
-                in: units,
-                rowMetadata: rowMetadata,
-                oldColumnCount: oldColumnCount
-            ),
-            attachment(
-                for: range.end,
-                prefersStart: false,
-                in: units,
-                rowMetadata: rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        )
-    }
-
-    private func attachment(
-        for anchor: TextAnchor,
-        prefersStart: Bool,
-        in units: [ProjectionUnit],
-        rowMetadata: [ReflowRowMetadata],
-        oldColumnCount: Int
-    ) -> ReflowTextAttachment {
-        if prefersStart, let unit = units.first(where: { $0.start == anchor }) {
-            return attachment(
-                for: unit,
-                usesStart: true,
-                rowMetadata: rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        if let unit = units.first(where: { $0.end == anchor }) {
-            return attachment(
-                for: unit,
-                usesStart: false,
-                rowMetadata: rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        if let unit = units.first(where: { $0.start >= anchor }) {
-            return attachment(
-                for: unit,
-                usesStart: true,
-                rowMetadata: rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        return .lineEnd(rowMetadata.last?.line ?? 0)
-    }
-
-    private func attachment(
-        for unit: ProjectionUnit,
-        usesStart: Bool,
-        rowMetadata: [ReflowRowMetadata],
-        oldColumnCount: Int
-    ) -> ReflowTextAttachment {
-        let sourceRow = unit.start.row - evictedRowCount
-        if unit.isHardBoundary {
-            return usesStart
-                ? .lineEnd(rowMetadata[sourceRow].line)
-                : .lineStart(rowMetadata[sourceRow + 1].line)
-        }
-        return .cell(
-            key: sourceKey(
-                row: sourceRow,
-                column: unit.start.column,
-                columns: oldColumnCount
-            ),
-            width: unit.end.column - unit.start.column,
-            usesStart: usesStart
-        )
-    }
-
-    private func textDestination(
-        for attachment: ReflowTextAttachment,
-        lineIndex: Int,
-        packed: PackedReflowLine,
-        baseRow: Int
-    ) -> TextAnchor? {
-        switch attachment {
-        case let .cell(key, width, usesStart):
-            guard let destination = packed.cellDestinations[key] else { return nil }
-            return TextAnchor(
-                row: evictedRowCount + baseRow + destination.row,
-                column: destination.column + (usesStart ? 0 : width)
-            )
-        case let .lineStart(line) where line == lineIndex:
-            return TextAnchor(row: evictedRowCount + baseRow, column: 0)
-        case let .lineEnd(line) where line == lineIndex:
-            return TextAnchor(
-                row: evictedRowCount + baseRow + packed.contentEnd.row,
-                column: packed.contentEnd.column
-            )
-        default:
-            return nil
-        }
-    }
-
     private mutating func refreshHasInteractionState() {
         hasInteractionState = selection != nil
             || search != nil
@@ -3812,8 +3659,8 @@ public struct Terminal: Equatable, Sendable {
             recordFullDamage()
         }
         guard hasInteractionState else { return }
-        let lower = evictedRowCount + scrollbackRows.count + range.lowerBound
-        let upper = evictedRowCount + scrollbackRows.count + range.upperBound - 1
+        let lower = evictedRowCount + historyRowCount + range.lowerBound
+        let upper = evictedRowCount + historyRowCount + range.upperBound - 1
         invalidateInspection(inAbsoluteRows: lower...upper)
     }
 
@@ -3859,7 +3706,7 @@ public struct Terminal: Equatable, Sendable {
         guard var selection else { return }
         selection.start.column = min(max(selection.start.column, 0), columnCount)
         selection.end.column = min(max(selection.end.column, 0), columnCount)
-        let lastRow = evictedRowCount + scrollbackRows.count + rows.count - 1
+        let lastRow = evictedRowCount + historyRowCount + rows.count - 1
         let lastAnchor = TextAnchor(row: lastRow, column: projectedCellEnd(in: rows.last!))
         if selection.start > lastAnchor {
             selection.start = lastAnchor
@@ -3903,7 +3750,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func clampViewportAnchorToRetainedStream() {
         guard case let .browsing(anchor) = viewportState else { return }
-        let maximumTop = evictedRowCount + max(0, scrollbackRows.count + rows.count - rowCount)
+        let maximumTop = evictedRowCount + max(0, historyRowCount + rows.count - rowCount)
         viewportState = .browsing(top: TextAnchor(
             row: min(max(anchor.row, evictedRowCount), maximumTop),
             column: 0
@@ -3914,91 +3761,38 @@ public struct Terminal: Equatable, Sendable {
     /// `MemoryLayout`, which describes the elements rather than the buffer holding them.
     static let arrayStorageHeaderBytes = 32
 
-    /// What history really costs, so the byte budget means what it says.
+    /// Admits scrolled-off display rows into the open tail of retained history.
     ///
-    /// Every term is the true size of something the row owns: its slot in the buffer, the header
-    /// of its cell array, the cells themselves at their **stride** (what a cell costs *in an
-    /// array*, the only way cells are stored), and one spill allocation per multi-scalar cell.
-    ///
-    /// The previous model charged `16 + cells * (32 + 8 * scalars)` -- 40 bytes for an ordinary
-    /// single-scalar cell against a true stride of 72. It therefore admitted ~2.2x the history it
-    /// promised: a 10 MB budget held ~22 MB (doc 15's `H1`, measured in `15/F2`).
-    ///
-    /// Cells are charged at `capacity`, not `count`, and that is the whole of doc 15's `D4`. A row's
-    /// cell array is not allocated at its element count: malloc rounds the request up to a size
-    /// class, and Swift then reports the block it really got as `capacity` -- 90 cells' worth at 80
-    /// columns, 218 at 200. Charging `count` therefore under-charged every row by that rounding,
-    /// which `15/F7` measured at ~11.5%.
-    ///
-    /// Reading `capacity` rather than modelling the size classes is what makes this affordable.
-    /// `15/F7` declined to model bucket rounding because a table of allocator size classes is a
-    /// platform detail this model cannot portably encode -- true, and still true. `capacity` is the
-    /// allocator's own answer to the same question, so the rounding is charged without anyone
-    /// predicting it. `retainedScrollbackAllocationBytes` re-derives the same total independently,
-    /// and a test holds it against the budget.
-    ///
-    /// This also decouples the budget from the cell's width, which is why `15/F12` needed it: a
-    /// narrower cell that leaves the row in the same malloc bucket now admits the same history it
-    /// always did, instead of admitting more rows that each cost what they always cost.
-    private static func scrollbackByteCost(of row: PackedRetainedRow) -> Int {
-        var total = MemoryLayout<PackedRetainedRow>.stride
-            + arrayStorageHeaderBytes
-            + row.storage.capacity
-        if row.spillCount > 0 {
-            // The spill directory is a real allocation the packed row owns, charged even
-            // though doc 28's model priced only the spills it points at -- `I4` is that the
-            // charge describes what the row allocates, not what a candidate predicted.
-            total += arrayStorageHeaderBytes + row.spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
-            for spill in row.spills {
-                total += arrayStorageHeaderBytes + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
-            }
-        }
-        return total
-    }
-
-    /// Prices a row the retained buffer has not admitted yet, by packing it. Used by the
-    /// test-facing sizing helpers below, which choose eviction boundaries in whole rows.
-    private static func scrollbackByteCost(of row: GridRow) -> Int {
-        scrollbackByteCost(of: PackedRetainedRow.pack(row))
-    }
-
+    /// One `admit` per display row, which appends its content to the logical line still being
+    /// printed and closes that line when the row ends it (`31/D2` operation 1). Admission enforces
+    /// the byte budget itself, so the eviction it causes is reported through
+    /// `syncHistoryEvictions` rather than counted here.
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
     where S.Element == GridRow {
         for sourceRow in newRows {
-            // `pack` trims to canonical form (`I2`) as it encodes, so admission never
-            // materializes the trimmed row -- see the note on `pack`. This is what makes
-            // history's representation `C1` while the live grid stays untouched (`I1`).
-            let row = PackedRetainedRow.pack(sourceRow)
-            scrollbackRows.append(row)
-            scrollbackByteCount += Self.scrollbackByteCost(of: row)
-            scrollbackStoredCellCount += row.storedCellCount
+            history.admit(sourceRow)
         }
     }
 
+    /// Brings retained history back inside its one charged-byte bound (`31/I2`).
+    ///
+    /// One bound, not three: the cell and row caps existed to bound the two terms of a width
+    /// reflow's cost, and there is no reflow of history left to bound (`31/D2` Decision 4).
     private mutating func enforceScrollbackBudget() {
-        // Carry the one bit we need rather than the row that holds it: retaining the `GridRow`
-        // across the loop and until scope exit pins its cells -- a whole row's allocation -- for
-        // nothing. Same defect class as the one `removeFirst` just stopped committing.
-        var lastEvictedIsSoftWrapped: Bool?
-        var evictedCount = 0
-        // Three bounds, whichever binds first. The byte budget bounds memory; the cell and row
-        // caps bound the two terms of reflow cost, which is what a width change pays and what
-        // bytes stopped bounding once packing cut a stored cell to ~1 B. See
-        // `productionScrollbackCellCap`.
-        while scrollbackByteCount > scrollbackBudgetBytes
-            || scrollbackRows.count > scrollbackRowCap
-            || scrollbackStoredCellCount > scrollbackCellCap
-        {
-            let evicted = scrollbackRows.removeFirst()
-            scrollbackByteCount -= Self.scrollbackByteCost(of: evicted)
-            scrollbackStoredCellCount -= evicted.storedCellCount
-            lastEvictedIsSoftWrapped = evicted.isSoftWrapped
-            evictedCount += 1
-        }
-        if let lastEvictedIsSoftWrapped {
-            isHistoryHeadTruncated = lastEvictedIsSoftWrapped
-        }
-        if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
+        history.evictToBudget()
+        syncHistoryEvictions()
+    }
+
+    /// Reports whatever history has evicted since this terminal last looked, exactly once.
+    ///
+    /// Admission evicts on its own, so a caller that only ever counted an explicit budget pass
+    /// would miss the rows a `feed` dropped. Reading the store's monotone counter instead of a
+    /// per-call return is what makes the accounting independent of where the eviction happened.
+    private mutating func syncHistoryEvictions() {
+        let evictedCount = history.evictedRowCount - historyEvictionsObserved
+        guard evictedCount > 0 else { return }
+        historyEvictionsObserved = history.evictedRowCount
+        primaryHistoryObservation.value &+= 1
         handleEviction(of: evictedCount)
     }
 
@@ -4008,7 +3802,7 @@ public struct Terminal: Equatable, Sendable {
         let windowRows = presentedRowGeometry
         let cursorStreamRow = isAlternateScreenActive
             ? cursor.row
-            : scrollbackRows.count + cursor.row
+            : historyRowCount + cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return TerminalGeometry(
             columns: columnCount,
@@ -4063,50 +3857,95 @@ public struct Terminal: Equatable, Sendable {
     /// Columns are visited in ascending order starting at zero. A row outside the
     /// viewport visits nothing, which is the same information `cell(row:column:)`
     /// conveys by returning nil.
+    ///
+    /// A caller that reads several rows of one frame must use `forEachViewportCell(rows:_:)`
+    /// instead: this spelling costs one history locate per call, and that is exactly the per-row
+    /// index walk `31/I7` forbids on the frame path.
     public func forEachViewportCell(
         row: Int,
         _ body: (_ column: Int, _ scalars: TerminalScalars, _ style: TerminalStyle) -> Void
     ) {
-        guard row >= 0, row < rowCount else { return }
-        let streamRow = scrollProjection.topRow + row
+        forEachViewportCell(rows: row..<(row + 1)) { _, column, scalars, style in
+            body(column, scalars, style)
+        }
+    }
+
+    /// Visits the content of every viewport row `rows` names, in ascending order.
+    ///
+    /// The frame path's entry point, and the shape `31/I7` needs: retained history is addressed
+    /// once, at the first row the traversal touches, and carried forward record by record for the
+    /// rest. Rows outside `rows` are skipped without being folded, so a damage-clipped frame pays
+    /// only for what it redraws. Out-of-viewport indices visit nothing.
+    public func forEachViewportCell(
+        rows requested: Range<Int>,
+        where includesRow: (_ row: Int) -> Bool = { _ in true },
+        _ body: (
+            _ row: Int,
+            _ column: Int,
+            _ scalars: TerminalScalars,
+            _ style: TerminalStyle
+        ) -> Void
+    ) {
+        let wanted = requested.clamped(to: 0..<rowCount)
+        guard wanted.isEmpty == false else { return }
+        let topRow = scrollProjection.topRow
+        var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
+
         // Memoized because a row is a handful of style runs, not `columnCount` distinct styles:
         // without it every column would pay a dictionary lookup that the previous column already
         // did. Correct for any content -- a miss just re-resolves.
         var lastId: StyleId?
         var lastStyle = TerminalStyle()
-        var storedCount = 0
-        func emit(_ column: Int, _ scalars: TerminalScalars, _ styleId: StyleId) {
-            if styleId != lastId {
-                lastStyle = self.style(for: styleId)
-                lastId = styleId
-            }
-            body(column, scalars, lastStyle)
-            storedCount = column + 1
-        }
 
-        // Retained rows stream out of packed storage rather than being materialized first.
-        // A frame reads every visible row once and discards it, so `unpacked()` here bought
-        // an allocation and a full `GridCell` write per cell that nothing outlived --
-        // `28/F17` measured that as the dominant term in the browsing regression, and the
-        // pre-packing representation never paid it because it could return its stored array
-        // by reference.
-        if isAlternateScreenActive == false, scrollbackRows.indices.contains(streamRow) {
-            scrollbackRows[streamRow].forEachContentCell { emit($0, $1, $2) }
-        } else {
-            guard let windowRow = viewportStreamRow(at: streamRow) else { return }
-            for column in windowRow.cells.indices {
-                let cell = windowRow.cells[column]
-                emit(column, cell.scalars, cell.styleId)
+        for row in wanted {
+            let streamRow = topRow + row
+            // A row the caller does not want still has to be stepped over, or the cursor stops
+            // naming the row it is asked for next. Stepping is O(1); folding is not.
+            guard includesRow(row) else {
+                cursor = cursor.flatMap { history.advance($0) }
+                continue
             }
-        }
+            var storedCount = 0
+            func emit(_ column: Int, _ scalars: TerminalScalars, _ styleId: StyleId) {
+                if styleId != lastId {
+                    lastStyle = self.style(for: styleId)
+                    lastId = styleId
+                }
+                body(row, column, scalars, lastStyle)
+                storedCount = column + 1
+            }
 
-        guard storedCount < columnCount else { return }
-        let padding = GridCell()
-        if padding.styleId != lastId {
-            lastStyle = self.style(for: padding.styleId)
-        }
-        for column in storedCount..<columnCount {
-            body(column, padding.scalars, lastStyle)
+            // Retained rows stream out of the arena rather than being materialized first.
+            // A frame reads every visible row once and discards it, so folding a `GridRow` here
+            // would buy an allocation and a full `GridCell` write per cell that nothing outlives
+            // -- `28/F17` measured that as the dominant term in the browsing regression.
+            if let at = cursor {
+                history.forEachPaintedCell(at: at) { emit($0, $1, $2) }
+                cursor = history.advance(at)
+                if cursor == nil, storedCount == columnCount - 1,
+                   history.hasOpenTailRecord,
+                   let head = rows.first?.cells.first, head.kind == .wideHead
+                {
+                    emit(storedCount, .empty, head.styleId)
+                }
+            } else if let windowRow = viewportStreamRow(at: streamRow) {
+                for column in windowRow.cells.indices {
+                    let cell = windowRow.cells[column]
+                    emit(column, cell.scalars, cell.styleId)
+                }
+            } else {
+                continue
+            }
+
+            guard storedCount < columnCount else { continue }
+            let padding = GridCell()
+            if padding.styleId != lastId {
+                lastStyle = self.style(for: padding.styleId)
+                lastId = padding.styleId
+            }
+            for column in storedCount..<columnCount {
+                body(row, column, padding.scalars, lastStyle)
+            }
         }
     }
 
@@ -4224,6 +4063,31 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Re-derives the `.spacerHead` the last handed-back display row is missing.
+    ///
+    /// History never stores a spacer -- where one sits is a function of the width, which `31/I1`
+    /// forbids storing -- and the fold re-derives it from the wide head that follows. For the
+    /// open tail's final display row that head is the live grid's first cell, so the fold cannot
+    /// see it and the row comes back one column short. Handing that row to the live grid as-is
+    /// would materialize the column as an ordinary blank, and the next width change would then
+    /// wrap a space the program never printed into the line. The live grid *can* see the head,
+    /// which is why the repair belongs here rather than in the store.
+    private func restoreSeamSpacer(in pulled: inout [GridRow], before follower: GridRow? = nil) {
+        guard var last = pulled.last,
+              last.isSoftWrapped,
+              last.cells.count == columnCount - 1,
+              let head = (follower ?? rows.first)?.cells.first,
+              head.kind == .wideHead
+        else { return }
+        last.cells.append(GridCell(
+            kind: .spacerHead,
+            styleId: head.styleId,
+            hyperlinkId: head.hyperlinkId,
+            contentIdentity: head.contentIdentity
+        ))
+        pulled[pulled.count - 1] = last
+    }
+
     private mutating func clippedBlank(replacing cell: GridCell) -> GridCell {
         GridCell(styleId: internStyle(TerminalStyle(background: style(for: cell.styleId).background)))
     }
@@ -4254,22 +4118,15 @@ public struct Terminal: Equatable, Sendable {
             let addedCount = newRowCount - rowCount
             var pulledCount = 0
             if cursor.row == rowCount - 1 {
-                pulledCount = min(addedCount, scrollbackRows.count)
+                pulledCount = min(addedCount, historyRowCount)
                 if pulledCount > 0 {
-                    let split = scrollbackRows.count - pulledCount
-                    let pulled = scrollbackRows.suffix(from: split)
-                    scrollbackByteCount -= pulled.reduce(0) {
-                        $0 + Self.scrollbackByteCost(of: $1)
-                    }
-                    // Counted off the *packed* rows, not off `pulled`: `suffix(from:)`
-                    // materializes to full width, so its rows no longer carry the stored
-                    // extent the cell cap is denominated in.
-                    var pulledCells = 0
-                    for index in split..<scrollbackRows.count {
-                        pulledCells += scrollbackRows[index].storedCellCount
-                    }
-                    scrollbackStoredCellCount -= pulledCells
-                    scrollbackRows.removeLast(pulledCount)
+                    // `31/D2` operation 4: the only write that shrinks the arena from the back.
+                    // The rows keep their absolute stream positions and merely change which side
+                    // of the history/live seam they sit on, so no anchor moves and
+                    // `evictedRowCount` does not advance.
+                    var pulled = history.truncateTail(displayRows: pulledCount)
+                    pulledCount = pulled.count
+                    restoreSeamSpacer(in: &pulled)
                     rows.insert(
                         contentsOf: pulled.map { $0.materialized(to: columnCount) },
                         at: 0
@@ -4285,111 +4142,50 @@ public struct Terminal: Equatable, Sendable {
         clampViewportAnchorToRetainedStream()
     }
 
+    /// Adopts a new width: history keeps its bytes, and only the live screen refolds.
+    ///
+    /// This is doc 31's headline. History stores logical lines rather than display rows, so a
+    /// width change writes no retained byte outside the open tail's seam repair (`31/I1`,
+    /// `31/I11`) and evicts nothing at any width down to the engine minimum (`31/I3`). What is
+    /// left is the live screen's refold -- which doc 28 already paid for and which survives
+    /// unchanged -- one pass to recount display rows, and one restatement of the held anchors.
     private mutating func resizeWidth(to newColumnCount: Int) {
         // Reflow redistributes logical lines across rows, so a row keeps its number and loses
         // its text. Height-only resizes never reach here, and must not.
         renumberRows()
-        let oldUnits = projectionUnits()
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row
-        let oldCursorGlobalRow = scrollbackRows.count + cursor.row
-        let fullStream = scrollbackRows.asArray() + rows
-        let lastContentRow = fullStream.lastIndex(where: rowContainsContent) ?? 0
-        let browsingSourceGlobalRow: Int?
-        if case let .browsing(anchor) = viewportState {
-            browsingSourceGlobalRow = min(
-                max(anchor.row - evictedRowCount, 0),
-                fullStream.count - 1
-            )
-        } else {
-            browsingSourceGlobalRow = nil
-        }
-        let retainedLastRow = max(
-            oldCursorGlobalRow,
-            lastContentRow,
-            browsingSourceGlobalRow ?? 0
-        )
-        let sourceRows = Array(fullStream[...retainedLastRow])
+        let historyRowsBefore = historyRowCount
+
+        // Captured against the *old* fold, which exists only until the index is recomputed.
+        // `31/D3` Decision 2's one new ordering invariant, stated rather than discovered later.
+        let capturedBeforeSeam = capturedAnchorAddresses(historyRows: historyRowsBefore)
+
+        // A line still being printed keeps its prompt mark on its record -- unless the pull-back
+        // consumes the whole record, in which case the live refold inherits it.
+        let seamPrompt = history.hasOpenTailRecord
+            ? history.recordSummary(at: history.recordCount - 1)?.semanticPrompt ?? SemanticPromptRow.none
+            : SemanticPromptRow.none
+        let seamPrefix = history.setWidth(newColumnCount)
+        let historyRowsAfter = historyRowCount
+        let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
+
+        let lastLiveContentRow = rows.lastIndex(where: rowContainsContent) ?? 0
+        let sourceRows = Array(rows[...max(cursor.row, lastLiveContentRow)])
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
-            cursorGlobalRow: oldCursorGlobalRow,
-            viewportTopGlobalRow: scrollbackRows.count,
+            leadingCells: seamPrefix,
+            leadingSemanticPrompt: seamPrompt,
+            cursorRow: cursor.row,
             oldColumnCount: oldColumnCount
         )
-        let selectionAttachments: (
-            start: ReflowTextAttachment,
-            end: ReflowTextAttachment
-        )? = selection.flatMap { selection in
-            guard oldUnits.isEmpty == false else { return nil }
-            return attachments(
-                for: selection,
-                in: oldUnits,
-                rowMetadata: reconstruction.rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        let searchAttachments = search?.range.map {
-            attachments(
-                for: $0,
-                in: oldUnits,
-                rowMetadata: reconstruction.rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        let hoverAttachments = hoveredLinkState.map {
-            attachments(
-                for: $0.range,
-                in: oldUnits,
-                rowMetadata: reconstruction.rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
-        let armAttachments = armedLinkState.map {
-            attachments(
-                for: $0.range,
-                in: oldUnits,
-                rowMetadata: reconstruction.rowMetadata,
-                oldColumnCount: oldColumnCount
-            )
-        }
 
         var rebuiltRows: [GridRow] = []
         var cursorDestination: ReflowDestination?
-        var selectionStartDestination: TextAnchor?
-        var selectionEndDestination: TextAnchor?
-        var searchStartDestination: TextAnchor?
-        var searchEndDestination: TextAnchor?
-        var hoverStartDestination: TextAnchor?
-        var hoverEndDestination: TextAnchor?
-        var armStartDestination: TextAnchor?
-        var armEndDestination: TextAnchor?
-        var viewportTopDestinationRow = 0
-        var browsingTopDestinationRow: Int?
+        var liveDestinations = [WidthChangeAnchor: TextAnchor]()
         for (lineIndex, line) in reconstruction.lines.enumerated() {
             let packed = pack(line: line, columns: newColumnCount)
             let baseRow = rebuiltRows.count
-
-            if lineIndex == reconstruction.viewportTopLine {
-                if let key = reconstruction.viewportTopKey,
-                   let local = packed.cellDestinations[key]
-                {
-                    viewportTopDestinationRow = baseRow + local.row
-                } else {
-                    viewportTopDestinationRow = baseRow
-                }
-            }
-            if let browsingSourceGlobalRow {
-                let metadata = reconstruction.rowMetadata[browsingSourceGlobalRow]
-                if lineIndex == metadata.line {
-                    if let key = metadata.firstSourceKey,
-                       let local = packed.cellDestinations[key]
-                    {
-                        browsingTopDestinationRow = baseRow + local.row
-                    } else {
-                        browsingTopDestinationRow = baseRow
-                    }
-                }
-            }
 
             switch reconstruction.anchor {
             case let .cell(key) where lineIndex == reconstruction.cursorLine:
@@ -4440,149 +4236,308 @@ public struct Terminal: Equatable, Sendable {
             default:
                 break
             }
-            if let selectionAttachments {
-                selectionStartDestination = selectionStartDestination ?? textDestination(
-                    for: selectionAttachments.start,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-                selectionEndDestination = selectionEndDestination ?? textDestination(
-                    for: selectionAttachments.end,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-            }
-            if let searchAttachments {
-                searchStartDestination = searchStartDestination ?? textDestination(
-                    for: searchAttachments.start,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-                searchEndDestination = searchEndDestination ?? textDestination(
-                    for: searchAttachments.end,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-            }
-            if let hoverAttachments {
-                hoverStartDestination = hoverStartDestination ?? textDestination(
-                    for: hoverAttachments.start,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-                hoverEndDestination = hoverEndDestination ?? textDestination(
-                    for: hoverAttachments.end,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-            }
-            if let armAttachments {
-                armStartDestination = armStartDestination ?? textDestination(
-                    for: armAttachments.start,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
-                )
-                armEndDestination = armEndDestination ?? textDestination(
-                    for: armAttachments.end,
-                    lineIndex: lineIndex,
-                    packed: packed,
-                    baseRow: baseRow
+
+            for (slot, address) in captured {
+                guard case let .live(line, offset) = address, line == lineIndex else { continue }
+                let local = packed.boundaryDestinations[offset] ?? packed.contentEnd
+                liveDestinations[slot] = TextAnchor(
+                    row: evictedRowCount + historyRowsAfter + baseRow + local.row,
+                    column: local.isPendingWrap ? newColumnCount : local.column
                 )
             }
             rebuiltRows.append(contentsOf: packed.rows)
         }
 
-        let destination = cursorDestination ?? ReflowDestination(
+        var destination = cursorDestination ?? ReflowDestination(
             row: 0,
             column: min(cursor.column, newColumnCount - 1),
             isPendingWrap: false
         )
-        let continuationIncrease = max(
-            0,
-            destination.row - viewportTopDestinationRow - cursor.row
+
+        // Restated against the fold as it stands now, before the viewport fill below moves rows
+        // across the seam: that move keeps every row's absolute stream position, so an anchor
+        // restated here stays right whichever side of the seam its row ends up on.
+        restateAnchors(
+            captured,
+            liveDestinations: liveDestinations,
+            historyRowsAfter: historyRowsAfter
         )
+
+        // A widening leaves the refolded live half shorter than the viewport, and the rows to
+        // fill it with are the ones history is holding directly above it. Padding with blanks
+        // instead would leave a blank line at the bottom of the stream that the same content at
+        // the same width never had -- `31/D2` operation 4 exists for exactly this hand-back, and
+        // it moves no anchor.
+        let deficit = rowCount - rebuiltRows.count
+        if deficit > 0, historyRowCount > 0 {
+            var pulled = history.truncateTail(displayRows: min(deficit, historyRowCount))
+            columnCount = newColumnCount
+            restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
+            columnCount = oldColumnCount
+            rebuiltRows.insert(
+                contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
+                at: 0
+            )
+            destination.row += pulled.count
+        }
+
+        let continuationIncrease = max(0, destination.row - cursor.row)
         let desiredBottomDistance = max(0, oldBottomDistance - continuationIncrease)
-        let requiredRowCount = max(
-            rowCount,
-            destination.row + desiredBottomDistance + 1
-        )
+        let requiredRowCount = max(rowCount, destination.row + desiredBottomDistance + 1)
         while rebuiltRows.count < requiredRowCount {
             rebuiltRows.append(makeBlankRow(columns: newColumnCount))
         }
 
         let viewportStart = rebuiltRows.count - rowCount
-        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart])
-        scrollbackByteCount = recomputedScrollbackByteCount
-        scrollbackStoredCellCount = recomputedScrollbackStoredCellCount
-        rows = Array(rebuiltRows[viewportStart...])
         columnCount = newColumnCount
+        rows = Array(rebuiltRows[viewportStart...])
         cursor = CellPosition(
             row: max(0, destination.row - viewportStart),
             column: destination.column
         )
         isPendingWrap = destination.isPendingWrap
-        if selectionAttachments != nil {
-            if let start = selectionStartDestination, let end = selectionEndDestination {
-                selection = TextAnchorRange(start: min(start, end), end: max(start, end))
-            } else {
-                selection = nil
-            }
-        }
-        if searchAttachments != nil {
-            if let start = searchStartDestination, let end = searchEndDestination {
-                search?.range = TextAnchorRange(start: min(start, end), end: max(start, end))
-            } else {
-                search = nil
-            }
-        }
-        if hoverAttachments != nil {
-            if let start = hoverStartDestination, let end = hoverEndDestination {
-                hoveredLinkState?.range = TextAnchorRange(
-                    start: min(start, end),
-                    end: max(start, end)
-                )
-            } else {
-                hoveredLinkState = nil
-            }
-        }
-        if armAttachments != nil {
-            if let start = armStartDestination, let end = armEndDestination {
-                armedLinkState?.range = TextAnchorRange(
-                    start: min(start, end),
-                    end: max(start, end)
-                )
-            } else {
-                armedLinkState = nil
-            }
-        }
-        if let browsingTopDestinationRow {
-            viewportState = .browsing(top: TextAnchor(
-                row: evictedRowCount + browsingTopDestinationRow,
-                column: 0
-            ))
+
+        // Whatever the refold pushed above the viewport scrolled off, so it is admitted exactly
+        // as it would have been had it scrolled off one row at a time.
+        if viewportStart > 0 {
+            appendToScrollback(Array(rebuiltRows[..<viewportStart]))
         }
         enforceScrollbackBudget()
         clampViewportAnchorToRetainedStream()
     }
 
+    /// Names one of the anchors a width change has to restate, so capture and restatement cannot
+    /// drift apart on which is which.
+    private enum WidthChangeAnchor: Hashable {
+        case selectionStart
+        case selectionEnd
+        case searchStart
+        case searchEnd
+        case hoverStart
+        case hoverEnd
+        case armStart
+        case armEnd
+        case browsingTop
+    }
+
+    /// What a width change did to one held range: it had none to restate, it restated one, or
+    /// an endpoint did not survive the rebuild and the range goes with it.
+    private enum RestatedRange {
+        case untouched
+        case restated(TextAnchorRange)
+        case dropped
+    }
+
+    /// An anchor's content address, which is what survives a width change.
+    ///
+    /// Two cases rather than one because the two halves of the stream change for different
+    /// reasons: history keeps its bytes and refolds, so a record address is enough; the live
+    /// screen is genuinely rebuilt, so its address is the reflow line and offset the rebuild is
+    /// keyed by. `31/D3` Decision 2 rejected making the *stored* anchor either of these -- these
+    /// are transients that live for the duration of one resize.
+    private enum WidthChangeAddress {
+        case history(recordIndex: Int, cellOffset: Int)
+        case live(line: Int, offset: Int)
+    }
+
+    /// Moves the addresses the seam pull-back invalidated onto the live side of it.
+    ///
+    /// `31/D3` Decision 4 hands the open tail's partial final display row to the live refold, so a
+    /// history address that pointed into those cells no longer resolves -- and the cells did not
+    /// vanish, they changed which side of the seam they sit on. The prefix seeds the refold's
+    /// first logical line at offset zero, which is what makes the conversion arithmetic; the same
+    /// prefix also shifts every live address on that line, which is the second half of this.
+    private func rebasedAcrossSeam(
+        _ captured: [(WidthChangeAnchor, WidthChangeAddress)],
+        seamPrefixLength: Int
+    ) -> [(WidthChangeAnchor, WidthChangeAddress)] {
+        captured.map { slot, address in
+            switch address {
+            case let .history(recordIndex, cellOffset):
+                guard history.position(ofRecord: recordIndex, cellOffset: cellOffset) == nil else {
+                    return (slot, address)
+                }
+                let kept = history.recordSummary(at: recordIndex)?.cellCount ?? 0
+                return (slot, .live(line: 0, offset: max(0, cellOffset - kept)))
+            case let .live(line, offset):
+                guard line == 0 else { return (slot, address) }
+                return (slot, .live(line: 0, offset: offset + seamPrefixLength))
+            }
+        }
+    }
+
+    private func capturedAnchorAddresses(
+        historyRows: Int
+    ) -> [(WidthChangeAnchor, WidthChangeAddress)] {
+        var captured: [(WidthChangeAnchor, WidthChangeAddress)] = []
+        func capture(_ slot: WidthChangeAnchor, _ anchor: TextAnchor?) {
+            guard let anchor, let address = widthChangeAddress(of: anchor, historyRows: historyRows)
+            else { return }
+            captured.append((slot, address))
+        }
+        capture(.selectionStart, selection?.start)
+        capture(.selectionEnd, selection?.end)
+        capture(.searchStart, search?.range?.start)
+        capture(.searchEnd, search?.range?.end)
+        capture(.hoverStart, hoveredLinkState?.range.start)
+        capture(.hoverEnd, hoveredLinkState?.range.end)
+        capture(.armStart, armedLinkState?.range.start)
+        capture(.armEnd, armedLinkState?.range.end)
+        if case let .browsing(top) = viewportState { capture(.browsingTop, top) }
+        return captured
+    }
+
+    private func widthChangeAddress(
+        of anchor: TextAnchor,
+        historyRows: Int
+    ) -> WidthChangeAddress? {
+        let streamRow = anchor.row - evictedRowCount
+        guard streamRow >= 0 else { return nil }
+        if streamRow < historyRows {
+            guard let address = history.address(
+                ofDisplayRow: streamRow,
+                column: anchor.column
+            ) else { return nil }
+            return .history(recordIndex: address.recordIndex, cellOffset: address.cellOffset)
+        }
+        let liveRow = min(streamRow - historyRows, rows.count - 1)
+        guard liveRow >= 0 else { return nil }
+        return .live(
+            line: liveReflowLine(ofRow: liveRow),
+            offset: liveReflowOffset(inRow: liveRow, upTo: anchor.column)
+        )
+    }
+
+    /// Writes the restated anchors back, dropping a range whose two ends did not both survive.
+    ///
+    /// The counterpart of `capturedAnchorAddresses`, and the only place a width change edits an
+    /// anchor: `31/D3` Decision 2 keeps the stored coordinate an absolute display row, so
+    /// eviction still needs no anchor edit at all and this loop is the whole restatement.
+    private mutating func restateAnchors(
+        _ captured: [(WidthChangeAnchor, WidthChangeAddress)],
+        liveDestinations: [WidthChangeAnchor: TextAnchor],
+        historyRowsAfter: Int
+    ) {
+        var restated: [WidthChangeAnchor: TextAnchor] = [:]
+        for (slot, address) in captured {
+            switch address {
+            case let .history(recordIndex, cellOffset):
+                if let position = history.position(
+                    ofRecord: recordIndex,
+                    cellOffset: cellOffset
+                ) {
+                    restated[slot] = TextAnchor(
+                        row: evictedRowCount + position.displayRow,
+                        column: position.column
+                    )
+                } else {
+                    // The only unresolvable case is a cell the seam pull-back handed to the live
+                    // grid (`31/D3` Decision 4); it is now the first live row's head.
+                    restated[slot] = TextAnchor(
+                        row: evictedRowCount + historyRowsAfter,
+                        column: 0
+                    )
+                }
+            case .live:
+                restated[slot] = liveDestinations[slot]
+            }
+        }
+
+        func restate(_ start: WidthChangeAnchor, _ end: WidthChangeAnchor) -> RestatedRange {
+            guard restated.keys.contains(start) || restated.keys.contains(end) else {
+                return .untouched
+            }
+            guard let first = restated[start], let last = restated[end] else { return .dropped }
+            return .restated(TextAnchorRange(start: min(first, last), end: max(first, last)))
+        }
+
+        switch restate(.selectionStart, .selectionEnd) {
+        case .untouched: break
+        case let .restated(range): selection = range
+        case .dropped: selection = nil
+        }
+        switch restate(.searchStart, .searchEnd) {
+        case .untouched: break
+        case let .restated(range): search?.range = range
+        case .dropped: search = nil
+        }
+        switch restate(.hoverStart, .hoverEnd) {
+        case .untouched: break
+        case let .restated(range): hoveredLinkState?.range = range
+        case .dropped: hoveredLinkState = nil
+        }
+        switch restate(.armStart, .armEnd) {
+        case .untouched: break
+        case let .restated(range): armedLinkState?.range = range
+        case .dropped: armedLinkState = nil
+        }
+        if let top = restated[.browsingTop] {
+            viewportState = .browsing(top: TextAnchor(row: top.row, column: 0))
+        }
+    }
+
+    /// Which logical line of the live refold a live row belongs to: the count of hard endings
+    /// above it, which is the same walk `reconstructLogicalLines` performs.
+    private func liveReflowLine(ofRow row: Int) -> Int {
+        var line = 0
+        for index in 0..<row where rows[index].isSoftWrapped == false {
+            line += 1
+        }
+        return line
+    }
+
+    /// A live row's column expressed as a cell offset within its logical line, which is the key
+    /// `pack`'s boundary destinations are built on.
+    private func liveReflowOffset(inRow row: Int, upTo column: Int) -> Int {
+        var offset = 0
+        var start = row
+        while start > 0, rows[start - 1].isSoftWrapped { start -= 1 }
+        for index in start..<row {
+            offset += logicalCellCount(in: rows[index], upTo: columnCount)
+        }
+        return offset + logicalCellCount(in: rows[row], upTo: column)
+    }
+
+    /// Counts the cells `reconstructLogicalLines` would emit for one row's leading columns.
+    private func logicalCellCount(in row: GridRow, upTo column: Int) -> Int {
+        let end = min(
+            column,
+            row.isSoftWrapped ? columnCount : retainedContentEnd(in: row)
+        )
+        var count = 0
+        var index = 0
+        while index < end {
+            switch row.cell(at: index).kind {
+            case .wideHead:
+                count += 2
+                index += 2
+            case .narrow, .padding:
+                count += 1
+                index += 1
+            case .spacerHead, .wideTail:
+                index += 1
+            }
+        }
+        return count
+    }
+
+    /// Rebuilds the **live screen**'s logical lines from its rows, so `pack` can lay them out at
+    /// the new width.
+    ///
+    /// History is no longer a source: it stores logical lines already, so there is nothing there
+    /// to reconstruct and nothing to rebuild (`31/F6` `X1`). What history does contribute is
+    /// `leadingCells` -- the sub-row remainder `setWidth` cut off its open tail so no short
+    /// display row is left in the middle of a line that continues here (`31/D3` Decision 4).
     private func reconstructLogicalLines(
         from sourceRows: [GridRow],
-        cursorGlobalRow: Int,
-        viewportTopGlobalRow: Int,
+        leadingCells: [GridCell],
+        leadingSemanticPrompt: SemanticPromptRow,
+        cursorRow: Int,
         oldColumnCount: Int
     ) -> (
         lines: [ReflowLine],
         anchor: ReflowCursorAnchor,
         cursorLine: Int,
-        viewportTopLine: Int,
-        viewportTopKey: Int?,
         rowMetadata: [ReflowRowMetadata]
     ) {
         var lines: [ReflowLine] = []
@@ -4592,12 +4547,46 @@ public struct Terminal: Equatable, Sendable {
         var pendingSpacerKeys: [Int] = []
         var retainedSourceKeys = Set<Int>()
 
+        // The seam remainder enters the first line as content with no source row of its own: it
+        // came out of history, so no live cell maps to it and it anchors nothing.
+        if leadingCells.isEmpty == false {
+            currentLine.semanticPrompt = leadingSemanticPrompt
+            var index = 0
+            while index < leadingCells.count {
+                let cell = leadingCells[index]
+                switch cell.kind {
+                case .wideHead:
+                    currentLine.units.append(ReflowUnit(
+                        cells: [
+                            cell,
+                            GridCell(
+                                kind: .wideTail,
+                                styleId: cell.styleId,
+                                hyperlinkId: cell.hyperlinkId,
+                                contentIdentity: cell.contentIdentity
+                            ),
+                        ],
+                        sourceOffsets: []
+                    ))
+                    logicalOffset += 2
+                    index += 2
+                case .narrow, .padding:
+                    currentLine.units.append(ReflowUnit(cells: [cell], sourceOffsets: []))
+                    logicalOffset += 1
+                    index += 1
+                case .wideTail, .spacerHead:
+                    index += 1
+                }
+            }
+        }
+
         for (rowIndex, row) in sourceRows.enumerated() {
             if currentLine.semanticPrompt == .none || row.semanticPrompt == .prompt {
                 currentLine.semanticPrompt = row.semanticPrompt
             }
             let retainedEnd = retainedContentEnd(in: row)
             let iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd
+            let startOffset = logicalOffset
             var column = 0
             var firstSourceKey: Int?
             while column < iterationEnd {
@@ -4656,6 +4645,7 @@ public struct Terminal: Equatable, Sendable {
 
             metadata.append(ReflowRowMetadata(
                 line: lines.count,
+                startOffset: startOffset,
                 boundaryOffset: logicalOffset,
                 retainedEnd: retainedEnd,
                 firstSourceKey: firstSourceKey
@@ -4667,14 +4657,13 @@ public struct Terminal: Equatable, Sendable {
                 pendingSpacerKeys.removeAll(keepingCapacity: true)
             }
         }
-        if sourceRows.last?.isSoftWrapped == true {
+        if sourceRows.last?.isSoftWrapped == true || sourceRows.isEmpty {
             lines.append(currentLine)
         }
 
-        let cursorMetadata = metadata[cursorGlobalRow]
-        let viewportTopMetadata = metadata[viewportTopGlobalRow]
+        let cursorMetadata = metadata[min(cursorRow, metadata.count - 1)]
         let cursorKey = sourceKey(
-            row: cursorGlobalRow,
+            row: min(cursorRow, sourceRows.count - 1),
             column: cursor.column,
             columns: oldColumnCount
         )
@@ -4700,14 +4689,7 @@ public struct Terminal: Equatable, Sendable {
             )
         }
 
-        return (
-            lines,
-            anchor,
-            cursorMetadata.line,
-            viewportTopMetadata.line,
-            viewportTopMetadata.firstSourceKey,
-            metadata
-        )
+        return (lines, anchor, cursorMetadata.line, metadata)
     }
 
     private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
@@ -5378,13 +5360,8 @@ public struct Terminal: Equatable, Sendable {
             }
             clearPendingMotionState()
         case 3:
-            let evictedCount = scrollbackRows.count
-            scrollbackRows.removeAll(keepingCapacity: true)
-            scrollbackByteCount = 0
-            scrollbackStoredCellCount = 0
-            isHistoryHeadTruncated = false
-            if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
-            handleEviction(of: evictedCount)
+            history.removeAll()
+            syncHistoryEvictions()
             clearPendingMotionState()
         default:
             return
@@ -6346,8 +6323,8 @@ public struct Terminal: Equatable, Sendable {
     ) {
         if row > 0 {
             severWrapClaim(at: row - 1, replacementStyleId: replacementStyleId)
-        } else if isAlternateScreenActive == false, let last = scrollbackRows.indices.last {
-            severScrollbackWrapClaim(at: last, replacementStyleId: replacementStyleId)
+        } else if isAlternateScreenActive == false {
+            severScrollbackWrapClaim(replacementStyleId: replacementStyleId)
         }
     }
 
@@ -6366,22 +6343,17 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func severScrollbackWrapClaim(
-        at row: Int,
-        replacementStyleId: StyleId
-    ) {
-        guard scrollbackRows[row].isSoftWrapped
-            || scrollbackRows[row].cell(at: columnCount - 1).kind == .spacerHead
-        else { return }
-        invalidateInspection(inScrollbackRow: row)
-        scrollbackRows[row].isSoftWrapped = false
-        if scrollbackRows[row].cell(at: columnCount - 1).kind == .spacerHead {
-            setScrollbackCell(
-                GridCell(styleId: replacementStyleId),
-                row: row,
-                column: columnCount - 1
-            )
-        }
+    /// Ends the logical line history is still printing, which is `31/D2` operation 2.
+    ///
+    /// A header bit plus at most one appended cell (`31/D3` Decision 3): the background-erase
+    /// style the sever paints into the vacated spacer column is a cell today's `pack` stores and
+    /// the renderer paints, so it is materialized into the open record before the line closes
+    /// rather than lost to a record measured at its content end.
+    private mutating func severScrollbackWrapClaim(replacementStyleId: StyleId) {
+        guard history.hasOpenTailRecord else { return }
+        invalidateInspection(inScrollbackRow: historyRowCount - 1)
+        history.repairClearedSpacer(styleId: replacementStyleId)
+        history.closeOpenRecord()
     }
 
     private mutating func restoreWrapClaimBeforeCursor() {
@@ -6389,10 +6361,10 @@ public struct Terminal: Equatable, Sendable {
             guard rows[cursor.row - 1].isSoftWrapped == false else { return }
             invalidateInspection(inViewportRows: (cursor.row - 1)..<cursor.row)
             rows[cursor.row - 1].isSoftWrapped = true
-        } else if isAlternateScreenActive == false, let last = scrollbackRows.indices.last {
-            guard scrollbackRows[last].isSoftWrapped == false else { return }
-            invalidateInspection(inScrollbackRow: last)
-            scrollbackRows[last].isSoftWrapped = true
+        } else if isAlternateScreenActive == false, historyRowCount > 0 {
+            guard history.hasOpenTailRecord == false else { return }
+            invalidateInspection(inScrollbackRow: historyRowCount - 1)
+            history.reopenTailRecord()
         }
     }
 
@@ -6442,29 +6414,18 @@ public struct Terminal: Equatable, Sendable {
         if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
             invalidateInspection(inViewportRows: (row - 1)..<row)
             rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
-        } else if row == 0,
-                  isAlternateScreenActive == false,
-                  let last = scrollbackRows.indices.last,
-                  scrollbackRows[last].cell(at: columnCount - 1).kind == .spacerHead
-        {
-            invalidateInspection(inScrollbackRow: last)
-            setScrollbackCell(
-                GridCell(styleId: replacementStyleId),
-                row: last,
-                column: columnCount - 1
-            )
+        } else if row == 0, isAlternateScreenActive == false, historyRowCount > 0 {
+            // The store never held the spacer -- where one sits is a function of the width, which
+            // `31/I1` forbids storing -- so the column the clear vacated shows up as the open
+            // tail's short final display row, and the repair fills it (`31/D3` Decision 3, which
+            // measured this against the real engine and found `31/F6` `X9`'s "no-op" wrong).
+            let repaired = history.repairClearedSpacer(styleId: replacementStyleId)
+            // Even when nothing was stored, the seam's spacer is *derived* from the live cell
+            // this clear just overwrote, so the last retained row displays differently now.
+            if repaired || seamRowIsShortOfItsSpacer {
+                invalidateInspection(inScrollbackRow: historyRowCount - 1)
+            }
         }
     }
 
-    /// Mutates logical history while keeping its cached byte charge exact.
-    private mutating func setScrollbackCell(_ cell: GridCell, row: Int, column: Int) {
-        let oldCost = Self.scrollbackByteCost(of: scrollbackRows[row])
-        let oldCells = scrollbackRows[row].storedCellCount
-        var retained = scrollbackRows[row].unpacked()
-        retained.setCell(cell, at: column, columns: columnCount)
-        let packed = PackedRetainedRow.pack(retained)
-        scrollbackRows[row] = packed
-        scrollbackByteCount += Self.scrollbackByteCost(of: packed) - oldCost
-        scrollbackStoredCellCount += packed.storedCellCount - oldCells
-    }
 }

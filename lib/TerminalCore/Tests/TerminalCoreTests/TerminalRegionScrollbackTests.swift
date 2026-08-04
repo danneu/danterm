@@ -110,28 +110,28 @@ struct TerminalRegionScrollbackTests {
         // Why it exists: the retention rule must reuse the existing push path, not
         //   a parallel one that bypasses accounting and grows history unbounded.
         // Scenario: a long-running inline-viewport session overruns its budget.
-        let rowCost = compactHistoryRowCost(storedCells: 1)
+        let lineCost = historyLineCost(cells: 1)
         var terminal = try labeledTerminal(
             columns: 2,
             rows: 4,
-            scrollbackBudgetBytes: rowCost * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1)
         )
         terminal.feed(Array("\u{1B}[1;3r\u{1B}[3;1H".utf8))
 
         terminal.feed(Array("\n".utf8))
         #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.scrollbackByteCount == rowCost)
+        #expect(terminal.scrollbackCensus.arenaBytesInUse == lineCost)
 
         terminal.feed(Array("\n".utf8))
         #expect(terminal.scrollbackRowCount == 2)
-        #expect(terminal.scrollbackByteCount == rowCost * 2)
+        #expect(terminal.scrollbackCensus.arenaBytesInUse == lineCost * 2)
 
         terminal.feed(Array("\n".utf8))
         #expect(terminal.scrollbackRowCount == 2)
-        #expect(terminal.scrollbackByteCount == rowCost * 2)
+        #expect(terminal.scrollbackCensus.arenaBytesInUse == lineCost * 2)
         #expect(terminal.scrollbackRow(at: 0)?.cells[0].scalars == ["B"])
         #expect(terminal.scrollbackRow(at: 1)?.cells[0].scalars == ["C"])
-        #expect(terminal.recomputedScrollbackByteCount == terminal.scrollbackByteCount)
+        #expect(terminal.scrollbackRowCount == terminal.independentScrollbackRowRecount)
     }
 
     @Test("CSI S beyond the region height pushes at most the region's rows")

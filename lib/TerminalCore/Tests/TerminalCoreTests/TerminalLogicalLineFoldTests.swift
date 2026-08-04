@@ -1,10 +1,15 @@
-// Fidelity proof for doc 31's read-time fold: the arena, read at a width, must emit the same
-// display rows today's per-display-row store holds.
+// Fidelity proof for doc 31's read-time fold: the arena, read at a width, must emit the display
+// rows a pane of that width really shows.
 //
-// What belongs here: comparisons between the logical-line store's fold and
-// `PackedRetainedRow`'s own walks over the rows a real `Terminal` retained, plus the spacer
-// arithmetic (`31/F4` Observation 1) the fold re-derives rather than stores. What does not:
-// the arena's mutating operations and its charge, which are `TerminalLogicalLineStoreTests`.
+// **The oracle is the live grid**, and it has to be, now that retained history *is* this store:
+// a comparison against `scrollbackRow(at:)` would ask the thing under test what the answer is.
+// The live grid's wrapping is the printer's own -- `printNarrow`/`printWide` and the live
+// refold -- and shares no code with the fold, so a terminal tall enough to hold its whole
+// transcript in the viewport answers "what does a pane of this width display" independently.
+//
+// What belongs here: comparisons between the logical-line store's fold and those live rows, plus
+// the spacer arithmetic (`31/F4` Observation 1) the fold re-derives rather than stores. What does
+// not: the arena's mutating operations and its charge, which are `TerminalLogicalLineStoreTests`.
 //
 // The comparison is deliberately content-level -- scalars, kinds, style ids, hyperlink ids,
 // content identity, soft-wrap and semantic prompt, read through `cell(at:)` over the pane's
@@ -29,22 +34,17 @@ import Testing
 struct TerminalLogicalLineFoldTests {
     // MARK: - Cross-store fidelity
 
-    @Test("Folding the arena reproduces the display rows today's store holds")
+    @Test("Folding the arena reproduces the display rows a pane of that width shows")
     func foldReproducesTodaysRetainedRows() throws {
-        // Intent: feeding a real terminal's retained display rows into the logical-line store
-        //   and folding them back at the same width returns every column unchanged.
+        // Intent: feeding a pane's own display rows into the logical-line store and folding
+        //   them back at the same width returns every column unchanged.
         // Why it exists: `31/I6` is the invariant the whole design rests on -- wrapping at
         //   read must emit the same cells, kinds, styles, spacer placement, continuation
-        //   stamping and soft-wrap marking today's stored rows do -- and `31/F5`'s
+        //   stamping and soft-wrap marking a displayed row carries -- and `31/F5`'s
         //   simplification argument is only collectable if it does.
         for content in RetainedContent.allCases {
-            var terminal = try #require(Terminal(columns: content.columns, rows: 6))
-            terminal.feed(Array(content.stimulus.utf8))
-
-            let retained = (0..<terminal.scrollbackRowCount).map {
-                terminal.retainedRowForTesting(at: $0)!
-            }
-            try #require(retained.count > 4, "\(content) retained too little to compare")
+            let retained = try liveDisplayRows(content.stimulus, columns: content.columns)
+            try #require(retained.count > 4, "\(content) displayed too little to compare")
 
             var store = Terminal.LogicalLineStore(
                 budgetBytes: 1 << 20,
@@ -82,25 +82,24 @@ struct TerminalLogicalLineFoldTests {
         //   the fold derives. A terminal reflowed to the new width is the independent oracle.
         for content in RetainedContent.allCases {
             for newWidth in [7, 13, 40] {
-                var reference = try #require(Terminal(columns: content.columns, rows: 6))
-                reference.feed(Array(content.stimulus.utf8))
-
+                let source = try liveDisplayRows(content.stimulus, columns: content.columns)
                 var store = Terminal.LogicalLineStore(
                     budgetBytes: 1 << 20,
                     width: content.columns
                 )
-                for index in 0..<reference.scrollbackRowCount {
-                    store.admit(reference.retainedRowForTesting(at: index)!)
+                for row in source {
+                    store.admit(row)
                 }
 
-                reference.resize(columns: newWidth, rows: 6)
                 _ = store.setWidth(newWidth)
 
-                // The live screen holds the tail of the stream on both sides, so compare the
-                // history the reference kept, oldest first, against the store's own head.
-                let referenceRows = (0..<reference.scrollbackRowCount).map {
-                    reference.retainedRowForTesting(at: $0)!
-                }
+                // The same content displayed by a pane that was *never* at the old width, so
+                // nothing the fold could have cached is shared with it.
+                let referenceRows = try liveDisplayRows(
+                    content.stimulus,
+                    columns: content.columns,
+                    resizedTo: newWidth
+                )
                 let shared = min(
                     referenceRows.count,
                     comparableRowCount(store, store.grandDisplayRowTotal)
@@ -458,18 +457,19 @@ struct TerminalLogicalLineFoldTests {
         //   recorded as a test rather than as a footnote. Today's `reconstructLogicalLines`
         //   measures a hard-ended row to its content end, so a resize discards the paint the
         //   user was looking at; the fill is width-free, so it survives and re-derives.
-        var reference = try #require(Terminal(columns: 17, rows: 6))
-        reference.feed(Array(RetainedContent.backgroundErased.stimulus.utf8))
-
+        let source = try liveDisplayRows(RetainedContent.backgroundErased.stimulus, columns: 17)
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 17)
-        for index in 0..<reference.scrollbackRowCount {
-            store.admit(reference.retainedRowForTesting(at: index)!)
+        for row in source {
+            store.admit(row)
         }
-
-        reference.resize(columns: 9, rows: 6)
         _ = store.setWidth(9)
 
-        let referenceRow = try #require(reference.retainedRowForTesting(at: 0))
+        let referenceRows = try liveDisplayRows(
+            RetainedContent.backgroundErased.stimulus,
+            columns: 17,
+            resizedTo: 9
+        )
+        let referenceRow = try #require(referenceRows.first)
         let painted = try #require(store.paintedDisplayRow(at: 0))
         let end = contentEnd(of: referenceRow, width: 9)
         try #require(end < 9, "the sample row must leave a tail for the erase to paint")
@@ -567,6 +567,44 @@ struct TerminalLogicalLineFoldTests {
                 }.joined()
             }
         }
+    }
+
+    /// The display rows a pane of `columns` shows for `stimulus`, read out of the live grid.
+    ///
+    /// The viewport is deliberately taller than the transcript so nothing scrolls into history:
+    /// these rows are the oracle, and an oracle that had been through the store under test would
+    /// not be one. `resizedTo` refolds the same live grid, which is the surviving half of the old
+    /// width reflow and the independent answer to "what does this content look like at that
+    /// width".
+    private func liveDisplayRows(
+        _ stimulus: String,
+        columns: Int,
+        resizedTo newWidth: Int? = nil
+    ) throws -> [Terminal.GridRow] {
+        let viewportRows = 400
+        var terminal = try #require(Terminal(columns: columns, rows: viewportRows))
+        terminal.feed(Array(stimulus.utf8))
+        if let newWidth {
+            terminal.resize(columns: newWidth, rows: viewportRows)
+        }
+        try #require(terminal.scrollbackRowCount == 0, "the transcript outgrew the oracle viewport")
+
+        var rows: [Terminal.GridRow] = []
+        for index in 0..<viewportRows {
+            guard let row = terminal.liveRowForTesting(at: index) else { break }
+            rows.append(row)
+        }
+        // The blank rows below the transcript are the viewport's, not the content's.
+        while let last = rows.last,
+              last.isSoftWrapped == false,
+              last.semanticPrompt == .none,
+              last.cells.allSatisfy({
+                  $0.kind == .padding && $0.styleId == Terminal.defaultStyleId
+              })
+        {
+            rows.removeLast()
+        }
+        return rows
     }
 
     /// Display rows the two stores must agree on cell for cell.

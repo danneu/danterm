@@ -1,5 +1,4 @@
 // Shared structural assertions for viewport and retained terminal rows.
-import Darwin
 import Testing
 
 @testable import TerminalCore
@@ -24,13 +23,16 @@ func expectValidGrid(
     context: Comment? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
+    // The one bound history has, and the independent recount that catches a stale index --
+    // `31/I2` and `31/I9`, asserted on every grid a suite validates rather than only where a
+    // test remembered to look.
     #expect(
-        terminal.scrollbackByteCount <= terminal.scrollbackBudgetBytes,
+        terminal.scrollbackCensus.chargedBytes <= terminal.scrollbackCensus.capacityBytes,
         context,
         sourceLocation: sourceLocation
     )
     #expect(
-        terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount,
+        terminal.scrollbackRowCount == terminal.independentScrollbackRowRecount,
         context,
         sourceLocation: sourceLocation
     )
@@ -248,70 +250,78 @@ private func expectValidRow(
     }
 }
 
-/// Bytes one full-width history row costs in the terminal's own byte accounting.
+/// The arena bytes one retained logical line of `cells` printed cells charges.
 ///
-/// Test budgets are written as multiples of this rather than as magic numbers, so the cost model
-/// lives in one place. Correcting it (doc 15's `H1`, which moved an ordinary cell from a charged
-/// 40 bytes to its true stride) otherwise means reverse-engineering the intended row count out of
-/// a dozen unrelated literals scattered across suites.
-///
-/// It asks the engine rather than restating its arithmetic, which doc 15's `D4` made necessary: the
-/// budget now charges the storage a row *reserves*, and a row's cell array is allocated in a malloc
-/// bucket that holds more cells than the row has columns (90 at 80 columns, 218 at 200). No
-/// expression in a column count can reproduce that, and one written from a stride would silently
-/// under-size every budget at real pane widths.
-///
-/// Sized on a row of *printed* cells since doc 28's packing. The packed retained row charges
-/// by content -- a scalar column, a style run, an identity run -- so a full-width row of
-/// never-written cells is both cheaper and a shape history does not hold at full width
-/// (canonical trimming collapses it to one cell). A budget written in blank rows would admit
-/// a different number of real rows than the test that wrote it intends.
-///
-/// Only a multi-scalar cluster adds a spill allocation, so `spilledClusterScalars` lists the
-/// scalar count of each such cluster.
-func historyRowCost(columns: Int, spilledClusterScalars: [Int] = []) -> Int {
-    Terminal.compactScrollbackRowByteCost(storedCells: columns)
-        + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
+/// Record-denominated since doc 31: history holds one record per logical line -- an 8-byte
+/// header, one 8-byte cell per stored cell, and the identity run a line printed straight
+/// through needs -- rather than one packed blob per display row. A fixture that wants a
+/// *budget* asks `historyBudget(lines:cells:)`, which searches the store; this is for a
+/// fixture that wants to state what one line costs.
+func historyLineCost(cells: Int) -> Int {
+    var total = RecordCharge.header + max(0, cells) * RecordCharge.cell
+    if cells > 0 { total += RecordCharge.identityRun }
+    return (total + 7) & ~7
 }
 
-/// Bytes an ordinary compact history row costs for an exact stored-cell extent.
-func compactHistoryRowCost(storedCells: Int) -> Int {
-    Terminal.compactScrollbackRowByteCost(storedCells: storedCells)
-}
-
-/// Bytes history charges for a packed retained row whose blob holds `payloadBytes`.
+/// The smallest byte budget that retains every logical line `lineCells` describes.
 ///
-/// Restates doc 28's `C1` charge -- row slot, array header, the allocator's answer for the
-/// blob, and one allocation per multi-scalar spill -- so a budget fixture can be written as
-/// the arithmetic it means instead of a number recovered from a failing assertion. Asks
-/// libmalloc for the rounding for the same reason `historyRowCost` asks the engine: no
-/// expression in a payload size reproduces a size class.
-func packedHistoryRowCost(payloadBytes: Int, spilledClusterScalars: [Int] = []) -> Int {
-    let arrayHeader = 32
-    var total = MemoryLayout<Terminal.PackedRetainedRow>.stride
-        + arrayHeader
-        + (malloc_good_size(arrayHeader + payloadBytes) - arrayHeader)
-    if spilledClusterScalars.isEmpty == false {
-        // The spill directory, then one allocation per cluster.
-        total += arrayHeader
-            + (malloc_good_size(arrayHeader + spilledClusterScalars.count * 8) - arrayHeader)
-        for scalars in spilledClusterScalars {
-            total += arrayHeader + (malloc_good_size(arrayHeader + scalars * 4) - arrayHeader)
+/// Searched against a real store rather than derived, for the reason doc 15's `D4` made the old
+/// helper ask the engine too: what history charges is what the *allocator* gave, and under doc 31
+/// that spans the records, the index rings, the side tables and the room the write path reserves
+/// for a record's tables before it appends. No expression in a cell count reproduces that, and
+/// one written from a model would silently size every fixture wrong.
+func historyBudget(lineCells: [Int], paneColumns: Int = 0) -> Int {
+    let width = max(2, lineCells.max() ?? 2)
+    func retainsAll(_ budget: Int) -> Bool {
+        var probe = Terminal.LogicalLineStore(budgetBytes: budget, width: width)
+        for cells in lineCells {
+            probe.admit(Terminal.GridRow(cells: (0..<cells).map {
+                Terminal.GridCell(
+                    scalars: TerminalScalars("a" as Unicode.Scalar),
+                    kind: .narrow,
+                    contentIdentity: Terminal.ContentIdentity($0 + 1)
+                )
+            }))
         }
+        return probe.recordCount >= lineCells.count
     }
-    return total
+
+    var low = Terminal.minimumScrollbackBudgetBytes
+    if retainsAll(low) { return low }
+    var high = low
+    while retainsAll(high) == false { high *= 2 }
+    while high - low > 8 {
+        let mid = (low + high) / 2 & ~7
+        if retainsAll(mid) { high = mid } else { low = mid }
+    }
+    return max(high, fullWidthRowFloor(columns: paneColumns))
 }
 
-/// The packed blob's own fixed costs, so a fixture can spell out what a row's payload is
-/// made of. Mirrors `Terminal.PackedRetainedRow.Header` deliberately rather than reading it:
-/// a fixture that asked the encoder what it charges could not pin the encoding.
+/// The smallest byte budget that retains `lines` logical lines of `cells` printed cells.
+func historyBudget(lines: Int, cells: Int, paneColumns: Int = 0) -> Int {
+    historyBudget(lineCells: Array(repeating: cells, count: lines), paneColumns: paneColumns)
+}
+
+/// A budget floor sized so one full-width soft-wrapped display row fits the arena.
 ///
-/// Five terms became three when `D9` pivoted from `C6` to `C1`: the stride tier, the
-/// style-run table, the kind-exception table and the spill directory all fold into the
-/// 8-byte cell. That collapse is the design, so the shrinking of this enum is the point
-/// rather than a side effect.
-enum PackedRowCharge {
-    static let header = 7
+/// A pane whose history cannot hold a single display row of its own width retains nothing at
+/// all -- legal, and never what a fixture means. Named as a floor rather than folded into the
+/// search because the search models the fixture's *lines*, and a wrapping line admits rows of
+/// the pane's width whatever its own length.
+private func fullWidthRowFloor(columns: Int) -> Int {
+    guard columns > 0 else { return 0 }
+    let arena = 112 + columns * 16
+    var budget = (arena + 7) & ~7
+    while budget - (((budget / 16) + 7) & ~7) < arena { budget += 8 }
+    return budget
+}
+
+/// The record arena's fixed charges, so a fixture can spell out what a logical line is made of.
+///
+/// Mirrors `Terminal.LogicalLineRecord` deliberately rather than reading it: a fixture that
+/// asked the store what it charges could not pin the encoding.
+enum RecordCharge {
+    static let header = 8
     static let cell = 8
     static let hyperlinkEntry = 4
     static let identityRun = 8

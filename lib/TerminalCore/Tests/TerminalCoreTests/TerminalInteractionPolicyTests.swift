@@ -173,7 +173,7 @@ struct TerminalInteractionPolicyTests {
         var evicting = try #require(Terminal(
             columns: 12,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 6) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 6, paneColumns: 12)
         ))
         evicting.feed(Array("  aa  \r\n  bb  \r\n  cc  \r\n  dd  \r\n  ee  ".utf8))
         evicting.scroll(toTopRow: 0)
@@ -710,7 +710,7 @@ struct TerminalInteractionPolicyTests {
         var terminal = try #require(Terminal(
             columns: 12,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 3) * 6
+            scrollbackBudgetBytes: historyBudget(lines: 6, cells: 3)
         ))
         terminal.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
         terminal.scroll(toTopRow: 2)
@@ -758,7 +758,7 @@ struct TerminalInteractionPolicyTests {
         var browsing = try #require(Terminal(
             columns: 12,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 12) * 6
+            scrollbackBudgetBytes: historyBudget(lines: 6, cells: 12)
         ))
         browsing.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
         browsing.scroll(toTopRow: 2)
@@ -786,7 +786,7 @@ struct TerminalInteractionPolicyTests {
         var terminal = try #require(Terminal(
             columns: 4,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 3
+            scrollbackBudgetBytes: historyBudget(lineCells: [8, 2, 2], paneColumns: 4)
         ))
         terminal.feed(Array("xx\r\naaaabbbb\r\nyy\r\nzz".utf8))
         terminal.scroll(toTopRow: 0)
@@ -817,8 +817,7 @@ struct TerminalInteractionPolicyTests {
         var terminal = try #require(Terminal(
             columns: 20,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 4) * 3
-                + compactHistoryRowCost(storedCells: 13)
+            scrollbackBudgetBytes: historyBudget(lineCells: [4, 4, 13, 2, 2, 2])
         ))
         terminal.feed(Array("top1\r\ntop2\r\none two three\r\nf1\r\nf2".utf8))
         terminal.scroll(toTopRow: 2)
@@ -833,7 +832,9 @@ struct TerminalInteractionPolicyTests {
         )
         #expect(forward.selectionMutation == .set(range(2, 4, 2, 13)))
 
-        terminal.feed(Array("\r\nf3\r\nf4".utf8))
+        // Four more lines rather than two: the byte bound evicts a whole logical line at a
+        // time now, so the feed has to be long enough for one to go.
+        terminal.feed(Array("\r\nf3\r\nf4\r\nf5\r\nf6".utf8))
         let reversed = decideTerminalPointer(
             .move(column: 1, row: 0), terminal: terminal, state: &state
         )
@@ -853,7 +854,7 @@ struct TerminalInteractionPolicyTests {
         var terminal = try #require(Terminal(
             columns: 12,
             rows: 2,
-            scrollbackBudgetBytes: compactHistoryRowCost(storedCells: 3) * 6
+            scrollbackBudgetBytes: historyBudget(lines: 6, cells: 3)
         ))
         terminal.feed(Array("r01\r\nr02\r\nr03\r\nr04\r\nr05\r\nr06\r\nr07\r\nr08".utf8))
         terminal.scroll(toTopRow: 2)

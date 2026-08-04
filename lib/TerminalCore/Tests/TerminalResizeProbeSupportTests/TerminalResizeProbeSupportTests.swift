@@ -51,7 +51,12 @@ struct TerminalResizeProbeSupportTests {
 
         #expect(atCeiling > 0)
         #expect(atCeiling < recipe.lineCount)
-        #expect(terminal.scrollbackRowCount == atCeiling)
+        // Not-greater rather than equal since doc 31: the bound is charged bytes, and a record
+        // whose head is trimmed frees a display row without freeing a whole line's charge, so an
+        // overfeed at the ceiling can settle a few rows below it. What the recipe claims -- that
+        // feeding more buys no more depth -- is the direction, not the exact figure.
+        #expect(terminal.scrollbackRowCount <= atCeiling)
+        #expect(terminal.scrollbackRowCount > atCeiling - 100)
     }
 
     @Test("The sparse recipe's rows are a fraction of the dense recipe's width")
@@ -97,7 +102,12 @@ struct TerminalResizeProbeSupportTests {
 
         #expect(atCeiling > 0)
         #expect(atCeiling < recipe.lineCount)
-        #expect(terminal.scrollbackRowCount == atCeiling)
+        // Not-greater rather than equal since doc 31: the bound is charged bytes, and a record
+        // whose head is trimmed frees a display row without freeing a whole line's charge, so an
+        // overfeed at the ceiling can settle a few rows below it. What the recipe claims -- that
+        // feeding more buys no more depth -- is the direction, not the exact figure.
+        #expect(terminal.scrollbackRowCount <= atCeiling)
+        #expect(terminal.scrollbackRowCount > atCeiling - 100)
     }
 
     @Test("The wide payload fills the standard recipe's width exactly")
@@ -130,7 +140,12 @@ struct TerminalResizeProbeSupportTests {
 
         #expect(atCeiling > 0)
         #expect(atCeiling < recipe.lineCount)
-        #expect(terminal.scrollbackRowCount == atCeiling)
+        // Not-greater rather than equal since doc 31: the bound is charged bytes, and a record
+        // whose head is trimmed frees a display row without freeing a whole line's charge, so an
+        // overfeed at the ceiling can settle a few rows below it. What the recipe claims -- that
+        // feeding more buys no more depth -- is the direction, not the exact figure.
+        #expect(terminal.scrollbackRowCount <= atCeiling)
+        #expect(terminal.scrollbackRowCount > atCeiling - 100)
     }
 
     @Test("A recipe's identity names its version, so v2's numbers cannot be read as v1's")

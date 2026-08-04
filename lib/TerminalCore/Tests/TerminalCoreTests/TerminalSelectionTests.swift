@@ -187,11 +187,10 @@ struct TerminalSelectionTests {
 
     @Test("eviction clamps selection and clears a truncated active match")
     func evictionMaintenance() throws {
-        let rowCost = historyRowCost(columns: 2)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: rowCost * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 2)
         ))
         terminal.feed(Array("A\r\nB\r\nC".utf8))
         terminal.setSelection(
@@ -217,11 +216,10 @@ struct TerminalSelectionTests {
 
     @Test("whole eviction clears while reflow eviction clamps after attachment")
     func wholeAndReflowEviction() throws {
-        let rowCost = historyRowCost(columns: 2)
         var whole = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: rowCost
+            scrollbackBudgetBytes: historyBudget(lines: 1, cells: 1, paneColumns: 2)
         ))
         whole.feed(Array("A\r\nB".utf8))
         whole.setSelection(
@@ -234,7 +232,7 @@ struct TerminalSelectionTests {
         var reflow = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+            scrollbackBudgetBytes: historyBudget(lineCells: [24], paneColumns: 4)
         ))
         reflow.feed(Array("ABCDEFGHI".utf8))
         reflow.setSelection(
@@ -246,8 +244,10 @@ struct TerminalSelectionTests {
 
         reflow.resize(columns: 2, rows: 1)
 
+        // The width change evicts nothing (`31/I3`), so the occurrence it used to lose to a
+        // reflow-triggered eviction survives -- restated, not dropped (`31/D3` Decision 2).
         #expect(reflow.selectedText == reflow.fullHistoryText)
-        #expect(reflow.activeSearchMatchRange == nil)
+        #expect(reflow.activeSearchMatchRange != nil)
     }
 
     @Test("a stripped trailing blank endpoint clamps to retained content")
@@ -284,11 +284,10 @@ struct TerminalSelectionTests {
         // Why it exists: pins whole-stream extent (not the viewport), computed inside the
         //   terminal value, the contract the Cmd-A plumbing relies on to copy scrollback.
         // Scenario: output has scrolled past one screen, evicting early rows into scrollback.
-        let rowCost = historyRowCost(columns: 2)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: rowCost * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 2)
         ))
         terminal.feed(Array("A\r\nB\r\nC\r\nD".utf8))
 

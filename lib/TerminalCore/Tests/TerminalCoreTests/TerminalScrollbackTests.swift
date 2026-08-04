@@ -35,6 +35,40 @@ struct TerminalScrollbackTests {
         #expect(terminal.scrollbackRow(at: 3) == nil)
     }
 
+    @Test("a background-erase sever and spacer clear leave the vacated column painted")
+    func backgroundErasePaintsTheSeveredSpacerColumn() throws {
+        // Intent: when a non-default background erase severs a retained wrap claim -- or clears
+        //   the spacer through EL -- the column the spacer occupied is painted in the erase
+        //   colour, and under the default erase style it is painted in the default colour.
+        // Why it exists: `31/PO2`. History stores logical lines and never stores a spacer, so
+        //   the naive mapping loses a cell the engine really holds and paints: `31/D3`
+        //   Decision 3 measured the four states against the real engine and made the repair a
+        //   tail append, asymmetric on purpose -- today's canonical trimming drops a
+        //   *default*-styled blank there, so storing nothing is what reproduces it.
+        // Scenario: a wide glyph wraps at the right margin, its row scrolls off, and a
+        //   background-erased insert or erase-in-line takes the column back.
+        var painted: [TerminalColor?] = []
+        for sgr in ["\u{1B}[41m", ""] {
+            var terminal = try #require(Terminal(columns: 4, rows: 2))
+            terminal.feed(Array("abc\u{754C}".utf8))
+            terminal.feed(Array("\r\n".utf8))
+            let seam = terminal.scrollbackRowCount - 1
+            #expect(terminal.scrollbackRow(at: seam)?.cells[3].kind == .spacerHead)
+
+            terminal.feed(Array("\u{1B}[H\(sgr)\u{1B}[L".utf8))
+
+            let repaired = try #require(terminal.scrollbackRow(at: seam))
+            #expect(repaired.isSoftWrapped == false)
+            #expect(repaired.cells[3].kind == .padding)
+            painted.append(repaired.cells[3].style.background)
+            expectValidGrid(terminal)
+        }
+        // The whole of `31/D3` Decision 3: the erase colour survives into history, and the
+        // default one is still the default rather than the erase colour left over.
+        #expect(painted[0] != painted[1])
+        #expect(painted[1] == TerminalStyle().background)
+    }
+
     @Test("clearing a viewport wide cell repairs its retained spacer row")
     func crossBoundarySpacerRepair() throws {
         // Intent: preserve wide-cell atomicity when the scrollback/viewport

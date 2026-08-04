@@ -123,13 +123,13 @@ struct TerminalMemoryProbeSupportTests {
         let totalRows = census.screenRowCount + census.scrollbackRowCount
         #expect(census.cellCount >= census.screenRowCount * Self.geometry.columns)
         #expect(census.cellCount < totalRows * Self.geometry.columns)
-        // Exactness survives doc 28's packing; the arithmetic it is exact *in* changed. Live
-        // rows are still stride times extent, and retained rows are now the exact byte count
-        // of their packed blobs -- neither sampled nor bucket-rounded, which is the property
-        // this test exists to hold.
+        // Exactness survives doc 31's record arena; the arithmetic it is exact *in* changed
+        // again. Live rows are still stride times extent, and retained content is now the
+        // arena's exact bytes in use -- neither sampled nor bucket-rounded, which is the
+        // property this test exists to hold.
         #expect(census.cellStorageBytes
             == census.screenRowCount * Self.geometry.columns * census.cellStrideBytes
-                + census.retainedPackedPayloadBytes)
+                + census.retainedArenaBytesInUse)
         // The headline: a retained cell costs a fraction of the live-grid stride. Bounded on
         // both sides deliberately. `C1` stores an 8-byte cell (`D9`), so the floor is what
         // says the cell really is packed and not a struct in disguise, and the ceiling is
@@ -156,7 +156,7 @@ struct TerminalMemoryProbeSupportTests {
             rows: Self.geometry.rows
         ))
         #expect(report.census.scrollbackRowCount > 0)
-        #expect(report.census.hasRetainedRowStorageLeak == false)
+        #expect(report.census.hasRetainedStorageOverdraft == false)
     }
 
     @Test("the heap snapshot cannot report more bytes in use than the allocator obtained")

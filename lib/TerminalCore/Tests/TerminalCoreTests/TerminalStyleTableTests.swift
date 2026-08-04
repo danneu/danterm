@@ -75,7 +75,7 @@ struct TerminalStyleTableTests {
         var terminal = Terminal(
             columns: 4,
             rows: 2,
-            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 4)
         )!
 
         let styleCount = 4_000

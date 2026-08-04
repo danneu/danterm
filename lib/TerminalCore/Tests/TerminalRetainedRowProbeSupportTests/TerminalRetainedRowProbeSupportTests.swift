@@ -39,22 +39,20 @@ struct TerminalRetainedRowProbeSupportTests {
         #expect(report.storedCellCounts.count == report.retainedRowCount)
     }
 
-    @Test("C1's pricing arithmetic predicts the packed rows' bytes exactly")
-    func packedPayloadMatchesModel() {
-        // Intent: applying doc 28's `C1` charges to composition the probe read through the
-        //   public API reproduces, to the byte, what the engine's packed rows really hold --
-        //   across styled runs, wide cells, combining sequences, hyperlinks, non-BMP scalars,
-        //   and rows combining them.
-        // Why it exists: `derivationMatchesCensus` proves only that the stored *extent* still
-        //   follows from canonical form. After packing, the extent is no longer the price, so
-        //   an encoder could keep every extent right and still store a field it is not charged
-        //   for -- or charge for one it does not store -- with every byte figure downstream
-        //   silently wrong. This is the check that the design's arithmetic and the
-        //   implementation's bytes are the same thing.
+    @Test("The probe reads every content axis back off the record arena")
+    func compositionCoversEveryContentAxis() {
+        // Intent: the composition the probe reads through the public API covers styled runs,
+        //   wide cells, combining sequences, hyperlinks and non-BMP scalars together, and the
+        //   arena reports bytes in use for them.
+        // Why it exists: doc 28's per-row payload model was retired with the representation it
+        //   described -- history charges one header per logical line since doc 31, not per
+        //   display row (`31/D3` Decision 6), so a per-row model cannot equal the arena and a
+        //   comparison against it would be false by construction rather than by defect. What
+        //   survives is the extent claim `derivationMatchesCensus` makes, held over the same
+        //   union of content axes.
         // Scenario: spec-first; the content is deliberately the union of the axes doc 28
-        //   prices separately, because a plain-ASCII corpus would match under almost any
-        //   encoding. It is unchanged across the `D9` pivot on purpose: the axes are content
-        //   classes, and `C1` has to show they cost it nothing rather than be spared them.
+        //   prices separately, because a plain-ASCII corpus would exercise almost none of the
+        //   record format.
         var terminal = Terminal(columns: 40, rows: 3)!
         for index in 0..<40 {
             terminal.feed(Array("\u{1B}[3\(index % 8)mstyled-\(index) ".utf8))
@@ -76,10 +74,7 @@ struct TerminalRetainedRowProbeSupportTests {
         #expect(report.composition.hyperlinkCellCounts.contains { $0 > 0 })
         #expect(report.composition.wideCellCounts.contains { $0 > 0 })
         #expect(report.derivationMatchesCensus)
-        #expect(
-            report.packedPayloadMatchesModel,
-            "model \(report.packedPayloadModelBytes) B, engine \(report.censusRetainedPackedPayloadBytes) B"
-        )
+        #expect(report.censusRetainedArenaBytesInUse > 0)
     }
 
     @Test("A blank retained row counts as blank, and stores one cell")

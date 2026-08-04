@@ -412,7 +412,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [x] 4a. perf(terminal): spend `31/F8`'s attributed headroom on the arena's write path, and ship `31/D4`'s residency remedy
 - [x] 4b. test(terminal): re-run `31/D4`'s frozen rule against the optimized store and record the verdict
-- [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
+- [x] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
 
@@ -762,3 +762,122 @@ Open conditions that the implementation, not the design, has to discharge:
     with two independent readings of the same complexity claim beside it. A
     human who wants it read literally has to batch the gated step, which is a
     change to a frozen instrument.
+
+- **Slice 5 wires the store and deletes reflow of history, and the wiring is smaller than
+  `31/F6` predicted in one direction and larger in another.** Smaller, because `31/D3`
+  Decision 5's materializing facade means `ProjectionRows` keeps its shape: every reader
+  `F6` classified as *rewritten* because it walks a row collection -- `R2`-`R11`, `R17`,
+  `R18` -- is unchanged, and only its backing changed. Larger, because two of `F6`'s
+  deletions turned out to cover only half of what they name, and because the fuzz suite
+  found two real defects the mapping did not predict. What landed, by subsystem:
+  - **Admission and eviction.** `appendToScrollback` is `history.admit` per display row;
+    `enforceScrollbackBudget` is `history.evictToBudget()` plus one sync. Admission evicts
+    on its own, so the count `handleEviction` needs is read as a delta against the store's
+    monotone `evictedRowCount` rather than returned per call -- `historyEvictionsObserved`
+    exists because a hard reset restarts `evictedRowCount` while history survives it, so
+    the two counters cannot be one.
+  - **Projection and reads.** `scrollProjection`, `projectionRowCount`, the cursor stream
+    row and every clamp bound read `history.grandDisplayRowTotal`: two-integer arithmetic,
+    no locate (`31/D3` Decision 1 rule 1, asserted by `TerminalFrameLocateTests`). The two
+    per-visible-row walks locate once and advance.
+  - **Tail mutations.** `severScrollbackWrapClaim` is repair-then-close;
+    `restoreWrapClaimBeforeCursor` is `reopenTailRecord`; `clearPreviousSpacer`'s scrollback
+    branch is the repair alone; `resizeHeight`'s grow is `truncateTail`.
+  - **The width change.** History adopts the new width and refolds nothing; only the live
+    screen is rebuilt, with the seam remainder `31/D3` Decision 4 hands back as its first
+    line's prefix.
+- **Nine judgment calls, recorded as `31/DD39`-`31/DD47` continuing `DD38`'s numbering.**
+  The first two are where `31/F6`'s mapping proved wrong against the code; the rest are
+  ordinary choices taken as the obvious simple option.
+  - **DD39 -- the live screen's refold survives, so `F6` `X2`/`R12` delete history's half
+    of it and not the whole.** `X2` deletes `reconstructLogicalLines` and `R12` moves
+    `pack(line:columns:)` "to read time", but a width change still has to rewrap the *live*
+    screen, and nothing else in the engine can. `31/D3` Decision 2's own table says as much
+    ("the seven reflow-only types, **less the live-refold half**"), and `31/F5`
+    Observation 2 and `31/F4` case 7 counted the live refold as *moving* rather than
+    deleting. So `reconstructLogicalLines`, `pack`, `sourceKey`, `ReflowCursorAnchor`,
+    `ReflowDestination` and `PackedReflowLine` stay, restricted to the live rows plus the
+    seam prefix; what goes is history as a reflow *source*, which is the ~286-line half
+    `X1` names.
+  - **DD40 -- the anchor restatement is split at the seam, and that is what replaces the
+    attachment machinery.** `31/D3` Decision 2 says a display-row anchor needs "one
+    restatement function, not the attachment machinery", and that is exactly right for the
+    history side: capture `(record, cell offset)` before the width change, convert back
+    after, both arithmetic. It does not cover the *live* side, which is genuinely rebuilt --
+    the decision's table is about history. So the live half restates through the reflow's
+    own `boundaryDestinations`, which survive for the cursor anyway (DD39). Deleted as
+    promised: `ReflowTextAttachment`, `attachments`, `attachment` (both), `textDestination`,
+    and `oldUnits = projectionUnits()` -- a whole-history materialization on the resize path.
+  - **DD41 -- the projection facade materializes the *painted* walk everywhere.**
+    `31/DD25`'s amendment reserves the content walk for copy, selection and search, and the
+    facade serves all three. It is still the painted walk, because `projectedCellEnd`
+    measures a hard-ended row to `retainedContentEnd`, which excludes a trailing fill
+    whichever walk produced the row -- so the distinction is invisible to every text
+    consumer, and using the painted walk keeps `scrollbackRow(at:)`, the geometry pass and
+    the renderer faithful to what the user saw. The content walk stays reachable and is
+    what `recordCells` serves.
+  - **DD42 -- a soft-wrapped row projects its own extent, not the pane width.** `31/I1`
+    forbids storing a spacer, so a folded row can legitimately be short: at the open tail's
+    seam by the dropped `.spacerHead`, and at a forced split whenever the split offset is
+    not a multiple of the current width. Measuring those to `columnCount` projected padding
+    as spaces the program never printed, which the resize fuzz caught as history text
+    gaining a space across a resize.
+  - **DD43 -- the history/live seam's spacer is re-derived in `Terminal`, not in the
+    store.** The fold re-derives a `.spacerHead` from the wide head that follows it; for the
+    *last* retained display row that head is the live grid's first cell, which the store
+    cannot see. Slice 3 recorded the resulting short row as an acknowledged divergence;
+    four behavioral tests turned out to depend on the column, so `Terminal` -- the one type
+    that sees both sides -- makes the same reach the store already makes across a forced
+    split's seam. The divergence is gone rather than accepted.
+  - **DD44 -- `31/PO7`'s "at most one locate" is read per viewport *traversal*.** A planned
+    frame makes two -- the geometry pass and the cell pass -- because they are two public
+    reads of two different projections, and merging them would undo `28/F17`. The
+    load-bearing half of the obligation is invariance to depth, and that is asserted
+    directly: the same count at 60 lines and at 6,000.
+  - **DD45 -- `forEachViewportCell` gains a plural spelling, and the planner uses it.**
+    `31/D3` Decision 1 rule 2 assumes the per-visible-row walks are loops; the singular
+    entry point is called once per row by `RenderFramePlanner`, so under the store it would
+    have been one locate per row -- exactly `31/HR1`'s hazard. The plural form takes the row
+    range and a predicate, so a damage-clipped frame still folds only what it redraws.
+    `31/F6` `U11` called the planner unchanged; this is the one thing it needed.
+  - **DD46 -- a budget too small to hold one display row retains nothing rather than
+    trapping.** The arena is reserved once and never grown (`31/I2`), so there is no room to
+    make for a row that does not fit an empty arena. The old store had no such floor, and a
+    `precondition` would turn a degenerate configuration into a crash.
+  - **DD47 -- evicting an *open* head record stamps the next record opened.** `31/D2`
+    Decision 2 step 2 as amended stamps a dropped forced-split piece's follower; the open
+    tail has the same problem and no follower yet, so the stamp is pending until the next
+    record opens. Without it a line whose whole retained head was evicted reads as a fresh
+    logical line -- the divergence from `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`
+    that inherited condition 10 exists to prevent.
+- **Two defects the resize fuzz found, both fixed with the test that caught them.** Neither
+  is in `31/F6`'s inventory, and both are seam cases the design's own rules imply:
+  `truncateTail` folded each handed-back row *after* cutting the one below it, which loses
+  the `.spacerHead` the fold re-derives from the row below (it now folds the whole batch
+  first); and a widening left the refolded live half shorter than the viewport, which used
+  to be padded with blanks -- it now pulls the deficit back out of history, which is `31/D2`
+  operation 4 at a third trigger and moves no anchor.
+- **Test contract changes, each citing what changed the contract.** `isHistoryHeadTruncated`
+  and its 14 assertions are gone (`31/DD10`), replaced by `31/D2` Decision 2's invariant
+  asserted on the head record's `startsMidLine`. `narrowThenWidenPreservesCappedHistory` and
+  the five other cap tests are gone with the caps; `widthChangeEvictsNothing` states `31/I3`
+  directly instead, at three widths down to the engine minimum. A reflow no longer clears a
+  search occurrence (`31/I3`, `31/D3` Decision 2). The census's per-row leak flag is restated
+  in arena terms (`31/DD11`), and its retained cell count no longer counts a blank line's
+  fold floor (`31/DD15`). The saturating resize probe's ceiling is asserted as a direction
+  rather than an equality, because eviction is byte-granular. The fold suite's oracle moved
+  from "today's stored row" -- which *is* the store now -- to the live grid, which shares no
+  code with the fold.
+- **`PackedRetainedRow` stops being history storage and survives as an instrument.**
+  `ScrollbackBuffer` is deleted outright, and with it the per-row charge model
+  (`scrollbackByteCost`, `retainedScrollbackAllocationBytes`, the two `recomputed*`
+  accessors, the two sizing helpers), `setScrollbackCell`, `isHistoryHeadTruncated` and both
+  caps with their derivations. `PackedRetainedRow` itself stays: the store shares its cell
+  coding, and `31/D4`'s frozen eviction probe plus `31/F1`/`31/F3`'s instruments are written
+  against it as arm A. Deleting it would make those unrunnable, which is a worse outcome
+  than `31/F5`'s line count reads.
+- **The index rings' minimum capacity drops from 16 to 4.** The index is charged at what its
+  rings allocated (`31/DD37`), so an empty store's charge is a fixed cost every budget pays;
+  at 16 slots that floor was 384 B, which made a small history unrepresentable rather than
+  merely shallow. Production depth grows both rings past 16 within one screenful, so the
+  steady-state charge every `31/F8`/`31/F10` number was measured against is unchanged.

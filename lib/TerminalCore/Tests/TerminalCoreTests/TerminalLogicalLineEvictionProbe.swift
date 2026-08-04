@@ -139,9 +139,7 @@ func buildEvictionStimulus(
     var terminal = Terminal(
         columns: columns,
         rows: rows,
-        scrollbackBudgetBytes: 1 << 30,
-        scrollbackRowCap: 1_000_000,
-        scrollbackCellCap: 1 << 30
+        scrollbackBudgetBytes: 1 << 28
     )!
 
     let target = contentClass.stimulusDisplayRows
@@ -1293,7 +1291,7 @@ struct TerminalLogicalLineEvictionProbe {
             // source rather than the store. Stated rather than hidden.
             var terminal = Terminal(
                 columns: columns, rows: 66,
-                scrollbackBudgetBytes: 1 << 24, scrollbackRowCap: 1_000, scrollbackCellCap: 1 << 20
+                scrollbackBudgetBytes: 1 << 24
             )!
             terminal.feed(Array(String(repeating: "\r\n", count: 200).utf8))
             guard let blank = terminal.retainedRowForTesting(at: 0) else { return [] }
@@ -1347,7 +1345,7 @@ struct TerminalLogicalLineEvictionProbe {
 
         var terminal = Terminal(
             columns: columns, rows: 66,
-            scrollbackBudgetBytes: 1 << 30, scrollbackRowCap: 4_000_000, scrollbackCellCap: 1 << 30
+            scrollbackBudgetBytes: 1 << 28
         )!
         var start = bytes.startIndex
         while start < bytes.endIndex {

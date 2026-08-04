@@ -275,9 +275,13 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     /// rather than trusted.
     public let censusCellStorageBytes: Int
 
-    /// What history's packed blobs really hold, straight from the census. The headline
-    /// quantity doc 28's `C6` moved, and the one the byte budget is spent on.
-    public let censusRetainedPackedPayloadBytes: Int
+    /// What history's record arena really holds, straight from the census -- headers, cells and
+    /// in-arena side tables. The quantity the byte budget is spent on.
+    ///
+    /// Denominated per *logical line* since doc 31, not per display row: there is one header per
+    /// record rather than per retained row, which is why `packedPayloadModelBytes` -- a per-row
+    /// model of doc 28's `C6` -- was retired with the representation it described.
+    public let censusRetainedArenaBytesInUse: Int
 
     /// Retained stored cells the census counted, held against the extent this probe derives
     /// from the public row reader.
@@ -288,19 +292,6 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     /// and every byte below it is unusable -- which is the state this flag exists to make
     /// loud instead of silent.
     public let derivationMatchesCensus: Bool
-
-    /// True when `C6`'s pricing arithmetic, applied to composition this probe read through
-    /// the public API, predicts the engine's packed bytes exactly.
-    ///
-    /// The strong check, and the one that would catch an encoder quietly storing a field it
-    /// is not charged for -- or charging for one it does not store. `derivationMatchesCensus`
-    /// only proves the *extent* still follows from canonical form; this proves the encoding
-    /// does too. False means `packedPayloadModelBytes` and the engine disagree, and the
-    /// engine is the fact.
-    public let packedPayloadMatchesModel: Bool
-
-    /// What `C6`'s arithmetic says these rows' blobs should hold, header included.
-    public let packedPayloadModelBytes: Int
 
     /// What malloc really hands back for these rows' requests -- the quantity a footprint
     /// measurement sees, and the one `F10` asks about.
@@ -324,7 +315,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         composition: RetainedRowComposition,
         screenRowCount: Int,
         censusCellStorageBytes: Int,
-        censusRetainedPackedPayloadBytes: Int,
+        censusRetainedArenaBytesInUse: Int,
         censusRetainedStoredCellCount: Int,
         derivationMatchesCensus: Bool
     ) {
@@ -340,37 +331,20 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         self.composition = composition
         self.screenRowCount = screenRowCount
         self.censusCellStorageBytes = censusCellStorageBytes
-        self.censusRetainedPackedPayloadBytes = censusRetainedPackedPayloadBytes
+        self.censusRetainedArenaBytesInUse = censusRetainedArenaBytesInUse
         self.censusRetainedStoredCellCount = censusRetainedStoredCellCount
         self.derivationMatchesCensus = derivationMatchesCensus
         self.allocatedBytes = storedCellCounts.reduce(0) {
             $0 + rowAllocation(storedCells: $1, cellStrideBytes: cellStrideBytes).allocated
         }
-
-        var modelled = 0
-        for index in storedCellCounts.indices {
-            let stored = storedCellCounts[index]
-            let runs = composition.strictContentIdentityRunCounts[index]
-            modelled += PackedRowModel.headerBytes
-                + stored * PackedRowModel.cellBytes
-                + composition.hyperlinkCellCounts[index] * PackedRowModel.hyperlinkEntryBytes
-                // The per-cell fallback, stated as the minimum it is: an encoder facing a row
-                // whose run table would outgrow its cells writes the cells instead.
-                + min(
-                    stored * PackedRowModel.identityCellBytes,
-                    runs * PackedRowModel.identityRunEntryBytes
-                )
-        }
-        self.packedPayloadModelBytes = modelled
-        self.packedPayloadMatchesModel = modelled == censusRetainedPackedPayloadBytes
     }
 
-    /// Packed payload bytes per retained row -- the figure `28/F18` priced at 423.0 on the
-    /// CRLF reference payload, where `D6` had priced `C6`'s at 78.0.
+    /// Arena bytes per retained display row -- the successor to the figure `28/F18` priced at
+    /// 423.0 on the CRLF reference payload, restated against the record arena.
     public var packedPayloadBytesPerRow: Double {
         retainedRowCount == 0
             ? 0
-            : Double(censusRetainedPackedPayloadBytes) / Double(retainedRowCount)
+            : Double(censusRetainedArenaBytesInUse) / Double(retainedRowCount)
     }
 
     /// Fraction of retained rows that are entirely blank -- `F9`'s headline number.
@@ -523,7 +497,14 @@ public func readRetainedRowShape(
         // from a materialized row. The engine reads its own stored prefix, which canonical
         // form makes identical to the extent derived above -- `derivationMatchesCensus` is
         // what holds those two together.
-        let identityShape = terminal.scrollbackRowContentIdentityShape(at: index)
+    }
+
+    // Sampled per *logical line*, which is the unit the store holds and the one the reader is
+    // denominated in since doc 31 (`31/D3` Decision 6, `31/DD17`). Doc 28's `PR1` consumes these
+    // in aggregate, so what changed for it is the sample unit rather than the quantity -- the
+    // arrays above stay per display row, and these three do not.
+    for index in 0..<terminal.scrollbackRecordCount {
+        let identityShape = terminal.scrollbackRecordContentIdentityShape(at: index)
         contentIdentityRunCounts.append(identityShape?.runCount ?? 0)
         identifiedCellCounts.append(identityShape?.identifiedCellCount ?? 0)
         strictContentIdentityRunCounts.append(identityShape?.strictRunCount ?? 0)
@@ -540,7 +521,7 @@ public func readRetainedRowShape(
     // `packedPayloadMatchesModel`, which prices that extent through `C6`'s own arithmetic.
     let derivedRetainedCells = storedCellCounts.reduce(0, +)
     let derivedStorageBytes = census.screenRowCount * columns * census.cellStrideBytes
-        + census.retainedPackedPayloadBytes
+        + census.retainedArenaBytesInUse
     return RetainedRowShapeReport(
         stimulus: stimulus,
         columns: columns,
@@ -569,7 +550,7 @@ public func readRetainedRowShape(
         ),
         screenRowCount: census.screenRowCount,
         censusCellStorageBytes: census.cellStorageBytes,
-        censusRetainedPackedPayloadBytes: census.retainedPackedPayloadBytes,
+        censusRetainedArenaBytesInUse: census.retainedArenaBytesInUse,
         censusRetainedStoredCellCount: census.retainedStoredCellCount,
         derivationMatchesCensus: derivedRetainedCells == census.retainedStoredCellCount
             && derivedStorageBytes == census.cellStorageBytes

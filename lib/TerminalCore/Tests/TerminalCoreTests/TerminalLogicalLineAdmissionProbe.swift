@@ -114,9 +114,7 @@ func buildAdmissionStimulus(
     var terminal = Terminal(
         columns: columns,
         rows: rows,
-        scrollbackBudgetBytes: 1 << 30,
-        scrollbackRowCap: 1_000_000,
-        scrollbackCellCap: 1 << 30
+        scrollbackBudgetBytes: 1 << 28
     )!
 
     var fed = 0

@@ -282,7 +282,10 @@ struct TerminalPackedRetainedRowTests {
             extents.append((last ?? 0) + 1)
         }
         #expect(extents == [1, 3, 5, 12])
-        #expect(terminal.memoryCensus.retainedStoredCellCount == extents.reduce(0, +))
+        // The census counts what history *stores*, and a blank logical line stores no cells at
+        // all (`31/DD15`): its single display row is the fold's floor, not a stored cell. So the
+        // stored total is the displayed extents less the blank row's one column.
+        #expect(terminal.memoryCensus.retainedStoredCellCount == extents.reduce(0, +) - 1)
     }
 
     // MARK: - PO3, through the terminal's three paths
@@ -397,7 +400,7 @@ struct TerminalPackedRetainedRowTests {
         terminal.feed(Array("\u{1B}[2;1H".utf8))
         terminal.feed(Array("filler-a\r\nfiller-b\r\n".utf8))
 
-        let shape = try #require(terminal.scrollbackRowContentIdentityShape(at: 0))
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
         #expect(shape.strictRunCount > 1)
         #expect(shape.identifiedCellCount > 0)
 

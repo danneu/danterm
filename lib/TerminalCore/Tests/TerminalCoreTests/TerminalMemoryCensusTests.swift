@@ -30,14 +30,14 @@ struct TerminalMemoryCensusTests {
         #expect(retained.cells.dropFirst(3).allSatisfy { $0.kind == .padding })
         #expect(census.scrollbackRowCount == 1)
         #expect(census.cellCount == 20 + 3)
-        // Cell storage is no longer one stride times one count: doc 28's `C6` prices retained
-        // rows by their packed blob and live rows by the struct, so the identity that used to
-        // hold is now a sum of two terms. Both are reported, which is what keeps it checkable.
+        // Cell storage is no longer one stride times one count: doc 31 prices retained content
+        // by the record arena and live rows by the struct, so the identity that used to hold is
+        // now a sum of two terms. Both are reported, which is what keeps it checkable.
         #expect(census.cellStorageBytes
             == census.screenRowCount * 20 * census.cellStrideBytes
-                + census.retainedPackedPayloadBytes)
+                + census.retainedArenaBytesInUse)
         #expect(census.retainedStoredCellCount == 3)
-        #expect(census.retainedPackedPayloadBytes < 3 * census.cellStrideBytes)
+        #expect(census.retainedArenaBytesInUse < 3 * census.cellStrideBytes)
     }
 
     @Test("trimmed retained padding remains readable through inspection and browsing render")
@@ -115,9 +115,12 @@ struct TerminalMemoryCensusTests {
         #expect(census.screenRowCount == 2)
         #expect(census.cellCount == 2 * 20 + 9 * 4)
         #expect(census.cellStorageBytes
-            == 2 * 20 * census.cellStrideBytes + census.retainedPackedPayloadBytes)
+            == 2 * 20 * census.cellStrideBytes + census.retainedArenaBytesInUse)
         #expect(census.retainedStoredCellCount == 9 * 4)
-        #expect(census.rowStorageAllocationCount == 11)
+        #expect(census.scrollbackRecordCount == 9)
+        // Live rows only: history's cells all live in the one arena, so it owns no per-row
+        // allocation for the census to count (`31/DD11`).
+        #expect(census.rowStorageAllocationCount == 2)
     }
 
     @Test("the census reports the fields doc 15's hypotheses are sized against")
@@ -145,17 +148,31 @@ struct TerminalMemoryCensusTests {
         #expect(terminal.memoryCensus.multiScalarCellCount == 0)
     }
 
-    @Test("history that has evicted rows reports no retained cell storage beyond its live rows")
+    @Test("history that has evicted rows charges no more than the arena it was built at")
     func censusReportsRetentionHealth() throws {
-        // Intent: the census surfaces the invariant doc 15's F4 found broken, so any future
-        //   measurement carries its own proof that it is not measuring retained garbage.
-        // Why it exists: F4's waste was invisible to every existing accessor. A census that could
-        //   not see it would be able to report a confidently wrong number.
+        // Intent: the census surfaces the invariant doc 15's F4 found broken, restated for the
+        //   record arena, so any future measurement carries its own proof that it is not
+        //   measuring retained garbage.
+        // Why it exists: F4's waste -- storage held for rows already evicted -- was invisible to
+        //   every existing accessor. With one region there are no per-row allocations left to
+        //   strand, so the proof becomes "bytes in use fall when records are evicted, and the
+        //   capacity never grows" (`31/DD11`).
         var terminal = try #require(Terminal(columns: 8, rows: 2, scrollbackBudgetBytes: 6_000))
-        for line in 1...1_200 { terminal.feed(Array("\(line % 10)\r\n".utf8)) }
+        let capacity = terminal.memoryCensus.retainedArenaCapacityBytes
+        var peak = 0
+        for line in 1...1_200 {
+            terminal.feed(Array("\(line % 10)\r\n".utf8))
+            peak = max(peak, terminal.memoryCensus.retainedChargedBytes)
+        }
 
         let census = terminal.memoryCensus
-        #expect(census.retainedRowStorageRowCount == census.scrollbackRowCount)
-        #expect(census.hasRetainedRowStorageLeak == false)
+        #expect(census.scrollbackRowCount > 0)
+        #expect(census.retainedArenaCapacityBytes == capacity)
+        #expect(peak <= capacity)
+        #expect(census.hasRetainedStorageOverdraft == false)
+
+        terminal.feed(Array("\u{1B}[3J".utf8))
+        #expect(terminal.memoryCensus.retainedArenaBytesInUse == 0)
+        #expect(terminal.memoryCensus.retainedArenaCapacityBytes == capacity)
     }
 }

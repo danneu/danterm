@@ -196,10 +196,11 @@ if wantsJSON {
         print("      and the allocator reuses freed pages. Use --payload NAME for a clean delta.")
     }
 
-    let leaking = report.payloads.filter(\.census.hasRetainedRowStorageLeak)
-    if leaking.isEmpty == false {
+    let overdrawn = report.payloads.filter(\.census.hasRetainedStorageOverdraft)
+    if overdrawn.isEmpty == false {
         print("")
-        print("WARNING: retained row storage exceeds live rows in: \(leaking.map(\.name).joined(separator: ", "))")
+        print("WARNING: retained history charges past its arena capacity in: "
+            + overdrawn.map(\.name).joined(separator: ", "))
     }
 }
 
