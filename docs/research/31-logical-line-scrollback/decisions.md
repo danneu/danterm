@@ -820,7 +820,10 @@ the verdict is read.
   unchanged, no production storage change is licensed by it, and the paired
   ladder is still owed. No measurement was taken for this entry -- every number
   below is either quoted from a prior finding or is arithmetic over quoted
-  numbers, and each is labelled as one or the other.
+  numbers, and each is labelled as one or the other. **The one open question it
+  left is closed: [F7](findings.md) measured the blank-line counting pass on
+  2026-08-04 under the rule frozen here, and the answer leaves every decision
+  below unchanged.**
 - Date and investigator: 2026-08-04, Claude (agent).
 - Evidence used: `F3` Observation 4 (the arena's measured footprint against what
   the budget charges today -- the input `D1`'s closure names for this task),
@@ -1184,6 +1187,9 @@ Named so a later reader can tell a gap from a silence:
     pass, and `F2` measured only to 100,000 lines. See the open question below;
     this is the one place where a decision here could be wrong in a way a user
     feels, and the fallback (a record-count bound) is one comparison away.
+    **Closed 2026-08-04 by [F7](findings.md): the pass costs 0.761 ms at
+    1,048,576 records, 21.9x inside its own one-frame bound, and its per-record
+    cost is flat from 10,000 records up. The fallback is not taken.**
   - **Eviction is still unmeasured** (inherited condition 2). This entry
     specifies the mechanism so it *can* be measured; it does not measure it, and
     the head-trim adds a fold walk per eviction step that today's `removeFirst`
@@ -1216,10 +1222,12 @@ Named so a later reader can tell a gap from a silence:
   is a specification the graduation task consumes. `28/D11` remains a live trial
   until doc 28 records its exit.
 - Reopening conditions:
-  1. The blank-line counting-pass probe (open question below) measures the eager
-     pass above one frame at 1,048,576 records -- then Decision 3's record-count
-     bound ships as an internal safety bound, sized to keep the pass under a
-     frame, and Decision 1's "one bound" becomes two.
+  1. ~~The blank-line counting-pass probe (open question below) measures the
+     eager pass above one frame at 1,048,576 records -- then Decision 3's
+     record-count bound ships as an internal safety bound, sized to keep the pass
+     under a frame, and Decision 1's "one bound" becomes two.~~ **Spent
+     2026-08-04: [F7](findings.md) measured 0.761 ms, 21.9x inside the bound, so
+     no record-count bound ships and Decision 1's one bound stands.**
   2. A measured eviction regression against today's
      `enforceScrollbackBudget` / `removeFirst` under a rule frozen before the
      comparison is read -- then the head-trim's fold walk is the first suspect
@@ -1283,7 +1291,7 @@ Against `D1`'s eleven carried-forward conditions:
   the fold must reproduce today's output, alongside `HR3`).
 - **Untouched: 1, 3, 6, 11.**
 
-#### One open question this entry could not decide without a measurement
+#### One open question this entry could not decide without a measurement -- answered 2026-08-04 by [F7](findings.md)
 
 **Does the eager counting pass survive the blank-line regime?** Decision 1
 admits 1,048,576 blank records at 16 MiB (derived), against the 100,000 lines
@@ -1304,3 +1312,30 @@ the pass under a frame at the measured per-record rate; **under 16.67 ms**, the
 one-bound design stands as decided. This is deliberately not run here -- this is
 a design task -- and it does not block the graduation task, because both
 outcomes are one comparison in one loop.
+
+**Applied once to [F7](findings.md), which measured it at `aec227c` plus the one
+probe file it adds.** The primary `arena` count-source at 1,048,576 zero-cell
+records reads **0.760-0.761 ms**, on all three width changes, with every gate
+held and no invocation voided. Against the rule: at-or-above required 16.67 ms
+and the worst cell is 0.761 ms, **21.9x inside**. **Under 16.67 ms, so no
+record-count bound ships and Decision 1's one charged-byte bound stands as
+decided.** Decision 3's "keep at most N logical lines" comparison stays
+*available and unbuilt*, which is where Decision 3 put it, and **reopening
+condition 1 below is spent.**
+
+Two things `F7` changes about the reasoning above rather than about the
+decision. First, the ~6.4 ms extrapolation was **8.4x pessimistic**, and the
+ladder says why: `F7` measured the per-record cost flat at 0.69-0.73 ns from
+10,000 to 1,048,576 records, where `F2`'s content ladder rose from 1.60 to
+5.49 ns/line. The pass's cost is governed by **stride, not record count** -- a
+blank arena is 8 bytes per record, so the header chase is a dense scan rather
+than `F2`'s one-touch-per-2.9 KB stride, and the two count-sources converge to
+within 10% (against 4.3x apart at `F2`'s depth). Any future re-measure of this
+pass -- notably the wide-content one inherited condition 1 asks for -- should
+vary bytes per record rather than depth. Second, `F7` records **`DD15`**: a
+blank logical line is stored as a zero-cell record, because today's one-cell
+canonical floor (`PackedRetainedRow.pack`, `I2`) is a property of the
+per-display-row store rather than of the arena. Decision 1's derived 1,048,576
+rests on that reading; the alternative admits 699,050 records, i.e. strictly
+fewer, so this measurement bounds it from above either way (`F7` measured that
+arm too: 1.378 ms, 12.1x inside).

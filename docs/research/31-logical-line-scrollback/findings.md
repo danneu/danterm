@@ -10,7 +10,9 @@ Phase 1's four viability probes are all recorded below: `F1` (read path), `F2`
 probe -- it is the simplification-inequality accounting pass that `D1`'s frozen
 rule owed at its close. `F6` opens Phase 2: it is the display-row-indexed
 call-site enumeration, and it discharges the sixth of the eleven conditions
-`D1` carried forward.
+`D1` carried forward. `F7` is Phase 2's first measurement: it prices `F2`'s
+counting pass at the record count `D2` Decision 1 admits, and closes the one
+open question `D2` could not decide without a number.
 
 ### F1 -- the read path is not the hazard: wrap-at-read browses 1.64x faster than today's store, and random seek is faster too
 
@@ -1812,3 +1814,218 @@ simply vanish is invariant 1, and `HR1`/`HR8` are where its remains sit.
   be sliced. Inherited condition 5's trigger-point list grows from four to six:
   add `HR4`'s tail truncation and, if `HR1` is resolved by caching, the browsing
   anchor's display row.
+
+### F7 -- the eager counting pass at the record count the budget admits: 0.76 ms for 1,048,576 blank records, 21.9x inside the one-frame bound, and flat per record
+
+- Status: complete. This is the measurement `D2`'s open question named, and it
+  **discharges** that question: the pass lands under one 60 Hz frame, so `D2`'s
+  frozen rule leaves the one-bound design standing and **no record-count safety
+  bound ships**. It licenses nothing else -- `D1`'s scoping is unchanged, no
+  production storage change is licensed, and the paired ladder is still owed.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: measured at `aec227c` (the commit that froze `D2`
+  and its decision rule, written before this probe existed in the tree) plus the
+  one file this entry adds --
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineBlankIndexProbe.swift`.
+  **No file under `lib/TerminalCore/Sources/` is touched, and `F1`'s, `F2`'s and
+  `F3`'s probe files are unedited**; this entry follows `F2`'s isolation practice
+  and adds its own file rather than extending `F2`'s arms. The two untracked
+  paths present throughout this doc's work are still present and still in no
+  build: `TODO.md` and `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
+        --filter TerminalLogicalLineBlankIndexProbe
+
+  Conditions: AC power, low-power mode off, one-minute load average **1.78
+  before and 1.78 after**, under the 2.5 gate. Release configuration, headless,
+  one process, pre-built so the probe does not measure itself under its own
+  compile (`F2` Observation 2's lesson). 9 measured rounds plus 2 warmup per
+  cell, statistic = median over rounds of one whole pass, min and max and `n`
+  beside every aggregate -- `F2`'s instrument unchanged.
+- Artifacts: none durable. Every number below is stdout from the command above.
+
+#### What was measured, and why this depth
+
+`D2` Decision 1 charges the block index 8 bytes per record, so 16 MiB admits
+**1,048,576 blank logical lines** (8 arena bytes + 8 index bytes each) -- 10.5x
+the deepest depth `F2` measured. `D2`'s open question extrapolated `F2`'s
+100,000-line per-line rate (5.49 ns) to ~6.4 ms against `F2`'s own one-frame
+(16.67 ms) reject bound, called that arithmetic rather than a measurement, and
+froze the rule this entry reads.
+
+The timed region is `F2`'s exactly: one call of the eager recompute -- discard
+every cached block total and rebuild `blockPrefix` for a new width, reading one
+cell count per record and doing one divide. Both of `D1`'s count-sources are
+reported, `arena` (primary; the count read from each record's header through
+`lineOffsets`) and `counts` (the priced alternative; a dense parallel array).
+
+#### Observation 1 -- the measured passes, and the rule `D2` reads them against
+
+Median milliseconds per whole pass at **1,048,576 records**, `n=9` per cell.
+The zero-cell column is `D2`'s stimulus and is the verdict-bearing one; the
+one-cell column is descriptive (see `DD15`).
+
+| width change | source | zero-cell records | ns/record | one-cell records |
+| --- | --- | ---: | ---: | ---: |
+| 179 -> 179 | `arena` (primary) | **0.760 ms** | 0.72 | 1.378 ms |
+| 179 -> 100 | `arena` (primary) | **0.761 ms** | 0.73 | 1.378 ms |
+| 179 -> 200 | `arena` (primary) | **0.760 ms** | 0.72 | 1.381 ms |
+| 179 -> 179 | `counts` | 0.689 ms | 0.66 | 1.344 ms |
+| 179 -> 100 | `counts` | 0.689 ms | 0.66 | 1.352 ms |
+| 179 -> 200 | `counts` | 0.689 ms | 0.66 | 1.343 ms |
+
+**`D2`'s frozen rule applied once**: at or above 16.67 ms a record-count safety
+bound ships; under it, the one-bound design stands. The worst verdict-bearing
+cell is **0.761 ms**, **21.9x inside** the bound. **No record-count bound
+ships**, `D2` Decision 1's single charged-byte bound stands as decided, and
+Decision 3's "keep at most N logical lines" comparison stays *available and
+unbuilt*, which is exactly where Decision 3 left it.
+
+The rule is not close to firing on any reading of the stimulus: the descriptive
+one-cell arm -- the record format `DD15` decides against, which doubles the
+arena stride -- is 1.38 ms, still **12.1x inside**, and it would in any case be
+measured at *fewer* records (16 MiB / 24 B = 699,050), so 1,048,576 bounds it
+from above.
+
+#### Observation 2 -- the extrapolation was 8.4x pessimistic, and the ladder says why
+
+Descriptive ladder, width 179 -> 100, blank (zero-cell) records:
+
+| records | `arena` median | ns/record | `counts` median | ns/record |
+| ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 0.007 ms | 0.71 | 0.007 ms | 0.66 |
+| 100,000 | 0.069 ms | 0.69 | 0.065 ms | 0.65 |
+| 300,000 | 0.210 ms | 0.70 | 0.195 ms | 0.65 |
+| 1,048,576 | 0.758 ms | 0.72 | 0.692 ms | 0.66 |
+
+The per-record cost is **flat across two orders of magnitude** -- 0.69 to 0.73
+ns for the primary source -- where `F2`'s `mix`/`full` ladder rose from 1.60 to
+5.49 ns/line between 10,000 and 100,000. `D2`'s ~6.4 ms extrapolation took
+`F2`'s degraded 100,000-line rate and multiplied; the measurement is **0.76 ms**,
+8.4x cheaper, because the rate does not degrade here at all.
+
+The mechanism the data fits, stated as an explanation and not an attributed
+cause (no counter was read): `F2`'s degradation was **stride**, not record
+count. At 100,000 lines of `mix` content the arena is 172 MB and the header
+chase touches one record per ~2.9 KB of it; a blank arena is 8 bytes per record,
+so the same "strided chase" is a dense sequential scan of 8 MB and the prefetcher
+sees every byte. The corroboration is in the same run: `arena` and `counts`,
+which `F2` measured 4.3x apart at 100,000 lines, are **within 10%** of each other
+here (0.72 vs 0.66 ns/record) -- the two count-sources converge exactly when the
+stride does. The one-cell arm is the control on that reading: doubling the stride
+to 16 B costs 1.81x, which is the direction and roughly the magnitude the
+mechanism predicts.
+
+This is the second time the campaign has measured the middle of a curve rather
+than acting on its endpoints (`agent-docs/measurement-discipline.md`), and the
+second time the extrapolation had the shape wrong.
+
+#### Observation 3 -- the gates, including the one the blank stimulus weakens
+
+1. **Non-elision.** Every timed pass's total was cross-checked against a sum
+   computed by a route the blocked prefix does not share, and no total was zero:
+   all 270 passes in the primary measurement matched, as did the ladder's 72.
+   **But a blank arena folds to one display row per record at every width, so
+   its total cannot show that the pass responded to width** -- the half of
+   `F2`'s gate 1 that catches a hoisted loop is inapplicable to this stimulus,
+   and saying so is why the probe carries a **sentinel arm**: the same 1,048,576
+   records with one full-width (179-cell) record every 1,000th, whose total is
+   1,048,576 at widths 179 and 200 and **1,049,624 at width 100**. The pass
+   responds to width on the same code path at the same depth, measured in the
+   same session. The sentinel arm's own times (0.695-0.751 ms) are also the
+   answer to "is the zero-cell arm fast because the divide is trivial": adding
+   1,048 records that take the full `ceil` path changes nothing.
+2. **Synthetic-stimulus fidelity.** `F2`'s control, unchanged in form: at 10,000
+   records the arena was built both ways -- through a real `Terminal` fed 10,000
+   CRLFs and read back through `retainedRowForTesting`, and synthetically from
+   the same per-record counts -- and both were measured in every cell. Ratios
+   spanned **0.997x to 1.003x** against the 15% the rule allows, and the two
+   arenas agreed exactly on byte count (160,000 B) and record count. The
+   synthetic extension to 1,048,576 records is admissible.
+3. **Host conditions.** AC power, low-power mode off, load 1.78 before and 1.78
+   after, both under 2.5.
+4. **Coverage.** `n=9` beside every median, with min and max; no aggregate is
+   reported without its sample count.
+5. **Content-class calibration: inapplicable, and dropped explicitly rather than
+   silently.** `F2` gated `mix` against `28/F23`'s measured cell-count band. A
+   blank stimulus has no content distribution to calibrate -- every record holds
+   zero cells by construction, which is the definition of the regime `D2`
+   Decision 1 bounds. What replaces it is the report of the achieved geometry
+   (8 B per record, 8,388,608 arena bytes + 8,388,608 index bytes = exactly the
+   16,777,216 B budget) and the engine-side check in gate 2.
+6. **A/A control: not part of `F2`'s rule and not added.** `F2` measures an
+   absolute cost against a frozen bound rather than a ratio between two arms, so
+   there is no second arm to interleave; the instrument's own spread is reported
+   instead as min/max beside every median, and it is under 2% on every
+   verdict-bearing cell.
+
+**No invocation was voided.** One earlier invocation *crashed* before producing
+any timing and is recorded rather than dropped: the probe's precondition that a
+blank retained row packs to zero stored cells fired, because
+`PackedRetainedRow.pack` floors the canonical extent at **one** cell (`I2`).
+That is a defect in the probe's model of the stimulus, not a gate failure on a
+measurement -- it produced no number to void -- and it is the reason `DD15`
+exists below. The instrument caught a wrong assumption instead of quietly
+measuring the wrong thing, which is what a precondition on a stimulus is for.
+
+- Observation: the eager block-total recompute costs **0.760-0.761 ms** at
+  1,048,576 zero-cell records for the primary count-source, at all three width
+  changes, and its per-record cost is flat from 10,000 to 1,048,576 records.
+- Inference: the blank-line regime does not threaten the eager pass. `D2`
+  Decision 1's single charged-byte bound needs no record-count companion, and
+  `H2`'s confirmation extends from `F2`'s 100,000 lines of content to the full
+  record count 16 MiB admits. The degenerate regime is *cheaper* per record than
+  the content regimes `F2` measured, not dearer, because record count and stride
+  move in opposite directions under a fixed byte budget.
+- Competing interpretations:
+  - *The loop was optimized away.* Refuted by gate 1 plus the sentinel arm: every
+    pass's total was consumed and cross-checked, and the sentinel arm's total
+    changes with width on the same code path at the same depth.
+  - *The synthetic arena is not the real one.* Gate 2: where both can be built
+    they agree within 0.3%, on identical geometry.
+  - *This is fast because the records are trivial.* Partly, and that is the
+    finding: a blank record is the whole regime `D2` Decision 1 bounds. The
+    one-cell arm and the sentinel arm both price departures from triviality
+    (1.81x and 1.00x respectively), and both stay far inside the bound.
+  - *A zero-cell record is not what the store would hold.* `DD15` takes that on
+    directly, and the one-cell arm bounds the alternative -- which admits fewer
+    records, so this measurement bounds it from above either way.
+- Uncertainty:
+  - **The pass is not the resize.** As `F2` said: a width change also refolds the
+    live screen, which this design does not remove and this probe does not
+    measure.
+  - **Nothing about eviction.** An arena that has evicted from its front has a
+    different offset structure than one that only ever grew. Still unmeasured,
+    still inherited condition 2, and `D2` Decision 2's head-trim adds a per-step
+    fold walk that no probe has seen.
+  - **Nothing about wide content.** These records hold no cells at all, so the
+    O(cells) wide-record scan (`F4` Observation 1, inherited condition 1) is
+    untouched by this entry. A blank-record measurement cannot be quoted against
+    it in either direction.
+  - **The 16 MiB arena is not a 16 MiB working set here.** The zero-cell arm
+    touches 8 MB of arena plus 8 MB of `lineOffsets`; a real arena at this record
+    count would also carry whatever the index and side tables cost. The charge
+    arithmetic is `D2`'s, and this entry measures the pass over it rather than
+    re-deriving it.
+  - **One machine, one session.** As with `F1`, `F2` and `F3`.
+- Deferred decisions, continuing `D2`'s numbering; the obvious simple choice,
+  taken at measurement time rather than blocking:
+  - **DD15 -- a blank logical line is stored as a zero-cell record, and today's
+    one-cell canonical floor does not transfer to the arena.**
+    `PackedRetainedRow.pack` floors the canonical extent at one cell (`I2`)
+    because a display row is the unit it stores; a record's cell count is a
+    content property and zero is representable, which is what `D2` Decision 1's
+    "8 arena bytes and 8 index bytes" already assumes. The alternative -- inherit
+    the floor -- costs 16 arena bytes per blank record and admits 699,050 rather
+    than 1,048,576 at the same budget, i.e. it is strictly the smaller number, so
+    nothing in `D2` or here turns on the choice. Recorded because `D2`'s derived
+    1,048,576 rests on it and because a probe crashed on the assumption. A
+    human's to revisit; the record format is Phase 3's.
+- Next action: `D2`'s open question is closed and its reopening condition 1 is
+  spent -- the graduation task inherits no record-count bound. Two things this
+  entry hands forward: the counting pass's cost is governed by **stride, not
+  record count**, so any future re-measure of it (the wide-content one inherited
+  condition 1 asks for) should vary bytes-per-record rather than depth; and the
+  parallel counts array stays unnecessary, now on a second regime -- it is within
+  10% of the primary source here, against 4.3x at `F2`'s 100,000 content lines.

@@ -409,9 +409,31 @@ work, that list is the constraint on it.
   removed") that doc 28 owes an amendment for. (5) A trimmed head record reads
   as a mid-line continuation and loses its semantic mark, which is what replaces
   `isHistoryHeadTruncated` under `DD10`. Three deferred decisions added
-  (`DD12`-`DD14`) and one open question that needs a measurement: the blank-line
+  (`DD12`-`DD14`) and one open question that needed a measurement: the blank-line
   regime admits 1,048,576 records, 10.5x anything `F2` measured, with the
-  probe and its decision rule frozen in the entry.
+  probe and its decision rule frozen in the entry. **`F7` has since answered it
+  and no decision moved.**
+- [x] `DONE` **F7, the blank-record counting pass.** Recorded in
+  [F7](findings.md); it **closes `D2`'s open question** and spends `D2`'s
+  reopening condition 1. The eager recompute costs **0.760-0.761 ms at 1,048,576
+  zero-cell records** -- the full record count `D2` Decision 1's per-record index
+  charge admits at 16 MiB -- against the **16.67 ms** one-frame bound `D2` froze,
+  so **no record-count safety bound ships** and Decision 1's single charged-byte
+  bound stands. `D2`'s ~6.4 ms extrapolation was **8.4x pessimistic**: the ladder
+  (10,000 / 100,000 / 300,000 / 1,048,576) measures the per-record cost **flat at
+  0.69-0.73 ns**, where `F2`'s content ladder tripled over the same span, because
+  the pass's cost is governed by **stride, not record count** -- which is also
+  why the `arena` and `counts` sources converge to within 10% here against 4.3x
+  apart at `F2`'s depth. Gates: non-elision on all 342 passes plus a **sentinel
+  arm** that restores the width-responsiveness a blank stimulus cannot show
+  (1,049,624 rows at width 100 against 1,048,576 at 179), synthetic-vs-real
+  fidelity 0.997x-1.003x against a 15% allowance, load 1.78 before and after; the
+  content-class calibration gate is inapplicable to a zero-cell stimulus and is
+  dropped explicitly. No invocation voided; one crashed before producing a number
+  and is recorded, which is where `DD15` comes from. Probe:
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineBlankIndexProbe.swift`,
+  same env gate as `F1`'s, `F2`'s and `F3`'s; all three of those files are
+  unedited.
 - [ ] `TODO` Graduate: when the design settles, extract it into a plan file
   (the `simplify-plan` admission test applies) and record here where it went.
 
@@ -503,13 +525,17 @@ add detail to it.
   `enforceScrollbackBudget` / `removeFirst`, under a rule frozen before the
   comparison is read. The head-trim's per-step fold walk is the new term such a
   probe has to see.
-- **The eager counting pass is also unpriced at the record counts the budget now
-  admits.** `D2` Decision 1 charges the index per record, which bounds a
-  blank-line history at **1,048,576 records** at 16 MiB -- 10.5x the deepest
-  `F2` measured. Extrapolating `F2`'s per-line rate puts the pass at ~6.4 ms
-  against its own one-frame reject bound, which is arithmetic and not a
-  measurement. `D2`'s open-question section names the probe and freezes the
-  decision rule; the fallback if it fails is an internal record-count bound.
+- ~~**The eager counting pass is also unpriced at the record counts the budget
+  now admits.**~~ **Answered by `F7`: the pass costs 0.761 ms at 1,048,576
+  zero-cell records, 21.9x inside the 16.67 ms bound `D2` froze, so no
+  record-count bound ships and `D2` Decision 1's one charged-byte bound stands.**
+  The ~6.4 ms extrapolation was 8.4x pessimistic because the per-record cost is
+  flat with depth and governed by **stride** instead -- which is the reading that
+  now carries forward to the *wide-content* re-measure this list already owes
+  (inherited condition 1): vary bytes per record, not record count. `DD15` (a blank logical line is a
+  zero-cell record; today's one-cell canonical floor is `PackedRetainedRow`'s,
+  not the arena's) is the one new deferred decision, and the alternative it
+  declines admits fewer records, so `F7`'s figure bounds it from above.
 - The forced-split cap is **65,536 cells, derived** in `F4` Observation 3 as
   1/32 of the byte budget rather than chosen, and **ratified by `D2`** now that
   the budget it divides has its own derivation. Still unpriced: what a real
@@ -538,3 +564,10 @@ inequality holds on invariants) -- with no frozen threshold failed by any of
 them. The verdict licenses Phase 2's **design** work only: no production storage
 change is licensed, and the paired ladder against a real implementation is the
 acceptance dimension still outstanding.
+
+Phase 2 is open and has three inputs so far: `F6` (the call-site enumeration),
+`D2` (budget and eviction semantics -- one charged-byte bound at the same
+16 MiB, head-granular eviction, no user-facing knob) and `F7` (the counting pass
+at the record count that budget admits: 0.761 ms against a 16.67 ms bound, so
+`D2` ships one bound rather than two). No decision in Phase 2 is yet blocked on
+a measurement; the largest unmeasured term remains **eviction**, on both sides.
