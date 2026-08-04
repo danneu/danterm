@@ -1,9 +1,9 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F20**. Phase 2's open resize-*profile* task has now been renumbered
-five times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`) without being written,
+Next free ID: **F21**. Phase 2's open resize-*profile* task has now been renumbered
+eight times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`) without being written,
 because IDs go in the order findings are recorded and each time something more urgent
-was measured first; it is still owed and now claims `F20`. The scratch-reusing encoder
+was measured first; it is still owed and now claims `F21`. The scratch-reusing encoder
 lead that `F17` Observation 4 left open is **not** carried forward with it -- `D9`
 declined it on the ground that even its success leaves browsing over
 threshold. `F14` measured how
@@ -2196,3 +2196,184 @@ incident for why the harness cannot catch it itself.
     specifies. The saturated pool would re-weight under C1 (`F13` Observation 1).
 - Next action: none taken. The disposition returns to the human with this verdict
   set, per the instruction not to improvise a second pivot.
+
+### F20 -- the `scrollback-stream` regression is admission's *copies*, not its bytes: folding the trim into the encoder buys -6.69%, and the staircase `F19` blamed is not in that workload at all
+
+- Status: recorded. It closes the write-pattern task, and it **corrects `F19`'s
+  stated mechanism** -- which was mine, and which this finding's own instrument
+  contradicts. The `slower` verdict `F19` reported stands; the explanation it
+  attached does not. Phase 2's resize-*profile* task is renumbered an eighth time
+  and now claims `F21`.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: candidate base `1a3e1c9`, candidate tree
+  `57483d78f75d3ea4a35068396aadfe2312a7e67c`, capturing four working-tree paths
+  (`TODO.md`, `PackedRetainedRow.swift`, `Terminal.swift`,
+  `TerminalPackedRetainedRowTests.swift`). Two baselines, on purpose: `678bfe9`
+  (pre-packing, the gate question) and `1a3e1c9` (pre-fix `C1`, which is the only
+  baseline that prices the fix itself).
+- Conditions: AC power, low-power mode off. Reported per run below; the machine
+  was busier this session than `F19`'s, and Observation 4 is what that cost.
+- Commands:
+
+      just benchmark-sample scrollback-stream 20            # before and after
+      just benchmark-report <dir> '--thread terminal-pty-host --top 12'
+      python3 ./scripts/terminal-benchmark-compare.py confirm --baseline 678bfe9
+      python3 ./scripts/terminal-benchmark-compare.py confirm --baseline 1a3e1c9
+
+- Artifacts (disposable `.build/`, pointers only):
+  `.build/terminal-benchmark-profiles/2026-08-03-223047-40508` (before),
+  `.build/terminal-benchmark-profiles/2026-08-03-223728-52200` (after),
+  `.build/terminal-benchmark-comparisons/confirm/57483d78f75d-0000` (vs `678bfe9`),
+  `.build/terminal-benchmark-comparisons/confirm/57483d78f75d-0001` (vs `1a3e1c9`).
+
+#### Observation 1 -- admission is 19.7% of the drain thread, and half of it is copying cells rather than encoding them
+
+Sampling the sustained workload and filtering to
+`com.danneu.danterm.terminal-pty-host`, the subtree rooted at
+`appendToScrollback` / `pack` / `compacted` / `scrollbackByteCost` /
+`enforceScrollbackBudget` is **19.7% of 15,578 thread samples**. What is *in* it
+is the finding:
+
+| frame | share of thread |
+| --- | ---: |
+| `PackedRetainedRow.pack(_:)` (self) | 4.6% |
+| `GridRow.compacted()` (self) | 2.4% |
+| `initializeWithCopy for GridCell` | 1.6% |
+| `swift_arrayInitWithCopy` | 1.4% |
+| `swift_retain` | 1.2% |
+| `swift_arrayDestroy` | 0.7% |
+| `outlined consume of TerminalScalars.Storage` | 0.5% |
+
+Roughly five points of the thread are spent **copying 32-byte `GridCell`s and
+retaining their scalar payloads** -- `compacted()` allocating a second cell array
+to drop a suffix the encoder was about to stop at anyway, and the encoder's own
+two `enumerated()` walks copying each element again.
+
+#### Observation 2 -- the fix, and what it is worth: -6.69% on `scrollback-stream` against pre-fix `C1`
+
+Two changes, both inside `C1`'s uniform-cell shape, so no representation change
+was needed or made:
+
+1. **`pack` trims as it encodes.** Trimming is a decision about
+   `storedCellCount`, which is the packed row's own field. All three call sites
+   drop `.compacted()`; `GridRow.compacted()` stays as the independent statement
+   of `I2` that the tests hold the encoder against, and calls nothing on the
+   measured path.
+2. **A never-written cell encodes to a zero word, and the blob is already zero,
+   so the writer skips it.** This is the bulk fill, spelled as an omission.
+
+`confirm` against `1a3e1c9`, host load 4.48/4.15/4.50 at invocation
+(0.45 per processor), 3.54 before the first block:
+
+| workload | verdict |
+| --- | --- |
+| `scrollback-stream` | **faster (-6.69%, 4 pairs)**; drain 184.3 -> 173.8 ms, draw tail 12.0 -> 9.1 ms |
+| `content-churn` | equivalent (-0.12%) |
+| `incremental-mixed` | equivalent (+0.39%) |
+| `retained-browse` | equivalent (+0.40%) |
+| `terminal-feed` | inconclusive (+1.67%) -- `F1`'s dead zone |
+| `style-churn` | slower (+3.86%) -- see Observation 4 |
+
+Re-sampled after the change, the admission subtree is **15.9%** of the thread and
+`initializeWithCopy for GridCell` and `compacted()` are absent from the profile
+entirely. That sample ran at load 13.6 and is attribution only.
+
+#### Observation 3 -- against pre-packing it is still `slower`, at +4.13%
+
+`confirm` against `678bfe9`, host load 2.03/4.03/4.64 at invocation (0.20 per
+processor), 1.88 before the first block, busiest external `claude` 53.0% /
+`DanTerm` 6.7%:
+
+| workload | pairs | threshold | verdict |
+| --- | ---: | ---: | --- |
+| `retained-browse` | 4 | 1.05% | equivalent (-0.33%) |
+| `incremental-mixed` | 6 | 1.85% | inconclusive (+1.17%), plan time -24.72% |
+| `content-churn` | 4 | 2.15% | inconclusive (+1.70%) |
+| `style-churn` | 4 | 2.0% | slower (+2.36%) -- see Observation 4 |
+| `scrollback-stream` | 4 | 1.85% | **slower (+4.13%)**; drain 163.0 -> 171.9 ms |
+| `terminal-feed` | 2 | 2.5% | **slower (+4.55%)** |
+
+The fix moved `scrollback-stream` a long way and did not clear the gate.
+`terminal-feed` reads `slower` here where `F19` read +1.50%; the two numbers are
+from different machine sessions and the protocol does not license comparing them,
+so what is recorded is that this session's reading is above threshold.
+
+#### Observation 4 -- a control failed, and it is stated rather than used
+
+`style-churn` answered `slower` in **both** runs (+2.36% and +3.86%). It cannot
+have: `full-screen-style-churn` frames begin with `ESC[H` and omit the final
+newline (`scripts/terminal-benchmark-producer.py#redraw_screen`), so the workload
+never scrolls a row into history and therefore **never calls `pack` at all**. The
+only candidate change in run two is the encoder. So the ladder was reading roughly
+two to four points high on that workload while these numbers were taken.
+
+That is recorded as a limit on this session's readings, **not** as grounds to
+discard the ones that came out badly. No block was declared invalid and nothing
+was re-run: the frozen protocol's whole point is that a verdict cannot be shopped
+for, and "the control drifted" is exactly the argument that would let it be.
+
+#### Observation 5 -- the staircase `F19` blamed is not in this workload; `ONLCR` removes it
+
+`F19` attributed the regression to `F11`'s staircase -- 134-cell rows, 66.4% of
+stored cells holding no scalar -- and that attribution is **wrong**, for a reason
+`F11` itself had already written down and this finding failed to read.
+
+- The stimulus emits bare LF: its template is
+  `DANTERM-SCROLLBACK-{index:05d} sustained plain-text output payload\n`
+  (`benchmarks/fixtures/terminal-app.json`, `scrollback-stream`, one segment
+  repeated 25,000 times).
+- But the benchmark producer runs **inside the pane's shell** and writes with
+  `os.write(1, ...)` (`scripts/terminal_benchmark_fixtures.py#write_all`), so its
+  bytes cross a real tty. `PTYSpawner` calls `openpty` with a `nil` termios
+  (`lib/TerminalPTY/Sources/TerminalPTYHost/PTYSpawner.swift#PTYSpawner`), which
+  installs Darwin's defaults: `references/xnu/bsd/sys/ttydefaults.h#TTYDEF_OFLAG`
+  is `OPOST | ONLCR`.
+- Measured directly rather than argued: a default `pty.openpty()` slave reports
+  `OPOST` and `ONLCR` set, and `os.write(slave, b"one\ntwo\n")` is read from the
+  master as `b"one\r\ntwo\r\n"`.
+
+So the terminal receives **CRLF**, each line starts at column 0, and a retained
+row is ~59 dense stored cells with no interior padding. The staircase is real, but
+it belongs to the *probe*, which feeds the same corpus bytes to `Terminal`
+directly with no tty in between. **Two stimuli share one name**, and `F19` priced
+the CPU workload with the probe's shape.
+
+The corroboration runs the same way elsewhere: Alacritty opens its pty with no
+termios override and adjusts only `IUTF8`
+(`references/alacritty/alacritty_terminal/src/tty/unix.rs#new`), and tmux sets
+`c_oflag = OPOST|ONLCR` explicitly for the pane it hands a program
+(`references/tmux/client.c#client_main`) while clearing those same flags on the
+outer terminal it writes control sequences *to*
+(`references/tmux/tty.c#tty_raw_start`) -- the opposite direction, which is what
+confirms the flag governs program-to-terminal output.
+
+- Inference: the write-pattern fix was the right instrument and it worked -- the
+  cost was `compacted()`'s array copy and the encoder's element copies, which is
+  the third time doc 28 has found the allocation and write pattern rather than the
+  encoding (`F17` on reads, `F19` Observation 5 on writes, this on both). It did
+  not clear the gate. **`H3` still does not graduate**, on `scrollback-stream` at
+  +4.13% against a 1.85% threshold.
+- What this closes, and it closes it against `H3`'s interest: the stimulus-fidelity
+  question does not arise. `benchmark/scrollback-stream` is an ordinary program
+  writing `\n` to a tty -- the most common shape output takes -- and the tty gives
+  it CRLF. There is nothing unproducible about it, no `23/D4`-style demotion to
+  propose, and no governance entry to write. The regression is over **dense,
+  realistic CRLF rows**, which makes it matter *more* than `F19` claimed, not less.
+- Competing interpretation, checked rather than argued: that the remaining +4.13%
+  is the blank-cell cost the fix did not reach. It is not -- there are no blank
+  cells in these rows. What remains is `C1`'s translate-copy on ~59 dense cells
+  per admitted row (~472 payload bytes), which pre-packing did not pay at all
+  because it stored the row's own array by reference.
+- Uncertainty, stated plainly:
+  - The `terminal-feed` readings are not settled. `+1.67%` against pre-fix `C1` and
+    `+4.55%` against pre-packing were taken in the same session as a failing
+    control, and `F1` says this workload's dead zone cannot resolve differences of
+    this size anyway. No claim is made that the fix helped or hurt feed.
+  - Whether the residual admission cost is further reducible is **not measured**.
+    The profile still shows ~1.2% `swift_arrayInitWithCopy` and ~1.2%
+    `swift_retain` under `pack`; nobody has attributed them.
+  - Observation 5 corrects a mechanism, not a verdict. Every `slower` reading in
+    `F19` was a real reading of a real workload.
+- Next action: none taken. The disposition returns to the human as a decision
+  package -- accept `scrollback-stream` as a trade, or fund further work on
+  admission -- per the instruction not to improvise a second pivot.

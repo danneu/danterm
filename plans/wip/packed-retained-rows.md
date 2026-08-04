@@ -1,8 +1,12 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- C1 IMPLEMENTED AND MEASURED; five of six pass, `scrollback-stream` does not
+## Status -- C1 IMPLEMENTED, MEASURED, AND TUNED; `scrollback-stream` still short at +4.13%
 
-`F19` is the deciding run, at `48f52b1` against `678bfe9` on an idle host (load
+`F19` was the deciding run and `F20` is the write-pattern follow-up that halved
+what it found; read the `F20` paragraphs below before the `F19` ones, because one
+of `F19`'s stated mechanisms is retracted there.
+
+`F19`, at `48f52b1` against `678bfe9` on an idle host (load
 1.88, 0.19 per processor). **The pivot did what `D9` chose it to do.**
 `retained-browse` -- the workload that decided against C6 at +19.83% -- came back
 **at the pre-packing baseline, -0.11% against a 1.05% threshold**. `terminal-feed`
@@ -18,15 +22,32 @@ pessimistic about the giveback: 123 B/row against C6's 69, not the predicted 4.1
 because the per-row constants do not scale with the payload.
 
 **`H3` does not graduate, on one workload.** `scrollback-stream` answers `slower`
-at **+6.51%**, and it did not move between C6 and C1 -- representations differing
-4x in per-row bytes -- while every other workload cleared. It is the bare-LF
-staircase stimulus (`F11`): 134 stored cells per row with **66.4% holding no
-scalar**, and a flat 8-byte cell charges a never-written padding cell full price.
-Its drain rose 163.2 -> 180.3 ms while its draw tail fell.
+at **+4.13%** against a 1.85% threshold (`F20`, run against `678bfe9`).
 
-That is the representation's shape, not its wiring, so no fix was improvised --
-the plan's boundary makes a non-uniform cell column a stop-and-report. The
-disposition returns to the human.
+`F20` is what closed the write-pattern question. The drain profile put scrollback
+admission at **19.7% of the PTY-host thread**, and half of that was *copying
+cells, not encoding them*: `compacted()` allocating a second cell array to drop a
+suffix the encoder was about to stop at anyway, plus the encoder's own two
+element-copying walks. Both fixes stay inside `C1`'s uniform-cell shape -- `pack`
+trims as it encodes, and a cell whose word is zero is written by not writing it --
+and together they are worth **-6.69% on `scrollback-stream`** against pre-fix
+`C1`, with `retained-browse`, `content-churn` and `incremental-mixed` all
+`equivalent`. Admission is now 15.9% of the thread.
+
+**`F20` Observation 5 retracts the mechanism this section previously claimed.**
+The bare-LF staircase is not in this workload. The benchmark producer runs inside
+the pane's shell and writes to fd 1, `PTYSpawner` opens its pty with a `nil`
+termios, and Darwin's `TTYDEF_OFLAG` is `OPOST | ONLCR` -- so the terminal receives
+**CRLF** and a retained row is ~59 dense cells with no interior padding. The
+staircase belongs to the *probe*, which feeds the same corpus bytes with no tty
+between. Two stimuli, one name; `F19` priced the CPU workload with the probe's
+shape, and this plan repeated it.
+
+The consequence cuts against `H3`: the stimulus is faithful, so there is no
+fidelity question to raise and no `23/D4`-style demotion to propose, and the
+residual regression is `C1`'s translate-copy over **ordinary dense rows**. The
+disposition returns to the human as a decision package -- accept it as a trade, or
+fund further work on admission.
 
 `F19` Observation 5 also records what nearly buried the pivot: C1's first encoder
 appended each cell byte by byte and measured `terminal-feed` at **+6.19%**, worse

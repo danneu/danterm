@@ -599,12 +599,21 @@ is a ledger entry opening an investigation, not a plan.
   **10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24, at 1.11x the depth**,
   and resize holds `D8`'s line to within 1% in all three regimes. `F18`'s cap
   prediction was confirmed to five cells: 327,675 retained against a 327,680 cap.
-  **`H3` still does not graduate, on one workload.** `scrollback-stream` answers
-  `slower` at **+6.51%**, and it did not move between representations differing
-  4x in per-row bytes: it is the bare-LF staircase stimulus whose rows are 134
-  cells with 66.4% holding no scalar, and a flat 8-byte cell charges a
-  never-written padding cell full price. That is the shape rather than the wiring,
-  so no fix was improvised; the disposition returns to the human.
+  **`H3` still does not graduate, on one workload.** `F20` profiled the drain,
+  found scrollback admission at **19.7% of the PTY-host thread with half of it
+  copying cells rather than encoding them**, and fixed it inside `C1`'s shape:
+  `pack` now trims as it encodes (no intermediate `compacted()` row) and skips
+  cells whose word is zero. That is worth **-6.69% on `scrollback-stream`** against
+  pre-fix `C1` -- and the workload still answers `slower` at **+4.13%** against
+  pre-packing, threshold 1.85%.
+  `F20` Observation 5 also **retracts `F19`'s mechanism**: the bare-LF staircase is
+  not in this workload. The producer writes through a real tty, `openpty` with a
+  `nil` termios installs Darwin's `OPOST | ONLCR`, and the terminal receives CRLF.
+  The staircase belongs to the *probe*, which feeds the same corpus bytes with no
+  tty in between -- two stimuli, one name. So the stimulus-fidelity question does
+  not arise, there is no `23/D4`-style demotion to propose, and the regression is
+  over dense realistic rows, which makes it matter more rather than less. The
+  disposition returns to the human as a decision package.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
