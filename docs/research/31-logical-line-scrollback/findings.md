@@ -725,6 +725,19 @@ at most one cell**, so the premise this observation exists to defend -- mutation
 is confined to the tail -- survives unchanged, while "these are bit flips" does
 not.
 
+**Amended again 2026-08-04 by the plan's `DD25` amendment, which settles case 17's
+other half.** Case 17's rule ("a hard-ended row is measured to
+`retainedContentEnd`") is unchanged as a rule about **cells**, and it is now only
+half the admission rule: the blank, non-default-styled run that reaches the right
+margin of a hard-ended row -- the same run `pack`'s canonical extent keeps and
+`reconstructLogicalLines` drops -- is admitted as the record's **trailing fill
+style**, an attribute rather than cells. So the store loses neither way: the
+painted read reproduces today's stored row column for column at the admitting
+width, the content read (copy, search) still stops at `retainedContentEnd`, and no
+width turns a painted tail into extra display rows. Case 10's "the store never
+held the spacer" is untouched; case 9's sever is untouched (`D3` Decision 3's
+mechanism stands, with its unification recorded there as an option not taken).
+
 #### Deferred decisions
 
 Recorded here so a human can revisit; each took the obvious, simple choice

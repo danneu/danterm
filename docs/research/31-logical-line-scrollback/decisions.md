@@ -950,6 +950,7 @@ than beside it:
 | per-block cached totals | ~1/256 of a record's index cost | amortized; not modelled separately |
 | spill table (`28/F11`: ~0.12% of rows) | its allocation, as today | the record format still owes its shape (condition 9) |
 | `hyperlinkId` / `contentIdentity` side tables | their allocations, at capacity | one table per *record* now, not per display row (`HR7`) |
+| trailing fill style (`DD25` as amended) | its allocation, at capacity | added 2026-08-04; one slot per record that carries a background-erase tail, none for the rest |
 
 Charging the index per record is not bookkeeping: it is what bounds the
 degenerate regime `productionScrollbackRowCap` exists for. A blank logical line
@@ -1753,6 +1754,24 @@ a boundary the fold will keep re-deriving. *Accepting the divergence* was
 rejected on inherited condition 10, which exists to prevent exactly this: `D2`
 Decision 5 refused the same trade for the head trim, and this entry does "the
 same quality of job" the ledger asked for rather than a cheaper one.
+
+**Amended 2026-08-04 by the plan's `DD25` amendment: this decision's mechanism is
+unchanged, and the unification it now sits next to is recorded as an option not
+taken.** The implementation gained a **trailing fill style** on hard-ended
+records -- a per-record attribute, held in a side table keyed by record and gated
+by a header bit, that says "after this line's content ends, the remainder of its
+last display row is painted in this style". That is a different case from this
+one in two ways: it is the *hard-ended* row's to-edge paint rather than this
+entry's single column at a wrap boundary, and it is width-relative rather than
+positional, which is exactly why it may not be cells. Neither objection above is
+weakened: the fill is not a field in every header, and it does not express the
+`X9` variant. **The option not taken:** severing could be re-spelled as "set the
+trailing fill from the severed spacer's style", leaving one mechanism where there
+are now two. It is not taken here because this entry's mechanism is the one that
+was *measured* against the real engine (the four-state table above), and
+re-spelling a measured case on the strength of an unmeasured generalization is
+not licensed by an amendment that changed no number. A later slice may take it
+deliberately; it would have to re-measure the same four states.
 
 **What it costs, stated so the addition side is not understated.** `F4`
 Observation 5's "all three writes are header-bit flips" becomes "two of the three

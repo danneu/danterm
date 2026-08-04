@@ -70,6 +70,26 @@ struct TerminalLogicalLineStoreTests {
         return row
     }
 
+    /// A hard-ended row whose columns past the content are blanks painted by a background
+    /// erase -- what the live grid hands admission after `ESC[41m ... ESC[K`.
+    private static func backgroundErasedRow(
+        width: Int,
+        count: Int,
+        seed: Int,
+        fillStyle: Terminal.StyleId
+    ) -> Terminal.GridRow {
+        var cells = (0..<count).map { column -> Terminal.GridCell in
+            let value = UInt32(97 + (seed &+ column) % 26)
+            return narrow(Unicode.Scalar(value)!, styleId: fillStyle)
+        }
+        cells.append(
+            contentsOf: (0..<(width - count)).map { _ in
+                Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fillStyle)
+            }
+        )
+        return Terminal.GridRow(cells: cells)
+    }
+
     /// The scalars of every retained display row, in order, as the store folds them today.
     private static func foldedScalars(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar?]] {
         (0..<store.grandDisplayRowTotal).map { index in
@@ -390,6 +410,137 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.displayRow(at: 0)!.semanticPrompt == .prompt)
         #expect(store.displayRow(at: 1)!.semanticPrompt == .continuation)
         #expect(store.displayRow(at: 2)!.semanticPrompt == .none)
+    }
+
+    // MARK: - `31/DD25` as amended: the trailing fill as a record attribute
+
+    @Test("The trailing fill is charged as a side-table slot and released when its record goes")
+    func trailingFillIsChargedAndReleased() {
+        // Intent: records carrying a trailing fill charge more side-table bytes than records
+        //   without one, the charged total stays inside the budget while fills are admitted,
+        //   and clearing history releases the slots.
+        // Why it exists: `31/D2` Decision 1 charges everything retained history allocates, and
+        //   `31/DD11` restates `15/F4`'s leak proof as "bytes-in-use falls when records are
+        //   evicted". A per-record style slot is a new allocation inside that bound, so it is
+        //   only admissible if it is charged and released like the spill table beside it.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 24)
+        #expect(store.census.sideTableBytes == 0)
+
+        store.admit(Self.shortRow(width: 24, count: 6, seed: 0))
+        let withoutFill = store.census.sideTableBytes
+
+        store.admit(Self.backgroundErasedRow(width: 24, count: 6, seed: 1, fillStyle: 9))
+        #expect(store.census.sideTableBytes > withoutFill)
+
+        let capacity = store.census.capacityBytes
+        for line in 0..<4_000 {
+            store.admit(Self.backgroundErasedRow(width: 24, count: 11, seed: line, fillStyle: 9))
+            #expect(store.census.chargedBytes <= capacity)
+        }
+        #expect(store.recordCount > 0)
+        #expect(store.census.sideTableBytes > 0)
+
+        store.removeAll()
+        #expect(store.census.sideTableBytes == 0)
+    }
+
+    @Test("A head trim keeps the line's trailing fill, which belongs to its far end")
+    func headTrimKeepsTheTrailingFill() {
+        // Intent: trimming display rows off the front of a logical line leaves the fill on the
+        //   record, so the line's last display row is still painted to the margin.
+        // Why it exists: the fill is keyed to the line's *end* while a trim eats its *start*,
+        //   and the two meet in the one record a trim rewrites (`31/D2` Decision 2 step 3). A
+        //   trim that dropped the fill would repaint a still-visible line in the default colour.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        for chunk in 0..<4 {
+            store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
+        }
+        store.admit(Self.backgroundErasedRow(width: 8, count: 3, seed: 4, fillStyle: 12))
+
+        #expect(store.recordCount == 1)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == 12)
+
+        #expect(evictOne(&store))
+
+        #expect(store.recordSummary(at: 0)!.startsMidLine)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == 12)
+        let last = store.paintedDisplayRow(at: store.grandDisplayRowTotal - 1)!
+        #expect(last.cells.count == 8)
+        #expect(last.cell(at: 7).styleId == 12)
+    }
+
+    @Test("A forced split leaves the trailing fill on the last piece, and eviction keeps it there")
+    func forcedSplitPutsTheTrailingFillOnTheLastPiece() {
+        // Intent: a logical line driven past the record cap carries its trailing fill on the
+        //   piece that holds the line's end, and evicting the first piece whole leaves the
+        //   follower's fill intact.
+        // Why it exists: the fill describes the paint after the line ends, so the *last* piece
+        //   is its only coherent owner -- a fill on the first piece would paint a margin in the
+        //   middle of a line. Ownership falls out of admission order (the split closes the piece
+        //   before the closing row's cells are appended), and this pins it (`31/DD33`).
+        let capacity = 1 << 16
+        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 32)
+        let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
+
+        var admitted = 0
+        while admitted + 32 <= cap {
+            store.admit(Self.filledRow(width: 32, seed: admitted, softWrapped: true))
+            admitted += 32
+        }
+        store.admit(Self.backgroundErasedRow(width: 32, count: 5, seed: 1, fillStyle: 21))
+
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == nil)
+        #expect(store.recordSummary(at: 1)!.trailingFillStyle == 21)
+
+        // Drain the whole first piece one display row at a time; the follower keeps the fill.
+        while store.recordCount > 1 {
+            #expect(evictOne(&store))
+        }
+        #expect(store.recordSummary(at: 0)!.startsMidLine)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == 21)
+    }
+
+    @Test("Reopening the tail record drops its trailing fill")
+    func reopeningTheTailDropsItsTrailingFill() {
+        // Intent: resuming a closed logical line clears the fill it carried.
+        // Why it exists: a fill is the paint after a line's *end*, and a reopened line has no
+        //   end -- its last display row is about to be extended by the next admission, which
+        //   re-derives whatever tail finally closes it (`31/DD35`).
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        store.admit(Self.backgroundErasedRow(width: 8, count: 4, seed: 0, fillStyle: 15))
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == 15)
+
+        store.reopenTailRecord()
+
+        #expect(store.recordSummary(at: 0)!.isOpen)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == nil)
+        #expect(store.paintedDisplayRow(at: 0)!.cells.count == 4)
+    }
+
+    @Test("Truncating the tail hands the painted row back to the live grid")
+    func truncatingTheTailHandsBackThePaintedRow() {
+        // Intent: a `resizeHeight` grow that pulls a background-erased line out of history
+        //   returns the row with its paint as cells.
+        // Why it exists: the live grid has no fill attribute -- paint is cells there -- so the
+        //   hand-back is exactly where the two representations meet. Returning the content walk
+        //   would erase the line's background the moment the window grew, and re-admitting the
+        //   painted row re-derives the same fill, which is what makes the round trip closed.
+        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        store.admit(Self.shortRow(width: 8, count: 3, seed: 0))
+        store.admit(Self.backgroundErasedRow(width: 8, count: 2, seed: 1, fillStyle: 18))
+
+        let handedBack = store.truncateTail(displayRows: 1)
+
+        #expect(handedBack.count == 1)
+        #expect(handedBack[0].cells.count == 8)
+        #expect(handedBack[0].cell(at: 7).styleId == 18)
+        #expect(store.recordCount == 1)
+
+        store.admit(handedBack[0])
+        #expect(store.recordSummary(at: 1)!.trailingFillStyle == 18)
+        #expect(store.recordSummary(at: 1)!.cellCount == 2)
     }
 
     // MARK: - PO12: cycling the ring

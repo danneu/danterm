@@ -9,10 +9,12 @@
 //
 // What belongs here: the arena and its ring discipline, the five mutating operations `31/D2`
 // Decision 2 enumerates (admit, close/reopen the tail, evict at the head, truncate the tail,
-// clear), the derived index (per-block display-row totals plus one grand total) and the reads
-// the fold serves. What does not: the record's byte layout and the fold's arithmetic, which are
-// `LogicalLineRecord`; and every terminal-side concern -- anchors, selection, projection --
-// which stays in `Terminal.swift`. This type never sees a `TextAnchor`.
+// clear), the derived index (per-block display-row totals plus one grand total), the side tables
+// keyed by record -- spills and the trailing background-erase fill style -- and the two reads the
+// fold serves: the content walk a copy takes and the painted walk a renderer takes. What does
+// not: the record's byte layout and the fold's arithmetic, which are `LogicalLineRecord`; and
+// every terminal-side concern -- anchors, selection, projection -- which stays in
+// `Terminal.swift`. This type never sees a `TextAnchor`.
 //
 // **The middle is immutable** (`I5`). The head record's header and the tail record are the only
 // writable bytes; everything between them is written once at admission and read forever. That is
@@ -81,6 +83,9 @@ extension Terminal {
             var startsMidLine: Bool
             var hasWideCells: Bool
             var semanticPrompt: Terminal.SemanticPromptRow
+            /// The style the line's tail is painted in past its content end, or nil when the
+            /// tail is default-painted (`31/DD25` as amended). Never part of the line's cells.
+            var trailingFillStyle: Terminal.StyleId?
         }
 
         /// A display row's address as (record, row within record).
@@ -155,6 +160,15 @@ extension Terminal {
         private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
         private var spillBytes = 0
 
+        /// The trailing background-erase fill style, keyed by absolute record sequence
+        /// (`31/DD25` as amended).
+        ///
+        /// A side table rather than a header field for the reason `31/D3` Decision 3 rejected a
+        /// header style slot: it is reachable on a minority of records, and a 32-bit slot in
+        /// every header would cost the blank-history depth `31/D2` Decision 1 rests on. Keyed
+        /// like the spill table, so the two are evicted and charged by the same rules.
+        private var fillStylesBySequence: [Int: Terminal.StyleId] = [:]
+
         /// Records per index block.
         ///
         /// `31/F1` Observation 4 measured sequential browse at 677 ns (32), 697 ns (64), 801 ns
@@ -190,13 +204,21 @@ extension Terminal {
                 arenaBytesInUse: bytesInUse,
                 indexBytes: offsets.capacity * MemoryLayout<Int>.stride
                     + blocks.capacity * MemoryLayout<Block>.stride,
-                sideTableBytes: spillBytes + openScratchBytes
+                sideTableBytes: spillBytes + openScratchBytes + fillStyleBytes
             )
         }
 
         private var openScratchBytes: Int {
             openHyperlinks.capacity * MemoryLayout<HyperlinkEntry>.stride
                 + openIdentityRuns.capacity * MemoryLayout<IdentityRun>.stride
+        }
+
+        /// The fill table's charge, at the dictionary's *capacity* rather than its count --
+        /// `15/D4`'s rule, the same one the index's 8-B-per-record charge follows: charge what
+        /// the allocator gave. Only records that carry a fill move this term.
+        private var fillStyleBytes: Int {
+            fillStylesBySequence.capacity
+                * (MemoryLayout<Int>.stride + MemoryLayout<Terminal.StyleId>.stride)
         }
 
         /// The record cap `31/I10` derives from the budget, exposed so a caller can drive a
@@ -211,19 +233,30 @@ extension Terminal {
         /// the previous logical line ended.
         ///
         /// The row's measurement rule is `reconstructLogicalLines`': a soft-wrapped row is
-        /// measured to full width and a hard-ended row to its canonical extent (`31/F4` case
-        /// 17), and the `.spacerHead` a wrap left in the last column is dropped, because where a
-        /// spacer sits is a function of the width and `31/I1` forbids storing one.
+        /// measured to full width and a hard-ended row to its content end (`31/F4` case 17),
+        /// and the `.spacerHead` a wrap left in the last column is dropped, because where a
+        /// spacer sits is a function of the width and `31/I1` forbids storing one. A hard-ended
+        /// row whose tail past the content is painted by a background erase contributes that
+        /// paint as the record's **trailing fill style**, not as cells (`31/DD25` as amended).
         mutating func admit(_ row: Terminal.GridRow) {
-            var cells = admissionCells(row)
+            let admission = admissionContent(row)
+            var cells = admission.cells
 
             // A hard-ended row with no content still occupies a display row when the line
-            // already has cells, and a zero-cell append would fold that row away. One default
+            // already has cells, and a zero-cell append would fold that row away. One blank
             // cell restores it -- the same thing today's store holds for a blank row, and
             // `31/DD15`'s zero-cell record is untouched, because that case is an *empty*
-            // record rather than an empty append.
+            // record rather than an empty append. It takes the fill's style when there is one,
+            // so the restored row is painted from its first column exactly as today's stored
+            // row is (`31/DD34`).
             if row.isSoftWrapped == false, cells.isEmpty, openRecordCellCount > 0 {
-                cells = [Terminal.GridCell()]
+                cells = [
+                    Terminal.GridCell(
+                        scalars: .empty,
+                        kind: .padding,
+                        styleId: admission.fillStyle ?? Terminal.defaultStyleId
+                    )
+                ]
             }
 
             // `31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
@@ -235,6 +268,7 @@ extension Terminal {
             makeRoom(forCells: cells.count)
             openRecordIfNeeded(mark: row.semanticPrompt)
             appendCells(cells)
+            setTrailingFillOnTail(admission.fillStyle)
 
             // `31/DD5`: the display-row count is *counted* here, not derived -- admission knows
             // it consumed one row, so no `ceil` and no wide-cell scan runs on the write path.
@@ -246,20 +280,32 @@ extension Terminal {
             evictToBudget()
         }
 
-        /// The cells a display row contributes to its logical line.
+        /// What a display row contributes to its logical line: cells, and a trailing fill style.
         ///
         /// `reconstructLogicalLines`' own rule (`31/F4` case 17): a soft-wrapped row is measured
         /// to full width, a hard-ended row to its **content** end. It is deliberately not
-        /// `PackedRetainedRow.pack`'s canonical extent, which keeps a trailing
-        /// background-erase-styled blank past the content: as a *display row* that blank is one
-        /// painted column, but as *line content* it is a cell the fold would re-wrap, so a
+        /// `PackedRetainedRow.pack`'s canonical extent, which keeps the trailing
+        /// background-erase-styled blanks past the content as *cells*: as a display row those
+        /// are painted columns, but as line content they are cells the fold would re-wrap, so a
         /// painted tail on a hard-ended line would grow into whole extra display rows at a
-        /// narrower width. Today's reflow drops it for the same reason, and there is no floor of
-        /// one -- a record's cell count is a content property and zero is representable
-        /// (`31/DD15`).
-        private func admissionCells(_ row: Terminal.GridRow) -> [Terminal.GridCell] {
+        /// narrower width. There is no floor of one either -- a record's cell count is a content
+        /// property and zero is representable (`31/DD15`).
+        ///
+        /// What `pack` sees and this splits (`31/DD25` as amended): the same predicate that
+        /// extends `pack`'s canonical extent past the content -- a blank cell carrying a
+        /// non-default style -- identifies the fill. The maximal run of such blanks reaching the
+        /// right margin is the **trailing fill**, recorded as one style on the record and
+        /// re-derived at read against whatever width is in force. Blanks that do *not* reach the
+        /// margin stay cells: they sit between content and the fill, so their columns are
+        /// positionally real and re-wrap with the rest of the line.
+        private func admissionContent(
+            _ row: Terminal.GridRow
+        ) -> (cells: [Terminal.GridCell], fillStyle: Terminal.StyleId?) {
             var end = 0
+            var fillStyle: Terminal.StyleId?
             if row.isSoftWrapped {
+                // A soft-wrapped row occupies every column by definition, so it has no tail gap
+                // for a fill to cover.
                 end = width
             } else {
                 for column in stride(from: min(width, row.cells.count) - 1, through: 0, by: -1) {
@@ -268,11 +314,66 @@ extension Terminal {
                     end = min(width, column + (kind == .wideHead ? 2 : 1))
                     break
                 }
+                let margin = row.cell(at: width - 1)
+                if end < width, isFillBlank(margin) {
+                    fillStyle = margin.styleId
+                    var start = width - 1
+                    while start > end, isFillBlank(row.cell(at: start - 1)),
+                          row.cell(at: start - 1).styleId == margin.styleId
+                    {
+                        start -= 1
+                    }
+                    end = start
+                }
             }
             if end > 0, row.cell(at: end - 1).kind == .spacerHead {
                 end -= 1
             }
-            return end <= 0 ? [] : (0..<end).map { row.cell(at: $0) }
+            return (end <= 0 ? [] : (0..<end).map { row.cell(at: $0) }, fillStyle)
+        }
+
+        /// Whether a cell is a blank that a background erase painted: `pack`'s canonical-extent
+        /// predicate read the other way round, and nothing else may be folded into a fill.
+        private func isFillBlank(_ cell: Terminal.GridCell) -> Bool {
+            cell.scalars.isEmpty
+                && cell.kind == .padding
+                && cell.styleId != Terminal.defaultStyleId
+                && cell.hyperlinkId == nil
+                && cell.contentIdentity == nil
+        }
+
+        // MARK: - The trailing fill
+
+        /// Records (or clears) the tail record's trailing fill style.
+        ///
+        /// Written after the row's cells so it lands on the record that holds the line's *end*,
+        /// which is what makes a forced-split line's fill the **last** piece's by construction:
+        /// a split closes the piece before these cells were appended (`31/DD33`).
+        private mutating func setTrailingFillOnTail(_ styleId: Terminal.StyleId?) {
+            guard offsets.count > 0 else { return }
+            let index = offsets.count - 1
+            let offset = offsets[index]
+            var record = self.record(at: offset)
+            guard let styleId else {
+                guard record.hasTrailingFill else { return }
+                record.hasTrailingFill = false
+                writeHeader(record, at: offset)
+                fillStylesBySequence.removeValue(forKey: firstRecordSequence + index)
+                return
+            }
+            record.hasTrailingFill = true
+            writeHeader(record, at: offset)
+            fillStylesBySequence[firstRecordSequence + index] = styleId
+        }
+
+        /// The style painted after this record's content ends, on its last display row.
+        ///
+        /// Nil for every record that carries no fill, which is the overwhelming majority: the
+        /// header bit answers that case without touching the side table.
+        func trailingFillStyle(at recordIndex: Int) -> Terminal.StyleId? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            guard record(at: offsets[recordIndex]).hasTrailingFill else { return nil }
+            return fillStylesBySequence[firstRecordSequence + recordIndex]
         }
 
         // MARK: - Operation 2: close / reopen the tail record
@@ -294,12 +395,21 @@ extension Terminal {
         }
 
         /// Resumes appending to the last record, which is `restoreWrapClaimBeforeCursor`.
+        ///
+        /// Reopening drops the trailing fill: the fill describes the paint after the *end* of a
+        /// line, and a reopened line has no end yet -- its last display row is about to be
+        /// extended, and admission re-derives the tail of whatever row finally closes it
+        /// (`31/DD35`).
         mutating func reopenTailRecord() {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
             guard record.isOpen == false, record.isForcedSplit == false else { return }
             loadOpenScratch(from: record, at: offset)
+            if record.hasTrailingFill {
+                record.hasTrailingFill = false
+                fillStylesBySequence.removeValue(forKey: firstRecordSequence + offsets.count - 1)
+            }
             let closedLength = record.byteLength
             record.isOpen = true
             record.hyperlinkCount = 0
@@ -428,6 +538,7 @@ extension Terminal {
             }
 
             spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: firstRecordSequence))
+            fillStylesBySequence.removeValue(forKey: firstRecordSequence)
             offsets.removeFirst()
             firstRecordSequence += 1
             headTrimmedCells = 0
@@ -478,6 +589,7 @@ extension Terminal {
             blocks.removeAll()
             spillsBySequence.removeAll()
             spillBytes = 0
+            fillStylesBySequence.removeAll()
             clearOpenScratch()
         }
 
@@ -515,7 +627,11 @@ extension Terminal {
                 lastEnd = end
                 rows = rowIndex + 1
             }
-            let materialized = gridRow(recordIndex: index, rowWithinRecord: rows - 1)
+            // Painted rather than content: the row is going back to the live grid, where the
+            // erase paint is cells again, and re-admitting it re-derives the fill.
+            let materialized = paintedRow(
+                at: DisplayRowCursor(recordIndex: index, rowWithinRecord: rows - 1)
+            )
 
             if rows == 1 {
                 dropTailRecord(record, at: offset)
@@ -536,6 +652,7 @@ extension Terminal {
         private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
             let sequence = firstRecordSequence + offsets.count - 1
             spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: sequence))
+            fillStylesBySequence.removeValue(forKey: sequence)
             clearOpenScratch()
             offsets.removeLast()
             bytesInUse -= record.byteLength
@@ -749,8 +866,40 @@ extension Terminal {
         /// Folds one display row out of its record. This is `31/I6`: the cells, kinds, styles,
         /// spacer placement, continuation stamping and soft-wrap marking today's stored rows
         /// carry, derived rather than stored.
+        ///
+        /// The **content walk**: it stops at the line's cells and never emits a trailing fill,
+        /// which is what makes it the right read for copy, selection and search -- the fill is
+        /// paint, not text (`31/DD25` as amended). Renderers want `paintedRow(at:)`.
         func gridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
             gridRow(recordIndex: cursor.recordIndex, rowWithinRecord: cursor.rowWithinRecord)
+        }
+
+        /// The same display row as the renderer must paint it: content, then the trailing fill
+        /// out to the right margin when this is the line's last display row and it carries one.
+        ///
+        /// The **painted walk**. At the width the row was admitted at this reproduces today's
+        /// stored row column for column, including the background-erase paint today keeps as
+        /// cells; at any other width the paint follows the content's new end, which is what a
+        /// terminal of that width running the same bytes would show. A line with a fill and no
+        /// content paints its whole single row, which is the ED-with-background case.
+        func paintedRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
+            var row = gridRow(at: cursor)
+            guard let fill = trailingFillStyle(at: cursor.recordIndex),
+                  cursor.rowWithinRecord == displayRowCount(recordIndex: cursor.recordIndex) - 1,
+                  row.cells.count < width
+            else { return row }
+            row.cells.append(
+                contentsOf: repeatElement(
+                    Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fill),
+                    count: width - row.cells.count
+                )
+            )
+            return row
+        }
+
+        func paintedDisplayRow(at index: Int) -> Terminal.GridRow? {
+            guard let cursor = locate(displayRow: index) else { return nil }
+            return paintedRow(at: cursor)
         }
 
         func recordSummary(at recordIndex: Int) -> RecordSummary? {
@@ -763,13 +912,17 @@ extension Terminal {
                 isForcedSplit: record.isForcedSplit,
                 startsMidLine: record.startsMidLine,
                 hasWideCells: record.hasWideCells,
-                semanticPrompt: record.semanticPrompt
+                semanticPrompt: record.semanticPrompt,
+                trailingFillStyle: trailingFillStyle(at: recordIndex)
             )
         }
 
         /// One logical line's stored cells, in order. Width-free by construction, which is what
         /// makes `scrollbackRowContentIdentityShape`'s contract literally true once it is
         /// re-denominated to the record (`31/D3` Decision 6).
+        ///
+        /// Content only: a trailing fill is never among these cells, so a caller that copies a
+        /// logical line copies what the program printed and not what the erase painted.
         func recordCells(at recordIndex: Int) -> [Terminal.GridCell]? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
             let record = self.record(at: offsets[recordIndex])

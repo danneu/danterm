@@ -6,7 +6,10 @@
 // column-sorted side tables -- and *nothing* in it depends on the pane's width (`I1`). The
 // fold below is the other half of that bargain: everything a per-display-row store baked in
 // at admission (where rows break, where a spacer sits, which rows are continuations) is
-// recomputed here from (record, width).
+// recomputed here from (record, width). The trailing background-erase fill is the same bargain
+// one step further: the *style* a line's tail is painted in is content, so the header carries a
+// bit for it, while *which columns* that paint covers is width-relative and so is derived at
+// read (`31/DD25` as amended).
 //
 // What belongs here: the header's bit layout, a record's decoded shape and byte length, and
 // the width-derived row walk. What does not: the arena, the ring, the derived index and the
@@ -67,6 +70,15 @@ extension Terminal {
         /// (`31/DD14`). Skipped by the head like any other bytes, and charged like them.
         var isPad: Bool
 
+        /// The line's last display row is painted to the right margin, after its content ends,
+        /// in a style the store holds in a side table keyed by this record (`31/DD25` as
+        /// amended: the trailing background-erase fill is an attribute, not cells).
+        ///
+        /// A bit rather than a table probe per read: the fill is reachable on a small
+        /// minority of records, and the whole point of keeping the style outside the header is
+        /// that a record without one pays nothing -- including the lookup.
+        var hasTrailingFill: Bool
+
         // MARK: - Layout
 
         /// Field positions in the header word, in one place.
@@ -74,7 +86,9 @@ extension Terminal {
         /// One little-endian `UInt64`, and it has to stay one: `31/D2` Decision 1 prices a
         /// blank logical line at **8 arena bytes and 8 index bytes**, and the 1,048,576-record
         /// blank-history depth that whole decision rests on is that arithmetic. Three 18-bit
-        /// counts, a 3-bit mark and six flags is exactly 63 bits, with one spare.
+        /// counts, a 3-bit mark and seven flags is exactly 64 bits, and the word is now **full**:
+        /// `31/DD25`'s amendment spent the spare bit on the trailing fill, so the next flag costs
+        /// either a narrower count field or a ninth byte no blank record can afford.
         ///
         ///     bits  0..17  cell count
         ///     bits 18..35  hyperlink table entries
@@ -86,7 +100,7 @@ extension Terminal {
         ///     bit  60      starts mid-line
         ///     bit  61      pad
         ///     bit  62      identity stored per cell
-        ///     bit  63      unused
+        ///     bit  63      has a trailing fill style (the style itself is a side table)
         enum Header {
             static let byteCount = 8
             static let countBits: UInt64 = 18
@@ -105,6 +119,7 @@ extension Terminal {
             static let midLineBit: UInt64 = 1 << 60
             static let padBit: UInt64 = 1 << 61
             static let identityPerCellBit: UInt64 = 1 << 62
+            static let trailingFillBit: UInt64 = 1 << 63
         }
 
         /// Bytes one cell occupies -- the same C1 word `PackedRetainedRow` stores, verbatim,
@@ -124,7 +139,8 @@ extension Terminal {
             isForcedSplit: Bool = false,
             hasWideCells: Bool = false,
             startsMidLine: Bool = false,
-            isPad: Bool = false
+            isPad: Bool = false,
+            hasTrailingFill: Bool = false
         ) {
             self.cellCount = cellCount
             self.hyperlinkCount = hyperlinkCount
@@ -136,6 +152,7 @@ extension Terminal {
             self.hasWideCells = hasWideCells
             self.startsMidLine = startsMidLine
             self.isPad = isPad
+            self.hasTrailingFill = hasTrailingFill
         }
 
         init(word: UInt64) {
@@ -151,6 +168,7 @@ extension Terminal {
             hasWideCells = word & Header.wideCellsBit != 0
             startsMidLine = word & Header.midLineBit != 0
             isPad = word & Header.padBit != 0
+            hasTrailingFill = word & Header.trailingFillBit != 0
         }
 
         var word: UInt64 {
@@ -167,6 +185,7 @@ extension Terminal {
             if hasWideCells { value |= Header.wideCellsBit }
             if startsMidLine { value |= Header.midLineBit }
             if isPad { value |= Header.padBit }
+            if hasTrailingFill { value |= Header.trailingFillBit }
             return value
         }
 

@@ -106,7 +106,11 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 - **I6 -- the fold reproduces today's output.** Reading history at a width emits
   the same cells, kinds, styles, spacer placement, continuation stamping and
   soft-wrap marking today's stored rows do -- including the styled blank a
-  background-erase sever or spacer clear leaves behind (`31/D3` Decision 3).
+  background-erase sever or spacer clear leaves behind (`31/D3` Decision 3), and
+  including a hard-ended line's background-erase tail, which the **painted** read
+  reproduces from the record's trailing fill style (`31/DD25` as amended). The
+  **content** read stops at the line's content on purpose, and that is the one
+  place the two reads differ: the fill is paint, not text, so copy never sees it.
 - **I7 -- the frame path does not walk the index.** Projection totals, the top
   row, cursor stream row and every clamp bound stay integer arithmetic; planning
   one frame performs at most one display-row-to-record locate, and that count is
@@ -355,7 +359,12 @@ Open conditions that the implementation, not the design, has to discharge:
   falsifier lives, or onto the `Comparable` pointer path.
 - **A per-record header style slot for the background-erase blank.** It adds a
   field to every record for a case reachable on one, and cannot express the
-  variant where the record stays open.
+  variant where the record stays open. **Both objections survive and neither
+  covers what landed 2026-08-04** (`31/DD25` as amended): the trailing fill is a
+  *side table* keyed by record, so a record without one pays a header bit and
+  nothing else, and it is not the mechanism for the open-record variant -- `31/D3`
+  Decision 3's measured cell append still owns that. What is rejected is a style
+  field in every header, and that stays rejected.
 
 ## Implementation discretion
 
@@ -448,12 +457,81 @@ Open conditions that the implementation, not the design, has to discharge:
     one, past the content end of a hard-ended row. `31/D3` Decision 3's measured
     case is untouched -- it is a *soft-wrapped* row measured to full width, plus
     an explicit repair append.
+
+    **Amended 2026-08-04 -- the choice above is superseded, and the loss it
+    accepted is gone.** Both options DD25 chose between were lossy: storing the
+    styled blank as a cell wraps paint into blank display rows at a narrower
+    width, and dropping it repaints a line the user saw in colour with the
+    default background. The third option, approved by the human and landed here,
+    is neither -- **a hard-ended row's trailing to-edge paint is stored as a
+    per-record *fill style*: an attribute, not cells.** A record keeps its content
+    cells plus, optionally, one style id meaning "after this line's content ends,
+    the remainder of its last display row is painted in this style". What each
+    half of the design now says:
+
+    - **Admission.** The predicate that identifies the fill is `pack`'s own
+      canonical-extent predicate read backwards
+      (`PackedRetainedRow.swift#pack`: a blank cell extends the extent when it
+      carries a non-default style): the maximal run of blank, non-default-styled,
+      unlinked, unidentified cells reaching the **right margin** of a hard-ended
+      row is the fill, and it is recorded as one style id rather than as cells. A
+      soft-wrapped row occupies every column and so can have no fill.
+    - **Trailing versus interior, the one line this draws.** Only the run that
+      reaches the margin is width-relative and only it becomes the attribute.
+      Styled blanks *between* content -- or a styled run that stops short of the
+      margin -- stay real cells: their columns are positionally meaningful, and
+      they re-wrap with the line like any other content.
+    - **Read.** Two walks, and the store's API makes the distinction expressible:
+      `gridRow`/`recordCells` are the **content** walk and never emit the fill;
+      `paintedRow` is the **painted** walk and appends the fill from the content's
+      end to the margin, on the line's last display row only. Copy, selection and
+      search take the content walk, because paint is not text. A zero-content
+      record with a fill paints its whole single row, which is the
+      ED-with-background case.
+    - **At every width.** At the admitting width the painted walk reproduces
+      today's stored row cell for cell -- *including* the styled blanks, which is
+      **more** than the original DD25 kept. Narrower, the content re-wraps and the
+      paint still runs from the content's end to the margin of the last row;
+      wider, it extends to the new margin. All three are what a terminal of that
+      width running the same bytes would display, and none of them adds a display
+      row.
+    - **Where it lives.** Header bit 63 -- the word's last spare -- says a record
+      has a fill; the style id itself is a side table keyed by absolute record
+      sequence, exactly like the spill table, so **only records that carry a fill
+      pay for one** and a blank logical line still costs eight arena bytes. The
+      slot is charged inside the budget at the table's capacity (`31/D2`
+      Decision 1's charge table, amended with the row).
+    - **The fidelity claim, restated precisely, because this is a deliberate
+      divergence and not a silent one.** Slice 3's
+      `foldReproducesTodaysRetainedRows` compares the store against today's
+      stored rows, and today stores the styled blank. It now compares **both**
+      walks: the painted walk against today's stored row over the full width
+      (equal, cell for cell, on all five content classes including a new
+      background-erased one), and the content walk against today's row up to the
+      content end (equal). Past the content end the two walks intentionally
+      differ, and that difference is the design: the fill is there, the content
+      is not. The divergence from *today's engine* is now in the store's favour
+      and is pinned by its own test --
+      `widthChangeRepaintsTheTrailingFillTodaysReflowDrops`: today's
+      `reconstructLogicalLines` discards the paint at a resize, and the fill
+      survives one because it is width-free.
+    - **`31/D3` Decision 3 is untouched, and its unification is recorded as an
+      option not taken.** The sever/spacer-clear repair still materializes one
+      styled cell into the **open** tail record. Severing could instead be spelled
+      "set the trailing fill from the severed spacer's style", which would leave
+      one mechanism for both sites -- but Decision 3 is a *measured* case against
+      the real engine, and re-spelling it on the back of an unmeasured
+      generalization is not licensed by this amendment. Recorded so a later slice
+      can take it deliberately.
   - **DD26 -- a hard-ended row with no content, appended to a record that already
     has cells, stores one default cell.** Without it `31/DD5`'s counted row and
     the fold's derived count disagree by one for that record, and `31/I9` is
     stated as their agreement. The case is reachable only by erasing a row whose
     predecessor soft-wrapped. `31/DD15`'s zero-cell record is untouched: that is
-    an *empty* record, this is an empty *append*.
+    an *empty* record, this is an empty *append*. **Amended 2026-08-04 with
+    `31/DD34`:** that cell takes the row's fill style when the row has one, so a
+    restored row is painted from its first column exactly as today's stored row
+    is; it is still a default cell when there is no fill.
   - **DD27 -- the trimmed head's "cleared" mark reads as `.continuation` when the
     logical line carried a mark and as `.none` when it did not.** `31/D2`
     Decision 5 asks for both "the slot is cleared" and "stamped `.continuation`
@@ -473,7 +551,12 @@ Open conditions that the implementation, not the design, has to discharge:
     blank logical line still costs eight arena bytes, which `31/D2` Decision 1's
     1,048,576-record depth rests on. The open tail's two in-arena tables are held
     in scratch until it closes, because admission would otherwise append cells
-    over them.
+    over them. **Amended 2026-08-04 by `DD25`'s amendment:** a **third** side
+    table joins the spill table outside the arena -- the trailing fill style,
+    keyed by absolute record sequence and gated by header bit 63 -- for the same
+    reason and on the same terms: it is reachable on a minority of records, it is
+    evicted with its record, and it is charged at its table's capacity. The
+    header word is now full.
 - **The fidelity suite names one acknowledged divergence rather than hiding it.**
   The open tail's final display row is short by exactly the `.spacerHead`
   admission dropped, until the wide head that follows is admitted -- which is the
@@ -526,3 +609,33 @@ Open conditions that the implementation, not the design, has to discharge:
   `reject` in all twenty-two at ratios between 1.41x and 3.24x, so nothing was
   selected on the numbers; the quoted invocation is simply one of the twelve that
   cleared every cell.
+
+- **`DD25`'s amendment landed as its own commit, between slices 4 and 5**, on the
+  unwired store rather than as part of the wiring: it changes what a record
+  *means*, so landing it before slice 5 keeps the wiring slice from having to
+  re-decide the trailing-blank question against live readers. It touches
+  `LogicalLineRecord` (header bit 63, the `hasTrailingFill` flag),
+  `LogicalLineStore` (the fill side table, the admission split, the painted read,
+  and eviction/reopen/hand-back release), and both store test suites. No
+  measurement is re-run: the fill costs one bit on every record and one table slot
+  on the minority that carry one, which is inside `31/F8`'s reported precision,
+  and `31/F8`'s verdicts stand as recorded.
+- **Three judgment calls, recorded as `31/DD33`-`31/DD35` continuing `DD32`'s
+  numbering**, each taken as the obvious simple option:
+  - **DD33 -- a forced-split line's trailing fill belongs to the LAST piece.** The
+    fill describes the paint after the line's *end*, so the piece that holds the
+    end is its only coherent owner; a fill on the first piece would paint a margin
+    in the middle of a line. It falls out of admission order rather than needing
+    machinery -- a split closes the earlier piece *before* the closing row's cells
+    are appended -- and a test pins it rather than trusting the ordering. Evicting
+    the first piece leaves the follower's fill untouched, for the same reason.
+  - **DD34 -- `31/DD26`'s restored blank cell takes the fill's style.** A
+    hard-ended empty row appended to a record that already has cells stores one
+    cell so the counted and derived row counts agree; giving it the fill style
+    (default when there is none) is what keeps the restored row painted from
+    column 0, which is what today's stored row shows.
+  - **DD35 -- reopening the tail record clears its trailing fill.** A reopened
+    line has no end, so the paint after its end is meaningless; the next
+    admission re-derives the tail of whichever row finally closes it. The
+    alternative -- keeping the fill through a reopen -- would paint a margin
+    inside a line that is still being printed.
