@@ -2152,3 +2152,436 @@ counting pass (condition 1) -- have their mechanisms specified and, for conditio
 1, their probe and rule frozen; neither changes the design on either outcome. The
 paired ladder (condition 3) is the acceptance dimension and is owed against a
 real implementation by construction.
+
+### D4 -- the eviction comparison's decision rule, and the `AR6` residency reading sequenced with it
+
+- Status: **rule frozen 2026-08-04 at `de17e95`, before the eviction probe
+  existed in the tree and before any eviction or residency number was produced.**
+  This entry is the first slice of
+  [the plan](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md)'s commit
+  checklist and it produces **no number**: it states the arms, the stimuli, the
+  instrument, the validity gates, the thresholds with their derivations and the
+  verdicts, so that nothing downstream can be chosen after a result is seen. The
+  measurement it governs is the plan's slice 4 and lands as `F8`.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Evidence used, all quoted rather than re-measured: `D2` Decision 2 (the
+  eviction step this rule prices, as amended by the external review), `D2`
+  Decision 1 (the charge model, the depth table and the amended residency
+  reading), `F3` Observation 4 (arena bytes and record counts per content class),
+  `F3` Observation 2 (mean stored cells per display row), `F3`'s own frozen rule
+  (the two-arm instrument and six gates this rule reuses), `F6` `HR5` (what
+  whole-record eviction costs in four anchors and the scrollbar), `28/F20`
+  Observation 1 (the 19.7% write-path subtree share) and Observation 5
+  (`scrollback-stream`'s row shape), `28/F23` (the `mix` and `full` calibration
+  bands), `agent-docs/terminal-performance.md` (the 95.7% drain share),
+  `scripts/terminal-benchmark-validation.py#DECISION_RULES` (the frozen
+  directional thresholds), and `15/F2` / `15/F4` (the charge-versus-resident
+  error class the residency reading exists to refuse).
+- Candidate solutions this rule can distinguish: head-granular eviction as `D2`
+  Decision 2 specifies it (the design), whole-record eviction (`DD2` as
+  originally written, which is the plan's `AR1` fallback), and today's
+  `enforceScrollbackBudget` (the thing being replaced).
+
+#### What this rule can and cannot decide
+
+Like `F3`, this is a microbenchmark converting a ladder threshold into a
+microbenchmark ratio through a **measured** cost share, so it reports a
+prediction. It therefore **cannot land the store and cannot fail it**: landing is
+the paired ladder's (`retained-browse` as the go/no-go, `terminal-feed` and
+`scrollback-stream` carrying `H3`'s falsifier), and `D1`'s scoping is unchanged
+-- no production storage change is licensed by this entry.
+
+**It prices the mechanism; it does not reopen `D2` Decision 2's granularity**
+unless its own reject bound below fires *and* the third arm attributes the cost
+to granularity rather than to the arena. That ordering is the whole point of
+freezing it now: the eviction number is the largest unmeasured term in the
+campaign (`D1` condition 2), and a rule written after it would be a rule written
+to fit it.
+
+**The complexity reading this rule is frozen against**, stated because the plan's
+`AR1` was corrected to it by the external review and a rule written against the
+worse reading would set its bounds in the wrong place: `D2` Decision 2's steps 1
+and 4 persist the head cell offset, so one trim step folds **one display row**
+from that offset -- `O(width)`, or `O(cells in that row)` on the wide path -- and
+draining a record costs one pass over the record across all its steps rather than
+one pass per step. Gate 7 below is what holds the implementation to that reading
+instead of assuming it.
+
+#### Instrument
+
+A standalone three-arm microbenchmark in
+`lib/TerminalCore/Tests/TerminalCoreTests/`, release configuration, headless,
+env-gated behind `DANTERM_LOGICAL_LINE_PROBE`, **in its own file, with `F1`'s,
+`F2`'s, `F3`'s and `F7`'s probe files unedited** (the practice `F2` established
+and every probe since has kept). It reuses this doc's existing harness --
+`RetainedStimulus`, `buildStimulus`, `interleavedRounds`, `median`, `percentile`,
+`loadAverageDescription` -- and adds only the two evicters plus the arena variant
+arm C needs.
+
+Arms are interleaved **ABBA within one process**, at **5 measured rounds + 2
+warmup** per (content class, statistic), the same round count `F3` froze. Every
+aggregate is reported with its min, max and sample count. Geometry is 179x66 and
+depth is whatever the 16 MiB budget admits for the class, which is the point:
+this is the only probe in the doc that measures a **saturated** store.
+
+**Two measured statistics, both taken on a store already filled to the budget
+outside the timed region.**
+
+1. `steady` (**verdict-bearing primary**) -- the whole write path at steady
+   state: admit one scrolled-off display row, then enforce the budget, 5,000
+   times inside the timed region. Statistic = **median over rounds of nanoseconds
+   per admitted display row**. This is the quantity a real pane pays, and it is
+   the quantity whose ladder denominator is measured (see Thresholds).
+2. `drain` (**verdict-bearing secondary**) -- eviction alone: admit 2,000 display
+   rows with enforcement suppressed *outside* the timed region, then time one
+   enforcement call that drains the charge back to the budget. Statistic =
+   **median over rounds of nanoseconds per evicted display row**. This isolates
+   the new term `AR1` names.
+
+**Comparison target -- today's production eviction path, named.** Arm A
+reproduces `Terminal.swift#enforceScrollbackBudget` exactly: the
+`while scrollbackByteCount > scrollbackBudgetBytes || ...` loop, and per step
+`ScrollbackBuffer.removeFirst()` (`Terminal.swift#removeFirst`, including the
+slot-release write and `compactIfNeeded`), the `scrollbackByteCost(of:)`
+subtraction, the `storedCellCount` subtraction and the `isSoftWrapped` read;
+then once per call the `isHistoryHeadTruncated` write, the
+`primaryHistoryObservation` bump and `Terminal.swift#handleEviction`. Its `steady`
+statistic also carries `Terminal.swift#appendToScrollback` -- `PackedRetainedRow.pack`,
+the buffer append and the two accumulations -- exactly as `F3`'s baseline did.
+`ScrollbackBuffer`, `scrollbackByteCost` and `handleEviction` are `private` to
+`Terminal`, so the arm reproduces them rather than calling them; that
+substitution is this probe's stated fidelity limit, exactly as it was `F1`'s and
+`F3`'s.
+
+**Candidate -- arm B, the arena head-trim as `D2` Decision 2 specifies it.**
+While the charge exceeds the budget: fold the head record from its **persisted
+head cell offset** at the current width and take the offset beginning the next
+display row (step 1); drop the whole record if that offset reaches its end, and
+if the dropped record carried `forcedSplit`, propagate the continuation bit to
+the follower and clear the follower's mark (step 2 as amended); otherwise advance
+the head past those cells and rewrite the 8-byte header in place with its cell
+count reduced, its semantic-mark slot cleared and the mid-line bit set (step 3);
+update the head record's index offset, the head block's cached display-row total,
+the grand display-row total, `evictedRowCount` and the charge (step 4 as
+amended -- no anchor cache). Its `steady` statistic also carries the open-line
+append `F3` measured, so the two arms' `steady` numbers cover the same work.
+
+**Arm C -- whole-record eviction on the same arena** (`DD2` as originally
+written). **Descriptive only and outside the verdict**, run as its own
+interleaved B-versus-C pair in the same session at the same round count. It
+exists for one purpose: if arm B rejects, arm C is the only thing that can say
+whether the cost is the *granularity* (in which case the plan's `AR1` fallback is
+on the table for a human) or the *arena* (in which case the fallback buys
+nothing). Without it a reject would be read as evidence for a fallback nobody
+measured.
+
+#### Stimuli, with every calibration band cited to its source
+
+All fed through a real `Terminal` at 179x66, so both arms evict rows the engine
+actually produced, and all fed past the 16,777,216-byte budget
+(`Terminal.swift#productionScrollbackBudgetBytes`) so eviction is sustained
+rather than incidental.
+
+1. `mix` -- `28/F23`'s measured content distribution. Band: display-row stored
+   cells median in **[119, 154]**, p95 **179**. Verdict-bearing.
+2. `full` -- `28/F23`'s `bound/wide-full-width-saturation`. Band: median and p95
+   both **179**. Verdict-bearing.
+3. `stream` -- `28/F20` Observation 5's measured `scrollback-stream` row shape.
+   Band: median stored cells in **[55, 65]**, soft-wrapped fraction **0**. This
+   is the class the threshold below is derived from, and the class where every
+   record is one display row so every eviction step drops a whole record.
+   Verdict-bearing.
+4. `wrapped` -- **new here**, logical lines of 60,000 cells (91.6% of `DD3`'s
+   65,536-cell cap, deliberately below it so the forced-split path does not fire
+   inside the measured region), which fold to 336 display rows each at 179
+   columns. Band: median display rows per logical line in **[330, 342]**,
+   soft-wrapped fraction **>= 0.99**. It is the only class in which a step trims
+   *inside* a record, so it is the only class that exercises the persisted head
+   cell offset at all -- the term `AR1`'s correction is about, and `PO5`'s case.
+   Verdict-bearing.
+5. `wide` -- `F3`'s CJK generator. Band: at least **50%** of admitted rows
+   contain a wide cell and at least one `.spacerHead` is present. **Descriptive
+   only and outside the verdict**, for the reason `F3` gave: the bound below is
+   derived from `scrollback-stream`, an ASCII CRLF workload, and no ladder
+   threshold derives from wide content. It is measured anyway because the amended
+   `AR1` names `O(cells in that row)` as the wide path's per-step cost, and that
+   is better recorded as a number than as a caveat.
+
+Out of band voids the run for that class, and the achieved distribution is
+reported either way. The probe also reports, per class, records evicted, trim
+steps taken, display rows evicted per admitted row, and the head record's mean
+display-row span -- because those are what say whether a class exercised the
+mechanism the verdict is about.
+
+#### Validity gates. Any failure voids the invocation, and a void invocation is not a verdict and does not become one by re-running
+
+1. **Per-arm fidelity, then cross-arm equivalence on the overlap.** The two arms
+   do **not** retain the same depth at the same budget -- `F3` Observation 4
+   measured the arena holding the same content in 0.744x-0.925x of the bytes
+   today's budget charges -- so equality of the whole store is the wrong check.
+   Instead: outside every timed region, each arm's retained content is read back
+   display row by display row through `F1`'s walks and checksummed over every
+   scalar, style id and kind, and each checksum must equal an independently
+   computed expectation for the **suffix of the fed stream that arm should have
+   retained**. Then, over the display rows both arms retain (the shorter suffix),
+   the two checksums must be **identical**. A difference in either half means the
+   arms did not evict the same content and no timing from that run may be quoted.
+2. **Head-stamping fidelity.** The first retained display row of each arm reads
+   as a mid-line continuation exactly when the row above it was soft-wrapped --
+   today's `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`
+   (`Terminal.swift#enforceScrollbackBudget`) and the arena's mid-line bit
+   (`D2` Decision 5) must agree on every measured round. This is the gate that
+   holds the candidate to `I4`'s "carries no semantic mark" reading rather than
+   letting a cheaper stamping produce a better number.
+3. **Steady-state check, stated per statistic because the two timed regions
+   differ.** In `steady`, each arm's evicted display rows must equal its admitted
+   display rows within **1%**. In `drain`, each arm must evict at least the
+   display rows its suppressed admissions added, again within **1%**. An arm that
+   is not evicting is not measuring eviction, and a per-row ratio taken while one
+   arm still has budget headroom is not a comparison. Out of tolerance voids the
+   class.
+4. **Non-elision.** Each timed round's product is consumed and cross-checked
+   against an expectation computed outside the timed region: arm A's evicted row
+   count, charged byte total and stored-cell total; arms B and C's head offset,
+   records dropped, arena bytes in use and grand display-row total. A mismatch,
+   or a zero, voids the run.
+5. **Instrument resolution (A/A control).** An arm-A-versus-second-identical-arm-A
+   control runs in the same session at the same round count, for every class and
+   both statistics. Its |median difference| is the instrument's resolution, and a
+   candidate-versus-baseline difference smaller than it is **reported as below
+   resolution and read as an effect in neither direction**. An A/A control above
+   **5%** voids the whole invocation, as in `F1` and `F3`.
+6. **Host conditions**, as `28/F15` gated them and every probe in this doc has
+   adopted: AC power, low-power mode off, one-minute load average below **2.5**
+   read before and after.
+7. **Complexity fidelity -- the gate this rule owes its own frozen reading.** On
+   `wrapped`, the probe reports the per-step cost by quartile of a record's
+   drain, and the **last quartile's median must be <= 1.20x the first
+   quartile's**. *Derivation:* a step that re-folded the record from its start
+   instead of from the persisted head cell offset would cost, on average, an
+   eighth of the record's display rows in the first quartile against seven
+   eighths in the last -- a **7x** separation. 1.20x sits an order of magnitude
+   below that and well above gate 5's 5% resolution ceiling, so it discriminates
+   the two shapes without being sensitive to noise. A failure here is an
+   **implementation defect report, not a design verdict**: the arm measured is
+   not the one `D2` Decision 2 specifies, and the run produces no verdict in
+   either direction.
+8. **Coverage.** Every aggregate printed beside its sample count; a quantity that
+   could not be measured is reported absent rather than as 0
+   (`agent-docs/measurement-discipline.md`).
+
+#### Thresholds, and where each number comes from
+
+- **Reject** -- candidate median **> 1.09x** arm A on **either** statistic on any
+  verdict-bearing class.
+  *Derivation, every input measured and none chosen here, and it is `F3`'s
+  derivation applied to the other half of the same subtree:* `28/F20`
+  Observation 1 sampled `benchmark/scrollback-stream` and put the write-path
+  subtree -- `appendToScrollback` / `pack` / `compacted` / `scrollbackByteCost` /
+  **`enforceScrollbackBudget`** -- at **19.7% of 15,578 `terminal-pty-host`
+  thread samples**; `agent-docs/terminal-performance.md` puts the drain at
+  **95.7%** of a `scrollback-stream` block (median over 368 archived blocks); and
+  `scrollback-stream`'s frozen `confirm` directional threshold is **1.85%**, read
+  from `scripts/terminal-benchmark-validation.py#DECISION_RULES` rather than from
+  a reconstruction of it. The write path is therefore `0.197 x 0.957 = 18.85%` of
+  the block, and `1.85 / 18.85 = 9.81%` is the write-path regression that first
+  predicts a `slower` verdict -- so a candidate above **1.098x**, rounded down to
+  **1.09x**, predicts `H3`'s own falsifier firing.
+  *Why the same bound governs both statistics:* the 18.85% denominator covers
+  admission and enforcement **together**, so the bound is exact for the `steady`
+  statistic and conservative for `drain`. If eviction is a fraction `f` of that
+  subtree, an eviction-only ratio `R` moves the block by `f x 18.85% x (R - 1)`,
+  so holding eviction alone to 1.09x is the strictest admissible reading (`f = 1`)
+  and any true `f < 1` makes it stricter than the ladder needs. A tighter bound is
+  the conservative choice for a probe whose failure mode is clearing a falsifier
+  too easily -- the same argument `F3` used to prefer the pre-fix share.
+  *Why the pre-fix 19.7% and not the post-fix 15.9%:* unchanged from `F3` --
+  the 15.9% re-sample "ran at load 13.6 and is attribution only" by `28/F20`'s
+  own entry, and the larger share yields the tighter bound.
+- **Confirm** -- candidate median **<= 1.00x** arm A on **both** statistics on
+  **every** verdict-bearing class, or a difference smaller than gate 5's
+  resolution. *Derivation:* this is `F3`'s confirm line reused, and it is a real
+  possibility rather than a courtesy: the arena's step is pointer arithmetic plus
+  at most one 8-byte header write against today's per-row `removeFirst` (a slot
+  release, an amortized compaction check) plus `scrollbackByteCost` arithmetic
+  over a packed row.
+- **Neutral** -- every verdict-bearing class under 1.09x on both statistics, and
+  at least one above 1.00x by more than the A/A resolution. The head-trim's added
+  fold is real and is inside the tolerance the ladder can absorb.
+
+#### Verdicts, and what each one triggers, stated now so it is not decided after the fact
+
+Applied **exactly once** to the frozen statistics; the entry's verdict is the
+worst cell across both statistics and every verdict-bearing class.
+
+- **confirm** -- `AR1` is discharged as a priced term, `D2` Decision 2's
+  head-granular eviction stands unchanged, and the plan's remaining slices
+  proceed. The `DD19` sequencing is satisfied: the paired ladder verdict may then
+  be read with eviction priced rather than with the campaign's largest unmeasured
+  term still open.
+- **neutral** -- the same, plus one recorded cost: the measured eviction
+  regression is carried forward as a number the paired ladder must re-read
+  against the real implementation before landing.
+- **reject** -- the plan gains a **named condition**: the store does not land
+  until either the eviction implementation clears this bound under **this same
+  rule**, or the paired ladder comes back not-`slower` on `terminal-feed` **and**
+  `scrollback-stream` against a real implementation, which is `H3`'s own
+  falsifier and outranks a microbenchmark prediction. Disposition is a human
+  decision, and a reject is not by itself a design failure -- `D3` Decision 1's
+  diagnostic discipline applies here too.
+
+**The `AR1` whole-record fallback, and the honest bar for taking it.** A reject
+does not authorize it. All three of the following must hold, and the third is not
+this rule's to satisfy:
+
+1. reject fires on a verdict-bearing class;
+2. arm C attributes it to **granularity**: head-granular exceeds whole-record on
+   the same class by more than **1.09x** (the same conversion applied to the same
+   subtree). If the two arena arms are within that, the cost is the arena's and
+   switching granularity buys nothing;
+3. a human accepts a **user-visible behavior change**. Whole-record eviction
+   reintroduces `F6` `HR5`: up to **367 display rows dropped in one step** at 179
+   columns and **32,768** at the 2-column minimum, moving the selection, the
+   search occurrence, the hovered and armed links, the browsing viewport and the
+   scrollbar further per admitted row than they move today. `D2` Decision 2
+   **closed** that hazard rather than accepting it, and the plan's `I4` and `PO5`
+   currently forbid it. It is therefore a decision this rule can only supply the
+   number for.
+
+On the corrected `AR1` reading the fallback is unlikely to be needed at all --
+one display row per step, one pass per record across a full drain -- which is
+precisely why the bar for taking it is stated before the number rather than
+after.
+
+#### The `AR6` residency reading, sequenced with this measurement
+
+`AR6` was promoted from an accepted risk to a gate by the external review of `D2`
+Decision 1: `I2` bounds **charged** bytes and `PO3`'s census can only see those,
+while **resident** is capacity plus metadata once the ring's write cursor has
+cycled. The two quantities diverge exactly when the ring cycles, and the eviction
+measurement is what cycles it -- hence one slice, not two.
+
+**Instrument.** `just terminal-memory-probe`
+(`lib/TerminalCore/Sources/TerminalMemoryProbe/main.swift` over
+`TerminalMemoryProbeSupport`) at 179x66, with `--json` for the artifact and
+`--vmmap` for dirty allocator pages sampled through `whileResident`. **One
+process per state** (`--payload NAME`), because the probe's own note records that
+footprint deltas are attributable only in single-payload mode -- in a matrix run
+every delta after the first understates its payload. Never `--chunk 0`, which
+measures the parse spike rather than the resident cost.
+
+**Four states, and what each one feeds.**
+
+| state | how it is reached | what the reading feeds |
+| --- | --- | --- |
+| empty | `--payload empty`: a constructed pane fed nothing | `DD12`'s claim that an idle pane's reservation "costs nothing"; this is the only number that can support or refute it |
+| partial | fed to ~50% of the charged budget | `D2` Decision 1's first-touch paragraph, which holds only until the cursor cycles |
+| saturated | fed until the charge first reaches the budget and the first eviction has fired, before the cursor wraps | resident against the charged bound at the moment `PO3`'s census reports them equal |
+| cycled | fed at least **two full physical wraps** of the arena | the only state `AR6`'s claim is about, and the only one the rule below reads |
+
+**Reported per state**, each beside its sample count and with "not measured"
+distinguished from zero: the `phys_footprint` delta, the `vmmap --summary`
+MALLOC/dirty lines verbatim (the probe dumps rather than parses them, and that
+stays), and the census's **capacity and bytes-in-use separately** (`DD11`, `D2`
+Decision 1's reporting requirement).
+
+**Control.** Today's store is measured at the **same fed inputs** in the same
+session. It has no ring, so "cycled" for it means the same input, not the same
+mechanism -- which is the point: the user-facing question is what a pane costs in
+RAM for the same program output, and only a same-session control answers it
+(`agent-docs/measurement-discipline.md`: give every comparison a control the
+change cannot reach, measured in the same session).
+
+**Gates.** Host conditions as gate 6 above; the census identity
+(`charged <= budget`) must hold in the saturated and cycled states, and a failure
+there is an **accounting** failure that voids the residency reading rather than
+producing a residency verdict.
+
+**The rule, frozen before the number exists.** Read on the cycled state, on the
+probe's own payloads rather than on new ones: `scrollback-plain` (the short-line
+shape closest to `stream`, which the derivation below shows is the worst measured
+class for index charge), `scrollback-mixed` (closest to `mix`), and a blank-line
+payload for the degenerate regime. Per content class:
+
+- **Confirm, no remedy** -- resident per pane **<= 1.10x** the charged bound
+  (16 MiB -> 17.6 MiB) on every measured content class. `AR6` is discharged and
+  the arena's capacity stays at the budget.
+  *Derivation:* `D2` Decision 1's model predicts resident = capacity + index +
+  side tables. The index is 8 B per record, and over `D2` Decision 1's depth
+  table with `F3` Observation 4's records-per-display-row the worst measured
+  class is `stream` -- 33,825 records x 8 B = **270,600 B, 1.61%** of the budget
+  (`mix` 0.46%, `wide` 0.36%, `full` 0.28%; arithmetic over quoted numbers, not
+  measured). 1.10x leaves roughly 6x headroom over the largest predicted term for
+  page granularity, allocator rounding and the two side tables -- the unmeasured
+  constants this reading exists to pin.
+- **Narrow confirm** -- above 1.10x and below **1.50x**. No remedy ships, and the
+  reading is recorded as a condition on pane count, which is exactly what
+  `DD12`'s reopening condition ("a real session's pane count makes the
+  reservation visible in RSS") needs to be decidable.
+  *Derivation:* 1.50x is `D2` Decision 1's **own** amended arithmetic worst case
+  -- a 16 MiB arena plus ~8 MiB of index in the blank-record regime, 24 MiB
+  against a 16 MiB charged bound -- so a content class landing at or under a
+  number the design already states in the open is not a discovery.
+- **Reject, the remedy ships** -- resident **>= 1.50x** the charged bound on any
+  measured content class, **or** arena resident **> 1.10x** today's store's
+  resident for the same fed input in the same session. Then the arena's capacity
+  is sized **below** the budget by the measured index and side-table share, which
+  costs depth by at most that same share -- 1.61% on the worst measured class,
+  well inside `D2` Decision 1's 1.16x-1.32x depth gain -- and `PO3`'s census is
+  what proves the new capacity holds.
+  *Derivation of the second trigger:* `D2` Decision 1 committed to "no content
+  class loses depth and no default changes"; its memory counterpart is that a
+  user does not pay more RAM for the same program output, and 1.10x is the same
+  instrument-and-page-granularity allowance the confirm line uses. `15/F2`'s 2.2x
+  understatement is the error class being refused here: a charge model that
+  describes a model rather than an allocation was wrong by 2.2x once already.
+- **The blank-record arm is measured and reported but carries no trigger.** A
+  reading at or above 1.5x there confirms `D2`'s arithmetic rather than
+  discovering anything, and the degenerate regime -- the one
+  `productionScrollbackRowCap` used to bound and this design deletes -- is a
+  human's disposition, recorded as a named condition rather than acted on by this
+  rule.
+
+#### What this measurement does not see, stated so the entry is not over-read
+
+The parse and grid work preceding admission, so this is not `terminal-feed`'s or
+`scrollback-stream`'s block; **scheduling**, which is where `28/F20`'s residual
+may actually live and which no probe in this doc touches; the read path (`F1`'s);
+the width-change counting pass (`F2`'s, `F7`'s, and `D3` Decision 7's for wide
+content); the resize refold, which survives this design; the **side tables**
+(`hyperlinkId`, `contentIdentity`), stripped from both arms exactly as `F1` and
+`F3` stripped them and conservative toward the baseline for `F3`'s reason -- under
+the candidate an identity run table is built once per logical line rather than
+once per display row; the **forced-split path** (`I10`, `DD20`), which `wrapped`
+is deliberately sized below; multi-pane residency, since one pane is measured per
+process; and correctness beyond the gates above, which is `PO5`, `PO12` and
+`PO13`'s.
+
+**A stated fidelity limit of the instrument itself:** production amortizes
+`enforceScrollbackBudget` over a batch of scrolled-off rows, while the `steady`
+statistic calls enforcement once per admitted row. Both arms are treated
+identically, so the ratio is fair; the absolute nanoseconds-per-row figures carry
+the loop prologue once per row and are upper bounds.
+
+#### Ratifications and new deferred decisions
+
+- **`DD2`'s amendment is not reopened.** This rule prices `D2` Decision 2's
+  head-granular eviction; it does not re-litigate the choice, and arm C is
+  descriptive unless the reject bound fires.
+- **DD21 -- the rule adds a fifth stimulus class (`wrapped`) that `F3`'s four do
+  not cover.** `mix`, `full`, `stream` and `wide` fold to a handful of display
+  rows per record (and `stream` to exactly one), so under all four an eviction
+  step almost always drops a whole record and the **persisted head cell offset is
+  never exercised** -- the very term the amended `AR1` and gate 7 are about. The
+  alternative, reusing `F3`'s four unchanged, is simpler and would leave the rule
+  unable to see the mechanism it was written to price. Reopen if the class cannot
+  be produced through a real `Terminal` at 179 columns, in which case it is built
+  synthetically under `F2` gate 2's fidelity discipline and said so.
+- **DD22 -- the verdict-bearing primary is the write path per admitted row, with
+  eviction alone as the second bound rather than the only one.** The gate names
+  eviction, and eviction alone is reported; but `28/F20`'s 19.7% is the only
+  measured denominator in the corpus and it covers admission and enforcement
+  **together**, so a bound derived from it is exact for the pair and merely
+  conservative for the half. Reporting both keeps the exact conversion and the
+  isolated term without choosing between them. Reopen if a future profile splits
+  the subtree, which would give eviction its own share and its own exact bound.

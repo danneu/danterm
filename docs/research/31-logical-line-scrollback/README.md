@@ -18,6 +18,8 @@ of scheduling it better. Inherited boundary: C1's cell format is settled
 - [decisions.md](decisions.md) -- the auditable decision log; D1 is the
   go/no-go gate, whose rule was frozen before F1's comparison was read and
   which closed **`go`** on 2026-08-04, licensing Phase 2's design work only.
+  D4 is the newest entry and freezes the eviction comparison's rule -- and the
+  `AR6` residency reading sequenced with it -- before any such number exists.
 
 ## Purpose
 
@@ -470,7 +472,7 @@ work, that list is the constraint on it.
   and three-way decision rule are frozen** for a follow-up to run mechanically.
   Three deferred decisions added (`DD16`-`DD18`).
 - [x] `DONE` **Graduate: the design is in
-  [`plans/wip/logical-line-scrollback-store.md`](../../../plans/wip/logical-line-scrollback-store.md).**
+  [`plans/impl/2026-08-04-1137-logical-line-scrollback-store.md`](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md).**
   Written 2026-08-04 under the `simplify-plan` admission test, so it carries the
   contract and cites this doc for everything else: eleven invariants, fourteen
   proof obligations (eleven when this entry was written; `PO11`-`PO14` were added
@@ -511,7 +513,7 @@ work, that list is the constraint on it.
 
 - [x] `DONE` **Fold the external review of the deferred decisions and the plan.**
   An external review of `DD1`-`DD19` and
-  [the plan](../../../plans/wip/logical-line-scrollback-store.md) was adjudicated
+  [the plan](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md) was adjudicated
   by the human and folded in on 2026-08-04, **before the plan's first slice ran**,
   so the eviction rule that slice freezes is written against the corrected
   reading. Nine points, each verified against the tree or the doc before it was
@@ -542,6 +544,42 @@ work, that list is the constraint on it.
   quoting the 4.5-versus-4.5 tie as a result (`DD8`'s re-read gate unchanged);
   and the plan's `AR1` corrected to the per-step complexity `D2` Decision 2
   actually specifies -- one display row per step, not a walk of the record.
+
+### Phase 3 -- the implementation's gates (the plan owns the work; this doc owns the rules and the verdicts)
+
+The plan's "Gates carried from the research doc" section is the authoritative
+list of what implementation must discharge. What lands *here* is each gate's
+frozen rule before its measurement runs, and each verdict after. No entry below
+licenses a production storage change; landing is the paired ladder's.
+
+- [x] `DONE` **`D4`, the eviction comparison's frozen rule** (`D1` condition 2,
+  the largest unmeasured term in the campaign). Recorded in
+  [decisions.md](decisions.md), frozen at `de17e95` before the probe exists and
+  before any eviction or residency number does. Three arms, named as real code:
+  today's `Terminal.swift#enforceScrollbackBudget` / `#removeFirst` /
+  `#handleEviction`, the arena head-trim as `D2` Decision 2 specifies it, and --
+  descriptive only -- whole-record eviction on the same arena, which is the only
+  thing that could attribute a reject to granularity rather than to the arena.
+  Two verdict-bearing statistics (the write path per admitted row at steady
+  state; eviction alone per evicted display row), five stimulus classes with
+  every calibration band cited, eight validity gates, and **1.09x** as the reject
+  line -- `F3`'s own derivation (`28/F20`'s 19.7% x the 95.7% drain share, against
+  `scrollback-stream`'s frozen 1.85%) applied to the other half of the same
+  subtree. The rule is written against the **corrected** per-step complexity (one
+  display row per trim step from the persisted head cell offset, not a record
+  walk), and gate 7 holds the implementation to it rather than assuming it. The
+  `AR6` residency reading rides the same entry: four states (empty, partial,
+  saturated, cycled) through `just terminal-memory-probe --vmmap`, with
+  capacity-below-budget as the remedy only above a derived 1.10x / 1.50x band.
+  Two deferred decisions added (`DD21`, `DD22`).
+- [ ] `TODO` **`F8`, the eviction measurement and the residency reading.** Run
+  `D4` mechanically; the plan's slice 4. Both readings land in one finding
+  because cycling the ring is what makes charged and resident bytes diverge.
+- [ ] `TODO` **The wide-content counting pass.** `D3` Decision 7's probe and
+  three-way rule are already frozen; run them mechanically (the plan's slice 2).
+  Neither outcome changes the design.
+- [ ] `TODO` **The paired ladder verdict, the `28/D11` exit and the `DD8`
+  re-read.** The acceptance dimension, owed against a real implementation.
 
 ## Rejected
 
@@ -636,7 +674,21 @@ add detail to it.
   remains owed is the measurement itself, against today's
   `enforceScrollbackBudget` / `removeFirst`, under a rule frozen before the
   comparison is read. The head-trim's per-step fold walk is the new term such a
-  probe has to see.
+  probe has to see. **`D4` is that rule, frozen 2026-08-04 at `de17e95`**: arms,
+  five stimulus classes, eight gates, a 1.09x reject line derived the way `F3`
+  derived its own, and the honest bar for `AR1`'s whole-record fallback -- which
+  would reintroduce `F6` `HR5`, so a reject alone does not authorize it. Only the
+  number is still owed.
+- **Resident pages are unmeasured, and `I2` does not bound them.** The external
+  review of `D2` Decision 1 found the entry's residency claim true of *charged*
+  bytes and overstated for resident ones: once the ring's write cursor has
+  cycled, every arena page has been touched, so resident is capacity plus
+  metadata -- 24 MiB against a 16 MiB charged bound in the blank-record regime.
+  `PO3`'s census cannot see it, which is why the plan carries it as a gate rather
+  than as an accepted risk. **`D4` freezes its reading too**: four pane states
+  through `just terminal-memory-probe --vmmap`, today's store as a same-session
+  control at the same fed inputs, and sizing the arena's capacity below the
+  budget as the remedy only if the cycled-state reading crosses the derived band.
 - ~~**The eager counting pass is also unpriced at the record counts the budget
   now admits.**~~ **Answered by `F7`: the pass costs 0.761 ms at 1,048,576
   zero-cell records, 21.9x inside the 16.67 ms bound `D2` froze, so no
@@ -685,7 +737,7 @@ ships one bound rather than two) and `D3` (the five remaining `F6` hard cases
 and the wide-record fallback). **With `D3` the design settled** -- all eight of
 `F6`'s flagged sites disposed of, the four decisions `F6` handed forward made --
 and it **graduated on 2026-08-04 into
-[`plans/wip/logical-line-scrollback-store.md`](../../../plans/wip/logical-line-scrollback-store.md)**,
+[`plans/impl/2026-08-04-1137-logical-line-scrollback-store.md`](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md)**,
 which closes Phase 2. No decision in Phase 2 was blocked on a measurement, and
 both measurements still owed have their mechanisms specified and change no
 decision on either outcome: **eviction** remains the largest unmeasured term on
@@ -693,6 +745,15 @@ both sides, and the **wide-content counting pass** has a frozen probe and
 decision rule. Both ride the plan as gates, alongside `28/D11`'s live trial, the
 forced-split cap's missing pathological input, and the record format's remaining
 side tables.
+
+Phase 3 has opened, and it is rules and verdicts rather than design. `D4`
+(2026-08-04) freezes the eviction comparison's decision rule -- three arms named
+as real code, five calibrated stimulus classes, eight validity gates, a 1.09x
+reject line derived from `28/F20`'s measured share, and the `AR6` residency
+reading sequenced into the same slice -- **before any eviction or residency
+number exists**, and against the corrected per-step complexity (one display row
+per trim step, not a record walk). It licenses nothing: `F8` is the measurement
+it governs.
 
 What this doc still owns after graduation is the verdict, not the work. `D1`'s
 scoping stands: no production storage change is licensed by any entry here, and

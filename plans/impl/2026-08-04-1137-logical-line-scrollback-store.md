@@ -338,10 +338,30 @@ Open conditions that the implementation, not the design, has to discharge:
 
 ## Commit progress
 
-- [ ] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
+- [x] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
 - [ ] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
 - [ ] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
 - [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
+
+## Implementation notes
+
+- **Slice 1 recorded the eviction rule as a new `31/D4` entry** rather than as a
+  decision inside `31/D3`, which hosted the wide-content rule. `D3` is a closed
+  design entry whose scope is `F6`'s hard cases; this rule governs a measurement,
+  carries a second measurement (the `AR6` residency reading) with its own
+  three-way rule, and owns verdicts that fire after `D3` closed. A new `D` entry
+  keeps the decision log auditable by ID, which is what the doc's format asks for.
+- **The rule adds a fifth stimulus class and a second verdict-bearing statistic**
+  beyond what `31/F3` froze, both recorded as `31/DD21` and `31/DD22`. `F3`'s four
+  classes never trim inside a record, so they would leave the persisted head cell
+  offset -- the term the amended `AR1` is about -- unexercised; and `28/F20`'s
+  measured share covers admission and enforcement together, so the ladder
+  conversion is exact for the write-path pair and only conservative for eviction
+  alone. Both readings are reported so neither is lost.
+- **Promoting the plan moved its path**, so the five research-doc references to
+  `plans/wip/logical-line-scrollback-store.md` were repointed in the same commit;
+  the `docs/research/README.md` index row drops the path entirely rather than
+  carrying a 99-character cell against the format's 100-character cap.
