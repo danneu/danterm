@@ -743,6 +743,55 @@ public struct Terminal: Equatable, Sendable {
     /// constant: the budget-taking initializer stays internal, because the public initializer
     /// enforcing this fixed value is an invariant with its own test.
     public static let productionScrollbackBudgetBytes = 10_485_760
+
+    /// The retained-history cell bound, and the one that actually bounds a resize.
+    ///
+    /// Reflow cost is two-term. Doc 28's `D8` fits it at **1.85 us/row + 0.352 us/cell** on the
+    /// packed representation, across three content regimes, and the cell term dominates at any
+    /// real pane width. Before packing, the byte budget bounded that term *implicitly*: a
+    /// `GridCell` cost 32 B, so 10 MiB could hold at most `10 MiB / 32 B` cells no matter how
+    /// the rows were shaped -- and the three measured regimes came in at 304K, 298K and 246K
+    /// cells, which is why a pre-packing saturated resize was 87-152 ms whatever the content.
+    /// Packing cut a stored cell to ~1 B and broke that coupling, which is the whole mechanism
+    /// behind `F14`'s 1,450 ms.
+    ///
+    /// So this restates the old implicit bound explicitly, at the same value it always had.
+    /// Being denominated in *content* is what makes it safe under reflow: rewrapping a row moves
+    /// stored cells between rows but does not create or destroy them, so a narrow-then-widen
+    /// cycle evicts nothing. A row cap alone does not have that property -- see
+    /// `productionScrollbackRowCap`.
+    public static let productionScrollbackCellCap = 327_680
+
+    /// The retained-history row bound: a backstop for content the cell cap cannot see.
+    ///
+    /// The cell cap bounds the dominant reflow term but is blind to the degenerate regime `F9`
+    /// describes -- a retained row can hold ~zero stored cells (a blank line costs 80 B and
+    /// stores nothing), so a history of blank rows would satisfy any cell cap while making row
+    /// count, and with it the `1.85 us/row` term, unbounded.
+    ///
+    /// Sized from the cost model rather than chosen as a round number, so it is a consequence of
+    /// the resize budget instead of a knob. Taking `D8`'s budget of ~150 ms (1.5x the 99.5 ms
+    /// pre-packing baseline) and the worst case where **both** bounds bind at once:
+    ///
+    ///     1.85 us x R + 0.352 us x 327,680 <= 150,000 us
+    ///     1.85 us x R <= 150,000 - 115,442 = 34,558 us
+    ///     R <= 18,680  ->  16,384 (2^14)
+    ///
+    /// which prices the simultaneous worst case at **145.8 ms**, or 1.46x the baseline. It also
+    /// sits at or above the 1,000-10,000 rows every mainstream terminal defaults to (`xterm`
+    /// 1,024, `foot` 1,000, `kitty` 2,000, `tmux` 2,000, `alacritty` 10,000).
+    ///
+    /// **The one place this bound is lossy.** Narrowing a pane multiplies row count while
+    /// leaving cells alone, so below `cellCap / rowCap` = 20 columns the row cap can bind on the
+    /// way down and evict content that widening cannot restore. Above 20 columns the cell cap
+    /// holds row count low enough that rewrapping never reaches this bound, which is what
+    /// `narrowThenWidenPreservesCappedHistory` pins. Raising `rowCap` to make even a 10-column
+    /// pane lossless would cost the cell cap most of its budget, and `D8` takes the trade
+    /// deliberately rather than by omission.
+    ///
+    /// Public for the same reason the budget is: measurement tools report the bound they ran
+    /// against, and the public initializer enforcing this value is an invariant with its own test.
+    public static let productionScrollbackRowCap = 16_384
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
 
@@ -778,6 +827,16 @@ public struct Terminal: Equatable, Sendable {
 
     /// Makes the active bound visible to shared structural test assertions.
     private(set) var scrollbackBudgetBytes: Int
+
+    /// The active row cap. See `productionScrollbackRowCap` for why there are three bounds.
+    private(set) var scrollbackRowCap: Int
+
+    /// The active cell cap. See `productionScrollbackCellCap`.
+    private(set) var scrollbackCellCap: Int
+
+    /// Caches retained stored cells so the line-feed path never re-walks history to enforce the
+    /// cell cap. Maintained exactly like `scrollbackByteCount`, at the same two sites.
+    private(set) var scrollbackStoredCellCount = 0
 
     /// Caches retained-row cost so the line-feed path never scans full history.
     private(set) var scrollbackByteCount = 0
@@ -1136,6 +1195,8 @@ public struct Terminal: Equatable, Sendable {
             columns: columns,
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
+            scrollbackRowCap: Self.productionScrollbackRowCap,
+            scrollbackCellCap: Self.productionScrollbackCellCap,
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors
@@ -1143,18 +1204,30 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Gives deterministic tests a small budget while production remains fixed at 10 MiB.
+    ///
+    /// `scrollbackRowCap` defaults to the production cap rather than to "unbounded": a test that
+    /// asks for a small budget is asking to reach the *byte* bound sooner, not to opt out of the
+    /// row bound, and defaulting it away would let a fixture retain a depth production never can.
     init?(
         columns: Int,
         rows: Int,
         scrollbackBudgetBytes: Int,
+        scrollbackRowCap: Int = Terminal.productionScrollbackRowCap,
+        scrollbackCellCap: Int = Terminal.productionScrollbackCellCap,
         machineHostname: String? = nil,
         programVersion: String = "dev",
         defaultColors: TerminalDefaultColors = .baked
     ) {
-        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
+        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0, scrollbackRowCap >= 0,
+            scrollbackCellCap >= 0
+        else {
+            return nil
+        }
         columnCount = columns
         rowCount = rows
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
+        self.scrollbackRowCap = scrollbackRowCap
+        self.scrollbackCellCap = scrollbackCellCap
         self.machineHostname = machineHostname
         self.programVersion = programVersion
         self.defaultColors = defaultColors
@@ -2216,6 +2289,11 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// The cell-cap sibling of `recomputedScrollbackByteCount`, for the same coherence proofs.
+    var recomputedScrollbackStoredCellCount: Int {
+        scrollbackRows.indices.reduce(0) { $0 + scrollbackRows[$1].storedCellCount }
+    }
+
     /// Charges one blank row of `columns` cells, so tests can size budgets in whole rows without
     /// restating the cost model. Since `D4` charges reserved rather than occupied storage, that
     /// model is no longer arithmetic a test can safely rewrite from a column count.
@@ -2287,6 +2365,8 @@ public struct Terminal: Equatable, Sendable {
     func withUnlimitedScrollbackForTesting() -> Self {
         var copy = self
         copy.scrollbackBudgetBytes = .max
+        copy.scrollbackRowCap = .max
+        copy.scrollbackCellCap = .max
         return copy
     }
 
@@ -3834,6 +3914,7 @@ public struct Terminal: Equatable, Sendable {
             let row = PackedRetainedRow.pack(sourceRow.compacted())
             scrollbackRows.append(row)
             scrollbackByteCount += Self.scrollbackByteCost(of: row)
+            scrollbackStoredCellCount += row.storedCellCount
         }
     }
 
@@ -3843,9 +3924,17 @@ public struct Terminal: Equatable, Sendable {
         // nothing. Same defect class as the one `removeFirst` just stopped committing.
         var lastEvictedIsSoftWrapped: Bool?
         var evictedCount = 0
-        while scrollbackByteCount > scrollbackBudgetBytes {
+        // Three bounds, whichever binds first. The byte budget bounds memory; the cell and row
+        // caps bound the two terms of reflow cost, which is what a width change pays and what
+        // bytes stopped bounding once packing cut a stored cell to ~1 B. See
+        // `productionScrollbackCellCap`.
+        while scrollbackByteCount > scrollbackBudgetBytes
+            || scrollbackRows.count > scrollbackRowCap
+            || scrollbackStoredCellCount > scrollbackCellCap
+        {
             let evicted = scrollbackRows.removeFirst()
             scrollbackByteCount -= Self.scrollbackByteCost(of: evicted)
+            scrollbackStoredCellCount -= evicted.storedCellCount
             lastEvictedIsSoftWrapped = evicted.isSoftWrapped
             evictedCount += 1
         }
@@ -4105,6 +4194,14 @@ public struct Terminal: Equatable, Sendable {
                     scrollbackByteCount -= pulled.reduce(0) {
                         $0 + Self.scrollbackByteCost(of: $1)
                     }
+                    // Counted off the *packed* rows, not off `pulled`: `suffix(from:)`
+                    // materializes to full width, so its rows no longer carry the stored
+                    // extent the cell cap is denominated in.
+                    var pulledCells = 0
+                    for index in split..<scrollbackRows.count {
+                        pulledCells += scrollbackRows[index].storedCellCount
+                    }
+                    scrollbackStoredCellCount -= pulledCells
                     scrollbackRows.removeLast(pulledCount)
                     rows.insert(
                         contentsOf: pulled.map { $0.materialized(to: columnCount) },
@@ -4356,6 +4453,7 @@ public struct Terminal: Equatable, Sendable {
         let viewportStart = rebuiltRows.count - rowCount
         scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart].map { $0.compacted() })
         scrollbackByteCount = recomputedScrollbackByteCount
+        scrollbackStoredCellCount = recomputedScrollbackStoredCellCount
         rows = Array(rebuiltRows[viewportStart...])
         columnCount = newColumnCount
         cursor = CellPosition(
@@ -5216,6 +5314,7 @@ public struct Terminal: Equatable, Sendable {
             let evictedCount = scrollbackRows.count
             scrollbackRows.removeAll(keepingCapacity: true)
             scrollbackByteCount = 0
+            scrollbackStoredCellCount = 0
             isHistoryHeadTruncated = false
             if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
             handleEviction(of: evictedCount)
@@ -6293,10 +6392,12 @@ public struct Terminal: Equatable, Sendable {
     /// Mutates logical history while keeping its cached byte charge exact.
     private mutating func setScrollbackCell(_ cell: GridCell, row: Int, column: Int) {
         let oldCost = Self.scrollbackByteCost(of: scrollbackRows[row])
+        let oldCells = scrollbackRows[row].storedCellCount
         var retained = scrollbackRows[row].unpacked()
         retained.setCell(cell, at: column, columns: columnCount)
         let packed = PackedRetainedRow.pack(retained.compacted())
         scrollbackRows[row] = packed
         scrollbackByteCount += Self.scrollbackByteCost(of: packed) - oldCost
+        scrollbackStoredCellCount += packed.storedCellCount - oldCells
     }
 }

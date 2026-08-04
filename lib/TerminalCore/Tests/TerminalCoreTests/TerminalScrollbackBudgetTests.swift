@@ -213,6 +213,212 @@ struct TerminalScrollbackBudgetTests {
         expectValidGrid(batch)
     }
 
+    @Test("the row cap evicts oldest-first once cheap rows outrun it, with the budget unspent")
+    func rowCapBoundsDepthOnCheapRows() throws {
+        // Intent: retained depth stops at the row cap even when the byte budget has
+        //   room left, and the rows that survive are the newest ones.
+        // Why it exists: doc 28's `D8`. Packing made a retained row ~14x cheaper, so
+        //   a byte-only bound admits ~82,000 rows of ordinary content and ~125,000 of
+        //   sparse -- and reflow visits every one of them, which `F14` measured as a
+        //   1.43 s resize. The row cap bounds reflow's per-row term, and it has to bind
+        //   on the *cheap* side where neither the budget nor the cell cap will: these
+        //   rows are 6 cells each, so 64 rows is 384 cells.
+        // Scenario: a shell history of short commands -- the content regime that
+        //   retains deepest, and the one `saturated-sparse-resize-v1` measures.
+        let cap = 64
+        var terminal = try #require(Terminal(
+            columns: 40,
+            rows: 1,
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackRowCap: cap,
+            scrollbackCellCap: Terminal.productionScrollbackCellCap
+        ))
+
+        for line in 0..<(cap * 4) {
+            terminal.feed(Array("cmd\(line)\r\n".utf8))
+        }
+
+        #expect(terminal.scrollbackRowCount == cap)
+        // The budget is nowhere near spent: the cap, not the bytes, decided.
+        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes / 100)
+        // Oldest-first, so the newest `cap` rows are what survived.
+        let retained = terminal.primaryHistoryText.split(separator: "\n").map(String.init)
+        #expect(retained.first == "cmd\(cap * 4 - cap)")
+        #expect(retained.last == "cmd\(cap * 4 - 1)")
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
+        expectValidGrid(terminal)
+    }
+
+    @Test("the cell cap bounds retained cells once rows are wide, before the row cap is near")
+    func cellCapBoundsWideRows() throws {
+        // Intent: retained depth stops at the cell cap when rows are wide enough to reach
+        //   it first, with the row cap and the byte budget both unspent.
+        // Why it exists: `D8`'s cost model is two-term -- 1.85 us/row + 0.352 us/cell --
+        //   and the cell term dominates at any real pane width. A row cap alone leaves it
+        //   free: the wide arm measured 232.6 ms against a 99.5 ms pre-packing baseline
+        //   while sitting well inside an 8,192-row cap. This is the bound that makes the
+        //   worst case a number rather than a function of how wide the pane is.
+        // Scenario: full-width program output, the regime `saturated-wide-resize-v1` runs.
+        let columns = 80
+        let cellCap = 800
+        var terminal = try #require(Terminal(
+            columns: columns,
+            rows: 1,
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackRowCap: 4_096,
+            scrollbackCellCap: cellCap
+        ))
+
+        for _ in 0..<64 {
+            terminal.feed(Array(String(repeating: "x", count: columns).utf8))
+            terminal.feed(Array("\r\n".utf8))
+        }
+
+        #expect(terminal.scrollbackStoredCellCount <= cellCap)
+        #expect(terminal.scrollbackRowCount == cellCap / columns)
+        #expect(terminal.scrollbackRowCount < 4_096)
+        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes / 100)
+        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
+        expectValidGrid(terminal)
+    }
+
+    @Test("narrowing then widening a capped history loses no rows")
+    func narrowThenWidenPreservesCappedHistory() throws {
+        // Intent: a width change and its inverse leave retained history exactly as deep as
+        //   it started, under both caps.
+        // Why it exists: the incident is the row-cap-only design measured during `D8`. A
+        //   row cap alone is not reflow-invariant -- narrowing multiplies row count while
+        //   leaving content alone, so the cap evicts the overflow and widening cannot
+        //   restore it. Measured directly at 179 columns with an 8,192-row cap and no cell
+        //   cap: 8,192 rows -> narrow to 100 -> 8,192 -> widen back to 179 -> **4,095**.
+        //   Half the user's scrollback destroyed by one window drag. The cell cap is what
+        //   fixes it: stored cells are content, so rewrapping moves them between rows
+        //   without creating any, and the cell cap therefore binds at a row count low
+        //   enough that rewrapping never reaches the row cap.
+        // Scenario: a user drags a pane narrow and back with a full history of full-width
+        //   output.
+        let wide = 179
+        let narrow = 100
+        // A one-row viewport, left blank by the trailing newline. A taller viewport holding
+        // full-width content would rewrap into more rows than it can show and spill the
+        // remainder into a history already sitting exactly at its cap, evicting a row for a
+        // reason that has nothing to do with the caps being reflow-safe.
+        var terminal = try #require(Terminal(
+            columns: wide,
+            rows: 1,
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackRowCap: 512,
+            scrollbackCellCap: 128 * wide
+        ))
+        for index in 0..<4_000 {
+            let line = String(String(repeating: "abcdefgh\(index % 10)", count: 20).prefix(wide))
+            terminal.feed(Array((line + "\r\n").utf8))
+        }
+
+        let atWide = terminal.scrollbackRowCount
+        let textAtWide = terminal.primaryHistoryText
+        terminal.resize(columns: narrow, rows: 1)
+        let atNarrow = terminal.scrollbackRowCount
+        terminal.resize(columns: wide, rows: 1)
+
+        #expect(atWide > 0)
+        // The mechanism, not just the outcome: narrowing roughly doubles row count, and the
+        // cell cap is what keeps that doubling clear of the row cap. Under a row cap alone
+        // this is where the eviction happened.
+        #expect(atNarrow > atWide)
+        #expect(atNarrow <= terminal.scrollbackRowCap)
+        #expect(terminal.scrollbackRowCount == atWide)
+        #expect(terminal.primaryHistoryText == textAtWide)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
+    }
+
+    @Test("whichever bound is reached first decides, so dense rows still evict on bytes")
+    func byteBudgetStillBindsBeforeTheRowCap() throws {
+        // Intent: the byte budget keeps deciding depth for content expensive enough to
+        //   reach it before the row cap does.
+        // Why it exists: the cap is an *additional* bound, not a replacement. A cap
+        //   that silently became the only bound would let pathological rows -- long,
+        //   multi-scalar, wide -- allocate without limit as long as they stayed under
+        //   the row count, which is the memory bound `I4` and doc 15 exist to hold.
+        // Scenario: full-width rows of program output against a generous row cap.
+        let columns = 200
+        let rowCost = historyRowCost(columns: columns)
+        let cap = 64
+        var terminal = try #require(Terminal(
+            columns: columns,
+            rows: 1,
+            scrollbackBudgetBytes: rowCost * 8,
+            scrollbackRowCap: cap,
+            scrollbackCellCap: Terminal.productionScrollbackCellCap
+        ))
+
+        for _ in 0..<(cap * 2) {
+            terminal.feed(Array(String(repeating: "x", count: columns).utf8))
+            terminal.feed(Array("\r\n".utf8))
+        }
+
+        #expect(terminal.scrollbackRowCount == 8)
+        #expect(terminal.scrollbackRowCount < cap)
+        #expect(terminal.scrollbackByteCount <= rowCost * 8)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+    }
+
+    @Test("cap-driven eviction marks a severed soft-wrapped line just as budget eviction does")
+    func rowCapEvictionMarksTruncation() throws {
+        // Intent: history-head truncation state is set by eviction the *cap* triggered,
+        //   not only by eviction the byte budget triggered.
+        // Why it exists: `isHistoryHeadTruncated` is what tells a reader the retained
+        //   stream was cut inside a logical line. Adding a second eviction trigger that
+        //   skipped it would leave a rejoined-looking wrapped line that is actually
+        //   severed -- a wrong answer no byte accounting would catch.
+        // Scenario: a soft-wrapped line scrolls off the top because the cap, not the
+        //   budget, forced it out.
+        let cap = 4
+        var terminal = try #require(Terminal(
+            columns: 4,
+            rows: 1,
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackRowCap: cap,
+            scrollbackCellCap: Terminal.productionScrollbackCellCap
+        ))
+
+        // A single logical line long enough to soft-wrap across several retained rows.
+        terminal.feed(Array(String(repeating: "w", count: 24).utf8))
+        terminal.feed(Array("\r\n".utf8))
+        for line in 0..<8 {
+            terminal.feed(Array("h\(line)\r\n".utf8))
+        }
+
+        #expect(terminal.scrollbackRowCount == cap)
+        #expect(terminal.isHistoryHeadTruncated == false)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+    }
+
+    @Test("public initializer enforces the fixed production row cap")
+    func publicProductionRowCapCrossing() throws {
+        // Intent: prove the public initializer alone wires the literal production cap.
+        // Why it exists: the same gap `publicProductionBudgetCrossing` closes for the
+        //   byte budget. Tiny injected caps cannot catch an omitted or wrong public
+        //   default, and at ordinary pane widths the cap is now the bound that actually
+        //   decides -- a packed row costs ~128 B, so 16,384 rows is ~2 MiB against a
+        //   10 MiB budget the content never reaches.
+        // Scenario: sustained short-line output at a narrow width, which is exactly
+        //   where a byte-only bound used to retain tens of thousands of rows.
+        let cap = 16_384
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+
+        for line in 0..<(cap + 500) {
+            terminal.feed(Array("c\(line % 10)\r\n".utf8))
+        }
+
+        #expect(Terminal.productionScrollbackRowCap == cap)
+        #expect(terminal.scrollbackRowCount == cap)
+        #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes)
+        #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+    }
+
     @Test("eviction marks only a soft-wrapped cut and preserves retained structure")
     func truncationTracksLastEvictedBoundary() throws {
         // Intent: derive truncation from the last removed row without editing retained cells.
@@ -547,39 +753,34 @@ struct TerminalScrollbackBudgetTests {
         }
     }
 
-    @Test("public initializer enforces the fixed 10 MiB production budget", .timeLimit(.minutes(1)))
-    func publicProductionBudgetCrossing() throws {
-        // Intent: prove the public initializer alone wires the literal production budget.
-        // Why it exists: tiny test budgets cannot catch an omitted or incorrect public default.
-        // Scenario: sustained two-column output crosses 10 MiB and retains the newest row.
-        let budget = 10_485_760
-        let rowCost = historyRowCost(columns: 2)
-        let rowCount = budget / rowCost + 2
-        var bytes: [UInt8] = []
-        bytes.reserveCapacity(rowCount * 4)
-        for index in 0..<rowCount {
-            if index == 0 {
-                bytes.append(0x58)
-            } else if index == rowCount - 1 {
-                bytes.append(0x5A)
-            } else {
-                bytes.append(0x41)
-            }
-            bytes.append(0x41)
-            bytes.append(0x0D)
-            bytes.append(0x0A)
+    @Test("public initializer wires all three bounds, and the caps bind before the budget")
+    func publicProductionBoundsCrossing() throws {
+        // Intent: prove the public initializer alone wires the three literal production
+        //   bounds, and that on ordinary content the caps are what decide depth.
+        // Why it exists: tiny injected bounds cannot catch an omitted or incorrect public
+        //   default. What changed with `D8` is which bound *binds*: a packed row costs ~84 B
+        //   plus about a byte per stored cell, so the two caps together admit at most roughly
+        //   `16,384 x 84 + 327,680` bytes -- under 2 MB. The 10 MiB budget is therefore
+        //   unreachable for ordinary content and has become the valve for byte-expensive
+        //   rows, where a stored cell carries a multi-scalar spill the cell cap cannot see.
+        //   `byteBudgetStillBindsBeforeTheRowCap` covers that side; this one pins that the
+        //   constants are wired and that the budget is not silently doing the work.
+        // Scenario: sustained ordinary output at a narrow width.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+
+        for line in 0..<(Terminal.productionScrollbackRowCap + 500) {
+            terminal.feed(Array("c\(line % 10)\r\n".utf8))
         }
-        var terminal = try #require(Terminal(columns: 2, rows: 1))
 
-        terminal.feed(bytes)
-
-        #expect(terminal.scrollbackBudgetBytes == budget)
-        #expect(terminal.scrollbackByteCount <= budget)
-        #expect(budget - terminal.scrollbackByteCount < rowCost)
-        #expect(terminal.scrollbackRowCount < rowCount)
-        #expect(terminal.scrollbackRow(at: 0)?.cells[0].scalars == ["A"])
-        #expect(terminal.scrollbackRow(at: terminal.scrollbackRowCount - 1)?.cells[0].scalars == ["Z"])
+        #expect(terminal.scrollbackBudgetBytes == 10_485_760)
+        #expect(terminal.scrollbackRowCap == 16_384)
+        #expect(terminal.scrollbackCellCap == 327_680)
+        // The row cap decided here: these rows hold 2 stored cells, so the cell cap is far away.
+        #expect(terminal.scrollbackRowCount == Terminal.productionScrollbackRowCap)
+        #expect(terminal.scrollbackStoredCellCount < Terminal.productionScrollbackCellCap)
+        #expect(terminal.scrollbackByteCount < terminal.scrollbackBudgetBytes)
         #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
+        #expect(terminal.scrollbackStoredCellCount == terminal.recomputedScrollbackStoredCellCount)
     }
 
     private enum Action {
