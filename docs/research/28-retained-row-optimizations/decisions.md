@@ -1,13 +1,15 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D11**, which the remaining Phase 3 direction gate in
+Next free ID: **D12**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
 on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
 representation, `D6` on correcting its pricing, `D7` on the resize-for-depth
-trade, `D8` on the bounds that resolve it, `D9` on rejecting C6 for C1, and `D10`
-on accepting C1's residuals and graduating H3. IDs are allocated in the order
-entries are written, not reserved in advance -- the H5 gate has now moved from
-`D5` to `D6` to `D7` to `D8` to `D9` to `D10` to `D11` for that reason.
+trade, `D8` on the bounds that resolve it, `D9` on rejecting C6 for C1, `D10` on
+accepting C1's residuals and graduating H3, and `D11` on reopening `D8`'s resize
+budget for a dogfood trial of `F23`'s candidate (b). IDs are allocated in the
+order entries are written, not reserved in advance -- the H5 gate has now moved
+from `D5` to `D6` to `D7` to `D8` to `D9` to `D10` to `D11` to `D12` for that
+reason, and is now the longest-deferred item in the doc.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -1220,3 +1222,104 @@ a large win rather than digging below the starting line.
   it below pre-campaign DanTerm. Either makes the admission path live work again.
   What does **not** reopen it is a proposal to shrink the retained cell: `D9`'s
   reasons are measured and stand.
+
+### D11 -- reopen `D8`'s resize budget for a dogfood trial of `F23` candidate (b): ship the ~10,000-row bounds and feel the 600 ms
+
+- Status: **decided as a provisional trial with an exit condition, on an explicit
+  human choice.** `D8`'s ~150 ms resize budget is reopened -- deliberately, not by
+  omission -- and the three production bounds are raised to `F23`'s candidate (b).
+  This is not a claim that 600 ms is acceptable; it is a decision to find out
+  whether it is, by feeling it, before spending on either of the two mitigations
+  that would hide it. **No mitigation ships with this entry**: no resize
+  coalescing, no `H7` lazy reflow. The raw cost is the instrument.
+- Date and investigator: 2026-08-04, Claude (agent), on a human decision made with
+  `F23`'s decision package in hand.
+- Evidence used: `F23` (the measured distributions, the binding-bound table, and
+  candidate (b)'s price -- this entry adds no measurement of its own), `D8` (the
+  budget being reopened and the cost model that still predicts the price), `D10`
+  (the retained-memory win this trades away part of), `F19` (the 3.72 MB figure),
+  `H7`'s ledger entry (the mitigation this trial is deciding whether to fund).
+
+#### What changed
+
+In `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`:
+
+| bound | `D8` | `D11` | why this number |
+| --- | ---: | ---: | --- |
+| `productionScrollbackCellCap` | 327,680 | **1,790,000** | `10,000 rows x 179 columns` -- the depth target, stated as content |
+| `productionScrollbackRowCap` | 16,384 | **89,500** | `cellCap / 20`, holding `D8`'s losslessness-to-20-columns property |
+| `productionScrollbackBudgetBytes` | 10 MiB | **16 MiB** | `F23` measured 1,552 charged B/row full-width; 89,500 rows needs 14.80 MiB, and at 10 MiB the *byte* bound stopped a full-width fill at 6,756 rows |
+
+The caps' doc comments are rewritten rather than left standing. Through `D8` they
+derived their values from the resize budget; that derivation does not produce
+these numbers, and a comment that still claimed it would be false. The new basis
+is stated as what it is -- a depth target, with the resize price accepted
+provisionally under this entry.
+
+#### What is being traded, as numbers
+
+All figures from `F23` unless noted; the resize figures are measured, not modelled
+(`D8`'s model overreads them by 7.7-12.0%).
+
+| | `D8` bounds | `D11` bounds |
+| --- | ---: | ---: |
+| retained footprint, deep pane at 179 columns | 3.72 MB (`F19`) | **~14.8 MB** |
+| worst-case saturated resize, full width | 104-117 ms | **600.5 ms** (min 594.1, max 632.9) |
+| ... as a multiple of the 99.5 ms pre-packing baseline | ~1.05-1.18x | **6.04x** |
+| ... as a multiple of `D8`'s ~150 ms budget | ~0.7-0.8x | **4.00x** |
+| retained rows, full-width content at 179 columns | 1,830 | **~10,000** |
+| retained rows, program output (45 c/row) | 7,281 | **39,777** |
+| retained rows, shell history (4.9 c/row) | 16,384 | **89,500** (row cap) |
+
+The memory column is the honest cost: this hands back most of what `D10` banked
+three commits earlier, per pane, for panes that actually fill their history. That
+is understood and accepted for the trial's duration, not permanently.
+
+Two things this entry explicitly does **not** do. It does not revise `D8`'s cost
+model -- the model predicted candidate (b) correctly and is why the price was
+known before shipping it. And it does not claim any content class is safe: at 179
+columns `F23` measured the *typical* corpus at a median 154 cells/row and a p95 of
+179, so "typical" and "worst case" nearly coincide at this width. A user who fills
+a wide pane is in the worst case.
+
+#### The trial, and the three ways out of it
+
+The human dogfoods the raw cost -- split-divider drags, live window resize, and a
+narrow-then-widen cycle on a pane filled past 10,000 rows of full-width output --
+and then picks one of three exits:
+
+1. **Keep the caps as they are.** A ~600 ms per-pane stall on an infrequent,
+   user-initiated gesture is judged acceptable for 10,000 lines of history. `D8`'s
+   budget is then formally superseded rather than reopened, and this entry gets a
+   successor that says so.
+2. **Keep the caps and fund resize coalescing** -- one reflow per settled gesture
+   instead of one per intermediate width. This does not make a reflow cheaper; it
+   makes a drag cost one reflow instead of dozens. It is the cheap mitigation and
+   is deliberately absent here so the trial reads the raw cost.
+3. **Fund `H7` (viewport-adjacent / lazy reflow)** and revert or keep the caps
+   under it. `H7` is the only exit that makes deep history cost bounded *latency*
+   rather than bounded work, and `F23` already named it as candidate (b)'s
+   prerequisite. Nothing about `H7`'s statement changes: a width-keyed wrap-count
+   index, scroll anchoring across a width change, and a reference read that has
+   not been done.
+
+Exits 2 and 3 are not alternatives to each other in the long run; coalescing is
+cheap and narrow, `H7` is the structural fix.
+
+- Behavioral verification: `narrowThenWidenPreservesCappedHistory` re-run at the
+  new values and passing -- the losslessness property that made the cell cap worth
+  having survives the raise, which is the one invariant a cap change could quietly
+  destroy. `publicProductionBoundsCrossing` updated to pin the three new literals
+  and to assert `cellCap / rowCap == 20` directly, so the ratio is now a test
+  rather than a comment. `publicProductionRowCapCrossing` now references the
+  constant instead of a literal `16_384`, since its subject is the crossing, not
+  the value. `just test` green.
+- Quantitative verification: none new, deliberately. `F23` measured candidate (b)
+  at exactly these three bounds; re-running the harness against the same numbers
+  would produce the same reading and license nothing. What is unverified is the
+  *subjective* question the trial exists to answer.
+- Reopening condition: **the trial's own verdict.** This entry is provisional by
+  construction and expires when the human picks exit 1, 2, or 3 above. It also
+  reopens early on any measured regression the raise causes that `F23` did not
+  price -- in particular a `scrollback-stream` or memory-probe reading that moves
+  because deeper history changed eviction frequency rather than reflow cost.

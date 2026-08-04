@@ -722,9 +722,12 @@ implementation without that funding decision.
   target. `F23` measured what today's bounds retain at 179 columns (1,830 rows of
   full-width content, 7,281 of program output, 16,384 of shell history), priced
   two candidate bound sets for ~10,000 rows through `D8`'s model, and changed no
-  default. What is left is the human decision: which definition of "10,000 lines"
-  the product wants, and whether `D8`'s ~150 ms resize budget reopens to pay for
-  it. The harness is
+  default. **`D11` then shipped candidate (b)** -- cell cap 1,790,000, row cap
+  89,500, budget 16 MiB -- as a provisional dogfood trial, reopening `D8`'s
+  ~150 ms budget by explicit human choice and paying a measured 600.5 ms
+  worst-case reflow and ~14.8 MB per deep pane. What is left is the trial's
+  verdict and the exit it selects: keep as-is, keep plus resize coalescing, or
+  fund `H7`. Deliberately no mitigation ships with the raise. The harness is
   `lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift`,
   env-gated out of the `just test` gate.
 
@@ -909,14 +912,17 @@ unanswered questions with named next steps, so this doc stays in `## Live`:
    give sparse content back the 3.08x depth `D8` charged it. **`F23` sharpened
    what waits on it**: reaching 10,000 retained rows of full-width content at 179
    columns costs a measured 600.5 ms resize (4.00x `D8`'s budget) and ~15 MiB, so
-   `H7` is that target's prerequisite rather than a later refinement.
-3. **`H5`'s gate** (`TODO`, destination `D11`) -- undecided, and the post-landing
+   `H7` is that target's prerequisite rather than a later refinement. **`D11` made
+   that concrete rather than hypothetical**: those bounds now ship, so the cost
+   `H7` would remove is one a user can feel today.
+3. **`H5`'s gate** (`TODO`, destination `D12`) -- undecided, and the post-landing
    evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
    rather than C6's 0.78 MB.
-4. **The history-depth default** (`RESEARCH`, opened by `F23`) -- `F23` priced
-   two candidate bound sets against `D8`'s model and changed nothing. Picking a
-   definition of "10,000 lines", and whether to reopen `D8`'s resize budget to
-   pay for it, is a human decision this doc holds the evidence for.
+4. **The history-depth default** (`RESEARCH`, opened by `F23`, shipped
+   provisionally by `D11`) -- candidate (b)'s bounds are live as a dogfood trial
+   with `D8`'s budget reopened by explicit human choice. The open item is the
+   trial's verdict and which of its three exits it selects (keep / coalesce /
+   `H7`), not which definition of "10,000 lines" to pick.
 
 **Parked with stated conditions, not live.** `H4` (re-price before running --
 `D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore
