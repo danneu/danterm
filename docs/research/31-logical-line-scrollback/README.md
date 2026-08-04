@@ -113,6 +113,15 @@ exactly the path `28/F17` had to fight for, and gives back that win.
 Falsifier: a `slower` verdict on `retained-browse` under its frozen rule, from
 the F1 probe or any later candidate. This is the go/no-go input to `D1`.
 
+**Confirmed 2026-08-04 by [F1](findings.md), and the competing explanation is
+refuted.** The candidate did not merely fit inside parity -- it browsed 1.64x
+faster than today's store on both content classes, because today's store is one
+heap allocation per retained row and the arena is one contiguous region. Note
+what remains unverified: F1 measures the read walk in isolation, so the
+prediction that this is worth ~-2% on `retained-browse` at the frame is a
+conversion through `28/F17`'s share, not a measurement. Only the paired ladder
+against a real implementation can settle it, and that is Phase 2's.
+
 ### H2 -- the eager counting pass is milliseconds at depth
 
 Proposed mechanism: recomputing every block's display-row total for a new
@@ -182,12 +191,17 @@ it.
 
 ### Phase 1 -- viability evidence (gates everything else)
 
-- [ ] `RESEARCH` **F1, the read-path probe -- run this first.** Prototype the
-  arena + block index standalone (scratch or test target, not production
-  code). Measure sequential browse and random seek against the current
-  `ScrollbackBuffer` at `28/F23`'s content mix (median 119-154 cells/row at
-  179 columns). Record in F1; this is the go/no-go input to D1, whose rule
-  must be frozen before the comparison is read.
+- [x] `DONE` **F1, the read-path probe.** Recorded in [F1](findings.md);
+  `D1` Part A answers **go** on the read path. The candidate browsed **1.64x
+  faster** than today's store on both content classes (0.608x / 0.610x
+  ns per display-row read) and was faster on random seek too (0.898x / 0.803x),
+  A/A controls under 1%. `H1` is confirmed and its competing explanation
+  refuted, including the deflationary reading that the win was ARC on today's
+  per-read row copy (measured; it is not). Probe:
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineReadProbe.swift`,
+  gated behind `DANTERM_LOGICAL_LINE_PROBE`. Its `recomputeIndex` is the eager
+  pass `F2` needs, and its `blockSize` sweep is where to start if seek cost
+  ever binds.
 - [ ] `RESEARCH` **F2, the counting pass at depth.** Eager block-total
   recompute at 10,000 and 100,000 lines of wide content. Record both figures;
   H2 states the confirm/reject bounds.
@@ -201,9 +215,13 @@ it.
   endpoints across a width change, scroll anchoring, giant single lines.
   Deliverable: a table of input -> intended DanTerm behavior, cited
   `file#identifier`. Decisions, not ported code.
-- [ ] `TODO` **D1, the go/no-go gate.** Freeze the rule (which workloads,
-  which verdicts, what the simplification inequality must show) *before*
-  reading F1's comparison; then decide whether Phase 2 opens.
+- [ ] `ACTIVE` **D1, the go/no-go gate.** Rule frozen at `eee1832`, in a commit
+  that predates the probe's existence in the tree. **Part A (the read path,
+  decided by F1) answers `go`.** Part B is still owed: F2, F3, F4, and the
+  simplification inequality -- and F4 finding any edge case that requires
+  stored width makes D1 no-go regardless of F1. Phase 2 does not open and no
+  production storage change is licensed until D1 closes; `28/H7` remains the
+  fallback. Next concrete step: F2.
 
 ### Phase 2 -- design (begin only after D1 answers go)
 

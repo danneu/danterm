@@ -146,8 +146,59 @@ other deletion on the list descends from.
 
 #### Verdict
 
-- Selected direction: **pending F1.** Nothing has been measured at the time
-  this rule was written and committed; this section is filled in only after
-  F1's numbers exist, by applying the rule above exactly once.
+- Status of the verdict: **Part A answered 2026-08-04. D1 remains open on Part
+  B.**
+- Selected direction (Part A, the read path): **go**.
+- Quantitative verification: [F1](findings.md), measured at `eee1832` plus the
+  probe it adds. Median over 5 ABBA rounds of nanoseconds per display-row read,
+  ~10,000 display rows, 179 columns.
+
+  | pattern | class | baseline | candidate | ratio | rule | result |
+  | --- | --- | ---: | ---: | ---: | --- | --- |
+  | sequential browse | `mix` | 882.3 ns | 536.3 ns | **0.608x** | <= 1.20x | pass |
+  | sequential browse | `full` | 1,270.4 ns | 774.7 ns | **0.610x** | <= 1.20x | pass |
+  | random seek | `mix` | 915.3 ns | 822.3 ns | **0.898x**, 0.82 us | <= 3.0x and <= 5.0 us | pass |
+  | random seek | `full` | 1,361.0 ns | 1,092.7 ns | **0.803x**, 1.09 us | <= 3.0x and <= 5.0 us | pass |
+
+  All five validity gates held: cross-arm checksums identical on every measured
+  pattern; `mix` calibrated at median 149 / p95 179, inside `28/F23`'s band;
+  A/A controls -0.64% / +0.21% / -0.43% / -0.88%, so every difference above is
+  an order of magnitude outside the instrument's resolution; AC power,
+  low-power mode off, load average 1.48 before and 1.44 after. One earlier
+  invocation was voided unread of its verdict for an A/A control of -6.91%, and
+  F1 records it rather than dropping it.
+- Behavioral verification: the candidate's derived display-row count matched
+  the engine's for all 10,773 logical lines measured, at both content classes,
+  with no width-dependent state stored (`F1` Observation 2).
+- Tradeoffs and correctness risks: F1's largest fidelity limit is that the
+  baseline arm reproduces `ScrollbackBuffer`'s three-line subscript rather than
+  calling it (the type is `private`), and that neither arm carries hyperlink or
+  content-identity side tables -- a strip that is conservative toward the
+  baseline. The prototype has no admission, eviction, spill table, open-line
+  rule or forced split, and F1 sees nothing about resize. Those are `F2`/`F3`'s
+  and Phase 2's, not evidence this entry may borrow against.
+- Decision and rationale: the read path clears the gate H1 expected it to
+  struggle with, and clears it in the opposite direction -- wrap-at-read
+  browsed **1.64x faster** than today's store on both content classes. H1's
+  competing explanation (that the added indirection lands on `28/F17`'s path
+  and gives back its win) is not merely unsupported; the deflationary reading
+  of the win -- that it is ARC on today's per-read row copy rather than storage
+  shape, and so recoverable without any redesign -- was measured directly and
+  refuted (`F1` Observation 3). The surviving mechanism is layout: 10,000
+  separately allocated row blobs against one contiguous region.
+
+  What this does **not** license, stated because a result this favourable
+  invites over-reading: F1 measures a read walk in isolation, not a frame. The
+  1.20x threshold was derived by converting a read-walk change into a
+  `retained-browse` frame change; the same conversion predicts roughly -2% at
+  the frame, and only the paired ladder against a real implementation can
+  confirm that.
+- Direction review: **Part A only. Phase 2 does not open on this entry.** D1
+  stays open pending F2 (the eager counting pass), F3 (admission), F4 (the
+  edge-case inventory, whose stored-width finding can still make D1 no-go), and
+  the simplification inequality above. No production storage change is licensed
+  by this verdict, and `28/H7` remains the fallback until D1 closes. The
+  disposition of Phase 1 -- whether to continue funding it on this evidence --
+  is a human decision.
 </content>
 </invoke>
