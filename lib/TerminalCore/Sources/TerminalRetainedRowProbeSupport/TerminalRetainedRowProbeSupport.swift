@@ -71,30 +71,25 @@ public func allocatedBytes(forRequest request: Int) -> Int {
 ///
 /// Same rationale as `arrayStorageHeaderBytes` above, and the same discipline: a probe that
 /// asked the engine what its rows cost could not catch the engine getting it wrong. These are
-/// doc 28's `C6` charges -- the ones `scripts/terminal-retained-row-shape.py` priced every
-/// candidate against -- so `packedPayloadMatchesModel` below is a comparison between the
-/// design's arithmetic and the implementation's bytes, not a value against itself.
+/// doc 28's `C1` charges -- the ones `28/F18` priced the pivot against -- so
+/// `packedPayloadMatchesModel` below is a comparison between the design's arithmetic and the
+/// implementation's bytes, not a value against itself.
 public enum PackedRowModel {
-    /// flags(1) + storedCells(2) + five table cardinalities(2 each).
+    /// flags(1) + storedCells(2) + two table cardinalities(2 each).
     ///
-    /// Not a charge any candidate in `D6`'s table carried: the pricing model priced payload
-    /// and side tables and never named a per-row header. It is real, it is charged here, and
-    /// the difference against `D6`'s figure is one of the numbers this probe exists to show.
-    public static let headerBytes = 13
+    /// `C6`'s was 13, for six counts. That a representation swap shrinks this constant is the
+    /// visible half of the pivot; the invisible half is that `C1`'s payload is 8 bytes per
+    /// stored cell instead of roughly one.
+    public static let headerBytes = 7
 
-    public static let styleRunEntryBytes = 6
-    public static let kindEntryBytes = 3
-    public static let spillEntryBytes = 7
+    /// The whole cell: scalar (or spill index), kind, and a full-width interned `StyleId`.
+    /// `C6` needed a stride tier, a style-run table, a kind-exception table and a spill
+    /// directory to say the same thing, and `28/F17` measured what decoding that cost.
+    public static let cellBytes = 8
+
     public static let hyperlinkEntryBytes = 4
     public static let identityRunEntryBytes = 8
     public static let identityCellBytes = 4
-}
-
-/// Bytes per scalar slot for a row whose widest single-scalar cell holds `maxSingleScalar`.
-public func scalarStrideBytes(maxSingleScalar: Int) -> Int {
-    if maxSingleScalar < 0x100 { return 1 }
-    if maxSingleScalar < 0x1_0000 { return 2 }
-    return 4
 }
 
 /// What one retained row's cell array costs, from its stored cell count.
@@ -357,12 +352,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
             let stored = storedCellCounts[index]
             let runs = composition.strictContentIdentityRunCounts[index]
             modelled += PackedRowModel.headerBytes
-                + stored * scalarStrideBytes(
-                    maxSingleScalar: composition.maxSingleScalarValues[index]
-                )
-                + composition.styleRunCounts[index] * PackedRowModel.styleRunEntryBytes
-                + composition.wideCellCounts[index] * PackedRowModel.kindEntryBytes
-                + composition.multiScalarCellCounts[index] * PackedRowModel.spillEntryBytes
+                + stored * PackedRowModel.cellBytes
                 + composition.hyperlinkCellCounts[index] * PackedRowModel.hyperlinkEntryBytes
                 // The per-cell fallback, stated as the minimum it is: an encoder facing a row
                 // whose run table would outgrow its cells writes the cells instead.
@@ -375,8 +365,8 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         self.packedPayloadMatchesModel = modelled == censusRetainedPackedPayloadBytes
     }
 
-    /// Packed payload bytes per retained row -- the figure `D6` priced at 128.0 on the CRLF
-    /// reference payload.
+    /// Packed payload bytes per retained row -- the figure `28/F18` priced at 423.0 on the
+    /// CRLF reference payload, where `D6` had priced `C6`'s at 78.0.
     public var packedPayloadBytesPerRow: Double {
         retainedRowCount == 0
             ? 0

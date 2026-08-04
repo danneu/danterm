@@ -532,17 +532,27 @@ def metadata_charge(fact, variant):
 
 
 def pack_narrow_cell(fact):
-    """C1: same array-of-cells, an 8-byte retained cell.
+    """C1: same array-of-cells, an 8-byte retained cell. **Selected by `D9`; shipped.**
 
-    4 B scalar (or spill index) + 1 B kind/flags + 2 B interned style id + 1 B pad.
-    `StyleId` narrows to 16 bits against a measured style-table size. Structure is
-    unchanged, so column reads stay O(1).
+    The shipped layout packs one 64-bit word: 21 bits of scalar (or spill index), 3 bits
+    of kind, a spill flag, and a **full-width 32-bit** interned style id, with 7 bits
+    spare. 21 bits is exactly `U+10FFFF`, so every scalar in Unicode is inline. An earlier
+    version of this docstring described "4 B scalar + 1 B kind + 2 B style id + 1 B pad"
+    and said `StyleId` narrows to 16 bits against a measured style-table size; the
+    implementation does not narrow it, because the bits were there for free and a
+    style-table ceiling is risk for no gain. Structure is unchanged, so column reads stay
+    O(1) -- and under this shape a column read is one load with nothing to decode, which
+    is what `28/F17` measured `C6` paying ~3.8 ns per cell to avoid needing.
 
     Hyperlink and `contentIdentity` storage are *not* in these 8 bytes and are charged
     separately, like every other candidate. An earlier version of this docstring claimed
     a retained cell's `contentIdentity` has no reader; that is false --
     `Terminal.activationIdentity` takes a max over a `ProjectionRows` range, which spans
     retained rows, so link activation reads it out of history.
+
+    Like every candidate here it is charged no per-row header (`F13` Observation 2). C1's
+    is 7 bytes; `28/F18` adds it back when pricing the pivot, and a reader pricing a new
+    candidate against this table must do the same or the comparison tilts.
     """
     return fact["stored"] * 8
 

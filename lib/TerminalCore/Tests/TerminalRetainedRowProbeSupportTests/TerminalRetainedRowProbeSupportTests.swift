@@ -39,20 +39,22 @@ struct TerminalRetainedRowProbeSupportTests {
         #expect(report.storedCellCounts.count == report.retainedRowCount)
     }
 
-    @Test("C6's pricing arithmetic predicts the packed rows' bytes exactly")
+    @Test("C1's pricing arithmetic predicts the packed rows' bytes exactly")
     func packedPayloadMatchesModel() {
-        // Intent: applying doc 28's `C6` charges to composition the probe read through the
+        // Intent: applying doc 28's `C1` charges to composition the probe read through the
         //   public API reproduces, to the byte, what the engine's packed rows really hold --
-        //   across styled runs, wide cells, combining sequences, hyperlinks, every scalar
-        //   stride tier, and rows combining them.
+        //   across styled runs, wide cells, combining sequences, hyperlinks, non-BMP scalars,
+        //   and rows combining them.
         // Why it exists: `derivationMatchesCensus` proves only that the stored *extent* still
         //   follows from canonical form. After packing, the extent is no longer the price, so
         //   an encoder could keep every extent right and still store a field it is not charged
         //   for -- or charge for one it does not store -- with every byte figure downstream
         //   silently wrong. This is the check that the design's arithmetic and the
         //   implementation's bytes are the same thing.
-        // Scenario: spec-first; the content is deliberately the union of the axes `D6` prices
-        //   separately, because a plain-ASCII corpus would match under almost any encoding.
+        // Scenario: spec-first; the content is deliberately the union of the axes doc 28
+        //   prices separately, because a plain-ASCII corpus would match under almost any
+        //   encoding. It is unchanged across the `D9` pivot on purpose: the axes are content
+        //   classes, and `C1` has to show they cost it nothing rather than be spared them.
         var terminal = Terminal(columns: 40, rows: 3)!
         for index in 0..<40 {
             terminal.feed(Array("\u{1B}[3\(index % 8)mstyled-\(index) ".utf8))

@@ -162,7 +162,7 @@ struct TerminalPackedRetainedRowTests {
         // must have taken the fallback. Read off the payload rather than a flag so the
         // assertion is about bytes, which is what the pricing model promised.
         let runTableBytes = 16 * 8
-        #expect(packed.payloadByteCount < 13 + 16 + runTableBytes)
+        #expect(packed.payloadByteCount < 7 + 16 * 8 + runTableBytes)
     }
 
     @Test("Random and sequential reads of the same packed row agree everywhere")

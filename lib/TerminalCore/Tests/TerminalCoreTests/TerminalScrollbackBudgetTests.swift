@@ -113,36 +113,39 @@ struct TerminalScrollbackBudgetTests {
         // Why it exists: eviction points are value semantics and cannot drift with a toolchain.
         // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
         //
-        // Restated against doc 28's packed retained row (`C6`). Each payload below is spelled
-        // out as the charges the encoding really makes -- a header, a scalar column at the
-        // row's own stride tier, one style run, and an entry per exception -- rather than as
-        // a number, because the point of the fixture is that the *composition* is pinned. A
-        // scheme that stored the same rows in a different mix of tables would still land on
-        // some total; it would not land on these terms.
+        // Restated against doc 28's packed retained row (`C1`). Each payload below is spelled
+        // out as the charges the encoding really makes -- a header, one fixed 8-byte cell per
+        // stored column, and the identity encoding -- rather than as a number, because the
+        // point of the fixture is that the *composition* is pinned. A scheme that stored the
+        // same rows in a different mix of tables would still land on some total; it would not
+        // land on these terms.
+        //
+        // What the terms show is `C1`'s whole argument: the scalar, the kind and the style id
+        // are all inside the cell, so no fixture below names a stride tier, a style run or a
+        // kind exception. `C6`'s version of this test named all three.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
         let charge = PackedRowCharge.self
         let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            // A blank row trims to one padding cell: a 1-byte slot and the default style run.
-            (4, "", packedHistoryRowCost(payloadBytes: charge.header + 1 + charge.styleRun)),
-            // Four ASCII cells are four 1-byte slots, one style run, and one identity run --
-            // the shape the whole scheme is chosen for.
+            // A blank row trims to one padding cell: one cell, and nothing else -- padding
+            // carries no identity.
+            (4, "", packedHistoryRowCost(payloadBytes: charge.header + charge.cell)),
+            // Four ASCII cells and one identity run -- the shape the whole scheme is chosen
+            // for, and the one where the cell's flat cost is the entire cost.
             (4, "ABCD", packedHistoryRowCost(
-                payloadBytes: charge.header + 4 + charge.styleRun + charge.identityRun
+                payloadBytes: charge.header + 4 * charge.cell + charge.identityRun
             )),
-            // A wide glyph promotes the row to a 2-byte stride and owes a kind entry for each
-            // of its head and tail. Head and tail share one identity, which a
+            // A wide glyph is two cells and costs no more than two of anything else: its kind
+            // rides in the cell. Head and tail share one identity, which a
             // `(start, extent, base)` run cannot express, so they are two runs -- and at two
             // stored cells the per-cell floor is cheaper, so the encoder takes it.
             (2, "\u{754C}", packedHistoryRowCost(
-                payloadBytes: charge.header + 2 * 2 + charge.styleRun
-                    + 2 * charge.kindException + 2 * charge.identityCell
+                payloadBytes: charge.header + 2 * charge.cell + 2 * charge.identityCell
             )),
-            // The only shape that costs more: a five-scalar cluster spills to its own
-            // allocation, and the row's slots stay 1 byte because no cell holds a lone scalar.
+            // The only shape that costs more, and the only one that still reaches outside the
+            // cell: a five-scalar cluster spills to its own allocation, reached by an index
+            // the cell's scalar field holds in place of a scalar.
             (2, family, packedHistoryRowCost(
-                payloadBytes: charge.header + 2 + charge.styleRun
-                    + 2 * charge.kindException + charge.spillException
-                    + 2 * charge.identityCell,
+                payloadBytes: charge.header + 2 * charge.cell + 2 * charge.identityCell,
                 spilledClusterScalars: [5]
             )),
         ]
@@ -161,11 +164,12 @@ struct TerminalScrollbackBudgetTests {
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}".utf8))
         #expect(spacer.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
-        // Two untouched padding cells, then the spacer: one style run, one kind entry for the
-        // spacer, and the spacer's own identity.
+        // Two untouched padding cells, then the spacer: three cells and the spacer's own
+        // identity run. The spacer's kind costs nothing extra -- it is three bits of a cell
+        // the row was already paying for.
         #expect(spacer.scrollbackRowByteCost(at: 0) == packedHistoryRowCost(
-            payloadBytes: PackedRowCharge.header + 3 + PackedRowCharge.styleRun
-                + PackedRowCharge.kindException + PackedRowCharge.identityRun
+            payloadBytes: PackedRowCharge.header + 3 * PackedRowCharge.cell
+                + PackedRowCharge.identityRun
         ))
 
         let production = try #require(Terminal(columns: 4, rows: 2))
@@ -835,7 +839,7 @@ struct TerminalScrollbackBudgetTests {
         // history-cell storage. Deliberately measured from the census rather than from
         // `scrollbackByteCount`, which is the very thing under test.
         // Read as what history's packed rows really hold, which is what the budget is spent
-        // on since doc 28's `C6`. Multiplying a retained cell count by the live-grid stride
+        // on since doc 28's packing. Multiplying a retained cell count by the live-grid stride
         // would price a representation history no longer uses -- and would answer ~35 MB for
         // a 10 MB budget purely because the same budget now admits ~9x the rows.
         let historyBytes = census.retainedPackedPayloadBytes
@@ -845,6 +849,10 @@ struct TerminalScrollbackBudgetTests {
         // holding far more rows is the whole point, and a regression that silently gave it
         // back would leave every assertion above still passing.
         #expect(census.retainedStoredCellCount > 0)
-        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 4)
+        // Bounded on both sides: `C1`'s cell is 8 bytes (`D9`), so the floor says a retained
+        // cell really is packed, and the ceiling says the header and side tables have not
+        // grown into a second cell's worth.
+        #expect(census.retainedBytesPerStoredCell > 8)
+        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 3)
     }
 }

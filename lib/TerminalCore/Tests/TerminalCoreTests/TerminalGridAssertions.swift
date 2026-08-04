@@ -281,7 +281,7 @@ func compactHistoryRowCost(storedCells: Int) -> Int {
 
 /// Bytes history charges for a packed retained row whose blob holds `payloadBytes`.
 ///
-/// Restates doc 28's `C6` charge -- row slot, array header, the allocator's answer for the
+/// Restates doc 28's `C1` charge -- row slot, array header, the allocator's answer for the
 /// blob, and one allocation per multi-scalar spill -- so a budget fixture can be written as
 /// the arithmetic it means instead of a number recovered from a failing assertion. Asks
 /// libmalloc for the rounding for the same reason `historyRowCost` asks the engine: no
@@ -305,12 +305,15 @@ func packedHistoryRowCost(payloadBytes: Int, spilledClusterScalars: [Int] = []) 
 /// The packed blob's own fixed costs, so a fixture can spell out what a row's payload is
 /// made of. Mirrors `Terminal.PackedRetainedRow.Header` deliberately rather than reading it:
 /// a fixture that asked the encoder what it charges could not pin the encoding.
+///
+/// Five terms became three when `D9` pivoted from `C6` to `C1`: the stride tier, the
+/// style-run table, the kind-exception table and the spill directory all fold into the
+/// 8-byte cell. That collapse is the design, so the shrinking of this enum is the point
+/// rather than a side effect.
 enum PackedRowCharge {
-    static let header = 13
-    static let styleRun = 6
-    static let kindException = 3
-    static let spillException = 7
-    static let hyperlinkException = 4
+    static let header = 7
+    static let cell = 8
+    static let hyperlinkEntry = 4
     static let identityRun = 8
     static let identityCell = 4
 }

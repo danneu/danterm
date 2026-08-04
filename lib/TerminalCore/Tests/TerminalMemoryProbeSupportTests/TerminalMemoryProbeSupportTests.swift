@@ -130,8 +130,14 @@ struct TerminalMemoryProbeSupportTests {
         #expect(census.cellStorageBytes
             == census.screenRowCount * Self.geometry.columns * census.cellStrideBytes
                 + census.retainedPackedPayloadBytes)
-        // The headline: a retained cell now costs a small fraction of the live-grid stride.
-        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 4)
+        // The headline: a retained cell costs a fraction of the live-grid stride. Bounded on
+        // both sides deliberately. `C1` stores an 8-byte cell (`D9`), so the floor is what
+        // says the cell really is packed and not a struct in disguise, and the ceiling is
+        // what says the per-row header and side tables have not grown into a second cell's
+        // worth. `C6` cleared `stride / 4`; `C1` sits just above it at ~8.6 B per stored
+        // cell, which is the memory this pivot deliberately gave back for the read path.
+        #expect(census.retainedBytesPerStoredCell > 8)
+        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 3)
     }
 
     @Test("a run deep enough to evict retains nothing it evicted")
