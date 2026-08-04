@@ -158,6 +158,21 @@ is the expectation and "better" is not assumed. Falsifier: a `slower` verdict
 on `terminal-feed` or `scrollback-stream` against the store this design
 replaces.
 
+**Confirmed 2026-08-04 by [F3](findings.md), and confirmed in the direction the
+hypothesis declined to assume.** Open-line append admits a scrolled-off row
+**1.45x-1.60x faster** than today's pack-per-display-row admission on all three
+verdict-bearing classes (0.624x `mix`, 0.691x `full`, 0.624x `stream`), with A/A
+controls under 0.5% -- against a rule that only needed 1.00x to confirm and 1.09x
+to reject. The proposed mechanism is **not** what produced it: on `stream`, the
+class reproducing `scrollback-stream`'s own CRLF row shape (`28/F20` Observation
+5), the candidate creates one record per display row -- exactly as many as today
+-- and is still 0.624x. The saving is a per-row constant, and `28/F20`'s lesson
+holds a third time: the cost is the allocation and write pattern, not the
+encoding. What remains unverified: F3 sees the encode-and-store term alone, so
+`H3`'s own caution stands -- if `28/F20`'s residual is scheduling, this does not
+remove it, and the conversion to roughly -7% on `scrollback-stream`'s block is a
+prediction through a share. Eviction is unmeasured.
+
 ### H4 -- the edge-case set is enumerable, and none requires stored width
 
 Proposed mechanism: the behaviors that make reflow subtle -- a wide character
@@ -207,7 +222,13 @@ it.
 - **The open-line rule at the live boundary.** A row scrolling off the live
   viewport appends its cells to the current open logical line; a hard newline
   closes the line. Scrolled-off content is immutable, so the open line only
-  ever grows at its end, which the arena already supports.
+  ever grows at its end, which the arena already supports. **`F3` measured this
+  rule and it is 1.45x-1.60x cheaper per admitted row than today's admission**;
+  `F4` Observation 5 is what licenses the "only grows at its end" premise, since
+  all three of today's writes into retained history target the tail row. `F3`
+  `DD5` settles one detail the sketch left open: a closed record's display-row
+  count at the admitting width is **counted** as rows arrive, not derived, so
+  neither `ceil` nor the wide-cell scan below runs on the write path at all.
 - **The forced-split rule for pathological lines.** Hard-split a logical line
   at a fixed cell cap, with a `forcedSplit` flag so copy and search rejoin
   logically. One documented wart, bounded up front. **The cap is 65,536 cells,
@@ -249,9 +270,25 @@ it.
   the pass at 100,000 lines and buys nothing at any reachable depth. Probe:
   `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineIndexProbe.swift`,
   same env gate as F1's.
-- [ ] `RESEARCH` **F3, the admission probe.** Open-line append vs today's
-  row-record admission on a feed-shaped stimulus. Expectation neutral
-  (H3); verify, do not assume -- this is where the campaign's residuals live.
+- [x] `DONE` **F3, the admission probe.** Recorded in [F3](findings.md); `H3`
+  **confirmed**, and the campaign's residuals are not made worse by this store.
+  Open-line append admits a scrolled-off row at **0.624x / 0.691x / 0.624x** of
+  today's pack-per-display-row cost on `mix` / `full` / `stream`, A/A controls
+  under 0.5%, against a rule that needed only 1.00x to confirm. `stream` is the
+  class that matters: it reproduces `scrollback-stream`'s own CRLF row shape
+  (`28/F20` Observation 5), where the candidate creates **one record per display
+  row, as many as today**, and it wins anyway -- so the win is not the
+  record-count reduction the sketch predicted. Three things it hands forward:
+  (a) the saving is a **per-row constant** (tripling stored cells per row moves
+  it 9%), so it is the per-row blob allocation the arena deletes; (b) today's
+  admission is **90-95% encoder** -- the buffer append and byte accounting are
+  5-10% -- so a container-only fix could recover at most a tenth of this; (c) the
+  arena holds the same content in **0.744x-0.925x** of the bytes the budget
+  charges today, which Phase 2's budget task needs. Probe:
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineAdmissionProbe.swift`,
+  same env gate as F1's and F2's; F1's and F2's files are unedited. Two deferred
+  decisions added (`DD5`, `DD6`). Unmeasured: eviction, and anything about
+  scheduling.
 - [x] `DONE` **F4, the edge-case inventory.** Recorded in [F4](findings.md);
   `H4` **confirmed** and `D1`'s no-go trigger **does not fire**. 28 cases
   catalogued from seven reference trees plus DanTerm's own reflow path and
@@ -277,9 +314,14 @@ it.
   confirmed) and it moved nothing about D1's direction, by its own rule.
   **F4 is in** and, with it, the one input that could have flipped the verdict
   is spent: no edge case requires stored width, so the no-go trigger the rule
-  names does not fire. Still owed: **F3 (the admission probe) and the
-  simplification inequality** -- and F4 adds one item to the inequality's
-  addition list (the `hasWideCells` fast/slow split). Next concrete step: F3.
+  names does not fire. **F3 is in** (rule frozen at `d6c83b0`, `H3` confirmed
+  outright at 0.624x-0.691x). **Part B now owes exactly one thing: the
+  simplification inequality** -- a reading and accounting pass over the deletion
+  and addition lists, with no measured input left. F4 added one item to the
+  addition list (the `hasWideCells` fast/slow split) and removed work from it
+  (the four `attachments` computations collapse into one address conversion);
+  F3's `DD5` removes another (no wide-cell scan runs on the write path). Next
+  concrete step: evaluate the inequality and close D1.
 
 ### Phase 2 -- design (begin only after D1 answers go)
 
@@ -348,6 +390,15 @@ the reopening condition is now a depth rather than a doubt: an arena past
   so there is margin -- but the margin is not measured against a wide-content
   stimulus and must not be assumed to transfer. Re-running `F2`'s probe with a
   wide stimulus is the cheapest way to close this, and it is Phase 2's.
+- **Eviction is unpriced on both sides, and it is now the largest unmeasured
+  term in Phase 1's evidence.** `F1` set it aside as Phase 2's, `F3`'s frozen
+  rule excluded it, so nothing has compared today's
+  `Terminal.swift#enforceScrollbackBudget` / `ScrollbackBuffer.removeFirst`
+  against `DD2`'s whole-record eviction. A real pane at steady state evicts on
+  every admitted row, so F3's admission win is measured on the half of the write
+  path that was easy to isolate. Descriptively, `F3` Observation 4 found the
+  arena holds the same content in **0.744x-0.925x** of the bytes the budget
+  charges today, which is the input the budget-and-eviction task needs.
 - The forced-split cap is **65,536 cells, derived** in `F4` Observation 3 as
   1/32 of the byte budget rather than chosen. Still unpriced: what a real
   pathological input (`cat` of a binary, minified JSON) actually produces --

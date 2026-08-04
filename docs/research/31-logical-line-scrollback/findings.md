@@ -5,12 +5,8 @@ Append-only evidence chain for
 [../FORMAT.md](../FORMAT.md). Cross-file citations are qualified (`28/F23` is
 doc 28's); bare IDs are this doc's.
 
-Reserved by the Phase 1 ledger and not yet run:
-
-- **F2** -- the eager counting pass at 10,000 and 100,000 lines.
-- **F3** -- the admission probe: open-line append vs row-record admission.
-- **F4** -- the edge-case inventory mined from `references/`, cited
-  `file#identifier`.
+Phase 1's four viability probes are all recorded below: `F1` (read path), `F2`
+(counting pass), `F3` (admission), `F4` (edge-case inventory).
 
 ### F1 -- the read path is not the hazard: wrap-at-read browses 1.64x faster than today's store, and random seek is faster too
 
@@ -800,3 +796,272 @@ rather than blocking.
   "`ceil` for narrow records, scan for wide ones", and the forced-split cap's
   open question closes into DD3's derivation. One new open question opens: the
   eager counting pass is unpriced on wide content.
+
+### F3 -- admission is not the residual either: open-line append admits a scrolled-off row 1.45x-1.60x faster than today's pack-per-row, including on `scrollback-stream`'s own row shape
+
+- Status: recorded. `H3` **confirmed** under `31/D1`'s Part B rule for F3, frozen
+  at `d6c83b0` before this probe existed in the tree. This is `D1` Part B's
+  fourth and last measured input; it **cannot and does not close `D1`**, whose
+  remaining debt is the simplification inequality alone. It licenses no
+  production storage change, and `28/H7` stays the fallback until `D1` closes.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: `d6c83b0` (the commit that froze this rule, written
+  before this probe existed in the tree), plus the one file this entry adds --
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineAdmissionProbe.swift`,
+  committed with it. **No file under `lib/TerminalCore/Sources/` is touched, and
+  neither F1's nor F2's probe file is edited** -- the two admitters are new types
+  in F3's own file, because F1's stores are read-oriented and built whole rather
+  than incrementally. The two untracked paths present throughout this doc's work
+  are still present and still in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Conditions: AC power, low-power mode off. One-minute load average **1.00
+  before and 1.00 after**, well under the 2.5 gate `28/F15` established and `D1`
+  adopted. Release configuration, headless, one process. The build was completed
+  and the machine allowed to settle before the measured invocation, per `F2`'s
+  gate-3 lesson.
+- Commands:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release \
+          --package-path lib/TerminalCore --filter TerminalLogicalLineAdmissionProbe
+
+- Artifacts: none durable. Every number below is stdout from the probe above and
+  is reproduced by re-running it; the probe prints its own gate outcomes.
+- **No invocation was voided.** All six gates held on the first measured run.
+  (The calibration test alone was run once beforehand to check the two new
+  content classes; it produces no timing, and its calibration figures are
+  identical to the measured run's.)
+
+#### What was compared
+
+Both arms admit the **same** engine-produced display rows, in the same order:
+the rows a real `Terminal` at 179x66 retained, taken through
+`retainedRowForTesting(at:)` and **materialized to full width**, because that is
+the shape production admission is handed from the live grid -- `pack`'s first
+walk covers every column, and charging the baseline a shorter walk than
+production pays would understate it.
+
+- **Baseline** -- today's admission, reproduced from
+  `Terminal.swift#appendToScrollback`: `PackedRetainedRow.pack` per display row
+  (the production encoder, which trims to canonical extent as it encodes), an
+  append into the retained buffer, and the two accumulations that call site
+  performs -- `Terminal.swift#scrollbackByteCost(of:)` into the charged byte
+  total and `storedCellCount` into the stored-cell total. `ScrollbackBuffer` and
+  `scrollbackByteCost` are `private` to `Terminal`, so the arm reproduces the
+  append, the storage and the byte-cost arithmetic rather than calling them.
+  That substitution is F3's stated fidelity limit, exactly as it was F1's.
+- **Candidate** -- doc 31's open-line rule with `F4`'s corrected semantics: the
+  row's cells are appended at the arena's write cursor into the **open** record,
+  `.spacerHead` cells are dropped on the way in (`F4` case 10 -- the store never
+  held one), a row that is not soft-wrapped closes the record and writes its
+  header bits (`hasWideCells`, `forcedSplit`), and **the only record ever
+  written is the tail** (`F4` Observation 5). Per-cell work is identical to the
+  baseline's by construction, down to the zero-word omission `pack` makes, which
+  is what leaves a *per-row* difference to measure.
+
+#### Observation 1 -- the four measured classes, and the verdict D1's F3 rule reads off them
+
+Median over 5 ABBA rounds of nanoseconds per admitted display row, at ~10,000
+display rows and 179 columns. Sample count: 10,000 admitted rows per arm per
+round (10,001 for `wide`), `n=5` rounds.
+
+| class | verdict-bearing | baseline | candidate | ratio | saving | A/A control | `D1` F3 rule | result |
+| --- | :---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `mix` | yes | 623.1 ns | **389.1 ns** | **0.624x** | -234.0 ns/row | +0.18% | <= 1.00x confirms | **confirm** |
+| `full` | yes | 642.4 ns | **444.0 ns** | **0.691x** | -198.4 ns/row | +0.49% | <= 1.00x confirms | **confirm** |
+| `stream` | yes | 484.5 ns | **302.4 ns** | **0.624x** | -182.1 ns/row | -0.15% | <= 1.00x confirms | **confirm** |
+| `wide` | **no** | 749.4 ns | 407.2 ns | 0.543x | -342.2 ns/row | -0.02% | outside the verdict | observation |
+
+Every A/A control is under 0.5%, so all four differences are two orders of
+magnitude outside the instrument's resolution. Every verdict-bearing class is at
+or under 1.00x, so **`H3` is confirmed outright** rather than landing in the
+neutral band: admission does not merely get no worse, it gets **1.45x to 1.60x
+cheaper per admitted row**. The reject bound -- 1.09x, the ratio that would
+predict a `slower` verdict on `scrollback-stream` -- is not approached from
+either side.
+
+The class that matters most to `H3` is `stream`, and it behaves like the others.
+`28/F20` Observation 5 established that `benchmark/scrollback-stream` -- the
+workload `H3` names as its falsifier -- retains **hard-ended CRLF rows that never
+soft-wrap**, because its producer writes `\n` through a tty whose Darwin default
+`OPOST|ONLCR` converts it. That is the *worst* case for this design's stated
+mechanism ("fewer records, less per-row header work"): the candidate creates
+**one record per display row, exactly as many as the baseline** (10,000 and
+10,000, measured). It is still 0.624x. So the win is not the record-count
+reduction the sketch predicted.
+
+All six validity gates held on the quoted invocation:
+
+1. **Cross-arm equivalence:** both stores were read back display row by display
+   row, outside every timed region, and checksummed over every scalar, style id
+   and kind. **Checksums identical and display-row counts equal on all four
+   classes.** That is the gate that holds the candidate to re-deriving what it
+   refused to store: on `wide` it must re-insert 5,124 `.spacerHead` cells at
+   read, from (record cells, width) alone, and it does -- the checksums would not
+   match otherwise.
+2. **Non-elision:** each arm's per-round product (records, bytes, rows/cells,
+   folded) matched the value computed outside the timed region on every round,
+   and no product was the empty store's.
+3. **Stimulus calibration** (Observation 2), all four in band.
+4. **A/A resolution:** +0.18% / +0.49% / -0.15% / -0.02%, all far under the 5%
+   ceiling.
+5. **Host conditions** as recorded above.
+6. **Coverage:** every aggregate printed with its round count and its admitted-row
+   count.
+
+#### Observation 2 -- the stimuli, calibrated before any arm was timed
+
+| class | display rows | logical lines | rows/line | soft-wrapped | spacers | median cells | p95 | mean | gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `mix` | 10,000 | 5,758 | 1.74 | 42.4% | 0 | 149 | 179 | 124.2 | median in [119,154], p95 179 -- **pass** |
+| `full` | 10,000 | 5,013 | 1.99 | 49.9% | 0 | 179 | 179 | 179.0 | median and p95 179 -- **pass** |
+| `stream` | 10,000 | 10,000 | 1.00 | **0.0%** | 0 | 60 | 60 | 60.0 | median in [55,65], soft-wrap 0 -- **pass** |
+| `wide` | 10,001 | 4,877 | 2.05 | 51.2% | **5,124** | 179 | 179 | 135.1 | >=50% wide rows (100%), >=1 spacer -- **pass** |
+
+`mix` reproduces Part A's calibration exactly (median 149, p95 179, mean 124.2),
+which is the cheapest available check that F3 and F1 measure one content model.
+`stream`'s template is `benchmarks/fixtures/terminal-app.json`'s
+`scrollback-stream` segment verbatim, fed with CRLF as the tty delivers it; it
+measures **60** stored cells per row against `28/F20` Observation 5's "~59",
+which is that entry's own rounding of the same 60-character line. `wide` puts a
+wide cell in 100% of admitted rows and produces 5,124 spacers -- roughly one per
+soft-wrapped row, as expected at 179 columns where 89 two-cell clusters fill 178
+and the 90th meets a one-column gap.
+
+#### Observation 3 -- the saving is per *row*, not per cell, and today's admission is ~90-95% encoder
+
+Two readings, taken together, say what the difference is made of.
+
+The saving barely responds to cell count. `stream` admits 60 stored cells a row
+and saves 182.1 ns; `full` admits 179 -- three times as many -- and saves 198.4
+ns, 1.09x as much. If the candidate were winning per cell, `full`'s saving would
+be about triple `stream`'s. **It is a per-row constant**, which is the signature
+of the thing the candidate deletes: one heap allocation and one
+`PackedRetainedRow` value per admitted row, against a store at a cursor.
+
+The descriptive decomposition says the same thing from the baseline's side.
+Median ns per row over 5 rounds, **not interleaved** -- these three arms run in
+sequence, so they are comparable to each other and *not* to Observation 1's
+interleaved figures (the `whole` column reads 4-11% above Observation 1's
+baseline for exactly that reason, which is itself a measured statement about
+what interleaving is worth):
+
+| class | `pack` only | `pack` + buffer append | whole path (+ accounting) | encoder's share |
+| --- | ---: | ---: | ---: | ---: |
+| `mix` | 613.9 | 654.7 | 666.4 | 92.1% |
+| `full` | 639.5 | 701.5 | 711.6 | 89.9% |
+| `stream` | 497.0 | 512.0 | 524.7 | 94.7% |
+| `wide` | 740.7 | 786.9 | 810.3 | 91.4% |
+
+So the buffer append is 2.5-8.7 points of today's admission and the byte and
+cell accounting 1.2-2.9 points; **the encoder is everything else.** A design
+that kept `pack` and only changed the container could therefore recover at most
+about a tenth of what the candidate recovers, which is the answer to the
+competing interpretation that this is a container win.
+
+#### Observation 4 -- the arena is also smaller than what the budget charges today, descriptively
+
+Outside `D1`'s rule. The candidate's exact arena footprint against the byte total
+today's budget charges for the same content, at the same depth:
+
+| class | records | charged today | arena | ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `mix` | 5,758 | 11,154,016 B | 9,982,856 B | 0.895x |
+| `full` | 5,013 | 15,520,000 B | 14,360,104 B | 0.925x |
+| `stream` | 10,000 | 6,560,000 B | 4,880,000 B | **0.744x** |
+| `wide` | 4,877 | 12,077,312 B | 10,805,592 B | 0.895x |
+
+The mechanism is per-record overhead: today every display row pays a 16-byte
+buffer slot plus a 32-byte array header plus its blob's bucket rounding, while
+the arena pays an 8-byte header per *logical line* and nothing per row.
+`stream`'s 0.744x is the extreme because its rows are short, so the fixed 48
+bytes a row costs today is a large share of its ~487-byte blob. This is a
+byproduct, not a claim about eviction or about what the budget should be; it is
+recorded because Phase 2 will have to decide what "the byte budget is the arena
+size" admits.
+
+- Observation: at ~10,000 admitted display rows and 179 columns, open-line
+  append into a contiguous arena admits a scrolled-off row **faster** than
+  today's pack-one-record-per-display-row admission on every content class
+  measured -- 0.624x (`mix`), 0.691x (`full`), 0.624x (`stream`), 0.543x
+  (`wide`, outside the verdict) -- with A/A controls under 0.5%, identical
+  cross-arm checksums, and calibrated stimuli.
+- Inference: `H3` is confirmed, in the direction it declined to assume. The
+  campaign's residuals (`28/F20`: `scrollback-stream` +4.13%, `terminal-feed`
+  +4.55% against pre-packing) are not made worse by the storage change this doc
+  proposes, and the part of them that lives in admission's *encoding and storing*
+  gets cheaper. The mechanism the numbers support is the same one `F1` found on
+  the read side and `28/F17`/`28/F20` found twice before that: **the cost is the
+  allocation and write pattern, not the encoding.** Today's admission allocates a
+  blob per display row; the candidate writes the identical cell words at a cursor
+  in a region it already owns.
+- Competing interpretations:
+  1. *The win is the container -- the buffer append and the accounting -- and is
+     recoverable inside today's design.* **Measured and refuted** (Observation 3):
+     those two together are 5-10% of today's admission, and the candidate's
+     margin is 31-38%.
+  2. *The win is per-cell work the candidate skips.* **Refuted by the shape of
+     the saving** (Observation 3): tripling the stored cells per row from 60 to
+     179 moves the saving by 9%, not by 200%. The cross-arm checksum independently
+     proves the two arms produced the same cell words, so no per-cell work was
+     skipped.
+  3. *The residual `28/F20` measured is scheduling, not encoding, so making
+     encoding cheaper does not remove it.* **Not refuted, and it is the most
+     important limit on this entry.** The doc's own `H3` says so, citing `28/H8`.
+     F3 measures admission in isolation, in one thread, with no PTY, no actor hop
+     and no backpressure; it can see the encode-and-store term and nothing else.
+     A -37.6% change in a term `28/F20` sampled at 19.7% of the drain thread
+     *predicts* roughly -7% on `scrollback-stream`'s block, but that is a
+     conversion through a share, exactly the kind of derivation `F1` was careful
+     to label a prediction. Only the paired ladder against a real implementation
+     can settle it.
+  4. *The arms differ in what they store.* Both lost `hyperlinkId` and
+     `contentIdentity`, so neither builds a side table -- the same strip Part A
+     made, conservative toward the baseline for the same reason (under the
+     candidate an identity run table would be built once per logical line rather
+     than once per display row).
+- Uncertainty:
+  - **No eviction.** Today's `enforceScrollbackBudget` / `removeFirst` against
+    `DD2`'s whole-record eviction is not measured here, by the frozen rule.
+    Both arms grow into a store that is never bounded, and a real pane at steady
+    state evicts on every admitted row. This is the largest thing F3 does not
+    see, and it is Phase 2's.
+  - **A microbenchmark is not a workload.** Parsing, grid mutation and damage all
+    run before admission on a real feed, and none of it is here. The -7%
+    prediction above is a conversion, not a measurement.
+  - **One depth, one geometry, one machine, one session.** ~10,000 display rows
+    at 179x66, as with `F1` and `F2`.
+  - **The `wide` margin is larger and unattributed.** `wide` costs the baseline
+    749.4 ns/row against `full`'s 642.4 while storing *fewer* cells per row (mean
+    135.1 against 179.0), so its extra cost is per-cell work on wide clusters
+    that the candidate also performs. Why the candidate's absolute saving is
+    nonetheless 342 ns rather than ~200 is not explained by the per-row constant
+    Observation 3 establishes, and no counter was read. It is recorded as an
+    observation and not built on.
+  - **The forced-split path is unexercised.** No class reaches 65,536 cells, so
+    only the per-row bound check was measured.
+  - **The prototype is still not a store.** No search, no selection, no semantic
+    marks beyond a header slot, no spill table (the arm `fatalError`s on a
+    multi-scalar cell rather than encoding one silently).
+- Deferred decisions, continuing `F4`'s numbering; each took the obvious, simple
+  choice rather than blocking:
+  - **DD5 -- a record's display-row count is *counted* at admission, not
+    derived.** Admission knows how many rows it consumed, so the block's cached
+    display-row total is incremented as rows arrive and no `ceil` -- and no
+    `hasWideCells` scan (`F4` Observation 1) -- runs on the write path at all.
+    `F2`'s counting pass therefore belongs to the width-change path exclusively.
+    The alternative, deriving the count at close, would pay the wide-cell scan on
+    every admitted line for a number the writer already has.
+  - **DD6 -- a forced split leaves no back-pointer.** The `forcedSplit` bit sits
+    on the record that was cut and the continuation simply follows it in the
+    arena; readers rejoin by adjacency. The alternative -- a `continuesPrevious`
+    bit on the follower -- is one flag more state for a case no measured input
+    reaches, and can be added later without changing the format.
+- Next action: `D1` Part B's last measured input is in. **Part B now owes exactly
+  one thing: the simplification inequality** (`D1`'s frozen paragraph "What the
+  simplification inequality must show"), which is a reading and accounting pass
+  over the deletion and addition lists, not a measurement. `D1` does not close on
+  this entry and Phase 2 does not open. Two things this entry hands forward:
+  Observation 3's decomposition says any future admission work belongs in the
+  encoder rather than the container, and Observation 4 prices the arena against
+  what the budget charges today, which the budget-and-eviction task in Phase 2
+  will need.

@@ -147,9 +147,9 @@ other deletion on the list descends from.
 #### Verdict
 
 - Status of the verdict: **Part A answered 2026-08-04. D1 remains open on Part
-  B, which now owes only F3 and the simplification inequality: F2 and F4 are
-  both in, and F4 -- the one input that could have made D1 no-go regardless of
-  F1 -- did not fire the trigger** (see "Part B, F4's outcome" below).
+  B, which now owes only the simplification inequality: F2, F3 and F4 are all
+  in, and F4 -- the one input that could have made D1 no-go regardless of F1 --
+  did not fire the trigger** (see the three Part B sections below).
 - Selected direction (Part A, the read path): **go**.
 - Quantitative verification: [F1](findings.md), measured at `eee1832` plus the
   probe it adds. Median over 5 ABBA rounds of nanoseconds per display-row read,
@@ -201,8 +201,9 @@ other deletion on the list descends from.
   the simplification inequality above. No production storage change is licensed
   by this verdict, and `28/H7` remains the fallback until D1 closes. The
   disposition of Phase 1 -- whether to continue funding it on this evidence --
-  is a human decision. *(F2 and F4 have since landed; see the two Part B
-  sections below. F3 and the inequality remain owed and this review stands.)*
+  is a human decision. *(F2, F3 and F4 have since landed; see the three Part B
+  sections below. The simplification inequality remains owed and this review
+  stands.)*
 
 #### Part B, frozen rule for F2 (the eager counting pass)
 
@@ -571,4 +572,48 @@ display row; the **forced-split path** beyond its per-row bound check, since no
 class reaches 65,536 cells; and **anything about read cost after admission**,
 which is Part A's.
 
-**Outcome, applied once to the frozen statistics.** Recorded below after F3 runs.
+**Outcome, applied once to the frozen statistics.** [F3](findings.md) measured,
+at ~10,000 admitted display rows and 179 columns, median over 5 ABBA rounds of
+nanoseconds per admitted display row:
+
+| class | verdict-bearing | baseline | candidate | ratio | A/A control | result |
+| --- | :---: | ---: | ---: | ---: | ---: | --- |
+| `mix` | yes | 623.1 ns | 389.1 ns | **0.624x** | +0.18% | confirm |
+| `full` | yes | 642.4 ns | 444.0 ns | **0.691x** | +0.49% | confirm |
+| `stream` | yes | 484.5 ns | 302.4 ns | **0.624x** | -0.15% | confirm |
+| `wide` | no | 749.4 ns | 407.2 ns | 0.543x | -0.02% | observation only |
+
+All six gates held on the first measured invocation and **no invocation was
+voided**: cross-arm checksums and display-row counts identical on all four
+classes (including the 5,124 `.spacerHead` cells the candidate refuses to store
+and re-derives at read); every arm's per-round product matched the value computed
+outside the timed region; `mix` calibrated at median 149 / p95 179 inside
+`28/F23`'s band and `stream` at median 60 cells with a soft-wrapped fraction of
+**0.000**, reproducing `28/F20` Observation 5's shape; A/A controls all under
+0.5%; AC power, low-power mode off, load average 1.00 before and after.
+
+Against the thresholds above: confirm required **<= 1.00x on every
+verdict-bearing class**, and the worst is 0.691x; reject required **> 1.09x**,
+which nothing approaches. **`H3` is confirmed outright** rather than landing in
+the neutral band -- admission does not merely get no worse, it gets 1.45x-1.60x
+cheaper per admitted row, *including* on `stream`, the class that reproduces the
+row shape of the very workload `H3` names as its falsifier and where the
+candidate creates exactly as many records as the baseline creates rows.
+
+What this does **not** license, stated because the result invites over-reading:
+F3 measures the encode-and-store term alone. `H3`'s own caution -- that `28/F20`'s
+residuals may be scheduling rather than encoding -- is untouched by it, and the
+conversion from a -37.6% admission change to roughly -7% on `scrollback-stream`'s
+block is a prediction through `28/F20`'s share, not a measurement. Eviction is
+not measured at all. Only the paired ladder against a real implementation
+settles either.
+
+**Part B therefore owes exactly one thing: the simplification inequality** -- the
+frozen paragraph above titled "What the simplification inequality must show".
+`F2`, `F3` and `F4` are all in, no measured input remains, and the remaining debt
+is a reading and accounting pass rather than a measurement. `D1` does not close
+on F3, Phase 2 does not open, `28/H7` remains the fallback, and no production
+storage change is licensed. F3 also records two deferred decisions continuing
+`F4`'s numbering: `DD5` (a record's display-row count is counted at admission,
+not derived, so no wide-cell scan runs on the write path) and `DD6` (a forced
+split leaves no back-pointer; readers rejoin by adjacency).
