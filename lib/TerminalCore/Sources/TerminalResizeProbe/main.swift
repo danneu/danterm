@@ -12,7 +12,28 @@ import TerminalResizeProbeSupport
 
 var recipe = ResizeProbeRecipe.standard
 var arguments = Array(CommandLine.arguments.dropFirst())
-let usage = "usage: TerminalResizeProbe [--samples <count>] [--alternate-columns <count>]\n"
+let usage = """
+usage: TerminalResizeProbe [--recipe standard|saturating] [--samples <count>] \
+[--alternate-columns <count>]
+
+"""
+
+// `--recipe` is resolved first, so flag order cannot silently decide whether a
+// later `--samples` is overwritten by the selected recipe's own count.
+if let index = arguments.firstIndex(of: "--recipe") {
+    guard index + 1 < arguments.count else {
+        FileHandle.standardError.write(Data(usage.utf8))
+        exit(2)
+    }
+    switch arguments[index + 1] {
+    case "standard": recipe = .standard
+    case "saturating": recipe = .saturating
+    default:
+        FileHandle.standardError.write(Data(usage.utf8))
+        exit(2)
+    }
+    arguments.removeSubrange(index...(index + 1))
+}
 
 while arguments.isEmpty == false {
     guard arguments.count >= 2, let value = Int(arguments[1]), value >= 1 else {
@@ -25,14 +46,16 @@ while arguments.isEmpty == false {
             columns: recipe.columns, rows: recipe.rows, lineCount: recipe.lineCount,
             scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
             alternateColumns: recipe.alternateColumns,
-            sampleCount: value, warmupCount: recipe.warmupCount
+            sampleCount: value, warmupCount: recipe.warmupCount,
+            name: recipe.name
         )
     case "--alternate-columns":
         recipe = ResizeProbeRecipe(
             columns: recipe.columns, rows: recipe.rows, lineCount: recipe.lineCount,
             scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
             alternateColumns: value,
-            sampleCount: recipe.sampleCount, warmupCount: recipe.warmupCount
+            sampleCount: recipe.sampleCount, warmupCount: recipe.warmupCount,
+            name: recipe.name
         )
     default:
         FileHandle.standardError.write(Data(usage.utf8))

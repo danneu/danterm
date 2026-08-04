@@ -27,6 +27,41 @@ struct TerminalResizeProbeSupportTests {
         #expect(terminal.scrollbackRowCount < recipe.lineCount)
     }
 
+    @Test("The saturating recipe fills the budget: feeding more lines buys no more rows")
+    func saturatingRecipeReachesTheBudgetCeiling() {
+        // Intent: `.saturating`'s line count is enough that retained depth is
+        //   decided by the byte budget rather than by how many lines were fed --
+        //   feeding a further screenful adds no retained row.
+        // Why it exists: `.standard`'s 10,000 lines saturated the pre-packing
+        //   representation (6,756 rows) but stopped saturating once retained rows
+        //   were packed, which made a resize sample cover 1.47x depth rather than
+        //   the ~14x the budget now admits. A recipe that quietly stops saturating
+        //   still prints a distribution, and nobody reading it can tell -- so the
+        //   ceiling is asserted by the observable it actually claims.
+        let recipe = ResizeProbeRecipe.saturating
+        var terminal = makeSaturatedTerminal(recipe: recipe)
+        let atCeiling = terminal.scrollbackRowCount
+
+        for line in 0..<200 {
+            terminal.feed(Array("DANTERM-RESIZE-OVERFEED-\(line) plain ascii retained row\r\n".utf8))
+        }
+
+        #expect(atCeiling > 0)
+        #expect(atCeiling < recipe.lineCount)
+        #expect(terminal.scrollbackRowCount == atCeiling)
+    }
+
+    @Test("A recipe's identity names its version, so v2's numbers cannot be read as v1's")
+    func recipeIdentityNamesItsVersion() {
+        // Intent: the two frozen recipes carry distinct, self-describing identities.
+        // Why it exists: the saturating recipe changes what a sample covers by an
+        //   order of magnitude. Redefining `saturated-resize-v1` in place would
+        //   make `F7`'s recorded distribution and this one look comparable.
+        #expect(ResizeProbeRecipe.standard.identity.hasPrefix("saturated-resize-v1-"))
+        #expect(ResizeProbeRecipe.saturating.identity.hasPrefix("saturated-resize-v2-"))
+        #expect(ResizeProbeRecipe.standard.identity != ResizeProbeRecipe.saturating.identity)
+    }
+
     @Test("The probe alternates widths, so no sample times a no-op resize")
     func probeAlternatesWidths() {
         // Intent: consecutive timed resizes target different widths, and the run

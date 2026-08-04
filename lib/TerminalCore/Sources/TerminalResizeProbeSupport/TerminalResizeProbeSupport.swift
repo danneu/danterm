@@ -32,6 +32,13 @@ import TerminalCore
 /// are carried into the emitted report, so a distribution can never be read
 /// without the conditions that produced it.
 public struct ResizeProbeRecipe: Equatable, Sendable {
+    /// The recipe's frozen version name, carried into `identity`.
+    ///
+    /// Versioned rather than edited in place: `saturated-resize-v2` covers ~14x
+    /// the retained rows `v1` did at the same budget, so a report that reused
+    /// `v1`'s name would invite reading `F7`'s recorded distribution and a v2
+    /// distribution as two arms of one comparison.
+    public let name: String
     public let columns: Int
     public let rows: Int
     public let lineCount: Int
@@ -59,13 +66,33 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public static let standard = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 10_000,
         scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
-        alternateColumns: 100, sampleCount: 40, warmupCount: 4
+        alternateColumns: 100, sampleCount: 40, warmupCount: 4,
+        name: "saturated-resize-v1"
+    )
+
+    /// The saturating recipe: `standard`'s geometry, fed enough lines that the
+    /// **budget** decides retained depth again.
+    ///
+    /// `standard`'s 10,000 lines saturated the pre-packing representation and no
+    /// longer saturate the packed one, which admits ~82,000 rows at the same
+    /// 10 MiB. Reading a resize distribution off a history bounded by the line
+    /// count rather than the budget understates the cost by that whole ratio, so
+    /// this recipe overshoots the ceiling and `saturatingRecipeReachesTheBudgetCeiling`
+    /// pins that it still does. Sample count is halved because each sample now
+    /// costs an order of magnitude more wall-clock.
+    public static let saturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 120_000,
+        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-resize-v2"
     )
 
     public init(
         columns: Int, rows: Int, lineCount: Int, scrollbackBudgetBytes: Int,
-        alternateColumns: Int, sampleCount: Int, warmupCount: Int
+        alternateColumns: Int, sampleCount: Int, warmupCount: Int,
+        name: String = "saturated-resize-custom"
     ) {
+        self.name = name
         self.columns = columns
         self.rows = rows
         self.lineCount = lineCount
@@ -77,7 +104,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
 
     /// The identity a report claims, so a changed shape is a changed identity.
     public var identity: String {
-        "saturated-resize-v1-\(lineCount)-lines-\(columns)x\(rows)-to-\(alternateColumns)"
+        "\(name)-\(lineCount)-lines-\(columns)x\(rows)-to-\(alternateColumns)"
     }
 }
 

@@ -130,7 +130,15 @@ terminal-occupancy-probe flags="":
 # gate: a change that is *expected* to move resize cost, which is what finally gives the
 # comparison two arms.
 #
-#   just terminal-resize-probe                             # 40 samples, 179x66 <-> 100
+# Two frozen recipes. `standard` (`saturated-resize-v1`) is `F7`'s: 10,000 lines, which
+# saturated the pre-packing representation. `saturating` (`saturated-resize-v2`) feeds
+# 120,000 so the byte budget decides depth again -- packed retained rows admit ~14x more
+# rows at the same 10 MiB, so v1's history is no longer budget-bounded and its samples
+# cover a fraction of the depth a real saturated pane holds. The versions are distinct
+# names, not an edit in place, because their numbers are not comparable.
+#
+#   just terminal-resize-probe                             # v1, 40 samples, 179x66 <-> 100
+#   just terminal-resize-probe "--recipe saturating"       # v2, budget-saturated, 20 samples
 #   just terminal-resize-probe "--samples 100"             # tighter tail
 #   just terminal-resize-probe "--alternate-columns 80"
 terminal-resize-probe flags="":
