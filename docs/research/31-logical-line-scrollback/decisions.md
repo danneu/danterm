@@ -379,3 +379,196 @@ choice and each is a human's to revisit.
 **Part B therefore owes exactly two things: `F3` (the admission probe) and the
 simplification inequality.** `28/H7` remains the fallback until D1 closes, and
 no production storage change is licensed.
+
+#### Part B, frozen rule for F3 (the admission probe)
+
+**Frozen 2026-08-04 at `393dfce`, before the F3 probe existed in the tree and
+before any admission number was produced.** F3 is a Part B input: it prices the
+open-line append this design admits scrollback through, against the
+per-display-row pack-and-append the design replaces.
+
+**What F3 can and cannot decide.** `H3`'s own falsifier is a **paired-ladder
+verdict** -- "a `slower` verdict on `terminal-feed` or `scrollback-stream`
+against the store this design replaces" -- and only a real implementation
+measured on the ladder can produce one. F3 is a microbenchmark, so like Part A
+it converts a ladder threshold into a microbenchmark ratio through a *measured*
+cost share and reports a **prediction**. Consequently **F3 cannot make D1 no-go
+and cannot close it**: D1's two no-go triggers are Part A's browse threshold
+(F1, spent) and F4's stored-width trigger (spent), and neither is F3's to move.
+Its outcomes are confirm, neutral, or reject, and reject attaches a *named
+condition* to Part B rather than a verdict.
+
+**Instrument.** A standalone two-arm microbenchmark in
+`lib/TerminalCore/Tests/TerminalCoreTests/`, release configuration, headless,
+env-gated behind `DANTERM_LOGICAL_LINE_PROBE`, **in its own file so Part A's and
+Part B's existing probe arms are not edited** (the practice F2 established). It
+reuses this doc's existing harness -- `RetainedStimulus`, `buildStimulus`,
+`interleavedRounds`, `median`, `percentile`, `loadAverageDescription` -- and
+defines only the two admitters, which are new because F1's stores are
+read-oriented and built whole rather than incrementally. Arms are interleaved
+**ABBA within one process**, at **5 measured rounds + 2 warmup** per (content
+class), statistic = **median over rounds of nanoseconds per admitted display
+row**, min and max and the sample count reported alongside. Depth ~10,000
+display rows at 179 columns, the same depth and geometry Part A froze.
+
+**Comparison target -- today's production admission path, named.** The baseline
+arm reproduces `Terminal.swift#appendToScrollback` exactly: for each `GridRow`
+scrolling off, `Terminal.PackedRetainedRow.pack(_:)`
+(`PackedRetainedRow.swift#pack`, which trims to canonical extent as it encodes),
+then `ScrollbackBuffer.append`, then the two accumulations that call site
+performs -- `Terminal.swift#scrollbackByteCost(of:)` into `scrollbackByteCount`
+and `storedCellCount` into `scrollbackStoredCellCount`. `ScrollbackBuffer` and
+`scrollbackByteCost` are `private` to `Terminal`, so the arm reproduces the
+buffer's storage and append and the byte-cost arithmetic rather than calling
+them; that substitution is F3's stated fidelity limit, exactly as it was F1's.
+
+**Candidate -- the open-line rule, with F4's corrected semantics.** One
+contiguous byte arena of the same record shape F1 and F2 use (8-byte header:
+cell count, flags; then C1 cell words verbatim). Per admitted display row: append
+the row's cells to the **open** record at the arena's write cursor, dropping
+`.spacerHead` cells (F4 case 10 -- the store never holds a spacer); a row that is
+not soft-wrapped **closes** the record, writing its header and pushing its offset
+into the index. Header bits are set at admission from content in hand:
+`hasWideCells` (F4 Observation 1 / `DD4`, per record, not per buffer) and
+`forcedSplit` at the 65,536-cell cap (`DD3`). **Mutation is tail-only** (F4
+Observation 5), which is what makes the append a write at the cursor rather than
+an edit. Where the README's sketch and F4 disagree, F4 wins: cells are appended
+per display row into an open line rather than a record being built per line, and
+a record's display-row count at the admitting width is *counted* rather than
+derived, because admission knows how many rows it consumed -- `ceil` and the
+wide-cell scan are the *width-change* path (`F2`), not the admission path.
+
+**Stimulus classes, all at ~10,000 admitted display rows and 179 columns.** All
+four are fed through a real `Terminal`, so the rows both arms admit are rows the
+engine actually produced.
+
+1. `mix` -- Part A's calibrated class, reproducing `28/F23`'s measured content
+   distribution. Verdict-bearing.
+2. `full` -- Part A's full-width class (`28/F23`'s
+   `bound/wide-full-width-saturation`): every display row 179 cells.
+   Verdict-bearing.
+3. `stream` -- **new here, and the class closest to `H3`'s named falsifier.**
+   `28/F20` Observation 5 measured what `benchmark/scrollback-stream` actually
+   retains: its producer writes `\n` through a real tty whose Darwin default
+   `OPOST|ONLCR` turns it into CRLF, so every retained row is a **hard-ended row
+   of ~59 dense stored cells with no soft wrap at all**. That is the *worst* case
+   for the candidate's "fewer records" mechanism -- one record per display row,
+   the same count the baseline creates -- and it is the shape of the workload
+   whose threshold this rule's bound is derived from. Verdict-bearing.
+4. `wide` -- CJK content, so records carry `wideHead`/`wideTail` cells and the
+   engine inserts `.spacerHead` at a one-column gap. **Descriptive only and
+   outside the verdict**, because the bound below is derived from
+   `scrollback-stream`, an ASCII CRLF workload, and `F4` has already recorded
+   that this design's wide-content costs are unpriced. It is measured anyway so
+   the gap is a number rather than a caveat.
+
+**Forced wraps and hard newlines, stated per class rather than left implicit.**
+A hard newline is one per logical line in every class; a forced (soft) wrap is
+whatever the engine produced at 179 columns. The probe reports, per class,
+display rows, logical lines, rows per logical line, the fraction of admitted rows
+that are soft-wrapped, and the `.spacerHead` count -- because that fraction is
+exactly the ratio of records to rows, which is the mechanism `H3` claims.
+
+**Validity gates. Any failure voids the invocation, and a void invocation is not
+a verdict and does not become one by re-running.**
+
+1. **Cross-arm equivalence.** After admission -- outside every timed region --
+   both stores are read back display row by display row and checksummed over
+   every scalar, style id and kind, using Part A's walks. The two checksums and
+   the two display-row counts must be identical. This is the gate that holds the
+   candidate to re-deriving the spacers it dropped and the wraps it did not
+   store; a difference means the arms did not admit the same content and no
+   timing from that run may be quoted.
+2. **Non-elision.** Each timed round's product is consumed and cross-checked
+   against an expectation recomputed outside the timed region: the baseline's
+   row count, charged byte total and stored-cell total; the candidate's record
+   count, arena byte total and display-row total. A mismatch, or a zero, voids
+   the run.
+3. **Stimulus calibration.** `mix`: display-row stored-cell counts median in
+   **[119, 154]** and p95 **179** (`28/F23`'s band, unchanged from Part A).
+   `full`: median and p95 both **179**. `stream`: median stored cells in
+   **[55, 65]** and soft-wrapped fraction **0** (`28/F20` Observation 5's
+   measured shape). `wide`: at least **50%** of admitted rows contain a wide
+   cell and at least one `.spacerHead` is present -- a failure here voids the
+   `wide` observation only, since it carries no verdict. Out of band voids the
+   run for that class, and the achieved distribution is reported either way.
+4. **Instrument resolution (A/A control).** A baseline-vs-second-identical-
+   baseline control runs in the same session at the same round count, for every
+   class. Its |median difference| is the instrument's resolution, and **a
+   candidate-vs-baseline difference smaller than it is reported as below
+   resolution and read as an effect in neither direction.** An A/A control above
+   **5%** voids the whole invocation, as in Part A.
+5. **Host conditions**, as `28/F15` gated them and Parts A and B adopted: AC
+   power, low-power mode off, one-minute load average below **2.5** read before
+   and after.
+6. **Coverage.** Every aggregate printed beside its sample count; a quantity
+   that could not be measured is reported absent rather than as 0
+   (`agent-docs/measurement-discipline.md`).
+
+**Thresholds, and where each number comes from.**
+
+- **Reject `H3`** -- candidate median **> 1.09x** baseline on any
+  verdict-bearing class.
+  *Derivation, all three inputs measured and none chosen here:* `28/F20`
+  Observation 1 sampled `benchmark/scrollback-stream` and put the admission
+  subtree (`appendToScrollback` / `pack` / `compacted` / `scrollbackByteCost` /
+  `enforceScrollbackBudget`) at **19.7% of 15,578 `terminal-pty-host` thread
+  samples**; `agent-docs/terminal-performance.md` states the drain is **95.7%**
+  of a `scrollback-stream` block (median over 368 archived blocks); and
+  `scrollback-stream`'s frozen `confirm` directional threshold is **1.85%**,
+  read from `scripts/terminal-benchmark-validation.py#DECISION_RULES` rather
+  than from a reconstruction of it. Admission is therefore
+  `0.197 x 0.957 = 18.85%` of the block, and `1.85 / 18.85 = 9.81%` is the
+  admission regression that first predicts a `slower` verdict -- so a candidate
+  above **1.098x**, rounded down to **1.09x**, predicts `H3`'s own falsifier
+  firing.
+  *Why the pre-fix share and not the post-fix one:* `28/F20` Observation 2
+  re-sampled the subtree at **15.9%** after the encoder fix that is in the tree
+  today, which would give a looser 1.12x -- but that sample "ran at load 13.6 and
+  is attribution only" by its own entry, while the 19.7% reading was taken under
+  stated conditions. The larger share yields the tighter bound, and a tighter
+  bound is the conservative choice for a probe whose failure mode is clearing a
+  falsifier too easily.
+  *Why no second bound from `terminal-feed`:* `H3` names it too, but **no
+  finding in the corpus measures admission's share of `terminal-feed`** (`28/F17`
+  measured 9.2% of feed self time for the *`C6`* encoder this design's baseline
+  replaced, which is a different encoder). A bound cannot be derived from a share
+  that was never measured, so none is, and F3's prediction is explicitly about
+  `scrollback-stream` alone.
+- **Confirm `H3`** -- candidate median **<= 1.00x** baseline on **every**
+  verdict-bearing class, or a difference on that class smaller than the A/A
+  resolution. *Derivation:* `H3`'s claim is literally "admission gets no worse",
+  so parity or better is what confirms it; the resolution clause is gate 4
+  applied, not a widening of the claim.
+- **Neutral** -- every verdict-bearing class under 1.09x, and at least one class
+  above 1.00x by more than the A/A resolution. `H3`'s "no worse" does not hold
+  strictly, but no class predicts a `slower` verdict on the workload `H3` names.
+
+**What each outcome means for `D1` Part B**, stated now so it is not decided
+after the fact:
+
+- **confirm** -- Part B's admission input is in and clean. `D1` then owes only
+  the simplification inequality.
+- **neutral** -- the same, plus one recorded cost: the measured admission
+  regression is carried into Phase 2 as a number the paired ladder must re-read
+  against a real implementation before any production storage change.
+- **reject** -- Part B gains a **named condition**: `D1` may not close `go` on
+  Part B until either an admission design clears this bound under **this same
+  rule**, or a paired `confirm` on `scrollback-stream` against a real
+  implementation comes back not-`slower`. Disposition is a human decision.
+  `D1` does not become no-go on F3 alone.
+
+**What F3 does not measure**, stated so the entry is not over-read: **eviction**
+(today's `enforceScrollbackBudget` / `ScrollbackBuffer.removeFirst` against
+`DD2`'s whole-record eviction, which is unspecified in cost and is Phase 2's, as
+`F1` already recorded); the **parse and grid work** that precedes admission on a
+real feed, so this is not `terminal-feed`'s or `scrollback-stream`'s block; the
+**side tables** (`hyperlinkId`, `contentIdentity`), stripped from the stimulus so
+neither arm builds them, exactly as Part A stripped them and for the same reason
+-- the strip is conservative toward the baseline, because under the candidate an
+identity run table would be built once per logical line instead of once per
+display row; the **forced-split path** beyond its per-row bound check, since no
+class reaches 65,536 cells; and **anything about read cost after admission**,
+which is Part A's.
+
+**Outcome, applied once to the frozen statistics.** Recorded below after F3 runs.
