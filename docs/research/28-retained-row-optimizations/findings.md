@@ -1332,7 +1332,7 @@ depth claim can be read: **narrow-pane depth arithmetic is bucket-dominated, and
 ### F14 -- a saturated resize costs 1.43 s after packing against 100 ms before: 12.1x the rows at 1.17x per row, and 14.2x the wall clock
 
 - Status: recorded, and it is the **two-armed comparison gate item 6 of
-  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)
   demanded**, run before landing rather than after. It is the risk that plan's
   own risk list named as "the largest blast radius, and what this evidence says
   least about", and it fired. `D7` adjudicates it; this entry is the measurement.

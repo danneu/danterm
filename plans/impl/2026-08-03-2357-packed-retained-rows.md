@@ -1,6 +1,28 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- C1 IMPLEMENTED, MEASURED, AND TUNED; `scrollback-stream` still short at +4.13%; disposition with the human
+## Status -- COMPLETE. Phase 1 landed; `H3` graduated as accepted-with-trade by `D10`
+
+**This plan is closed.** Phase 1 shipped C1 across `987927a`..`f364cd9` (the
+8-byte cell, the single-write encoder, and the encoder-side trim), and
+[`D10`](../../docs/research/28-retained-row-optimizations/decisions.md) adjudicated
+the verification gate by the third of its three exits -- the trade stated as
+numbers and decided in a `D` entry. Banked: **10.49 -> 3.72 MB at 179x66 and
+10.17 -> 3.40 MB at 80x24 at 1.11x the depth**, browsing at parity (-0.33%), and
+resize within 1% of `D8`'s line in all three regimes. Paid: `terminal-feed`
++4.55% and `scrollback-stream` +4.13%, both against `678bfe9` on `F20`'s deciding
+table, with `F21` resolving the control question that table left open.
+
+**Out of scope and not owed by this plan.** `H4` (aggregate storage for the packed
+payload) and `H8` (deferred packing on the pane's queue, the designated successor
+that removes both residuals by construction) live in doc 28's ledger as parked
+leads with stated conditions. `H4` must be **re-priced** before anyone runs it --
+`D5`'s 50/50 split and its 36% were computed against C6's ~1-byte cell and do not
+survive C1. Nothing here is waiting on either.
+
+The record below is the plan as it was executed, kept unedited because the
+measured reasons are what make the C6-to-C1 pivot and this graduation auditable.
+
+### The measured state `D10` ruled on
 
 `F19` was the deciding run and `F20` is the write-pattern follow-up that halved
 what it found; read the `F20` paragraphs below before the `F19` ones, because one
