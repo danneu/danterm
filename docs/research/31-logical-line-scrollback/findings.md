@@ -229,4 +229,181 @@ parameter.
   Observation 4 is the starting point if seek cost ever becomes the binding
   constraint, and `F2` can reuse this probe's `LogicalLineArena.recomputeIndex`
   directly -- it is the eager pass H2 describes.
-</content>
+
+### F2 -- the eager counting pass is 0.016 ms at trial depth and 0.64 ms at 100,000 lines, 15x inside H2's bound
+
+- Status: complete. `H2` **confirmed** under `31/D1`'s Part B rule, frozen at
+  `497d181` before this probe existed in the tree. This is a Part B input to
+  `D1`; it cannot and does not move `D1`'s direction (the rule says so
+  explicitly), and it does not open Phase 2.
+- Date and investigator: 2026-08-04, agent.
+- Commit and worktree state: measured at `497d181` plus the one file this
+  finding adds (`TerminalLogicalLineIndexProbe.swift`) and the three members it
+  needed on `F1`'s arena (a synthetic initializer, a second counting-pass
+  variant, and the independent cross-check total). No file under
+  `lib/TerminalCore/Sources/` is touched; `F1`'s arms are unedited.
+- Commands, inputs, or reproduction:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
+        --filter TerminalLogicalLineIndexProbe
+
+  Conditions: AC power, low-power mode off, one-minute load average **1.49
+  before and 1.49 after**. 9 measured rounds plus 2 warmup per cell; statistic
+  is the median over rounds of one whole pass, min and max and `n` beside every
+  aggregate.
+
+#### What was measured
+
+One call of the eager recompute: discard every cached block total and rebuild
+`blockPrefix` for a new width, reading one cell count per logical line and doing
+one divide. Nothing else is inside the timed region.
+
+`31/D1` named two count-sources, and the difference between them is the whole
+cost:
+
+- `arena` (**primary**) -- the count is read from each line's record header
+  through `lineOffsets`, which is what the candidate direction sketches: the
+  index stores offsets and the count lives in the record. A strided chase across
+  the whole arena.
+- `counts` (**alternative**) -- the count is read from a dense parallel array,
+  which is what `F1`'s prototype happened to do. A sequential scan of
+  `8 x lineCount` bytes, bought with 8 bytes per line of extra index state.
+
+#### Observation 1 -- the measured passes, and the bound D1 reads them against
+
+Median milliseconds per whole pass, primary `arena` source, `n=9` per cell.
+10,000-line figures are the real-engine arena; 100,000-line figures are the
+synthetic one (gate 2 below).
+
+| class | width change | 10,000 lines | 100,000 lines |
+| --- | --- | ---: | ---: |
+| `mix` | 179 -> 179 | 0.016 ms | 0.547 ms |
+| `mix` | 179 -> 100 | 0.015 ms | 0.550 ms |
+| `mix` | 179 -> 200 | 0.015 ms | 0.545 ms |
+| `full` | 179 -> 179 | 0.016 ms | 0.557 ms |
+| `full` | 179 -> 100 | 0.016 ms | 0.639 ms |
+| `full` | 179 -> 200 | 0.016 ms | 0.641 ms |
+
+The `counts` alternative, same cells: **0.013 ms** at 10,000 lines in every one
+of the six, and 0.127-0.136 ms at 100,000.
+
+Read against `31/D1`'s frozen thresholds:
+
+- **Confirm H2** required the 100,000-line median at or under **10.0 ms** on
+  both classes and both width changes. Worst cell measured: **0.641 ms**. Passes
+  with a 15.6x margin.
+- **Reject** required 10,000 lines at or above **16.67 ms** (one 60 Hz frame).
+  Worst cell measured: **0.016 ms**, about 1,000x under the line. Nowhere near
+  rejection.
+- The narrow-confirm band is not entered.
+
+So: **H2 confirmed, eager recompute stands for milestone 1, and the lazy
+per-block alternative stays in Rejected.** The primary count-source clears the
+bound on its own, so the design does *not* need the parallel counts array --
+that is the one Phase 2 input this entry produces.
+
+For scale against what the pass replaces: 10,000 logical lines of `mix` content
+is **17,248 display rows** at 179 columns, 1.72x the depth `28/F23` priced at a
+600.5 ms synchronous reflow. The counting pass over it is 0.016 ms. The
+comparison is a division between two separately measured numbers, not a paired
+measurement, so treat the ratio as an order of magnitude (about 4 orders) rather
+than a figure.
+
+#### Observation 2 -- the gates
+
+1. **Non-elision.** Every timed pass's total was cross-checked against a sum
+   computed by an unblocked route; all 324 passes in the primary measurement
+   matched, as did the ladder's 108, and no total was zero. The totals themselves are reported (`mix` at 179: 17,248 display rows
+   from 10,000 lines; at 100: 26,498; at 200: 15,892 -- the pass responds to
+   width, which is what it is for). A counting loop is exactly what an optimizer
+   deletes, and this gate is why the numbers above are of a loop that ran.
+2. **Synthetic-stimulus fidelity.** The 10,000-line arena was built both ways --
+   through `F1`'s real-engine `buildStimulus` and synthetically from the same
+   per-line counts -- and both were measured in every cell. Ratios spanned
+   **0.975x to 1.062x**, inside the 15% the rule allows, and the two arenas
+   agreed exactly on byte count and line count. The synthetic extension to
+   100,000 lines is therefore admissible.
+3. **Host conditions.** Load 1.49 before and after, AC power, low-power off.
+   **One earlier invocation was discarded, and is recorded rather than
+   hidden**: it read load 2.97 before and after, above the 2.5 the rule freezes,
+   because `swift test` compiled the newly added file in the same command and
+   the probe then measured itself under its own build. Its numbers were within a
+   few percent of the ones above, which is exactly why discarding it had to be
+   automatic -- a gate that is only honoured when it would change the answer is
+   not a gate. The quoted run pre-builds and waits for the machine to settle.
+4. **Coverage.** `n=9` beside every median, with min and max.
+
+#### Observation 3 -- the cost per line is not constant with depth, measured rather than interpolated
+
+Descriptive ladder, width 179 -> 100, nanoseconds per logical line:
+
+| class | source | 10,000 | 30,000 | 100,000 |
+| --- | --- | ---: | ---: | ---: |
+| `mix` | `arena` | 1.60 | 1.70 | 5.49 |
+| `mix` | `counts` | 0.68 | 0.68 | 0.68 |
+| `full` | `arena` | 1.57 | 2.17 | 5.50 |
+| `full` | `counts` | 0.68 | 0.72 | 0.68 |
+
+The middle point was measured rather than assumed, because two points would not
+have shown that the `arena` source's per-line cost is flat to 30,000 lines and
+then roughly triples by 100,000 while `counts` stays flat throughout. The
+mechanism this is consistent with is cache residency: at 100,000 lines the arena
+is 172 MB (`mix`) or 287 MB (`full`) and the header chase touches one line per
+~2.9 KB of it, while the dense counts array is 800 KB at the same depth and
+stays resident. This is an explanation the data fits, not an attributed cause --
+no counter was read.
+
+A depth where this matters is far away and probably unreachable: at 100,000
+lines of wide content the arena is 172-287 MB, which the 10 MiB byte budget
+(`28/F23`: peak 3.38 MB observed) would have evicted from long before. **H2's
+100,000-line bound therefore stresses a depth the current byte budget makes
+unreachable**, which is the right way to test a bound and the wrong way to
+describe a workload.
+
+#### Observation 4 -- an instrument caveat, recorded because it is visible in the numbers
+
+The `counts` source reads 0.013 ms at 10,000 lines in the main measurement and
+0.007 ms in the ladder, at the same depth and width. The difference is that the
+main measurement holds a 172-287 MB neighbour arena resident while it measures
+the small ones and the ladder does not. Both are three orders of magnitude
+inside every bound, so nothing here turns on it -- but it is the size of the
+effect memory pressure has on this instrument, and a future reading that wants
+tighter resolution than that should not take these cells as interchangeable.
+
+- Observation: the eager block-total recompute costs 0.015-0.016 ms at 10,000
+  logical lines and 0.545-0.641 ms at 100,000, for the count-source the
+  candidate direction actually sketches, at both content classes and for
+  narrowing, widening and same-width rebuilds.
+- Inference: `H2` holds. Recounting display rows is cheap enough that a resize
+  under this design has no meaningful history-side cost, which is the property
+  the whole doc trades reflow away for. The eager choice needs no defence at
+  milestone 1, and the index can stay as sketched -- offsets only, no parallel
+  counts array.
+- Competing interpretations:
+  - *The loop was optimized away.* Refuted by gate 1: every pass's total was
+    consumed and cross-checked, and the totals differ correctly by width.
+  - *The synthetic arena is not the real one.* It is not, and that is why gate 2
+    exists: at the depth where both can be built they agree within 6.2%. What
+    the synthetic arena reproduces is geometry -- record sizes, header offsets,
+    total footprint -- which is all the counting pass touches.
+  - *This is fast because the stimulus is small.* The ladder is the answer: the
+    per-line cost does grow, and it is still 0.64 ms at a depth the byte budget
+    makes unreachable.
+  - *A microbenchmark is not a resize.* Correct, and this entry does not claim
+    otherwise -- see Uncertainty.
+- Uncertainty:
+  - **The pass is not the resize.** A resize also refolds the live screen, which
+    this design does not remove and this probe does not measure. F2 prices the
+    term the design deletes reflow *into*, not the whole event.
+  - **No lookup follows the recompute here.** The index is rebuilt and then
+    thrown away; a real width change is followed by reads, which Part A measured
+    separately and which this entry does not compose with.
+  - **Nothing about eviction.** An arena that has evicted from its front has a
+    different offset structure than one that only ever grew. Unmeasured.
+  - **One machine, one session.** As with `F1`.
+- Next action: `D1` Part B advances -- `F2` is in, `F3` (admission) and `F4`
+  (the edge-case inventory, which can still make `D1` no-go) remain. Two things
+  this entry hands forward: keep the index offsets-only (the primary
+  count-source clears the bound without the parallel array), and if a future
+  design does want the counts array, this entry has already priced what it buys
+  (4.3x on the pass at 100,000 lines, nothing that matters at trial depth).

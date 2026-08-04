@@ -16,6 +16,11 @@
 // sources is touched by this file, and the candidate store is local to it -- Phase 1
 // prototypes live in a test target until `D1` answers go (doc 31, Investigation rules).
 //
+// `TerminalLogicalLineIndexProbe.swift` (F2) reuses `LogicalLineArena` from this file and adds
+// its own harness there rather than editing the arms above; the arena's synthetic initializer
+// and its second counting-pass variant are the only things F2 added here, because they need the
+// type's private storage.
+//
 // It lives in the test target for the same reason `TerminalHistoryDepthSizingProbe` does: it
 // needs `@testable` reach into `PackedRetainedRow` and the cap-taking initializer, which are
 // internal on purpose.
@@ -331,8 +336,61 @@ struct LogicalLineArena {
         }
     }
 
+    /// Builds an arena with real record geometry but unpopulated cell payload. **F2 only.**
+    ///
+    /// The counting pass reads a record header and nothing else, so an arena whose cell words
+    /// are left zero prices it exactly -- and it is the only way to reach 100,000 lines of wide
+    /// content, which is hundreds of megabytes and cannot come out of a real `Terminal` at this
+    /// probe's cost. What must still be real is the *geometry*: record sizes, header offsets and
+    /// the total footprint, because those are what the pointer chase pays for. `31/D1`'s gate 2
+    /// is the control that holds this claim to account -- at 10,000 lines the synthetic arena
+    /// and the real one are both measured, and must agree.
+    ///
+    /// Not usable for reading: `read` would decode zeros. Nothing in F2 reads a cell.
+    init(syntheticCellCounts counts: [Int], width: Int, blockSize: Int = 256) {
+        self.width = width
+        self.blockSize = blockSize
+
+        var total = 0
+        lineOffsets.reserveCapacity(counts.count)
+        for cells in counts {
+            lineOffsets.append(total)
+            total += Self.headerBytes + cells * Self.cellBytes
+        }
+        lineCellCounts = counts
+        arena = [UInt8](repeating: 0, count: total)
+        arena.withUnsafeMutableBufferPointer { bytes in
+            for line in counts.indices {
+                let offset = lineOffsets[line]
+                let count = UInt32(counts[line])
+                for byte in 0..<4 {
+                    bytes[offset + byte] = UInt8(truncatingIfNeeded: count >> (8 * UInt32(byte)))
+                }
+            }
+        }
+        recomputeIndex(width: width)
+    }
+
+    /// The per-line cell counts, so F2 can build a synthetic arena from a real one's geometry.
+    func lineCellCountsSnapshot() -> [Int] { lineCellCounts }
+
+    /// The display-row total computed by a route the blocked prefix cannot share.
+    ///
+    /// `31/D1` gate 1: a counting pass is exactly the loop shape an optimizer deletes, and a
+    /// deleted loop reports an excellent number. Every timed pass is checked against this.
+    func independentDisplayRowTotal(width: Int) -> Int {
+        var total = 0
+        for cells in lineCellCounts { total += Self.displayRows(cells: cells, width: width) }
+        return total
+    }
+
     /// The eager recompute doc 31 settled on: discard every cached block total and rebuild it
-    /// in one pass. F1 calls it once at construction; `F2` is what prices it at depth.
+    /// in one pass. F1 calls it once at construction; `F2` prices it at depth.
+    ///
+    /// This is `31/D1`'s `counts` count-source: the per-line cell count comes from a dense
+    /// parallel array. That is *not* what the candidate direction sketches -- the sketched index
+    /// holds record offsets and the count lives in the record -- so F2's primary variant is
+    /// `recomputeIndexFromArena` below and this one is the priced alternative.
     mutating func recomputeIndex(width: Int) {
         self.width = width
         let blockCount = (lineOffsets.count + blockSize - 1) / blockSize
@@ -344,6 +402,35 @@ struct LogicalLineArena {
             let end = min(start + blockSize, lineOffsets.count)
             for line in start..<end {
                 total += Self.displayRows(cells: lineCellCounts[line], width: width)
+            }
+        }
+        blockPrefix[blockCount] = total
+    }
+
+    /// The same eager pass, reading each line's cell count out of its record header.
+    ///
+    /// `31/D1`'s **primary** count-source, because it is what the candidate direction describes:
+    /// the index stores offsets only. The loop is therefore a strided chase across the whole
+    /// arena rather than a scan of a dense array, and the gap between this and `recomputeIndex`
+    /// is the price of not carrying a parallel counts array.
+    mutating func recomputeIndexFromArena(width: Int) {
+        self.width = width
+        let blockCount = (lineOffsets.count + blockSize - 1) / blockSize
+        blockPrefix = [Int](repeating: 0, count: blockCount + 1)
+        var total = 0
+        arena.withUnsafeBufferPointer { bytes in
+            for block in 0..<blockCount {
+                blockPrefix[block] = total
+                let start = block * blockSize
+                let end = min(start + blockSize, lineOffsets.count)
+                for line in start..<end {
+                    let offset = lineOffsets[line]
+                    let cells = Int(UInt32(bytes[offset])
+                        | (UInt32(bytes[offset + 1]) << 8)
+                        | (UInt32(bytes[offset + 2]) << 16)
+                        | (UInt32(bytes[offset + 3]) << 24))
+                    total += Self.displayRows(cells: cells, width: width)
+                }
             }
         }
         blockPrefix[blockCount] = total

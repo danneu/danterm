@@ -306,3 +306,16 @@ lookup cost after a recompute (Part A's `random seek`, already measured), the
 cost of building or evicting from the arena (F3's), and anything about
 correctness of wrapping at a width other than 179 beyond the cross-check in
 gate 1.
+
+**Outcome, applied once to the frozen statistics.** [F2](findings.md) measured
+the primary count-source at **0.015-0.016 ms at 10,000 logical lines** and
+**0.545-0.641 ms at 100,000**, on both classes and all three width changes, with
+all four gates held (one earlier invocation was voided on the load gate and is
+recorded in F2). Against the thresholds above: confirm required <= 10.0 ms at
+100,000 and the worst cell is 0.641 ms; reject required >= 16.67 ms at 10,000
+and the worst cell is 0.016 ms. **H2 is confirmed, eager recompute stands for
+milestone 1, and lazy per-block recompute stays rejected.** Part B advances by
+one input and D1's direction is unchanged, exactly as the scope note above said
+it must be. The one design input F2 produces for Phase 2: the index stays
+offsets-only, because the primary source clears the bound without a parallel
+counts array.

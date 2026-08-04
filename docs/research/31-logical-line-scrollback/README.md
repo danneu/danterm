@@ -132,6 +132,15 @@ lines of wide content (with the 10,000-line figure recorded alongside).
 Reject: a pass that approaches frame budget at the `28/D11` trial depth, which
 would force the lazy per-block alternative back onto the table.
 
+**Confirmed 2026-08-04 by [F2](findings.md).** Measured 0.641 ms at 100,000
+lines against this bound's 10.0 ms, and 0.016 ms at 10,000 -- about a thousandth
+of the frame the reject condition names. The mechanism is as proposed (one
+count read, one divide, no cell movement), and the per-line cost is flat to
+30,000 lines before cache residency roughly triples it by 100,000, at a depth
+the byte budget makes unreachable. What remains unverified: F2 prices the
+counting pass alone, not a whole resize -- refolding the live screen survives
+this design and is unmeasured here.
+
 ### H3 -- admission gets no worse, and plausibly better
 
 Proposed mechanism: a row scrolling off appends its cells to the open logical
@@ -202,9 +211,17 @@ it.
   gated behind `DANTERM_LOGICAL_LINE_PROBE`. Its `recomputeIndex` is the eager
   pass `F2` needs, and its `blockSize` sweep is where to start if seek cost
   ever binds.
-- [ ] `RESEARCH` **F2, the counting pass at depth.** Eager block-total
-  recompute at 10,000 and 100,000 lines of wide content. Record both figures;
-  H2 states the confirm/reject bounds.
+- [x] `DONE` **F2, the counting pass at depth.** Recorded in
+  [F2](findings.md); `H2` **confirmed** with a 15.6x margin. The eager
+  recompute costs **0.015-0.016 ms at 10,000 logical lines** (17,248 display
+  rows of `mix` content -- 1.72x the depth `28/F23` priced at 600.5 ms of
+  reflow) and **0.545-0.641 ms at 100,000**, reading counts from the record
+  headers as the sketched offsets-only index requires. Eager stands for
+  milestone 1 and lazy per-block recompute stays in Rejected. Phase 2 input:
+  **keep the index offsets-only** -- a parallel counts array is 4.3x faster on
+  the pass at 100,000 lines and buys nothing at any reachable depth. Probe:
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineIndexProbe.swift`,
+  same env gate as F1's.
 - [ ] `RESEARCH` **F3, the admission probe.** Open-line append vs today's
   row-record admission on a feed-shaped stimulus. Expectation neutral
   (H3); verify, do not assume -- this is where the campaign's residuals live.
@@ -221,7 +238,11 @@ it.
   simplification inequality -- and F4 finding any edge case that requires
   stored width makes D1 no-go regardless of F1. Phase 2 does not open and no
   production storage change is licensed until D1 closes; `28/H7` remains the
-  fallback. Next concrete step: F2.
+  fallback. **Part B progress: F2 is in** (rule frozen at `497d181`, `H2`
+  confirmed) and it moved nothing about D1's direction, by its own rule. Still
+  owed: F3, F4, and the simplification inequality. Next concrete step: F4 --
+  it is the only remaining input that can flip the verdict, and it needs no
+  benchmark, so it is worth taking before F3.
 
 ### Phase 2 -- design (begin only after D1 answers go)
 
@@ -263,7 +284,9 @@ Recompute a block's display-row total only when a lookup first touches it
 after a width change. Deferred, not refuted: the human chose eager for the
 first milestone because it is simpler and F2's expectation is that the whole
 pass costs milliseconds. Reopen if F2 measures the eager pass above H2's
-bound.
+bound. **F2 measured it 15.6x inside the bound, so this stays rejected**, and
+the reopening condition is now a depth rather than a doubt: an arena past
+~100,000 logical lines, which the byte budget does not currently allow.
 
 ## Open questions and caveats
 
