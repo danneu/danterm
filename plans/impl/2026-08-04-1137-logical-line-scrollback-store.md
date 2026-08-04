@@ -83,15 +83,27 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 - **I1 -- nothing width-dependent is stored.** A record's bytes are a function of
   content alone. Every width-dependent quantity is a cache that a flush can
   rebuild from the arena.
-- **I2 -- one *charged* bound, and it holds by construction.** Charged bytes --
-  arena bytes in use plus index plus side tables -- never exceed the scrollback
-  byte budget; the arena is allocated once at that capacity and is never grown,
-  compacted or shrunk. **Resident bytes are a different quantity and this
-  invariant does not bound them**: they are bounded by capacity plus metadata,
-  because once the ring cursor has cycled every arena page has been touched, so
-  the blank-record regime is a 16 MiB arena plus ~8 MiB of index resident against
-  a 16 MiB charged bound (`31/D2` Decision 1 as amended). The budget constant
-  does not change at migration, and no content class loses depth.
+- **I2 -- one *charged* bound, and it holds by construction. *(Restated
+  2026-08-04 as `31/D4`'s residency remedy shipped. The original sentence said
+  "the arena's capacity *is* that budget", which the remedy makes false; `31/F8`
+  and the slice-4 notes both record that this restatement is the human's to
+  ratify, so it is marked rather than folded in silently.)*** Charged bytes --
+  arena bytes in use, plus the index, plus **every** side table at what its
+  allocator gave rather than at what its live entries weigh -- never exceed the
+  **arena's capacity**; the arena is allocated once, at a capacity held **below**
+  the scrollback byte budget by a fixed metadata reserve, and is never grown,
+  compacted or shrunk. The three quantities are distinct and each is reported
+  separately by `PO3`'s census: the **budget** is what a pane's history may cost,
+  the **capacity** is what the charge is tested against, and the **reserve** is
+  the difference, which exists so that the index and the side tables are resident
+  inside the budget rather than on top of it. **Resident bytes are a different
+  quantity again and this invariant still does not bound them**: they are
+  capacity plus metadata once the ring cursor has cycled, which lands inside the
+  budget exactly when the metadata fits the reserve -- so the degenerate
+  blank-record regime is still an arena plus ~8 MiB of index resident against a
+  16 MiB budget (`31/D2` Decision 1 as amended). The budget constant does not
+  change at migration; depth costs the reserve, and `PO11`'s "no content class
+  loses depth" is what bounds how large the reserve may be (`31/DD36`).
 - **I3 -- a width change evicts nothing**, at any width down to the engine
   minimum. The lossiness `28/D8`'s row cap could not avoid becomes
   unrepresentable.
@@ -251,17 +263,22 @@ Open conditions that the implementation, not the design, has to discharge:
   1.118x today's store for the same fed input on `scrollback-mixed`, over the
   1.10x line, and an *empty* arena pane is already 16.281 MiB resident because
   the reservation is dirty from construction rather than on first touch (which
-  refutes `31/DD12`). **The remedy `31/D4` names ships, and it is slice 5's:**
-  the arena's capacity is sized *below* the byte budget by the measured index and
-  side-table share, and `PO3`'s census is what proves the new capacity holds. The
+  refutes `31/DD12`). **The remedy `31/D4` names has shipped, in the inserted
+  slice 4a rather than in slice 5** -- it is a change to the store's construction
+  and to its charge model, and the store is still unwired, so it never needed the
+  wiring slice: the arena's capacity is held *below* the byte budget by a fixed
+  metadata reserve (`31/DD36`), every side table is charged at what its allocator
+  gave rather than at what its live entries weigh (`31/DD37`), and `PO3`'s census
+  is what proves the new capacity holds. The
   measured share is 3.23% of the budget on `plain` and 15.29% on `mixed`, not the
   1.61% `31/D4` derived -- the side tables that derivation left as an unmeasured
   constant are 3.7x the index on `mixed`, and the spill table in particular is
   charged at less than it allocates, which is `15/F2`'s error class recurring
   inside `I2`. `I2`'s "the arena is allocated once at that capacity" survives;
   what changes is that capacity and budget stop being the same number, which
-  `I2`'s own wording ("the arena's capacity *is* that budget", Decision above)
-  needs the human to restate before slice 5 implements it. The original statement
+  `I2`'s own wording ("the arena's capacity *is* that budget") is restated for
+  above -- **marked as an amendment, and still owed the human's ratification**.
+  The original statement
   of the gate follows. `I2` bounds charged bytes, and `PO3`'s
   census can only see those; resident is capacity plus metadata once the ring
   cursor has cycled. Measure resident pages through `TerminalMemoryProbe`
@@ -382,6 +399,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
 - [x] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
 - [x] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
+- [x] 4a. perf(terminal): spend `31/F8`'s attributed headroom on the arena's write path, and ship `31/D4`'s residency remedy
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
@@ -639,3 +657,72 @@ Open conditions that the implementation, not the design, has to discharge:
     admission re-derives the tail of whichever row finally closes it. The
     alternative -- keeping the fill through a reopen -- would paint a margin
     inside a line that is still being printed.
+- **The optimize-then-re-price round is inserted as `4a` and `4b` rather than
+  renumbered into the list.** The human took `31/F8`'s "optimize, then re-price"
+  route, which is a slice the plan did not have; numbering it `5` would have
+  renumbered the wiring slice that `31/F8`, `31/D4` and this plan's own gates all
+  refer to by number. Two entries rather than one because the campaign's
+  rule-then-measure separation is a commit boundary: `4a` changes the store and
+  reads no new number, `4b` runs the frozen rule and records what it says.
+- **Slice 4a spends `31/F8`'s measured headroom and ships `31/D4`'s residency
+  remedy, on the same unwired store.** The human's disposition of `F8`'s two
+  rejects was "optimize, then re-price", so this slice changes the store's write
+  path and its construction and changes nothing else -- no call site, no reader,
+  no threshold, and no line of `31/D4`. What it does, in the order `F8`
+  Observation 3 attributed the cost:
+  - **The arena is words, not bytes.** `LogicalLineStore` composed and decomposed
+    each 8-byte cell through eight checked `[UInt8]` subscripts; it now stores
+    `ContiguousArray<UInt64>` and addresses a word as `offset >> 3`. Every
+    sub-word table field is naturally aligned inside one word by the layout that
+    was already there, so `u16`/`u32` are one masked shift and no field straddles
+    a boundary -- stated as assertions rather than as a hope.
+  - **Admission streams from the caller's row.** `admissionContent` returned a
+    freshly allocated `[GridCell]`; it is now `admissionExtent`, which returns a
+    count and a fill style, and the append walks the row's own buffer through an
+    `UnsafeBufferPointer` reading each cell's fields in place. Binding the
+    element was itself a cost -- a `TerminalScalars` copy and release per cell --
+    which is why `PackedRetainedRow.pack` already walks a row exactly this way.
+  - **The charge is maintained, not recomputed.** The write path tested
+    `census.chargedBytes` -- two dictionary capacities and four array capacities,
+    rebuilt -- once per admission and once per eviction step. Index and
+    side-table bytes are now maintained at the operations that move them, the
+    same discipline `grandDisplayRowTotal` keeps, and `census` recomputes them
+    from scratch and asserts the two agree so a missed refresh fails a test.
+  - **Two mechanisms the attribution did not name, both found by re-reading the
+    step the reject is about.** `RingBuffer` wrapped every index with `%` on a
+    capacity that has always been a power of two, so it masks now; and
+    `firstRowCellEnd` walked a display row's worth of columns to answer a
+    question whose only possible boundary is the last column, so it is one probe.
+    The head drop also reads the reclaimed span off the index instead of
+    re-deriving the record's length and then walking the ring's pads.
+- **Two judgment calls in the remedy, recorded as `31/DD36`-`31/DD37` continuing
+  `DD35`'s numbering.** `31/D4`'s remedy names the shape ("capacity sized below
+  the budget by the measured index and side-table share") and leaves the number
+  to judgment, and `31/F8` measured a share that does not fit the number
+  unqualified:
+  - **DD36 -- the metadata reserve is a fixed 1/16 of the byte budget.** `31/F8`
+    measured the metadata share at 3.23% of the budget on `plain` and 15.29% on
+    `mixed`; a reserve at the worst measured class would cost 15.29% of depth,
+    and `31/F8`'s own depth table puts the arena's tightest margin over today's
+    store at **1.076x** (`full`) and 1.084x (`wrapped`) -- so any reserve above
+    ~7.1% makes those classes retain *less* than today's engine, which `PO11`
+    forbids outright ("a class that retains less does not ship"). 1/16 = 6.25% is
+    the largest simple fraction under that ceiling. Its depth cost is 6.25%,
+    which the re-priced depth table shows leaves every measured class at or above
+    today's. What it does **not** do is cover `mixed`'s measured metadata share,
+    so `I2`'s resident reading stays "capacity plus metadata" rather than "inside
+    the budget" on that class. That tension is real and is recorded rather than
+    resolved: closing it needs either a per-class reserve, which the store cannot
+    know at construction, or a depth loss `PO11` currently forbids. A human's to
+    revisit if a later reading makes residency bind harder than depth.
+  - **DD37 -- a side table is charged at its allocated bucket count, not at its
+    entry count.** `Dictionary.capacity` is the count it holds *before* it
+    resizes -- three quarters of the power-of-two bucket count it actually
+    allocated -- so the existing `capacity * stride` charge under-describes the
+    allocation by a third plus the occupancy bitmap, and the spill table was not
+    charging its dictionary at all. Both tables now charge
+    `buckets * (key + value stride)` plus the bitmap and the allocation header.
+    This is `15/D4`'s rule, and it is the mechanism `31/F8` Observation 4 put
+    behind the residency reject; the alternative -- charging `malloc_size` --
+    would measure rather than model, and neither `Dictionary` nor its storage is
+    reachable for that from inside the store.

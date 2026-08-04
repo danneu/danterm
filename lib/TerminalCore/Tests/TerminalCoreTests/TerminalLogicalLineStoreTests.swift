@@ -107,7 +107,7 @@ struct TerminalLogicalLineStoreTests {
         //   one-cell canonical floor `PackedRetainedRow.pack` applies. Without `31/I9`'s
         //   `max(1, ...)` floor in the fold, a blank history would fold to nothing and
         //   `31/D2` Decision 1's 1,048,576-records-to-rows reading would break.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for _ in 0..<5 {
             store.admit(Self.shortRow(width: 8, count: 0, seed: 0))
         }
@@ -129,7 +129,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/AR4` names a stale index as the one new failure mode with no
         //   analogue today -- six invalidation points against an eagerly maintained truth --
         //   and this recount is the only thing that catches a missed one.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 16)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
 
         func check(_ label: Comment) {
             #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount(), label)
@@ -166,7 +166,7 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("Clearing all history adds the retained rows to the evicted count")
     func clearingAllHistoryAdvancesTheEvictedRowCount() {
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for line in 0..<4 {
             store.admit(Self.shortRow(width: 8, count: 3, seed: line))
         }
@@ -187,7 +187,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/I1` and `31/I3` are the design's whole premise -- a record's
         //   bytes are a function of content alone, so a narrow-then-widen cycle is
         //   unrepresentable as a loss rather than merely tested against.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 20)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 20)
         for line in 0..<10 {
             store.admit(Self.filledRow(width: 20, seed: line, softWrapped: true))
             store.admit(Self.shortRow(width: 20, count: 7, seed: line))
@@ -221,7 +221,7 @@ struct TerminalLogicalLineStoreTests {
         //   capacity does not grow" -- a charge that describes a model rather than an
         //   allocation was wrong by 2.2x once already.
         for blankHistory in [false, true] {
-            var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 24)
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 24)
             let capacity = store.census.capacityBytes
             var peakInUse = 0
 
@@ -246,10 +246,127 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
+    @Test("The arena's capacity is allocated below the byte budget by the metadata reserve")
+    func arenaCapacityIsHeldBelowTheBudget() {
+        // Intent: the store reserves less than its budget for the arena, so the index and the
+        //   side tables are resident inside the bound rather than on top of it, and the charge
+        //   is tested against the arena's capacity rather than against the budget.
+        // Why it exists: `31/F8` Observation 4 measured a cycled arena pane at 1.118x today's
+        //   resident bytes for the same fed input, because the reservation is dirty from
+        //   construction and the metadata sits on top of it. `31/D4`'s residency remedy is
+        //   exactly this reserve, and without a test the two numbers can silently become one
+        //   again -- which is the state `31/I2`'s original "the arena's capacity *is* that
+        //   budget" describes.
+        let budget = 1 << 16
+        var store = Terminal.LogicalLineStore(budgetBytes: budget, width: 16)
+        let reserve = Terminal.LogicalLineStore.metadataReserveBytes(forBudget: budget)
+
+        #expect(reserve > 0)
+        #expect(store.census.budgetBytes == budget)
+        #expect(store.census.capacityBytes == budget - reserve)
+        #expect(store.census.capacityBytes < store.census.budgetBytes)
+
+        for line in 0..<4_000 {
+            store.admit(Self.filledRow(width: 16, seed: line, softWrapped: true))
+            store.admit(Self.shortRow(width: 16, count: 7, seed: line))
+            #expect(store.census.chargedBytes <= store.census.capacityBytes)
+        }
+        #expect(store.recordCount > 0)
+        #expect(store.census.capacityBytes == budget - reserve)
+    }
+
+    @Test("The spill table's own storage stays charged after the records that filled it are gone")
+    func spillTableChargesWhatItAllocated() {
+        // Intent: what the spill table charges follows what its dictionary allocated, not what
+        //   its live entries weigh, so evicting every spill-bearing record leaves the retained
+        //   bucket storage inside the charge.
+        // Why it exists: `31/F8` Observation 4 found the census charging 1.931 MiB of side
+        //   tables on `scrollback-mixed` against 4.375 MiB of resident excess, and named the gap
+        //   as `spillsBySequence`'s own storage -- `15/F2`'s "a charge that describes a model
+        //   rather than an allocation" recurring inside `31/I2`. A charge that falls back to
+        //   zero the moment the entries go is that same error stated in the other direction.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
+        #expect(store.census.sideTableBytes == 0)
+
+        for line in 0..<200 {
+            var row = Self.filledRow(width: 16, seed: line, softWrapped: false)
+            row.cells[0] = Terminal.GridCell(
+                scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
+                kind: .narrow
+            )
+            store.admit(row)
+        }
+        let filled = store.census.sideTableBytes
+        #expect(filled > 0)
+
+        // Evict every spill-bearing record, leaving plain ones behind so the store is not
+        // emptied -- the payloads are freed with their records, the table that held them is
+        // not, and neither is its charge.
+        for line in 0..<200 {
+            store.admit(Self.filledRow(width: 16, seed: line, softWrapped: false))
+        }
+        for _ in 0..<200 { store.evictOneDisplayRow() }
+        #expect(store.recordCount > 0)
+        #expect(store.census.sideTableBytes > 0)
+        #expect(store.census.sideTableBytes < filled)
+
+        store.removeAll()
+        #expect(store.census.sideTableBytes == 0)
+    }
+
+    @Test("The maintained charge agrees with a full recount after each of the six triggers")
+    func maintainedChargeAgreesWithARecount() {
+        // Intent: the O(1) charged total the write path tests against the capacity equals the
+        //   census's from-scratch recount after every operation that can move it.
+        // Why it exists: the charge is maintained incrementally for the same reason
+        //   `grandDisplayRowTotal` is, and it inherits `31/AR4`'s failure mode -- a mutating
+        //   operation that moves a metadata term without refreshing the total loosens `31/I2`'s
+        //   bound silently. This is the recount that catches a missed refresh.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
+
+        func check(_ label: Comment) {
+            #expect(store.chargedBytes == store.census.chargedBytes, label)
+        }
+
+        for line in 0..<12 {
+            var row = Self.filledRow(width: 16, seed: line, softWrapped: true)
+            row.cells[1].hyperlinkId = 7
+            row.cells[2].contentIdentity = Terminal.ContentIdentity(line + 1)
+            row.cells[3] = Terminal.GridCell(
+                scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
+                kind: .narrow
+            )
+            store.admit(row)
+            store.admit(Self.backgroundErasedRow(width: 16, count: 5, seed: line, fillStyle: 9))
+            check("admission")
+        }
+
+        for width in [9, 40, 16] {
+            _ = store.setWidth(width)
+            check("width change to \(width)")
+        }
+
+        store.evictOneDisplayRow()
+        check("head eviction")
+
+        _ = store.truncateTail(displayRows: 2)
+        check("tail truncation")
+
+        store.admit(Self.filledRow(width: 16, seed: 3, softWrapped: true))
+        store.forceSplitOpenRecord()
+        check("forced split")
+
+        store.reopenTailRecord()
+        check("reopen")
+
+        store.removeAll()
+        check("clear all")
+    }
+
     @Test("The census reports capacity and bytes-in-use as separate quantities")
     func censusSeparatesCapacityFromBytesInUse() {
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 16)
-        #expect(store.census.capacityBytes == 1 << 16)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
+        #expect(store.census.capacityBytes > 0)
         #expect(store.census.arenaBytesInUse == 0)
 
         store.admit(Self.filledRow(width: 16, seed: 0, softWrapped: false))
@@ -272,7 +389,7 @@ struct TerminalLogicalLineStoreTests {
         //   that no anchor moves further per admitted row than it does today; a whole-record
         //   step would drop the entire line at once, which `31/F6` `HR5` found user-visible in
         //   four anchors and the scrollbar.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<10 {
             store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
         }
@@ -299,7 +416,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/D2` Decision 5 and `31/DD13` chose this to *reproduce today's
         //   output* -- it is what `isHistoryHeadTruncated` described -- rather than the one
         //   bit cheaper alternative of folding the trimmed head as a fresh line start.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<4 {
             store.admit(
                 Self.filledRow(
@@ -324,7 +441,7 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("Trimming the head of a line with no prompt mark leaves no mark behind")
     func trimmedHeadOfAnUnmarkedLineCarriesNoMark() {
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<3 {
             store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
         }
@@ -346,7 +463,7 @@ struct TerminalLogicalLineStoreTests {
         //   leaves no back-pointer, so a reader rejoining the pair has only adjacency and the
         //   marker to go on.
         let capacity = 1 << 16
-        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 32)
+        var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
         let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
 
         var admitted = 0
@@ -378,7 +495,7 @@ struct TerminalLogicalLineStoreTests {
         //   for exactly this -- dropping a `forcedSplit` record without stamping diverges from
         //   today's `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`, which inherited
         //   condition 10 exists to prevent.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
         store.forceSplitOpenRecord()
         store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
@@ -398,7 +515,7 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("A split logical line's semantic mark appears exactly once, on the piece that starts it")
     func splitLineCarriesItsMarkOnlyOnTheFirstPiece() {
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
         store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
         store.forceSplitOpenRecord()
@@ -423,7 +540,7 @@ struct TerminalLogicalLineStoreTests {
         //   `31/DD11` restates `15/F4`'s leak proof as "bytes-in-use falls when records are
         //   evicted". A per-record style slot is a new allocation inside that bound, so it is
         //   only admissible if it is charged and released like the spill table beside it.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 24)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 24)
         #expect(store.census.sideTableBytes == 0)
 
         store.admit(Self.shortRow(width: 24, count: 6, seed: 0))
@@ -451,7 +568,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: the fill is keyed to the line's *end* while a trim eats its *start*,
         //   and the two meet in the one record a trim rewrites (`31/D2` Decision 2 step 3). A
         //   trim that dropped the fill would repaint a still-visible line in the default colour.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<4 {
             store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
         }
@@ -479,7 +596,7 @@ struct TerminalLogicalLineStoreTests {
         //   middle of a line. Ownership falls out of admission order (the split closes the piece
         //   before the closing row's cells are appended), and this pins it (`31/DD33`).
         let capacity = 1 << 16
-        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 32)
+        var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
         let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
 
         var admitted = 0
@@ -508,7 +625,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: a fill is the paint after a line's *end*, and a reopened line has no
         //   end -- its last display row is about to be extended by the next admission, which
         //   re-derives whatever tail finally closes it (`31/DD35`).
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.backgroundErasedRow(width: 8, count: 4, seed: 0, fillStyle: 15))
         #expect(store.recordSummary(at: 0)!.trailingFillStyle == 15)
 
@@ -527,7 +644,7 @@ struct TerminalLogicalLineStoreTests {
         //   hand-back is exactly where the two representations meet. Returning the content walk
         //   would erase the line's background the moment the window grew, and re-admitting the
         //   painted row re-derives the same fill, which is what makes the round trip closed.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.shortRow(width: 8, count: 3, seed: 0))
         store.admit(Self.backgroundErasedRow(width: 8, count: 2, seed: 1, fillStyle: 18))
 
@@ -554,7 +671,7 @@ struct TerminalLogicalLineStoreTests {
         //   `31/DD14`'s pad for a closed record and `31/DD20`'s forced split for the open
         //   tail are both only correct if the retained suffix survives the seam untouched.
         let capacity = 1 << 15
-        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 12)
+        var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 12)
 
         // A shadow model of everything admitted, so "expected retained suffix" is derived
         // from the input rather than from the store's own arithmetic.
@@ -603,7 +720,7 @@ struct TerminalLogicalLineStoreTests {
         //   pad needs a record's length at placement time, which is false of the open tail;
         //   `31/PO12` already tested this shape and had no decision behind it until then.
         let capacity = 1 << 14
-        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 16)
+        var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 16)
 
         var expected: [Unicode.Scalar] = []
         var seed = 0
@@ -634,7 +751,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/DD20` names this edge explicitly ("an empty open record needs no
         //   split") so it is not discovered later as a spurious split marker on a fresh line.
         let capacity = 1 << 13
-        var store = Terminal.LogicalLineStore(capacityBytes: capacity, width: 16)
+        var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 16)
 
         // Hard-ended lines only: every record closes immediately, so the record that meets the
         // seam is always freshly opened and empty when the fit test runs.
@@ -656,7 +773,7 @@ struct TerminalLogicalLineStoreTests {
         //   neither the head nor the tail folds to exactly the cells it folded to before.
         // Why it exists: `31/I5` is what makes the arena's cost model honest -- if the middle
         //   were writable, no operation's cost would be bounded by the head and tail alone.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 18, width: 12)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 12)
         for line in 0..<20 {
             store.admit(Self.filledRow(width: 12, seed: line, softWrapped: true))
             store.admit(Self.shortRow(width: 12, count: 5, seed: line))
@@ -686,7 +803,7 @@ struct TerminalLogicalLineStoreTests {
         //   formats owed, and `31/D3` Decision 6 keyed identity by *cell offset in the logical
         //   line* rather than by column -- so a trim, which shifts the record's start, is
         //   exactly where a naive key would silently lose a value.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 6)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
 
         var cells: [Terminal.GridCell] = []
         for column in 0..<6 {
@@ -737,7 +854,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
         //   and `28/I3` requires that neither encoding lose a value, because
         //   `activationIdentity` reads this out of history.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 16)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
         var cells: [Terminal.GridCell] = []
         for column in 0..<16 {
             var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column % 26))!)
@@ -769,7 +886,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/D2` Decision 2's operation 2 is `severScrollbackWrapClaim` and
         //   `restoreWrapClaimBeforeCursor` under the new store; both must stay header-only so
         //   the "middle immutable" premise and the charge both hold.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true))
         let cells = store.recordCells(at: 0)!
         #expect(store.displayRow(at: 0)!.isSoftWrapped)
@@ -792,7 +909,7 @@ struct TerminalLogicalLineStoreTests {
         //   grand total, the recount and the charge all agree afterwards.
         // Why it exists: `31/D2` operation 4 is the only operation that shrinks the arena from
         //   the back, and `31/PO6` asks for exactly this consistency check.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<3 {
             store.admit(Self.filledRow(width: 8, seed: chunk, softWrapped: true))
         }
@@ -819,7 +936,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/D3` Decision 4 and `31/DD16` -- today `reconstructLogicalLines`
         //   repacks the retained tail with the live rows so no such row exists; under this
         //   store history does not refold, so it would.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 10)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 10)
         for chunk in 0..<3 {
             store.admit(Self.filledRow(width: 10, seed: chunk, softWrapped: true))
         }
@@ -837,7 +954,7 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("A width change leaves a closed tail record alone")
     func widthChangeLeavesAClosedTailAlone() {
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 10)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 10)
         for chunk in 0..<3 {
             store.admit(Self.filledRow(width: 10, seed: chunk, softWrapped: true))
         }
@@ -858,7 +975,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: `31/D3` Decision 1 rule 2 -- a planned frame performs at most one
         //   display-row-to-record locate -- is a contract the API shape has to make natural,
         //   because nothing in the type system stops a per-row lookup (`31/AR5`).
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for line in 0..<6 {
             store.admit(Self.filledRow(width: 8, seed: line, softWrapped: true))
             store.admit(Self.shortRow(width: 8, count: 3, seed: line))

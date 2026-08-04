@@ -47,7 +47,7 @@ struct TerminalLogicalLineFoldTests {
             try #require(retained.count > 4, "\(content) retained too little to compare")
 
             var store = Terminal.LogicalLineStore(
-                capacityBytes: 1 << 20,
+                budgetBytes: 1 << 20,
                 width: content.columns
             )
             for row in retained {
@@ -86,7 +86,7 @@ struct TerminalLogicalLineFoldTests {
                 reference.feed(Array(content.stimulus.utf8))
 
                 var store = Terminal.LogicalLineStore(
-                    capacityBytes: 1 << 20,
+                    budgetBytes: 1 << 20,
                     width: content.columns
                 )
                 for index in 0..<reference.scrollbackRowCount {
@@ -143,7 +143,7 @@ struct TerminalLogicalLineFoldTests {
             // Admit the whole line as one display row at a width that holds it, then fold it at
             // the narrow width: the record's bytes never change, only the derivation.
             var store = Terminal.LogicalLineStore(
-                capacityBytes: 1 << 16,
+                budgetBytes: 1 << 16,
                 width: clusters * 2
             )
             var cells: [Terminal.GridCell] = []
@@ -179,7 +179,7 @@ struct TerminalLogicalLineFoldTests {
         //   head it precedes -- which is what `pack(line:columns:)` does today.
         // Admitted as one display row at width 4, then folded at 3, so the boundary the spacer
         // fills is one the fold discovers rather than one admission wrote.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 4)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
         var wide = Terminal.GridCell(
             scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
             kind: .wideHead,
@@ -215,7 +215,7 @@ struct TerminalLogicalLineFoldTests {
         // Why it exists: `31/I1` -- a spacer's *position* is a function of the width, so
         //   storing one would be width-dependent data in history, which is `31/D1`'s no-go
         //   trigger.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 3)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         var wrapped = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
             Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
@@ -251,7 +251,7 @@ struct TerminalLogicalLineFoldTests {
         //   whole blank display rows on a narrow. The amended design keeps both properties at
         //   once -- the paint is width-relative, so it is an attribute rather than cells -- and
         //   this is the test that says the row count stays put while the paint survives.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 20)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 20)
         var cells = (0..<3).map { column in
             Terminal.GridCell(
                 scalars: TerminalScalars(Unicode.Scalar(UInt32(97 + column))!),
@@ -303,7 +303,7 @@ struct TerminalLogicalLineFoldTests {
         //   right only by storing a whole row of blanks. As a fill it is one style id on a
         //   zero-cell record, and `31/DD15`'s one-display-row floor is what keeps the row
         //   itself from folding away.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 12)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 12)
         store.admit(
             Terminal.GridRow(
                 cells: (0..<12).map { _ in
@@ -336,7 +336,7 @@ struct TerminalLogicalLineFoldTests {
         //   to-edge paint is width-relative and becomes an attribute, while an interior erase
         //   is positionally real content. Without this test the fill rule could quietly swallow
         //   any styled blank and lose a column a program deliberately painted mid-line.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 10)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 10)
         var cells: [Terminal.GridCell] = [
             Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
             Terminal.GridCell(scalars: .empty, kind: .padding, styleId: 6),
@@ -374,7 +374,7 @@ struct TerminalLogicalLineFoldTests {
         // Why it exists: the fill is paint, not text. If it reached `recordCells` or
         //   `displayRow`, selecting a background-erased line would copy trailing blanks the
         //   program never printed, which is a user-visible regression no width would undo.
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 8)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         var cells = [
             Terminal.GridCell(scalars: TerminalScalars("h" as Unicode.Scalar), kind: .narrow),
             Terminal.GridCell(scalars: TerminalScalars("i" as Unicode.Scalar), kind: .narrow),
@@ -406,7 +406,7 @@ struct TerminalLogicalLineFoldTests {
         var reference = try #require(Terminal(columns: 17, rows: 6))
         reference.feed(Array(RetainedContent.backgroundErased.stimulus.utf8))
 
-        var store = Terminal.LogicalLineStore(capacityBytes: 1 << 20, width: 17)
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 17)
         for index in 0..<reference.scrollbackRowCount {
             store.admit(reference.retainedRowForTesting(at: index)!)
         }
@@ -434,7 +434,7 @@ struct TerminalLogicalLineFoldTests {
         //   cell at that column, and nothing at all when the style is default -- so the fold
         //   reproduces today's output only if the repair is asymmetric in the same way.
         for (styleId, expectedCells) in [(Terminal.StyleId(5), 3), (Terminal.defaultStyleId, 2)] {
-            var store = Terminal.LogicalLineStore(capacityBytes: 1 << 16, width: 3)
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
             var wrapped = Terminal.GridRow(cells: [
                 Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
                 Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),

@@ -4,8 +4,9 @@
 // This is the store `31/D1` funded and `31/D2`/`31/D3` specified. History holds one record per
 // logical line a program printed; wrapping is derived at read from (record, width); a width
 // change rewrites no retained byte and evicts nothing, because there is no width in storage to
-// rewrite (`I1`, `I3`). The arena's capacity *is* the byte budget, allocated once and never
-// grown, compacted or shrunk (`I2`), so at steady state admission allocates nothing.
+// rewrite (`I1`, `I3`). The arena is allocated once at a capacity held *below* the byte budget by
+// the metadata reserve, and is never grown, compacted or shrunk (`I2` as amended by `31/D4`'s
+// residency remedy), so at steady state admission allocates nothing.
 //
 // What belongs here: the arena and its ring discipline, the five mutating operations `31/D2`
 // Decision 2 enumerates (admit, close/reopen the tail, evict at the head, truncate the tail,
@@ -58,13 +59,21 @@ extension Terminal {
             var base: Terminal.ContentIdentity
         }
 
-        /// What the store charges against its budget, reported so capacity and bytes-in-use are
-        /// separately visible (`31/DD11`, restating `15/F4`'s leak proof in arena terms).
+        /// What the store charges against its budget, reported so budget, capacity and
+        /// bytes-in-use are separately visible (`31/DD11`, restating `15/F4`'s leak proof in
+        /// arena terms).
         ///
-        /// `chargedBytes` is the single quantity `31/I2` bounds. It is **not** resident bytes:
-        /// once the ring's write cursor has cycled, every arena page has been touched, which is
-        /// the reading `31/AR6` promotes to a gate rather than an assumption.
+        /// `chargedBytes` is the single quantity `31/I2` bounds, and it is bounded by
+        /// `capacityBytes` rather than by `budgetBytes`: the arena is allocated **below** the
+        /// budget by the metadata reserve, so that the index and the side tables live inside the
+        /// bound rather than resident on top of it (`31/D4`'s residency remedy, `31/DD36`).
+        /// Charged is still **not** resident: once the ring's write cursor has cycled every arena
+        /// page has been touched, which is the reading `31/AR6` promoted to a gate.
         struct Census: Equatable, Sendable {
+            /// The byte budget the store was configured with -- what a pane's history may cost.
+            var budgetBytes: Int
+            /// The arena's allocated capacity, which is the budget less the metadata reserve and
+            /// is the number `chargedBytes` is bounded by.
             var capacityBytes: Int
             var arenaBytesInUse: Int
             var indexBytes: Int
@@ -101,10 +110,17 @@ extension Terminal {
 
         // MARK: - Stored state
 
-        /// The arena. Allocated once at `capacityBytes` and never resized -- `31/D2` Decision 1
-        /// rejected both geometric growth (resident slack no charge model can see, the shape of
-        /// `15/F4`'s leak) and `memmove` compaction (a 16 MiB copy on the admission path).
-        private var arena: [UInt8]
+        /// The arena, stored as 64-bit words. Allocated once at `arenaCapacity` and never
+        /// resized -- `31/D2` Decision 1 rejected both geometric growth (resident slack no charge
+        /// model can see, the shape of `15/F4`'s leak) and `memmove` compaction (a 16 MiB copy on
+        /// the admission path).
+        ///
+        /// Words rather than bytes because every offset in the store is a byte offset on an
+        /// 8-byte grain -- headers, cells and both in-arena tables all are -- so a word is
+        /// addressed as `offset >> 3` and read or written whole. `31/F8` Observation 3 priced the
+        /// alternative: composing a word out of eight checked `[UInt8]` subscripts put admission
+        /// at ~1.1 ns per stored cell byte, which was the whole of that finding's reject.
+        private var arena: ContiguousArray<UInt64>
 
         /// Byte offset of the oldest retained record's header.
         private var head = 0
@@ -141,8 +157,25 @@ extension Terminal {
 
         private(set) var width: Int
 
-        private let capacity: Int
+        /// The byte budget `31/I2` bounds the charge by, as configured.
+        private let budget: Int
+
+        /// The arena's allocated capacity: the budget less the metadata reserve, and the number
+        /// the charge is actually tested against (`31/DD36`).
+        private let arenaCapacity: Int
+
         private let forcedSplitCellCap: Int
+
+        /// Index plus side tables, maintained at the mutating operations that move them rather
+        /// than recomputed per call.
+        ///
+        /// The same discipline `grandDisplayRowTotal` keeps, and for the same reason: the write
+        /// path tests the charge against the capacity once per admission and once per eviction
+        /// step, and `31/F8` Observation 3 counted a full `census` recompute -- two dictionary
+        /// capacities and four array capacities -- on each of those. `census` recomputes it from
+        /// scratch and asserts the two agree, so a missed refresh fails a test rather than
+        /// silently drifting the bound (`31/AR4`'s failure mode, applied to the charge).
+        private var metadataBytes = 0
 
         /// The open tail record's side tables, held outside the arena until it closes.
         ///
@@ -179,33 +212,87 @@ extension Terminal {
 
         // MARK: - Construction
 
-        /// Reserves the whole budget up front, which is what makes the bound hold by
-        /// construction rather than by a model checked against a second model.
-        init(capacityBytes: Int = Terminal.productionScrollbackBudgetBytes, width: Int) {
-            precondition(capacityBytes >= 1024 && capacityBytes % 8 == 0)
+        /// Reserves the arena up front, at the budget less the metadata reserve, which is what
+        /// makes the bound hold by construction rather than by a model checked against a second
+        /// model.
+        init(budgetBytes: Int = Terminal.productionScrollbackBudgetBytes, width: Int) {
+            precondition(budgetBytes >= 1024 && budgetBytes % 8 == 0)
             precondition(width >= 1)
-            capacity = capacityBytes
-            arena = [UInt8](repeating: 0, count: capacityBytes)
+            budget = budgetBytes
+            arenaCapacity = budgetBytes - Self.metadataReserveBytes(forBudget: budgetBytes)
+            arena = ContiguousArray(repeating: 0, count: arenaCapacity / 8)
             self.width = width
-            forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: capacityBytes)
+            forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
             blocks = RingBuffer(filler: Block(rowStart: 0, rowCount: 0))
+            metadataBytes = indexChargeBytes + sideTableChargeBytes
+        }
+
+        /// The spelling `31/F8`'s eviction probe compiles against.
+        ///
+        /// That probe is a frozen instrument -- `31/D4`'s rule is applied to it unedited -- and it
+        /// constructs the store with the production **budget** under this label, which is what the
+        /// argument has always meant to a caller: how many bytes a pane's history may cost. The
+        /// arena's capacity stopped being that same number when `31/D4`'s residency remedy landed,
+        /// so new call sites say `budgetBytes:` and this stays to keep the instrument runnable.
+        init(capacityBytes: Int, width: Int) {
+            self.init(budgetBytes: capacityBytes, width: width)
+        }
+
+        /// How far below the byte budget the arena's capacity is held, so the index and the side
+        /// tables are resident *inside* the bound rather than on top of it.
+        ///
+        /// `31/DD36` derives the 1/16: `31/F8` measured the metadata share at 3.23% of the budget
+        /// on `plain` and 15.29% on `mixed`, and measured the arena's depth margin over today's
+        /// store at 1.076x on its tightest class -- so a reserve above ~7.1% would make a content
+        /// class retain *less* than today's engine, which `31/PO11` forbids. 1/16 is the largest
+        /// simple fraction under that ceiling.
+        static func metadataReserveBytes(forBudget budget: Int) -> Int {
+            ((budget / 16) + 7) & ~7
         }
 
         // MARK: - Census
 
-        var capacityBytes: Int { capacity }
+        var budgetBytes: Int { budget }
+
+        var capacityBytes: Int { arenaCapacity }
 
         var recordCount: Int { offsets.count }
 
+        /// The single quantity `31/I2` bounds, in O(1).
+        ///
+        /// Read on the write path -- once per admission and once per eviction step -- which is why
+        /// it reads a maintained total instead of building a `Census`.
+        var chargedBytes: Int { bytesInUse + metadataBytes }
+
         var census: Census {
-            Census(
-                capacityBytes: capacity,
-                arenaBytesInUse: bytesInUse,
-                indexBytes: offsets.capacity * MemoryLayout<Int>.stride
-                    + blocks.capacity * MemoryLayout<Block>.stride,
-                sideTableBytes: spillBytes + openScratchBytes + fillStyleBytes
+            // The maintained total against a full recompute: a mutating operation that moves a
+            // metadata term without refreshing the total fails here rather than loosening the
+            // bound in production.
+            assert(
+                metadataBytes == indexChargeBytes + sideTableChargeBytes,
+                "the maintained metadata charge drifted from a recount"
             )
+            return Census(
+                budgetBytes: budget,
+                capacityBytes: arenaCapacity,
+                arenaBytesInUse: bytesInUse,
+                indexBytes: indexChargeBytes,
+                sideTableBytes: sideTableChargeBytes
+            )
+        }
+
+        private var indexChargeBytes: Int {
+            offsets.capacity * MemoryLayout<Int>.stride
+                + blocks.capacity * MemoryLayout<Block>.stride
+        }
+
+        private var sideTableChargeBytes: Int {
+            spillTableBytes + openScratchBytes + fillStyleBytes
+        }
+
+        private mutating func refreshMetadataCharge() {
+            metadataBytes = indexChargeBytes + sideTableChargeBytes
         }
 
         private var openScratchBytes: Int {
@@ -213,12 +300,42 @@ extension Terminal {
                 + openIdentityRuns.capacity * MemoryLayout<IdentityRun>.stride
         }
 
-        /// The fill table's charge, at the dictionary's *capacity* rather than its count --
-        /// `15/D4`'s rule, the same one the index's 8-B-per-record charge follows: charge what
-        /// the allocator gave. Only records that carry a fill move this term.
+        /// The spill table's charge: its payloads **and** the hash table holding them.
+        ///
+        /// The second term is what `31/F8` Observation 4 found missing -- the census charged
+        /// 1.931 MiB of side tables on `scrollback-mixed` while the arena's resident excess was
+        /// 4.375 MiB, and the gap was this dictionary's own storage. A charge that describes the
+        /// payloads and not the allocation is `15/F2`'s error class, recurring inside `31/I2`.
+        private var spillTableBytes: Int {
+            spillBytes
+                + Self.hashTableBytes(
+                    capacity: spillsBySequence.capacity,
+                    entryStride: MemoryLayout<Int>.stride
+                        + MemoryLayout<[[Unicode.Scalar]]>.stride
+                )
+        }
+
+        /// The fill table's charge, on the same rule. Only records that carry a fill move it.
         private var fillStyleBytes: Int {
-            fillStylesBySequence.capacity
-                * (MemoryLayout<Int>.stride + MemoryLayout<Terminal.StyleId>.stride)
+            Self.hashTableBytes(
+                capacity: fillStylesBySequence.capacity,
+                entryStride: MemoryLayout<Int>.stride + MemoryLayout<Terminal.StyleId>.stride
+            )
+        }
+
+        /// What a `Dictionary` at this capacity actually allocated, rather than what its live
+        /// entries weigh.
+        ///
+        /// `Dictionary.capacity` is the count it holds *before* it resizes -- three quarters of
+        /// the power-of-two bucket count it allocated -- so `capacity * stride` under-charges the
+        /// allocation by a third plus the occupancy bitmap. Charging the buckets is `15/D4`'s
+        /// rule, the same one the index's 8-B-per-record charge follows: charge what the
+        /// allocator gave, not what the model says is in use.
+        private static func hashTableBytes(capacity: Int, entryStride: Int) -> Int {
+            guard capacity > 0 else { return 0 }
+            var buckets = 1
+            while buckets - buckets / 4 < capacity { buckets <<= 1 }
+            return Terminal.arrayStorageHeaderBytes + buckets * entryStride + buckets / 8
         }
 
         /// The record cap `31/I10` derives from the budget, exposed so a caller can drive a
@@ -239,8 +356,7 @@ extension Terminal {
         /// row whose tail past the content is painted by a background erase contributes that
         /// paint as the record's **trailing fill style**, not as cells (`31/DD25` as amended).
         mutating func admit(_ row: Terminal.GridRow) {
-            let admission = admissionContent(row)
-            var cells = admission.cells
+            let admission = admissionExtent(row)
 
             // A hard-ended row with no content still occupies a display row when the line
             // already has cells, and a zero-cell append would fold that row away. One blank
@@ -249,25 +365,30 @@ extension Terminal {
             // record rather than an empty append. It takes the fill's style when there is one,
             // so the restored row is painted from its first column exactly as today's stored
             // row is (`31/DD34`).
-            if row.isSoftWrapped == false, cells.isEmpty, openRecordCellCount > 0 {
-                cells = [
+            let restoresBlankRow = row.isSoftWrapped == false
+                && admission.contentEnd == 0
+                && openRecordCellCount > 0
+            let cellCount = restoresBlankRow ? 1 : admission.contentEnd
+
+            // `31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
+            // the cut on a display-row boundary at the admitting width.
+            if let open = openTailRecord(), open.cellCount + cellCount > forcedSplitCellCap {
+                forceSplitOpenRecord()
+            }
+
+            makeRoom(forCells: cellCount)
+            openRecordIfNeeded(mark: row.semanticPrompt)
+            if restoresBlankRow {
+                appendCell(
                     Terminal.GridCell(
                         scalars: .empty,
                         kind: .padding,
                         styleId: admission.fillStyle ?? Terminal.defaultStyleId
                     )
-                ]
+                )
+            } else {
+                appendRowPrefix(row, cellCount: cellCount)
             }
-
-            // `31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
-            // the cut on a display-row boundary at the admitting width.
-            if let open = openTailRecord(), open.cellCount + cells.count > forcedSplitCellCap {
-                forceSplitOpenRecord()
-            }
-
-            makeRoom(forCells: cells.count)
-            openRecordIfNeeded(mark: row.semanticPrompt)
-            appendCells(cells)
             setTrailingFillOnTail(admission.fillStyle)
 
             // `31/DD5`: the display-row count is *counted* here, not derived -- admission knows
@@ -280,7 +401,13 @@ extension Terminal {
             evictToBudget()
         }
 
-        /// What a display row contributes to its logical line: cells, and a trailing fill style.
+        /// What a display row contributes to its logical line: how many of its cells are content,
+        /// and the style its tail is painted in.
+        ///
+        /// An **extent** rather than a materialized `[GridCell]`: the caller's row already holds
+        /// those cells contiguously, and `31/F8` Observation 3 charged the admission path one
+        /// array allocation plus a full copy of every cell per admitted row for the privilege of
+        /// naming them twice.
         ///
         /// `reconstructLogicalLines`' own rule (`31/F4` case 17): a soft-wrapped row is measured
         /// to full width, a hard-ended row to its **content** end. It is deliberately not
@@ -298,9 +425,9 @@ extension Terminal {
         /// re-derived at read against whatever width is in force. Blanks that do *not* reach the
         /// margin stay cells: they sit between content and the fill, so their columns are
         /// positionally real and re-wrap with the rest of the line.
-        private func admissionContent(
+        private func admissionExtent(
             _ row: Terminal.GridRow
-        ) -> (cells: [Terminal.GridCell], fillStyle: Terminal.StyleId?) {
+        ) -> (contentEnd: Int, fillStyle: Terminal.StyleId?) {
             var end = 0
             var fillStyle: Terminal.StyleId?
             if row.isSoftWrapped {
@@ -318,9 +445,11 @@ extension Terminal {
                 if end < width, isFillBlank(margin) {
                     fillStyle = margin.styleId
                     var start = width - 1
-                    while start > end, isFillBlank(row.cell(at: start - 1)),
-                          row.cell(at: start - 1).styleId == margin.styleId
-                    {
+                    while start > end {
+                        let candidate = row.cell(at: start - 1)
+                        guard isFillBlank(candidate), candidate.styleId == margin.styleId else {
+                            break
+                        }
                         start -= 1
                     }
                     end = start
@@ -329,7 +458,7 @@ extension Terminal {
             if end > 0, row.cell(at: end - 1).kind == .spacerHead {
                 end -= 1
             }
-            return (end <= 0 ? [] : (0..<end).map { row.cell(at: $0) }, fillStyle)
+            return (max(0, end), fillStyle)
         }
 
         /// Whether a cell is a blank that a background erase painted: `pack`'s canonical-extent
@@ -359,11 +488,13 @@ extension Terminal {
                 record.hasTrailingFill = false
                 writeHeader(record, at: offset)
                 fillStylesBySequence.removeValue(forKey: firstRecordSequence + index)
+                refreshMetadataCharge()
                 return
             }
             record.hasTrailingFill = true
             writeHeader(record, at: offset)
             fillStylesBySequence[firstRecordSequence + index] = styleId
+            refreshMetadataCharge()
         }
 
         /// The style painted after this record's content ends, on its last display row.
@@ -418,6 +549,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse -= closedLength - record.byteLength
             writeCursor = offset + record.byteLength
+            refreshMetadataCharge()
         }
 
         /// Materializes the styled blank a background-erase sever or spacer clear leaves behind
@@ -439,7 +571,7 @@ extension Terminal {
                 lastRowColumns = end - start
             }
             guard lastRowColumns == width - 1 else { return }
-            appendCells([Terminal.GridCell(scalars: .empty, kind: .padding, styleId: styleId)])
+            appendCell(Terminal.GridCell(scalars: .empty, kind: .padding, styleId: styleId))
         }
 
         /// Cuts the open logical line here and lets the next admission continue it in a new
@@ -474,6 +606,7 @@ extension Terminal {
             let cut = LogicalLineFold.firstRowCellEnd(
                 cellCount: record.cellCount,
                 width: width,
+                hasWideCells: record.hasWideCells,
                 isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
             )
 
@@ -482,8 +615,10 @@ extension Terminal {
             evictedRowCount += 1
             grandDisplayRowTotal -= 1
             if blocks.count > 0 {
-                blocks[0].rowCount -= 1
-                blocks[0].rowStart += 1
+                blocks.modifyElement(at: 0) { block in
+                    block.rowCount -= 1
+                    block.rowStart += 1
+                }
             }
 
             if cut >= record.cellCount {
@@ -498,7 +633,7 @@ extension Terminal {
         @discardableResult
         mutating func evictToBudget() -> Int {
             var dropped = 0
-            while census.chargedBytes > capacity, evictOneDisplayRow() {
+            while chargedBytes > arenaCapacity, evictOneDisplayRow() {
                 dropped += 1
             }
             return dropped
@@ -537,33 +672,38 @@ extension Terminal {
                 writeHeader(follower, at: followerOffset)
             }
 
-            spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: firstRecordSequence))
-            fillStylesBySequence.removeValue(forKey: firstRecordSequence)
+            // Probing an empty table costs a hash of a key that cannot be there, and a store whose
+            // content carries neither spills nor fills evicts on every admitted row. `spillBytes`
+            // answers "is the spill table empty" without touching the dictionary at all, because
+            // only a non-empty payload is ever charged.
+            if spillBytes > 0 {
+                spillBytes -= spillCost(
+                    of: spillsBySequence.removeValue(forKey: firstRecordSequence)
+                )
+                refreshMetadataCharge()
+            }
+            if record.hasTrailingFill {
+                fillStylesBySequence.removeValue(forKey: firstRecordSequence)
+                refreshMetadataCharge()
+            }
             offsets.removeFirst()
             firstRecordSequence += 1
             headTrimmedCells = 0
-            bytesInUse -= record.byteLength
 
             if offsets.count == 0 {
+                bytesInUse -= record.byteLength
                 resetToEmptyArena()
                 return
             }
 
-            head = offset + record.byteLength
-            skipHeadPads()
+            // The head lands on the next record, and everything between the two is what this step
+            // reclaims: the dropped record, plus any pad the ring left before the wrap. Reading
+            // the span off the index rather than re-deriving the record's length and then walking
+            // the pads (`31/DD14`) charges the same bytes with one subtraction and no decode.
+            let next = offsets[0]
+            bytesInUse -= next > offset ? next - offset : (arenaCapacity - offset) + next
+            head = next
             retireEmptyHeadBlocks()
-        }
-
-        /// Steps the head up to the next live record, reclaiming the ring's pad records on the
-        /// way -- they are bytes like any other and are charged like any other (`31/DD14`).
-        private mutating func skipHeadPads() {
-            if head >= capacity { head = 0 }
-            while head != offsets[0] {
-                let pad = record(at: head)
-                bytesInUse -= pad.byteLength
-                head += pad.byteLength
-                if head >= capacity { head = 0 }
-            }
         }
 
         private mutating func retireEmptyHeadBlocks() {
@@ -591,6 +731,7 @@ extension Terminal {
             spillBytes = 0
             fillStylesBySequence.removeAll()
             clearOpenScratch()
+            refreshMetadataCharge()
         }
 
         // MARK: - Operation 4: truncate the tail
@@ -651,8 +792,11 @@ extension Terminal {
 
         private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
             let sequence = firstRecordSequence + offsets.count - 1
-            spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: sequence))
-            fillStylesBySequence.removeValue(forKey: sequence)
+            if spillsBySequence.isEmpty == false {
+                spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: sequence))
+            }
+            if record.hasTrailingFill { fillStylesBySequence.removeValue(forKey: sequence) }
+            refreshMetadataCharge()
             clearOpenScratch()
             offsets.removeLast()
             bytesInUse -= record.byteLength
@@ -698,6 +842,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse -= (oldCellCount - newCellCount) * LogicalLineRecord.cellBytes
             writeCursor = offset + record.byteLength
+            refreshMetadataCharge()
         }
 
         // MARK: - Operation 5: clear all history
@@ -785,6 +930,7 @@ extension Terminal {
             if offsets.count > 0 {
                 blocks.append(current)
             }
+            refreshMetadataCharge()
         }
 
         /// Counts the retained display rows straight off the arena, ignoring every cached total.
@@ -1111,30 +1257,85 @@ extension Terminal {
             clearOpenScratch()
         }
 
-        private mutating func appendCells(_ cells: [Terminal.GridCell]) {
+        /// Appends the first `cellCount` cells of an admitted display row, borrowing them from the
+        /// caller's own storage rather than copying them into an array first.
+        ///
+        /// A row may be logically wider than it is stored -- `GridRow.cell(at:)` reads a default
+        /// cell past the end -- so a soft-wrapped short row is appended as its stored prefix plus
+        /// the blanks the columns past it read as.
+        private mutating func appendRowPrefix(_ row: Terminal.GridRow, cellCount: Int) {
+            guard cellCount > 0 else { return }
+            let stored = min(cellCount, row.cells.count)
+            if stored > 0 {
+                row.cells.withUnsafeBufferPointer { cells in
+                    appendCells(UnsafeBufferPointer(rebasing: cells[0..<stored]))
+                }
+            }
+            if cellCount > stored { appendBlankCells(cellCount - stored) }
+        }
+
+        /// Appends one cell the store synthesized rather than read off a row.
+        private mutating func appendCell(_ cell: Terminal.GridCell) {
+            withUnsafePointer(to: cell) { pointer in
+                appendCells(UnsafeBufferPointer(start: pointer, count: 1))
+            }
+        }
+
+        /// Appends `count` default cells: what a row's columns past its stored extent read as, and
+        /// the one shape that needs no per-cell decoding at all.
+        private mutating func appendBlankCells(_ count: Int) {
+            guard count > 0 else { return }
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
+            let blank = UInt64(TerminalCellKind.padding.packedCode)
+                << PackedRetainedRow.Header.cellKindShift
+                | UInt64(Terminal.defaultStyleId) << PackedRetainedRow.Header.cellStyleShift
+            for index in 0..<count {
+                setWord(blank, at: offset + LogicalLineRecord.headerAndCells(record.cellCount + index))
+            }
+            openPreviousIdentity = nil
+            record.cellCount += count
+            writeHeader(record, at: offset)
+            writeCursor += count * LogicalLineRecord.cellBytes
+            bytesInUse += count * LogicalLineRecord.cellBytes
+        }
+
+        /// Takes the cells through a buffer pointer so admission can hand it a slice of the
+        /// caller's own row, and so the loop below reads a cell's fields in place.
+        ///
+        /// Both halves of that are `31/F8` Observation 3's: materializing a `[GridCell]` per
+        /// admitted row cost an allocation and a copy of every cell, and *binding* each element
+        /// costs a copy and a release of a `TerminalScalars` on every one. `PackedRetainedRow.pack`
+        /// walks a row the same way for the same reason, so the two stores read a row alike.
+        private mutating func appendCells(_ cells: UnsafeBufferPointer<Terminal.GridCell>) {
             guard cells.isEmpty == false else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
             let sequence = firstRecordSequence + offsets.count - 1
             var spills = spillsBySequence[sequence] ?? []
+            let spillsBefore = spills.count
+            var sideTablesGrew = false
             spillBytes -= spillCost(of: spillsBySequence[sequence])
 
-            for (index, cell) in cells.enumerated() {
+            for index in 0..<cells.count {
                 let cellOffset = record.cellCount + index
-                var word = UInt64(cell.kind.packedCode) << PackedRetainedRow.Header.cellKindShift
-                word |= UInt64(cell.styleId) << PackedRetainedRow.Header.cellStyleShift
-                if cell.scalars.count == 1 {
-                    word |= UInt64(cell.scalars[0].value)
-                } else if cell.scalars.count > 1 {
+                let kind = cells[index].kind
+                var word = UInt64(kind.packedCode) << PackedRetainedRow.Header.cellKindShift
+                word |= UInt64(cells[index].styleId) << PackedRetainedRow.Header.cellStyleShift
+                let scalarCount = cells[index].scalars.count
+                if scalarCount == 1 {
+                    word |= UInt64(cells[index].scalars[0].value)
+                } else if scalarCount > 1 {
                     word |= PackedRetainedRow.Header.cellSpillBit | UInt64(spills.count)
-                    spills.append(Array(cell.scalars))
+                    spills.append(Array(cells[index].scalars))
                 }
                 setWord(word, at: offset + LogicalLineRecord.headerAndCells(cellOffset))
 
-                if let id = cell.hyperlinkId {
+                if let id = cells[index].hyperlinkId {
                     openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
+                    sideTablesGrew = true
                 }
-                if let identity = cell.contentIdentity {
+                if let identity = cells[index].contentIdentity {
                     // A run is a strict step of one, matching `PackedRetainedRow.pack` -- the
                     // only shape a (base, start, extent) triple reconstructs exactly.
                     if let previous = openPreviousIdentity, identity == previous &+ 1,
@@ -1145,12 +1346,13 @@ extension Terminal {
                         openIdentityRuns.append(
                             IdentityRun(start: cellOffset, extent: 1, base: identity)
                         )
+                        sideTablesGrew = true
                     }
                     openPreviousIdentity = identity
                 } else {
                     openPreviousIdentity = nil
                 }
-                if cell.kind == .wideHead { record.hasWideCells = true }
+                if kind == .wideHead { record.hasWideCells = true }
             }
 
             if spills.isEmpty == false { spillsBySequence[sequence] = spills }
@@ -1160,6 +1362,9 @@ extension Terminal {
             writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
             bytesInUse += cells.count * LogicalLineRecord.cellBytes
+            // The overwhelmingly common row moves no side table at all, and the charge only has
+            // to be refreshed when one of its terms moved.
+            if sideTablesGrew || spills.count != spillsBefore { refreshMetadataCharge() }
         }
 
         /// Writes the open record's side tables after its cells and stamps their counts into the
@@ -1264,12 +1469,12 @@ extension Terminal {
                 let need = (openNow ? 0 : LogicalLineRecord.Header.byteCount)
                     + cells * LogicalLineRecord.cellBytes
                     + projectedTableBytes(addingCells: cells)
-                if contiguousRoomAtCursor >= need, census.chargedBytes + need <= capacity {
+                if contiguousRoomAtCursor >= need, chargedBytes + need <= arenaCapacity {
                     return
                 }
                 if offsets.count == 0 {
                     resetToEmptyArena()
-                    precondition(capacity >= need, "a record cannot exceed the arena")
+                    precondition(arenaCapacity >= need, "a record cannot exceed the arena")
                     return
                 }
                 if contiguousRoomAtCursor < need, writeCursorPrecedesHead == false {
@@ -1287,8 +1492,8 @@ extension Terminal {
         }
 
         private var contiguousRoomAtCursor: Int {
-            if bytesInUse == 0 { return capacity - writeCursor }
-            if writeCursor > head { return capacity - writeCursor }
+            if bytesInUse == 0 { return arenaCapacity - writeCursor }
+            if writeCursor > head { return arenaCapacity - writeCursor }
             return head - writeCursor
         }
 
@@ -1319,7 +1524,7 @@ extension Terminal {
                     retireEmptyTailBlocks()
                 }
             }
-            let remainder = capacity - writeCursor
+            let remainder = arenaCapacity - writeCursor
             precondition(remainder % LogicalLineRecord.cellBytes == 0)
             if remainder >= LogicalLineRecord.Header.byteCount {
                 let units = (remainder - LogicalLineRecord.Header.byteCount)
@@ -1336,7 +1541,7 @@ extension Terminal {
         /// An upper bound on the bytes the open record's side tables will need when it closes.
         ///
         /// Reserved before every append so `31/DD20`'s split can always write them: the seam
-        /// test keeps `writeCursor + tables <= capacity` true after each append, which is what
+        /// test keeps `writeCursor + tables <= arenaCapacity` true after each append, which is what
         /// makes "close the open record at its current end" a move that always fits.
         private func projectedTableBytes(addingCells cells: Int) -> Int {
             let openCells = openRecordCellCount + cells
@@ -1357,6 +1562,7 @@ extension Terminal {
                 firstBlockNumber = sequence / Self.blockSize
                 blocks.removeAll()
                 blocks.append(Block(rowStart: evictedRowCount, rowCount: 0))
+                refreshMetadataCharge()
                 return
             }
             let number = sequence / Self.blockSize
@@ -1364,12 +1570,13 @@ extension Terminal {
                 let previous = blocks[blocks.count - 1]
                 blocks.append(Block(rowStart: previous.rowStart + previous.rowCount, rowCount: 0))
             }
+            refreshMetadataCharge()
         }
 
         private mutating func addDisplayRowsToTail(_ rows: Int) {
             grandDisplayRowTotal += rows
             if blocks.count > 0 {
-                blocks[blocks.count - 1].rowCount += rows
+                blocks.modifyElement(at: blocks.count - 1) { $0.rowCount += rows }
             }
         }
 
@@ -1404,40 +1611,49 @@ extension Terminal {
             word(at: offset + LogicalLineRecord.headerAndCells(index))
         }
 
+        // The arena is words, and every access below is one word-sized load or store plus a shift.
+        //
+        // The alignment that makes that legal is a property of the layout rather than a hope: a
+        // record starts on an 8-byte boundary and its header and cells are whole words, so its
+        // two in-arena tables start 4-byte aligned; hyperlink entries are 4 bytes and identity
+        // entries 8 or 4, so every `u16` field is 2-byte aligned and every `u32` field 4-byte
+        // aligned. A naturally aligned field never straddles a word boundary, which is why none
+        // of these has a carry path. The assertions state it where a future layout change would
+        // break it.
+
         private func word(at offset: Int) -> UInt64 {
-            var value: UInt64 = 0
-            for byte in 0..<8 {
-                value |= UInt64(arena[offset + byte]) << (8 * byte)
-            }
-            return value
+            assert(offset & 7 == 0, "a record word must be 8-byte aligned")
+            return arena[offset >> 3]
         }
 
         private mutating func setWord(_ value: UInt64, at offset: Int) {
-            for byte in 0..<8 {
-                arena[offset + byte] = UInt8(truncatingIfNeeded: value >> (8 * byte))
-            }
+            assert(offset & 7 == 0, "a record word must be 8-byte aligned")
+            arena[offset >> 3] = value
         }
 
         private func u16(_ offset: Int) -> Int {
-            Int(arena[offset]) | (Int(arena[offset + 1]) << 8)
+            assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
+            return Int((arena[offset >> 3] >> UInt64((offset & 7) << 3)) & 0xFFFF)
         }
 
         private func u32(_ offset: Int) -> UInt32 {
-            UInt32(arena[offset])
-                | (UInt32(arena[offset + 1]) << 8)
-                | (UInt32(arena[offset + 2]) << 16)
-                | (UInt32(arena[offset + 3]) << 24)
+            assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
+            return UInt32(truncatingIfNeeded: arena[offset >> 3] >> UInt64((offset & 7) << 3))
         }
 
         private mutating func setU16(_ value: Int, at offset: Int) {
-            arena[offset] = UInt8(truncatingIfNeeded: value)
-            arena[offset + 1] = UInt8(truncatingIfNeeded: value >> 8)
+            assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
+            let shift = UInt64((offset & 7) << 3)
+            let index = offset >> 3
+            arena[index] = arena[index] & ~(0xFFFF << shift)
+                | (UInt64(UInt16(truncatingIfNeeded: value)) << shift)
         }
 
         private mutating func setU32(_ value: UInt32, at offset: Int) {
-            for byte in 0..<4 {
-                arena[offset + byte] = UInt8(truncatingIfNeeded: value >> (8 * byte))
-            }
+            assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
+            let shift = UInt64((offset & 7) << 3)
+            let index = offset >> 3
+            arena[index] = arena[index] & ~(0xFFFF_FFFF << shift) | (UInt64(value) << shift)
         }
 
         private func spillCost(of spills: [[Unicode.Scalar]]?) -> Int {
@@ -1458,15 +1674,27 @@ extension Terminal {
     /// `31/D2` Decision 1's "8 B per record, at the deque's *capacity*": a structure that
     /// charges what the allocator gave needs a capacity it can report, and one that never
     /// shrinks keeps `31/DD11`'s "capacity does not grow" checkable in one comparison.
+    /// Its capacity is a power of two, so an index wraps by masking rather than by dividing.
+    ///
+    /// Not an implementation detail of the type so much as of the write path: every eviction step
+    /// and every admission reads and writes several of these positions, and an integer division
+    /// per access was a measurable share of a step that is otherwise pointer arithmetic. The
+    /// capacity was already a power of two -- it starts at 16 and doubles -- so this only stops
+    /// paying for a general modulus the structure never needed.
     struct RingBuffer<Element: Sendable>: Sendable {
         private var storage: ContiguousArray<Element>
+        private var mask: Int
         private var start = 0
         private(set) var count = 0
         private let filler: Element
 
         init(filler: Element, minimumCapacity: Int = 16) {
+            precondition(minimumCapacity > 0)
+            var capacity = 1
+            while capacity < minimumCapacity { capacity <<= 1 }
             self.filler = filler
-            storage = ContiguousArray(repeating: filler, count: minimumCapacity)
+            storage = ContiguousArray(repeating: filler, count: capacity)
+            mask = capacity - 1
         }
 
         var capacity: Int { storage.count }
@@ -1474,31 +1702,38 @@ extension Terminal {
         subscript(index: Int) -> Element {
             get {
                 precondition(index >= 0 && index < count)
-                return storage[(start + index) % storage.count]
+                return storage[(start + index) & mask]
             }
             set {
                 precondition(index >= 0 && index < count)
-                storage[(start + index) % storage.count] = newValue
+                storage[(start + index) & mask] = newValue
             }
+        }
+
+        /// Updates one element in place, so a caller that adjusts two of its fields pays one
+        /// addressed access rather than a read and a write per field.
+        mutating func modifyElement(at index: Int, _ body: (inout Element) -> Void) {
+            precondition(index >= 0 && index < count)
+            body(&storage[(start + index) & mask])
         }
 
         mutating func append(_ element: Element) {
             if count == storage.count { grow() }
-            storage[(start + count) % storage.count] = element
+            storage[(start + count) & mask] = element
             count += 1
         }
 
         mutating func removeFirst() {
             precondition(count > 0)
             storage[start] = filler
-            start = (start + 1) % storage.count
+            start = (start + 1) & mask
             count -= 1
         }
 
         mutating func removeLast() {
             precondition(count > 0)
             count -= 1
-            storage[(start + count) % storage.count] = filler
+            storage[(start + count) & mask] = filler
         }
 
         mutating func removeAll() {
@@ -1510,9 +1745,10 @@ extension Terminal {
         private mutating func grow() {
             var next = ContiguousArray(repeating: filler, count: storage.count * 2)
             for index in 0..<count {
-                next[index] = storage[(start + index) % storage.count]
+                next[index] = storage[(start + index) & mask]
             }
             storage = next
+            mask = next.count - 1
             start = 0
         }
     }

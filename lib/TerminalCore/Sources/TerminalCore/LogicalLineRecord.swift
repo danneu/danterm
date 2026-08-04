@@ -307,21 +307,31 @@ extension Terminal {
         /// stop at the answer: `31/D2` Decision 2 step 1 folds **one display row** per trim step
         /// -- `O(width)`, or `O(cells in that row)` on the wide path -- and the complexity that
         /// bound rests on is the reading `31/D4` froze its decision rule against.
+        ///
+        /// The `hasWideCells` fast path is the same one `rowCount` takes and for the same reason
+        /// (`31/DD4`): without a wide cell no boundary test can fail, so the answer is arithmetic
+        /// and the walk is `O(1)` rather than `O(width)` -- which matters because eviction asks
+        /// The *first* row is the one case `enumerateRows`' walk collapses to arithmetic: its
+        /// column and its cell index advance together from zero, so the only boundary test that
+        /// can fire is the one at the last column. One display row per trim step therefore costs
+        /// one probe rather than a walk over the row -- which matters because eviction asks this
+        /// once per dropped display row, and `31/D4` gate 7 measures exactly that step.
+        ///
+        /// `hasWideCells` skips even the probe for a record that cannot contain a wide head
+        /// (`31/DD4`); it defaults to taking it, which is correct for every record.
         static func firstRowCellEnd(
             cellCount: Int,
             width: Int,
+            hasWideCells: Bool = true,
             isWideHead: (Int) -> Bool
         ) -> Int {
             precondition(width >= 1)
-            var column = 0
-            var index = 0
-            while index < cellCount {
-                if width >= 2, column == width - 1, isWideHead(index) { return index }
-                column += 1
-                index += 1
-                if column == width { return index }
+            guard hasWideCells, width >= 2, cellCount >= width, isWideHead(width - 1) else {
+                return min(cellCount, width)
             }
-            return cellCount
+            // A 2-cell cluster meeting the last column does not split: the spacer fills the
+            // column and the cluster starts the next row.
+            return width - 1
         }
     }
 }
