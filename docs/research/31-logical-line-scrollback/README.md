@@ -345,11 +345,35 @@ Read the "Conditions and unpriced terms Phase 2 inherits" list in
 [decisions.md](decisions.md) before starting any task below; the tasks are the
 work, that list is the constraint on it.
 
-- [ ] `TODO` Enumerate every display-row-indexed call site (`projectionRows`,
-  `activationIdentity`'s range scan, `primaryHistoryText`, scrollbar math,
-  selection, search) and state its mapping under the new store. `28/H7`'s
-  entry already names the invariant that dies: "history is always at the
-  current width."
+- [x] `DONE` **F6, the display-row-indexed call-site enumeration.** Recorded in
+  [F6](findings.md); it discharges inherited condition 6. **69 sites** across
+  `lib/TerminalCore`, `lib/TerminalPTY` and `app/` -- **14 unchanged, 16
+  index-translated, 18 rewritten, 13 deleted, and 8 whose mapping is not
+  obviously satisfiable.** Three boundary answers the seed list wanted: the
+  checkpoint and persistence path serializes history as **text**
+  (`primaryHistoryText`), so the record format owes it nothing; scrollbar math
+  is a pass-through over `TerminalScrollProjection`, so the work is in its
+  producer; and search needs no index of its own -- `searchMatches` gets
+  *simpler*, since wrap boundaries stop existing in the data. The structural
+  finding: only 13 of the 69 sites read a **cell** out of history; the other 56
+  read a count, an index or a flag, so the difficulty is not decoding at a width
+  but that **a display-row count is free today and becomes derived**. The four
+  flagged items that are design decisions rather than edits: `HR1`
+  (`scrollProjection.topRow` is read ~200x per frame and would become an index
+  lookup -- this lands on `retained-browse`, the go/no-go), `HR2` (anchors
+  straddle history and the live grid, and `F4` case 13 addresses only the
+  history half; ~130 lines of deletion rest on the choice), `HR4` (`resizeHeight`
+  pulls rows back out of history -- a **fourth** tail mutation `F4` Observation 5
+  missed, and a truncation rather than a bit flip), and `HR6` (`ProjectionRows`
+  hands out a materialized row per display row, the allocation the arena exists
+  to delete). Two are user-visible behavior changes needing a human's
+  disposition: `HR3` (severing a wrap claim drops a BCE-colored cell that is
+  stored and painted today -- the first case found where the read-time fold does
+  not reproduce today's output) and `HR5` (whole-record eviction drops up to 367
+  display rows at once, clamping four anchors and the browsing viewport). Three
+  deferred decisions added (`DD9`-`DD11`). `28/H7`'s entry names the invariant
+  that dies -- "history is always at the current width" -- and F6 Observation 3
+  says exactly which sites depended on it.
 - [ ] `TODO` Decide budget and eviction semantics: arena size as the byte
   budget, what (if anything) "keep N logical lines" means as a user-facing
   knob now that it is trivial to enforce, and what happens to the `28/D11`
@@ -404,11 +428,24 @@ terms Phase 2 inherits" section of the `D1` closure in
 [decisions.md](decisions.md); the entries below are the ones that predate it or
 add detail to it.
 
-- What does search operate on -- a straight scan of the arena's packed cells,
-  or does it need its own index? Expectation is that logical lines make
-  search *simpler* (no wrap boundaries in the data); unverified. `F4` case 20
-  and `wideGraphemeSearchRangeSpansSoftWrap` are the supporting evidence that
-  the wrap artifacts search has to step over today simply stop existing.
+- ~~What does search operate on -- a straight scan of the arena's packed cells,
+  or does it need its own index?~~ **Answered by `F6` (`R10`): no separate index
+  is implied by any call site.** `Terminal.swift#searchMatches` already runs a
+  needle window over `projectionUnits()`, i.e. over a flat unit stream, and
+  under the new store the same window runs over records with the wrap boundaries
+  gone -- so search gets simpler, as expected. `F4` case 20 and
+  `wideGraphemeSearchRangeSpansSoftWrap` were the supporting evidence and remain
+  it. What is still unpriced is the *cost*: `19/F9`'s occupancy probe measures
+  search against today's store and nothing has re-measured it against an arena.
+- **The eight sites `F6` flagged are the design risks Phase 2 must close**, and
+  four of them are decisions rather than edits: `HR1` (per-frame `topRow`
+  re-derivation, which lands on `retained-browse`), `HR2` (the anchor coordinate
+  space across the history/live seam, which gates ~130 lines of deletion), `HR4`
+  (`resizeHeight`'s pull-back from history, a fourth tail mutation and the only
+  operation that shrinks the arena from the back), `HR6` (`ProjectionRows` must
+  stop materializing a row per display row). `HR3` and `HR5` are user-visible
+  behavior changes; `HR7` makes inherited condition 9 concrete; `HR8` adds a
+  grand display-row total to what the block index must maintain.
 - **The eager counting pass is unpriced on wide content.** `F2` measured
   0.016 ms at trial depth on ASCII stimuli, where every record takes the O(1)
   `ceil` path. `F4` Observation 1 establishes that a record holding wide cells

@@ -8,7 +8,9 @@ doc 28's); bare IDs are this doc's.
 Phase 1's four viability probes are all recorded below: `F1` (read path), `F2`
 (counting pass), `F3` (admission), `F4` (edge-case inventory). `F5` is not a
 probe -- it is the simplification-inequality accounting pass that `D1`'s frozen
-rule owed at its close.
+rule owed at its close. `F6` opens Phase 2: it is the display-row-indexed
+call-site enumeration, and it discharges the sixth of the eleven conditions
+`D1` carried forward.
 
 ### F1 -- the read path is not the hazard: wrap-at-read browses 1.64x faster than today's store, and random seek is faster too
 
@@ -1356,3 +1358,437 @@ why it is nonetheless not "width-dependent persisted state" in `D1`'s sense.
   phase only -- no production storage change is licensed by `D1`, because every
   Phase 1 number is a microbenchmark and the README's first acceptance dimension
   gives the verdict to the paired ladder.
+
+### F6 -- the display-row-indexed call-site inventory: 69 sites, 13 of them deleted outright, and 8 whose mapping is not obviously satisfiable
+
+- Status: recorded. This is Phase 2's first ledger task and it discharges
+  inherited condition 6 (`D1`'s "Conditions and unpriced terms Phase 2
+  inherits"). Like `F4` and `F5` it produces no number: it is a reading and
+  cataloguing pass over the tree. **It licenses nothing.** `D1`'s scoping still
+  holds -- `go` licenses design work only, and the paired ladder is still owed.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: `eb17fbc`, the commit that recorded `F5` and closed
+  `D1`. **No file under `lib/` is added or changed by this entry.** Line numbers
+  below are read at `eb17fbc`. The two untracked paths present throughout this
+  doc's work are still present and still in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction: the sweep read
+  `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` (6,470 lines) and
+  `PackedRetainedRow.swift` end to end, then followed every caller of
+  `scrollbackRows`, `scrollbackRowCount`, `scrollProjection`, `ProjectionRows`,
+  `TextAnchor`, `evictedRowCount`, `isSoftWrapped` and `scrollbackByteCost` out
+  through `lib/TerminalCore/Sources/TerminalRenderPlanning/`,
+  `lib/TerminalCore/Sources/TerminalCore/TerminalInteractionPolicy.swift`, the
+  five probe-support targets, `lib/TerminalPTY/` and `app/`.
+- Artifacts: none durable.
+
+#### What "display-row-indexed" turned out to mean
+
+The seed list in the ledger (`projectionRows`, `activationIdentity`'s range
+scan, `primaryHistoryText`, scrollbar math, selection, search) named six sites.
+The sweep found **69**, and the reason is that display-row indexing is not a
+handful of readers but three coordinate systems that all currently bottom out in
+the same identity -- *a retained row is a display row*:
+
+1. **The absolute stream row.** `Terminal.swift:427 TextAnchor` is
+   `(evictedRowCount + streamRow, column)`, and `TextAnchor` is `Comparable`.
+   Selection, the search occurrence, the hovered link, the armed link, the
+   browsing viewport top and the drag pin (`:463 PinnedTextRange`) are all
+   stored in it. It spans history *and* the live grid in one space, which is the
+   fact `HR2` below turns on.
+2. **The public position.** `TerminalTextPosition.row` is a display row relative
+   to the oldest *retained* row; `Terminal.swift:3396 publicRange` is the only
+   converter, and it is `- evictedRowCount` plus a bound check against
+   `scrollbackRows.count + rows.count`.
+3. **The viewport row.** `scrollProjection.topRow + row`, resolved through
+   `:3211 viewportStreamRow(at:)`, which is the funnel `presentedRows`,
+   `presentedRowGeometry`, `cell(row:column:)` and `forEachViewportCell` share.
+
+Every one of the three is O(1) today for exactly one reason: `scrollbackRows`
+holds one element per display row, so a count is a count and an index is an
+index. That identity is what the logical-line store removes, and the inventory
+below is the list of places that notice.
+
+Two boundaries the sweep settled and that are worth stating before the tables:
+
+- **The checkpoint and persistence path does not serialize history as rows.** It
+  serializes `Terminal.swift:2425 primaryHistoryText`'s **string**, through
+  `TerminalPaneSession.swift:676 readPrimaryHistoryText` to
+  `app/AppRuntime.swift:1265` and `:1687`. There is no on-disk row index, row
+  count or offset anywhere in the recovery store, so the whole persistence layer
+  is `unchanged` and the record format owes it nothing. The ledger's parenthetical
+  asked for this to be checked; this is the answer.
+- **`isHistoryHeadTruncated` has no production consumer.** It is
+  `public private(set)` (`:866`) and every reference in the tree is one of 14
+  assertions in `TerminalScrollbackBudgetTests.swift`. `DD2` makes it always
+  false; `DD10` deletes it instead.
+
+#### Observation 1 -- the inventory, grouped by mapping
+
+**69 sites: 14 unchanged, 16 index-translated, 18 rewritten, 13 deleted, 8
+flagged.** The flagged eight are counted inside their mapping group as well --
+being hard is not a fifth mapping, it is a warning on one of the four -- so the
+first four numbers sum to 61 and the eight are called out again in Observation 2.
+
+**Unchanged (14).** Sites that touch only the live grid, only viewport-relative
+coordinates, or only text.
+
+| # | site | what it does today | why the store cannot reach it |
+| ---: | --- | --- | --- |
+| U1 | `Terminal.swift:6354 severWrapClaim(at:)` | clears a viewport row's wrap claim and its trailing spacer | viewport rows only; the scrollback sibling is `R13`/`HR3` |
+| U2 | `Terminal.swift:6405 clearCellAndPair` | clears a cell and its wide partner in `rows` | live grid only |
+| U3 | `Terminal.swift:6287 moveAndFillCells` | horizontal shift within one live row | live grid only |
+| U4 | `Terminal.swift:6442 clearPreviousSpacer` (viewport branch) | clears a spacer on the previous *live* row | the scrollback branch is `X9` |
+| U5 | `Terminal.swift:4232`-`:4252 resizeHeight` (shrink half) | drops blank tail rows, admits the displaced prefix | admission is `R14`; the row selection is live-grid arithmetic |
+| U6 | `Terminal.swift:5359`-`:5368` ED 0/1/2 | erases live rows | ED 3 is `T15` |
+| U7 | `Terminal.swift:413`, `:2082`, `:3213`, `:4093` alternate-screen branches | the alt grid never has scrollback | `F4` cases 11-12; the alt *seam* rule is `R17` |
+| U8 | `TerminalGeometry.swift:146 TerminalScrollProjection`, `:36 activationIdentity` | value shapes crossing the module boundary | the producers move, the types do not |
+| U9 | `TerminalDamage.swift` row spans + `Terminal.swift:1064 recordDamage(row:)` | viewport-relative damage rows | never absolute |
+| U10 | `Terminal.swift:1107 damagedViewportRows` | clips a stream range to viewport rows | the subtraction is unchanged; only `topRow`'s supplier moves (`HR1`) |
+| U11 | `RenderFramePlanner.swift:180`-`:184`, `:266`, `:286` | per-row planning off `geometry.rows[row]` | viewport-relative throughout |
+| U12 | `TerminalInteractionPolicy.swift:592 isViewportPosition` | gates owner input on `geometry` | viewport-relative |
+| U13 | `app/SwiftTerminalSessionView.swift:73`-`:82`, `:641`; `TerminalPaneSession.swift:591`-`:595` | the scrollbar: `totalRows` / `topRow` / `windowRows` -> `TerminalScrollPosition`, and `scroll(toTopRow:)` back | consumes `TerminalScrollProjection`, whose shape does not change. **The scrollbar math the ledger named is a pass-through; the work is in its producer (`T10`).** |
+| U14 | `app/AppRuntime.swift:851`, `:1265`, `:1687`; `TerminalPaneSession.swift:599`, `:676` | checkpoint, recovery and `danterm read` | history crosses as text, never as rows or offsets |
+
+**Index-translated (16).** Display row -> (record, offset) through the block
+index; the reader's shape survives, its address does not.
+
+| # | site | what it reads today | translation |
+| ---: | --- | --- | --- |
+| T1 | `Terminal.swift:2148 scrollbackRowCount` | `scrollbackRows.count` | the index's grand display-row total (`HR8`) |
+| T2 | `Terminal.swift:2153 scrollbackRow(at:)` (public) | subscript + `unpacked().materialized(to:)` | locate the record, fold its k-th display row |
+| T3 | `Terminal.swift:2184 scrollbackRowContentIdentityShape(at:)` | the row's *unmaterialized* stored prefix | locate + slice; the contract needs restating (`HR7`) |
+| T4 | `Terminal.swift:2360 retainedRowForTesting(at:)` | subscript + `unpacked()` | same as `T2`, minus materialization |
+| T5 | `Terminal.swift:2366 scrollbackRowByteCost(at:)` | `scrollbackByteCost(of:)` on one row | record bytes divided by its rows, or deleted with `X13` |
+| T6 | `Terminal.swift:3211 viewportStreamRow(at:)` | `scrollbackRows[index].unpacked()`, else `rows[index - count]` | the one funnel: locate + fold, else live |
+| T7 | `Terminal.swift:3185 presentedRowGeometry` | `scrollbackRows[index].forEachKind` per visible row | locate + walk the record slice's kinds |
+| T8 | `Terminal.swift:4066 forEachViewportCell` | `scrollbackRows[streamRow].forEachContentCell` | locate + walk the slice. **`28/F17`'s hot path and `F1`'s measured one.** |
+| T9 | `Terminal.swift:4027 cell(row:column:)` | `viewportStreamRow` + `cell(at:)` | one cell inside a record |
+| T10 | `Terminal.swift:2090`, `:2125` `scrollProjection` / `scroll(toTopRow:)` | `scrollbackRows.count + rows.count`, `maximumTop` | grand total + live rows (`HR1`, `HR8`) |
+| T11 | `Terminal.swift:3243 projectionRowCount` | same sum | same |
+| T12 | `Terminal.swift:969`, `:4011` cursor stream row | `scrollbackRows.count + cursor.row` | grand total + cursor row |
+| T13 | `Terminal.swift:3815`-`:3816`, `:3825`, `:3862`, `:3906` inspection and clamp bounds | `evictedRowCount + scrollbackRows.count + ...` | same origin, index-supplied |
+| T14 | `Terminal.swift:3396 publicRange` | bound check against `base + streamCount` | same |
+| T15 | `Terminal.swift:3226`, `:3235 revealSearchMatchIfNeeded`; `:5381`-`:5386` ED 3 | absolute match row vs viewport window; whole-history clear counts evicted *rows* | index-supplied totals |
+| T16 | `TerminalRetainedRowProbeSupport.swift:450`, `:469`; `TerminalBrowseBenchmarkSupport.swift:165`; `OccupancyProbe.swift:39`; `TerminalResizeProbeSupport.swift:325` | `scrollbackRowCount` + `scrollbackRow(at:)` per row | measurement consumers; follow `T1`/`T2` |
+
+**Rewritten (18).** The read stops being "fetch row i" and becomes something
+else; the one-or-two-sentence new read is in the third column.
+
+| # | site | today | the new read |
+| ---: | --- | --- | --- |
+| R1 | `Terminal.swift:394 ProjectionRows` + `:408` subscript | a `RandomAccessCollection<GridRow>` over scrollback then live, materializing per access | a cursor over (record, display-row-in-record) that yields a borrowed slice plus the folded spacers, never a `GridRow`. **The largest single rewrite (`HR6`).** |
+| R2 | `Terminal.swift:3259 activeProjectionRows()` | `Array(activeProjection())` -- materializes all of history | a forward walk over records; consumers are search, Select All, export and `text(in:)`, all of which want units rather than rows |
+| R3 | `Terminal.swift:2680 logicalLineRange(at:in:)` | walks `isSoftWrapped` outward in both directions from the clicked row | **the record you are in.** O(1) instead of O(rows in the line); this is the design's clearest reader win |
+| R4 | `Terminal.swift:2704 trimmedLogicalLineRange` | slices `stream[line.start.row...line.end.row]` then trims units | trims units over one record's cells |
+| R5 | `Terminal.swift:2737 explicitLink` | two soft-wrap walks (`:2748`-`:2749`), then a coordinate array over the whole logical line | one record; the coordinate array becomes a cell-offset range |
+| R6 | `Terminal.swift:2789 detectedLink` | windows `rowRadius = maximumHyperlinkTargetBytes / columnCount + 2` rows around the click | a cell-offset window in the record; the window stops depending on width |
+| R7 | `Terminal.swift:3338 projectedCellEnd` + `:4779 retainedContentEnd` | `isSoftWrapped ? columnCount : retainedContentEnd(in: row)` | a fold output: a non-final display row ends at `width`, the final one at the record's content end (`F4` case 17). Admission owns the trailing-blank rule; read owns the rest |
+| R8 | `Terminal.swift:3278 forEachProjectionUnit` / `:3306 forEachRowTextUnit` | per row, with the hard boundary emitted when `row.isSoftWrapped == false` (`:3291`) | per record: units come from the record's cells and the hard boundary is the record boundary. Wrap boundaries stop existing in the data |
+| R9 | `Terminal.swift:3477 nearestTextUnit`, `:3505`/`:3536 textUnit(before:/after:)`, `:3456 rowTextUnits` | step within a row's unit array, then walk to an adjacent row while `isSoftWrapped` | step within a record; the soft-wrap walk disappears (`F4` case 20) |
+| R10 | `Terminal.swift:3624 searchMatches` | a needle window over `projectionUnits()`, i.e. over every row of history | the same window over records. **The README's open question resolves toward "simpler": there are no wrap artifacts to step over.** No separate search index is implied by any site in this inventory |
+| R11 | `Terminal.swift:2891 activationIdentity` | scans `stream[row].cell(at: column).contentIdentity` over the link's row range | one contiguous cell-offset range in one record -- but see `HR7`: `contentIdentity` is a side table every Phase 1 probe stripped |
+| R12 | `Terminal.swift:4713 pack(line:columns:)` | folds a logical line to display rows during reflow | **moves to read time** (`F5` Observation 2). Its `.spacerHead` at a one-column gap (`:4734`), `isSoftWrapped` marking (`:4726`) and `.continuation` stamping (`:4731`, `:4746`) are inherited condition 10 |
+| R13 | `Terminal.swift:6369 severScrollbackWrapClaim`, `:6387 restoreWrapClaimBeforeCursor` | flip `isSoftWrapped` on the last retained row, and replace its trailing spacer | close / reopen the tail record's header bit (`F4` case 9). **The spacer replacement does not survive the mapping -- `HR3`** |
+| R14 | `Terminal.swift:3965 appendToScrollback` | `pack` per display row, append, accumulate two totals | open-line append at the write cursor (`F3`); one total |
+| R15 | `Terminal.swift:3978 enforceScrollbackBudget` | evict one display row at a time on three bounds | evict whole records on one bound, and move the index head (`DD2`, `HR5`) |
+| R16 | `Terminal.swift:2227 memoryCensus` | `scrollbackRowCount`, `retainedRowStorageRowCount`, `rowStorageAllocationCount`, `retainedPackedPayloadBytes`, and a walk of `asArray()` | arena-denominated: bytes in use, capacity, records, and a walk of records (`DD11`) |
+| R17 | `Terminal.swift:2414 fullHistoryText`, `:2425 primaryHistoryText`, `:3157 projectedHistoryText` | `scrollbackRows.asArray()` + rows, with the alt seam applied by mutating a copy's `isSoftWrapped` | walk records; the alt seam becomes a read-time "the tail record reads as closed", with no copy and no mutation |
+| R18 | `Terminal.swift:2630 selectAll` | `projectionUnits()` over the whole projection, for its first and last unit | the arena's first cell offset and the live grid's last unit |
+
+**Deleted (13).** Subsumed by wrap-at-read; nothing replaces them.
+
+| # | site | why it goes |
+| ---: | --- | --- |
+| X1 | `Terminal.swift:4288 resizeWidth`'s history half | history is never rebuilt |
+| X2 | `Terminal.swift:4575 reconstructLogicalLines` | it is admission run backwards (`F4`); admission now runs forwards once |
+| X3 | `Terminal.swift:3686 attachments`, `:3710`/`:3744 attachment`, `:3767 textDestination`, `:4791 sourceKey`, `:560`+`:599`-`:639` the seven reflow-only types | nothing has to survive a destructive rebuild. **Conditional on `HR2`'s resolution** |
+| X4 | `Terminal.swift:4319`-`:4364`, `:4443`-`:4498`, `:4531`-`:4564` | the four attachment computations, eight destination locals, their `??` threading and their write-back |
+| X5 | `Terminal.swift:4522`-`:4523` | the post-resize re-walk of all history to recompute the charged byte and stored-cell totals |
+| X6 | `Terminal.swift:784 productionScrollbackCellCap` + `:763`-`:783` derivation + `:855 scrollbackCellCap` + `:860 scrollbackStoredCellCount` + five maintenance sites (`:3974`, `:3994`, `:4269`-`:4271`, `:4523`, `:6462`/`:6468`) + `:2314` + the `:3990` clause | the cap bounds reflow's cell term |
+| X7 | `Terminal.swift:815 productionScrollbackRowCap` + `:786`-`:814` derivation + `:853 scrollbackRowCap` + the `:3989` clause | the cap bounds reflow's row term |
+| X8 | `Terminal.swift:866 isHistoryHeadTruncated` + `:3999`, `:5385` | constant under `DD2`, no production consumer (`DD10`) |
+| X9 | `Terminal.swift:6445`-`:6456 clearPreviousSpacer` (scrollback branch) | the store never held the spacer (`F4` case 10) |
+| X10 | `Terminal.swift:6460 setScrollbackCell` | its only two callers are `X9` and `R13`'s spacer replacement |
+| X11 | `Terminal.swift:290 ScrollbackBuffer` entire: `:304` subscript, `:318 retainedCellStorageRowCount`, `:329 asArray`, `:333 suffix(from:)`, `:338 removeFirst`, `:352 removeLast`, `:371 compactIfNeeded`, `storageStart` | one arena replaces the whole type |
+| X12 | `Terminal.swift:2302 retainedCellStorageRowCount` + `TerminalMemoryCensus.swift:81`, `:128` | doc 15's per-row leak proof is unrepresentable with one region (`DD11`) |
+| X13 | `Terminal.swift:2349 retainedScrollbackAllocationBytes`, `:3943`/`:3961 scrollbackByteCost`, `:2307 recomputedScrollbackByteCount`, `:2321 blankScrollbackRowByteCost`, `:2326 compactScrollbackRowByteCost` | the per-row charge model. The arena's charge is its write cursor, and the charge-vs-cost honesty proof becomes an identity |
+
+#### Observation 2 -- the eight sites whose mapping is NOT obviously satisfiable
+
+These are the design risks Phase 2 exists to surface. Each names the site, why
+the obvious mapping fails, and what has to be decided. **None of them is a
+reason to reverse `D1`**; five are unenumerated work and three are behavior
+changes that need a human's disposition.
+
+**`HR1` -- `scrollProjection.topRow` is read roughly 200 times per frame and
+becomes an index lookup.** Sites: `Terminal.swift:3166 presentedRows`, `:3186
+presentedRowGeometry`, `:4028 cell(row:column:)`, `:4071 forEachViewportCell`,
+`:4007 geometry`, `:966 damageActionSnapshot`, `:1109 damagedViewportRows`,
+`:3225 revealSearchMatchIfNeeded`, `:2113 scroll(byRows:)`,
+`RenderFramePlanner.swift:244`, `:387`, `:398`,
+`TerminalInteractionPolicy.swift:598`. Today `scrollProjection` is
+`scrollbackRows.count + rows.count` and a clamp: pure arithmetic, so re-reading
+it per row is free and the tree does exactly that -- the render planner reads it
+three times per visible row (`forEachViewportCell` once, `hoveredColumns` once,
+`selectedColumns` once), which is ~200 reads on a 66-row frame. Under the new
+store `totalRows` is the index's grand total and `topRow` is the browsing
+anchor's display row. If either is an index walk, a frame pays ~200 of them, and
+`F1` priced one point lookup at **0.82-1.09 us** -- 164-218 us per frame, an
+order of magnitude above the whole browse frame this design must not regress.
+**This lands directly on `retained-browse`, the README's go/no-go workload, and
+it is the concrete mechanism by which `F1`'s 1.64x could turn into a `slower`
+ladder verdict.** The fix is not free: the index must carry an O(1) grand total
+*and* the browsing anchor must cache its display row, which becomes a fifth
+thing to invalidate on top of `F5` Observation 3's four trigger points. Do not
+book this as bookkeeping.
+
+**`HR2` -- the anchor coordinate space straddles history and the live grid, and
+`F4` case 13 addresses only the history half.** `Terminal.swift:427 TextAnchor`
+is `(absolute display row, column)` and is `Comparable`; that ordering is
+load-bearing at `:2634 selectAll`, `:2807 detectedLink`, `:3348 text(in:)`,
+`:3382`-`:3385 resolvedRange`, `:3486 nearestTextUnit`, `:3510`-`:3557` the four
+`textUnit` steps, `:3848 range(_:intersects:)`, `:3864`-`:3868
+clampSelectionToRetainedStream`, `:3877`-`:3899 handleEviction`, and `:4533`,
+`:4540`, `:4548`, `:4558` in `resizeWidth`'s write-back. `F4` case 13 and
+Observation 4 say the remap becomes "(logical line, cell offset), the *native*
+address instead of a transient reflow attachment" -- but a live-grid anchor has
+no record, and a selection dragged from scrollback into the viewport, a search
+match crossing the seam, and `selectAll` all hold one endpoint in each space.
+Two exits, and Phase 1 chose neither: (a) keep the anchor a display row and
+translate at the store boundary, which is cheap per query but means a width
+change must still restate every held anchor -- so `X3`'s deletion of the
+attachment machinery is *conditional*, and what returns is smaller but not
+nothing; or (b) make the anchor a record address and give the live grid a
+parallel one, which needs a total order across two address kinds, defined for
+every comparison above. **`X3` and `X4` -- about 130 lines and one of `F5`
+Observation 5's five deleted invariants -- rest on this choice.**
+
+**`HR3` -- severing a wrap claim on the tail record silently drops a
+background-erase-colored cell that is stored and painted today.**
+`Terminal.swift:6369 severScrollbackWrapClaim` does two things: clears
+`isSoftWrapped`, and replaces a trailing `.spacerHead` with
+`GridCell(styleId: replacementStyleId)` -- a BCE-colored blank.
+`PackedRetainedRow.swift:487`-`:492` stores that cell (a styled `.padding`
+extends the canonical extent) and `:371 forEachContentCell` emits it with its
+style, so the renderer paints it in the erase color. `F4` case 9 maps the sever
+to "flip the tail record's open/closed header bit ... No cell is rewritten" and
+case 10 says the spacer was never stored -- both true, and together they lose
+the blank: a closed record is measured to its content end at read (`R7`), so the
+column is not emitted at all and the renderer pads it with the *default*
+background. Reachable with `ESC[41m` followed by IL or ED at viewport row 0.
+Either admission materializes the erase-styled blank into the record when the
+claim is severed -- which reintroduces a *cell* write into history, still
+tail-only but no longer a bit flip -- or the divergence is accepted and the
+sever's BCE behavior changes. `F4` missed it because it read the sever as a flag
+operation; it is a flag operation plus a cell write, and only the flag half maps.
+
+**`HR4` -- `resizeHeight` is a fourth tail mutation, and it is a truncation
+rather than a bit flip.** `Terminal.swift:4256`-`:4278`: growing the grid with
+the cursor on the last row pulls up to `addedCount` retained **display rows**
+back out of history into the live grid, materialized to full width, and
+decrements both running totals. `F4` Observation 5 enumerated "exactly three"
+writes into retained history and found all three are bit flips on the tail;
+this one is absent from that list because it removes rows rather than editing
+one. Under the arena it is: fold the tail record at the current width, cut it at
+the cell offset that begins the k-th-from-last display row, hand the suffix to
+the live grid, rewind the write cursor, reopen the record, and decrement the
+tail block's total -- which is a *sixth* index trigger point and the only
+operation in the whole design that shrinks the arena from the back. `DD5`'s
+counted display-row total has to be decremented by a number only the fold
+produces. **Nothing in Phase 1 designs or prices this, and it is on the resize
+path -- the path the doc exists to make cheap.** The arena's "middle immutable"
+premise survives (this is the tail), but "the open line only ever grows at its
+end" does not.
+
+**`HR5` -- whole-record eviction (`DD2`) evicts an unbounded batch of display
+rows, and four anchors clamp per eviction.** `Terminal.swift:3873
+handleEviction` runs once per `enforceScrollbackBudget` with the total evicted
+row count and drops the selection, the search occurrence, the hovered link and
+the armed link whose start precedes the new first retained row, then re-clamps
+the browsing anchor (`:3898`-`:3901`). Today one eviction step is one display
+row, so the clamp moves by one. Under `DD2` one step is one record -- **367
+display rows at 179 columns and 32,768 at the 2-column minimum**, using `F4`
+Observation 3's own arithmetic for a 65,536-cell record. So one admitted row can
+evict a screenful-plus, dropping a selection that survives today and jumping a
+browsing viewport by hundreds of rows. `F4` case 27 prices the granularity as "the
+budget can undershoot by at most one record", which is a *memory* statement; the
+same granularity is user-visible in four anchors and in the scrollbar, and no
+entry says so. `DD2`'s recorded alternative -- advance a head offset inside the
+first record so eviction stays display-row granular -- is the mitigation, and
+this is the argument for taking it in milestone 1 rather than later.
+
+**`HR6` -- `ProjectionRows` hands out a materialized `GridRow` per display row,
+which is the allocation the arena exists to delete.** `Terminal.swift:394` and
+its readers at `:2647`, `:2684`-`:2695`, `:2712`, `:2740`-`:2768`, `:2798`,
+`:3283`-`:3290`, `:3412`-`:3414`, `:3457`-`:3467`, `:3520`, `:3549`, `:3604`.
+The subscript is one `unpacked()` today. Under the new store it must locate
+(record, display-row-in-record) and *fold* the slice into a `GridRow`, re-adding
+a per-row allocation on every pointer query and on `activeProjectionRows()`'s
+whole-stream materialization. Making it a borrowing cursor instead is the right
+answer, and it is a rewrite of all fourteen readers, not a translation. `F5`
+Observation 3 conceded the migration was unenumerated; **this is the
+enumeration, and by line count the projection layer is larger than the arena
+itself** -- which is a fact `DD8`'s line-count reading should be re-read against
+when Phase 2 lands something real.
+
+**`HR7` -- two call sites read `contentIdentity`, which every Phase 1 probe
+stripped, and they disagree about the unit.** `Terminal.swift:2891
+activationIdentity` walks every cell of a link's range reading
+`cell.contentIdentity`; `:2184 scrollbackRowContentIdentityShape` reports one
+retained row's identity-run shape and does so deliberately over the
+*unmaterialized* stored prefix, because "counting the materialized trailing
+cells would report the pane's width rather than the row's content". Inherited
+condition 9 says the record format must carry what the probes dropped; these two
+sites are what makes it binding. `PackedRetainedRow`'s identity run table is
+keyed by column within a display row (`:243`-`:266` binary search, `:499`-`:503`
+the per-cell fallback). Under records the key becomes a cell offset within a
+logical line, which is strictly better -- one table per record rather than per
+display row, the advantage `F1` and `F3` both measured themselves as *not*
+having taken. But `scrollbackRowContentIdentityShape`'s contract has no meaning
+at a fold boundary: a display row's "stored prefix" is now a slice chosen by the
+current width, so "the row's own content" is a width-dependent question about a
+width-free store. The reader must be re-specified before it can be
+re-implemented, and doc 28's `PR1` consumes it.
+
+**`HR8` -- three running totals collapse to one, and `scrollbackRows.count` is
+load-bearing in ten places as "the viewport's origin in stream coordinates".**
+`Terminal.swift:969`, `:2090`, `:2125`, `:3219`, `:3243`, `:3815`-`:3816`,
+`:3862`, `:3906`, `:4011`, `:4316`. Each is O(1) today because a retained row
+*is* a display row. Under the new store each is the index's grand display-row
+total -- and `DD5` maintains a **per-block** total, not a grand one. Either the
+index maintains a grand total explicitly (a fifth maintained quantity, alongside
+`HR1`'s cached anchor row), or these become a walk over the block array: ~40
+blocks at `28/D11`'s trial depth and ~390 at 100,000 lines, on paths that run
+around **every `feed` action** (`:966 damageActionSnapshot` is taken before and
+after each one). Small per call, on the exact path `terminal-feed` and
+`scrollback-stream` measure -- the two workloads carrying `H3`'s named
+falsifier.
+
+#### Observation 3 -- what the inventory says about the invariant that dies
+
+`28/H7`'s entry names it: "history is always at the current width". The sweep
+can now say precisely what depends on it, and the answer is narrower than the
+site count suggests. Of the 69 sites, **only 13 read a *cell* out of history**
+(`T2`, `T3`, `T4`, `T6`, `T7`, `T8`, `T9`, `R1`, `R2`, `R11`, `R16`, `R17`, and
+`X11`'s `asArray`). The other 56 read a **count**, an **index**, or a **flag**:
+`scrollbackRows.count` in ten places, `isSoftWrapped` in eight, an absolute row
+number in twenty-odd, a byte or cell total in a dozen. That asymmetry is the
+finding: the design's difficulty is not decoding cells at a width -- `F1`
+measured that faster -- it is that **a display-row count is currently free and
+becomes derived**, and the tree spends it like it is free.
+
+Read the other way, this is also why the deletion side is real. Every one of the
+five invariants `F5` Observation 5 deletes shows up here as a group of sites
+that stop existing rather than a group that gets harder: `X1`+`X2`+`X3`+`X4` is
+invariant 4 (ten anchors across a rebuild), `X6`+`X7` is invariant 5 (three
+bounds), `X8`+`X9`+`X10`+`R13` is invariant 3 (the per-display-row continuation
+flag under three tail edits), and `X5` plus `resizeWidth:4571`'s re-enforcement
+is invariant 2 (narrow-then-widen must not evict). The one that does *not*
+simply vanish is invariant 1, and `HR1`/`HR8` are where its remains sit.
+
+- Observation: 69 display-row-indexed sites were enumerated across
+  `lib/TerminalCore`, `lib/TerminalPTY` and `app/` -- 14 unchanged, 16
+  index-translated, 18 rewritten, 13 deleted -- and 8 of them have a mapping
+  that is not obviously satisfiable. The checkpoint and persistence path
+  serializes history as text and is entirely unaffected;
+  `isHistoryHeadTruncated` has no production consumer at all.
+- Inference: inherited condition 6 is discharged, and the migration `F5`
+  Observation 3 called "a one-time cost, but a cost, and it is unenumerated" now
+  has a size and a shape. The shape is the surprise: the work is concentrated in
+  the *projection and anchor* layer (`R1`-`R11`, `HR1`, `HR2`, `HR6`), not in
+  cell decoding, because 56 of the 69 sites read a count, an index or a flag
+  rather than a cell. Four of the eight flagged items (`HR1`, `HR4`, `HR5`,
+  `HR8`) are new obligations on the block index and the arena that no Phase 1
+  entry states; two (`HR3`, `HR5`) are user-visible behavior changes needing a
+  human's disposition; one (`HR2`) gates whether `X3`/`X4`'s ~130-line deletion
+  is real; one (`HR7`) makes inherited condition 9 concrete.
+
+  Against `D1`'s eleven carried-forward conditions: this entry **discharges 6**
+  (the call-site enumeration) and **advances five others** -- **2** (`HR5` names
+  what `DD2`'s eviction granularity costs in four anchors and the scrollbar),
+  **3** (`HR1` names the concrete mechanism by which the paired ladder could come
+  back `slower` on `retained-browse`), **5** (`HR4` and `HR1` grow the block
+  index's trigger-and-maintenance list from four items to six), **7** (`X13`
+  hands the budget task the six per-row charge sites and the open question of
+  whether the spill table and the two side tables sit inside the arena's byte
+  budget), and **9** (`HR7` names the two `contentIdentity` readers that make
+  the stripped-side-table condition binding, and finds their units disagree).
+  Conditions 1, 4, 8 and 11 are untouched; condition 10 gains its first
+  counter-example in `HR3`.
+- Competing interpretations:
+  1. *The count is inflated by grouping -- 69 "sites" is really a dozen
+     functions.* Partly fair, and the tables group deliberately (`X6` is one row
+     covering nine code locations). The number that matters is not 69 but the
+     four in `HR1`, `HR2`, `HR4` and `HR6`, each of which is a design decision
+     rather than an edit. A reader who prefers a smaller count should read the
+     tables and ignore the total.
+  2. *`HR1` is a strawman: nobody would leave an index lookup on a per-row
+     path.* Correct that it is fixable, and the entry says how. It is flagged
+     because today's code re-reads `scrollProjection` ~200 times a frame *because
+     it is free*, and a mapping that silently makes it not-free is exactly the
+     kind of thing that shows up first as a `slower` ladder verdict rather than
+     as a review comment. `28/F17` is the precedent: the browsing regression it
+     chased was a per-cell cost nobody intended either.
+  3. *`HR3` is a rounding error nobody will see.* Possibly. It is recorded
+     because it is the first case found where the read-time fold does **not**
+     reproduce today's output, which is inherited condition 10's whole subject,
+     and because `F3`'s cross-arm checksum gate would not have caught it -- the
+     probe's stimuli contain no severed wrap claim.
+  4. *This should have been done before `D1` closed.* `D1`'s frozen rule did not
+     ask for it, and `F5` Observation 3 named the migration as an addition-side
+     cost with no number rather than hiding it. Nothing found here fires a `D1`
+     trigger: no site requires stored width.
+- Uncertainty:
+  - **The inventory is a reading, not a compile.** No mapping here has been
+    implemented, and the only way to know the list is complete is to delete
+    `ScrollbackBuffer` and see what fails to build. That is Phase 2's
+    implementation, not this pass.
+  - **Test suites are enumerated only where they assert a deleted API.** The
+    ~40 resize/wrap tests `F4` swept, the 21 in
+    `TerminalScrollbackBudgetTests.swift` and the 14 `isHistoryHeadTruncated`
+    assertions are named; a full test-site inventory is not here and would be
+    larger than the production one.
+  - **`HR1`'s 164-218 us is arithmetic, not a measurement**: `F1`'s point-read
+    median times an estimated 200 reads per frame. The real figure depends on
+    what an implementation caches, which is the point of flagging it rather than
+    pricing it.
+  - **`HR5`'s 367 rows is `F4`'s bound, not an observed record.** No real
+    session has been fed to see what record lengths actually occur (inherited
+    condition 8).
+  - **`app/` was swept for terminal-engine consumers only.** The GhosttyKit
+    surface in `app/TerminalView.swift` is the old backend and was read only far
+    enough to confirm it reaches history as text (`:913`, `:917`).
+- Deferred decisions, continuing `F5`'s numbering; each took the obvious, simple
+  choice rather than blocking:
+  - **DD9 -- the public coordinate does not change: `TerminalTextPosition.row`
+    stays a display row relative to the oldest retained row.** All translation
+    happens inside `Terminal`. The alternative -- publishing record-relative
+    addresses -- would change every consumer in `app/`, `lib/TerminalPTY` and
+    the render planner for no measured benefit, and would put a store detail in
+    a cross-module value type. This decision is about the *public* coordinate
+    only and deliberately does not settle `HR2`, which is about the stored one.
+  - **DD10 -- `isHistoryHeadTruncated` is deleted rather than kept
+    always-false.** `DD2` makes it constant, and a public property that is
+    always `false` is a claim a future reader can act on. It has no production
+    consumer -- 14 assertions in `TerminalScrollbackBudgetTests.swift` and
+    nothing else -- so deleting costs less than documenting. Reopen if a
+    consumer ever needs "did the last eviction cut inside a logical line", which
+    the evicted record's open/closed bit can still answer.
+  - **DD11 -- the census's per-row leak proof is restated in arena terms.**
+    `retainedCellStorageRowCount` (doc 15's `F4`) asserts that history does not
+    hold storage for rows it has evicted; with one region there are no per-row
+    allocations to count. The simple analogue: eviction must advance the arena's
+    head and the region must not grow monotonically, asserted as bytes-in-use
+    against capacity. Dropping the proof entirely was rejected -- doc 15's
+    regression was real and cost twice the promised memory.
+- Next action: Phase 2's second ledger task (budget and eviction semantics)
+  inherits `HR5` (eviction granularity is user-visible in four anchors and the
+  scrollbar, which is an argument for `DD2`'s head-offset alternative in
+  milestone 1) and `X13` (the per-row charge model's six sites, and the question
+  of whether the spill table and the two side tables are inside the arena's byte
+  budget or charged beside it). The graduation task inherits `HR1`, `HR2`, `HR4`
+  and `HR6` as the four design decisions a plan file has to make before it can
+  be sliced. Inherited condition 5's trigger-point list grows from four to six:
+  add `HR4`'s tail truncation and, if `HR1` is resolved by caching, the browsing
+  anchor's display row.
