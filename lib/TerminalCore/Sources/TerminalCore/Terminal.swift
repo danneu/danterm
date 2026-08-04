@@ -744,28 +744,44 @@ public struct Terminal: Equatable, Sendable {
     private var nextSemanticEventOrder: UInt64 = 0
     private var primaryHistoryObservation = ObservationGeneration()
 
+    /// The retained-history byte bound: the valve for rows whose bytes the cell cap cannot see.
+    ///
+    /// Raised from 10 MiB to 16 MiB by doc 28's `D11`, because the two caps below no longer fit
+    /// under the old budget. `F23` measured a full-width retained row at 179 columns costing
+    /// **1,552 charged B/row**, so `D11`'s target depth needs `89,500 x 1,552` ~ 14.8 MiB and at
+    /// 10 MiB the *byte* bound bound first, stopping a full-width fill at 6,756 rows. 16 MiB is
+    /// that measured requirement plus headroom, not a round number chosen first.
+    ///
+    /// This is a per-pane figure, and `D11` is a trial: it gives back most of the 3.72 MB
+    /// retained footprint `D10` banked. Read `D11` before treating it as settled.
+    ///
     /// Public so measurement tools can report the budget they ran against. Deliberately just the
     /// constant: the budget-taking initializer stays internal, because the public initializer
     /// enforcing this fixed value is an invariant with its own test.
-    public static let productionScrollbackBudgetBytes = 10_485_760
+    public static let productionScrollbackBudgetBytes = 16_777_216
 
     /// The retained-history cell bound, and the one that actually bounds a resize.
     ///
     /// Reflow cost is two-term. Doc 28's `D8` fits it at **1.85 us/row + 0.352 us/cell** on the
     /// packed representation, across three content regimes, and the cell term dominates at any
-    /// real pane width. Before packing, the byte budget bounded that term *implicitly*: a
-    /// `GridCell` cost 32 B, so 10 MiB could hold at most `10 MiB / 32 B` cells no matter how
-    /// the rows were shaped -- and the three measured regimes came in at 304K, 298K and 246K
-    /// cells, which is why a pre-packing saturated resize was 87-152 ms whatever the content.
-    /// Packing cut a stored cell to ~1 B and broke that coupling, which is the whole mechanism
-    /// behind `F14`'s 1,450 ms.
+    /// real pane width. Being denominated in *content* is what makes this bound safe under
+    /// reflow: rewrapping a row moves stored cells between rows but does not create or destroy
+    /// them, so a narrow-then-widen cycle evicts nothing. A row cap alone does not have that
+    /// property -- see `productionScrollbackRowCap`.
     ///
-    /// So this restates the old implicit bound explicitly, at the same value it always had.
-    /// Being denominated in *content* is what makes it safe under reflow: rewrapping a row moves
-    /// stored cells between rows but does not create or destroy them, so a narrow-then-widen
-    /// cycle evicts nothing. A row cap alone does not have that property -- see
-    /// `productionScrollbackRowCap`.
-    public static let productionScrollbackCellCap = 327_680
+    /// **What sizes it now is a depth target, not the resize budget.** Through `D8` this value
+    /// was 327,680, derived so that the simultaneous worst case fit `D8`'s ~150 ms budget (1.5x
+    /// the 99.5 ms pre-packing baseline). `D11` reopens that budget by explicit human choice and
+    /// sizes the cap from `F23`'s candidate (b) instead: **10,000 retained rows of full-width
+    /// content at 179 columns**, i.e. `10,000 x 179 = 1,790,000` stored cells. The old
+    /// derivation does not produce this number and is no longer what justifies it.
+    ///
+    /// The price is measured, not modelled away. `F23` timed a saturated resize at this cap and
+    /// row cap at **600.5 ms** (min 594.1, max 632.9) -- 6.04x the 99.5 ms baseline and 4.00x
+    /// `D8`'s budget. That cost is accepted *provisionally*, for a dogfood trial with an exit
+    /// condition; `D11` states the trial and the three ways out of it. Nothing here supersedes
+    /// `D8`'s cost model, which still predicts this correctly (it overreads by 7.7-12.0%).
+    public static let productionScrollbackCellCap = 1_790_000
 
     /// The retained-history row bound: a backstop for content the cell cap cannot see.
     ///
@@ -774,17 +790,12 @@ public struct Terminal: Equatable, Sendable {
     /// stores nothing), so a history of blank rows would satisfy any cell cap while making row
     /// count, and with it the `1.85 us/row` term, unbounded.
     ///
-    /// Sized from the cost model rather than chosen as a round number, so it is a consequence of
-    /// the resize budget instead of a knob. Taking `D8`'s budget of ~150 ms (1.5x the 99.5 ms
-    /// pre-packing baseline) and the worst case where **both** bounds bind at once:
-    ///
-    ///     1.85 us x R + 0.352 us x 327,680 <= 150,000 us
-    ///     1.85 us x R <= 150,000 - 115,442 = 34,558 us
-    ///     R <= 18,680  ->  16,384 (2^14)
-    ///
-    /// which prices the simultaneous worst case at **145.8 ms**, or 1.46x the baseline. It also
-    /// sits at or above the 1,000-10,000 rows every mainstream terminal defaults to (`xterm`
-    /// 1,024, `foot` 1,000, `kitty` 2,000, `tmux` 2,000, `alacritty` 10,000).
+    /// Sized to hold the losslessness property below against the cell cap, rather than chosen as
+    /// a round number: `cellCap / 20` = `1,790,000 / 20` = **89,500**. Through `D8` the same
+    /// ratio fell out of the resize budget (16,384 against a 327,680 cell cap); under `D11` the
+    /// cell cap is sized from a depth target instead, and this cap follows it to keep the ratio
+    /// at 20. It sits far above the 1,000-10,000 rows every mainstream terminal defaults to
+    /// (`xterm` 1,024, `foot` 1,000, `kitty` 2,000, `tmux` 2,000, `alacritty` 10,000).
     ///
     /// **The one place this bound is lossy.** Narrowing a pane multiplies row count while
     /// leaving cells alone, so below `cellCap / rowCap` = 20 columns the row cap can bind on the
@@ -794,9 +805,14 @@ public struct Terminal: Equatable, Sendable {
     /// pane lossless would cost the cell cap most of its budget, and `D8` takes the trade
     /// deliberately rather than by omission.
     ///
+    /// The ratio is not cosmetic, and `F23` measured what breaking it costs: the same cell cap
+    /// with `rowCap` left at 10,000 (ratio 179) looks cheaper to resize -- 296.3 ms -- but the
+    /// first narrowing to 100 columns **evicted 5,032 of its 10,000 rows**. A row cap set to the
+    /// depth target rather than to `cellCap / 20` does not hold that depth.
+    ///
     /// Public for the same reason the budget is: measurement tools report the bound they ran
     /// against, and the public initializer enforcing this value is an invariant with its own test.
-    public static let productionScrollbackRowCap = 16_384
+    public static let productionScrollbackRowCap = 89_500
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
 

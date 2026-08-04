@@ -406,18 +406,19 @@ struct TerminalScrollbackBudgetTests {
         // Why it exists: the same gap `publicProductionBudgetCrossing` closes for the
         //   byte budget. Tiny injected caps cannot catch an omitted or wrong public
         //   default, and at ordinary pane widths the cap is now the bound that actually
-        //   decides -- a packed row costs ~128 B, so 16,384 rows is ~2 MiB against a
-        //   10 MiB budget the content never reaches.
+        //   decides -- a short packed row costs ~108 B, so `D11`'s 89,500 rows is ~9.7 MB
+        //   against a 16 MiB budget this content does not reach.
         // Scenario: sustained short-line output at a narrow width, which is exactly
         //   where a byte-only bound used to retain tens of thousands of rows.
-        let cap = 16_384
+        // The exact literals are pinned by `publicProductionBoundsCrossing`; this test
+        // asks whether the public initializer crosses whatever that constant is.
+        let cap = Terminal.productionScrollbackRowCap
         var terminal = try #require(Terminal(columns: 8, rows: 1))
 
         for line in 0..<(cap + 500) {
             terminal.feed(Array("c\(line % 10)\r\n".utf8))
         }
 
-        #expect(Terminal.productionScrollbackRowCap == cap)
         #expect(terminal.scrollbackRowCount == cap)
         #expect(terminal.scrollbackByteCount < Terminal.productionScrollbackBudgetBytes)
         #expect(terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount)
@@ -762,13 +763,14 @@ struct TerminalScrollbackBudgetTests {
         // Intent: prove the public initializer alone wires the three literal production
         //   bounds, and that on ordinary content the caps are what decide depth.
         // Why it exists: tiny injected bounds cannot catch an omitted or incorrect public
-        //   default. What changed with `D8` is which bound *binds*: a packed row costs ~84 B
-        //   plus about a byte per stored cell, so the two caps together admit at most roughly
-        //   `16,384 x 84 + 327,680` bytes -- under 2 MB. The 10 MiB budget is therefore
-        //   unreachable for ordinary content and has become the valve for byte-expensive
-        //   rows, where a stored cell carries a multi-scalar spill the cell cap cannot see.
-        //   `byteBudgetStillBindsBeforeTheRowCap` covers that side; this one pins that the
-        //   constants are wired and that the budget is not silently doing the work.
+        //   default, and these three literals are a deliberate ruling rather than a
+        //   detail -- `D8` derived them from a ~150 ms resize budget, and `D11` re-sized
+        //   the caps from a depth target (10,000 full-width rows at 179 columns) and
+        //   raised the budget to cover them. A silent edit to any of the three moves both
+        //   the memory footprint and the worst-case reflow, so they are pinned literally
+        //   here and nowhere else. `byteBudgetStillBindsBeforeTheRowCap` covers the
+        //   byte-expensive side; this one pins that the constants are wired and that the
+        //   budget is not silently doing the caps' work on ordinary content.
         // Scenario: sustained ordinary output at a narrow width.
         var terminal = try #require(Terminal(columns: 8, rows: 1))
 
@@ -776,9 +778,12 @@ struct TerminalScrollbackBudgetTests {
             terminal.feed(Array("c\(line % 10)\r\n".utf8))
         }
 
-        #expect(terminal.scrollbackBudgetBytes == 10_485_760)
-        #expect(terminal.scrollbackRowCap == 16_384)
-        #expect(terminal.scrollbackCellCap == 327_680)
+        #expect(terminal.scrollbackBudgetBytes == 16_777_216)
+        #expect(terminal.scrollbackRowCap == 89_500)
+        #expect(terminal.scrollbackCellCap == 1_790_000)
+        // `D8`'s losslessness property, restated as the arithmetic that keeps it: below
+        // `cellCap / rowCap` columns the row cap evicts what widening cannot restore.
+        #expect(terminal.scrollbackCellCap / terminal.scrollbackRowCap == 20)
         // The row cap decided here: these rows hold 2 stored cells, so the cell cap is far away.
         #expect(terminal.scrollbackRowCount == Terminal.productionScrollbackRowCap)
         #expect(terminal.scrollbackStoredCellCount < Terminal.productionScrollbackCellCap)
