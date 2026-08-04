@@ -1,13 +1,13 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D10**, which the remaining Phase 3 direction gate in
+Next free ID: **D11**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
 on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
 representation, `D6` on correcting its pricing, `D7` on the resize-for-depth
-trade, `D8` on the bounds that resolve it, and `D9` on rejecting C6 for C1. IDs
-are allocated in the order entries are written, not reserved in advance -- the H5
-gate has now moved from `D5` to `D6` to `D7` to `D8` to `D9` to `D10` for that
-reason.
+trade, `D8` on the bounds that resolve it, `D9` on rejecting C6 for C1, and `D10`
+on accepting C1's residuals and graduating H3. IDs are allocated in the order
+entries are written, not reserved in advance -- the H5 gate has now moved from
+`D5` to `D6` to `D7` to `D8` to `D9` to `D10` to `D11` for that reason.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -667,7 +667,7 @@ that is a decision to make on post-landing evidence rather than here.
   must preserve, how each field is charged, and which representation the corrected
   table selects. It **supersedes `D5`'s pricing**, not `D5`'s selection: the
   representation is unchanged and the yield figures are restated. Phase 1 of
-  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)
   may begin. No engine packing code exists; the only engine change is a read-only
   measurement accessor.
 - Date and investigator: 2026-08-03, Claude (agent).
@@ -746,7 +746,7 @@ the gate.
 
 - Status: **decided as far as measurement can decide it, and deliberately no
   further.** Gate item 6 of
-  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)
   is **not cleared**. This entry states the trade as numbers, which is the second
   of the two exits that gate allows; it does not pick which way to take the trade,
   because every option changes the shape the remaining gate runs would measure.
@@ -843,7 +843,7 @@ None of these is chosen here. Each is stated with the number that governs it.
 - Status: **decided and implemented** at `43b9c83`. This takes `D7`'s exit 1
   (cap retained depth) and, on `F15`'s evidence, changes what is capped. It
   clears gate item 6 of
-  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)
   by the second of its two exits -- the trade stated as numbers and decided
   before landing.
 - Date and investigator: 2026-08-03, Claude (agent), on a human decision to take
@@ -952,7 +952,7 @@ and this restores it.
   **not** rewrite the gate: `D3`'s success criterion is unchanged, the baseline
   stays `678bfe9`, and `D8`'s two caps carry over untouched. The implementation
   is the next hand-off and is written against
-  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md).
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md).
 - Date and investigator: 2026-08-03, Claude (agent), on a human decision.
 - Evidence used: `F16` (the deciding ladder that failed), `F17` (the read-path
   profile and the fix that halved the failure), `F18` (C1 priced exactly, and the
@@ -1100,3 +1100,123 @@ load-bearing for everything after it:
   such rather than C6's decode -- and would make **revert** the remaining exit
   rather than a third representation. Stop and bring the numbers back; do not
   improvise a second pivot.
+
+### D10 -- accept C1's residuals as a trade and graduate `H3`: the memory win is banked, and `H8` is the successor that removes what it cost
+
+- Status: **decided as a graduation ruling, on a human decision made with the full
+  verdict set in hand.** It takes the third of the plan's three graduation exits --
+  "a trade stated as numbers and decided in a `D` entry" -- and rules `H3`
+  **graduated as accepted-with-trade**. Phase 1 (C1) is landed at
+  `987927a`..`f364cd9`; the plan is closed and promoted to
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md).
+  No code changes here, and nothing is re-measured: `F20`'s table is the deciding
+  table and the no-shopping rule closed it.
+- Date and investigator: 2026-08-03, Claude (agent), on a human decision.
+- Evidence used: `F20` (the deciding table, and the write-pattern fix that halved
+  what `F19` found), `F19` (C1's deciding run and the memory/depth/resize
+  measurements), `F21` (the control question, resolved: `style-churn` was never a
+  control for this range, so there was no failed control and no ground to
+  re-measure), `F22` (the wide-baseline audit, which supplies the absolute framing
+  below), `F18` (C1 priced before implementation), `D9` (the pivot this closes),
+  `D8` (the caps that make depth representation-independent), `D3` (the success
+  criterion this is read against), `D2` (the frozen browsing rule), `F1` (the feed
+  path's resolution wall).
+
+#### The trade, as numbers
+
+Against the adjacent pre-packing baseline `678bfe9`, on `F20`'s deciding table
+(`confirm`, host conditions read) plus `F19`'s memory and resize reads:
+
+| what is banked | pre-packing | C1 at HEAD |
+| --- | ---: | ---: |
+| retained footprint, 179x66 | 10.49 MB | **3.72 MB** |
+| retained footprint, 80x24 | 10.17 MB | **3.40 MB** |
+| retained depth, both geometries | 1.00x | **1.11x** |
+| saturated resize, three regimes | `D8`'s line | **within 1%** (116.9 / 56.3 / 103.8 ms) |
+| `retained-browse` (threshold 1.05%) | -- | **equivalent, -0.33%** |
+
+| what it costs | threshold | reading |
+| --- | ---: | ---: |
+| `scrollback-stream` | 1.85% | **slower, +4.13%** (drain 163.0 -> 171.9 ms) |
+| `terminal-feed` | 2.5% | **slower, +4.55%** (2 pairs) |
+| `incremental-mixed` | 1.85% | inconclusive on the deciding table (+1.17%) |
+
+Three qualifications belong with those numbers rather than under them:
+
+- **The feed reading is the least settled number in the package.** Three sessions
+  read `+1.50%` (`F19`), `+1.67%` against pre-fix C1, and `+4.55%` against
+  pre-packing (`F20`). The direction is consistent across all three; the magnitude
+  is not, the protocol does not license comparing readings across sessions, and
+  `F1` established that this workload cannot resolve differences of this size and
+  cannot buy extra pairs at `confirm`. What is accepted is a feed cost of the
+  order of a few percent, not the specific figure 4.55%.
+- **`incremental-mixed` is a residual this acceptance carries but packing did not
+  cause.** `F21` isolated `+2.15%` against a 1.85% threshold to `2ae37c4` -- the
+  read-path rewiring `F17` landed to rescue C6 -- by construction rather than by
+  profile. It is inside the accepted range and it is **not fixed**; it is recorded
+  here so nobody later reads the graduation as a claim that the range is clean.
+- **`style-churn`'s `+2.36%` is unexplained and stays that way.** `F21` cleared the
+  only commit that touches its path (`equivalent`, -0.41%), so there is no
+  attribution to make and no re-measurement to license.
+
+#### The absolute framing, and the one thing it cannot say
+
+`F22`'s wide-baseline audit is descriptive and carries no verdict, but it is the
+input that makes the giveback legible as a fraction of something:
+
+- **`terminal-feed`'s residual can be placed.** +4.55% is ~61 ms on a 1,345 ms
+  batch -- about **3.3% of an 1,855 ms campaign win**. HEAD remains **2.30x faster
+  than pre-campaign `6c58c45`** rather than 2.38x.
+- **`retained-browse` is the payoff, absolutely.** 2.20x faster than pre-campaign
+  while holding **4.24x the history**.
+- **`scrollback-stream`'s absolute position is unknown.** It is one of the four
+  workloads `F22` classified *not comparable* at the wide baseline, so nothing in
+  this repo says whether sustained output at HEAD is above or below where it
+  started. **This entry accepts that open question rather than resolving it**, and
+  it is the largest single unknown in the package. It is not a task, because
+  answering it needs a baseline no older than `39abdbf` -- close enough to HEAD to
+  mostly duplicate the adjacent runs `F20` already has.
+
+#### `H8` is the designated successor, and accepting now forecloses nothing
+
+`H8` -- admit rows by reference into a bounded unpacked tail and pack in amortized
+steps on the pane's queue -- removes **both** accepted residuals by construction
+rather than by tuning: there is no packing on the measured path at all, so feed
+and `scrollback-stream` become neutral without anything having to get faster. The
+evidence that the residuals are a *scheduling* cost and not an *encoding* one is
+that they did not move between two representations 4x apart in per-row bytes
+(`F19` under C6 at 128 B/row, `F20` under C1 at 528 B/row after the encoder fix
+had already taken -6.69%).
+
+**C1's format is settled and `H8` does not reopen it.** This is worth stating
+because the question will otherwise be relitigated by the next reader: C6 was
+rejected on decode-on-read (`F17`: ~3.8 ns per browsed cell, which no encoder
+change reaches, on the workload with the tightest threshold), and that failure is
+intrinsic to a format that must be decoded. `H8` moves *when* the encode runs, not
+what it writes. So a future `H8` is not a route back to a smaller cell, and a
+smaller cell is not a cheaper alternative to `H8`.
+
+#### The ruling
+
+**`H3` graduates as accepted-with-trade.** `D3`'s criterion is met on every axis
+except "nothing else `slower`", and that axis is discharged by the exit the
+criterion itself provides: the trade is stated as numbers, above, and decided
+here rather than discovered after landing. The human's judgement, recorded as
+theirs: 2.8-3.0x less retained memory at 1.11x the depth, with browsing at parity
+and resize holding `D8`'s line, is worth a few percent on two admission-bound
+workloads when the campaign-absolute reading says that giveback spends a slice of
+a large win rather than digging below the starting line.
+
+- Behavioral verification: none required -- this entry writes no code. The landed
+  C1 implementation's verification is `D9`'s, unchanged: `I1`-`I5`, the full
+  `PO2`/`PO3` round-trip battery through admission, width reflow and height
+  transfer, `PO4`'s `derivationMatchesCensus` and pricing model updated to C1, and
+  `just test` green at `f364cd9`.
+- Quantitative verification: the tables above, reproducible from `F19`'s and
+  `F20`'s recorded artifacts. Nothing was re-run for this entry, deliberately.
+- Reopening condition: **`H8` funded, or a measured `scrollback-stream` or
+  `terminal-feed` cost materially worse than the readings accepted here** -- for
+  instance a later wide-baseline run that can reach `scrollback-stream` and places
+  it below pre-campaign DanTerm. Either makes the admission path live work again.
+  What does **not** reopen it is a proposal to shrink the retained cell: `D9`'s
+  reasons are measured and stand.
