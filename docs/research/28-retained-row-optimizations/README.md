@@ -203,11 +203,17 @@ The memory claim held at both geometries (`F16`: 69 B/row, 1.27 MB live heap at
 pre-packing resize, closing `F14`'s 14.2x. The deciding ladder then answered
 `slower` on four of six calibrated workloads, worst **`retained-browse` at
 +19.83% against a 1.05% threshold** -- and `F16` Observation 2 shows neither cap
-binds on that workload, so the cost is the packed row's read, which is `C6`'s own
-named falsification. **`H3` does not graduate, and its disposition is open pending
-`F17`**: the human decision is to profile where the constant goes before choosing
-among revert, the `C1`/`C2` pivot, and accepting the trade. Accepting +19.83% is
-off the table.
+binds on that workload, so the cost is the packed row's read.
+**`F17` then profiled that read, and `C6`'s named falsification had not fired.**
+Nothing on the browsing path took a per-cell point read; it took `unpacked()`,
+which is the linear walk `PO5` proved -- but *two* readers took it, per visible
+row per frame, each wanting a slice of a whole materialized row. Giving each
+reader a walk that decodes only what it consumes cut browsing from **+19.83% to
++3.27%** and put `geometry` below the baseline arm. **`H3` still does not
+graduate**: all four workloads remain `slower`, the read-side residual is the
+decode itself (~3.8 ns/cell, no localized fix visible), and the other three are
+one unfixed cause -- `pack(_:)` at 9.2% of feed self time, a frame that does not
+exist at the baseline. Disposition returns to the human at a much smaller size.
 
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
@@ -538,9 +544,24 @@ is a ledger entry opening an investigation, not a plan.
   both bounds, resize lands within 1.19x of pre-packing in all three regimes.
   `F16` then ran the full deciding ladder and **the gate failed**: four `slower`
   verdicts, worst `retained-browse` at **+19.83%** against 1.05%, with neither cap
-  binding on that workload. **`H3` does not graduate; disposition open pending
-  `F17`**, which profiles where the constant factor goes before revert, `C1`/`C2`
-  pivot, or acceptance is chosen. Profiling is in progress.
+  binding on that workload.
+  **`F17` profiled the read and fixed what wiring could fix.** The suspected
+  cause -- per-cell point reads defeating `PO5`'s linear walk -- was wrong: the
+  planner already took the linear walk, but `geometry` and `forEachViewportCell`
+  each materialized a whole `[GridCell]` per visible row per frame, where the
+  pre-packing form returned its stored array by reference. Three readers now get
+  three walks (`forEachCell`, `forEachContentCell`, `forEachKind`), pinned
+  against drift by `TerminalRetainedRowReadPathTests`, landing at `2ae37c4`.
+  Browsing fell **+19.83% -> +3.27%** and `geometry` now costs less than at the
+  baseline. **`H3` still does not graduate**: browsing misses 1.05% by 3x on a
+  residual that is the decode itself, and the three admission-bound workloads are
+  unmoved because their cost is `pack(_:)` -- 9.2% of feed self time, absent at
+  the baseline. `F17` Observation 5 also records the plan's `terminal-feed`
+  prediction (~+1%, bounded +2%) as **falsified** across three readings, which
+  leaves `D1` pitch 3's longer screen moot rather than overdue.
+  **Awaiting the human decision among revert, the `C1`/`C2` pivot, and a stated
+  trade** -- now against +3.27% rather than +19.83%, with a scratch-reusing
+  encoder (`F18`) as the one unexplored lead on the admission side.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.

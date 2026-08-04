@@ -1,6 +1,6 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- GATE FAILED on the read path; profiling in progress (`F17`)
+## Status -- GATE FAILED; read path profiled and fixed, admission still open
 
 Chunk A landed the packing at `efa549f`. `PO1`-`PO5` are green and the memory
 claim held to the byte: **128.0 B/row** on the CRLF reference payload, **81,920**
@@ -22,11 +22,26 @@ row's read -- `C6`'s own named falsification, on the constant factor `PO5` never
 bounded. Memory is unambiguously won: 69 B/row and 1.27 MB live heap at 179x66,
 1.12x deeper than pre-packing at roughly an eighth of the bytes.
 
-`H3` does not graduate, and its disposition is **open**. The human decision is to
-**profile before choosing** -- `F17` reads where the ~20% goes, and only then do
-revert, the `C1`/`C2` pivot, or a stated-trade acceptance get adjudicated.
-Accepting +19.83% is off the table; reverting now would discard measured
-information. This block records the failure, not a verdict.
+`F17` then profiled that read. The suspected cause -- per-cell point reads
+defeating `PO5`'s linear walk -- was **wrong**: the planner already took the
+linear walk. What it did was materialize a whole row twice per frame, once for
+`geometry` (which needs only kinds) and once for `forEachViewportCell` (which
+needs only scalars and a style), where the pre-packing form returned its stored
+array by reference. Three readers now get three walks, landing at `2ae37c4`:
+browsing **+19.83% -> +3.27%**, and `geometry` now costs *less* than at the
+baseline.
+
+`H3` still does not graduate. Browsing misses its 1.05% threshold by 3x on a
+residual that is the decode itself (~3.8 ns/cell, no localized fix visible), and
+the three admission-bound workloads are unmoved because their cost is
+`pack(_:)` -- 9.2% of feed self time, a frame absent at the baseline and not
+attempted here, since an encoder rewrite is a shape change rather than a wiring
+one.
+
+Its disposition is **open**, and returns to the human at a much smaller size:
+revert, the `C1`/`C2` pivot, or a stated trade -- now against +3.27%, with a
+scratch-reusing encoder (`F18`) as the one unexplored admission lead. This block
+records the failure, not a verdict.
 
 ## Problem and desired outcome
 

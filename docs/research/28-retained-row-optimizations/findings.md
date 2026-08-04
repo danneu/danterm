@@ -1,11 +1,12 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F17**, which Phase 2's open resize-*profile* task claims (it was
-written down as `F11`, then `F12`, then `F13`, then `F15`, before the entries
-ahead of it existed; IDs go in the order findings are recorded, not in the order
-tasks were listed). `F14` measured how much a saturated resize costs and `F15`
-measured what it is a function of; what neither did is read *where inside
-reflow* the time goes, which is what `F17` still owes. Inherited baseline:
+Next free ID: **F18**. Phase 2's open resize-*profile* task has now been renumbered
+three times (`F11`, `F12`, `F13`, `F15`, `F17`) without being written, because IDs
+go in the order findings are recorded and each time something more urgent was
+measured first; it is still owed and now claims `F18`, alongside the
+scratch-reusing encoder lead `F17` Observation 4 leaves open. `F14` measured how
+much a saturated resize costs and `F15` measured what it is a function of; what
+neither did is read *where inside reflow* the time goes. Inherited baseline:
 `15/F18` -- the compact retained-row validation at `dd51a12`/`54d4d2d` -- is
 cited, not copied; read it there.
 
@@ -1724,3 +1725,137 @@ single-arm probe run here; the before/after above is two arms.
   gives up depth (3.39x against 8.86x) for an O(1) read with no tables -- is the
   named reopening target, and `F17`'s profile is what would say whether `C6`'s read
   can be made cheap enough instead.
+
+### F17 -- the browsing regression was two whole-row materializations per frame, not a slow decode: streaming the readers cuts +19.83% to +3.27%, and what remains is admission
+
+- Status: recorded. It answers `F16`'s "where inside the read the 19.83% goes"
+  and supplies the profile the human decision on `H3`'s disposition was made
+  conditional on. **It does not graduate `H3`**: all four `slower` workloads are
+  still `slower`, and `retained-browse` still misses its 1.05% threshold by 3x.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: profiled at `1d0e73a`/`4c63042` (packing plus `D8`'s
+  caps), fixed at `2ae37c4`, both against the adjacent baseline `678bfe9`.
+  Release configuration throughout.
+- Conditions: AC power. Every directional reading was taken behind a load gate
+  (`< 2.5` one-minute) per gate item 7; the profiles themselves are attribution
+  and carry no verdict, per `agent-docs/terminal-performance.md`.
+- Commands:
+
+      sample <pid> 12          # TerminalBrowseBenchmark, both arms, release
+      just benchmark-quick baseline=678bfe9 workload=retained-browse
+      just benchmark-feed-sample scrollback-stream 20
+
+#### Observation 1 -- the read path was never the shape the microbenchmark proved, but not in the direction predicted
+
+The standing suspicion entering this work was that frame planning read retained
+cells through per-cell **point reads** -- `cell(at:)`, a binary search per table
+per cell -- rather than the linear cursor walk `PO5` benchmarked. **It does
+not.** Nothing on the browsing path calls `cell(at:)`; the planner reached
+`unpacked()`, which *is* the linear walk, cursor-per-table and provably linear.
+
+The cost was the opposite shape. `unpacked()` returns a **materialized
+`[GridCell]`**, and two separate readers asked for one per visible row per frame:
+
+| site | what it wanted | what it paid | samples (of 9,738 in `planFrame`) |
+| --- | --- | --- | ---: |
+| `geometry` -> `presentedRows` | per-column `kind`, `isSoftWrapped` | full decode + array | 699 |
+| `forEachViewportCell` | scalars + style id | full decode + array | 656 |
+
+That is **each visible retained row decoded twice and allocated twice, every
+frame**, to serve two readers that each wanted a slice of one. Against the
+baseline arm profiled identically, the same two sites cost 775 and ~5 samples --
+because the pre-packing representation could hand back its stored `[GridCell]`
+**by reference**. The regression was never the decode being slow. It was the
+decode being *requested wholesale, twice, by callers that wanted a third of it.*
+
+- Inference: `C6`'s named falsification -- "a row read whose metadata lookup
+  dominates" -- did **not** fire. What fired is a plainer thing that no proof
+  obligation covered: `PO5` proved the walk's asymptotics and its constant, and
+  said nothing about *how many walks a frame performs*.
+
+#### Observation 2 -- three readers, three walks, and the measured effect of each
+
+The fix gives each reader a walk that decodes only what it consumes, sharing the
+layout rather than a decoder. Measured on `TerminalBrowseBenchmark`, ABBA, three
+rounds each, load-gated:
+
+| state | `planNanosecondsPerFrame` (head vs base) | effect |
+| --- | --- | ---: |
+| at `F16` | 367.4k vs 341.8k | **+19.83%** (confirm, `F16`) |
+| stream both readers (`forEachCell`, `forEachKind`) | 367.4k vs 341.8k -> 358.5k vs 343.6k | **+7.5%** |
+| render walk stops decoding hyperlink + identity (`forEachContentCell`) | 358.5k -> 353.4k | **+4.3%** |
+| scalar slot read through an unsafe buffer, stride resolved once | 353.4k -> 353.3k | **+3.5%** |
+| adjudicated | `just benchmark-quick` | **`slower`, +3.27%** (2 pairs, threshold 1.05%) |
+
+`geometry` is now measured **below** the baseline arm (654 samples against 775):
+projecting kinds never needed a scalar, a style, a hyperlink, or a content
+identity, and it had been paying for all four.
+
+One tried change is recorded as **rejected**: a non-failable
+`Unicode.Scalar(UInt8)` path for the 1-byte stride, on the theory that the
+failable initializer's surrogate check was per-cell cost. Measured +3.6% against
++3.5% -- no effect -- and it was reverted rather than kept. It is named here so
+the next reader does not re-derive it.
+
+#### Observation 3 -- what remains on the read side is the decode itself
+
+After the fix, `forEachContentCell` is 302 self samples of ~9,750 (~3.1%),
+which is the measured +3.27% almost exactly. That is ~3.8 ns per stored cell to
+reassemble a scalar and a style id from packed bytes, against ~0 for a 32-byte
+struct load out of a contiguous array. **No further localized fix is visible.**
+Merging the kind walk and the content walk into one traversal is the only
+remaining structural idea, and `forEachKind`'s 205 samples bound its yield at
+~2%, which would still not clear 1.05%.
+
+- Inference: the read-side residual is `C6`'s representation, not a defect in
+  how it is called. Reducing it further means changing what a cell costs to
+  decode -- which is `C1`/`C2`'s subject, not a tuning exercise.
+
+#### Observation 4 -- the other three regressions are one cause, and it is admission
+
+`F16` decomposed `scrollback-stream` as admission rather than draw. Profiling
+headless `Terminal.feed` confirms it and names the frame:
+**`PackedRetainedRow.pack(_:)` is 9.2% of feed self time**, the second-largest
+frame after `Terminal.feed` itself (16.9%). At the baseline this frame **does not
+exist** -- admission stored the `GridRow` as it stood.
+
+Post-fix quick verdicts against `678bfe9`, each load-gated:
+
+| workload | at `F16` | at `2ae37c4` | threshold |
+| --- | ---: | ---: | ---: |
+| `retained-browse` | +19.83% | **+3.27%** | 1.05% |
+| `scrollback-stream` | +7.53% | **+6.34%** | 1.85% |
+| `terminal-feed` | +3.10% | **+5.18%** | 2.5% |
+| `incremental-mixed` | +4.24% | **+4.22%** | 1.85% |
+
+The three admission-bound workloads are unmoved, which is the expected result of
+a read-only fix and is recorded as such rather than as a surprise.
+
+- Inference: encoding a row costs what it costs. `pack` scans every cell, sizes a
+  stride, and builds up to five exception tables plus a scalar column and a blob
+  -- on an ordinary row roughly four heap allocations where admission previously
+  made none. A scratch-reusing single-pass encoder is a **plausible** reduction;
+  it is not attempted here, because it is an encoder rewrite rather than a wiring
+  change, and the brief's boundary is that a shape problem is a stop-and-report.
+- Uncertainty, stated plainly: **how much of the 9.2% is recoverable is
+  unmeasured.** The scan is irreducible; the allocations are not. Nobody should
+  read "admission costs 9.2% of feed" as "6% is available".
+
+#### Observation 5 -- the plan's `terminal-feed` prediction was wrong, and `D1` pitch 3's screen stays moot
+
+The plan predicted `terminal-feed` at **~+1%, bounded at +2%**. Four readings now
+exist: +2.72% (quick, `F16`), +3.10% (confirm, `F16`), +5.18% (quick, here).
+Every one is above the +2% bound, so the prediction is **falsified**, and `D1`
+pitch 3's reopening condition -- which fires only *below* ~2% -- does not fire.
+The longer feed screen remains unnecessary. This is the correction `F16`
+Observation 3 flagged, now recorded against three independent readings rather
+than one.
+
+- Next action: the human decision `F16` deferred, now with the profile it was
+  made conditional on. The read path is fixed as far as wiring can fix it and the
+  gate still fails, so the choice among **revert**, the **`C1`/`C2` pivot**, and
+  **accepting a stated trade** returns to the human unchanged in kind but much
+  changed in size: the browsing cost is +3.27%, not +19.83%, and the three
+  remaining regressions have a single named cause with an unmeasured fraction of
+  it recoverable. `F18` -- a scratch-reusing encoder -- is the one unexplored
+  lead that could move them, and it is not started.
