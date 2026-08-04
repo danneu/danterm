@@ -1,12 +1,13 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F15**, which Phase 2's open resize-*profile* task claims (it was
-written down as `F11`, then `F12`, then `F13`, before the entries ahead of it
-existed; IDs go in the order findings are recorded, not in the order tasks were
-listed). `F14` measured how much a saturated resize costs; `F15` is still owed
-the read of *where inside reflow* that cost goes. Inherited baseline: `15/F18` --
-the compact retained-row validation at `dd51a12`/`54d4d2d` -- is cited, not
-copied; read it there.
+Next free ID: **F17**, which Phase 2's open resize-*profile* task claims (it was
+written down as `F11`, then `F12`, then `F13`, then `F15`, before the entries
+ahead of it existed; IDs go in the order findings are recorded, not in the order
+tasks were listed). `F14` measured how much a saturated resize costs and `F15`
+measured what it is a function of; what neither did is read *where inside
+reflow* the time goes, which is what `F17` still owes. Inherited baseline:
+`15/F18` -- the compact retained-row validation at `dd51a12`/`54d4d2d` -- is
+cited, not copied; read it there.
 
 ### F1 -- the trim's feed-path effect is structurally unresolvable: four schedules agree on ~+1%, which is the harness's dead zone
 
@@ -1440,3 +1441,286 @@ exit, and `D7` takes it.
 - Next action: `D7`. Per the plan's own instruction, the remaining gate runs
   (`terminal-feed` screen, the deciding ladder, the two-width memory read) were
   **not** run -- they would measure a shape the design decision may change.
+
+### F15 -- reflow costs `a x rows + b x cells`, the byte budget used to bound the cell term and stopped, and a row cap alone destroys history
+
+- Status: recorded, and it is the evidence `D8` decides on. `F14` measured *how
+  much* a saturated resize costs after packing; this measures *what it is a
+  function of*, which is what makes a bound designable rather than guessable. It
+  also corrects a premise the cap discussion started from -- that pre-packing
+  depth was ~5,800-6,800 rows -- which was wrong by an order of magnitude and
+  would have produced an unsatisfiable decision rule.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: three arms, each a separate checkout, with the probe
+  sources byte-identical in all three (the same two files were copied into both
+  worktrees, as `F14` did). **old** = `678bfe9`, the commit before packing.
+  **packed** = `c140069`, packing with no cap. **dual** = `43b9c83`, packing with
+  the cell and row caps. Release configuration, headless.
+- Conditions: AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`, no low-power mode.
+  Every timed arm ran behind a load gate that blocks until the one-minute load
+  average is below 2.5, and host conditions were read before and after each --
+  they sat between 2.0 and 2.4 throughout. One earlier batch was **discarded
+  unread** because it began at load 10.48, contaminated by a test-suite run that
+  had just finished; gate item 7 is what that discard implements. The
+  per-stimulus depth arithmetic in Observation 1 is exact integer arithmetic over
+  recorded rows and claims no wall clock, so load cannot perturb it.
+- Commands:
+
+      just terminal-retained-row-probe "--saturated --json"     # at 678bfe9
+      just terminal-resize-probe "--recipe saturating"          # each of the three arms
+      just terminal-resize-probe "--recipe sparse"              # each of the three arms
+      just terminal-resize-probe "--recipe wide"                # each of the three arms
+
+#### Observation 1 -- pre-packing depth ran to 82,023 rows, not ~6,800
+
+`F7`'s and `F14`'s 6,756-row baseline is the depth the *probe's dense payload*
+reached, and it is near the shallow end of the pre-packing range rather than
+representative of it. Retained rows have been content-sized since doc 15, so the
+byte budget bought a row count that varied with row length. Pricing every
+saturated stimulus at `678bfe9`:
+
+| stimulus | old B/row | old depth at 10 MiB |
+| --- | ---: | ---: |
+| `danterm/fish-u2733-title` (20 cols) | 127.8 | **82,023** |
+| `alacritty/history` (105 cols) | 186.3 | **56,273** |
+| `danterm/zsh-osc133-width-sweep` (12 cols) | 272.2 | 38,519 |
+| `alacritty/tab_rendering` (116 cols) | 1,014.9 | 10,332 |
+| pooled saturated corpus (94,990 rows) | 1,059.4 | 9,898 |
+| the resize probe's dense payload | ~1,550 | 6,756 |
+| `benchmark/scrollback-stream` (179 cols) | 4,607.3 | 2,276 |
+
+The consequence is not academic. A cap rule requiring both "no user retains fewer
+rows than pre-packing" and "worst-case resize within ~1.5x of 100 ms" is
+**unsatisfiable**: the first demands at least 82,023 and the second at most
+~8,600, an order of magnitude apart. Any cap is a depth regression against *some*
+pre-packing content, and the honest question is which content and how much.
+
+#### Observation 2 -- what the pre-packing worst case actually cost, which is not what extrapolation predicted
+
+The natural guess is that the old format's deepest content was also its slowest
+resize: 56,273 rows at `F14`'s measured 14.84 us/row extrapolates to ~835 ms, and
+if that held, a cap would be bounding a pathology that already existed. **It does
+not hold.** Measured on `saturated-sparse-resize-v1`:
+
+| arm | retained rows | median | per row |
+| --- | ---: | ---: | ---: |
+| `678bfe9` unpacked | 50,412 | **152.0 ms** | 3.01 us |
+| packed, uncapped | 124,830 | **445.2 ms** | 3.57 us |
+
+The extrapolation failed because **per-row reflow cost is not a constant** -- it
+scales with the row's length, and these rows are ~4.9 cells against the dense
+payload's ~45. So the pre-packing format's deepest content resized in 152 ms, not
+800, and the depth a cap gives back is depth users really had at a price they
+were really paying. `F14`'s 1.17x per-row packing penalty reproduces here as
+3.01 -> 3.57 us on completely different content, which is an independent
+confirmation of its factorization.
+
+#### Observation 3 -- the cost model, fitted across three content regimes
+
+Three payloads at one geometry (179x66 <-> 100), differing only in row length,
+give two equations per representation and therefore a two-term fit:
+
+| representation | per row | per cell |
+| --- | ---: | ---: |
+| unpacked (`678bfe9`) | 1.59 us | **0.292 us** |
+| packed (`c140069`) | 1.85 us | **0.352 us** |
+
+The cell term dominates at any real pane width -- at 45 cells per row it is ~90%
+of the cost, at 179 cells ~97%. Packing moved both terms by ~1.17x, which is the
+same factor `F14` reported and is the *small* half of what it found.
+
+**This is the mechanism behind `F14`, stated properly.** A `GridCell` cost 32 B,
+so the byte budget bounded stored cells at `10 MiB / 32 B` = 327,680 however the
+rows were shaped -- and the three regimes measured 304,020, 245,758 and 298,035
+cells at `678bfe9`, all just under it. That is why a pre-packing saturated resize
+was 87-152 ms *whatever the content was*: bytes were a cell bound in disguise. A
+packed stored cell costs ~1 B, so 10 MiB now admits up to ~10 M cells and the
+disguised bound is gone. Packing did not make reflow slow; it removed the thing
+that had been bounding it.
+
+#### Observation 4 -- a row cap bounds the wrong term, and destroys history
+
+The first cap tried was rows alone, at 8,192. Measured against the same three
+regimes, it bounds the regime it was sized on and misses the others:
+
+| regime | `678bfe9` | row cap 8,192 | ratio |
+| --- | ---: | ---: | ---: |
+| dense (~45 cells/row) | 99.5 ms | 135.8 ms | 1.36x |
+| sparse (~4.9 cells/row) | 152.0 ms | 29.3 ms | 0.19x |
+| wide (179 cells/row) | 87.4 ms | **232.6 ms** | **2.66x** |
+
+Wide content overshoots because 8,192 rows of 179 columns is 1.47 M cells in
+~2.15 MB -- the row cap is satisfied and the byte budget is nowhere near reached,
+while the dominant term runs free.
+
+**And a row cap is not reflow-invariant, which is worse than the overshoot.**
+Narrowing a pane multiplies row count while leaving content alone, so the cap
+evicts the overflow and widening cannot restore it. Measured directly at 179
+columns, 8,192-row cap, no cell cap:
+
+    8,192 rows  ->  narrow to 100  ->  8,192  ->  widen back to 179  ->  4,095
+
+Half a user's scrollback destroyed by one window drag, silently, with no byte
+budget exceeded and no error. The byte budget never had this failure mode because
+bytes are roughly conserved under rewrap while row count is not.
+
+#### Observation 5 -- restating the old implicit bound explicitly fixes both
+
+`D8` adds a **cell cap at 327,680** -- the pre-packing implicit ceiling at the
+value it always had -- with the row cap kept as a backstop for the degenerate
+regime a cell cap cannot see (`F9`'s near-empty rows store ~zero cells, so blank
+history would satisfy any cell cap while leaving the per-row term unbounded), and
+sized from the model at 16,384 (`D8` carries the arithmetic). Measured:
+
+| regime | `678bfe9` | packed uncapped | dual-bound | vs old | depth vs old |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dense | 99.5 ms / 6,756 | 1,450.2 ms / 81,920 | **117.6 ms / 7,123** | 1.18x | 1.05x deeper |
+| sparse | 152.0 ms / 50,412 | 445.2 ms / 124,830 | **57.1 ms / 16,384** | 0.38x | **3.08x shallower** |
+| wide | 87.4 ms / 1,665 | 1,846.5 ms / 29,757 | **104.1 ms / 1,798** | 1.19x | 1.08x deeper |
+
+Every regime lands within 1.19x of pre-packing, against 14.6x / 2.9x / 21.1x
+uncapped. Retained cells at the bound come out at 320,535 / 79,872 / 321,842 --
+the cell cap binds for dense and wide, the row cap for sparse, which is each
+bound doing the job it was added for. The `678bfe9` dense arm reproduces `F14`'s
+100.2 ms at 99.5 ms, which is the internal control that makes the three arms
+comparable.
+
+- Inference for `D8`: the trade is no longer resize-for-depth across the board.
+  Dense and wide content get *both* -- slightly more depth and near-baseline
+  resize -- because their bound was always the cell ceiling and it has been
+  restored. The entire giveback is sparse content, at 3.08x shallower than
+  pre-packing, and it is a real regression rather than a bounded pathology
+  (Observation 2 closed the alternative).
+- Competing interpretation, checked rather than argued: that the wide arm's
+  232.6 ms under the row cap was the byte budget rather than the cap. It was not
+  -- that history is ~2.15 MB against a 10 MiB budget, and the row count sat at
+  4,064 rather than 8,192 precisely because Observation 4's destruction had
+  already halved it during warm-up.
+- Uncertainty, stated plainly:
+  - **The simultaneous worst case is modelled, not measured.** The 145.8 ms that
+    sizes the row cap assumes content at ~20 cells per row, where both bounds bind
+    at once. No corpus stimulus sits there; the three measured regimes bind on one
+    bound each, and the worst *measured* case is 117.6 ms.
+  - **One geometry, one machine.** 179x66 <-> 100 throughout. The two-term
+    factorization is what generalizes; the absolute milliseconds are not claimed
+    beyond this recipe.
+  - **The fit is two points per representation**, so it has no residual to report.
+    It predicted the dual-bound dense arm at 142.8 ms against 135.8 measured under
+    the row cap -- ~5% -- which is the only out-of-sample check it has.
+  - **Below 20 columns the row cap can still bind on a narrowing** and lose
+    content, because `cellCap / rowCap` = 20. `D8` takes that trade explicitly.
+- Next action: `D8` decides the bounds and their values; `F16` still owes the
+  profile of where inside reflow the per-cell term goes, which is what any further
+  reduction depends on.
+
+### F16 -- the deciding ladder: the memory win is real and so are four `slower` verdicts, browsing worst at +19.83%
+
+- Status: recorded, and it is the deciding run set `D3`'s success criterion asked
+  for. **`H3` does not graduate on it.** The memory claim is measured and holds;
+  four of six calibrated workloads answer `slower`, and the largest is the guard
+  `D3` named in advance as most likely to fire.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: candidate `43b9c83` (packing plus `D8`'s cell and
+  row caps) against the adjacent baseline `678bfe9`, the commit before packing.
+  Release configuration. The candidate snapshot also captured five untracked
+  markdown paths, none of which is engine or benchmark code.
+- Conditions: AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`. Host conditions
+  present and **read before trusting the verdicts**, per gate item 7: load
+  2.06/4.16/5.55 at invocation on the operator's idle machine, busiest external
+  process 29.8%. The second preflight reading (3.22) follows the run's own builds
+  and is confounded by them, as the harness itself annotates. `F3`'s standing
+  lesson is honoured in the framing rather than the load: the baseline is the
+  **adjacent** commit, which is what made three of `F3`'s four `slower` verdicts
+  evaporate.
+- Commands:
+
+      just benchmark-quick baseline=678bfe9 workload=terminal-feed
+      just benchmark-confirm baseline=678bfe9
+      just terminal-memory-probe "--payload scrollback-plain"
+      just terminal-memory-probe "--payload scrollback-plain --columns 80 --rows 24"
+
+#### Observation 1 -- the ladder, at `confirm`
+
+| workload | verdict | effect | pairs / threshold |
+| --- | --- | ---: | --- |
+| `retained-browse` | **slower** | **+19.83%** | 4 / 1.05% |
+| `scrollback-stream` | **slower** | +7.53% | 4 / 1.85% |
+| `incremental-mixed` | **slower** | +4.24% | 6 / 1.85% |
+| `terminal-feed` | **slower** | +3.10% | 2 / 2.5% |
+| `content-churn` | equivalent | +0.44% | 4 / 2.15% |
+| `style-churn` | equivalent | -0.11% | 4 / 2.0% |
+
+`retained-browse` is not a marginal call: the frozen threshold is 1.05% and the
+measured effect is nineteen times it. `D2`'s 0.30-point dead zone and `AR1`'s
+"expect `inconclusive`" do not apply to a difference this size, and no rerun is
+warranted -- reaching for one is the shopping `F1`'s protocol forbids, and there
+is nothing ambiguous here to shop for.
+
+**This is `C6`'s named falsification, fired.** The plan's risk list opens with
+"a row read whose metadata lookup dominates -- if reconstructing a cell from slot
++ style run + exception measurably costs more than a struct load, `C6`'s whole
+advantage over the text form evaporates and the choice reopens toward `C1`/`C2`".
+`PO5` proved the *asymptotics* (a random read is flat in width, a full-row read
+stays linear) and both microbenchmarks pass; what they never bounded is the
+**constant factor**, and on the real browsing workload it is +19.83%.
+
+#### Observation 2 -- the caps are not the cause
+
+`retained-browse` plans frames over 10,000 short hard-terminated lines
+(`D1` pitch 1's recipe): ~100K stored cells against `D8`'s 327,680 cell cap and
+10,000 rows against its 16,384 row cap. **Neither bound binds on this workload**,
+so the regression is the packed row's read cost, not eviction. The same holds for
+`terminal-feed`, which measures admission rather than depth.
+
+#### Observation 3 -- the memory claim, at both geometries, and it holds
+
+`reference/scrollback-plain`, the CRLF payload every earlier finding is
+comparable against:
+
+| geometry | retained rows | cell bytes | per row | live heap |
+| --- | ---: | ---: | ---: | ---: |
+| 179x66 | 6,491 | 0.84 MB | 69 B | **1.27 MB** |
+| 80x24 | 6,449 | 0.54 MB | 66 B | **0.95 MB** |
+
+Against pre-packing's 5,799 rows at 1,808.0 B/row (~10.5 MB): **1.12x deeper at
+roughly an eighth of the memory**, and still width-independent, which is the
+property `F11` measured rather than assumed.
+
+Depth is now decided by `D8`'s cell cap rather than by the byte budget, and it
+binds exactly -- the probe's `cells` column counts the live grid too, so
+subtracting it gives 339,489 - 11,814 = **327,675** at 179x66 and
+329,595 - 1,920 = **327,675** at 80x24, against a 327,680 cap. That the two
+geometries land on the same retained cell count to within five cells is the cell
+cap doing precisely what a content-denominated bound should.
+
+Per `F13` Observation 4, no `savingFraction` or `depthMultiple` is quoted from a
+single-arm probe run here; the before/after above is two arms.
+
+- Inference: the trade is no longer "resize for depth" (`D8` resolved that) but
+  **memory for browsing latency**. ~8x less retained-history memory and 1.12x more
+  depth, against +19.83% on the workload that displays that history and three
+  smaller regressions on paths that touch retained rows.
+- Competing interpretation, checked rather than argued: that `D8`'s caps cause the
+  regressions. They do not -- Observation 2 shows neither bound binds on the two
+  worst workloads. A second candidate, that the baseline is too wide, is excluded
+  by construction: `678bfe9` is the immediately preceding commit.
+- Uncertainty, stated plainly:
+  - **Where inside the read the 19.83% goes is unmeasured.** Binary searches over
+    the style/exception tables, the identity run decode, and the blob's cache
+    behaviour are all candidates and none is separated. That read is `F17`.
+  - **`terminal-feed` at +3.10% exceeds the plan's own prediction** of ~+1%
+    bounded at +2%. The quick reading was +2.72% and `inconclusive`; confirm made
+    it `slower` at +3.10%. Because both readings sit above ~2%, `D1` pitch 3's
+    reopening condition does **not** fire and the longer screen is unnecessary --
+    the plan's stated escape, and the one case where exceeding a prediction makes
+    less measurement necessary rather than more.
+  - **`scrollback-stream`'s +7.53% is the largest surprise after browsing** and is
+    unexplained. Its drain rate fell 9.2 -> 8.4 MB/s while its draw tail *improved*
+    13.4 -> 9.7 ms, so the cost is on the admission side, not the draw side.
+- Next action: a human decision on `H3`'s disposition. The plan's graduation rule
+  admits "a trade stated as numbers and decided in a `D` entry", and this entry is
+  the numbers; whether a +19.83% browsing regression is a trade anyone wants is not
+  a measurement question. `C1`/`C2` -- a narrower cell that keeps a real cell and
+  gives up depth (3.39x against 8.86x) for an O(1) read with no tables -- is the
+  named reopening target, and `F17`'s profile is what would say whether `C6`'s read
+  can be made cheap enough instead.

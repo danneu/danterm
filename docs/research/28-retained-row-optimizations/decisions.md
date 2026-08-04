@@ -1,12 +1,12 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D8**, which the remaining Phase 3 direction gate in
+Next free ID: **D9**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
 on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
-representation, `D6` on correcting its pricing, and `D7` on the resize-for-depth
-trade. IDs are allocated in the order entries are written, not reserved in
-advance -- the H5 gate has now moved from `D5` to `D6` to `D7` to `D8` for that
-reason.
+representation, `D6` on correcting its pricing, `D7` on the resize-for-depth
+trade, and `D8` on the bounds that resolve it. IDs are allocated in the order
+entries are written, not reserved in advance -- the H5 gate has now moved from
+`D5` to `D6` to `D7` to `D8` to `D9` for that reason.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -836,3 +836,109 @@ None of these is chosen here. Each is stated with the number that governs it.
   or incremental reflow), or a measured per-drag cost showing coalescing reduces
   the user-visible figure to one 1.43 s event per drag rather than a stall per
   step. Either changes the arithmetic above rather than the judgement about it.
+
+### D8 -- bound retained history by cells and rows, not bytes alone: `D7`'s trade resolves for two content regimes and is paid by the third
+
+- Status: **decided and implemented** at `43b9c83`. This takes `D7`'s exit 1
+  (cap retained depth) and, on `F15`'s evidence, changes what is capped. It
+  clears gate item 6 of
+  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md)
+  by the second of its two exits -- the trade stated as numbers and decided
+  before landing.
+- Date and investigator: 2026-08-03, Claude (agent), on a human decision to take
+  the cap exit and open hybrid lazy reflow as the follow-on that later raises it.
+- Evidence used: `F15` (the whole basis -- the cost model, the three-regime
+  comparison, the pre-packing depth ceiling, and the row-cap failure), `F14` (the
+  regression this answers), `F13` (which probe numbers may be quoted at HEAD),
+  `F9` (near-empty rows, which is why a cell cap alone is not enough), `D7` (the
+  trade), `D6` (the depth packing buys).
+
+#### What changed, and the one sentence that explains it
+
+The byte budget stopped bounding resize cost, and the caps put that bound back.
+
+Before packing, a `GridCell` cost 32 B, so 10 MiB could hold at most
+`10 MiB / 32 B` = **327,680 stored cells** no matter how the rows were shaped.
+Reflow cost is `1.59 us x rows + 0.292 us x cells` (`F15`), overwhelmingly the
+cell term -- so the byte budget was bounding reflow *implicitly*, and the three
+measured content regimes came in at 304K, 298K and 246K cells, which is why a
+pre-packing saturated resize was 87-152 ms whatever the content was. A packed
+stored cell costs ~1 B. The coupling is gone, 10 MiB now admits ~10 M cells, and
+that is the whole of `F14`'s 1,450 ms.
+
+#### The two bounds, and why each exists
+
+- **Cell cap, 327,680.** The old implicit ceiling restated explicitly at the value
+  it always had. It bounds the dominant term, and being denominated in *content*
+  makes it safe under reflow: rewrapping moves stored cells between rows without
+  creating any.
+- **Row cap, 16,384.** The backstop for what a cell cap cannot see. `F9`'s
+  near-empty rows store ~zero cells, so a history of blank lines satisfies any
+  cell cap while leaving the per-row term unbounded. Sized from the model rather
+  than chosen, at the ~150 ms budget with **both** bounds binding at once:
+
+      1.85 us x R + 0.352 us x 327,680 <= 150,000 us
+      1.85 us x R <= 34,558 us
+      R <= 18,680   ->   16,384 (2^14)
+
+  which prices that simultaneous case at **145.8 ms**, 1.46x the 99.5 ms
+  pre-packing baseline. It also sits at or above what every mainstream terminal
+  defaults to: `xterm/XTerm.ad` `*saveLines: 1024`, `foot/foot.ini`
+  `[scrollback] lines=1000`, `kitty/kitty/options/definition.py#scrollback_lines`
+  2,000, `tmux/options-table.c#options_table` `history-limit` 2,000,
+  `alacritty/alacritty_terminal/src/term/mod.rs#Config` `scrolling_history: 10000`.
+
+#### A row cap alone was tried, and is rejected on two measurements
+
+Recorded because it is the obvious design and it looks sufficient.
+
+1. **It bounds the wrong term.** At 8,192 rows, wide content reflows in 232.6 ms
+   against an 87.4 ms baseline -- **2.66x**, missing the target -- because 8,192
+   rows of 179 columns is 1.47 M cells in ~2.15 MB, satisfying the row cap with
+   the byte budget untouched.
+2. **It destroys history.** Narrowing multiplies row count while leaving content
+   alone, so the cap evicts and widening cannot restore:
+   `8,192 -> narrow to 100 -> 8,192 -> widen to 179 -> **4,095**`. Half a user's
+   scrollback gone from one window drag. `narrowThenWidenPreservesCappedHistory`
+   pins the round trip and the mechanism.
+
+#### The trade, stated as numbers
+
+| regime | `678bfe9` | packed uncapped | dual-bound | resize vs old | depth vs old |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dense (~45 cells/row) | 99.5 ms / 6,756 | 1,450.2 ms / 81,920 | **117.6 ms / 7,123** | 1.18x | **1.05x deeper** |
+| sparse (~4.9 cells/row) | 152.0 ms / 50,412 | 445.2 ms / 124,830 | **57.1 ms / 16,384** | 0.38x | **3.08x shallower** |
+| wide (179 cells/row) | 87.4 ms / 1,665 | 1,846.5 ms / 29,757 | **104.1 ms / 1,798** | 1.19x | **1.08x deeper** |
+
+**The decided giveback is sparse-content depth, 3.08x.** A shell history of short
+commands retained 50,412 rows before packing and retains 16,384 now. It is a real
+regression, not a bounded pathology -- `F15` Observation 2 checked the
+alternative and closed it, measuring the pre-packing sparse resize at 152 ms
+rather than the ~835 ms an extrapolation had predicted. Those 50,412 rows were
+depth users had at a price they were paying, and 16,384 is above every mainstream
+terminal's default while resizing in 57.1 ms, a third of what it used to cost.
+Hybrid lazy reflow (`H7`) is the mechanism that raises it.
+
+**What is not a trade:** dense and wide content get slightly *more* depth and
+near-baseline resize together, because their bound was always the cell ceiling
+and this restores it.
+
+#### Two consequences recorded rather than left implicit
+
+- **The 10 MiB byte budget is now unreachable for ordinary content.** The two caps
+  together admit at most roughly `16,384 x 84 B + 327,680 B` -- under 2 MB. The
+  budget has become the valve for byte-*expensive* rows, where a stored cell
+  carries a multi-scalar spill the cell cap cannot see. That is the coherence
+  question `D7` exit 1 raised, answered: the budget is no longer the depth bound,
+  it is the memory backstop, and `publicProductionBoundsCrossing` was restated to
+  stop claiming otherwise. It also means ordinary-content footprint lands near
+  ~1-2 MB rather than 10 MiB, which is a further memory win beyond packing.
+- **Below 20 columns the row cap can still bind on a narrowing and lose content**,
+  because `cellCap / rowCap` = 20. Raising the row cap enough to make a 10-column
+  pane lossless would cost the cell cap most of its budget. Taken deliberately.
+
+- Reopening condition: a reflow path that does not visit every retained row
+  (`H7`'s hybrid lazy reflow), which breaks the depth-is-latency coupling both
+  caps work around and lets them rise; or a measured per-cell reflow cost
+  materially below 0.352 us, which `F16`'s profile is the prerequisite for and
+  which would let the same budget buy a larger cell cap.

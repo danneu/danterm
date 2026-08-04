@@ -151,7 +151,10 @@ row, so a saturated-history resize should move roughly a content-to-width
 ratio less data -- while also processing ~2-3x more rows at the same budget,
 which cuts against it. Net direction is genuinely unknown. **Answered by `F14`:
 per-row reflow got 1.17x *dearer*, not cheaper, and the row count rose 12.13x, so
-a saturated resize costs 14.2x more wall clock.** Window-drag latency
+a saturated resize costs 14.2x more wall clock. Resolved by `F15`/`D8`:** the
+cost is `1.85 us x rows + 0.352 us x cells`, the byte budget had been bounding the
+cell term implicitly until a packed cell stopped costing 32 B, and restoring that
+bound explicitly returns every measured regime to within 1.19x of pre-packing. Window-drag latency
 on a deep pane is user-visible and composes with the shipped resize
 coalescing. Confirm or reject with a paired before/after-style probe at HEAD
 (there is no pre-trim arm to compare against and the rules forbid wanting one;
@@ -236,6 +239,42 @@ question before it is a performance question -- the recovery store snapshots
 the model, not terminal content, today. Parked until session-restore of
 terminal content is a live feature goal; recorded here so the sizing argument
 is not lost.
+
+### H7 -- viewport-adjacent reflow makes depth stop costing latency
+
+`D8` capped retained history because reflow visits **every** retained row, so
+depth is latency: `F15` fitted the cost at `1.85 us x rows + 0.352 us x cells`
+and both caps exist only to bound that product. The caps are therefore a
+workaround for the reflow algorithm, not a property anyone wants -- they cost
+sparse content 3.08x its pre-packing depth (`D8`), and the packed format could
+otherwise carry ~12x.
+
+The hypothesis: **rows near the viewport reflow synchronously on resize; the rest
+reflow on demand or in the background.** Resize becomes O(viewport) instead of
+O(history), which decouples depth from resize latency and lets both caps rise
+toward what the format can actually hold.
+
+What this doc's own evidence says is hard about it, so the research does not
+rediscover it:
+
+- **A width-keyed wrap-count index.** Mapping a viewport position to a row in
+  unreflowed history needs to know how many display rows each logical line
+  occupies *at the current width*, which is exactly what reflow computes. Doing
+  it lazily means maintaining that count separately, per width.
+- **Scroll anchoring across a resize.** The user's scroll position is a row
+  offset today. If most of history has not been reflowed yet, that offset does
+  not denote a stable place, and the scrollbar's extent is unknown until it does.
+- **The end of "history is always at the current width."** Every reader assumes
+  it: `projectionRows`, `activationIdentity`'s range scan, `primaryHistoryText`,
+  and the resize path's own rejoining of soft-wrapped lines. A mixed-width
+  history is a new invariant that all of them have to state.
+
+First research task is **mining `references/` for how the pinned terminals handle
+history reflow and scrollbar mapping** -- kitty, wezterm, alacritty, foot and
+windows-terminal all keep scrollback across resizes and have each made this
+tradeoff somewhere. Cite `file#identifier` per `AGENTS.md`. Design and
+implementation are explicitly **not** in scope until that read is recorded: this
+is a ledger entry opening an investigation, not a plan.
 
 ## Task ledger
 
@@ -382,12 +421,14 @@ is not lost.
   a frame budget? `F7` has the distribution and the committed probe; this task
   is the profile and the frame-budget reading `F7` deliberately withheld. Now
   also a prerequisite risk check for `D5` (depth rises ~9x at the same budget, so
-  reflow processes ~9x more rows). Destination: `F15`.
-  **Half-answered and sharply promoted by `F14`/`D7`.** The frame-budget reading
-  is in: a saturated resize costs **1,425.8 ms** after packing against 100.2 ms
-  before, 12.13x the rows at 1.17x per row. What this task still owes is the
-  *profile* -- where inside reflow the 17.40 us/row goes -- and it is no longer a
-  curiosity: `D7` exit 2 (make reflow cheaper) cannot be evaluated without it.
+  reflow processes ~9x more rows). Destination: `F16`.
+  **Half-answered and sharply promoted by `F14`/`D7`, then narrowed by `F15`.**
+  The frame-budget reading is in, and so is the shape: reflow costs
+  `1.85 us x rows + 0.352 us x cells` (`F15`), and `D8`'s two caps bound that
+  product back to within 1.19x of pre-packing. What this task still owes is the
+  *profile* -- where inside the **per-cell** term the time goes, since that is the
+  dominant one and the one whose reduction would let `D8`'s cell cap rise. Unpack,
+  repack, or the allocation traffic between them is still unmeasured.
 
 ### Phase 3 -- direction gates
 
@@ -424,7 +465,21 @@ is not lost.
   a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence. Destination: `D8`.
+  dead on sizing, but that is decided on post-landing evidence. Destination: `D9`.
+- [ ] `RESEARCH` Open `H7` -- viewport-adjacent reflow. Opened by `D8`, which
+  capped retained depth because reflow visits every retained row, and which cost
+  sparse content 3.08x its pre-packing depth to do it. **The first task is a read,
+  not a design**: mine `references/` for how the pinned terminals reflow history
+  across a width change and how they map a scroll position onto history that may
+  not be reflowed yet -- kitty, wezterm, alacritty, foot and windows-terminal all
+  keep scrollback across resizes and have each placed this tradeoff somewhere.
+  Cite `file#identifier`. The three hard parts this doc already knows about are in
+  `H7`'s statement (a width-keyed wrap-count index, scroll anchoring across a
+  resize, and the end of the "history is always at the current width" invariant
+  every reader assumes) and exist so the read confirms or refutes them rather than
+  rediscovering them. Nothing is designed or implemented until that read is
+  recorded. Destination: a finding, and then its own doc if the ledger says Phase 4
+  is the wrong home.
 
 ### Phase 4 -- graduate
 
