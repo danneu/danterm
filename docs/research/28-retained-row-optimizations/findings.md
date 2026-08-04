@@ -1,10 +1,12 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F18**. Phase 2's open resize-*profile* task has now been renumbered
-three times (`F11`, `F12`, `F13`, `F15`, `F17`) without being written, because IDs
-go in the order findings are recorded and each time something more urgent was
-measured first; it is still owed and now claims `F18`, alongside the
-scratch-reusing encoder lead `F17` Observation 4 leaves open. `F14` measured how
+Next free ID: **F19**. Phase 2's open resize-*profile* task has now been renumbered
+four times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`) without being written, because
+IDs go in the order findings are recorded and each time something more urgent was
+measured first; it is still owed and now claims `F19`. The scratch-reusing encoder
+lead that `F17` Observation 4 left open is **not** carried forward with it -- `D9`
+declined it on the ground that even its success leaves browsing over
+threshold. `F14` measured how
 much a saturated resize costs and `F15` measured what it is a function of; what
 neither did is read *where inside reflow* the time goes. Inherited baseline:
 `15/F18` -- the compact retained-row validation at `dd51a12`/`54d4d2d` -- is
@@ -1857,5 +1859,160 @@ than one.
   **accepting a stated trade** returns to the human unchanged in kind but much
   changed in size: the browsing cost is +3.27%, not +19.83%, and the three
   remaining regressions have a single named cause with an unmeasured fraction of
-  it recoverable. `F18` -- a scratch-reusing encoder -- is the one unexplored
-  lead that could move them, and it is not started.
+  it recoverable. A scratch-reusing encoder is the one unexplored lead that could
+  move them, and it is not started. (That lead reserved `F18` when this was
+  written; `D9` then declined it and `F18` went to the C1 pricing below. The ID
+  is not the lead.)
+
+### F18 -- C1 priced exactly: 528.0 B/row on the CRLF reference payload, and under `D8`'s caps it retains the *same* rows C6 does
+
+- Status: recorded, and it is a **pricing measurement, not a verdict**. It charges
+  the C1 representation the human pivot selected against the same real retained
+  rows every earlier candidate was charged against, with the two corrections `F13`
+  found and the Python candidate table never took. No engine code implements C1 at
+  the time of this reading; every figure here is a model over measured rows, and
+  the deciding runs are what confirm or refute it.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: `52ac28b` (C6 packed, read path streamed), clean
+  tree. Release configuration, headless. Every number at or after the evidence
+  floor `dd51a12`.
+- Conditions: AC power. These are exact arithmetic over recorded rows -- no
+  wall-clock is claimed, so host load cannot perturb them.
+- Commands:
+
+      just terminal-retained-row-probe "--saturated --json"
+
+  then the two candidates charged through the committed model's own
+  `row_charge`/`good_size`, with a per-row header constant and the encoder's
+  *strict* identity-run count (`F13` Observations 1 and 2).
+
+#### Observation 1 -- the layout, and why an 8-byte cell needs no narrowing anywhere
+
+`D5` and the Python table both priced C1 as "4 B scalar + 1 B kind + 2 B style id
++ 1 B pad", and `pack_narrow_cell`'s docstring says `StyleId` narrows to 16 bits
+"against a measured style-table size". That narrowing is real risk for no gain,
+and it is avoidable: a scalar needs **21 bits** (`U+10FFFF`), a kind needs 3, and
+that leaves 40 bits in a 64-bit word for a **full-width 32-bit `StyleId`** with 8
+bits spare. So the priced 8 bytes buy strictly more than the priced design did --
+every scalar in Unicode inline, including non-BMP, and no style-table ceiling.
+
+`HyperlinkId` (`UInt16`) does not fit alongside them and stays a side-table entry,
+as it is for every candidate. It is charged, not assumed away: `F11` measured
+0.37% of stored cells carrying OSC 8, which prices at **0.60 B/row** on the
+saturated pool and **0.0 B/row** on the CRLF reference payload.
+
+#### Observation 2 -- the priced table, both headline pools
+
+Charged the way `Terminal.scrollbackByteCost` charges a real row -- 16 B row slot,
+the allocator's own answer for `32 B array header + payload`, plus spills.
+
+`reference/scrollback-plain` (the CRLF payload every headline in this doc quotes),
+6,425 retained rows at 51.00 stored cells/row:
+
+| quantity | pre-packing | C6 (shipped) | **C1** |
+| --- | ---: | ---: | ---: |
+| payload B/row | -- | 78.0 | **423.0** |
+| charged B/row | 1,808.0 | 128.0 | **528.0** |
+| against pre-packing | 1.00x | 14.12x cheaper | **3.42x cheaper** |
+
+Saturated pool, 68,646 rows at 31.54 stored cells/row: C1 is **343.4 B/row**
+charged (270.3 payload) against C6's 136.2, a ratio of 2.52x. The ratio is smaller
+here than the reference payload's 4.12x for the reason `AR2` states -- the pool's
+rows are shorter, so the per-row constants both candidates share are a larger
+share of each.
+
+C1's payload decomposes, per row, on the reference payload: **408.0 B of cells**
+(51 x 8), **8.0 B of identity runs**, **7 B of header**, 0 B of hyperlinks. The
+cells are 96.5% of it. There is no style-run table, no kind-exception table, no
+spill directory and no stride tier, because the cell carries all four itself --
+C1 is **two side tables against C6's five**.
+
+#### Observation 3 -- the decisive one: under `D8`'s caps the pivot costs **zero depth**
+
+`D8` bounds retained history at 327,680 stored cells and 16,384 rows, *and both
+bounds are denominated in content rather than bytes*. At 51.00 stored cells per
+row the cell cap admits 6,425 rows. That is the binding bound for **both**
+candidates:
+
+| candidate | depth by bytes | by cells | by rows | binding | footprint |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C6 | 81,920 | 6,425 | 16,384 | **6,425 (cells)** | 0.78 MB |
+| **C1** | 19,859 | 6,425 | 16,384 | **6,425 (cells)** | **3.24 MB** |
+
+The byte budget is slack under both, by 4.1x for C6 and 1.9x for C1, exactly as
+`D8` predicted when it recorded that "the 10 MiB byte budget is now unreachable
+for ordinary content". **So C1 retains the same rows C6 retains, and gives back
+only memory.** Against pre-packing's ~5,799 rows at the same budget, C1 is still
+**1.11x deeper at 3.1x less memory**; against C6 it is the same depth at 4.12x
+more memory.
+
+This is the fact that makes the pivot cheap, and it is not a property of C1 -- it
+is a property of `D8`. Before the caps, an 8-byte cell would have cost 12.7x the
+depth of a 1-byte one. The caps already neutralized depth-per-byte, which is why
+paying 4x the bytes now buys back the read path for nothing that a user sees as
+history length.
+
+It also means **`D8`'s cell cap must not be re-derived from C1's bytes.** The cap
+exists to bound reflow's per-cell term (`1.85 us/row + 0.352 us/cell`, `F15`),
+which is a count of cells, not of bytes. C1 stores the same cells in more bytes,
+so the fitted model's inputs are unchanged and the caps carry over untouched.
+
+#### Observation 4 -- a 12-byte cell carrying `contentIdentity` inline was priced and is rejected
+
+The one structural simplification C1 invites is folding `contentIdentity` into the
+cell, which would leave admission a pure translate-copy with no scan of any kind.
+Priced: **784.0 B/row** on the reference payload and 461.9 on the saturated pool,
+against 528.0 and 343.4. That is **+48% memory to remove one comparison per cell
+from a pass that already touches every cell** -- and the thing it removes costs
+8.0 B/row, 1.9% of C1's payload, because `F12`'s contiguity holds. Rejected on
+those numbers rather than on taste.
+
+#### Observation 5 -- the predicted feed effect, stated skeptically because the last one was falsified three times
+
+**Predicted: between -2% and +1.5%, most likely near neutral.** The reasoning, and
+then the reason not to trust it:
+
+C1's admission does strictly less classification than C6's -- no widest-scalar
+scan to pick a stride tier, no style-run detection, no kind-exception table, no
+spill directory -- leaving one identity-run comparison per cell on a pass that
+already visits every cell. And it writes **8 B per stored cell where pre-packing
+copied 32 B**, so its write traffic is *below* the baseline's, where C6's
+`pack(_:)` was measured at 9.2% of feed self time (`F17` Observation 4).
+
+Against that: **the plan's C6 feed prediction (~+1%, bounded +2%) was falsified by
+three separate readings** (+2.72%, +3.10%, +5.18%, `F17` Observation 5), always in
+the direction of costing more than predicted. The same reasoning style produced
+that prediction. Nothing here entitles this one to more credit, and it is recorded
+as the input to a gate rather than as a result.
+
+Because the prediction is under ~2% and graduation turns on it, **`D1` pitch 3's
+reopening condition fires**: the longer `terminal-feed` schedule is screened
+before the deciding run. The plan's own falsification check retires that
+obligation cheaply if a prototype measures the feed effect **above** ~2%, at which
+point `F1`'s dead zone is not load-bearing and the screen buys nothing.
+
+- Inference: C1 is priced at 3.42x cheaper per retained row than pre-packing and
+  4.12x dearer than C6, at **identical retained depth** under `D8`'s caps, on two
+  side tables instead of five. The pivot's cost is memory alone, and it is
+  bounded: 3.24 MB against C6's 0.78 MB and pre-packing's ~10 MB.
+- Competing interpretation, checked rather than argued: that C1's larger rows
+  would cut depth and so partly undo `H3`'s win. They do not, because both caps
+  count content and the byte budget binds under neither candidate. Checked by
+  evaluating all three bounds for both candidates rather than by quoting the byte
+  budget alone -- which is the single-arm error `F13` Observation 4 retired.
+- Uncertainty, stated plainly:
+  - Every figure here is a **model**, not a measurement of a C1 engine. `F13`
+    Observation 2 is the standing warning: the header term was omitted from the
+    Python table for the whole life of the C6 selection and only surfaced when the
+    encoder was written. C1 is charged with a header here, but a real encoder can
+    still find a byte the model does not know about.
+  - The saturated pool is representation-dependent (`F13` Observation 1), so the
+    pool figures are read at C6's pool and would re-weight under C1. The reference
+    payload does not have this problem -- its rows are content-determined -- which
+    is why it carries the headline.
+  - The feed prediction is the weakest number in this finding and is labelled as
+    such above.
+- Next action: implement C1 behind the shipped seam and run `D3`'s success
+  criterion. The memory read is the deciding measurement and is expected to be a
+  **stated giveback against C6**, not a win against it -- the win is against
+  pre-packing, and the gate's baseline is `678bfe9` for exactly that reason.

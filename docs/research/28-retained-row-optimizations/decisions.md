@@ -1,12 +1,13 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D9**, which the remaining Phase 3 direction gate in
+Next free ID: **D10**, which the remaining Phase 3 direction gate in
 [README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
 on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
 representation, `D6` on correcting its pricing, `D7` on the resize-for-depth
-trade, and `D8` on the bounds that resolve it. IDs are allocated in the order
-entries are written, not reserved in advance -- the H5 gate has now moved from
-`D5` to `D6` to `D7` to `D8` to `D9` for that reason.
+trade, `D8` on the bounds that resolve it, and `D9` on rejecting C6 for C1. IDs
+are allocated in the order entries are written, not reserved in advance -- the H5
+gate has now moved from `D5` to `D6` to `D7` to `D8` to `D9` to `D10` for that
+reason.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -942,3 +943,160 @@ and this restores it.
   caps work around and lets them rise; or a measured per-cell reflow cost
   materially below 0.352 us, which `F16`'s profile is the prerequisite for and
   which would let the same budget buy a larger cell cap.
+
+### D9 -- C6 is rejected on the measured verdict set and replaced by C1; the caps had already taken away the objective C6 was chosen for
+
+- Status: **decided as a representation pivot, on a human decision made with the
+  full verdict set in hand.** It rejects the shipped C6 representation, declines
+  the one unexplored lead that might have rescued it, and selects C1. It does
+  **not** rewrite the gate: `D3`'s success criterion is unchanged, the baseline
+  stays `678bfe9`, and `D8`'s two caps carry over untouched. The implementation
+  is the next hand-off and is written against
+  [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md).
+- Date and investigator: 2026-08-03, Claude (agent), on a human decision.
+- Evidence used: `F16` (the deciding ladder that failed), `F17` (the read-path
+  profile and the fix that halved the failure), `F18` (C1 priced exactly, and the
+  cap interaction that makes the pivot free of depth), `F15`/`D8` (the two-term
+  reflow model and the caps derived from it), `F13` (the accounting corrections
+  `F18` applies), `F11`/`F12`/`D6` (the composition and contiguity every candidate
+  is priced against), `D5` (the selection this supersedes).
+
+#### The decision, in one line
+
+**A retained row stores a fixed 8-byte cell per stored cell, plus two side
+tables.** C6's stride column, style-run table, kind-exception table, spill
+directory and stride tier are all removed. The seam, the dual caps, the
+invariants, the proof obligations and the whole test/probe apparatus stay exactly
+where they are.
+
+#### Why C6 is rejected, and the numbers are the whole argument
+
+C6 shipped, was measured, and failed the deciding ladder at `F16` -- four `slower`
+verdicts of six. `F17` then profiled the worst of them, found a real and
+localized defect (two whole-row materializations per frame), fixed it, and
+re-measured. The post-fix verdict set, all `quick` against the adjacent baseline
+`678bfe9` with host conditions read:
+
+| workload | threshold | at `F16` | after `F17`'s fix | verdict |
+| --- | ---: | ---: | ---: | --- |
+| `retained-browse` | 1.05% | +19.83% | **+3.27%** | slower |
+| `scrollback-stream` | 1.85% | +7.53% | **+6.34%** | slower |
+| `terminal-feed` | 2.5% | +3.10% | **+5.18%** | slower |
+| `incremental-mixed` | 1.85% | +4.24% | **+4.22%** | slower |
+| `content-churn` | 2.15% | +0.44% | not re-run | equivalent |
+| `style-churn` | 2.0% | -0.11% | not re-run | equivalent |
+
+Two facts make this a rejection rather than another round of optimization:
+
+1. **The browsing residual is the decode, not a defect.** `F17` measured
+   `forEachContentCell` at ~3.1% of frame-plan self time, matching the adjudicated
+   +3.27% almost exactly -- roughly **3.8 ns per cell** to reassemble a scalar and
+   a style id out of packed bytes against ~0 for a struct load. The only
+   structural idea left (merging the kind and content walks) is bounded by
+   `forEachKind`'s ~2%, which still would not clear 1.05%. There is no localized
+   fix because there is no longer anything localized about it.
+2. **The other three are one unfixed cause, and fixing it would not be enough.**
+   All three are admission-bound, and `F17` measured `PackedRetainedRow.pack(_:)`
+   at **9.2% of feed self time** -- a frame that does not exist at the baseline.
+
+#### The scratch-reusing encoder is declined, and this is the load-bearing judgement
+
+`F17` Observation 4 left one unexplored lead: a single-pass encoder reusing
+scratch buffers, which could recover an unmeasured fraction of that 9.2%. It is
+**declined without being run**, and the reason is arithmetic rather than appetite:
+it addresses only the admission side. Even a total success -- `pack(_:)` reduced
+to zero -- leaves `retained-browse` at +3.27% against a 1.05% threshold, because
+browsing does not admit rows. **The one workload that cannot be rescued by the
+encoder is the one whose threshold is tightest**, so the lead's best case is still
+a failed gate. Spending a measurement budget to arrive there is the shopping this
+doc's rules forbid, one level up.
+
+#### Why C1, and what it costs -- priced before a line of engine code
+
+`F18` charges C1 against the same real retained rows, through the engine's own
+charge model, with `F13`'s two corrections applied:
+
+| quantity | pre-packing | C6 (shipped) | **C1 (selected)** |
+| --- | ---: | ---: | ---: |
+| charged B/row, CRLF reference payload | 1,808.0 | 128.0 | **528.0** |
+| against pre-packing | 1.00x | 14.12x cheaper | **3.42x cheaper** |
+| retained rows at `D8`'s caps | ~5,799 | 6,425 | **6,425** |
+| footprint at that depth | ~10 MB | 0.78 MB | **3.24 MB** |
+| side tables | -- | five | **two** |
+
+**The decisive fact is the third row, and it is a property of `D8` rather than of
+C1.** Both of `D8`'s bounds count *content* -- 327,680 stored cells, 16,384 rows --
+and at 51.00 stored cells per row the cell cap admits 6,425 rows under either
+candidate. The byte budget is slack by 4.1x for C6 and 1.9x for C1, so **C1
+retains exactly the rows C6 retains.** Before the caps an 8-byte cell would have
+cost 12.7x the depth of a 1-byte one, and this pivot would have been unaffordable.
+The caps took depth-per-byte off the table in `D8`, which is precisely the
+objective C6 was selected over C1 to serve (`D5`: "3.54x depth against C6's
+9.41x"). **C6 was chosen to win a contest that no longer exists.**
+
+What C1 buys for those bytes is the read path: a column read becomes a load from a
+fixed offset with no decode, no cursor, and no table. That is the ~3.8 ns/cell
+`F17` measured, removed rather than reduced. Admission becomes a translate-copy of
+8 bytes per cell where pre-packing copied 32 -- less write traffic than the
+baseline, against C6's measured 9.2%.
+
+The exchange is stated as numbers, per this doc's rules: **~3.1x memory
+improvement instead of ~12.8x, at identical retained depth, in exchange for a read
+path and an admission path that should clear every gate.** DanTerm is a CPU
+renderer; the last 2.5 MB is worth less than the frame budget. That is the human
+judgement this entry records, and it is a judgement -- the numbers bound the trade
+but do not make it.
+
+#### C6's evidence contributions, which do not go away with it
+
+C6 was a completed experiment, not a wasted one, and three of its outputs are
+load-bearing for everything after it:
+
+- **`D8`'s dual caps**, which exist only because C6's depth exposed that the byte
+  budget had been bounding stored cells implicitly (`F15`). They now bound reflow
+  for *any* representation, and they are what makes this pivot free of depth.
+- **`F13`'s accounting corrections** -- the per-row header the candidate table
+  charged nowhere, the spill directory nobody priced, the strict-versus-lenient
+  identity run rule, and the `current`-arm fiction. `F18` prices C1 correctly only
+  because C6's implementation forced all four into the open.
+- **`F17`'s read-path fix**, which is representation-independent: the three
+  streaming readers and their cross-reader pin test are how any packed row is read
+  now, and `geometry` costs less than it did before packing.
+- **`F11`/`F12`'s composition and contiguity data**, which priced C1 here as
+  surely as they priced C6.
+
+#### What is not decided, and what stays closed
+
+- **C2 is rejected, not deferred.** A second 4-byte all-ASCII cell form would
+  reintroduce a per-row variant and a branch on every read, for bytes this entry
+  has just decided are the cheap side of the trade. One code path.
+- **`H4` stays sequenced behind this** (`RI3` unchanged). It composes with
+  whatever shape settles and would make a browsing result unattributable. It is
+  also *more* attractive under C1 than under C6 -- `D5`'s 50/50 split arithmetic
+  was computed for a ~1 B cell and does not carry over -- and that re-pricing is
+  a ledger note, not work authorized here.
+- **`D8`'s caps are not re-derived.** They bound reflow's `1.85 us/row +
+  0.352 us/cell` (`F15`), whose inputs are counts of rows and cells. C1 stores the
+  same cells in more bytes, so the fitted model is unchanged.
+- **`H7` (viewport-adjacent reflow) stays a research entry**, and `H5` stays gated.
+- **The research record stays in the repo permanently.** `F11`-`F18` and `D5`-`D8`
+  are the evidence that lets a future session take a different trade -- the
+  scratch-reusing encoder, a C6 revival on a machine or workload where 2.5 MB
+  outranks 3.8 ns/cell, or `H7` -- without re-deriving any of it. A rejected
+  representation with a measured reason is worth more than an unexplored one.
+
+- Behavioral verification: C1 is implemented behind the shipped seam under `I1`-`I5`
+  unchanged, and the full `PO2`/`PO3` round-trip battery re-runs on the same axes
+  through all three paths (admission, width reflow, height transfer), including
+  `narrowThenWidenPreservesCappedHistory`. `PO4`'s `derivationMatchesCensus` and the
+  probe's pricing model are updated to C1. `just test` green.
+- Quantitative verification: `D3`'s success criterion, unchanged -- the two-width
+  memory read, the stated depth effect, `retained-browse` under `D2`'s frozen rule,
+  `terminal-feed` with `D1` pitch 3's screen if the prediction still stands at
+  measurement time, the four standing ladder guards, resize at the caps across all
+  three regimes, and host conditions on every deciding run against `678bfe9`.
+- Reopening condition: a measured C1 verdict set that still answers `slower` on a
+  workload the representation touches, which would mean the cost is packing as
+  such rather than C6's decode -- and would make **revert** the remaining exit
+  rather than a third representation. Stop and bring the numbers back; do not
+  improvise a second pivot.

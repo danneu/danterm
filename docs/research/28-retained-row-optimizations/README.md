@@ -209,11 +209,19 @@ Nothing on the browsing path took a per-cell point read; it took `unpacked()`,
 which is the linear walk `PO5` proved -- but *two* readers took it, per visible
 row per frame, each wanting a slice of a whole materialized row. Giving each
 reader a walk that decodes only what it consumes cut browsing from **+19.83% to
-+3.27%** and put `geometry` below the baseline arm. **`H3` still does not
-graduate**: all four workloads remain `slower`, the read-side residual is the
-decode itself (~3.8 ns/cell, no localized fix visible), and the other three are
-one unfixed cause -- `pack(_:)` at 9.2% of feed self time, a frame that does not
-exist at the baseline. Disposition returns to the human at a much smaller size.
++3.27%** and put `geometry` below the baseline arm. All four workloads still
+answered `slower`: the read-side residual is the decode itself (~3.8 ns/cell) and
+the other three are `pack(_:)` at 9.2% of feed self time.
+
+**`D9` therefore rejects C6 and pivots `H3` to C1 -- a fixed 8-byte retained
+cell.** The scratch-reusing encoder lead is declined, because even its success
+leaves browsing over threshold. The pivot is cheap for a reason that is a property
+of `D8` rather than of C1: **both caps count content, so the cell cap binds under
+either representation and C1 retains exactly the rows C6 retains** (`F18`). It
+gives back only memory -- 528.0 B/row against C6's 128.0, still **3.42x cheaper
+than pre-packing**, ~3.1x total improvement instead of ~12.8x -- and buys a column
+read that is a load at a fixed offset with nothing to decode. C6 was selected over
+C1 on depth per byte (`D5`); `D8` retired that contest before the ladder ran.
 
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
@@ -231,6 +239,14 @@ per-row overhead) and kept it alive only as a composition inside H3's design.
 slot, array header and size-class rounding do not move, so `F8`'s 89.5 / 10.5
 split inverts to roughly 50 / 50 and the arena is worth a further **36%** on top
 of H3. `D5` sequences it as a separately measured second step.
+
+**That arithmetic does not survive `D9`'s pivot, and this is a ledger note rather
+than work.** The 50/50 inversion and the 36% were computed for C6's ~1 byte per
+stored cell. C1's cell is 8 bytes, so the payload is the dominant term again --
+408 of C1's 423 payload B/row on the CRLF reference payload, 96.5% -- and the
+fixed per-row cost an arena would remove is a much smaller share than it was.
+`H4` stays sequenced behind the representation (`RI3`) and must be **re-priced
+before it is run**; nobody should quote the 36% at a C1 HEAD.
 
 ### H5 -- ancient history can demote to a compressed tier
 
@@ -477,7 +493,7 @@ is a ledger entry opening an investigation, not a plan.
   a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence. Destination: `D9`.
+  dead on sizing, but that is decided on post-landing evidence. Destination: `D10`.
 - [ ] `RESEARCH` Open `H7` -- viewport-adjacent reflow. Opened by `D8`, which
   capped retained depth because reflow visits every retained row, and which cost
   sparse content 3.08x its pre-packing depth to do it. **The first task is a read,
@@ -557,11 +573,20 @@ is a ledger entry opening an investigation, not a plan.
   residual that is the decode itself, and the three admission-bound workloads are
   unmoved because their cost is `pack(_:)` -- 9.2% of feed self time, absent at
   the baseline. `F17` Observation 5 also records the plan's `terminal-feed`
-  prediction (~+1%, bounded +2%) as **falsified** across three readings, which
-  leaves `D1` pitch 3's longer screen moot rather than overdue.
-  **Awaiting the human decision among revert, the `C1`/`C2` pivot, and a stated
-  trade** -- now against +3.27% rather than +19.83%, with a scratch-reusing
-  encoder (`F18`) as the one unexplored lead on the admission side.
+  prediction (~+1%, bounded +2%) as **falsified** across three readings.
+  **The human took the pivot, and `D9` records it: C6 is rejected on that verdict
+  set and replaced by C1, a fixed 8-byte retained cell.** The scratch-reusing
+  encoder is declined -- it addresses only admission, and browsing is the workload
+  with the tightest threshold and no encoder fix, so the lead's best case is still
+  a failed gate. `F18` prices C1 against the same rows with `F13`'s corrections
+  applied: **528.0 B/row** on the CRLF reference payload, 3.42x cheaper than
+  pre-packing, on two side tables instead of five -- and, decisively, **at
+  identical retained depth**, because `D8`'s caps count content and the cell cap
+  binds under either representation. The pivot's whole cost is memory: 3.24 MB
+  against C6's 0.78 MB, ~3.1x better than pre-packing instead of ~12.8x. C6's
+  evidence contributions stay load-bearing (`D8`'s caps, `F13`'s corrections,
+  `F17`'s streaming readers), and the record stays in the repo permanently so a
+  future session can take a different trade with the evidence intact.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
