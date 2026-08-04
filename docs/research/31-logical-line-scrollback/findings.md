@@ -2391,3 +2391,475 @@ own term is the cache-friendly one; what degrades with depth is the pointer chas
   is ~3.1-3.2M display rows); and the `179 -> 2` cell is the store's depth condition,
   so a resize-to-minimum with a budget-full CJK history is the case a later
   end-to-end resize measurement should include rather than assume.
+
+### F8 -- eviction and residency, both **reject**: the landed store's write path costs 1.42x-3.18x today's and its arena is resident from construction, and the attribution arm says neither number is wrap-at-read's
+
+- Status: complete, and it is the only entry in this doc that returns a
+  **reject** -- twice. `D4`'s eviction rule reads **reject** (the candidate is
+  above 1.09x arm A on *both* statistics on *all four* verdict-bearing classes)
+  and `D4`'s `AR6` residency rule also reads **reject** (the arena is resident at
+  1.118x today's store for the same fed input on `scrollback-mixed`, over the
+  1.10x second trigger). Inherited condition 2 -- *eviction unmeasured on both
+  sides*, the largest unmeasured term in the campaign -- is **discharged as a
+  measurement**, in its reject branch. `AR6` is **discharged as a gate**, in its
+  reject branch, which ships a remedy. Neither verdict lands or fails the store:
+  `D1`'s scoping is unchanged, no production storage change is licensed here, and
+  landing is still the paired ladder's. **Disposition of both rejects is a
+  human's**, and `D4` said so before either number existed.
+- **The reject is attributed, and it is not the design's.** A third,
+  descriptive arm ran `F3`'s own prototype beside the landed store on the same
+  rows in the same session. `F3`'s prototype admits at **0.52x-0.64x** of today's
+  cost -- reproducing `F3`'s published result -- while
+  `Terminal.LogicalLineStore.admit` costs **1.79x-2.76x** of today's and
+  **3.01x-4.31x** the prototype. Wrap-at-read admission is not what rejects; this
+  implementation of it is. Gate 7, the one gate `D4` wrote to catch an
+  implementation that does not match `D2` Decision 2, **passes at 1.000x**.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: measured at `c8238ca` (the commit that landed the
+  arena unwired) plus the one file this entry adds --
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineEvictionProbe.swift`.
+  **No file under `lib/TerminalCore/Sources/` is touched, and `F1`'s, `F2`'s,
+  `F3`'s, `F7`'s and `F9`'s probe files are unedited**; this entry keeps `F2`'s
+  isolation practice and adds its own file. Arm B is **not** a prototype: it is
+  `Terminal.LogicalLineStore` as slice 3 landed it, driven through its own
+  `admit` and `evictOneDisplayRow`. The two untracked paths present throughout
+  this doc's work are still present and still in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
+        --filter TerminalLogicalLineEvictionProbe
+
+      DANTERM_LOGICAL_LINE_PROBE=1 DANTERM_RESIDENCY_CASE=arena/plain/cycled \
+        swift test -c release --package-path lib/TerminalCore --filter residencyReading
+
+  the second once per `<store>/<class>/<state>` triple, which is `D4`'s
+  one-process-per-state requirement. Conditions: AC power, low-power mode off,
+  one-minute load average **1.52 before and 1.34 after** on the quoted eviction
+  invocation and 1.3-1.5 across the twelve residency ones, all under the 2.5
+  gate. Release, headless, 179x66, the 16,777,216-byte production budget, ABBA
+  interleaving at 5 measured rounds plus 2 warmup, median over rounds with min,
+  max and `n` beside every aggregate -- `D4`'s instrument, with the two
+  substitutions the probe file's header states and no others.
+- Artifacts: none durable. Every number below is stdout from the commands above.
+- **Ten invocations were voided and are recorded rather than hidden**, every one
+  of them on the same cell. Gate 5's A/A control on (`full`, `drain`) exceeded
+  the 5% ceiling in **10 of 22** gated invocations of the verdict-bearing arms
+  (worst -10.62%, +10.62%; the rest between 5.1% and 8.3%). **That cell is the
+  instrument's floor and is stated as a limitation rather than worked around**:
+  arm A's `full` drain is 2,000 `free` calls over ~180 microseconds, and the
+  allocator's state after a 24,004-row rebuild is what moves it. **Nothing was
+  selected on the numbers** -- the verdict is reject in all 22, at ratios between
+  1.41x and 3.24x, and the quoted invocation's ratios sit inside that spread; it
+  is one of the twelve that cleared every cell, at a worst cell of -1.16%. Two
+  further invocations are **superseded** rather than voided: they copied one
+  saturated baseline per round instead of rebuilding it, which let arm A's
+  evictions decrement a shared reference instead of calling `free` (Observation
+  5). Two residency invocations were voided for the reason `DD32` gives.
+
+#### Observation 1 -- the two verdict-bearing statistics, and the rule applied once
+
+Both arms were filled to the 16,777,216-byte budget from the same cycled fed
+stream before anything was timed, and each was rebuilt per round. `n=5` rounds
+per cell, 5,000 admissions per `steady` round and 2,000 eviction steps per
+`drain` round.
+
+**`steady` -- the whole write path, nanoseconds per admitted display row.**
+
+| class | arm A (today) | min / max | arm B (arena) | min / max | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `mix` | 737.2 | 735.8 / 779.3 | 1,789.1 | 1,774.5 / 1,834.1 | **2.427x** |
+| `full` | 708.0 | 696.9 / 714.6 | 2,249.4 | 2,244.3 / 2,307.7 | **3.177x** |
+| `stream` | 754.1 | 752.9 / 768.3 | 1,069.4 | 1,066.5 / 1,071.7 | **1.418x** |
+| `wrapped` | 764.3 | 753.8 / 776.8 | 2,101.6 | 2,093.2 / 2,110.8 | **2.750x** |
+| `wide` (descriptive) | 864.5 | 854.6 / 866.4 | 1,882.7 | 1,867.2 / 1,920.2 | 2.178x |
+
+**`drain` -- eviction alone, nanoseconds per evicted display row.**
+
+| class | arm A (today) | min / max | arm B (arena) | min / max | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `mix` | 113.8 | 112.6 / 114.6 | 228.2 | 226.7 / 231.3 | **2.005x** |
+| `full` | 93.8 | 82.1 / 105.9 | 267.3 | 266.8 / 279.5 | **2.850x** |
+| `stream` | 47.2 | 45.8 / 50.3 | 146.9 | 146.4 / 149.1 | **3.114x** |
+| `wrapped` | 132.2 | 126.0 / 134.7 | 241.9 | 237.0 / 246.6 | **1.830x** |
+| `wide` (descriptive) | 120.6 | 119.2 / 142.6 | 234.5 | 233.7 / 234.9 | 1.945x |
+
+**`D4`'s three-way rule, applied once.** Reject is a candidate median above
+**1.09x** arm A on *either* statistic on *any* verdict-bearing class. All eight
+verdict-bearing cells are above it, the smallest by **42%** of arm A and the
+largest by **218%**. **The verdict is reject.**
+
+Stated in the units the bound was derived in, because that is what the number
+means rather than what it is: `D4` converts `28/F20`'s measured 19.7%
+write-path share and `agent-docs/terminal-performance.md`'s 95.7% drain share
+into 18.85% of a `scrollback-stream` block, so a write path at `R` moves the
+block by `18.85% x (R - 1)`. On `stream` -- the class the bound is derived from,
+and `H3`'s own named falsifier -- `R = 1.418`, which predicts a **+7.9%** block
+regression against a frozen `slower` line of **1.85%**. That is `H3`'s falsifier
+firing by a factor of four, predicted rather than observed.
+
+#### Observation 2 -- what the depths are, and what the arms retained
+
+Read outside every timed region. Both arms hold the byte budget; they do not
+hold the same number of display rows, which is why `D4` gate 1 compares them
+over the shorter suffix rather than over the whole store.
+
+| class | fed rows | arm A rows | arm B rows | arm B records | depth B/A | arm B charge (arena + index + side) |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `mix` | 36,006 | 15,049 | 16,681 | 9,538 | 1.108x | 16,640,624 + 135,168 + 0 |
+| `full` | 24,004 | 10,810 | 11,632 | 5,799 | 1.076x | 16,706,920 + 67,584 + 0 |
+| `stream` | 72,000 | 25,575 | 33,269 | 33,269 | **1.301x** | 16,236,024 + 540,672 + 0 |
+| `wrapped` | 26,880 | 10,835 | 11,740 | 36 | 1.084x | 16,774,352 + 768 + 0 |
+| `wide` | 36,000 | 13,901 | 15,465 | 7,565 | 1.113x | 16,707,896 + 67,584 + 0 |
+
+The depth column is the one thing this entry confirms rather than rejects, and
+it confirms `D2` Decision 1's 1.16x-1.32x prediction from the other side of the
+budget: the arena retains **1.076x-1.301x** the display rows today's charge
+admits, on the same input, with `stream`'s 1.301x landing where `F3`
+Observation 4's 0.744x bytes-per-record ratio said it would. `PO11`'s "no
+content class loses depth" holds on all five measured classes.
+
+#### Observation 3 -- the attribution arm: the cost is the implementation, not wrap-at-read
+
+Descriptive, outside `D4`'s rule, and the reason it exists is that a bare reject
+would be read as evidence against the design. Three admitters over the same
+rows, admission only (every store has room, so nothing evicts), `n=5` rounds.
+
+| class | today's `pack`+append+accounting | `F3`'s prototype | landed `LogicalLineStore.admit` | prototype / today | landed / today | landed / prototype |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `mix` | 672.2 | 402.6 | 1,557.5 | 0.599x | 2.317x | **3.868x** |
+| `full` | 716.5 | 458.3 | 1,976.7 | 0.640x | 2.759x | **4.313x** |
+| `stream` | 519.3 | 308.9 | 930.0 | 0.595x | 1.791x | **3.011x** |
+| `wrapped` | 724.5 | 452.0 | 1,912.0 | 0.624x | 2.639x | **4.230x** |
+| `wide` | 803.1 | 417.8 | 1,621.2 | 0.520x | 2.019x | **3.880x** |
+
+Two readings, and the second is what the human needs.
+
+**`F3` reproduces.** Its prototype re-measured at 0.52x-0.64x of today's
+admission in this session, against the 0.62x-0.69x `F3` published -- so the
+campaign's admission result is not an artifact of `F3`'s session, and the
+open-line rule still admits a scrolled-off row for less than `pack` does.
+
+**The landed store costs 3.0x-4.3x its own prototype**, and the cost tracks
+stored cells almost exactly: 930.0 ns at 60 stored cells (`stream`) against
+1,976.7 ns at 179 (`full`), a marginal slope of **~1.1 ns per stored cell byte**.
+That is the signature of the arena's byte access rather than of anything the
+design prescribes: `LogicalLineStore` reads and writes its arena one `UInt8` at
+a time through checked `[UInt8]` subscripts (`setWord`/`word`, eight subscript
+writes per cell, plus one per-row `[GridCell]` array from `admissionCells` and a
+`census` recomputation per `admit` and per eviction step), where `F3`'s
+prototype wrote the identical eight bytes inside one
+`withUnsafeMutableBufferPointer`. **This entry does not fix that**: `D4` froze
+its rule so the landed store would be priced as it stands, and optimising first
+would be tuning to the number the rule exists to prevent being tuned to. It is
+reported as the attribution and left to the human.
+
+#### Observation 4 -- the `AR6` residency reading: four states, and a reject on the second trigger
+
+One process per reading. `phys_footprint` sampled either side of the store's
+construction and fill with the allocator settled (`malloc_zone_pressure_relief`)
+before each sample, cross-checked against `vmmap --summary`'s TOTAL DIRTY delta,
+which agreed to within 0.2 MiB on every one of the twelve readings. Census
+capacity and bytes in use are reported separately (`DD11`). `n=1` process per
+row; the two `cycled` rows that carry the verdict were each re-run three times
+(the repeatability reading is under Competing interpretations).
+
+| store | class | state | resident (footprint delta) | capacity | bytes in use | index | side tables | charged | retained rows |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| arena | plain | empty | **16.281 MiB** | 16.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0 |
+| arena | plain | partial | 16.266 | 16.000 | 7.743 | 0.258 | 0.000 | 8.000 | 19,516 |
+| arena | plain | saturated | 16.312 | 16.000 | 15.484 | 0.516 | 0.000 | 16.000 | 39,029 |
+| arena | plain | cycled | 16.969 | 16.000 | 15.484 | 0.516 | 0.000 | 15.999 | 39,027 |
+| arena | mixed | cycled | **20.375** | 16.000 | 13.553 | 0.516 | 1.931 | 16.000 | 50,150 |
+| arena | blank | cycled | 31.609 | 16.000 | 7.750 | 8.250 | 0.000 | 16.000 | 1,015,806 |
+| today | plain | empty | 0.219 | n/a | 0.000 | -- | -- | 0.000 | 0 |
+| today | plain | partial | 8.125 | n/a | 8.000 | -- | -- | 8.000 | 18,079 |
+| today | plain | saturated | 16.297 | n/a | 16.000 | -- | -- | 16.000 | 36,157 |
+| today | plain | cycled | 18.188 | n/a | 16.000 | -- | -- | 16.000 | 36,157 |
+| today | mixed | cycled | 18.219 | n/a | 16.000 | -- | -- | 16.000 | 43,034 |
+| today | blank | cycled | 31.344 | n/a | 16.000 | -- | -- | 16.000 | 262,144 |
+
+`cycled` means at least two full arenas' worth of display rows evicted: 78,058
+against 39,027 retained on `plain`, 100,304 against 50,150 on `mixed`, 2,031,614
+against 1,015,806 on `blank`. The census identity (`charged <= budget`) held in
+the saturated and cycled states on every reading, so no reading is voided for
+accounting.
+
+**`D4`'s residency rule, applied once, on the cycled state:**
+
+| class | arena resident / 16 MiB charged bound | arena / today, same fed input | confirm <= 1.10x of the bound | reject: >= 1.50x of the bound, or > 1.10x today's |
+| --- | ---: | ---: | --- | --- |
+| `plain` | 1.061x | **0.933x** | pass | -- |
+| `mixed` | **1.273x** | **1.118x** | fail | **second trigger fires** |
+| `blank` | 1.976x | 1.008x | (no trigger, by `D4`) | (no trigger, by `D4`) |
+
+Confirm required every measured class at or under 1.10x of the charged bound;
+`mixed` is 1.273x, so confirm is out. The first reject trigger (>= 1.50x of the
+bound) does **not** fire on either triggering class. The **second** does:
+`mixed`'s arena is **1.118x** today's resident for the same fed input in the
+same session, over the 1.10x line `D4` derived as "a user does not pay more RAM
+for the same program output". **The residency verdict is reject, and the remedy
+`D4` names ships**: the arena's capacity is sized *below* the budget by the
+measured index and side-table share.
+
+Three things the table says that `D2` Decision 1 did not predict, and two of
+them are worse than it predicted.
+
+**`DD12` is refuted outright.** An *empty* arena pane is **16.281 MiB**
+resident, against today's 0.219 MiB -- `vmmap` puts a single 16.0 MiB
+MALLOC_LARGE region at 16.0 MiB VIRTUAL, 16.0 MiB RESIDENT and 16.0 MiB DIRTY
+the instant the store is constructed. `Array(repeating: 0, count:)` initialises
+its whole buffer, so the reservation is dirty from birth. `D2` Decision 1's
+first-touch paragraph does not hold "until the cursor cycles"; it does not hold
+at all, at any state -- `partial` is 16.266 MiB against today's 8.125 MiB for
+the same half-full charge. The idle-pane reading `DD12` said "costs nothing" is
+the **largest** single number in the `plain` column.
+
+**The remedy's depth cost is much larger than `D4` derived it.** `D4` computed
+the index share as 1.61% of the budget on its worst measured class and said the
+capacity reduction "costs depth by at most that same share". The measured
+index-plus-side-table share at the cycled state is **3.23%** on `plain`
+(0.516 MiB), **15.29%** on `mixed` (0.516 index + 1.931 side tables) and
+**51.56%** on `blank` (8.250 MiB of index). `D4`'s figure was index-only
+arithmetic over `D2`'s depth table; the side tables it left as an unmeasured
+constant are, on `mixed`, **3.7x the index**.
+
+**The spill table is charged at less than it costs**, which is `15/F2`'s error
+class recurring inside the new store. On `mixed` the census charges 1.931 MiB of
+side tables, while the arena's total resident excess over its own 16 MiB
+reservation is 4.375 MiB. The gap is `spillsBySequence` -- a `Dictionary` of
+~50,000 entries each holding an array of arrays -- whose real allocator cost the
+charge model describes rather than measures. That is exactly what `I2` promises
+not to do, and it is the mechanism behind the one cell that rejects.
+
+#### Observation 5 -- the gates, including the two `D4` could not have written literally
+
+1. **Per-arm fidelity, then cross-arm equivalence.** Each arm's retained content
+   was read back display row by display row and checksummed over every scalar,
+   style id, kind and soft-wrap flag against an expectation computed from the
+   fed stream's own suffix, touching neither store: **both arms matched on all
+   five classes**. Over the display rows both retain (10,810 to 25,575 depending
+   on class) the two checksums were **identical on all five**. The arena
+   therefore re-derives at read the `.spacerHead` cells it refused to store --
+   `wide` alone carries 3,067 of them -- and reproduces today's rows cell for
+   cell.
+2. **Head-stamping fidelity.** On every class, arm A's `isHistoryHeadTruncated`
+   and the arena's head-record `startsMidLine` each equalled "the row above my
+   first retained one was soft-wrapped": `false/false` on `mix` and `stream`,
+   `true/true` on `full` and `wrapped`, and on `wide` each matched its own
+   (different-depth) predecessor row.
+3. **Steady-state check.** In `steady`, evicted display rows matched admitted
+   within **0.22%** on every arm and class, against the 1% tolerance. In `drain`
+   both arms evicted exactly 2,000 -- satisfied by construction under `DD29`
+   rather than by tolerance, which is **reported rather than dropped**.
+4. **Non-elision.** Every round's product (arm A: retained rows, charged bytes,
+   stored cells, evicted rows; arm B: records, arena bytes in use, grand
+   display-row total, evicted rows) matched the value computed outside the timed
+   region on every round of every cell, and none was an empty store's.
+   Independently, the arena's grand display-row total matched
+   `independentDisplayRowRecount()` -- a count taken straight off the arena
+   ignoring every cached total -- on all five classes.
+5. **A/A resolution.** -1.16%, +0.87%, -0.63%, -0.68%, -0.08%, -0.24%, -0.75%,
+   +0.33%, +0.36%, -0.20% on the quoted invocation, all inside the 5% ceiling.
+   Ten other invocations exceeded it on (`full`, `drain`) and were voided; see
+   the void note above.
+6. **Host conditions.** AC power, low-power mode off, load 1.52 before and 1.34
+   after on the quoted eviction invocation, 1.3-1.5 across the residency ones.
+7. **Complexity fidelity -- the gate this rule owes its own frozen reading, and
+   it passes.** Draining 20 whole `wrapped` records one display row at a time
+   (335 timed steps each, 6,680 samples) put the per-step median at **250.0 ns
+   in every quartile**: Q1 250.0 (n=1,675), Q2 250.0 (n=1,675), Q3 250.0
+   (n=1,675), Q4 250.0 (n=1,655), **Q4/Q1 = 1.000x** against a 1.20x ceiling. A
+   step that re-folded the record from its start would have separated the
+   quartiles by ~7x, or 250 ns against ~1,750 ns. The step that drops the record
+   -- the last of each drain, reported beside the quartiles rather than inside
+   them -- is *cheaper* at 125.0 ns (n=20). So `D2` Decision 2's per-step
+   complexity is what the landed code does, and `AR1`'s corrected reading is
+   confirmed: **one display row per trim step, one pass per record across a full
+   drain.** The medians are quantised by the 41.7 ns clock, which is stated
+   because it is why they are equal to the tenth; the gate discriminates a 7x
+   shape regardless.
+8. **Coverage.** Every aggregate is printed with its round count and its
+   per-round sample count; every residency row carries `n=1 process`; and "not
+   measured" is distinguished from zero throughout.
+
+**The two substitutions, both written into the probe file's header before it was
+first run** and both recorded as deferred decisions below: `drain` times a fixed
+2,000-step eviction loop rather than one budget-driven enforcement call (`DD29`
+-- under `I2` the arena's capacity *is* the budget, so admission cannot run with
+enforcement suppressed), and arm C is the arena *design* reproduced in the probe
+file rather than the landed store (`DD30` -- `LogicalLineStore` exposes no
+whole-record eviction, and adding one to production for a descriptive arm is not
+licensed).
+
+**The instrument bias that was found and removed before any number was read.**
+The first two invocations copied one saturated baseline per round. A
+`PackedRetainedRow` owns two Swift arrays, so a copied baseline keeps a
+reference to every retained row's blob and arm A's evictions decrement instead
+of calling `free` -- a real per-eviction cost silently deleted from the
+**baseline only**, since the arena has no per-row allocation to free. Rebuilding
+each arm's saturated store per round moved arm A's `full` drain from 36.5 to
+~85 ns and left arm B unchanged, and every number quoted here is post-fix. It is
+recorded because it ran in the candidate's disfavour and would otherwise have
+made this reject look worse than it is.
+
+#### Observation 6 -- arm C, descriptive: granularity is not where the cost is
+
+`D4` runs arm C for exactly one purpose -- if arm B rejects, only arm C can say
+whether the cost is the *granularity* or the *arena*. Head-granular against
+whole-record on one arena, `n=5` rounds, 2,000 display rows per round.
+
+| class | rows/record | head-granular | whole-record | head/whole | rows overshot |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `mix` | 1.74 | 96.1 | 5.3 | 18.3x | 1 |
+| `full` | 2.00 | 134.0 | 4.4 | 30.3x | 0 |
+| `stream` | 1.00 | 52.6 | 9.0 | 5.9x | 0 |
+| `wrapped` | 336.00 | 133.7 | ~0.0 | >1,000x | **16** |
+| `wide` | 2.04 | 105.6 | 138.6 | 0.76x | 0 |
+
+Mechanically, `D4`'s fallback condition 2 fires: head-granular exceeds
+whole-record by more than 1.09x on four of five classes. **Read alone that is
+misleading, and the fidelity arm is why.** The same reproduction's head-granular
+drain runs at **0.391x** (57.2 against 146.2 ns on `stream`) and **0.619x**
+(150.6 against 243.4 ns on `wrapped`) of the landed store's -- so most of arm
+B's excess over arm A is *not* granularity, it is the same per-byte arena access
+Observation 3 attributes admission's excess to. And where the reproduction's
+head-granular eviction can be compared to today's directly it is already at or
+near parity: 52.6 ns against arm A's 47.2 on `stream`, 133.7 against 132.2 on
+`wrapped`, 105.6 against 120.6 on `wide`.
+
+So the honest statement of arm C is: **whole-record eviction is cheaper per
+display row because one step drops many rows, which is its definition and not a
+discovery**; the `wrapped` row prices that at 16 display rows dropped past the
+2,000 asked for, which is `F6` `HR5`'s hazard measured -- at 179 columns and 336
+rows per record a whole-record step moves four anchors and the scrollbar by up
+to a third of a screenful more than today's does. `D4`'s bar for taking the
+`AR1` fallback has three conditions and the third is not satisfiable by any
+number here: **a human must accept a user-visible behavior change** that `D2`
+Decision 2 closed rather than accepted and that `I4` and `PO5` currently forbid.
+On this evidence, taking it would buy a regression the design already rejected
+in order to fix a cost that is not granularity's.
+
+- Observation: on a store saturated at the 16 MiB production budget, the landed
+  arena's whole write path costs **1.418x-3.177x** today's per admitted display
+  row and its eviction alone **1.830x-3.114x** today's per evicted display row,
+  across all four verdict-bearing content classes; and an arena pane is
+  **16.281 MiB resident when empty**, and **20.375 MiB when cycled on
+  `scrollback-mixed`** against today's 18.219 MiB for the same fed input.
+- Inference: **reject on both of `D4`'s rules**, and the plan gains both named
+  conditions `D4` states. For eviction: the store does not land until either the
+  implementation clears 1.09x under this same rule, or the paired ladder comes
+  back not-`slower` on `terminal-feed` **and** `scrollback-stream` against a
+  real implementation -- which is `H3`'s own falsifier and outranks a
+  microbenchmark prediction. For residency: the arena's capacity is sized below
+  the budget by the measured index and side-table share, whose measured value is
+  **3.23% on `plain` and 15.29% on `mixed`**, not the 1.61% `D4` derived, and
+  `PO3`'s census is what proves the new capacity holds. What neither verdict
+  touches is the design: gate 7 confirms `D2` Decision 2's per-step complexity at
+  1.000x, gate 1 confirms `I1`/`I6` cell for cell on five classes, the depth
+  table confirms `PO11` on five classes, and the attribution arm puts the whole
+  eviction reject in the landed store's byte access rather than in wrap-at-read.
+- Competing interpretations:
+  - *Wrap-at-read admission is intrinsically expensive.* Refuted by Observation
+    3 in the same session on the same rows: `F3`'s prototype of the same rule
+    admits at 0.52x-0.64x of today's cost while the landed store costs
+    1.79x-2.76x.
+  - *The head-trim's fold walk is the new cost `AR1` warned about.* Refuted by
+    gate 7 (flat across a record's drain, 1.000x) and by arm C's fidelity arm
+    (the reproduction's head-granular drain is at or near parity with today's on
+    three classes). The fold walk is real and it is not what rejects.
+  - *The baseline is flattered because it never frees.* True of the first two
+    invocations and fixed before any quoted number; see Observation 5's bias
+    note, which moved arm A's `full` drain 2.3x in the baseline's disfavour.
+  - *The residency reject is measurement noise at a 1.118x line.* Refuted by
+    repetition: three further runs of each `mixed`/`cycled` reading put the arena
+    at 20.297-20.375 MiB and today's at 18.188-18.297 MiB, a ratio of
+    **1.110x-1.118x**, never under the trigger.
+  - *An arena that reserves 16 MiB obviously costs 16 MiB, so `AR6` discovered
+    nothing.* Half true, and the half that matters is the other one: `D2`
+    Decision 1 predicted first-touch would keep an idle pane cheap and the
+    overshoot would appear only after cycling. Measured, an empty pane is already
+    at 16.281 MiB and a cycled `plain` pane is *below* today's, at 0.933x. The
+    gate found the prediction wrong in **both** directions.
+- Uncertainty:
+  - **This is a microbenchmark and predicts a ladder verdict; it does not
+    produce one.** `D4` says so, and `H3`'s falsifier against a real
+    implementation outranks it in the reject branch by `D4`'s own wording.
+  - **The instrument calls enforcement once per admitted row** while production
+    amortizes it over a batch of scrolled-off rows. Both arms are treated
+    identically so the ratio is fair; the absolute nanoseconds carry a loop
+    prologue per row and are upper bounds.
+  - **Gate 5's ceiling is marginal on one cell.** (`full`, `drain`) exceeded 5%
+    in 10 of 22 invocations. The verdict is nowhere near that margin -- the
+    smallest verdict-bearing effect is +42% -- but a future rule that needs to
+    resolve a 10% effect on that cell needs a longer drain than `D4` froze.
+  - **Arm C is a reproduction** (`DD30`), and its fidelity arm measures it at
+    0.391x-0.619x of the landed store, so its granularity ratio brackets the real
+    one rather than equalling it.
+  - **The residency source pool is 300 distinct lines, cycled.** Byte shapes are
+    the payloads', but a real session's content novelty -- particularly its style
+    and spill diversity -- is not reproduced, and `mixed`'s side-table term is the
+    one the verdict turns on.
+  - **One machine, one session**, as with every probe in this doc.
+- Deferred decisions, continuing `DD28`'s numbering; each took the obvious simple
+  choice at measurement time rather than blocking, and the first two were written
+  into the probe file's header before it was first run:
+  - **DD29 -- the `drain` statistic times a fixed 2,000-step eviction loop, not
+    one budget-driven enforcement call.** `D4` asks for 2,000 rows admitted "with
+    enforcement suppressed" and then one call that drains back to the budget.
+    Under `I2` the arena's capacity *is* the budget and is a `let`, so admission
+    cannot run with enforcement suppressed without changing the arena's defining
+    geometry -- which would measure a different store. Both arms therefore run
+    the same fixed-step loop, which is the body of `evictToBudget` /
+    `enforceScrollbackBudget` with the loop condition supplied by the harness,
+    and each arm's once-per-call epilogue runs once. Gate 3's drain half becomes
+    satisfied by construction and is reported as such. A human's to revisit if
+    the arena ever gains a budget separate from its capacity -- which the
+    residency reject's remedy is about to give it.
+  - **DD30 -- arm C is the arena design reproduced in the probe file, run in both
+    granularities, with the reproduction measured against the landed store.**
+    `D4` asks for whole-record eviction "on the same arena"; `LogicalLineStore`
+    exposes no whole-record eviction, and adding one to production for a
+    descriptive arm is not licensed by `D1`'s scoping. The reproduction uses the
+    real `LogicalLineRecord` header and the real `LogicalLineFold`, and is linear
+    rather than a ring because a drain writes nothing at the tail. The
+    substitution's size is measured rather than assumed (the fidelity arm), which
+    is what keeps the granularity ratio readable.
+  - **DD31 -- the residency reading reproduces `TerminalMemoryProbe`'s instrument
+    inside the test process instead of running the probe binary.** `D4` names
+    `just terminal-memory-probe --vmmap`, and that binary **cannot see the
+    arena**: `Terminal.LogicalLineStore` is internal to `TerminalCore`, so only a
+    `@testable` caller can construct one, and making the store public for a
+    measurement would be a production API change `D1` does not license. The
+    mechanism is the probe's, verbatim -- `task_vm_info.phys_footprint`,
+    `malloc_zone_statistics`, and `vmmap --summary` dumped rather than parsed --
+    and only the caller moved. Today's store is measured through the same file's
+    `enforceScrollbackBudget` reproduction rather than through a whole
+    `Terminal`, so both sides measure history alone and neither carries a live
+    screen. Reopen if the store is ever made public for another reason, in which
+    case the binary should own this.
+  - **DD32 -- resident is the settled `phys_footprint` delta, cross-checked
+    against `vmmap`'s TOTAL DIRTY delta, over a 300-line source pool.** Two
+    residency invocations were voided before this shape was settled and are
+    recorded here rather than hidden: with a 12,000-line pool the process carried
+    ~27 MiB of dirty pages before the store existed, the allocator then handed
+    the arena pages it already owned, and four of the twelve readings came out
+    *negative*. `malloc_zone_pressure_relief` before each sample, plus a pool
+    small enough to leave the baseline near an empty process, fixed both, and the
+    two instruments then agreed to within 0.2 MiB on every reading -- which is
+    the cross-check that makes either quotable.
+- Next action: **the human decides the disposition of two rejects, and this doc
+  records no further verdict until they do.** The eviction reject's named
+  condition and the residency reject's remedy both land on the plan's slice 5,
+  which is where the store is wired: the remedy (capacity below budget) is a
+  change to `LogicalLineStore`'s construction plus the census proof `PO3` already
+  owes, and the eviction condition is either an optimization pass over the
+  arena's byte access -- which Observation 3 sizes at 3.0x-4.3x of headroom
+  against the store's own prototype -- or a decision to read `H3`'s falsifier on
+  the paired ladder instead. Three things this entry hands forward regardless:
+  the arena's byte access costs **~1.1 ns per stored cell byte** at the margin as
+  written, which is the constant any optimization is measured against; `DD12` is
+  **refuted** and an idle arena pane costs 16.281 MiB, which doc 28's `D11`
+  amendment and any future multi-pane question must be read against; and the
+  spill table's charge under-describes its allocation, which is `15/F2`'s error
+  class inside `I2` and is the mechanism behind the residency reject.

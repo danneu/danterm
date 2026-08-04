@@ -2179,6 +2179,20 @@ real implementation by construction.
 
 - Status: **rule frozen 2026-08-04 at `de17e95`, before the eviction probe
   existed in the tree and before any eviction or residency number was produced.**
+  **Run 2026-08-04 as `F8`, and both of its rules read `reject`** -- the eviction
+  comparison at 1.418x-3.177x on `steady` and 1.830x-3.114x on `drain` across all
+  four verdict-bearing classes, and the `AR6` residency reading on the second
+  trigger (the arena resident at 1.118x today's store for the same fed input on
+  `scrollback-mixed`). The rule was applied once, to the numbers as printed, and
+  is not reopened by them; disposition of both rejects is a human's, as this
+  entry says it is. Two things `F8` reports that this rule could not anticipate
+  and that a reader of the verdict needs: gate 7 **passes at 1.000x**, so the
+  per-step complexity this rule was frozen against is what the landed code does;
+  and the descriptive attribution arm puts the eviction reject in the landed
+  store's per-byte arena access rather than in wrap-at-read, since `F3`'s own
+  prototype of the same rule re-measured at 0.52x-0.64x of today's admission in
+  the same session. Four deferred decisions added (`DD29`-`DD32`), the first two
+  of them the substitutions this rule's letter could not be executed with.
   This entry is the first slice of
   [the plan](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md)'s commit
   checklist and it produces **no number**: it states the arms, the stimuli, the

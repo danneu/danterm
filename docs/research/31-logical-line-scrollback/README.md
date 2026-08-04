@@ -572,9 +572,28 @@ licenses a production storage change; landing is the paired ladder's.
   saturated, cycled) through `just terminal-memory-probe --vmmap`, with
   capacity-below-budget as the remedy only above a derived 1.10x / 1.50x band.
   Two deferred decisions added (`DD21`, `DD22`).
-- [ ] `TODO` **`F8`, the eviction measurement and the residency reading.** Run
-  `D4` mechanically; the plan's slice 4. Both readings land in one finding
-  because cycling the ring is what makes charged and resident bytes diverge.
+- [x] `DONE` **`F8`, the eviction measurement and the residency reading** (`D1`
+  condition 2 and `AR6`). Recorded in [F8](findings.md); `D4` was frozen at
+  `2ac87e1` before the probe existed and was run mechanically (the plan's slice
+  4). **Both verdicts are `reject`, and they are the only rejects in this doc.**
+  Eviction: the landed store's whole write path costs **1.418x-3.177x** today's
+  per admitted display row and its eviction alone **1.830x-3.114x** per evicted
+  display row, on all four verdict-bearing classes, against a 1.09x reject line.
+  Residency: an arena pane is **16.281 MiB resident when empty** (so `DD12`'s
+  "an idle pane's reservation costs nothing" is **refuted** -- the reservation is
+  dirty from construction, not on first touch) and **20.375 MiB cycled on
+  `scrollback-mixed`** against today's 18.219 MiB for the same fed input, which
+  is **1.118x** and fires the second reject trigger. **The design is not what
+  rejects**: gate 7 confirms `D2` Decision 2's per-step complexity at **1.000x**
+  (one display row per trim step, flat across a record's drain), gate 1 confirms
+  `I1`/`I6` cell for cell on five classes, the depth table confirms `PO11` at
+  **1.076x-1.301x** today's retained rows, and the descriptive attribution arm
+  re-measured `F3`'s own prototype at **0.52x-0.64x** of today's admission in the
+  same session while the landed store cost **3.01x-4.31x the prototype** -- so
+  the eviction reject is the store's per-byte arena access, not wrap-at-read.
+  Disposition of both rejects is a human's; the residency remedy `D4` names
+  (capacity sized below the budget) costs **3.23%-15.29%** of depth measured,
+  against the 1.61% `D4` derived. Four deferred decisions added (`DD29`-`DD32`).
 - [x] `DONE` **`F9`, the wide-content counting pass** (`D1` condition 1).
   Recorded in [F9](findings.md); `D3` Decision 7's probe and three-way rule were
   frozen before it existed and were run mechanically (the plan's slice 2). It
@@ -679,8 +698,18 @@ add detail to it.
   1.05M the budget admits. What the answer leaves standing is a **depth condition**, not an
   open question: a resize to the engine's minimum width with a budget-full CJK
   history spends about a third of a frame in the counting pass.
-- **Eviction is unpriced on both sides, and it is now the largest unmeasured
-  term in Phase 1's evidence.** `F1` set it aside as Phase 2's, `F3`'s frozen
+- ~~**Eviction is unpriced on both sides, and it is now the largest unmeasured
+  term in Phase 1's evidence.**~~ **Answered by `F8`, and the answer is
+  `reject`: the landed store's write path costs 1.418x-3.177x today's per
+  admitted display row and its eviction alone 1.830x-3.114x per evicted display
+  row, against a 1.09x line.** What the same finding says in the other
+  direction is why this is not a verdict on the design: gate 7 confirms `D2`
+  Decision 2's per-step complexity at 1.000x, and `F3`'s own prototype of the
+  open-line rule re-measured at 0.52x-0.64x of today's admission in the same
+  session while `LogicalLineStore.admit` cost 3.01x-4.31x that prototype. The
+  reject is the landed store's per-byte arena access. Disposition is a human's,
+  and the named condition `D4` attaches is the plan's now. The historical
+  framing follows. `F1` set it aside as Phase 2's, `F3`'s frozen
   rule excluded it, so nothing has compared today's
   `Terminal.swift#enforceScrollbackBudget` / `ScrollbackBuffer.removeFirst`
   against `DD2`'s whole-record eviction. A real pane at steady state evicts on
@@ -698,7 +727,17 @@ add detail to it.
   derived its own, and the honest bar for `AR1`'s whole-record fallback -- which
   would reintroduce `F6` `HR5`, so a reject alone does not authorize it. Only the
   number is still owed.
-- **Resident pages are unmeasured, and `I2` does not bound them.** The external
+- ~~**Resident pages are unmeasured, and `I2` does not bound them.**~~
+  **Answered by `F8`, and the answer is `reject` on the second trigger:** an
+  arena pane is 16.281 MiB resident *when empty* -- the reservation is dirty
+  from construction, so `DD12`'s "costs nothing" is refuted and first-touch
+  never applied at any state -- and 20.375 MiB cycled on `scrollback-mixed`
+  against today's 18.219 MiB for the same fed input, which is 1.118x and over
+  the 1.10x line. The remedy `D4` names ships (capacity sized below the budget),
+  and its measured depth cost is 3.23% on `plain` and 15.29% on `mixed` rather
+  than the 1.61% `D4` derived, because the side tables that derivation left as an
+  unmeasured constant are 3.7x the index on `mixed`. The historical framing
+  follows. The external
   review of `D2` Decision 1 found the entry's residency claim true of *charged*
   bytes and overstated for resident ones: once the ring's write cursor has
   cycled, every arena page has been touched, so resident is capacity plus
@@ -773,6 +812,20 @@ reading sequenced into the same slice -- **before any eviction or residency
 number exists**, and against the corrected per-step complexity (one display row
 per trim step, not a record walk). It licenses nothing: `F8` is the measurement
 it governs.
+
+**`F8` ran it, and both of its rules read `reject`** -- the first rejects in this
+doc. The eviction comparison puts the landed store's write path at 1.418x-3.177x
+today's and its eviction alone at 1.830x-3.114x, against a 1.09x line; the
+residency reading puts an *empty* arena pane at 16.281 MiB and a cycled
+`scrollback-mixed` pane at 1.118x today's resident for the same fed input. Both
+dispositions are a human's and `D4` said so before either number existed. What
+the same finding establishes in the design's favour is not small: gate 7
+confirms the per-step complexity at 1.000x, gate 1 confirms `I1`/`I6` cell for
+cell on five content classes, the depth table confirms `PO11` at 1.076x-1.301x,
+and the attribution arm re-measured `F3`'s prototype of the same admission rule
+at 0.52x-0.64x of today's cost in the same session while the landed store cost
+3.01x-4.31x that prototype. The store as landed is what rejects, and it rejects
+on how it touches its own bytes.
 
 What this doc still owns after graduation is the verdict, not the work. `D1`'s
 scoping stands: no production storage change is licensed by any entry here, and

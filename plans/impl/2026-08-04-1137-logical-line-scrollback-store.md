@@ -217,7 +217,22 @@ implementation, not by any Phase 1 number:
 Open conditions that the implementation, not the design, has to discharge:
 
 - **Eviction is unmeasured on both sides** (`31/D1` condition 2, the largest
-  unmeasured term in Phase 1). Compare today's budget enforcement and
+  unmeasured term in Phase 1). **Measured 2026-08-04 as `31/F8`, and the verdict
+  is `reject`**: the landed store's whole write path costs 1.418x-3.177x today's
+  per admitted display row and its eviction alone 1.830x-3.114x per evicted
+  display row, on all four verdict-bearing classes, against `31/D4`'s 1.09x line.
+  **The named condition `31/D4` attaches is therefore live: this store does not
+  land until either the eviction implementation clears 1.09x under that same
+  rule, or the paired ladder comes back not-`slower` on `terminal-feed` and
+  `scrollback-stream` against a real implementation** (`31/H3`'s own falsifier,
+  which `31/D4` says outranks a microbenchmark prediction). Disposition is a
+  human's. What the same finding rules out as the cause: `31/D4` gate 7 passes at
+  1.000x, so `31/D2` Decision 2's per-step complexity is what the landed code
+  does; and `31/F3`'s own prototype of the open-line rule re-measured at
+  0.52x-0.64x of today's admission in the same session while
+  `LogicalLineStore.admit` cost 3.01x-4.31x that prototype, which puts the reject
+  in the store's per-byte arena access rather than in wrap-at-read. The original
+  statement of the gate follows. Compare today's budget enforcement and
   head removal against this design's head-trim -- whose per-step fold walk is
   the new term -- under a rule frozen before the comparison is read. Owed before
   the ladder verdict is read, since a real pane evicts on every admitted row.
@@ -227,7 +242,23 @@ Open conditions that the implementation, not the design, has to discharge:
   the wide path -- rather than re-folding the record, and the per-record cost is
   therefore linear in its display rows across a full drain, not quadratic.
 - **Resident pages are unmeasured** (`AR6`, promoted from an accepted risk by the
-  external review of `31/D2` Decision 1). `I2` bounds charged bytes, and `PO3`'s
+  external review of `31/D2` Decision 1). **Measured 2026-08-04 as `31/F8`, and
+  the verdict is `reject` on the second trigger**: the arena is resident at
+  1.118x today's store for the same fed input on `scrollback-mixed`, over the
+  1.10x line, and an *empty* arena pane is already 16.281 MiB resident because
+  the reservation is dirty from construction rather than on first touch (which
+  refutes `31/DD12`). **The remedy `31/D4` names ships, and it is slice 5's:**
+  the arena's capacity is sized *below* the byte budget by the measured index and
+  side-table share, and `PO3`'s census is what proves the new capacity holds. The
+  measured share is 3.23% of the budget on `plain` and 15.29% on `mixed`, not the
+  1.61% `31/D4` derived -- the side tables that derivation left as an unmeasured
+  constant are 3.7x the index on `mixed`, and the spill table in particular is
+  charged at less than it allocates, which is `15/F2`'s error class recurring
+  inside `I2`. `I2`'s "the arena is allocated once at that capacity" survives;
+  what changes is that capacity and budget stop being the same number, which
+  `I2`'s own wording ("the arena's capacity *is* that budget", Decision above)
+  needs the human to restate before slice 5 implements it. The original statement
+  of the gate follows. `I2` bounds charged bytes, and `PO3`'s
   census can only see those; resident is capacity plus metadata once the ring
   cursor has cycled. Measure resident pages through `TerminalMemoryProbe`
   (`phys_footprint`, `--vmmap`) on an empty, a partially filled, a saturated and a
@@ -341,7 +372,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
 - [x] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
 - [x] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
-- [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
+- [x] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
@@ -454,3 +485,44 @@ Open conditions that the implementation, not the design, has to discharge:
   `plans/wip/logical-line-scrollback-store.md` were repointed in the same commit;
   the `docs/research/README.md` index row drops the path entirely rather than
   carrying a 99-character cell against the format's 100-character cap.
+- **Slice 4's two verdicts are both `reject`, and they change slice 5's scope in
+  one direction each.** The residency reject *adds* work to slice 5: the arena's
+  capacity must be constructed below the byte budget by the measured index and
+  side-table share, and `PO3`'s census has to prove the new capacity holds --
+  which also means `31/I2`'s "the arena's capacity *is* that budget" is no longer
+  literally true and is a sentence the human owes a restatement of. The eviction
+  reject *gates* slice 5 rather than resizing it: `31/D4`'s named condition says
+  the store does not land until the implementation clears 1.09x under that same
+  rule or the paired ladder clears `H3`'s falsifier against a real
+  implementation, and which of those two routes is taken is explicitly a human's
+  decision. Nothing was optimised in this slice in response: `31/D4` froze its
+  rule precisely so the landed store would be priced as it stands, and the
+  probe's own attribution arm sizes the available headroom (3.0x-4.3x against the
+  store's own `F3` prototype) without spending it.
+- **Slice 4 changed no production code, and the probe found no correctness
+  defect.** Every `31/D4` gate that tests the landed store's behavior passed on
+  the first gated invocation and every one after: gate 1 (both arms' retained
+  content checksums identically over the display rows both retain, on all five
+  content classes, with the arena re-deriving the 3,067 `.spacerHead` cells it
+  refuses to store), gate 2 (head stamping), gate 4 including the independent
+  display-row recount off the arena, and gate 7 (per-step complexity flat at
+  1.000x across a record's drain). The rejects are cost readings, not defects.
+- **Four judgment calls, recorded as `31/DD29`-`31/DD32` continuing `DD28`'s
+  numbering**, the first two written into the probe file's header before it was
+  first run so the resolution is visible in the same commit as the numbers it
+  governs: the `drain` statistic times a fixed 2,000-step eviction loop because
+  `31/I2` makes the arena's capacity its budget and admission cannot run with
+  enforcement suppressed; arm C is the arena design reproduced in the probe file
+  because `LogicalLineStore` exposes no whole-record eviction and adding one for
+  a descriptive arm is not licensed; the residency reading reproduces
+  `TerminalMemoryProbe`'s instrument inside the test process because
+  `Terminal.LogicalLineStore` is internal to `TerminalCore` and the probe binary
+  cannot see it; and resident is read as a settled `phys_footprint` delta
+  cross-checked against `vmmap`'s TOTAL DIRTY delta.
+- **Ten of twenty-two gated eviction invocations were voided and are recorded in
+  `31/F8` rather than hidden.** All ten failed the same cell -- gate 5's A/A
+  control on (`full`, `drain`), whose 2,000 `free` calls over ~180 microseconds
+  sit at the instrument's resolution floor against a 5% ceiling. The verdict was
+  `reject` in all twenty-two at ratios between 1.41x and 3.24x, so nothing was
+  selected on the numbers; the quoted invocation is simply one of the twelve that
+  cleared every cell.
