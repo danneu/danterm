@@ -575,9 +575,23 @@ licenses a production storage change; landing is the paired ladder's.
 - [ ] `TODO` **`F8`, the eviction measurement and the residency reading.** Run
   `D4` mechanically; the plan's slice 4. Both readings land in one finding
   because cycling the ring is what makes charged and resident bytes diverge.
-- [ ] `TODO` **The wide-content counting pass.** `D3` Decision 7's probe and
-  three-way rule are already frozen; run them mechanically (the plan's slice 2).
-  Neither outcome changes the design.
+- [x] `DONE` **`F9`, the wide-content counting pass** (`D1` condition 1).
+  Recorded in [F9](findings.md); `D3` Decision 7's probe and three-way rule were
+  frozen before it existed and were run mechanically (the plan's slice 2). It
+  numbers `F9` rather than `F8` because `D4` had already reserved `F8` for the
+  eviction measurement. Verdict: **narrow confirm**. On the deepest wide history
+  16 MiB admits (7,531 CJK records, 2,082,012 cells) the pass costs **0.056-0.144
+  ms** at widths 200, 179 and 100 and **5.439 ms** at `179 -> 2`, the engine
+  minimum -- above the 1.67 ms tenth-of-a-frame line and **3.07x inside** the
+  16.67 ms reject line. The eager recompute stands, **neither mitigation ships**
+  (the per-record cached count and the lazy per-block recompute both stay
+  unbuilt, so the Rejected entry for lazy recompute is not spent), and the
+  recorded depth condition is the (`wide`, `179 -> 2`) cell. The fallback measures
+  `O(display rows)` at **5.2-5.4 ns a row**, flat from 2 to 4,096 cells per
+  record, which puts one frame at ~3.1-3.2M display rows against the 1.05M the
+  budget admits
+  -- `D3` Decision 7's own arithmetic bracket said 3.2x before the constant
+  existed. Two deferred decisions added (`DD23`, `DD24`).
 - [ ] `TODO` **The paired ladder verdict, the `28/D11` exit and the `DD8`
   re-read.** The acceptance dimension, owed against a real implementation.
 
@@ -620,6 +634,10 @@ pass costs milliseconds. Reopen if F2 measures the eager pass above H2's
 bound. **F2 measured it 15.6x inside the bound, so this stays rejected**, and
 the reopening condition is now a depth rather than a doubt: an arena past
 ~100,000 logical lines, which the byte budget does not currently allow.
+**`F9` closes the second route back in**: the plan carried this as the mitigation
+a wide-content reject would ship, and the wide probe returned narrow confirm at
+~3x inside its reject line, so nothing is spent and this stays rejected on both
+counts.
 
 ## Open questions and caveats
 
@@ -645,21 +663,22 @@ add detail to it.
   real engine and turned out to have a **second** reachable site (`X9`, which
   `F6` had mapped as a no-op), and `HR2`'s answer costs `F5`'s invariant tally
   half a point, which `DD8`'s amendment records instead of absorbing.
-- **The eager counting pass is unpriced on wide content.** `F2` measured
-  0.016 ms at trial depth on ASCII stimuli, where every record takes the O(1)
-  `ceil` path. `F4` Observation 1 establishes that a record holding wide cells
-  needs a scan instead, so a CJK- or emoji-heavy history makes the pass a walk
-  of the flagged records. `H2` cleared its bound by 15.6x, so there is margin --
-  but the margin is not measured against a wide-content stimulus and must not be
-  assumed to transfer. **`D3` Decision 7 advances this without closing it**: the
-  scan is `O(display rows)` rather than `O(cells)` (one boundary probe per
-  display row, which is iTerm2's own loop as `F4` quoted it), so the pass is
-  bounded by the grand display-row total the byte budget already bounds -- under
-  1 ms at `F7`'s measured per-record rate and ~5 ms at a pessimistic 5 ns per
-  probe, against the 16.67 ms frame. That is arithmetic on an unmeasured
-  constant, so the probe stays owed: `D3` freezes it (wide stimulus, cells-per-
-  record ladder, `179 -> 2` added to the width changes) and its three-way
-  decision rule, and states that neither outcome changes the design.
+- ~~**The eager counting pass is unpriced on wide content.**~~ **Answered by
+  `F9`, narrow confirm: 5.439 ms at `179 -> 2` on the deepest wide history 16 MiB
+  admits, 3.07x inside the 16.67 ms reject line and above the 1.67 ms
+  tenth-of-a-frame line, so the eager pass stands and neither mitigation ships.**
+  `F2` had measured 0.016 ms at trial depth on ASCII stimuli, where every record
+  takes the O(1) `ceil` path, and `F4` Observation 1 established that a record
+  holding wide cells needs a boundary walk instead. `D3` Decision 7 reframed that
+  walk as `O(display rows)` rather than `O(cells)` -- one probe per display row,
+  which is iTerm2's own loop as `F4` quoted it -- and bracketed it at ~5 ms on a
+  pessimistic 5 ns per probe against the 16.67 ms frame, then froze the probe
+  rather than spend a margin it had computed itself. **The bracket was right in
+  shape and in constant**: measured 5.2-5.4 ns per display row, flat from 2 to
+  4,096 cells per record, putting one frame at ~3.1-3.2M display rows against the
+  1.05M the budget admits. What the answer leaves standing is a **depth condition**, not an
+  open question: a resize to the engine's minimum width with a budget-full CJK
+  history spends about a third of a frame in the counting pass.
 - **Eviction is unpriced on both sides, and it is now the largest unmeasured
   term in Phase 1's evidence.** `F1` set it aside as Phase 2's, `F3`'s frozen
   rule excluded it, so nothing has compared today's

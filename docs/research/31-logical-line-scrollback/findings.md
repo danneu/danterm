@@ -2094,3 +2094,300 @@ measuring the wrong thing, which is what a precondition on a stimulus is for.
   condition 1 asks for) should vary bytes-per-record rather than depth; and the
   parallel counts array stays unnecessary, now on a second regime -- it is within
   10% of the primary source here, against 4.3x at `F2`'s 100,000 content lines.
+
+### F9 -- the wide-content counting pass at the depth 16 MiB admits: 5.44 ms at the engine's minimum width, ~3x inside one frame, and flat at 5.2-5.4 ns per display row
+
+- Status: complete. This is the measurement `D3` Decision 7 froze, and its rule
+  reads **narrow confirm**: the eager pass stands, no mitigation ships, and the
+  band-crossing cell -- `wide` at `179 -> 2` -- is recorded below as a condition
+  on the store's depth. Inherited condition 1 (the wide-record counting
+  fallback) is **discharged**, in the branch that changes no design and no
+  constant. It licenses nothing else: `D1`'s scoping is unchanged, no production
+  storage change is licensed, and the paired ladder is still owed.
+- **Numbered `F9`, not `F8`**, because `D4` -- frozen at `2ac87e1`, before this
+  probe existed -- reserves `F8` for the eviction measurement and the residency
+  reading it governs (the plan's slice 4). This doc numbers findings by
+  reservation rather than by landing order, as `F3` and `F4` already are.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: measured at `2ac87e1` (the commit that promoted the
+  plan and froze `D4`) plus the one file this entry adds --
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineWideIndexProbe.swift`.
+  **No file under `lib/TerminalCore/Sources/` is touched, and `F1`'s, `F2`'s,
+  `F3`'s and `F7`'s probe files are unedited**; this entry keeps `F2`'s isolation
+  practice and adds its own file. The two untracked paths present throughout this
+  doc's work are still present and still in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
+        --filter TerminalLogicalLineWideIndexProbe
+
+  Conditions: AC power, low-power mode off, one-minute load average **1.57 before
+  and 1.57 after**, under the 2.5 gate. Release configuration, headless, one
+  process, pre-built and the machine allowed to settle before the measured
+  invocation (`F2` Observation 2's lesson). 9 measured rounds plus 2 warmup per
+  cell, statistic = median over rounds of one whole pass, min and max and `n`
+  beside every aggregate -- `F2`'s instrument, with the three changes `D3`
+  Decision 7 names and no others.
+- Artifacts: none durable. Every number below is stdout from the command above.
+- **No invocation was voided.** Three earlier invocations were run and are
+  recorded rather than hidden: a shakedown, whose purpose was to find a crash or a
+  gate failure and which found neither; one before the probe was renumbered `F8`
+  -> `F9`; and one before an unused `CaseIterable` conformance was removed from
+  it. All three cleared every gate, all three returned the same verdict under the
+  rule, and their medians sit within ~5% of the quoted ones. The quoted invocation
+  is the last one, taken from the file exactly as committed with the machine
+  settled; nothing was selected on the numbers.
+
+#### What was measured, and what the fallback actually is
+
+`D3` Decision 7's reframing is the thing under test: the wide-record fold is not
+an `O(cells)` scan. To fold a record the pass needs to know, at each display-row
+boundary, whether a 2-cell cluster straddles it -- one probe per **display row**.
+The probe walks a flagged record's boundaries, reads the cell that would occupy
+the last column, and takes `width - 1` cells instead of `width` when that cell
+starts a cluster (`Terminal.swift#pack`'s spacer rule read from the record's
+side; iTerm2's `LineBuffer` loop read from the other). An unflagged record takes
+`F2`'s divide. The timed region is `F2`'s: one call of the eager recompute,
+discarding every cached block total and rebuilding `blockPrefix` for a new width.
+
+The stimulus is `F3`'s `wide` CJK generator through a real `Terminal` at 179x66:
+10,000 records, 20,572 engine display rows, 2,777,004 cells, 2,229.6 bytes per
+record against `F3` Observation 4's 2,215 (0.7% apart), 10,572 spacers at 179
+columns, **100% of admitted rows carrying a wide cell and 100% of records
+flagged**. Depths are `D3` Decision 7's: the record count 16 MiB admits for that
+class, plus `F2`'s 10,000 and 100,000 rungs for continuity. Widths are `F2`'s
+three plus `179 -> 2`, the engine minimum (`F4` case 3), where display rows per
+record -- and therefore boundary probes -- are maximised.
+
+#### Observation 1 -- the verdict-bearing arm, and the rule applied once
+
+A budget-full wide arena: **7,531 records, 2,082,012 cells, 16,716,344 arena
+bytes + 60,248 index bytes = 16,776,592 B charged** of the 16,777,216 B budget.
+`n=9` per cell; the `fast path` column is `F2`'s divide over the *same* records,
+which counts wide content wrong and is here as the contrast and the elision
+guard.
+
+| width change | display rows | wide-aware median | min / max | ns/display row | fast path | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 179 -> 179 | 15,440 | **0.064 ms** | 0.064 / 0.068 | 4.17 | 0.012 ms | 5.49x |
+| 179 -> 100 | 24,633 | **0.144 ms** | 0.142 / 0.164 | 5.84 | 0.012 ms | 12.29x |
+| 179 -> 200 | 13,945 | **0.056 ms** | 0.055 / 0.057 | 3.99 | 0.012 ms | 4.74x |
+| 179 -> 2 | 1,041,006 | **5.439 ms** | 5.425 / 5.603 | 5.22 | 0.012 ms | 464.52x |
+
+**`D3` Decision 7's three-way rule, applied once.** Reject required a median at
+or above **16.67 ms** on a measured cell; the worst verdict-bearing cell across
+this arm and the ladder below is **5.634 ms**, **2.96x inside** the frame.
+Confirm required every cell under **1.67 ms**; every `179 -> 2` cell measured is
+1.835-5.634 ms, so that band is entered. **The verdict is narrow confirm.** Eager
+stands, the per-record cached count and the lazy per-block recompute both stay
+unbuilt, and the recorded band-crossing cell is **(`wide`, `179 -> 2`)** -- CJK
+content at the engine's minimum width, where every display row holds exactly one
+cluster.
+
+Stated as a depth condition rather than as a width: the pass costs **5.2-5.4 ns
+per display row** with the fallback engaged, so one 60 Hz frame is **~3.1-3.2
+million display rows**. The 16 MiB budget admits **1,046,528** of them in the
+worst case measured, a **~3x** margin -- and `D3` Decision 7's own arithmetic
+bracket, written before any of this was measured, said 3.2x at a pessimistic 5 ns
+per probe. The bracket was right in shape and in constant.
+
+#### Observation 2 -- the ladder that matters is cells per record, and it is flat
+
+`F7` handed forward that the counting pass's cost is governed by **stride, not
+record count**, so this ladder holds the 16 MiB charge fixed and varies bytes per
+record. Every rung is budget-admissible and therefore verdict-bearing (`DD23`).
+Medians in milliseconds, `n=9` per cell.
+
+| cells/record | records | cells | 179 -> 179 | 179 -> 100 | 179 -> 200 | 179 -> 2 | rows at width 2 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 524,288 | 1,048,576 | 1.283 | 1.278 | 1.278 | **1.835** | 524,288 |
+| 8 | 209,715 | 1,677,720 | 0.516 | 0.516 | 0.517 | **2.765** | 838,860 |
+| 32 | 61,680 | 1,973,760 | 0.301 | 0.301 | 0.301 | **4.504** | 986,880 |
+| 128 | 16,131 | 2,064,768 | 0.040 | 0.095 | 0.040 | **5.415** | 1,032,384 |
+| 276 | 7,543 | 2,081,868 | 0.042 | 0.081 | 0.042 | **5.475** | 1,040,934 |
+| 1,024 | 2,044 | 2,093,056 | 0.052 | 0.126 | 0.051 | **5.634** | 1,046,528 |
+| 4,096 | 511 | 2,093,056 | 0.104 | 0.201 | 0.089 | **5.452** | 1,046,528 |
+
+Two readings, and the second is the finding.
+
+The `179 -> 2` column is **flat in display rows across three orders of magnitude
+of record size**: 3.50 ns/row at 2 cells a record down to 5.21-5.38 ns/row from
+128 cells a record upward, over 524,288 to 1,046,528 rows. Cells per record moves
+the *number* of display rows the budget buys by 2x and moves the *cost per row*
+by well under 2x. That is what `O(display rows)` with an O(1) test per boundary
+predicts, measured rather than bracketed.
+
+The other three columns are the fast-path regime seen from inside the wide
+pass. At 2 and 8 cells a record no boundary probe fires at all at widths 100,
+179 and 200 -- the record is shorter than one display row -- so those cells price
+the header chase alone, at 2.44-2.47 ns per record against `F7`'s 0.72 ns for an
+8-byte stride. The stride here is 24 bytes (an 8-byte header plus two 8-byte
+cells), and `F7`'s mechanism reading survives the check: cost tracks stride.
+
+#### Observation 3 -- the gates, including the two this stimulus changes
+
+1. **Non-elision.** Every timed pass's total was cross-checked against a total
+   computed by a route that reads no arena byte -- for content that is CJK end to
+   end a display row holds `2 * (width / 2)` cells, so the total is closed-form
+   arithmetic over the cell counts -- and no total was zero. All 108 passes in the
+   primary arm matched, as did the fast-path arm's 36 against its own expectation,
+   the cells-per-record ladder's 252 and the continuity ladder's 36. **The half of `F2`'s gate 1 that
+   catches a hoisted loop is intact here and is stronger than `F7` could make
+   it**: the totals move with width (15,440 rows at 179, 24,633 at 100, 13,945 at
+   200, 1,041,006 at 2) *and* the fast-path arm over the identical records
+   produces a **different** total at the odd width (15,405 against 15,440), which
+   is the spacer the fold puts back. A boundary walk that had been optimized away
+   would report the fast path's number and fail the check.
+2. **Synthetic-stimulus fidelity.** The 10,000-record arena was built both ways --
+   through a real `Terminal` fed `F3`'s CJK lines and read back through
+   `retainedRowForTesting`, and synthetically from the same per-record cell counts
+   -- and both were measured at every width. Ratios spanned **0.948x to 1.000x**,
+   inside the 15% the rule allows, and the two arenas agreed exactly on byte count
+   (22,296,032 B) and record count. The synthetic extension to the budget depth
+   and along the ladder is therefore admissible.
+3. **Host conditions.** AC power, low-power mode off, load 1.57 before and 1.57
+   after, both under 2.5.
+4. **Coverage.** `n=9` beside every median, with min and max; no aggregate is
+   reported without its sample count.
+5. **Content-class calibration: replaced, not dropped.** `F2` gated `mix` against
+   `28/F23`'s measured cell-count band, which is an **ASCII** band and cannot be
+   applied to CJK. What stands in its place is `F3`'s own `wide` band (at least
+   50% of admitted rows carrying a wide cell, at least one spacer present:
+   measured 100% and 10,572), the achieved geometry against `F3` Observation 4
+   (2,229.6 B/record against 2,215), and -- the substantive one -- **the fold is
+   checked against the engine's own wrapping**: the derived display-row count
+   matches the 20,572 rows the engine produced for those 10,000 records, record
+   by record. That is `F4`'s corrected arithmetic, spacers included, held to the
+   engine rather than to itself.
+6. **The count-source arm is inapplicable, and what replaces it is reported.**
+   `F2` and `F7` price `arena` against `counts` -- whether the index carries a
+   dense parallel array of per-record cell counts. A flagged record cannot be
+   counted from such an array at all: the boundary probes must read the record's
+   cells wherever the count came from. So the primary source is the only
+   measurable one, and the second arm's place is taken by the **fast path over
+   the same records**, which is what the fallback is measured against (columns 6
+   and 7 of Observation 1's table).
+7. **A/A control: not part of `F2`'s rule and not added**, for `F7`'s reason --
+   this instrument measures an absolute cost against a frozen bound rather than a
+   ratio between two arms. The instrument's own spread stands in, and it is not
+   uniform: on the `179 -> 2` cells the verdict actually turns on, min and max sit
+   within **3.4%** of the median (5.425 / 5.439 / 5.603 ms on the budget arm); on
+   the sub-0.5 ms cells the spread reaches **14%** of the median, which is under
+   30 microseconds in absolute terms and three orders of magnitude from any
+   bound.
+8. **Cross-session control.** `F2`'s `mix` and `full` arms were re-run unchanged
+   in this session, as `D3` Decision 7 asks: **0.015-0.016 ms** at 10,000 lines at
+   every width, against `F2`'s published 0.015-0.016 ms. No record in those
+   classes is flagged, so none takes the fallback, and the machine this ran on is
+   the machine `F2` ran on.
+
+#### Observation 4 -- the continuity rungs, descriptive and outside the verdict
+
+`D3` Decision 7 named `F2`'s 10,000 and 100,000 rungs "for continuity". At this
+class's ~2,229 bytes a record those are **22.4 MB** and **223.8 MB** of charge
+against a 16.8 MB budget, so they are depths the store cannot reach -- the same
+thing `F2` Observation 3 said about its own 100,000-line rung. They are reported
+and are **not** verdict-bearing (`DD23`).
+
+| records | cells | charged | 179 -> 100 | ns/row | 179 -> 2 | ns/row |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10,000 | 2,777,004 | 22,376,032 B | 0.193 ms (32,819 rows) | 5.87 | 7.262 ms (1,388,502 rows) | 5.23 |
+| 100,000 | 27,770,040 | 223,760,320 B | 11.466 ms (328,190 rows) | 34.94 | 72.653 ms (13,885,020 rows) | 5.23 |
+
+**Said plainly, because it is the one number that could be misread as a reject:**
+at 100,000 wide records -- 13.3x the charge the budget permits -- the `179 -> 2`
+pass costs 72.7 ms, four frames. It is not a verdict cell and `DD23` says why
+before the number is read; it is also not a hazard the design carries, because
+the budget is the arena and the arena cannot hold that content.
+
+What the two rows do show is which term degrades. At `179 -> 2` the per-row cost
+is **5.23 ns at both depths** -- the boundary walk is a dense sequential scan
+inside a record and the prefetcher sees it. At `179 -> 100` the per-row cost goes
+from 5.87 ns to 34.94 ns between the two, which is `F2` Observation 3's cache
+residency effect on the **header chase**, over a 224 MB arena. So the fallback's
+own term is the cache-friendly one; what degrades with depth is the pointer chase
+`F2` already measured and `F7` already explained.
+
+- Observation: the wide-content counting pass costs **0.056-0.144 ms** at the
+  three ordinary widths and **5.439 ms** at the engine's minimum width, on the
+  deepest wide history a 16 MiB budget admits (7,531 records, 2,082,012 cells,
+  1,041,006 display rows at width 2), with a per-display-row cost of **3.99-5.84
+  ns** that stays flat from 2 to 4,096 cells per record.
+- Inference: `D3` Decision 7's reframing holds as measured, not merely as an
+  argument. The fallback is `O(display rows)` with a 5.2-5.4 ns constant, the
+  frame bound sits at ~3.1-3.2 million display rows, and the budget admits about
+  3x fewer than that in its worst case. **Narrow confirm**: the eager whole-index recompute
+  stands for milestone 1 exactly as `F2` and `F7` left it, no per-record cached
+  count and no lazy per-block recompute ships, and the README's Rejected entry for
+  lazy recompute is **not** spent. The condition recorded against the store's
+  depth is the `179 -> 2` cell: a resize to the engine minimum with a budget-full
+  CJK history spends about a third of one frame in the counting pass.
+- Competing interpretations:
+  - *The boundary walk was optimized away.* Refuted by gate 1 and, specifically,
+    by the fast-path arm: at width 179 the two passes over the identical arena
+    report different totals (15,440 against 15,405), so the walk demonstrably ran
+    and demonstrably inserted the spacers.
+  - *The synthetic arena is not the real one.* Gate 2: where both can be built
+    they agree within 9.1% on time and exactly on geometry, and the real arena's
+    fold agrees with the engine's own wrapping row by row.
+  - *The probe reads one byte where a real implementation reads a cell word.*
+    True, and recorded as `DD24`: both touch the same cache line, so the
+    difference is register work rather than memory traffic -- and the measured
+    5.2-5.4 ns/row is already at `D3`'s **pessimistic** 5 ns/probe estimate rather
+    than at its optimistic 0.7 ns one, so the arm is not where the cost hides.
+  - *5.6 ms is not free.* Correct, and that is why the rule has a middle band and
+    why this entry is a narrow confirm rather than a confirm. What it replaces at
+    that depth is `28/F15`'s reflow, which is `1.85 us x rows + 0.352 us x cells`
+    -- but the two numbers come from different instruments and different stores,
+    so the comparison is an order of magnitude, not a figure.
+- Uncertainty:
+  - **The pass is not the resize.** As `F2` and `F7` said: a width change also
+    refolds the live screen, which this design does not remove and this probe does
+    not measure. At `179 -> 2` the live screen's own refold is likely to dominate,
+    and nothing here says otherwise.
+  - **One geometry of wide content.** The stimulus is CJK end to end. A record
+    that mixes narrow runs with occasional clusters is flagged and takes the same
+    walk, but its boundary probes are cheaper per cell because more cells fit per
+    row; that case is bracketed by these numbers from above and was not measured.
+  - **Nothing about eviction.** Unmeasured here as everywhere before `F8`: an
+    arena that has evicted from its front has a different offset structure. The
+    amended `AR1` names `O(cells in that row)` for a wide head-trim step, which is
+    this probe's per-row term seen one row at a time -- but a walk that starts
+    from a persisted offset is not this pass, and `D4` prices it.
+  - **The budget-full arena is synthetic.** Its geometry is the engine's (gate 2)
+    but a real 16 MiB pane also carries the side tables `D2` charges and this
+    probe does not build.
+  - **One machine, one session.** As with `F1`, `F2`, `F3` and `F7`.
+- Deferred decisions, continuing `F7`'s numbering; each took the obvious simple
+  choice at measurement time rather than blocking:
+  - **DD23 -- a measured cell is verdict-bearing iff its charged bytes fit the
+    16 MiB budget.** `D3` Decision 7 says the rule reads "every measured cell" and
+    also names continuity rungs at 10,000 and 100,000 records, which for this
+    class are 22.4 MB and 223.8 MB of charge. Both cannot be true at once, and
+    this entry resolves it toward the budget: the decision was written into the
+    probe's own header before the probe was first run, and it is the reading `D3`
+    Decision 7 derived its bracket from (its stated worst case is "~2.08M stored
+    cells become ~1.04M display rows", which is the budget-full arena and nothing
+    larger) and the one `F7` handed forward (vary bytes per record, not record
+    count). The alternative -- read every cell literally -- would return **reject**
+    on a 223.8 MB arena that `I2` makes unrepresentable, and would spend the lazy
+    per-block recompute on a depth the store cannot hold. A human's to revisit;
+    if the byte budget ever grows, the rung to re-read is the one whose charge it
+    then admits.
+  - **DD24 -- the boundary probe reads the byte holding the kind field, not the
+    whole 8-byte cell word.** Both loads touch one cache line, so the choice is
+    register work; the alternative (assemble the `u64` as `F1`'s readers do) would
+    add shifts that no real implementation needs to perform for a 3-bit test. It
+    is recorded because it is the one place where an instrument choice could
+    flatter the fallback, and because the measured per-probe cost lands at `D3`'s
+    pessimistic estimate rather than under it, which is the evidence that it does
+    not.
+- Next action: `D3` Decision 7 is discharged and inherited condition 1 is closed
+  in its narrow-confirm branch; the plan's slice 3 proceeds unchanged, with no
+  mitigation to absorb. Two things this entry hands forward: the counting pass's
+  cost is **5.2-5.4 ns per display row** once the fallback engages, which is the
+  constant any future depth or budget question should be read against (one frame
+  is ~3.1-3.2M display rows); and the `179 -> 2` cell is the store's depth condition,
+  so a resize-to-minimum with a budget-full CJK history is the case a later
+  end-to-end resize measurement should include rather than assume.

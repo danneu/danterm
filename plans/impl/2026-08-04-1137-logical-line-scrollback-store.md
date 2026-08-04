@@ -339,7 +339,7 @@ Open conditions that the implementation, not the design, has to discharge:
 ## Commit progress
 
 - [x] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists, written against the per-step complexity the Gates section states (one display row per trim step, not a record walk)
-- [ ] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
+- [x] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
 - [ ] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
 - [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
@@ -361,6 +361,23 @@ Open conditions that the implementation, not the design, has to discharge:
   measured share covers admission and enforcement together, so the ladder
   conversion is exact for the write-path pair and only conservative for eviction
   alone. Both readings are reported so neither is lost.
+- **Slice 2's finding is numbered `31/F9`, not `F8`.** `D4`, frozen in slice 1,
+  reserves `F8` for the eviction measurement and the residency reading it governs
+  (slice 4), and the README's Phase 3 ledger carries that reservation. Findings in
+  doc 31 are numbered by reservation rather than by landing order -- `F3` and `F4`
+  already are -- so renumbering a frozen entry to keep the sequence chronological
+  would have cost more than it bought.
+- **Slice 2's verdict is narrow confirm, so slice 3's scope is unchanged**: no
+  per-record cached count and no lazy per-block recompute. The one thing it hands
+  slice 3 is a number rather than a design change -- the counting pass costs
+  5.2-5.4 ns per display row once the wide fallback engages, flat across record
+  sizes.
+- **The probe reads the verdict on budget-admissible cells only** (`31/DD23`).
+  `D3` Decision 7's rule says "every measured cell" and also names continuity
+  rungs at 10,000 and 100,000 wide records, which are 22.4 MB and 223.8 MB of
+  charge against a 16.8 MB budget; those two cannot both be verdict-bearing. The
+  resolution was written into the probe file's header before the probe was first
+  run, so it is visible in the same commit as the numbers it governs.
 - **Promoting the plan moved its path**, so the five research-doc references to
   `plans/wip/logical-line-scrollback-store.md` were repointed in the same commit;
   the `docs/research/README.md` index row drops the path entirely rather than

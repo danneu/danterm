@@ -1890,7 +1890,7 @@ identity table's key and encoding are settled here, and the **spill table**
 (`28/F11`: ~0.12% of rows), the `hyperlinkId` table and the semantic-mark slot
 are still owed a format.
 
-#### Decision 7 (inherited condition 1) -- the wide-record fallback is `O(display rows)`, not `O(cells)`; the argument is recorded, the probe and its decision rule are frozen, and it does not block graduation
+#### Decision 7 (inherited condition 1) -- the wide-record fallback is `O(display rows)`, not `O(cells)`; the argument is recorded, the probe and its decision rule are frozen, and it does not block graduation -- probe run 2026-08-04 by [F9](findings.md), narrow confirm
 
 **The reframing, which is the substance of this decision.** `F4` Observation 1,
 `D1`'s condition 1 and this doc's README all describe the wide-record counting
@@ -1958,6 +1958,26 @@ shape:
   applied a second time -- a cache, discarded rather than migrated, not stored
   width), or **lazy per-block recompute**, which the README's Rejected section
   keeps available for exactly this.
+
+**Applied once to [F9](findings.md), which measured it at `2ac87e1` plus the one
+probe file it adds.** On the deepest wide history 16 MiB admits -- 7,531 CJK
+records, 2,082,012 cells, every record flagged -- the pass reads **0.056 ms** at
+`179 -> 200`, **0.064 ms** at `179 -> 179`, **0.144 ms** at `179 -> 100` and
+**5.439 ms** at `179 -> 2`, with every gate held and no invocation voided. The
+worst cell across the arm and the cells-per-record ladder is **5.634 ms**.
+Against the rule: reject required 16.67 ms and is **2.96x** away; confirm
+required every cell under 1.67 ms and every `179 -> 2` cell is 1.835-5.634
+ms. **The verdict is narrow confirm.** The eager recompute stands, **neither
+mitigation ships**, and the recorded band-crossing cell is (`wide`, `179 -> 2`).
+Two things `F9` settles about this entry's own reasoning rather than about the
+design: the `O(display rows)` reframing is measured, not merely argued -- the
+per-display-row cost is **5.2-5.4 ns and flat from 2 to 4,096 cells per
+record**, so one frame is ~3.1-3.2M display rows against the 1.05M the budget
+admits, and this
+entry's 3.2x bracket at a pessimistic 5 ns per probe was right in shape and in
+constant. `F9` also records **`DD23`** (a measured cell is verdict-bearing iff its
+charged bytes fit the budget, which is how the continuity rungs this entry named
+are read) and **`DD24`**.
 
 #### Scoped out of this decision, deliberately
 
@@ -2054,9 +2074,11 @@ Named so a later reader can tell a gap from a silence:
      frozen rule, **and** Decision 1's two diagnostics (the frame-locate counter,
      the ~200 arithmetic-only reads) both hold -- then `HR1`'s mitigation is
      insufficient and the index's shape, not its discipline, is the suspect.
-  2. The wide-content counting probe (Decision 7) rejects -- then a per-record
+  2. ~~The wide-content counting probe (Decision 7) rejects -- then a per-record
      cached count or lazy per-block recompute ships, and the README's Rejected
-     entry for lazy recompute is spent.
+     entry for lazy recompute is spent.~~ **Spent 2026-08-04: [F9](findings.md)
+     ran the probe and returned narrow confirm, so no mitigation ships and the
+     Rejected entry for lazy recompute is not spent.**
   3. `terminal-feed` or `scrollback-stream` comes back `slower` and profiling
      attributes it to anchor bookkeeping -- then Decision 2's exit (a) is the
      suspect, and exit (b)'s per-admission conversion is *not* the fallback,
