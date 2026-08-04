@@ -1033,6 +1033,15 @@ arena has exactly five mutating operations, and this entry owns the list:
 | 4 | **truncate the tail** (`resizeHeight` grow, `Terminal.swift:4256`-`:4278`) | back, shrinks | fold the tail record at the current width, cut at the cell offset beginning the k-th-from-last display row, hand the suffix to the live grid, rewind the write cursor, rewrite the tail header and reopen it, decrement both totals by k and the charge by the cells freed; if the cut consumes the whole record, drop it and its index entry -- the new tail record is closed by construction, because a record boundary is a hard newline |
 | 5 | clear all history (ED 3, reset) | both | head = tail; `evictedRowCount` += the grand total; index emptied |
 
+**Amended 2026-08-04 by [`D3`](decisions.md) in two rows, and in neither case
+does the arena gain a sixth operation.** Operation 2 widens from "one header bit"
+to "one header bit, plus at most one appended cell": `D3` Decision 3 measured
+that severing a wrap claim under a non-default background-erase style stores a
+styled blank today, and materializes it as a tail append. Operation 4 gains a
+second trigger: a **width change** re-establishes the open tail record's
+display-row boundary at the new width by pulling its partial row back into the
+live refold (`D3` Decision 4), using this same cut-and-rewind mechanism.
+
 Operations 3, 4 and 5 are the only ones that shrink the arena, and 4 is the only
 one that shrinks it from the back. Operation 4 does not touch
 `evictedRowCount` and moves no anchor: the rows keep their absolute stream
@@ -1284,7 +1293,10 @@ Against `D1`'s eleven carried-forward conditions:
   measure, and the probe is named below; the measurement is still owed),
   **5** (the index's trigger points are now six -- width change, admission, head
   eviction, tail truncation, forced split, clear-all -- each riding the cached
-  browsing-anchor row from `HR1`), **8** (`DD3` ratified against a budget that
+  browsing-anchor row from `HR1`; **amended by [`D3`](decisions.md) Decision 1,
+  which discharges 5: the six stand, the maintained quantity is the grand
+  display-row total, and there is no cached anchor row, because `D3` Decision 2
+  keeps the browsing anchor an absolute display row**), **8** (`DD3` ratified against a budget that
   is now derived rather than inherited; still unmeasured against a real
   pathological input), **9** (the side tables are charged inside the budget;
   their format is still owed), and **10** (Decision 5 adds a second case where
@@ -1339,3 +1351,696 @@ per-display-row store rather than of the arena. Decision 1's derived 1,048,576
 rests on that reading; the alternative admits 699,050 records, i.e. strictly
 fewer, so this measurement bounds it from above either way (`F7` measured that
 arm too: 1.378 ms, 12.1x inside).
+
+### D3 -- the five open `F6` hard cases and the wide-record fallback: display-row anchors kept, one grand total in the index, the BCE blank materialized, the projection facade deferred, and identity denominated per record
+
+- Status: **decided 2026-08-04.** This is Phase 2's fourth ledger entry and the
+  last design work the ledger gates the graduation task on. It **discharges
+  inherited condition 5**, **advances 1, 3, 9, 10 and 11**, amends `DD8`, `DD9`,
+  `F4` cases 9 and 10, `F4` Observation 5, and two rows of `D2` Decision 2's
+  operation table, and adds `DD16`-`DD18`. It is a **design** decision: `D1`'s
+  scoping is unchanged, no production storage change is licensed by it, and the
+  paired ladder is still owed. One measurement was taken for it, and only one --
+  a throwaway experiment against the real engine for `HR3`, quoted in full in
+  Decision 3 so the reading is reproducible from the doc alone. Every other
+  number below is quoted from a prior finding or is arithmetic over quoted
+  numbers, labelled as one or the other at each use.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Evidence used: `F6` Observation 2 (`HR1`-`HR8`, the eight sites whose mapping
+  is not obviously satisfiable), `F6` Observation 1 (the mapping of all 69
+  sites, and specifically `T7`/`T8` versus `R1` on the frame path), `F6`
+  Observation 3 (56 of 69 sites read a count, an index or a flag), `F1`
+  Observation 1 (a point read costs 0.82-1.09 us) and Observation 2 (the derived
+  count matches the engine's), `F2` (the counting pass on ASCII), `F7`
+  Observation 2 (the pass's cost is governed by stride, not record count), `F3`
+  Observation 4 and `DD5` (admission counts display rows rather than deriving
+  them), `F4` Observation 1 (the wide-cell correction and iTerm2's own loop),
+  `F4` Observation 5 (the tail-mutation enumeration), `F4` cases 9, 10, 13, 15,
+  17 and 23, `F5` Observation 2 (the fold moves rather than vanishes) and
+  Observation 5 (the invariant tally), `D2` Decisions 1, 2 and 5 (the budget,
+  the eviction step and the five mutating operations), `28/F17` (the browse
+  path's two walks and their 5.2% share), `21/F1` and `21/F2` (the drag-move
+  latency budget), and the tree itself at `c8f46b1`.
+- Candidate solutions considered, per area: `HR1` -- cache a grand total, cache
+  an anchor row, or leave both derived; `HR2` -- (a) display-row anchors kept,
+  (b) a two-kind history/live address with a defined total order, (c) logical-line
+  anchors throughout; `HR3` -- materialize the styled blank, add a header style
+  slot, or accept the divergence; `HR6` -- keep the materializing facade or
+  rewrite all fourteen readers up front; `HR7` -- per-record identity, identity
+  recomputed at read, or identity stored per fold; inherited condition 1 --
+  argue it closed on existing numbers, or freeze a probe.
+
+#### Frozen inputs, stated before the decisions that read them
+
+Six facts this entry is built on, each with its provenance.
+
+1. **In the tree at `c8f46b1` (read, not measured).** `Terminal.swift:2081
+   scrollProjection` computes `totalRows` as `scrollbackRows.count + rows.count`
+   and, when browsing, `topRow` as `anchor.row - evictedRowCount` clamped to
+   `maximumTop` (`:2090`-`:2099`). The browsing anchor is **already** stored as a
+   `TextAnchor`, i.e. as an absolute display row (`:2131`), and `evictedRowCount`
+   is the immovable origin every absolute row is expressed against.
+2. **In the tree (read, not measured).** The per-frame render path does **not**
+   go through `ProjectionRows`. `presentedRowGeometry` (`:3185`) reads
+   `scrollbackRows[index].forEachKind` directly and `forEachViewportCell`
+   (`:4066`) reads `.forEachContentCell` directly; that separation is `28/F17`'s
+   fix and its doc comment says so. `ProjectionRows` (`:394`) serves the
+   point-local queries and `activeProjectionRows()`'s whole-history
+   materialization.
+3. **Measured here (Decision 3's experiment).** Severing a retained wrap claim
+   under a non-default background-erase style leaves a **styled blank stored and
+   painted**: 4 stored cells against the control's 3, `styleId` 1 at the last
+   column, and a public read of `bg=indexed(1)`. Under the default style the
+   same operation stores 3 cells and the column reads `bg=default`.
+4. **Measured here (Decision 3's experiment).** The sever is **not the only**
+   site: `clearPreviousSpacer`'s scrollback branch (`F6` `X9`) reaches the same
+   cell through EL and through DCH at row 0, and leaves the row **still
+   soft-wrapped** -- so the styled blank is reachable on a record that stays
+   open, not only on one that closes.
+5. **Quoted (`F4` Observation 1).** iTerm2's fallback loop for a line containing
+   wide cells is
+   `references/iterm2/sources/LineBlock.mm#iTermLineBlockNumberOfFullLinesImpl`,
+   and it steps `i += width` -- one probe per display row, backing off one column
+   when the boundary cell is a wide tail. `F4` and this doc's README have been
+   calling that fallback `O(cells)`; it is `O(display rows)` with an O(1) test
+   per boundary. The correction is Decision 7's whole basis and is derived from a
+   quotation already in `F4`, not from a new reading.
+6. **Quoted (`F1` Observation 1, `21/F2`).** One point read of the candidate
+   store costs **0.82-1.09 us**; `21/F2` measured a `.character` drag-move at
+   **92-101 us** deep, with roughly six projection reads per query (`21/F1`).
+
+#### Decision 1 (`HR1`) -- the index maintains one grand display-row total, the anchor needs no cache, and no index lookup runs per row or per read
+
+**What the index maintains.** Beyond the per-record offsets (`F2`: offsets-only)
+and the per-block cached display-row totals, exactly **one** additional scalar:
+
+    grandDisplayRowTotal : Int   // sum of every record's display-row count at the current width
+
+It is maintained -- not recomputed -- at the six trigger points `D2` enumerated,
+and each maintenance is O(1) in the number of records:
+
+| # | trigger | what the writer knows | maintenance |
+| ---: | --- | --- | --- |
+| 1 | width change | nothing; the fold changes everywhere | the eager pass rebuilds every block total and **sets** the grand total to their sum (`F2`: 0.016 ms at trial depth, `F7`: 0.761 ms at the record count the budget admits) |
+| 2 | admission (`DD5`) | `k`, the display rows just admitted, **counted** rather than derived | tail block total `+= k`; grand `+= k` |
+| 3 | head eviction (`D2` Decision 2) | `k`, the display rows dropped by this step | head block total `-= k`; grand `-= k`; `evictedRowCount += k` |
+| 4 | tail truncation (`HR4`, `D2` operation 4) | `k`, produced by the fold that chose the cut | tail block total `-= k`; grand `-= k` |
+| 5 | forced split (`DD3`) | the split offset | recount the two resulting records at the current width; adjust both totals by the delta, which is 0 or +1 because a split ends a display row early |
+| 6 | clear all (ED 3, reset) | the grand total | `evictedRowCount +=` grand; both totals to 0 |
+
+**What the anchor cache caches: nothing, because there is no anchor cache.**
+`F6` `HR1` proposed "the browsing anchor must cache its display row", and `D2`
+carried that forward as a fifth maintained quantity riding all six trigger
+points. Decision 2 below removes the need: the browsing anchor **is** an
+absolute display row (frozen input 1), so `topRow` is the subtraction the tree
+already performs. Its exact invalidation set is therefore the set of events that
+change what an absolute display row denotes, and there is exactly one:
+
+- **A width change** restates the anchor along with the other nine held anchors
+  (Decision 2's restatement loop). This is `F4` case 15's content anchoring and
+  `resizePreservesBrowsingAnchor` is the test that already pins it.
+- **Eviction** requires no anchor edit at all: `evictedRowCount` moves and the
+  subtraction absorbs it, exactly as `Terminal.swift:2099` and `:3906` do today.
+- **Admission, tail truncation, forced split and clear-all** do not move any
+  anchor's meaning (`D2` operation 4 states this for truncation: rows keep their
+  absolute stream positions and merely change which side of the seam they sit
+  on; clear-all adds the grand total to `evictedRowCount`, which is the same
+  arithmetic the anchors are read through).
+
+So `D2`'s "advanced condition 5" note is amended: the trigger list stays at six,
+the maintained quantity is the grand total, and no cached browsing-anchor row
+exists to invalidate.
+
+**The reader contract that makes `topRow` O(1) again**, stated as three rules the
+implementation must satisfy:
+
+1. **`scrollProjection` performs no index lookup and no fold.** `totalRows` is
+   `grandDisplayRowTotal + rows.count`; `topRow` is `anchor.row - evictedRowCount`
+   clamped. The same holds for `projectionRowCount` (`:3243`), the cursor stream
+   row (`:969`, `:4011`), `damageActionSnapshot` (`:966`), `damagedViewportRows`
+   (`:1107`) and every clamp bound in `F6` `T13`. These are the ~200 reads per
+   frame `HR1` priced at 164-218 us if each became a lookup; under this contract
+   each stays the two-integer arithmetic it is today.
+2. **A planned frame performs at most one display-row-to-record locate.** The two
+   per-visible-row walks (`T7` `presentedRowGeometry`, `T8` `forEachViewportCell`)
+   locate the top row once and then advance a forward cursor record by record for
+   the remaining 65 rows. A per-row binary search would be 66 lookups where one
+   suffices, and `F1` measured a lookup at 0.82-1.09 us, so the difference is the
+   whole of `HR1`'s hazard.
+3. **A lookup is paid per anchor change, not per read.** `scroll(toTopRow:)`
+   (`:2125`) and `revealSearchMatchIfNeeded` (`:3226`) convert once when the
+   anchor moves; nothing re-derives it afterwards.
+
+**Behavioral tests this contract earns** (owed by the implementation, not written
+here): the grand total agrees with an independent recount after each of the six
+triggers, at two widths; and a test-only counter on the index asserts that
+planning one frame performs **at most one** locate, and that the number is
+invariant to history depth (10 records versus 10,000). The second is the one that
+pins `HR1` itself, and it is cheap: a counter, a frame, an assertion.
+
+**What `retained-browse`'s paired ladder must show for this to be judged
+sufficient, frozen here before any implementation exists.** The verdict is
+`retained-browse`'s own frozen rule in
+`scripts/terminal-benchmark-validation.py#DECISION_RULES` (the 1.05% directional
+threshold), measured against the parent revision the change forks from, under a
+rule frozen before the comparison is read:
+
+- **Not `slower`** is the bar. `HR1` is judged sufficient on `neutral` or
+  `faster`; `F1`'s conversion predicts roughly **-2%**, and a `neutral` verdict
+  means the predicted win did not materialize, which is a recorded cost and not
+  a failure of this decision.
+- **`slower` falsifies the implementation before it falsifies the design**, and
+  the diagnostic order is fixed now so it is not chosen after seeing the number:
+  first the frame-locate counter (rule 2 above -- more than one locate per frame
+  is an implementation defect), then the ~200-read sites (rule 1 -- any of them
+  reaching the index is an implementation defect), and only if both hold does the
+  `slower` verdict read as evidence against wrap-at-read, at which point
+  `28/H7`'s reopening condition is met as `D1`'s closure already states.
+
+#### Decision 2 (`HR2`) -- the stored anchor coordinate stays the absolute display row; what returns is one restatement function, not the attachment machinery
+
+**The decision: exit (a).** `TextAnchor` (`Terminal.swift:427`) keeps its
+shape -- one absolute display row plus a column, `Comparable` over a single total
+order -- and every one of the fourteen ordering call sites `F6` `HR2` enumerated
+is unchanged. A record address, `(record, cell offset)`, is a **transient** the
+index produces on demand; it is never stored in an anchor and never crosses the
+module boundary. `DD9` said the *public* coordinate does not change and
+deliberately left the stored one open; this closes it in the same direction, so
+the public coordinate stays a subtraction away from the stored one.
+
+**Why not (b), the two-kind address.** It is the exit that deletes the most, and
+it costs more than it deletes. A history address must survive `D2`'s head trim,
+which shifts every offset in the head record, so the history side needs a
+monotone cell-stream position rather than a record index -- a second immovable
+origin beside `evictedRowCount`. Worse, an anchor's *kind* changes when its row
+crosses the seam, so every admitted batch would have to convert any live-kind
+anchor whose row is being admitted: a fixup on `appendToScrollback`, which is the
+exact path `terminal-feed` and `scrollback-stream` measure and where `H3`'s named
+falsifier lives. Today that conversion is free precisely because `TextAnchor` is
+one space; its doc comment says so ("keeps inspection state stable while rows
+migrate between viewport and scrollback"). Trading a bounded per-width-change
+cost for an unbounded-in-frequency per-admission one is the wrong direction.
+
+**Why not (c), logical-line anchors throughout.** The live grid is not a
+logical-line store and this design does not make it one; a live anchor would have
+to be converted through a refold on every comparison, and `Comparable` is on the
+pointer path.
+
+**What returns, stated precisely, because `X3`/`X4`'s ~130 lines were counted as
+deleted.** Under (a) an absolute display row denotes a different cell after a
+width change, so the ten held anchors must be restated. The restatement is *not*
+the attachment machinery:
+
+| deleted, and stays deleted | why the choice does not save it |
+| --- | --- |
+| `Terminal.swift:4791 sourceKey` | it keys a cell by its **scalars** because a destructive rebuild leaves no index to key by; the arena is not rebuilt, so the address is arithmetic |
+| `:3686 attachments`, `:3710`/`:3744 attachment` | they *search* a unit array for the anchor and fall back through three cases; the conversion is total and needs no search |
+| `:3767 textDestination` and the `cellDestinations` / `boundaryDestinations` dictionaries built per logical line | a dictionary exists to answer "where did this cell go"; the fold answers it by arithmetic, and `textDestination`'s `Optional` return and the eight `??`-threaded destination locals in `resizeWidth` go with it |
+| the seven reflow-only types (`:560`, `:599`-`:639`), less the live-refold half | `ReflowCursorAnchor`'s three cases serve the **live screen's** refold, which survives under either exit and which `F5` Observation 2 and `F4` case 7 already counted as *moving* rather than deleting |
+
+What replaces them is one function pair plus one loop: `address(ofDisplayRow:)`
+and `displayRow(of:)` -- the index lookup and the fold, both of which the store
+owes anyway for `T2`/`T6` and for `DD9`'s public conversion -- and a
+`restateAnchorsAcrossWidthChange` loop over the ten anchors. Estimated **~40
+lines returning against ~130 deleted**, so `X3`/`X4` remain a real deletion of
+roughly 90 lines; the estimate is labelled as one.
+
+**The one new ordering invariant, stated rather than discovered later:** the ten
+anchors are captured as addresses **before** the index is recomputed for the new
+width, and restated **after**. The capture must read the old fold, which exists
+only until the eager pass runs.
+
+**Reconciliation with `F5`'s tally, which `DD8` rests the whole `D1` verdict on.**
+`F5` Observation 5 counts invariant 4, "ten anchors survive a destructive
+rebuild", among five deleted. Under this decision it is **reduced, not deleted**:
+the rebuild is gone and the content-keyed mapping with it, but the *renumbering*
+survives and one function now owns it. Counting honestly, the tally becomes
+**4.5 deleted against 4.5 added** (`F5`'s 3.5 plus this capture-then-restate
+ordering). The count alone therefore no longer carries the inequality, and this
+entry says so instead of rounding in its own favour. What still carries it is the
+distinction `F5` drew and did not merely assert: the deleted contracts are
+between the store and *every* reader, or between a resize and *every* anchor
+holder; the added ones each have exactly one enforcing site, and this one is a
+total function testable by a round-trip property (convert, restate, convert back)
+rather than a table that can miss. `DD8` is amended accordingly below.
+
+**What this decision preserves, checked one at a time against the four things
+`F6` asked it to weigh.** Selection remap under a width change (`DD1`): the
+restatement loop, and `DD1`'s "remapped, not cleared" is unaffected. Eviction
+clamping (`D2` Decision 2's contract): unchanged -- `handleEviction` (`:3873`)
+keeps its shape, and the clamp is still the `evictedRowCount` subtraction.
+Scroll anchoring (`F4` case 15): the browsing anchor is one of the ten restated
+anchors, which is also what makes Decision 1's "no anchor cache" true. The
+`Comparable` contract's call sites: untouched, because the type is untouched.
+
+#### Decision 3 (`HR3`) -- the severed wrap claim's BCE cell is materialized into the open tail record as one styled cell, and the same rule closes `X9`
+
+**What the engine actually does, measured rather than asserted.** A throwaway
+test was run against the real engine at `c8f46b1` and deleted before this commit;
+its body is quoted so the reading is reproducible from the doc alone:
+
+    var terminal = try #require(Terminal(columns: 4, rows: 2))
+    terminal.feed(Array("abc\u{754C}".utf8))   // 3 narrow cells, then a 2-cell cluster
+    terminal.feed(Array("\r\n".utf8))          // row 0 scrolls off, carrying its spacer
+    terminal.feed(Array("\u{1B}[H\u{1B}[41m\u{1B}[L".utf8))  // IL at row 0, red BCE
+
+| state | stored cells | kinds | style ids | `isSoftWrapped` | public column 3 |
+| --- | ---: | --- | --- | :---: | --- |
+| before the sever | 4 | narrow, narrow, narrow, **spacerHead** | 0,0,0,0 | true | -- |
+| after, red BCE | 4 | narrow, narrow, narrow, **padding** | 0,0,0,**1** | false | kind `padding`, **`bg=indexed(1)`** |
+| after, default BCE (control) | 3 | narrow, narrow, narrow | 0,0,0 | false | kind `padding`, `bg=default` |
+
+Three things this settles that `F6` `HR3` could only assert. First, the
+divergence is **exactly one cell and only under a non-default erase style**: the
+control shows today's engine already stores nothing at that column when the style
+is default, so the naive mapping (drop the spacer, measure a closed record to its
+content end) is byte-for-byte correct in the default case and `F4` case 10's
+"no-op" holds there. Second, the retained row's charged byte cost is **96 before
+and 96 after**, so the cell is free in the budget's terms. Third -- and this is
+new, `F6` `HR3` did not have it -- the sever is **not the only reachable site**:
+
+    terminal.feed(Array("\u{1B}[H\u{1B}[41m\u{1B}[2K".utf8))   // EL  -> eraseCells -> clearPreviousSpacer
+    terminal.feed(Array("\u{1B}[H\u{1B}[41m\u{1B}[P".utf8))    // DCH -> moveAndFillCells -> clearPreviousSpacer
+
+Both leave 4 stored cells with `styleId` 1 at column 3 and **`isSoftWrapped`
+still true**. So `F6` `X9` ("the store never held the spacer, so this is a
+no-op") is wrong in the same way `F4` case 9 was, and on a record that stays
+**open** rather than one that closes.
+
+**The mechanism, chosen to reproduce today's output.** The record's trailing cells
+obey `pack`'s canonical-extent rule verbatim
+(`PackedRetainedRow.swift:487`-`:495`: a cell extends the stored extent when it
+carries scalars, or is not `.padding`, or is not the default style). Concretely,
+both repair sites become a **tail append of at most one cell** on the open tail
+record:
+
+1. Fold the open tail record at the current width. If its final display row
+   occupies `width - 1` columns, the dropped spacer is the missing column. (For an
+   open record that is the only way a final display row can be short: admission
+   measures a soft-wrapped row to full width, `F4` case 17, and the only cell it
+   drops is the spacer.)
+2. If the replacement style is the **default**, do nothing -- today's `pack`
+   trims that cell, so storing nothing reproduces it exactly.
+3. Otherwise **append one cell**: empty scalars, the erase style id, no
+   hyperlink, no content identity. At read the fold emits that column with that
+   style, which is the cell the renderer paints.
+4. Then, and only for the sever, flip the open/closed header bit (`F4` case 9's
+   original mapping).
+
+**Why this and not the two alternatives.** A *header style slot* was rejected: it
+adds a field to every record for a case reachable on one record, and it cannot
+express the `X9` variant, where the record stays open and the styled cell sits at
+a boundary the fold will keep re-deriving. *Accepting the divergence* was
+rejected on inherited condition 10, which exists to prevent exactly this: `D2`
+Decision 5 refused the same trade for the head trim, and this entry does "the
+same quality of job" the ledger asked for rather than a cheaper one.
+
+**What it costs, stated so the addition side is not understated.** `F4`
+Observation 5's "all three writes are header-bit flips" becomes "two of the three
+are a header-bit flip **plus at most one appended cell**, and the third
+(`clearPreviousSpacer`) is an appended cell with no flip". It is still a **tail
+append** -- the operation admission already performs at the write cursor -- so no
+new mutating operation joins `D2`'s table of five and the "middle immutable"
+premise is untouched. `D2` Decision 2's row 2 is amended below. The charge is 8
+bytes, charged like any other cells.
+
+#### Decision 4 (discovered while settling `HR3`) -- the open tail record ends on a display-row boundary at the current width, re-established by the same pull-back `HR4` already needs
+
+Decision 3's step 1 asks the fold a question about the open tail record's final
+display row, and that question only has today's answer if the record's cells end
+where a display row ends. A width change breaks that: the record's cells were
+admitted at `W0`, and folding them at `W1` leaves `count mod W1` cells in a short
+final display row **in the middle of a logical line** that continues in the live
+grid. Today `reconstructLogicalLines` joins the retained tail with the live rows
+and repacks, so no such row exists; under this design the live screen refolds and
+history does not, so it would. Worked case, derived: 190 admitted cells plus 31
+live cells, widened to 200 columns, renders as 190 + 31 where today it renders as
+200 + 21.
+
+**The rule:** on a width change, the open tail record is truncated at its last
+display-row boundary **at the new width**, and the suffix (fewer than `W1` cells)
+is handed to the live screen's refold as the continued line's prefix; when those
+rows scroll off again, admission re-appends them. That is `D2` operation 4's
+mechanism -- fold the tail record, cut at a cell offset, hand the suffix to the
+live grid, rewind the write cursor, rewrite the header and reopen -- at a new
+trigger, so the arena still has exactly five mutating operations and operation 4
+gains a second trigger. It does not touch the rest of history, and it is bounded
+by one display row.
+
+The alternatives are recorded as `DD16`: accept the ragged seam (user-visible,
+and diverges from today's output, which inherited condition 10 forbids), or let
+the fold peek at the live grid at the seam (the fold stops being a function of
+(record, width) alone, which is the property the whole design leans on).
+
+#### Decision 5 (`HR6`) -- `ProjectionRows` keeps its materializing facade for milestone 1; the borrowing cursor is milestone 2, with its priority rule frozen now
+
+**The decision.** Milestone 1 keeps `Terminal.swift:394 ProjectionRows` as a
+`RandomAccessCollection<GridRow>`; its subscript locates (record,
+display-row-in-record) and folds that slice into a `GridRow`. All fourteen
+readers are unchanged. The borrowing cursor (`R1`) and `activeProjectionRows()`'s
+replacement by a forward walk over records (`R2`) are **milestone 2**.
+
+**Why this is not simply deferring the hard part.** The borrow-versus-materialize
+split already exists in the tree and already follows the hot/cold line (frozen
+input 2): the per-frame path reads `forEachKind` and `forEachContentCell`
+directly off the packed row and never touches `ProjectionRows`, which is `28/F17`'s
+fix. So milestone 1 lands the arena's borrow on **exactly the path `F1`
+measured**, and keeps a materializing facade on the pointer and whole-history
+paths -- where today's subscript already materializes one `unpacked()` per
+access. Against today, that is a wash rather than a regression: the arena's
+deletion of the per-row allocation is *realized* on the frame path at milestone 1
+and *not yet taken* on the pointer path. `F6` is right that this is the largest
+single rewrite; it is also the one with no measured pressure behind it.
+
+**The priority rule for milestone 2, frozen before the number.** Re-measure doc
+21's `.character` drag-move at trial depth against `21/F2`'s measured 92-101 us
+band, under `21`'s own instrument. **Above 121 us** (101 us plus 20%) the
+borrowing cursor is promoted ahead of the rest of milestone 2; **at or under**,
+milestone 2 stays scheduled and unprioritized. The 20% is the same allowance
+`21/F2`'s band width implies rather than a new number: `F1` prices one point read
+at 0.82-1.09 us and `21/F1` counts roughly six projection reads per query, so a
+facade that materializes rather than borrows can move the query by ~5 us, and a
+20% band is well outside that -- which is the point. If the drag-move exceeds it,
+something other than this arithmetic is happening and it should be found before
+the rewrite is scheduled.
+
+**`DD8` re-read against `HR6`, which `F6` asked for explicitly.** Three findings.
+(i) `F6`'s "by line count the projection layer is larger than the arena itself"
+is a **milestone 2** statement under this decision, so it does not enlarge
+milestone 1's diff. (ii) It does not move the invariant tally either way:
+`ProjectionRows` is an internal facade with no cross-cutting contract, materialized
+or borrowed. (iii) But Decision 2 **does** move the tally, from 5-versus-3.5 to
+4.5-versus-4.5, so `DD8`'s first reopening clause ("Phase 2's implementation lands
+materially larger than the prototype suggests") is not met while its second ("the
+invariant argument has weakened") now is, partially. `DD8` requires both, so it
+stands -- and the graduation task must re-read it against the landed
+implementation rather than treating `F5`'s margin as banked. That is recorded as
+an amendment at `DD8` rather than as a silent reading here.
+
+#### Decision 6 (`HR7`) -- `contentIdentity` is a per-record run table keyed by cell offset in the logical line; `activationIdentity` keeps its semantics and the shape reader is re-denominated
+
+**What identity becomes.** A per-record side table, in the same encoding
+`PackedRetainedRow` already uses -- `(start, extent, base)` runs with the per-cell
+fallback when the table would cost more than four bytes per stored cell
+(`PackedRetainedRow.swift:243`-`:266`, `:499`-`:503`) -- with the key changed from
+**column within a display row** to **cell offset within the logical line**.
+
+Two alternatives are refused for stated reasons. *Recomputed at read* is
+impossible: `contentIdentity` is a counter allocated at print time
+(`allocateContentIdentity`), not a function of the cell's bytes, so it must be
+stored or lost. *Stored per fold* is refused as a matter of principle and of
+`D1`: a fold is width-dependent, so a per-fold identity table is width-dependent
+persisted state and fires `D1`'s no-go trigger. Keying by line offset is the only
+option that keeps the store width-free, and it is strictly better than today: a
+run no longer breaks at a display-row boundary, which is the "one table per
+record rather than per display row" advantage `F1` and `F3` both measured
+themselves as *not* having taken.
+
+**The consumers, named from the code, and what happens to each.**
+
+- **`Terminal.swift:2891 activationIdentity`** -- the only production consumer.
+  It computes `max(contentIdentity)` over a link range's cells and stores it in
+  `InteractionLinkState` (`:529`), which is written at `:2779` and `:2850` and
+  compared at `:2443`, `:2479`, `:2527` and `:2545` to decide whether a hovered
+  or armed link still refers to the same content. Under the store the link range
+  is a contiguous **cell-offset range** in one record (`F6` `R5`, `R6`), so the
+  computation is `max` over one run-table range -- the same set of cells and the
+  same maximum. A link that crosses the history/live seam takes the max of the
+  record range and the live range, which is what the two-part walk does today.
+  Semantics preserved exactly; `TerminalHyperlinkInteractionTests` is the suite
+  that pins it and needs no new case for the unit change.
+- **`Terminal.swift:2184 scrollbackRowContentIdentityShape`** -- measurement
+  only. Its consumers are `TerminalContentIdentityShapeTests`,
+  `TerminalPackedRetainedRowTests:400` and
+  `TerminalRetainedRowProbeSupport.swift:526` (doc 28's `PR1`); there is no
+  production caller. It is **re-denominated to the record**:
+  `contentIdentityShape(ofRecord:)` over one logical line's stored cells. This is
+  what dissolves `HR7`'s contradiction rather than papering over it: the reader's
+  stated contract is "the row's own content, not the pane's width", and it is
+  implemented today by deliberately reading the *unmaterialized* prefix. A
+  record's stored cells are width-free by construction, so under the new store
+  the contract is literally true and the caveat disappears -- there is no
+  materialized trailing padding to exclude. Doc 28's `PR1` consumes the quantity
+  as an aggregate, so what changes is the sample unit (one sample per logical
+  line rather than per display row); doc 28 owes a one-line note saying so, and
+  this entry does not write it.
+
+**What this advances and what it does not.** Inherited condition 9 (the record
+format must carry what every probe stripped) is advanced, not discharged: the
+identity table's key and encoding are settled here, and the **spill table**
+(`28/F11`: ~0.12% of rows), the `hyperlinkId` table and the semantic-mark slot
+are still owed a format.
+
+#### Decision 7 (inherited condition 1) -- the wide-record fallback is `O(display rows)`, not `O(cells)`; the argument is recorded, the probe and its decision rule are frozen, and it does not block graduation
+
+**The reframing, which is the substance of this decision.** `F4` Observation 1,
+`D1`'s condition 1 and this doc's README all describe the wide-record counting
+fallback as "an O(cells) scan". It is not. The fold needs to know, at each
+display-row boundary, whether a 2-cell cluster straddles it -- one probe per
+**display row**, not per cell. iTerm2's own fallback is exactly that loop and it
+is already quoted in `F4` (frozen input 5): it steps `i += width` and backs off
+one column when the boundary cell is a wide tail. DanTerm's rule is the same
+statement from the other side -- `pack` inserts a `.spacerHead` when a 2-cell
+unit meets a one-column gap -- so the count is obtained by walking boundaries,
+not cells.
+
+**The bracket, with the existing numbers, labelled as arithmetic.** The pass's
+work is then bounded by the **grand display-row total**, which the byte budget
+bounds directly. From `D2` Decision 1's table: 11,650 display rows for `full`,
+16,728 for `mix`, ~15,472 for `wide`, and 1,048,576 in the degenerate blank-record
+regime -- where no record is flagged and the fast path runs, which is precisely
+what `F7` measured at 0.760-0.761 ms. The wide-content worst case is not depth
+but **narrowness**: a CJK arena folded at the 2-column minimum puts one cluster
+per display row, so ~2.08M stored cells become ~1.04M display rows and ~1.04M
+boundary probes. At `F7`'s measured per-record rate (0.69-0.73 ns for a dense
+8-byte-stride chase) that is under 1 ms; at a pessimistic 5 ns per probe -- a
+scalar-width lookup rather than a bit test -- it is ~5 ms, inside the 16.67 ms
+one-frame bound by 3.2x. `F7`'s reading is what makes the estimate credible in
+shape ("the pass's cost is governed by stride, not record count", and a wide scan
+is the densest stride there is) and what makes it uncertain in constant.
+
+**Therefore: condition 1 does not block the graduation task, and it is not
+closed.** The design does not change on either outcome -- the fold is the fold --
+so nothing downstream waits on the number. But 3.2x on an unmeasured constant is
+not `F7`'s 21.9x on a measured one, and this entry declines to spend a margin it
+computed itself.
+
+**The probe, frozen here so a follow-up runs it mechanically.** Re-run
+`TerminalLogicalLineIndexProbe`'s eager recompute under `F2`'s frozen rule --
+same instrument, same 9 measured rounds plus 2 warmup, same statistic (median
+over rounds of wall time for one whole pass), same four validity gates
+(non-elision with an independent cross-check of the total, synthetic-stimulus
+fidelity within 15% against a real-engine arena at 10,000 lines, host conditions,
+coverage) -- with three changes and no others:
+
+1. **Stimulus:** `F3`'s `wide` CJK generator, so every record carries the
+   `hasWideCells` bit and every boundary probe fires. `F2`'s `mix` and `full` are
+   re-run unchanged as the control, since their cells never take the fallback.
+2. **Depths:** the record count a full 16 MiB arena admits for that class
+   (~7,500 records / ~2.08M cells, derived from `F3` Observation 4's 2,215 bytes
+   per record), plus `F2`'s 10,000 and 100,000 rungs for continuity. Per `F7`,
+   **vary bytes per record, not record count**: the ladder that matters is
+   cells-per-record, and the blank-record end of it is already measured.
+3. **Width changes:** `179 -> 100` and `179 -> 200` as `F2` froze, **plus
+   `179 -> 2`**, the minimum the engine permits (`F4` case 3), because display
+   rows per record -- and therefore boundary probes -- are maximised there.
+
+**The decision rule, frozen before the number exists**, in `F2`'s own three-way
+shape:
+
+- **Confirm** -- median pass **< 1.67 ms** (a tenth of a frame) on every measured
+  cell. Inherited condition 1 is discharged and nothing changes.
+- **Narrow confirm** -- at or above 1.67 ms but **< 16.67 ms**. Eager stands, and
+  the entry records the (class, width) cell that crosses a tenth of a frame as a
+  condition on the store's depth, exactly as `F2`'s narrow-confirm did.
+- **Reject** -- **>= 16.67 ms**, one 60 Hz frame, on any measured cell. Then one
+  of two mitigations ships, and the choice is a human's: a **per-record cached
+  display-row count** invalidated by width change (which is `DD7`'s reading
+  applied a second time -- a cache, discarded rather than migrated, not stored
+  width), or **lazy per-block recompute**, which the README's Rejected section
+  keeps available for exactly this.
+
+#### Scoped out of this decision, deliberately
+
+Named so a later reader can tell a gap from a silence:
+
+- **`HR4`'s fold arithmetic** -- `D2` Decision 2 owns operation 4 and states what
+  it must update; Decision 4 above adds its second trigger. How the cut offset is
+  computed is the plan file's.
+- **`HR5` and `HR8`** -- closed by `D2` Decision 2 and by Decision 1 above
+  respectively; neither is reopened here.
+- **Exact record, header, index and side-table layout** -- Phase 3's, as `D2`
+  already scoped it. Decision 6 fixes identity's *key*, not its bytes.
+- **The spill table, the hyperlink table and the semantic-mark slot** --
+  inherited condition 9's remainder, still owed.
+- **Whether doc 28's `PR1` wants per-record samples** -- doc 28's, per Decision 6.
+
+- Behavioral verification owed (none of it written by this entry; it is the test
+  list the implementation inherits, and every item is behavioral rather than
+  structure-coupled, with the one deliberate exception noted):
+  1. The grand display-row total agrees with an independent recount after each of
+     Decision 1's six triggers, at two widths.
+  2. Planning one frame performs at most one display-row-to-record locate, and
+     the count does not vary with history depth. *(The one structure-coupled
+     test in the list, and it is the one that pins `HR1`; a test-only counter is
+     the cheapest instrument that can fail for the right reason.)*
+  3. A width change preserves the selection, the search occurrence, the hovered
+     and armed links, the drag pin and the browsing anchor, at widths 179, 100,
+     200 and 2 -- the round trip Decision 2's restatement owes, and
+     `resizePreservesBrowsingAnchor` plus the `TerminalResizeTests` /
+     `TerminalSelectionTests` remap cases are the existing shape.
+  4. Severing a retained wrap claim under a non-default background-erase style
+     leaves the last column painted in the erase colour, and under the default
+     style leaves it painted in the default -- the two rows of Decision 3's
+     table, re-asserted against the new store. Same for EL and DCH at row 0
+     (`X9`), where the record additionally stays open.
+  5. Widening or narrowing while a logical line straddles the history/live seam
+     leaves no short display row in the middle of that line (Decision 4).
+  6. A hovered link's `activationIdentity` changes when any cell in its range is
+     overprinted and does not change otherwise, with the link range spanning the
+     history/live seam (Decision 6).
+- Quantitative verification: one measurement, reported in Decision 3's table
+  (stored cell counts, kinds, style ids and the public background at column 3,
+  before and after a sever, under a red and a default erase style, plus the two
+  `X9` paths). It is a behavioral reading of the current engine, not a benchmark,
+  and nothing in this entry is a timing.
+- Tradeoffs and correctness risks:
+  - **The invariant margin narrows.** Decision 2 takes `F5`'s tally from
+    5-versus-3.5 to 4.5-versus-4.5, and this entry declines to hide that. The
+    qualitative distinction (cross-cutting versus local, and a total function
+    versus a lookup table that can miss) is what carries it, and `DD8` is amended
+    rather than left to be re-read favourably.
+  - **Decision 3 puts a cell write back into history.** It is a tail append and
+    it is charged, but "two of the three tail mutations are pure bit flips" was a
+    claim `F4` made and `F5` counted, and it is now false.
+  - **Decision 4 was discovered, not designed.** It follows from Decision 3's
+    precondition, and no probe has exercised a width change with a logical line
+    straddling the seam. It is the least-tested corner of this entry.
+  - **Decision 5 defers the largest rewrite**, so milestone 1 ships an arena
+    behind a facade that still allocates a `GridRow` per pointer query. That is
+    parity with today, not a regression -- but it means the paired ladder at
+    milestone 1 measures a store whose projection layer has not yet been paid
+    for.
+  - **Decision 7's bracket is arithmetic on an unmeasured constant.** The
+    reframing from `O(cells)` to `O(display rows)` is read from iTerm2's loop and
+    from `pack`'s own rule; the per-probe cost is not measured, which is why the
+    probe is frozen rather than the condition closed.
+  - **`HR1`'s reader contract is a discipline, not a mechanism.** Nothing in the
+    type system stops a future call site from reaching the index inside a
+    per-row loop. The frame-locate counter is the only thing that would catch it,
+    which is why it is on the test list.
+- Decision and rationale: the five open hard cases split cleanly into two kinds,
+  and the entry treats them differently on purpose. `HR1`, `HR6` and `HR7` are
+  *mechanism* questions where the tree already contains the answer -- the browse
+  path already avoids `ProjectionRows`, the browsing anchor is already a display
+  row, the identity table already has a run encoding -- so the decisions are to
+  keep what works and name the contract that keeps it working. `HR2` and `HR3`
+  are *trade* questions, and both are decided against the cheaper option: the
+  anchor space stays where the cost is bounded and periodic rather than
+  unbounded and per-admission, and the BCE blank is materialized rather than
+  dropped, because inherited condition 10 exists to stop exactly the kind of
+  silent output change that a checksum gate over spacer-free stimuli would never
+  have caught. `F6` was right that the eight flagged sites were the design risk;
+  what settling them shows is that seven of the eight cost the design something
+  small and one of them -- `HR2` -- costs it a line in `F5`'s tally, which this
+  entry pays openly rather than rounding away.
+- Direction review: this entry changes no constant, no code and no default. It
+  is a specification the graduation task consumes, and with it the ledger's
+  "when the design settles" gate is met: `HR1`-`HR8` are all disposed of, the
+  four decisions `F6` handed the graduation task are made, and inherited
+  condition 5 is discharged. `28/D11` remains a live trial until doc 28 records
+  its exit, and `28/H7` remains rejected with `D1`'s reopening condition.
+- Reopening conditions:
+  1. `retained-browse` comes back `slower` against the parent revision under its
+     frozen rule, **and** Decision 1's two diagnostics (the frame-locate counter,
+     the ~200 arithmetic-only reads) both hold -- then `HR1`'s mitigation is
+     insufficient and the index's shape, not its discipline, is the suspect.
+  2. The wide-content counting probe (Decision 7) rejects -- then a per-record
+     cached count or lazy per-block recompute ships, and the README's Rejected
+     entry for lazy recompute is spent.
+  3. `terminal-feed` or `scrollback-stream` comes back `slower` and profiling
+     attributes it to anchor bookkeeping -- then Decision 2's exit (a) is the
+     suspect, and exit (b)'s per-admission conversion is *not* the fallback,
+     since it puts more work on that same path; the fallback is to hold fewer
+     anchors.
+  4. A human prefers the divergence to the cell write in Decision 3 -- then
+     inherited condition 10 is being narrowed, and it should be narrowed
+     explicitly rather than by omission.
+  5. The drag-move re-measure in Decision 5 exceeds 121 us -- then the borrowing
+     cursor is promoted, which is a scheduling change, not a design change.
+
+#### Ratifications, amendments and new deferred decisions
+
+- **`DD8` is amended, not overturned.** Its reading -- the inequality is
+  adjudicated on invariants rather than line count -- stands, but the margin it
+  reported (five deleted against three and a half added) is now **4.5 against
+  4.5** by Decision 2's honest count. Its reopening condition requires *both* a
+  materially larger implementation *and* a weakened invariant argument; the
+  second clause is now partially met, so the graduation task must re-read `DD8`
+  against the landed implementation instead of quoting `F5`'s margin. The
+  amendment is noted at `DD8` in [findings.md](findings.md) rather than
+  rewriting it.
+- **`DD9` is extended.** It settled the *public* coordinate and deliberately left
+  the stored one open; Decision 2 settles the stored one in the same direction,
+  so the two are one subtraction apart and `DD9`'s "all translation happens
+  inside `Terminal`" now describes both.
+- **`F4` case 9 and case 10 are amended, and `F4` Observation 5 with them.**
+  Severing is a header-bit flip **plus at most one appended cell**, and clearing
+  a spacer is an appended cell with **no** flip -- not a no-op -- whenever the
+  background-erase style is non-default. Decision 3 measured both. The amendment
+  is noted at `F4` Observation 5 in [findings.md](findings.md).
+- **`D2` Decision 2's operation table is amended in two rows.** Operation 2
+  ("close / reopen the tail record") widens from "one header bit" to "one header
+  bit, plus at most one appended cell (`D3` Decision 3)". Operation 4
+  ("truncate the tail") gains a second trigger: a width change, to re-establish
+  the display-row boundary at the open record's tail (`D3` Decision 4). The
+  arena still has exactly five mutating operations.
+- **`D2`'s advanced-condition-5 note is amended.** The six trigger points stand;
+  "each riding the cached browsing-anchor row from `HR1`" does not, because
+  Decision 2 makes the anchor a display row and Decision 1 therefore needs no
+  anchor cache. The maintained quantity is the grand display-row total alone.
+- **DD16 -- a width change pulls the open tail record's partial display row back
+  into the live refold rather than leaving a ragged seam.** The alternatives are
+  accepting a short display row in the middle of a logical line after a resize
+  (user-visible, and the divergence inherited condition 10 forbids), or letting
+  the fold read live-grid state at the seam (the fold stops being a function of
+  (record, width) alone). Reopen if the pull-back is measured on the resize path
+  and is not free -- it is bounded by one display row, so this is a small risk
+  stated rather than a large one hidden.
+- **DD17 -- `contentIdentity` runs are keyed by cell offset in the logical line,
+  and the shape reader is re-denominated per record.** The alternative that keeps
+  `scrollbackRowContentIdentityShape`'s display-row denomination would have to
+  choose the row's cells by the current width, which is the width-dependent
+  question `HR7` found the contract cannot answer. Reopen if doc 28's `PR1` needs
+  per-display-row samples, which no consumer asks for today.
+- **DD18 -- milestone 1 keeps a materializing `ProjectionRows`.** The alternative
+  is rewriting fourteen readers before any ladder verdict exists. Reopen on
+  Decision 5's frozen drag-move rule, which is the only measurement that can make
+  the deferral wrong.
+
+#### Conditions discharged and advanced
+
+Against `D1`'s eleven carried-forward conditions:
+
+- **Discharged: 5** (the block index's trigger points -- Decision 1's table
+  enumerates all six, states what each maintains, and the behavioral-test list
+  gives each one a test; `HR4`'s and `HR1`'s additions to the list are absorbed).
+- **Advanced: 1** (the fallback is reframed as `O(display rows)` and bracketed
+  with existing numbers, and its probe and decision rule are frozen for a
+  follow-up; the measurement is still owed), **3** (Decision 1 states what
+  `retained-browse` must show and fixes the diagnostic order before the
+  comparison), **9** (identity's key and encoding are settled; the spill table,
+  the hyperlink table and the semantic-mark slot are still owed), **10**
+  (Decision 3 closes `HR3`, the counter-example `F6` found, and Decision 4 closes
+  the seam case it exposed; the standing obligation discharges only when the
+  implementation's cross-arm check passes), and **11** (`DD8` re-read and
+  amended, `DD9` extended).
+- **Untouched: 2** (eviction is still unmeasured on both sides), **4**, **6**
+  (discharged by `F6`), **7** (discharged by `D2`), **8**.
+
+**What remains open before graduation: nothing that is a design decision.** The
+two measurements still owed -- eviction (condition 2) and the wide-content
+counting pass (condition 1) -- have their mechanisms specified and, for condition
+1, their probe and rule frozen; neither changes the design on either outcome. The
+paired ladder (condition 3) is the acceptance dimension and is owed against a
+real implementation by construction.

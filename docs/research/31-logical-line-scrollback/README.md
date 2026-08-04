@@ -239,9 +239,12 @@ it.
   pass (H2 prices this). Nothing width-shaped survives a cache flush, which is
   the purity property the whole design leans on. **A record's display-row count
   is `ceil(cells / width)` only when it holds no wide cells** (`F4`
-  Observation 1): a record whose `hasWideCells` header bit is set costs an
-  O(cells) scan because a 2-cell cluster meeting a one-column gap starts the
-  next row instead of splitting. The bit is a content property, not a width.
+  Observation 1): a record whose `hasWideCells` header bit is set costs a scan,
+  because a 2-cell cluster meeting a one-column gap starts the next row instead
+  of splitting. The bit is a content property, not a width. **`D3` Decision 7
+  corrects the scan's cost**: it is `O(display rows)`, not `O(cells)` -- one
+  boundary probe per display row, backing off a column when the boundary cell is
+  a wide tail, which is the loop `F4` already quoted from iTerm2.
 - **The open-line rule at the live boundary.** A row scrolling off the live
   viewport appends its cells to the current open logical line; a hard newline
   closes the line. Scrolled-off content is immutable, so the open line only
@@ -434,8 +437,41 @@ work, that list is the constraint on it.
   `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLineBlankIndexProbe.swift`,
   same env gate as `F1`'s, `F2`'s and `F3`'s; all three of those files are
   unedited.
-- [ ] `TODO` Graduate: when the design settles, extract it into a plan file
-  (the `simplify-plan` admission test applies) and record here where it went.
+- [x] `DONE` **`D3`, the five open `F6` hard cases and the wide-record
+  fallback.** Recorded in [decisions.md](decisions.md); it **discharges inherited
+  condition 5**, advances 1, 3, 9, 10 and 11, and disposes of the last of `F6`'s
+  eight flagged sites, so **the design has settled and the graduation task's gate
+  is met**. Seven decisions: (1) `HR1` -- the index maintains one **grand
+  display-row total** and nothing else new, `scrollProjection` stays two-integer
+  arithmetic, a planned frame performs **at most one** display-row-to-record
+  locate, and `retained-browse` not-`slower` under its frozen rule is what judges
+  it, with the diagnostic order fixed in advance. (2) `HR2` -- the stored anchor
+  coordinate **stays the absolute display row**, because the alternative moves
+  the conversion onto the admission path where `H3`'s falsifier lives; `X3`/`X4`
+  still delete ~130 lines against ~40 returning as one restatement function, and
+  `F5`'s invariant tally is amended from 5-versus-3.5 to **4.5-versus-4.5** in
+  the open. (3) `HR3` -- **measured against the real engine**: severing under a
+  non-default background-erase style stores and paints a styled blank (4 stored
+  cells against the control's 3), and `clearPreviousSpacer` reaches the same cell
+  through EL and DCH while leaving the record *open*, so `X9` was wrong too; both
+  become a **tail append of at most one cell**, which reproduces today's output
+  byte for byte and keeps the default-style case a genuine no-op. (4) a case
+  discovered there -- the open tail record must end on a display-row boundary at
+  the current width, re-established by `D2` operation 4's pull-back at a width
+  change, so a resize leaves no short row mid-line. (5) `HR6` -- the materializing
+  `ProjectionRows` facade **stays for milestone 1** (the frame path never touches
+  it: `28/F17` already split borrow from materialize along the hot/cold line), and
+  the borrowing cursor is milestone 2 under a frozen drag-move rule; `DD8` is
+  re-read as `F6` asked. (6) `HR7` -- identity is a per-record run table keyed by
+  **cell offset in the logical line**, `activationIdentity`'s `max` semantics are
+  preserved exactly, and the shape reader is re-denominated per record, which is
+  what dissolves its width-dependent contract. (7) inherited condition 1 -- the
+  wide fallback is reframed and bracketed with existing numbers, and **its probe
+  and three-way decision rule are frozen** for a follow-up to run mechanically.
+  Three deferred decisions added (`DD16`-`DD18`).
+- [ ] `TODO` Graduate: the design has settled (`F6`, `D2`, `F7`, `D3`); extract
+  it into a plan file (the `simplify-plan` admission test applies) and record
+  here where it went.
 
 ## Rejected
 
@@ -493,23 +529,29 @@ add detail to it.
   `wideGraphemeSearchRangeSpansSoftWrap` were the supporting evidence and remain
   it. What is still unpriced is the *cost*: `19/F9`'s occupancy probe measures
   search against today's store and nothing has re-measured it against an arena.
-- **The eight sites `F6` flagged are the design risks Phase 2 must close**, and
-  four of them are decisions rather than edits: `HR1` (per-frame `topRow`
-  re-derivation, which lands on `retained-browse`), `HR2` (the anchor coordinate
-  space across the history/live seam, which gates ~130 lines of deletion), `HR4`
-  (`resizeHeight`'s pull-back from history, a fourth tail mutation and the only
-  operation that shrinks the arena from the back), `HR6` (`ProjectionRows` must
-  stop materializing a row per display row). `HR3` and `HR5` are user-visible
-  behavior changes; `HR7` makes inherited condition 9 concrete; `HR8` adds a
-  grand display-row total to what the block index must maintain.
+- ~~**The eight sites `F6` flagged are the design risks Phase 2 must close.**~~
+  **All eight are closed: `HR4`, `HR5` and `X13` by `D2`, and `HR1`, `HR2`,
+  `HR3`, `HR6`, `HR7` and `HR8` by `D3`.** The status table is in `F6`
+  Observation 2 and each disposition is in the decision that took it. Two things
+  the closures change rather than merely settle: `HR3` was measured against the
+  real engine and turned out to have a **second** reachable site (`X9`, which
+  `F6` had mapped as a no-op), and `HR2`'s answer costs `F5`'s invariant tally
+  half a point, which `DD8`'s amendment records instead of absorbing.
 - **The eager counting pass is unpriced on wide content.** `F2` measured
   0.016 ms at trial depth on ASCII stimuli, where every record takes the O(1)
   `ceil` path. `F4` Observation 1 establishes that a record holding wide cells
-  needs an O(cells) scan instead, so a CJK- or emoji-heavy history makes the
-  pass a walk of the flagged records' bytes. `H2` cleared its bound by 15.6x,
-  so there is margin -- but the margin is not measured against a wide-content
-  stimulus and must not be assumed to transfer. Re-running `F2`'s probe with a
-  wide stimulus is the cheapest way to close this, and it is Phase 2's.
+  needs a scan instead, so a CJK- or emoji-heavy history makes the pass a walk
+  of the flagged records. `H2` cleared its bound by 15.6x, so there is margin --
+  but the margin is not measured against a wide-content stimulus and must not be
+  assumed to transfer. **`D3` Decision 7 advances this without closing it**: the
+  scan is `O(display rows)` rather than `O(cells)` (one boundary probe per
+  display row, which is iTerm2's own loop as `F4` quoted it), so the pass is
+  bounded by the grand display-row total the byte budget already bounds -- under
+  1 ms at `F7`'s measured per-record rate and ~5 ms at a pessimistic 5 ns per
+  probe, against the 16.67 ms frame. That is arithmetic on an unmeasured
+  constant, so the probe stays owed: `D3` freezes it (wide stimulus, cells-per-
+  record ladder, `179 -> 2` added to the width changes) and its three-way
+  decision rule, and states that neither outcome changes the design.
 - **Eviction is unpriced on both sides, and it is now the largest unmeasured
   term in Phase 1's evidence.** `F1` set it aside as Phase 2's, `F3`'s frozen
   rule excluded it, so nothing has compared today's
@@ -565,9 +607,17 @@ them. The verdict licenses Phase 2's **design** work only: no production storage
 change is licensed, and the paired ladder against a real implementation is the
 acceptance dimension still outstanding.
 
-Phase 2 is open and has three inputs so far: `F6` (the call-site enumeration),
-`D2` (budget and eviction semantics -- one charged-byte bound at the same
-16 MiB, head-granular eviction, no user-facing knob) and `F7` (the counting pass
-at the record count that budget admits: 0.761 ms against a 16.67 ms bound, so
-`D2` ships one bound rather than two). No decision in Phase 2 is yet blocked on
-a measurement; the largest unmeasured term remains **eviction**, on both sides.
+Phase 2 is open and has four inputs: `F6` (the call-site enumeration), `D2`
+(budget and eviction semantics -- one charged-byte bound at the same 16 MiB,
+head-granular eviction, no user-facing knob), `F7` (the counting pass at the
+record count that budget admits: 0.761 ms against a 16.67 ms bound, so `D2`
+ships one bound rather than two) and `D3` (the five remaining `F6` hard cases
+and the wide-record fallback). **With `D3` the design has settled**: all eight of
+`F6`'s flagged sites are disposed of, the four decisions `F6` handed forward are
+made, and the only ledger task left is graduating the design into a plan file.
+No decision in Phase 2 is blocked on a measurement, and both measurements still
+owed have their mechanisms specified and change no decision on either outcome:
+**eviction** remains the largest unmeasured term on both sides, and the
+**wide-content counting pass** now has a frozen probe and decision rule. The
+acceptance dimension outstanding is unchanged and is not a design question: the
+paired ladder against a real implementation.

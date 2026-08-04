@@ -712,6 +712,19 @@ premise holds, and the cases are 9 and 10 in the inventory.
 invalidate that retained row" is the existing test that pins this surface, and
 it is the test to re-point at the new store.
 
+**Amended 2026-08-04 by [`D3`](decisions.md), which measured what these three
+writes actually store.** "All three become header-bit flips" is true only when
+the background-erase style is the default one. Under a non-default style,
+`severScrollbackWrapClaim` replaces the trailing `.spacerHead` with a *styled*
+blank that `pack`'s canonical extent keeps and the renderer paints (`F6` `HR3`),
+and `clearPreviousSpacer`'s scrollback branch does the same through EL and DCH at
+row 0 while leaving the row **soft-wrapped** -- so case 10's "no-op" and case 9's
+"no cell is rewritten" both hold in the default case only. `D3` Decision 3
+measured all four states and materializes the styled blank as a **tail append of
+at most one cell**, so the premise this observation exists to defend -- mutation
+is confined to the tail -- survives unchanged, while "these are bit flips" does
+not.
+
 #### Deferred decisions
 
 Recorded here so a human can revisit; each took the obvious, simple choice
@@ -1367,6 +1380,21 @@ why it is nonetheless not "width-dependent persisted state" in `D1`'s sense.
     verdict on it would be resting it on noise. Reopen if Phase 2's
     implementation lands materially larger than the prototype suggests *and* the
     invariant argument has weakened -- either one alone does not reopen it.
+
+    **Amended 2026-08-04 by [`D3`](decisions.md).** The reading stands; the
+    margin does not. `D3` Decision 2 keeps `TextAnchor` an absolute display row,
+    so invariant 4 ("ten anchors survive a destructive rebuild") is **reduced
+    rather than deleted** -- the rebuild and its content-keyed mapping go, the
+    renumbering stays and one restatement function owns it -- and the added side
+    gains one ordering invariant (capture the anchors' addresses before the index
+    is recomputed, restate them after). The honest tally is now **4.5 deleted
+    against 4.5 added**, so the *count* no longer carries the inequality and the
+    qualitative distinction does: cross-cutting contracts against local ones, and
+    a total conversion function against a lookup table that can miss. This
+    partially meets the second of `DD8`'s two reopening clauses; the first is not
+    met, and `DD8` requires both, so it stands. The graduation task must re-read
+    it against the landed implementation rather than quoting `F5`'s original
+    margin.
 - Next action: `D1` closes. Its verdict, scoping, and the conditions Phase 2
   inherits are in [decisions.md](decisions.md); the ledger in
   [README.md](README.md) is updated to match. Phase 2 opens as a **design**
@@ -1535,6 +1563,21 @@ These are the design risks Phase 2 exists to surface. Each names the site, why
 the obvious mapping fails, and what has to be decided. **None of them is a
 reason to reverse `D1`**; five are unenumerated work and three are behavior
 changes that need a human's disposition.
+
+**Status, updated 2026-08-04: all eight are disposed of.** The eight paragraphs
+below stand as written -- they are the statement of the risk, not of its
+resolution -- and each disposition is recorded in the decision that took it.
+
+| # | disposition | where |
+| --- | --- | --- |
+| `HR1` | the index maintains one grand display-row total; no anchor cache is needed, and no index lookup runs per read or per row | [`D3`](decisions.md) Decision 1 |
+| `HR2` | the stored anchor stays an absolute display row; ~40 lines of restatement return against `X3`/`X4`'s ~130 deleted, and `F5`'s invariant tally is amended | [`D3`](decisions.md) Decision 2 |
+| `HR3` | the BCE-styled blank is materialized into the open tail record as one appended cell; measured against the real engine, and `X9` is the same case | [`D3`](decisions.md) Decision 3 |
+| `HR4` | the tail truncation is `D2`'s operation 4, and gains a second trigger in `D3` Decision 4 | [`D2`](decisions.md) Decision 2, [`D3`](decisions.md) Decision 4 |
+| `HR5` | closed rather than accepted: eviction is display-row granular at the head, so no anchor moves further per admitted row than today | [`D2`](decisions.md) Decision 2 |
+| `HR6` | `ProjectionRows` keeps its materializing facade for milestone 1; the borrowing cursor is milestone 2 under a frozen priority rule | [`D3`](decisions.md) Decision 5 |
+| `HR7` | identity is a per-record run table keyed by cell offset; the shape reader is re-denominated per record | [`D3`](decisions.md) Decision 6 |
+| `HR8` | the grand display-row total is maintained, not walked | [`D3`](decisions.md) Decision 1 |
 
 **`HR1` -- `scrollProjection.topRow` is read roughly 200 times per frame and
 becomes an index lookup.** Sites: `Terminal.swift:3166 presentedRows`, `:3186
@@ -1783,6 +1826,11 @@ simply vanish is invariant 1, and `HR1`/`HR8` are where its remains sit.
     the render planner for no measured benefit, and would put a store detail in
     a cross-module value type. This decision is about the *public* coordinate
     only and deliberately does not settle `HR2`, which is about the stored one.
+    **Extended 2026-08-04 by [`D3`](decisions.md) Decision 2**, which settles the
+    stored coordinate in the same direction: `TextAnchor` stays an absolute
+    display row, so the public and stored coordinates are one `evictedRowCount`
+    subtraction apart and "all translation happens inside `Terminal`" now
+    describes both.
   - **DD10 -- `isHistoryHeadTruncated` is deleted rather than kept
     always-false.** `DD2` makes it constant, and a public property that is
     always `false` is a claim a future reader can act on. It has no production
@@ -1814,6 +1862,13 @@ simply vanish is invariant 1, and `HR1`/`HR8` are where its remains sit.
   be sliced. Inherited condition 5's trigger-point list grows from four to six:
   add `HR4`'s tail truncation and, if `HR1` is resolved by caching, the browsing
   anchor's display row.
+
+  **Superseded 2026-08-04**: `D2` took `HR5` and `X13`, and
+  [`D3`](decisions.md) took the four design decisions, so the graduation task
+  now inherits a settled design rather than four open choices. `D3` Decision 1
+  also answers the trigger-point sentence above: the list is six, and `HR1` is
+  *not* resolved by caching the anchor's display row -- `D3` Decision 2 keeps the
+  anchor a display row, so there is nothing left to cache.
 
 ### F7 -- the eager counting pass at the record count the budget admits: 0.76 ms for 1,048,576 blank records, 21.9x inside the one-frame bound, and flat per record
 
