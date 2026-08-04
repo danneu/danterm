@@ -1,9 +1,9 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F19**. Phase 2's open resize-*profile* task has now been renumbered
-four times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`) without being written, because
-IDs go in the order findings are recorded and each time something more urgent was
-measured first; it is still owed and now claims `F19`. The scratch-reusing encoder
+Next free ID: **F20**. Phase 2's open resize-*profile* task has now been renumbered
+five times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`) without being written,
+because IDs go in the order findings are recorded and each time something more urgent
+was measured first; it is still owed and now claims `F20`. The scratch-reusing encoder
 lead that `F17` Observation 4 left open is **not** carried forward with it -- `D9`
 declined it on the ground that even its success leaves browsing over
 threshold. `F14` measured how
@@ -2016,3 +2016,183 @@ point `F1`'s dead zone is not load-bearing and the screen buys nothing.
   criterion. The memory read is the deciding measurement and is expected to be a
   **stated giveback against C6**, not a win against it -- the win is against
   pre-packing, and the gate's baseline is `678bfe9` for exactly that reason.
+
+### F19 -- C1 measured: browsing and the read path are won, memory is 2.8x, resize holds `D8`'s line -- and `scrollback-stream` still answers `slower` at +6.51%
+
+- Status: recorded, and it is **the deciding run for `D9`'s pivot**. Five of six
+  calibrated workloads pass and one fails, so `H3` does not graduate. The gate's
+  closing rule is unchanged and unmet: nothing may answer `slower`. The
+  disposition returns to the human rather than being improvised into a second
+  pivot.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: candidate `48f52b1` (C1 implemented, encoder
+  single-pass) against the adjacent baseline `678bfe9` (pre-packing), both from
+  clean trees. Release configuration. Every number at or after the evidence floor
+  `dd51a12`.
+- Conditions: AC power, no `DANTERM_BENCHMARK_ALLOW_BATTERY`. **Host conditions on
+  the deciding run: load 1.88/6.74/6.81, 0.19 per processor across 10, busiest
+  external `claude` 31.5% / `DanTerm` 5.6% / `nvim` 1.9%.** An earlier `confirm`
+  at load 19.07 with `mobileassetd` at 81.8% was discarded before it was read as a
+  verdict -- see Observation 4.
+- Commands:
+
+      just benchmark-confirm baseline=678bfe9
+      just terminal-memory-probe "--payload scrollback-plain"                     # both arms
+      just terminal-memory-probe "--payload scrollback-plain --columns 80 --rows 24"
+      just terminal-resize-probe "--recipe saturating|sparse|wide --samples 20"
+
+#### Observation 1 -- the verdict set, and the one that fails
+
+| workload | pairs | threshold | C6 (`F17`) | **C1** | verdict |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `retained-browse` | 4 | 1.05% | +3.27% | **-0.11%** | equivalent |
+| `terminal-feed` | 2 | 2.5% | +5.18% | **+1.50%** | inconclusive |
+| `content-churn` | 4 | 2.15% | +0.44% | **+1.72%** | inconclusive |
+| `style-churn` | 4 | 2.0% | -0.11% | **+0.74%** | equivalent |
+| `incremental-mixed` | 6 | 1.85% | +4.22% | **+1.27%** | inconclusive |
+| **`scrollback-stream`** | 4 | 1.85% | +6.34% | **+6.51%** | **slower** |
+
+`inconclusive` and `equivalent` are both passes; only `slower` blocks. Five
+workloads moved from `slower` to a pass, and the one that decided against C6 --
+`retained-browse`, the whole reason for the pivot -- came back **at the
+pre-packing baseline**, a point estimate of -0.11% against a 1.05% threshold.
+That is `D9`'s hypothesis confirmed: the residual C6 could not shed was the
+decode, and removing the decode removed it.
+
+The descriptive metrics say the same thing from the other side.
+`incremental-mixed` plans frames **24.08% faster** than pre-packing and
+`style-churn` 2.00% faster, on a read path that now loads a cell instead of
+reassembling one.
+
+**`scrollback-stream` is the exception, and it did not move.** +6.34% under C6,
++6.51% under C1, on representations whose per-row bytes differ by 4x. Its drain
+went 163.2 -> 180.3 ms, so the cost is admission and only admission.
+
+#### Observation 2 -- why that workload, and the mechanism is content shape rather than the encoder
+
+`scrollback-stream` is one of the two corpus stimuli `F11` flagged as
+**staircasing**: it emits bare LF with no CR, so each line starts where the last
+ended and rows accumulate leading padding. Its measured shape is **134 stored
+cells per row with 66.4% of them holding no scalar**, against ~50 cells for CRLF
+content.
+
+That is the worst possible content for a flat cell. C1 charges a never-written
+padding cell the same 8 bytes it charges a printed one, so on this stimulus it
+writes roughly **1,080 payload bytes per admitted row** where C6 wrote ~160 and
+pre-packing moved an existing array without copying it at all. The regression is
+proportional to that, and it is the only ladder workload whose rows have this
+shape.
+
+**This is a mechanism, not an exemption, and the verdict stands.**
+`scrollback-stream` has a frozen decision rule and it answered `slower`; `F11`'s
+staircase caveat bars *expected-yield claims* from resting on these two stimuli
+and says nothing about their verdicts. It is worth recording alongside the number
+that a real program writing through a PTY gets `ONLCR` from the tty driver and
+does not produce rows of this shape -- but that is an argument about how much the
+regression matters, which is a human decision, not one this doc can measure its
+way out of.
+
+#### Observation 3 -- the memory claim, measured at both geometries
+
+| quantity | `678bfe9` | **C1** | C6 (`F16`) |
+| --- | ---: | ---: | ---: |
+| 179x66 retained rows | 5,865 | **6,491** | 1.12x deeper |
+| 179x66 live heap | 10.49 MB | **3.72 MB** | 1.27 MB |
+| 179x66 per row | 197 B | **123 B** | 69 B |
+| 80x24 retained rows | 5,823 | **6,449** | -- |
+| 80x24 live heap | 10.17 MB | **3.40 MB** | -- |
+| 80x24 per row | 196 B | **121 B** | -- |
+
+**C1 holds 1.11x more history in 2.82x less memory at 179x66, and 1.11x more in
+2.99x less at 80x24.** The split does not vary with pane width, which is `F8`'s
+standing property re-measured rather than assumed.
+
+`F18`'s central prediction is confirmed exactly: **the cell cap binds and depth is
+representation-independent.** At 179x66 the census reports 339,489 cells, of which
+11,814 are the live grid (66 x 179), leaving **327,675 retained -- five cells
+short of `D8`'s 327,680 cap**. C6 and C1 retain the same rows because both caps
+count content.
+
+Where `F18` was wrong is the size of the giveback, and it was pessimistic: it
+predicted 528 B/row charged against C6's 128, a 4.12x ratio, and the probe
+measures 123 B/row against 69, a **1.78x** ratio. The per-row constants -- the
+16-byte slot, the 32-byte array header, and bucket rounding -- do not scale with
+the payload, so a 4x payload is not a 4x row. The model was not wrong about
+payload; it was quoted as though payload were the row.
+
+#### Observation 4 -- resize holds `D8`'s line, as the caps predicted it would
+
+| regime | pre-packing (`D8`) | at `D8`'s caps, C6 | **C1** |
+| --- | ---: | ---: | ---: |
+| dense | 99.5 ms | 117.6 ms | **116.9 ms** |
+| sparse | 152.0 ms | 57.1 ms | **56.3 ms** |
+| wide | 87.4 ms | 104.1 ms | **103.8 ms** |
+
+All three within **1%** of `D8`'s numbers, so all three stay within 1.19x of
+pre-packing. This is the expected result and it is worth stating why it was still
+worth measuring: `F15`'s cost model is `1.85 us x rows + 0.352 us x cells`, whose
+inputs are counts rather than bytes, and C1 stores the same cells in more bytes.
+The prediction was that the caps carry over untouched. They do.
+
+#### Observation 5 -- the encoder cost was how bytes were written, not what was encoded
+
+Recorded because it nearly buried the pivot, and because it is the same class of
+error `F17` found on the read side.
+
+C1's first encoder appended each cell byte by byte -- eight `Array.append` calls
+per stored cell, each with its own capacity and uniqueness check -- and measured
+`terminal-feed` at **+6.19%**, *worse than the C6 encoder the pivot exists to
+beat*, and worse than the +5.18% C6 itself measured. Writing the identical
+encoding into a pre-sized buffer took it to **+2.05%**, and the deciding run reads
+**+1.50%**.
+
+Two follow-ons are recorded as **measured and rejected**, so nobody re-derives
+them:
+
+- Removing the last intermediate array (exact-size single allocation, no
+  `append` anywhere) measured +2.70% against the bulk-copy form's +2.05% -- a tie
+  inside noise at 2 pairs. Kept anyway, on the invariant that the blob's size is
+  known before the first byte is written, and stated here as a structural choice
+  rather than a speed one.
+- Allocating the blob **uninitialized** (`Array(unsafeUninitializedCapacity:)`)
+  to avoid memsetting a payload the writer then overwrites: `scrollback-stream`
+  measured 183.1 ms drain against 180.3, no gain. Reverted rather than kept.
+
+The generalization is worth stating once, because doc 28 has now paid for it
+twice: **for a representation this small, the encoding is not the cost -- the
+allocation and write pattern around it is.** `F17` found it on the read side (two
+whole-row materializations per frame), and this finds it on the write side (eight
+appends per cell). Neither was visible in any pricing model.
+
+A first `confirm` run also had to be discarded before it was read: host load
+19.07 with `mobileassetd` at 81.8%, which reported `scrollback-stream` at +9.74%
+and `terminal-feed` at +3.00% against the idle run's +6.51% and +1.50%. `D1`
+pitch 4's annotation is what made that visible, and `F2` remains the standing
+incident for why the harness cannot catch it itself.
+
+- Inference: `D9`'s pivot did what it was chosen to do. Browsing is at parity with
+  pre-packing, the three other CPU regressions cleared, memory is 2.8-3.0x better
+  at 1.11x the depth, and resize is unmoved. **`H3` does not graduate**, on one
+  workload, for a reason that is the representation's shape rather than its
+  wiring: a flat 8-byte cell charges a never-written padding cell full price, and
+  `scrollback-stream`'s rows are two-thirds padding.
+- Competing interpretation, checked rather than argued: that `scrollback-stream`'s
+  +6.51% is the same admission cost the other workloads show, merely larger. It is
+  not -- `terminal-feed` and `incremental-mixed` both cleared while this did not
+  move at all between two representations differing 4x in per-row bytes, and its
+  drain rose 10.5% while its draw tail *fell*. The cost tracks stored cells per
+  row, which is the axis this stimulus is an outlier on.
+- Uncertainty, stated plainly:
+  - `terminal-feed` at +1.50% sits inside `F1`'s structural dead zone (band 0.75%,
+    threshold 2.5%) and three readings of it span +1.50% to +2.70%. It is a pass,
+    not a measured neutrality, and it is the one verdict here that would change
+    under a longer schedule. `D1` pitch 3's screen was not run: the plan's own
+    retirement condition is a prototype above ~2%, and two of three readings were.
+  - Whether the padding-cell cost is recoverable **is not measured**. Any fix
+    makes the cell column non-uniform, which is a representation change and a
+    stop-and-report under the plan's boundary. Nobody should read "the cost is
+    padding cells" as "the fix is cheap".
+  - The memory figures are one payload at two geometries, as `D3` criterion 1
+    specifies. The saturated pool would re-weight under C1 (`F13` Observation 1).
+- Next action: none taken. The disposition returns to the human with this verdict
+  set, per the instruction not to improvise a second pivot.

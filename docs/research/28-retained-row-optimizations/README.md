@@ -190,6 +190,10 @@ shipped seam -- readers already tolerate storage narrower than the logical row
 grid's `GridCell` is untouched. Gate on Phase 2 evidence: only worth designing
 if stored cell bytes, not per-row overhead, dominate the remaining footprint.
 
+**Current state: pivoted to C1, measured, and one workload short of graduating.**
+See the `D9`/`F18`/`F19` paragraphs at the end of this entry for where it stands;
+the arc below is how it got there.
+
 **Selected by `D3`** (`F8`: stored cell bytes are 89.5% of attributable footprint
 at both widths) and **designed by `D5`** on `F11`'s composition evidence: a
 per-row fixed-stride scalar column, a run-length style table, and an exception
@@ -587,6 +591,20 @@ is a ledger entry opening an investigation, not a plan.
   evidence contributions stay load-bearing (`D8`'s caps, `F13`'s corrections,
   `F17`'s streaming readers), and the record stays in the repo permanently so a
   future session can take a different trade with the evidence intact.
+  **C1 is implemented and measured (`F19`), and the pivot did what it was chosen
+  to do -- on five of six workloads.** `retained-browse` came back **at the
+  pre-packing baseline** (-0.11% against 1.05%), `terminal-feed` +1.50%,
+  `incremental-mixed` +1.27% while planning frames **24.08% faster**,
+  `content-churn` +1.72%, `style-churn` +0.74% -- all passes. Memory is
+  **10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24, at 1.11x the depth**,
+  and resize holds `D8`'s line to within 1% in all three regimes. `F18`'s cap
+  prediction was confirmed to five cells: 327,675 retained against a 327,680 cap.
+  **`H3` still does not graduate, on one workload.** `scrollback-stream` answers
+  `slower` at **+6.51%**, and it did not move between representations differing
+  4x in per-row bytes: it is the bare-LF staircase stimulus whose rows are 134
+  cells with 66.4% holding no scalar, and a flat 8-byte cell charges a
+  never-written padding cell full price. That is the shape rather than the wiring,
+  so no fix was improvised; the disposition returns to the human.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.

@@ -1,6 +1,40 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- PIVOTED to C1 by `D9`; implementing an 8-byte retained cell
+## Status -- C1 IMPLEMENTED AND MEASURED; five of six pass, `scrollback-stream` does not
+
+`F19` is the deciding run, at `48f52b1` against `678bfe9` on an idle host (load
+1.88, 0.19 per processor). **The pivot did what `D9` chose it to do.**
+`retained-browse` -- the workload that decided against C6 at +19.83% -- came back
+**at the pre-packing baseline, -0.11% against a 1.05% threshold**. `terminal-feed`
++1.50%, `incremental-mixed` +1.27% while planning frames **24.08% faster**,
+`content-churn` +1.72%, `style-churn` +0.74%: all passes.
+
+Memory: **10.49 -> 3.72 MB at 179x66** and **10.17 -> 3.40 MB at 80x24**, at
+**1.11x the depth** at both. Resize holds `D8`'s line to within 1% in all three
+regimes (116.9 / 56.3 / 103.8 ms). `F18`'s central prediction was confirmed to
+five cells -- 327,675 retained against `D8`'s 327,680 cap -- so depth really is
+representation-independent and the pivot really did cost none of it. `F18` was
+pessimistic about the giveback: 123 B/row against C6's 69, not the predicted 4.12x,
+because the per-row constants do not scale with the payload.
+
+**`H3` does not graduate, on one workload.** `scrollback-stream` answers `slower`
+at **+6.51%**, and it did not move between C6 and C1 -- representations differing
+4x in per-row bytes -- while every other workload cleared. It is the bare-LF
+staircase stimulus (`F11`): 134 stored cells per row with **66.4% holding no
+scalar**, and a flat 8-byte cell charges a never-written padding cell full price.
+Its drain rose 163.2 -> 180.3 ms while its draw tail fell.
+
+That is the representation's shape, not its wiring, so no fix was improvised --
+the plan's boundary makes a non-uniform cell column a stop-and-report. The
+disposition returns to the human.
+
+`F19` Observation 5 also records what nearly buried the pivot: C1's first encoder
+appended each cell byte by byte and measured `terminal-feed` at **+6.19%**, worse
+than the C6 encoder it exists to beat. **For a representation this small the
+encoding is not the cost; the allocation and write pattern around it is** -- which
+is the same class of error `F17` found on the read side.
+
+## How the pivot was decided
 
 C6 shipped at `efa549f`, got `D8`'s dual caps, had its read path profiled and
 fixed by `F17` at `2ae37c4`, and still failed the deciding ladder on four of six
