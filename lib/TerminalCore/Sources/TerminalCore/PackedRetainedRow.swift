@@ -420,38 +420,36 @@ extension Terminal {
         /// Encodes an already-trimmed row. Called at scrollback admission, where canonical
         /// trimming already runs, so the caller owns `I2` and this owns only the encoding.
         ///
-        /// One pass, and it is close to a translate-copy: every cell's scalar, kind and
-        /// style id go straight into a word, with only `contentIdentity` needing a
-        /// comparison against the previous cell. `C6`'s encoder classified each row four
-        /// more ways -- a stride tier from the widest scalar, style runs, kind exceptions,
-        /// and a spill directory -- and `28/F17` measured it at 9.2% of feed self time.
+        /// Two passes and **one allocation**, which is what admission cost turned out to be
+        /// about rather than how much classifying a row takes.
+        ///
+        /// Pass 1 collects only what the blob's size depends on -- the hyperlink entries,
+        /// the `contentIdentity` runs, and the spills. Pass 2 writes every byte into a blob
+        /// allocated at its exact final size, through one unsafe buffer, with no `append`
+        /// anywhere. `28/F17` had measured `C6`'s encoder at 9.2% of feed self time and this
+        /// design's whole claim on admission was that a translate-copy is cheaper than a
+        /// classification pass -- but the first version of it measured **+6.19%** on
+        /// `terminal-feed`, *worse* than `C6`, because it appended each cell byte by byte:
+        /// eight `Array.append` calls per stored cell, each with a capacity and uniqueness
+        /// check. Writing the same encoding into a pre-sized buffer took it to +2.05%, and
+        /// removing the last intermediate array is the rest of it. **The cost was never the
+        /// encoding; it was how the bytes got written.**
         static func pack(_ row: GridRow) -> PackedRetainedRow {
             let cells = row.cells
             let stored = cells.count
 
-            var words = [UInt64](repeating: 0, count: stored)
             var hyperlinkEntries: [(column: Int, id: HyperlinkId)] = []
             var identityRuns: [(start: Int, extent: Int, base: ContentIdentity)] = []
             var spills: [[Unicode.Scalar]] = []
-
             var previousIdentity: ContentIdentity?
 
             for (column, cell) in cells.enumerated() {
-                var word = UInt64(cell.kind.packedCode) << Header.cellKindShift
-                word |= UInt64(cell.styleId) << Header.cellStyleShift
-
-                if cell.scalars.count == 1 {
-                    word |= UInt64(cell.scalars[0].value)
-                } else if cell.scalars.count > 1 {
-                    word |= Header.cellSpillBit | UInt64(spills.count)
+                if cell.scalars.count > 1 {
                     spills.append(Array(cell.scalars))
                 }
-                words[column] = word
-
                 if let id = cell.hyperlinkId {
                     hyperlinkEntries.append((column, id))
                 }
-
                 if let identity = cell.contentIdentity {
                     // A run is a strict step of one, because that is the only shape a
                     // (base, start, extent) triple can reconstruct exactly. `printWide`
@@ -476,45 +474,75 @@ extension Terminal {
             // costs more than four bytes on every stored cell writes the cells instead.
             let perCell = identityRuns.count * Header.identityRunEntryBytes
                 > stored * Header.identityCellBytes
-
-            var blob = [UInt8]()
-            blob.reserveCapacity(
-                Header.byteCount
-                    + stored * Header.cellBytes
-                    + hyperlinkEntries.count * Header.hyperlinkEntryBytes
-                    + (perCell
-                        ? stored * Header.identityCellBytes
-                        : identityRuns.count * Header.identityRunEntryBytes)
-            )
+            let identityBytes = perCell
+                ? stored * Header.identityCellBytes
+                : identityRuns.count * Header.identityRunEntryBytes
 
             var flags: UInt8 = 0
             if row.isSoftWrapped { flags |= Header.softWrapBit }
             flags |= row.semanticPrompt.packedCode << Header.promptShift
             if perCell { flags |= Header.identityPerCellBit }
 
-            blob.append(flags)
-            blob.appendUInt16(stored)
-            blob.appendUInt16(hyperlinkEntries.count)
-            blob.appendUInt16(perCell ? stored : identityRuns.count)
+            let cellBase = Header.byteCount
+            let linkBase = cellBase + stored * Header.cellBytes
+            let identityBase = linkBase
+                + hyperlinkEntries.count * Header.hyperlinkEntryBytes
 
-            for word in words { blob.appendUInt64(word) }
-            for entry in hyperlinkEntries {
-                blob.appendUInt16(entry.column)
-                blob.appendUInt16(Int(entry.id))
-            }
-            if perCell {
-                var values = [ContentIdentity](repeating: 0, count: stored)
-                for run in identityRuns {
-                    for offset in 0..<run.extent {
-                        values[run.start + offset] = run.base &+ ContentIdentity(offset)
+            var blob = [UInt8](repeating: 0, count: identityBase + identityBytes)
+            blob.withUnsafeMutableBufferPointer { bytes in
+                func put16(_ at: Int, _ value: Int) {
+                    bytes[at] = UInt8(truncatingIfNeeded: value)
+                    bytes[at + 1] = UInt8(truncatingIfNeeded: value >> 8)
+                }
+                func put32(_ at: Int, _ value: UInt32) {
+                    for byte in 0..<4 {
+                        bytes[at + byte] = UInt8(truncatingIfNeeded: value >> (8 * byte))
                     }
                 }
-                for value in values { blob.appendUInt32(value) }
-            } else {
-                for run in identityRuns {
-                    blob.appendUInt16(run.start)
-                    blob.appendUInt16(run.extent)
-                    blob.appendUInt32(run.base)
+
+                bytes[0] = flags
+                put16(1, stored)
+                put16(3, hyperlinkEntries.count)
+                put16(5, perCell ? stored : identityRuns.count)
+
+                var spillIndex = 0
+                for (column, cell) in cells.enumerated() {
+                    var word = UInt64(cell.kind.packedCode) << Header.cellKindShift
+                    word |= UInt64(cell.styleId) << Header.cellStyleShift
+                    if cell.scalars.count == 1 {
+                        word |= UInt64(cell.scalars[0].value)
+                    } else if cell.scalars.count > 1 {
+                        word |= Header.cellSpillBit | UInt64(spillIndex)
+                        spillIndex += 1
+                    }
+                    let at = cellBase + column * Header.cellBytes
+                    for byte in 0..<Header.cellBytes {
+                        bytes[at + byte] = UInt8(truncatingIfNeeded: word >> (8 * byte))
+                    }
+                }
+
+                for (index, entry) in hyperlinkEntries.enumerated() {
+                    let at = linkBase + index * Header.hyperlinkEntryBytes
+                    put16(at, entry.column)
+                    put16(at + 2, Int(entry.id))
+                }
+
+                if perCell {
+                    for run in identityRuns {
+                        for offset in 0..<run.extent {
+                            put32(
+                                identityBase + (run.start + offset) * Header.identityCellBytes,
+                                run.base &+ ContentIdentity(offset)
+                            )
+                        }
+                    }
+                } else {
+                    for (index, run) in identityRuns.enumerated() {
+                        let at = identityBase + index * Header.identityRunEntryBytes
+                        put16(at, run.start)
+                        put16(at + 2, run.extent)
+                        put32(at + 4, run.base)
+                    }
                 }
             }
 
@@ -550,12 +578,6 @@ extension Array where Element == UInt8 {
         append(UInt8(truncatingIfNeeded: value >> 8))
         append(UInt8(truncatingIfNeeded: value >> 16))
         append(UInt8(truncatingIfNeeded: value >> 24))
-    }
-
-    fileprivate mutating func appendUInt64(_ value: UInt64) {
-        for byte in 0..<8 {
-            append(UInt8(truncatingIfNeeded: value >> (8 * byte)))
-        }
     }
 }
 
