@@ -190,9 +190,11 @@ shipped seam -- readers already tolerate storage narrower than the logical row
 grid's `GridCell` is untouched. Gate on Phase 2 evidence: only worth designing
 if stored cell bytes, not per-row overhead, dominate the remaining footprint.
 
-**Current state: pivoted to C1, measured, and one workload short of graduating.**
-See the `D9`/`F18`/`F19` paragraphs at the end of this entry for where it stands;
-the arc below is how it got there.
+**Current state: GRADUATED as accepted-with-trade (`D10`).** C1 is landed
+(`987927a`..`f364cd9`), the plan is closed and promoted to
+[`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md),
+and the residuals it did not clear are accepted as numbers rather than fixed. The
+arc below is how it got there; `D10` is the ruling.
 
 **Selected by `D3`** (`F8`: stored cell bytes are 89.5% of attributable footprint
 at both widths) and **designed by `D5`** on `F11`'s composition evidence: a
@@ -226,6 +228,20 @@ gives back only memory -- 528.0 B/row against C6's 128.0, still **3.42x cheaper
 than pre-packing**, ~3.1x total improvement instead of ~12.8x -- and buys a column
 read that is a load at a fixed offset with nothing to decode. C6 was selected over
 C1 on depth per byte (`D5`); `D8` retired that contest before the ladder ran.
+
+**`D10` accepts the residuals as a trade and graduates `H3`.** Banked:
+**10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24 at 1.11x the depth**,
+`retained-browse` at parity (-0.33%), resize within 1% of `D8`'s line in all three
+regimes. Paid: `terminal-feed` **+4.55%** and `scrollback-stream` **+4.13%** against
+`678bfe9` on `F20`'s deciding table, plus an `incremental-mixed` **+2.15%** that
+`F21` isolated to `2ae37c4`'s reader rewiring rather than to packing. `F22`'s
+wide-baseline audit is what makes the giveback legible: the feed residual is ~61 ms
+on a 1,345 ms batch, ~3.3% of an 1,855 ms campaign win, leaving HEAD **2.30x faster
+than pre-campaign** rather than 2.38x -- while `scrollback-stream`'s absolute
+position stays **unknown**, because it is one of the four workloads that cannot
+reach that baseline. `H8` is the designated successor and removes both residuals by
+construction; accepting now forecloses nothing, and C1's format is not reopened by
+it (`D9`'s decode-on-read reasons are measured and stand).
 
 ### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
 
@@ -344,9 +360,16 @@ Named hard parts, so the research does not rediscover them:
   competing for it. A step size that is wrong turns a bounded tail into an
   unbounded one under sustained output -- exactly the `scrollback-stream` regime.
 
-Ledger entry only: no design and no implementation until `H3`'s disposition is
-decided, and funding it is one of that decision's options rather than a
-consequence of it.
+**`H3`'s disposition is now decided, and it did not fund this.** `D10` accepted
+the residuals as a trade, so `H8` is the **designated successor**: the option that
+removes both by construction, named in `D10` and deliberately left unfunded.
+Funding it is a fresh decision, not a consequence of that one. Two things `D10`
+settles for whoever picks it up: C1's format is **not** reopened by `H8` (it moves
+when the encode runs, not what it writes, and `D9` rejected C6 on decode-on-read
+that no encoder change reaches), and `F22` cannot say where `scrollback-stream`
+sits against pre-campaign DanTerm, so this hypothesis inherits that unknown rather
+than an established absolute regression. Still a ledger entry: no design and no
+implementation without that funding decision.
 
 ## Task ledger
 
@@ -537,7 +560,10 @@ consequence of it.
   a separately measured second step.
 - [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
   deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence. Destination: `D10`.
+  dead on sizing, but that is decided on post-landing evidence -- which now
+  exists, and points the other way from `D5`'s: C1 retains at **3.72 MB**, not
+  C6's 0.78 MB (`F19`), so deep-history footprint is ~4x what the pivot's
+  rejected representation would have left. Destination: `D11`.
 - [ ] `RESEARCH` Open `H7` -- viewport-adjacent reflow. Opened by `D8`, which
   capped retained depth because reflow visits every retained row, and which cost
   sparse content 3.08x its pre-packing depth to do it. **The first task is a read,
@@ -555,7 +581,7 @@ consequence of it.
 
 ### Phase 4 -- graduate
 
-- [ ] `RESEARCH` Build and run `H3`'s experiment: implement `D5`'s C6 in the
+- [x] `DONE` Build and run `H3`'s experiment: implement `D5`'s C6 in the
   engine (retained rows only -- doc 16's closure keeps the live grid's `GridCell`
   untouched) and read it against `D3`'s success criterion as written. This is the
   next hand-off and the first Phase-4 task, because `D5` is a priced design and
@@ -563,7 +589,7 @@ consequence of it.
   if a resize claim is made, and the longer `terminal-feed` screen if the predicted
   feed effect lands under ~2%. Run `D5`'s falsification checks against a prototype
   before the full ladder.
-  **Graduated to [`plans/wip/packed-retained-rows.md`](../../../plans/wip/packed-retained-rows.md),
+  **Graduated to [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md),
   which is awaiting human plan review before any engine code.** The plan writes
   the predicted feed effect down as **~+1%, bounded at +2%** -- under the ~2%
   line, so `D1` pitch 3's screening reopen fires and the longer `terminal-feed`
@@ -663,6 +689,15 @@ consequence of it.
   `slower` at +2.15%** against 1.85%, plan time +5.99%, attributable by
   construction to the reader rewiring. The disposition returns to the human as a
   decision package, with `H8` registered as the funded-work option.
+  **Closed by `D10`: the human accepted the residuals as a trade and `H3`
+  graduates as accepted-with-trade.** Banked -- 10.49 -> 3.72 MB at 179x66 and
+  10.17 -> 3.40 MB at 80x24 at 1.11x depth, browsing at parity, resize within 1%
+  of `D8`. Paid -- `terminal-feed` +4.55%, `scrollback-stream` +4.13%, and an
+  `incremental-mixed` +2.15% that `F21` attributes to the reader rewiring rather
+  than to packing. `F22` supplies the absolute framing (feed's residual is ~3.3%
+  of an 1,855 ms campaign win; `scrollback-stream`'s absolute position is
+  **unknown** and accepted as an open question). `H8` is named the designated
+  successor and left **unfunded**; funding it is a fresh decision.
 - [x] `DONE` Run the campaign's first wide-baseline audit. Closed by `F22`,
   which is **wide-baseline descriptive** and carries no verdict: against
   pre-campaign `6c58c45`, HEAD feeds **2.38x faster** (3,197 -> 1,345 ms) and
@@ -676,9 +711,13 @@ consequence of it.
   HEAD's block contract there. A full-ladder wide run needs a baseline no older
   than `39abdbf` (2026-07-31), which is close enough to HEAD to mostly duplicate
   the adjacent runs; that is why it is not proposed here.
-- [ ] `TODO` Extract the selected direction into a plan file once the experiment
-  answers; record where it went and close, or close with all hypotheses
-  dispositioned.
+- [x] `DONE` Extract the selected direction into a plan file once the experiment
+  answers; record where it went. **It went to
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)**,
+  promoted out of `plans/wip/` at closure, and shipped as C1 across
+  `987927a`..`f364cd9`. The doc does **not** close with it: `H5`'s gate is
+  undecided, `H7`'s reference read has not been done, and Phase 2 still owes the
+  resize *profile* (`F23`). See `## Outcome` for the liveness reading.
 
 ## Rejected
 
@@ -819,6 +858,15 @@ non-ASCII, which is the one regime where variable width wins on bytes
   payload), but it inflates any pooled figure those two workloads dominate, and it
   **flatters any scheme that compresses gaps** -- which is exactly the flattery this
   doc's rules exist to refuse.
+- **`scrollback-stream`'s absolute position is unknown, and `D10` accepted the
+  trade without it.** `F22` could place `terminal-feed`'s residual against
+  pre-campaign DanTerm (~3.3% of an 1,855 ms win) but not this one: the workload
+  drives the real app, which only compiles against the pre-campaign engine through
+  shims that would then run inside the measurement. So nothing in this repo says
+  whether sustained output at HEAD is above or below where the campaign started.
+  Closing it needs a baseline no older than `39abdbf`, which is close enough to
+  HEAD to mostly duplicate the adjacent runs -- which is why it is a caveat and
+  not a task.
 - `D5`'s selection rests on three measured properties of retained content -- 1.66
   style runs per row, 0.903 UTF-8 bytes per cell, 0.119% multi-scalar cells. Each
   has a stated falsification threshold in `D5`, and each is one probe command to
@@ -827,4 +875,38 @@ non-ASCII, which is the one regime where variable width wins on bytes
 
 ## Outcome
 
-Investigation in progress.
+Investigation in progress. **`H3` is settled and the doc is not**, which is the
+whole of the liveness reading and is worth stating explicitly because the doc's
+largest thread just ended.
+
+**Settled.** `H3` graduated as accepted-with-trade (`D10`), shipping C1 across
+`987927a`..`f364cd9` via
+[`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md):
+retained history costs **10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24
+at 1.11x the depth**, browsing at parity and resize on `D8`'s line, paid for with
+`terminal-feed` +4.55% and `scrollback-stream` +4.13%. `H2` is rejected (`D4`),
+C6 is rejected on measurement (`D9`), and C3/C4 on pricing plus read shape
+(`D5`/`D6`). `D8`'s dual caps and `F17`'s streaming readers are the two shipped
+byproducts that outlive the representation contest.
+
+**Live, and why each is work rather than a parked lead.** Three items are
+unanswered questions with named next steps, so this doc stays in `## Live`:
+
+1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F23`) -- where inside
+   reflow's dominant per-cell term the time goes. Renumbered ten times and still
+   owed; it is the prerequisite for `D8`'s cell cap ever rising.
+2. **`H7`, viewport-adjacent reflow** (`RESEARCH`) -- opened by `D8`, first task
+   is a read of `references/`, nothing designed. It is the mechanism that would
+   give sparse content back the 3.08x depth `D8` charged it.
+3. **`H5`'s gate** (`TODO`, destination `D11`) -- undecided, and the post-landing
+   evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
+   rather than C6's 0.78 MB.
+
+**Parked with stated conditions, not live.** `H4` (re-price before running --
+`D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore
+of terminal content becoming a product goal), `H8` (designated successor to
+`D10`'s trade, deliberately unfunded), and `H2`'s reopening condition.
+
+Reopening conditions for the settled work live in `D10` and `D9`; the shortest
+statement of what would restart the admission thread is **`H8` funded, or a
+measured `scrollback-stream` cost worse than the +4.13% `D10` accepted**.
