@@ -6,7 +6,9 @@ Append-only evidence chain for
 doc 28's); bare IDs are this doc's.
 
 Phase 1's four viability probes are all recorded below: `F1` (read path), `F2`
-(counting pass), `F3` (admission), `F4` (edge-case inventory).
+(counting pass), `F3` (admission), `F4` (edge-case inventory). `F5` is not a
+probe -- it is the simplification-inequality accounting pass that `D1`'s frozen
+rule owed at its close.
 
 ### F1 -- the read path is not the hazard: wrap-at-read browses 1.64x faster than today's store, and random seek is faster too
 
@@ -1065,3 +1067,292 @@ size" admits.
   encoder rather than the container, and Observation 4 prices the arena against
   what the budget charges today, which the budget-and-eviction task in Phase 2
   will need.
+
+### F5 -- the simplification inequality holds, and it holds on invariants rather than on line count: five cross-cutting invariants deleted against three local ones added
+
+- Status: recorded. This is `D1` Part B's last owed input and the only one that
+  is not a measurement -- the frozen rule calls it "a reading and accounting
+  pass over the deletion and addition lists". It closes `D1`; the verdict and
+  its scoping are in [decisions.md](decisions.md).
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: `3fd09fd`, the commit that recorded `F3`. **No file
+  under `lib/` is added or changed by this entry** -- like `F4`, it is a reading
+  and accounting pass. Line numbers below are read at `3fd09fd`. The two
+  untracked paths present throughout this doc's work are still present and still
+  in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction: the deletion side was enumerated by reading
+  `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
+  `lib/TerminalCore/Sources/TerminalCore/PackedRetainedRow.swift` and the
+  `lib/TerminalCore/Tests/TerminalCoreTests/` suites named below; the addition
+  side was enumerated from this doc's own three probe files, which are the
+  candidate's only existing implementation, plus `F4`'s and `F3`'s deferred
+  decisions (`DD1`-`DD6`), which are what settle its semantics.
+- Artifacts: none durable.
+
+#### What the rule asks, restated before it is answered
+
+`D1`'s frozen paragraph "What the simplification inequality must show" names six
+things the deletion list **must actually contain** -- history reflow mutation,
+`productionScrollbackCellCap`, `productionScrollbackRowCap`, the `28/D8`
+cost-model derivations and their tests, narrow-then-widen eviction machinery, and
+continuation-flag bookkeeping in retained history -- and three properties the
+addition list **must have**: pure, unit-testable, and free of any width-dependent
+persisted state. The README states the same gate as a magnitude: the deletion
+list "must exceed" the addition list. Both readings are answered below, and they
+do not answer the same way, which is the substance of this entry.
+
+#### Observation 1 -- the deletion side, named against real code sites
+
+All six named items are present in the tree and are genuinely removed. What each
+one actually is:
+
+| # | rule's item | the code that is it | disposition |
+| ---: | --- | --- | --- |
+| 1 | history reflow mutation | `Terminal.swift:4288` `resizeWidth` (286 lines), `:4575` `reconstructLogicalLines` (137), `:4713` `pack(line:columns:)` (65), `:3686`-`:3791` `attachments` / two `attachment` overloads / `textDestination` (106), `:560`+`:599`-`:639` the seven reflow-only types (46), `:4791` `sourceKey` (3) | history is never rebuilt; see Observation 2 for the part that moves rather than vanishes |
+| 2 | `productionScrollbackCellCap` | `Terminal.swift:784`, its 21-line derivation at `:763`-`:783`, the live `scrollbackCellCap` `:856`, `scrollbackStoredCellCount` `:860` and its two maintenance sites (`:3974`, `:3994`), `recomputedScrollbackStoredCellCount` `:2314`, and the cap's clause in `enforceScrollbackBudget`'s `while` (`:3990`) | deleted: the doc comment says in terms that the cap exists to bound reflow's dominant term, and there is no such term |
+| 3 | `productionScrollbackRowCap` | `Terminal.swift:815`, its 29-line derivation at `:786`-`:814`, `scrollbackRowCap` `:853`, the row clause at `:3989` | deleted: it bounds the `1.85 us/row` term for `28/F9`'s blank-row regime, and `F4` case 28 shows blank rows fold into near-zero-cell records the byte budget already bounds |
+| 4 | the `28/D8` cost-model derivations and their tests | the ~50 lines of doc comment carrying `1.85 us/row + 0.352 us/cell`, the `cellCap / 20` ratio and the 600.5 ms price; six of `TerminalScrollbackBudgetTests.swift`'s 21 tests (`:220`, `:257`, `:290`, `:341`, `:403`, `:761`); `TerminalHistoryDepthSizingProbe.swift` (294 lines, whose whole purpose is pricing candidate cap sets and their resize cost) | deleted; `TerminalResizeProbe` / `TerminalResizeProbeSupport` (344 lines) survives but loses its subject -- it would measure a live-screen refold plus `F2`'s counting pass |
+| 5 | narrow-then-widen eviction machinery | not a module but an invariant: the cell cap's content-denomination exists solely to hold it (`Terminal.swift:767`-`:770`), the row cap documents a lossy region below 20 columns (`:800`-`:806`), `narrowThenWidenPreservesCappedHistory` (`TerminalScrollbackBudgetTests.swift:290`) pins it, and `resizeWidth` re-enforces the budget at `:4571` after every rebuild | deleted by construction: a width change does not touch the arena, so a narrow-then-widen cycle is a no-op on storage and the lossiness question becomes unrepresentable |
+| 6 | continuation-flag bookkeeping in retained history | `PackedRetainedRow.swift:101` `softWrapBit` + `:149` accessor + pack/unpack at `:506`/`:289`, one bit **per display row**; the three tail mutations that keep it truthful (`Terminal.swift:6369` `severScrollbackWrapClaim`, `:6387` `restoreWrapClaimBeforeCursor`, `:6436` `clearPreviousSpacer`, plus `:6460` `setScrollbackCell`, 65 lines); `isHistoryHeadTruncated` (`:866`, maintained at `:3999` and `:5385`, asserted 14 times in `TerminalScrollbackBudgetTests`); `.continuation` stamping into retained rows (`:4731`, `:4746`) | reduced, not erased: the flag becomes one open/closed bit per **logical line**, two of the three mutations become header-bit flips on the tail record and the third disappears (`F4` Observation 5), `isHistoryHeadTruncated` becomes always-false (`DD2`), and `.continuation` is stamped at read (`F4` case 16) |
+
+Summed as lines of `Terminal.swift`, the reflow-shaped code is **~660 lines**,
+the cap machinery ~75, and the tail-mutation trio ~65: about **790 of 6,470
+lines, 12% of the file**.
+
+#### Observation 2 -- the honest subtraction: the fold is not deleted, it moves
+
+`pack(line:columns:)` is the function that turns one logical line into display
+rows at a width. Every rule in it -- the `.spacerHead` at a one-column gap
+(`Terminal.swift:4734`), the `isSoftWrapped` marking (`:4726`), the
+`.continuation` stamping (`:4731`, `:4746`) -- is exactly what the candidate has
+to do **at read time** instead. So of that ~660 lines, roughly **70 move rather
+than vanish**: `pack`'s fold minus its two destination dictionaries, plus
+`retainedContentEnd` (`:4779`, which becomes admission's trailing-blank rule,
+`F4` case 17). `F4` already said this from the other direction --
+`reconstructLogicalLines` is the admission rule run backwards -- and the correct
+statement of the deletion is therefore **the round trip, not the wrapping**.
+
+What *is* deleted outright inside that machinery is everything that exists only
+because the rebuild is destructive and identities must survive it: the
+`sourceKey` coordinate space, the `cellDestinations` and `boundaryDestinations`
+dictionaries built per logical line, `ReflowRowMetadata`, `ReflowCursorAnchor`'s
+three cases, `ReflowTextAttachment`, and the four `attachments` computations plus
+the eight destination locals and their `??` threading in `resizeWidth`
+(`:4319`-`:4354`, `:4356`-`:4365`, `:4443`-`:4498`, `:4531`-`:4564`) -- about
+**130 lines whose entire job is carrying ten anchors across a rebuild that no
+longer happens**. `F4` Observation 4 priced the replacement: one address
+conversion, because (logical line, offset) becomes the stored address.
+
+Also deleted and easy to miss: `resizeWidth:4522`-`:4523` re-walks all of history
+after every width change to recompute the charged byte and stored-cell totals.
+Under the arena the byte total is the write cursor.
+
+#### Observation 3 -- the addition side, stated at full cost
+
+Six items, not the rule's four. `F4` added one and `F3`'s `DD5` removed work from
+another; two more are named here because an inequality argued by omission is
+worthless.
+
+1. **The contiguous byte arena.** A record is an 8-byte header (cell count,
+   flags, a semantic-mark slot) plus C1 cell words. Pure value type over
+   `[UInt8]`; no clock, no IO, no AppKit. Unit-testable, and `F1`'s and `F3`'s
+   cross-arm checksum gates are already the shape those tests take.
+   Width-dependent persisted state: none -- `F1` Observation 2 reconstructed the
+   engine's own display-row count for all 10,773 logical lines from (record,
+   width) alone.
+2. **The block-summed wrap index.** Per-line record offsets, blocked ~256 lines,
+   one cached display-row total per block at the current width; offsets-only, per
+   `F2`. This is the design's one genuinely new *mutable derived* structure, and
+   it has **four maintain-or-recompute trigger points**: a width change (discard
+   and recompute eagerly -- `F2`: 0.016 ms at trial depth), admission (`DD5`
+   increments the tail block's total as rows arrive), eviction at the head
+   (unspecified -- see below), and a forced split (one record becomes two).
+   Nothing survives a flush, which is the property Observation 5 turns on, but
+   the invalidation discipline is real and is new.
+3. **The open-line rule.** Exactly one open record, always the arena's tail; a
+   hard-ended row closes it. `F4` Observation 5 licenses the "tail only" premise
+   by enumerating today's three history writes and finding all three target
+   `scrollbackRows.indices.last`. `F3` measured the rule at 0.624x-0.691x of
+   today's admission.
+4. **The forced-split rule.** 65,536 cells, derived as 1/32 of the byte budget
+   (`DD3`); a `forcedSplit` header bit; readers rejoin by adjacency with no
+   back-pointer (`DD6`). One documented wart, bounded up front, and unexercised
+   by every probe so far.
+5. **The `hasWideCells` fast/slow split** (added by `F4`). A per-record content
+   bit selecting `ceil((cells + spacers) / width)`'s O(1) path or an O(cells)
+   scan. Weakest possible addition: always scanning would be correct, so the
+   design does not depend on the bit existing.
+6. **Spacer re-derivation at read.** The store never holds a `.spacerHead`, so
+   every read re-inserts it from (record cells, width). `F3`'s gate 1 proved the
+   derivation total -- 5,124 spacers re-derived on the `wide` class with
+   identical checksums -- but it is work the reader does that today's store does
+   not, and `F1`'s 0.608x browse figure was measured on stimuli with **zero**
+   spacers.
+
+Two further costs that are not permanent additions but are not free either, and
+that the inequality must not be allowed to hide:
+
+- **Eviction from the front of an arena is unpriced on both sides.** Today's
+  `Terminal.swift:3978` `enforceScrollbackBudget` plus `ScrollbackBuffer`'s
+  `removeFirst` (`:338`) and `compactIfNeeded` (`:371`) is the incumbent; `DD2`'s
+  whole-record eviction is the candidate; nothing has compared them, and whole-
+  record eviction additionally needs the index's head to move with it (trigger
+  point 3 above). `F1`, `F3` and this doc's README all flag it, and it is the
+  largest single hole in Phase 1's evidence.
+- **Migration.** Phase 2's first task exists because the invariant "history is
+  always at the current width" dies, and every display-row-indexed call site --
+  `projectionRows`, `activationIdentity`'s range scan, `primaryHistoryText`,
+  scrollbar math, selection, search -- must be re-expressed. That is a one-time
+  cost, but it is a cost, and it is unenumerated.
+
+#### Observation 4 -- on line count, the inequality is close to a wash, and this entry says so
+
+The candidate's only existing implementation is this doc's probes. `F1`'s arena
+plus derived index plus read walk is `TerminalLogicalLineReadProbe.swift:257`-`:560`,
+about **303 lines**; `F3`'s open-line admitter is
+`TerminalLogicalLineAdmissionProbe.swift:247`-`:458`, about **211**, of which the
+read-back checksum is test scaffolding. Call the storage core **~350-400 lines**
+of prototype -- and it has no spill table (`F1`'s arm calls `fatalError` on a
+multi-scalar cell, and `28/F11` measured spills in ~0.12% of real rows), no
+hyperlink or content-identity side tables, no semantic marks beyond a header
+slot, no eviction and no search. A production version is plainly larger.
+
+Against ~720 net lines deleted (790 less the ~70 that move), that is a win of
+roughly 300 lines on a 6,470-line file, with an error bar wide enough to swallow
+it. **The magnitude reading of the inequality is therefore weak**, and this
+entry declines to rest the verdict on it. `DD8` records that choice.
+
+#### Observation 5 -- on invariants, the inequality is not close
+
+The reading that does carry it. What a maintainer must currently hold true, and
+can currently get wrong:
+
+| # | invariant deleted | who has to hold it today |
+| ---: | --- | --- |
+| 1 | history is always at the current width | every reader, and `resizeWidth` must re-establish it across the whole store before any of them runs |
+| 2 | a narrow-then-widen cycle must not evict | the cell cap's content-denomination exists only for this, the row cap documents where it fails (below 20 columns), and one test pins the seam |
+| 3 | the per-display-row continuation flag stays truthful under three tail edits | `severScrollbackWrapClaim`, `restoreWrapClaimBeforeCursor`, `clearPreviousSpacer`, plus `isHistoryHeadTruncated` at every eviction |
+| 4 | ten anchors survive a destructive rebuild | four `attachments` computations, a source-key coordinate space, two destination dictionaries per logical line, three cursor-anchor cases |
+| 5 | three bounds, whichever binds first | bytes, rows and cells, each with its own maintenance at two sites, its own derivation, and its own eviction clause |
+
+| # | invariant added | who has to hold it |
+| ---: | --- | --- |
+| 1 | exactly one open record, always the arena tail | the admission path alone |
+| 2 | cached block totals are valid for the current width, or discarded | the index alone, at four trigger points |
+| 3 | no record exceeds 1/32 of the byte budget, and readers rejoin splits by adjacency | the admission path and the copy/search readers |
+| 3.5 | `hasWideCells` is set iff the record holds a wide cell | the admission path -- and being wrong the safe way is still correct, which is why it counts as a half |
+
+Five against three and a half, and the two sides are not the same kind of thing.
+The deleted invariants are **cross-cutting**: each one is a contract between the
+store and every reader, or between a resize and every anchor the terminal
+carries. The added ones are **local**: each is a contract inside the store,
+enforceable by one writer and testable by one gate.
+
+Two of the deletions are stronger still, because they delete a failure mode
+rather than a test of one. `F4` case 18 -- two hard-ended lines must not join
+when widening -- becomes unrepresentable, since a record boundary *is* a hard
+newline. And a width change that does not touch storage cannot evict, so
+invariant 2 is not merely upheld but has nothing left to be about.
+
+Against that, one addition has no analogue today and must be stated as a new
+risk, not folded into the tally: **a stale block index**. Today there is no
+derived width-dependent cache at all -- the store is at the width -- so this
+design trades an eagerly-maintained truth for a derived cache with four trigger
+points. It is the one item on the addition side that can grow, and `DD7` records
+why it is nonetheless not "width-dependent persisted state" in `D1`'s sense.
+
+#### Observation 6 -- the rule's three properties of the addition list, answered one at a time
+
+- **Pure.** Every addition is a function of bytes already in hand: arena
+  construction, index recompute, open-line append, forced split, wide-cell
+  bit, spacer re-derivation. None reads a clock, a home directory, an id
+  generator, or the filesystem. All six live under `lib/TerminalCore`, which
+  takes no such input in the first place.
+- **Unit-testable.** All three probes already demonstrate the test shape and it
+  is a strong one: read the two stores back display row by display row and
+  checksum every scalar, style id and kind. `F3` gate 1 is the proof that this
+  catches the interesting failure -- it is what holds the candidate to
+  re-deriving the 5,124 spacers it refused to store. `F2` gate 1's independent
+  cross-check of the counting pass's total is the second shape.
+- **Free of width-dependent persisted state.** Nothing width-shaped is written
+  into a record: the header carries a cell count and content flags. The one
+  width-dependent quantity in the design is the block index's cached totals, and
+  it is a cache -- fully recomputable from the arena (`F2` measured exactly that
+  pass, and cross-checked its output against an independently computed sum),
+  discarded rather than migrated at every width change, and never consulted to
+  decide what a record *is*. `DD7` records this reading.
+
+- Observation: all six items `D1` requires on the deletion list are present in
+  the tree at `3fd09fd` and are genuinely removed or reduced to a header-bit
+  flip; the addition list has six members rather than four; and the two lists
+  compare differently under two different units -- close to a wash on lines of
+  code, five cross-cutting invariants against three and a half local ones on
+  invariants.
+- Inference: **the simplification inequality holds**, on the invariant reading,
+  and `D1`'s three properties of the addition list are all satisfied. The
+  argument is not that the design is smaller. It is that the design moves the
+  wrapping rule from a destructive whole-history rebuild to a derivation at
+  read, which deletes five contracts that span the entire engine and adds three
+  and a half that live inside one store.
+- Competing interpretations:
+  1. *The inequality is being rescued by choosing a favourable unit.* The
+     strongest objection, and Observation 4 concedes the unfavourable unit
+     outright rather than burying it. The defence is that `D1`'s own rule is
+     stated in terms of *what the lists contain*, not how long they are, and
+     that the campaign's whole trigger (`28/D8`) was an invariant problem --
+     "depth is latency" -- not a volume problem. `DD8` records the choice so it
+     can be disputed.
+  2. *`pack`'s fold moving to read time means the deletion is smaller than it
+     looks.* Correct, and Observation 2 states it as the honest subtraction: ~70
+     of ~790 lines move. It does not change the invariant tally, because the
+     fold at read time is a pure function of (record, width) with no contract
+     attached to it.
+  3. *The block index is width-dependent persisted state, so the addition list
+     fails `D1`'s third property outright.* Answered in Observation 6 and
+     recorded as `DD7`. The distinguishing test the design leans on is whether
+     the store can be reconstructed with no width anywhere in it; `F1`
+     Observation 2 and `F2` gate 1 both demonstrate that it can.
+  4. *An accounting pass cannot see the cost of code that does not exist yet.*
+     True and unfixable at this stage. Everything on the addition side is sized
+     from a prototype missing spills, side tables, eviction and search, so the
+     addition list is the side with the larger error bar -- which is why the
+     conditions carried into Phase 2 are all on that side.
+- Uncertainty:
+  - **Eviction is unpriced on both sides**, and it adds an index-head invariant
+    nobody has designed. This is the largest term in the whole inequality that
+    has no number attached to it.
+  - **The addition list is sized from a prototype, not an implementation.** No
+    spill table, no hyperlink or content-identity side tables, no search, no
+    eviction. Each of those is on the addition side, and each will grow it.
+  - **The migration is unenumerated.** Phase 2's call-site task is exactly the
+    measurement of how large the one-time cost is, and it has not been done.
+  - **The counting pass is still unpriced on wide content** (`F4`, `F2`), which
+    is an addition-side cost that no reading here can settle.
+  - **This is an accounting pass, not a measurement.** It reports what code
+    exists and what contracts it carries. Nothing in it is a benchmark, and
+    nothing in it substitutes for the paired ladder.
+- Deferred decisions, continuing `F3`'s numbering; each took the obvious, simple
+  choice rather than blocking:
+  - **DD7 -- the block index's cached display-row totals are read as a cache,
+    not as "width-dependent persisted state" under `D1`'s addition-list
+    clause.** The test applied: the store can be reconstructed from its own
+    bytes with no width anywhere in it (`F1` Observation 2, `F2` gate 1), and
+    the cache is discarded rather than migrated at a width change. The stricter
+    reading -- that any width-dependent byte anywhere in the design violates the
+    clause -- would make the clause unsatisfiable by any wrap-at-read design
+    that indexes at all, including iTerm2's, and would therefore have made `D1`
+    no-go the moment the index was sketched at `de17e95`. A human may prefer the
+    stricter reading; it would reopen `D1`.
+  - **DD8 -- the inequality is adjudicated on invariants and cross-cutting
+    coupling, not on line count.** Line count alone is close to neutral
+    (Observation 4) and its error bar is wider than its margin, so resting the
+    verdict on it would be resting it on noise. Reopen if Phase 2's
+    implementation lands materially larger than the prototype suggests *and* the
+    invariant argument has weakened -- either one alone does not reopen it.
+- Next action: `D1` closes. Its verdict, scoping, and the conditions Phase 2
+  inherits are in [decisions.md](decisions.md); the ledger in
+  [README.md](README.md) is updated to match. Phase 2 opens as a **design**
+  phase only -- no production storage change is licensed by `D1`, because every
+  Phase 1 number is a microbenchmark and the README's first acceptance dimension
+  gives the verdict to the paired ladder.

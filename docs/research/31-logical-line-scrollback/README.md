@@ -12,10 +12,12 @@ of scheduling it better. Inherited boundary: C1's cell format is settled
 (`28/D9`, `28/D10`) and is not reopened here -- this doc changes what a stored
 *record* is, not what a stored *cell* is.
 
-- [findings.md](findings.md) -- the append-only evidence chain; F1-F4 are
-  reserved for the Phase 1 viability probes.
+- [findings.md](findings.md) -- the append-only evidence chain; F1-F4 are the
+  Phase 1 viability probes and F5 is the simplification-inequality accounting
+  pass D1's rule owed at its close.
 - [decisions.md](decisions.md) -- the auditable decision log; D1 is the
-  go/no-go gate, whose rule must be frozen before F1's comparison is read.
+  go/no-go gate, whose rule was frozen before F1's comparison was read and
+  which closed **`go`** on 2026-08-04, licensing Phase 2's design work only.
 
 ## Purpose
 
@@ -42,6 +44,17 @@ Two acceptance dimensions, and a change lands only on both:
    rule), and every addition must be pure and unit-testable. If the design
    drifts to where that inequality no longer holds, that is evidence against
    the direction, not a cost to absorb.
+
+   **Evaluated 2026-08-04 by [F5](findings.md), and it holds -- on invariants,
+   not on volume.** All six deletion-list items are present in the tree and
+   genuinely removed; the addition list has six members (F4 added the
+   `hasWideCells` fast/slow split, and F5 names spacer re-derivation at read as
+   the sixth) and all six are pure, unit-testable and free of width-dependent
+   persisted state. On lines of code the comparison is close to a wash and F5
+   says so; what carries it is **five cross-cutting invariants deleted against
+   three and a half local ones added**. Dimension 1 remains outstanding: it is
+   the paired ladder's, against a real implementation, and Phase 1 produced only
+   microbenchmark predictions of it.
 
 ## Investigation rules
 
@@ -304,26 +317,33 @@ it.
   "middle immutable" premise holds and two of the three become header-bit
   flips while the third disappears. Four deferred decisions are recorded in
   F4 for the human to revisit.
-- [ ] `ACTIVE` **D1, the go/no-go gate.** Rule frozen at `eee1832`, in a commit
-  that predates the probe's existence in the tree. **Part A (the read path,
-  decided by F1) answers `go`.** Part B is still owed: F2, F3, F4, and the
-  simplification inequality -- and F4 finding any edge case that requires
-  stored width makes D1 no-go regardless of F1. Phase 2 does not open and no
-  production storage change is licensed until D1 closes; `28/H7` remains the
-  fallback. **Part B progress: F2 is in** (rule frozen at `497d181`, `H2`
-  confirmed) and it moved nothing about D1's direction, by its own rule.
-  **F4 is in** and, with it, the one input that could have flipped the verdict
-  is spent: no edge case requires stored width, so the no-go trigger the rule
-  names does not fire. **F3 is in** (rule frozen at `d6c83b0`, `H3` confirmed
-  outright at 0.624x-0.691x). **Part B now owes exactly one thing: the
-  simplification inequality** -- a reading and accounting pass over the deletion
-  and addition lists, with no measured input left. F4 added one item to the
-  addition list (the `hasWideCells` fast/slow split) and removed work from it
-  (the four `attachments` computations collapse into one address conversion);
-  F3's `DD5` removes another (no wide-cell scan runs on the write path). Next
-  concrete step: evaluate the inequality and close D1.
+- [x] `DONE` **D1, the go/no-go gate -- closed `go`.** Rule frozen at `eee1832`
+  (Part A) with Part B's sub-rules frozen at `497d181` (F2) and `d6c83b0` (F3),
+  each in a commit predating the probe it governs. Full adjudication in
+  [decisions.md](decisions.md). Part A answered `go` on the read path (F1);
+  Part B is complete -- `F2` confirmed `H2` with a 15.6x margin, `F4` confirmed
+  `H4` and the stored-width no-go trigger **did not fire**, `F3` confirmed `H3`
+  outright at 0.624x-0.691x, and **[F5](findings.md) finds the simplification
+  inequality holds**. No frozen threshold was failed by any input.
+  **Scoping, which is part of the verdict:** `go` licenses **Phase 2's design
+  work and nothing else**. No production storage change is licensed, because
+  every Phase 1 number is a microbenchmark and this doc's first acceptance
+  dimension gives the verdict to the paired ladder -- `retained-browse`,
+  `terminal-feed` and `scrollback-stream` against a real implementation, under
+  rules frozen before the comparisons are read, are all still owed. The -2% and
+  -7% frame figures are conversions through measured shares, not measurements.
+  `28/H7` stays in Rejected and its reopening condition becomes a `slower`
+  ladder verdict rather than a `D1` no-go. Eleven conditions and unpriced terms
+  are carried forward into Phase 2 and enumerated in the D1 closure; the four
+  that bind hardest are the **unpriced wide-record counting fallback**,
+  **eviction unmeasured on both sides**, the **paired ladder**, and the
+  **`28/D11` trial bounds** this design's caps are currently shipped as.
 
-### Phase 2 -- design (begin only after D1 answers go)
+### Phase 2 -- design (open: D1 answered go on 2026-08-04)
+
+Read the "Conditions and unpriced terms Phase 2 inherits" list in
+[decisions.md](decisions.md) before starting any task below; the tasks are the
+work, that list is the constraint on it.
 
 - [ ] `TODO` Enumerate every display-row-indexed call site (`projectionRows`,
   `activationIdentity`'s range scan, `primaryHistoryText`, scrollbar math,
@@ -362,8 +382,10 @@ tag the rest by width, rewrap on demand or in the background. Set aside by
 explicit human choice in favor of this doc's rethink, because the hybrid's
 transient mixed-width state *adds* invariants (every reader must handle two
 widths) where this design *deletes* them (no reader ever sees a width in
-storage). Reopen if D1 answers no-go: the hybrid remains the fallback that
-needs no storage rewrite.
+storage). **D1 answered `go` on 2026-08-04, so this stays rejected and its
+reopening condition changes**: it is no longer "if D1 answers no-go" but a
+`slower` verdict on the paired ladder against a real implementation. It remains
+the fallback that needs no storage rewrite.
 
 ### Lazy per-block index recompute (for milestone 1)
 
@@ -376,6 +398,11 @@ the reopening condition is now a depth rather than a doubt: an arena past
 ~100,000 logical lines, which the byte budget does not currently allow.
 
 ## Open questions and caveats
+
+The authoritative list of what Phase 2 inherits is the "Conditions and unpriced
+terms Phase 2 inherits" section of the `D1` closure in
+[decisions.md](decisions.md); the entries below are the ones that predate it or
+add detail to it.
 
 - What does search operate on -- a straight scan of the arena's packed cells,
   or does it need its own index? Expectation is that logical lines make
@@ -413,4 +440,11 @@ the reopening condition is now a depth rather than a doubt: an arena past
 
 ## Outcome
 
-Investigation in progress.
+Investigation in progress. Phase 1 is complete: `D1` closed **`go`** on
+2026-08-04 on five inputs -- `F1` (read path 1.64x faster), `F2` (the eager
+counting pass 15.6x inside its bound), `F3` (admission 1.45x-1.60x cheaper),
+`F4` (28 edge cases, zero requiring stored width) and `F5` (the simplification
+inequality holds on invariants) -- with no frozen threshold failed by any of
+them. The verdict licenses Phase 2's **design** work only: no production storage
+change is licensed, and the paired ladder against a real implementation is the
+acceptance dimension still outstanding.

@@ -7,14 +7,17 @@ Auditable decision log for
 ### D1 -- go/no-go for the logical-line store
 
 - Status: **rule frozen 2026-08-04 at `de17e95`, before the F1 probe existed in
-  the tree and before any comparison number was produced.** Verdict pending
-  below. The rule is stated in full here -- instrument, comparison target,
+  the tree and before any comparison number was produced. Closed 2026-08-04:
+  the verdict is `go`, and its scoping, evidence, risks and carried-forward
+  conditions are in the final section below.** The rule is stated in full here -- instrument, comparison target,
   validity gates, thresholds and their derivations, and what the simplification
   inequality must show -- so that no threshold can be chosen after seeing a
   result.
 - Evidence used (planned): F1 (read-path probe), F2 (counting pass), F3
   (admission probe), F4 (edge-case inventory -- specifically whether any edge
-  case requires stored width, which rejects H4 and the premise).
+  case requires stored width, which rejects H4 and the premise). Evidence used
+  (actual): all four, plus F5, the simplification-inequality accounting pass the
+  rule owed at D1's close.
 - Candidate solutions: go (open Phase 2 design), no-go (fall back to the
   hybrid recorded in Rejected / `28/H7`), or narrow-go (viable but with a
   named condition, e.g. a search index requirement discovered in F1).
@@ -149,7 +152,10 @@ other deletion on the list descends from.
 - Status of the verdict: **Part A answered 2026-08-04. D1 remains open on Part
   B, which now owes only the simplification inequality: F2, F3 and F4 are all
   in, and F4 -- the one input that could have made D1 no-go regardless of F1 --
-  did not fire the trigger** (see the three Part B sections below).
+  did not fire the trigger** (see the three Part B sections below). *(Superseded
+  by the close: F5 has since landed and D1 closed `go` on 2026-08-04. This
+  section is preserved as the Part A record; the closing verdict is the final
+  section of this entry.)*
 - Selected direction (Part A, the read path): **go**.
 - Quantitative verification: [F1](findings.md), measured at `eee1832` plus the
   probe it adds. Median over 5 ABBA rounds of nanoseconds per display-row read,
@@ -201,9 +207,11 @@ other deletion on the list descends from.
   the simplification inequality above. No production storage change is licensed
   by this verdict, and `28/H7` remains the fallback until D1 closes. The
   disposition of Phase 1 -- whether to continue funding it on this evidence --
-  is a human decision. *(F2, F3 and F4 have since landed; see the three Part B
-  sections below. The simplification inequality remains owed and this review
-  stands.)*
+  is a human decision. *(F2, F3, F4 and F5 have since landed; see the four Part
+  B sections below. D1 has closed `go`, so the "no production storage change is
+  licensed" clause above still stands -- the close licenses Phase 2's design
+  work only -- while `28/H7`'s status as the fallback moves from "until D1
+  closes" to "reopened only by a `slower` verdict on the paired ladder".)*
 
 #### Part B, frozen rule for F2 (the eager counting pass)
 
@@ -617,3 +625,189 @@ storage change is licensed. F3 also records two deferred decisions continuing
 `F4`'s numbering: `DD5` (a record's display-row count is counted at admission,
 not derived, so no wide-cell scan runs on the write path) and `DD6` (a forced
 split leaves no back-pointer; readers rejoin by adjacency).
+
+#### Part B, F5's outcome (the simplification inequality) and D1's close
+
+Like `F4`, `F5` needs no frozen measurement rule because it produces no number.
+The rule it is read against was frozen at `de17e95` in the paragraph above titled
+"What the simplification inequality must show", and it has two clauses.
+
+**Clause 1 -- the deletion list must actually contain six named items.** Applied
+once to [F5](findings.md) Observation 1: all six are present in the tree at
+`3fd09fd` and all six are genuinely removed.
+
+| rule's item | present at | disposition |
+| --- | --- | --- |
+| history reflow mutation | `Terminal.swift:4288` `resizeWidth`, `:4575` `reconstructLogicalLines`, `:4713` `pack(line:columns:)`, `:3686`-`:3791` the attachment machinery, `:560`+`:599`-`:639` seven reflow-only types | history is never rebuilt; ~660 lines, of which ~70 move to read/admission rather than vanish |
+| `productionScrollbackCellCap` | `Terminal.swift:784` + 21-line derivation + `scrollbackCellCap`/`scrollbackStoredCellCount` and their two maintenance sites | deleted -- its own doc comment says it bounds reflow's dominant term |
+| `productionScrollbackRowCap` | `Terminal.swift:815` + 29-line derivation + `scrollbackRowCap` + the `while` clause at `:3989` | deleted -- `F4` case 28 shows the byte budget bounds the blank-row regime directly |
+| the `28/D8` cost-model derivations and their tests | ~50 lines of doc comment; six of `TerminalScrollbackBudgetTests.swift`'s 21 tests; `TerminalHistoryDepthSizingProbe.swift` (294 lines) | deleted; `TerminalResizeProbe`/`Support` survives but loses its subject |
+| narrow-then-widen eviction machinery | the cell cap's content-denomination (`:767`-`:770`), the row cap's documented lossy region (`:800`-`:806`), `narrowThenWidenPreservesCappedHistory`, `resizeWidth:4571`'s re-enforcement | deleted by construction: a width change does not touch the arena, so the lossiness question is unrepresentable |
+| continuation-flag bookkeeping in retained history | `PackedRetainedRow.swift:101`/`:149` (one bit per **display row**), the three tail mutations at `Terminal.swift:6369`/`:6387`/`:6436`, `isHistoryHeadTruncated`, `.continuation` stamping at `:4731`/`:4746` | reduced to one open/closed bit per **logical line**; two mutations become header-bit flips, the third disappears (`F4` Observation 5) |
+
+**Clause 2 -- the addition list must be pure, unit-testable, and free of any
+width-dependent persisted state.** Applied once to `F5` Observation 6: all three
+hold. Every addition is a function of bytes in hand (no clock, no id, no IO --
+`lib/TerminalCore` takes none of those); the probes already demonstrate the test
+shape, and it is a strong one (read both stores back row by row and checksum
+every scalar, style id and kind -- `F3` gate 1 is what holds the candidate to
+re-deriving the 5,124 spacers it refuses to store); and nothing width-shaped is
+written into a record. The one width-dependent quantity, the block index's cached
+totals, is a cache -- recomputable from the arena alone, cross-checked as such by
+`F2` gate 1, and discarded rather than migrated at a width change. `F5` records
+that reading as `DD7` rather than asserting it silently, because the stricter
+reading would have made `D1` no-go the moment the index was sketched at
+`de17e95`.
+
+**The magnitude reading, conceded rather than buried.** The README states the
+same gate as "the deletion list must exceed the addition list". On lines of code
+that is close to a wash: ~720 net lines deleted against a ~350-400 line prototype
+that has no spill table, no side tables, no eviction and no search, so a
+production version is plainly larger. `F5` declines to rest the verdict there and
+records the choice as `DD8`. What carries the inequality is invariants: **five
+cross-cutting contracts deleted** (history is always at the current width; a
+narrow-then-widen cycle must not evict; the per-display-row continuation flag
+stays truthful under three tail edits; ten anchors survive a destructive rebuild;
+three bounds whichever binds first) **against three and a half local ones added**
+(one open record at the tail; cached block totals valid or discarded; no record
+exceeds 1/32 of the budget and readers rejoin by adjacency; `hasWideCells` set
+iff a wide cell is present, where being wrong the safe way is still correct). The
+deleted contracts span the store and every reader; the added ones live inside the
+store, enforceable by one writer and testable by one gate. Two deletions are
+stronger than upheld invariants -- `F4` case 18's "two hard-ended lines must not
+join when widening" becomes unrepresentable, and a width change that does not
+touch storage has nothing to evict.
+
+**The inequality holds.** Both clauses of the frozen rule are satisfied and the
+magnitude clause is satisfied on the unit `DD8` selects.
+
+#### Verdict (D1, closed 2026-08-04)
+
+- Status of the verdict: **closed. Part A answered `go` on the read path
+  (`F1`); Part B is now complete -- `F2` confirmed `H2`, `F4` confirmed `H4` and
+  did not fire the stored-width no-go trigger, `F3` confirmed `H3` outright, and
+  `F5` finds the simplification inequality holds.** No frozen threshold in this
+  entry was failed by any input.
+- Selected direction: **go.** Phase 2 opens as a **design** phase.
+- Exact scoping, because a result this favourable invites over-reading:
+  1. **`go` licenses Phase 2's design work and nothing else.** No production
+     storage change is licensed by this verdict. Every Phase 1 number is a
+     microbenchmark, and the README's first acceptance dimension gives the
+     verdict to the paired benchmark ladder: `retained-browse` is the go/no-go
+     and `terminal-feed` / `scrollback-stream` carry `H3`'s named falsifier.
+     Those verdicts are still owed, against a real implementation, under rules
+     frozen before the comparisons are read.
+  2. **The three microbenchmark wins are predictions at the frame, not
+     measurements of it.** `F1`'s 0.608x/0.610x browse converts to roughly -2% on
+     `retained-browse` through `28/F17`'s ~5.2% share; `F3`'s 0.624x-0.691x
+     admission converts to roughly -7% on `scrollback-stream`'s block through
+     `28/F20`'s 19.7% share. Both conversions are labelled predictions in their
+     own entries and stay predictions here.
+  3. **`H3`'s own caution survives.** `28/F20`'s residual may be scheduling
+     rather than encoding (`28/H8`); this store does not address scheduling, and
+     `F3` could not see it.
+  4. **Milestone 1 only** for the eager index recompute (`F2`), and the
+     forced-split cap is derived rather than measured (`DD3`).
+- Evidence used: `F1` (read path), `F2` (counting pass), `F3` (admission), `F4`
+  (edge-case inventory), `F5` (the simplification inequality). Four measured
+  inputs and one accounting pass; no measured input remains outstanding at
+  Phase 1's scope.
+- Behavioral verification: `F1` Observation 2 (derived display-row count matches
+  the engine's for all 10,773 logical lines, no width-dependent state stored);
+  `F3` gate 1 (both stores read back row by row with identical checksums and
+  display-row counts on all four classes, including 5,124 spacers the candidate
+  refuses to store and re-derives at read); `F2` gate 1 (every counting pass's
+  total cross-checked against an independently computed sum, and responding
+  correctly to width); `F4` Observation 2 (28 edge cases, zero requiring stored
+  width).
+- Quantitative verification: the three tables above -- `F1`'s read path,
+  `F2`'s counting pass, `F3`'s admission -- each measured under a rule frozen
+  before its probe existed in the tree, with every validity gate held on the
+  quoted invocation and every voided invocation recorded rather than dropped.
+- Tradeoffs and correctness risks:
+  - **Eviction is unpriced on both sides** and is the largest unmeasured term in
+    Phase 1's evidence. `DD2`'s whole-record eviction additionally needs the
+    block index's head to move with it, which nobody has designed.
+  - **One new failure mode with no analogue today: a stale block index.** Today
+    the store *is* at the width; the design trades that eagerly-maintained truth
+    for a derived cache with four trigger points (width change, admission,
+    head eviction, forced split). `DD7` explains why it is still not
+    width-dependent persisted state; it remains the one addition that can grow.
+  - **The addition list is sized from a prototype**, missing spills (~0.12% of
+    real rows, `28/F11`), hyperlink and content-identity side tables, semantic
+    marks beyond a header slot, search and eviction. The addition side carries
+    the larger error bar, which is why every carried-forward condition below is
+    on that side.
+  - **The wrapping rule is not deleted, it moves** to read time (`F5`
+    Observation 2). The read path must reproduce `pack`'s spacer, continuation
+    and soft-wrap semantics exactly; `F3`'s cross-arm checksum is the model for
+    the test that proves it.
+- Decision and rationale: the design was funded to answer one question -- can
+  history be stored unwrapped and wrapped at read without regressing the read
+  path -- and the answer is not merely yes but faster, on the read path
+  (0.608x/0.610x), on random seek (0.898x/0.803x), on admission
+  (0.624x/0.691x/0.624x), and in footprint (0.744x-0.925x of what the budget
+  charges today). The counting pass the design deletes reflow *into* costs
+  0.016 ms at the depth `28/F23` priced at 600.5 ms of reflow. The one input that
+  could have killed the premise regardless of any timing -- an edge case
+  requiring stored width -- was swept across seven reference trees plus DanTerm's
+  own reflow path and ~40 resize/wrap tests, and does not exist. And the
+  simplification the README made a co-equal acceptance dimension is real, on the
+  unit that matters: five engine-spanning contracts deleted against three and a
+  half store-local ones added.
+- Direction review: **`28/H7` (the hybrid) stays in Rejected and is no longer the
+  fallback for `D1`'s purposes.** Its reopening condition becomes a Phase 2
+  failure -- a `slower` verdict on the paired ladder against a real
+  implementation -- rather than a `D1` no-go. The disposition of Phase 2, and
+  whether to fund it now, remains a human decision.
+
+**Conditions and unpriced terms Phase 2 inherits.** Listed here rather than left
+in the findings, because a verdict that carries conditions must carry them where
+the verdict is read.
+
+1. **The wide-record counting fallback is unpriced** (`F4` Observation 1 and
+   Uncertainty; `F2`'s stimuli were ASCII, so every record took the O(1) `ceil`
+   path). Re-run `F2`'s probe against a wide stimulus. `H2` cleared its bound by
+   15.6x, but that margin was not measured on wide content and must not be
+   quoted as though it were.
+2. **Eviction is unmeasured on both sides** (`F1`, `F3`, and the README's open
+   question): today's `Terminal.swift:3978` `enforceScrollbackBudget` /
+   `ScrollbackBuffer.removeFirst` against `DD2`'s whole-record eviction, plus
+   the index-head invariant whole-record eviction adds. A real pane at steady
+   state evicts on every admitted row, so `F3`'s admission win is measured on
+   the half of the write path that was easy to isolate.
+3. **The paired ladder is owed.** `retained-browse` (the README's go/no-go),
+   `terminal-feed` and `scrollback-stream` (`H3`'s named falsifier), against a
+   real implementation, under rules frozen before the comparisons are read. The
+   arc baseline for the descriptive wide reading is pinned at `de17e95`, and
+   that reading is accounting only, never a verdict.
+4. **`28/D11`'s trial bounds.** The caps this design deletes are currently
+   shipped as a dogfood trial whose verdict (human: keep the caps, the hitch is
+   livable) is recorded in conversation but not yet as a doc 28 decision
+   amendment. Phase 2's budget task must state what happens to them during
+   migration.
+5. **The block index's four trigger points** -- width change, admission
+   increment (`DD5`), head eviction, forced split -- must be enumerated and each
+   given a behavioral test. This is the design's one new invalidation
+   discipline (`F5` Observation 3).
+6. **The display-row-indexed call-site enumeration** (Phase 2's first ledger
+   task). The invariant that dies is "history is always at the current width",
+   and `28/H7`'s entry already names it.
+7. **Budget and eviction semantics** (Phase 2's second ledger task): arena size
+   as the byte budget, what "keep N logical lines" means as a user-facing knob,
+   and `F3` Observation 4's 0.744x-0.925x footprint ratio as the input.
+8. **The forced-split cap is derived, not measured** (`DD3`). No pathological
+   input -- `cat` of a binary, minified JSON -- has been fed to a real engine to
+   see what a session actually produces, and no probe class reaches 65,536
+   cells.
+9. **The record format must carry what every probe stripped**: the spill table
+   (`F1`'s arm calls `fatalError` on a multi-scalar cell; `28/F11` measures
+   spills in ~0.12% of rows), `hyperlinkId` and `contentIdentity` side tables
+   (the strip was conservative toward the baseline, so the candidate's identity
+   run table -- one per logical line rather than one per display row -- is an
+   unbuilt advantage, not a free one), and semantic marks beyond a header slot.
+10. **The read path must reproduce `pack`'s fold exactly** -- `.spacerHead` at a
+    one-column gap, `isSoftWrapped` marking, `.continuation` stamping -- because
+    the fold moves to read time rather than being deleted (`F5` Observation 2).
+11. **`DD1`-`DD8` are a human's to revisit.** `DD7` in particular: the stricter
+    reading of "width-dependent persisted state" would reopen `D1`.
