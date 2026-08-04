@@ -407,3 +407,396 @@ tighter resolution than that should not take these cells as interchangeable.
   count-source clears the bound without the parallel array), and if a future
   design does want the counts array, this entry has already priced what it buys
   (4.3x on the pass at 100,000 lines, nothing that matters at trial depth).
+
+### F4 -- 28 edge cases, none requiring stored width, and one arithmetic correction: `ceil(cells / width)` is wrong for lines containing wide cells
+
+- Status: recorded. This is `D1` Part B's third input and the only Phase 1
+  input that could have made `D1` no-go regardless of `F1`. **It does not.** No
+  case in the inventory requires width-dependent data persisted in history, so
+  `H4` is confirmed and the premise survives. What the sweep does produce is one
+  correction to the *mechanism* `H1` stated -- display-row count is not
+  `ceil(cells / width)` for a line containing wide cells -- and it is a change
+  to the derivation, not to what is stored.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: `dbe42f2`, the commit that recorded `F2`. **No
+  file under `lib/` is added or changed by this entry** -- it is a reading and
+  cataloguing pass. The two untracked paths present throughout this doc's work
+  are still present and still in no build: `TODO.md` and
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`.
+- Commands, inputs, or reproduction: the reference trees were read at the pins
+  `just fetch-references --list` records, and DanTerm's own reflow behavior was
+  read from `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` and its
+  resize/wrap test suites. Observation 1's counter-example was executed against
+  the real engine through a throwaway test in
+  `lib/TerminalCore/Tests/TerminalCoreTests/`, deleted before this commit; its
+  body is quoted below so the reading is reproducible from the doc alone.
+- Artifacts: none durable.
+
+#### What was swept
+
+Seven implementations, chosen because most store display rows and rewrap
+destructively while iTerm2 -- the doc's stated existence proof -- stores raw
+lines and wraps at read, which is this design's category:
+
+`references/iterm2/sources/LineBlock.mm`, `references/kitty/kitty/resize.c`,
+`references/foot/grid.c#grid_resize_and_reflow`,
+`references/wezterm/term/src/screen.rs#rewrap_lines`,
+`references/vte/src/vte.cc`,
+`references/windows-terminal/src/buffer/out/textBuffer.cpp#TextBuffer::Reflow`,
+`references/alacritty/alacritty_terminal/src/grid/resize.rs`. Plus DanTerm's own
+reflow -- `Terminal.swift#reconstructLogicalLines` and `Terminal.swift#pack`,
+which already build and repack logical lines, destructively, at every width
+change -- and the tests that pin it.
+
+One correction to the README's framing fell out of the sweep and is recorded
+rather than left standing: **vte is a second, partial member of the category.**
+Its scrollback is a UTF-8 text stream plus an attr stream, and the wrap points
+live in a separate row stream that `references/vte/src/ring.hh`'s own comment
+describes as "(This stream is regenerated when the contents rewrap on resize.)"
+-- so vte's *stored text* is already width-free, exactly as this design wants.
+What vte does not do is defer the regeneration: `references/vte/src/ring.cc#Ring::rewrap`
+rebuilds the row stream eagerly at resize instead of deriving wrap points at
+read. It is therefore the halfway house between today's DanTerm and this doc's
+candidate, and it is the closest thing in the sweep to a working reference for
+the record format -- including for the parts iTerm2 gets to skip.
+
+DanTerm's existing engine is the most important source in the sweep and is
+easily overlooked: **`reconstructLogicalLines` is the admission rule this design
+proposes, run backwards.** It joins display rows on `isSoftWrapped`, measures a
+soft-wrapped row to full width and a hard-ended row to `retainedContentEnd`,
+drops `.spacerHead` cells entirely, and carries one `semanticPrompt` per logical
+line. That is exactly the record the arena would store. The design is therefore
+not introducing a new normal form; it is deleting the round trip that converts
+to it and back on every resize.
+
+#### Observation 1 -- the one correction: display-row count is not `ceil(cells / width)` when the line contains wide cells
+
+`H1` and `F2` both state the mechanism as "per-line display-row counts derived
+as `ceil(cells / width)` from the record header". For narrow content that is
+exact -- `F1` Observation 2 verified it on all 10,773 logical lines it measured,
+and said in terms that it "says nothing yet about wide characters at the last
+column, which `F4` owns". It is wrong for wide content, and the counter-example
+is small:
+
+    var t = try #require(Terminal(columns: 3, rows: 40))
+    t.feed(Array("\u{754C}\u{754C}\u{754C}".utf8))   // three 2-cell clusters, 6 cells
+
+Measured against the real engine: **3 display rows, where `ceil(6 / 3)` predicts
+2.** Five wide clusters (10 cells) at width 3 measure 5 rows against a predicted
+4. Narrow content and wide content that happens to divide evenly both match, so
+this is not a case a casual check finds.
+
+The mechanism is `Terminal.swift#pack`, and it is deliberate:
+
+    if unit.cells.count == 2, columns - column == 1 {
+        packedRows[row].cells[column] = GridCell(kind: .spacerHead, ...)
+        packedRows[row].isSoftWrapped = true
+
+A 2-cell cluster that meets a row with one column left does not split; a
+`.spacerHead` fills the column and the cluster starts the next row. The exact
+count is `ceil((cells + spacers) / width)`, and `spacers` -- the number of wide
+clusters that land on a boundary -- is a function of *where* the wide cells sit,
+so it needs a scan of the record's cells, not a read of its header.
+
+**This is a derivation change, not a storage change.** `spacers` is computed from
+(logical line, width) exactly as the design requires; nothing width-dependent is
+persisted. Every surveyed implementation that wraps at read pays the same price
+in the same place: iTerm2 splits precisely here, with
+`references/iterm2/sources/LineBlock.mm#LineBlockNumberOfFullLinesFastPath`
+(`MAX(0, length - 1) / width`, i.e. `ceil`) guarded by a flag, falling through
+to `references/iterm2/sources/LineBlock.mm#iTermLineBlockNumberOfFullLinesImpl`,
+whose whole body is the correction:
+
+    for (int i = width; i < length; i += width) {
+        if (ScreenCharIsDWC_RIGHT(buffer[i])) { --i; }
+        ++fullLines;
+    }
+
+vte reaches the same place from the other side, and its version is worth having
+because it shows the correction is intrinsic to the content rather than to
+iTerm2's data structure: `references/vte/src/ring.cc#Ring::rewrap` wraps *early*
+rather than padding --
+
+    if (col >= columns - attr_change.attr.columns() + 1) {
+        /* Wrap now */
+        new_record.width = col;
+        new_record.soft_wrapped = 1;
+
+-- and records the short `width` on the row. No spacer is stored either way; the
+display row is simply narrower than the terminal, which is the same statement as
+"the count is not `ceil(cells / width)`".
+
+The intended DanTerm behavior is the same split, with one deliberate divergence.
+iTerm2's `mayHaveDoubleWidthCharacter` is a **sticky, buffer-wide, one-way**
+flag (`references/iterm2/sources/LineBuffer.m#setMayHaveDoubleWidthCharacter:`
+sets it and never clears it, and
+`references/iterm2/sources/iTermLineBlockArray.m#setAllBlocksMayHaveDoubleWidthCharacters`
+then discards every cached width count), so one CJK character anywhere
+permanently downgrades the entire buffer to the scanning path -- which is why
+iTerm2 needs three further layers of memoization
+(`LineBlock.mm`'s `_numberOfFullLinesCache`, `LineBlockMetadata`'s
+`number_of_wrapped_lines`, and
+`references/iterm2/sources/iTermDoubleWidthCharacterCache.h`) to make it
+tolerable. DanTerm should carry the bit **per record**, in the header flags the
+sketch already has: it is a property of one logical line's content, it is known
+at admission for free (the admitting row's cells are in hand), and it is
+width-independent, so a width change never invalidates it. A record without the
+bit keeps the O(1) `ceil`; a record with it pays an O(cells) scan.
+
+The bit is an optimization, not a correctness requirement -- always scanning
+would also be correct -- which is the strongest form this finding can take
+against `D1`'s no-go trigger: the correction does not even need a stored flag,
+let alone stored width.
+
+#### Observation 2 -- the inventory
+
+28 cases. `stored width?` answers `D1`'s no-go trigger directly: **`yes` means
+the case is decidable from (logical line, width) plus live-grid state; `flag`
+means it additionally wants a width-independent content bit in the record
+header; `NO` would be a no-go trigger.** There are no `NO` rows.
+
+| # | input / scenario | intended DanTerm behavior under the logical-line store | stored width? |
+| ---: | --- | --- | :---: |
+| 1 | wide cluster meets a row with one column left | insert `.spacerHead` at read/refold time, start the cluster on the next display row; never store the spacer | yes |
+| 2 | display-row count of a line containing wide cells | `ceil((cells + spacers) / width)`; scan the record when its `hasWideCells` header bit is set, `ceil(cells / width)` otherwise (Observation 1) | flag |
+| 3 | cluster wider than the whole pane | unreachable: `Terminal.swift#resize` refuses `columns < 2` and `desiredClusterWidth` caps a cluster at 2 cells. Keep the guard rather than adopting a policy | yes |
+| 4 | VS16 upgrades a placed narrow cluster to 2 cells at the last column | live-grid concern only; the relocation happens before the row can scroll off, so history sees the settled cells | yes |
+| 5 | multi-scalar grapheme cluster at a wrap boundary | a cluster is one cell (plus its tail), so it is atomic in the record and can never straddle a boundary | yes |
+| 6 | cursor sits on a soft-wrapped line during a width change | refold the live screen only; the cursor never anchors into history because a row the cursor is on has not scrolled off | yes |
+| 7 | pending wrap (`isPendingWrap`) armed at a width change | live-screen refold keeps today's boundary-anchor rule; `Terminal.swift#pack`'s `boundaryDestinations` moves to the refold, unchanged | yes |
+| 8 | cursor parked in trailing blanks past the content end | live-screen refold keeps today's `.trailingPadding` distance rule, including the "squeezed-out trailing blank defers its wrap" clamp | yes |
+| 9 | the wrap claim on the last retained row is severed or restored | flip the tail record's open/closed header bit: severing closes the open line, restoring reopens it. No cell is rewritten, and only the tail is touched | yes |
+| 10 | a `.spacerHead` on the last retained row is cleared | no-op: the store never held the spacer | yes |
+| 11 | alternate screen, width change | never reflowed; clip and pad the rectangle as `Terminal.swift#resizedRectangle` does today. Unaffected by this design | yes |
+| 12 | alternate screen, scrollback admission | never admitted; the alt seam in `ScrollbackBuffer`'s reader stays as it is | yes |
+| 13 | selection endpoints across a width change | remap through (logical line, cell offset), which becomes the *native* address instead of a transient reflow attachment | yes |
+| 14 | search range and hovered/armed hyperlink ranges across a width change | same remap as 13; the four attachment computations in `resizeWidth` collapse into one address conversion | yes |
+| 15 | browsing viewport anchor (scroll anchoring) across a width change | content-anchored, as today: the anchor is the top row's first cell, expressed as (logical line, offset) | yes |
+| 16 | OSC 133 marks and `.continuation` stamping across a width change | one semantic mark per record (the header's mark slot); continuation rows are stamped at read, as `Terminal.swift#pack` already does | yes |
+| 17 | trailing blanks: hard-ended row vs soft-wrapped row | admission measures a soft-wrapped row to full width and a hard-ended row to `retainedContentEnd`, exactly `reconstructLogicalLines`'s rule | yes |
+| 18 | two hard-ended lines must not join when widening | two records; a record boundary is a hard newline by construction, so the failure mode is unrepresentable rather than merely tested against | yes |
+| 19 | interior spaces of a continued row survive a narrowing | they are ordinary cells in the record; nothing distinguishes them from text | yes |
+| 20 | a row emptied mid-line (prompt blanking) must not splice its old width into the next reflow | strictly removed: once a row is admitted its cells are frozen, so no later width change re-measures it. The live-screen rule still applies to rows that have not scrolled off | yes |
+| 21 | DECAWM off, printing at the right margin | the row never soft-wraps, so it closes a record at its retained content end; measured: `"\u{1B}[?7l0123456789"` at 5 columns retains `01239` and no wrap flag | yes |
+| 22 | hard tabs | already resolved to cursor motion at parse time (`Terminal.swift#execute`, `0x09`); history stores cells, never a tab | yes |
+| 23 | styles, BCE padding, wide tails and spacers synthesized at a new width | style ids travel with cells; the synthesized wide tail and spacer inherit the head's style, as `reflowSynthesizesCoherentWideTailsAndSpacerHeads` pins | yes |
+| 24 | DECDWL / DECDHL line attributes | not supported by DanTerm and not proposed here. If added, the attribute is a per-line content property that belongs in the record header, still not a stored width | yes |
+| 25 | a single logical line with no hard newline, longer than history | one record that grows until the forced-split cap; no reference caps this (Observation 3) | yes |
+| 26 | the forced-split cap itself | split at a fixed cell count with a `forcedSplit` header bit so copy, search and text extraction rejoin logically (Observation 3) | flag |
+| 27 | eviction at the head of the arena | evict whole records. The head-truncation flag `isHistoryHeadTruncated` becomes always-false, and the budget can undershoot by at most one record, which the cap bounds (deferred decision DD2) | yes |
+| 28 | degenerate history of blank rows | blank rows fold into records with near-zero cells, so the byte budget bounds them directly. This is the regime `productionScrollbackRowCap` exists for, and the row cap is on the deletion list | yes |
+
+#### Observation 3 -- the forced-split cap: no reference caps a logical line, so the cap is DanTerm's own bound and needs its own derivation
+
+The README proposes 65,536 cells "to be justified or replaced in F4". The sweep
+found **no implementation that caps the length of a single logical line or the
+number of display rows one may span.** What each has instead is an aggregate
+bound the long line simply consumes:
+
+- iTerm2 grows a block to fit: `references/iterm2/sources/LineBuffer.m#reallyAppendLine:length:partial:width:metadata:continuation:`
+  allocates `length + prefix_len + block_size` for a line too long for the
+  current block, with the in-source comment "this is the case when the line is
+  freaking huge". Its only line-shaped cap is `iTermLineBlockMaxLines = 10000`
+  in `references/iterm2/sources/LineBlock.mm#reallyAppendLine:length:partial:width:metadata:continuation:cert:`,
+  which bounds lines *per block* to keep serialized state small, not line length.
+- kitty: none; the bound is `scrollback_lines` (default 2,000,
+  `references/kitty/kitty/options/definition.py`), and
+  `references/kitty/kitty/options/utils.py#scrollback_lines` maps a negative
+  value to `2 ** 32 - 1`.
+- foot: none; the ring is a power of two capped at 2^30 rows in the resize path
+  of `references/foot/render.c`.
+- alacritty: none per line; `references/alacritty/alacritty_terminal/src/grid/resize.rs#Grid::shrink_columns`
+  ends with `reversed.truncate(self.max_scroll_limit + self.lines)`, an aggregate
+  row bound (default history 10,000).
+- windows-terminal: none; an over-long line circles the ring inside
+  `references/windows-terminal/src/buffer/out/textBuffer.cpp#TextBuffer::Reflow`.
+- wezterm: none in `references/wezterm/term/src/screen.rs#Screen::rewrap_lines`,
+  which joins a logical line unboundedly. It does cap logical-line *scanning* at
+  `MAX_LOGICAL_LINE_LEN: usize = 1024`, declared inside both
+  `references/wezterm/term/src/screen.rs#Screen::for_each_logical_line_in_stable_range`
+  and its `_mut` twin, with the comment "Avoid pathological cases where we have
+  eg: a really long logical line (such as 1.5MB of json) that we previously
+  wrapped." That is the closest precedent in the sweep to a per-logical-line
+  bound, it names exactly the input this doc's open question names, and it is
+  still a *consumer* limit rather than a storage split.
+
+Two near-precedents, then, and both degrade a feature rather than split the
+line. vte's is the second:
+  `references/vte/src/vtedefines.hh` defines
+  `VTE_RINGVIEW_PARAGRAPH_LENGTH_MAX 500` -- "Maximum length of a paragraph, in
+  lines, that might get proper RingView (BiDi) treatment" -- consumed by
+  `references/vte/src/ringview.cc#RingView::update` and
+  `references/vte/src/bidi.cc#BidiRunner::paragraph`. Past 500 display rows vte
+  keeps the paragraph whole and gives up a *feature* on it.
+
+So the cap is not a compatibility requirement, and the references supply no
+number to adopt -- 1,024 cells and 500 display rows are thresholds past which a
+*feature* is dropped, not lengths a store refuses to hold. What they do supply
+is the shape of the argument: every one of them bounds *the store*, and lets one
+line consume as much of that bound as it wants. DanTerm's reason for a cap is narrower and real -- the arena is one
+contiguous region, a record must fit inside it, and eviction granularity is one
+record (case 27) -- so the cap should be derived from the arena rather than
+guessed.
+
+**The proposed 65,536 already is that derivation, and the entry records it
+rather than leaving it a guess.** A C1 cell is one `UInt64` (8 bytes;
+`PackedRetainedRow.swift`'s `Header.cellStyleShift` and the `u64` accessors), the
+production byte budget is `Terminal.productionScrollbackBudgetBytes` =
+16,777,216, and `65,536 x 8 = 524,288` bytes = **1/32 of the arena**. Stated as a
+rule -- *no single record may exceed 1/32 of the byte budget* -- the number
+follows from the budget instead of from taste, moves with it, and bounds both
+hazards it exists for: the worst-case eviction undershoot is 1/32 of history,
+and the worst-case in-block wide-cell scan (Observation 1) is 65,536 cells.
+Recorded as a derivation offered by F4, to be ratified in Phase 2 (DD3).
+
+For scale on what a real pathological line costs: at 179 columns a
+65,536-cell record is 367 display rows, and at the minimum 2 columns it is
+32,768 -- under `productionScrollbackRowCap`'s 89,500, so a single forced-split
+segment cannot alone exhaust any current bound.
+
+#### Observation 4 -- where the references disagree, and what DanTerm does
+
+Six disagreements matter to this design. In each, DanTerm's existing behavior
+is already pinned by its own tests, so the intended behavior is "keep it", and
+the reference split is recorded so it is not re-litigated.
+
+| question | the split | DanTerm |
+| --- | --- | --- |
+| selection across a width change | **cleared:** kitty (`references/kitty/kitty/screen.c#screen_resize` calls `clear_all_selections`), alacritty (`references/alacritty/alacritty_terminal/src/term/mod.rs#Term::resize`: `if old_cols != num_cols { self.selection = None; }`). **remapped:** foot (tracking points through `references/foot/grid.c#grid_resize_and_reflow`), iTerm2 (`references/iterm2/sources/VT100ScreenMutableState+Resizing.m#convertRange:toWidth:to:inLineBuffer:tolerateEmpty:`), vte (markers 4 and 5 of the seven in `references/vte/src/vte.cc#Terminal::screen_set_size`, with block selection alone cleared) | remap, and keep remapping: `TerminalResizeTests` and `TerminalSelectionTests` pin it, and the logical-line store makes the remap cheaper, not harder (case 13) |
+| a cluster wider than the pane | **discarded:** kitty (`references/kitty/kitty/resize.c#multiline_copy_src_to_dest`). **replaced by a blank:** foot (`references/foot/grid.c#grid_resize_and_reflow`) | unreachable behind the `columns >= 2` guard; adopt neither policy (case 3) |
+| trailing blanks on a continued row | **trimmed:** kitty trims unwritten cells only (`references/kitty/kitty/resize.c#init_src_line`), windows-terminal trims to `MeasureRight` (`references/windows-terminal/src/buffer/out/Row.cpp#ROW::MeasureRight`, which returns full width for a wrap-forced row). wezterm trims by *character*, `references/wezterm/wezterm-surface/src/line/line.rs#Line::wrap` truncating at the last cell whose `str() != " "`, which also discards a blank carrying a non-default background. **not trimmed:** foot explicitly re-extends a continued row to full width; vte does not trim in `Ring::rewrap` at all and instead shrinks rows at write time and strips trailing nondefault-background blanks at read (`references/vte/src/vte.cc#Terminal::get_text`) | full width for a soft-wrapped row, `retainedContentEnd` for a hard-ended one -- the same rule, and already what `reconstructLogicalLines` does (case 17). Note DanTerm trims by cell *kind*, not by character, so wezterm's BCE-blank loss is not reachable here; `bceOnlyPaddingRemainsStyleBlindAcrossResize` pins that |
+| viewport across a width change | **numeric:** kitty leaves `scrolled_by` untouched. **content-anchored:** foot adds the viewport to its tracking points; vte anchors on the row below the bottom visible row, after two special cases for "was at bottom" and "was at top" (`references/vte/src/vte.cc#Terminal::screen_set_size`) | content-anchored, pinned by `resizePreservesBrowsingAnchor` (case 15) |
+| hard tabs in history | **not stored:** wezterm (`references/wezterm/term/src/terminalstate/mod.rs#TerminalState::c0_horizontal_tab` moves the cursor and writes nothing), kitty, foot. **stored:** vte writes a real `'\t'` cell spanning up to `VTE_TAB_WIDTH_MAX` = 15 columns when the tab lands past existing content (`references/vte/src/vteseq.cc#Terminal::move_cursor_tab_forward`), and the span survives its rewrap unchanged rather than re-snapping to the new tab stops | not stored, as today (case 22). vte's smart tab is worth knowing exists -- it is a per-cell content property, so it would fit a record header without introducing a width -- but it buys copy fidelity DanTerm has not asked for |
+| DECDWL / DECDHL line attributes | **unimplemented:** vte stubs all three (`references/vte/src/vteseq.cc#Terminal::DECDWL`: "Probably not worth implementing"). **implemented and silently dropped by reflow:** wezterm sets `LineBits` in `references/wezterm/wezterm-surface/src/line/line.rs#Line::set_double_width` but `#Line::wrap` builds fresh rows with `bits = NONE`, and its `#test_dec_double_width` performs no resize, so the loss is untested. **partially handled:** windows-terminal refuses to reflow a non-single-width row and force-newlines around it | unimplemented, and this doc does not propose adding it (case 24). If it is ever added, wezterm's silent drop is the failure to avoid |
+
+Where the sweep *agrees* is worth one line, because it is the shape cases 6-8
+and 13-15 all want. Every implementation that remaps anything across a width
+change converts (row, column) into an offset into the unwrapped logical text,
+carries it through, and converts back. vte's is the most complete and is the
+model to take to Phase 2: `CellTextOffset { text_offset, fragment_cells,
+eol_cells }` (`references/vte/src/ring.hh`, `Ring::CellTextOffset`), computed by
+`references/vte/src/ring.cc#Ring::frozen_row_column_to_text_offset` and reversed
+by `#Ring::frozen_row_text_offset_to_column`. The three fields are exactly the
+three cases DanTerm's reflow anchor enum already distinguishes -- an offset in
+the line, a position *inside* a wide cluster, and a position at or past
+end-of-line -- and vte carries seven such markers simultaneously (cursor, saved
+cursor, below-viewport, below-current-paragraph, two selection endpoints).
+DanTerm carries ten today, through the four `attachments` computations in
+`Terminal.swift#resizeWidth`. Under the logical-line store that offset *is* the
+stored address, so the conversion happens once at the boundary instead of twice
+per resize.
+
+#### Observation 5 -- the immutability premise survives, but only because every history mutation is confined to the tail record
+
+The design says "scrolled-off content is immutable, so the open line only ever
+grows at its end". That is a claim about today's engine, and today's engine does
+write into retained history. Every such write was enumerated: there are exactly
+three, all in `Terminal.swift`, and **all three target
+`scrollbackRows.indices.last` and no other index**:
+
+- `Terminal.swift#severScrollbackWrapClaim` -- clears `isSoftWrapped` and
+  replaces a trailing `.spacerHead`, reached only through
+  `Terminal.swift#severWrapClaim(before:replacementStyleId:)` at row 0.
+- `Terminal.swift#restoreWrapClaimBeforeCursor` -- sets `isSoftWrapped` back to
+  true on the last retained row.
+- `Terminal.swift#clearPreviousSpacer` -- clears a `.spacerHead` on the last
+  retained row when column 0 or 1 of the top viewport row is cleared.
+
+Under the logical-line store these become: close the open record, reopen it, and
+nothing at all (the spacer was never stored). All three are header-bit flips on
+the arena's tail, which is the one record the append path already writes. The
+premise holds, and the cases are 9 and 10 in the inventory.
+`TerminalInspectionInvalidationTests`' "scrollback-tail wrap and spacer edits
+invalidate that retained row" is the existing test that pins this surface, and
+it is the test to re-point at the new store.
+
+#### Deferred decisions
+
+Recorded here so a human can revisit; each took the obvious, simple choice
+rather than blocking.
+
+- **DD1 -- selection is remapped, not cleared, across a width change.** Two
+  references clear it (Observation 4). Keeping DanTerm's remap is chosen because
+  it is existing pinned behavior and this design makes it cheaper; the
+  alternative would be a user-visible regression taken for implementation
+  convenience.
+- **DD2 -- eviction evicts whole records.** The simple choice. The cost is that
+  `isHistoryHeadTruncated` becomes always-false and the byte budget can
+  undershoot by up to one record. The alternative -- advancing a head offset
+  inside the first record so eviction stays display-row granular -- is real and
+  cheap to add later, and is not needed for milestone 1.
+- **DD3 -- the forced-split cap is 65,536 cells, stated as "no record exceeds
+  1/32 of the byte budget".** Same number the README proposed, now with a
+  derivation (Observation 3) instead of a guess. Reopen if the budget changes
+  shape or if Phase 2 finds the eviction granularity or the wide-cell scan binds.
+- **DD4 -- the `hasWideCells` header bit is carried per record, not per buffer.**
+  iTerm2's buffer-wide sticky flag is the alternative and is rejected on
+  DanTerm's own constraint: a per-record bit costs one flag in a header that
+  already exists, is computed free at admission, and never needs the three
+  memoization layers iTerm2 added to survive its own pessimism.
+
+- Observation: 28 edge cases were catalogued from seven reference
+  implementations and DanTerm's own reflow path and tests. Every one is
+  decidable as a pure function of (logical line, current width) plus live-grid
+  state. **Zero cases require width-dependent data persisted in history.** One
+  case (2) corrects the arithmetic `H1` and `F2` assumed, and one (26) wants a
+  `forcedSplit` marker; both are content properties, not widths.
+- Inference: `H4` is **confirmed** and `D1`'s no-go trigger does not fire. The
+  design's core premise -- nothing width-shaped survives in storage -- holds
+  against the full set of inputs the references' test suites exist to surface.
+  Two things it hands to Phase 2 beyond the table: display-row counting needs a
+  per-record `hasWideCells` bit and an O(cells) fallback, and the forced-split
+  cap now has a derivation rather than a guess.
+- Competing interpretations:
+  1. *The inventory is only as good as the sweep, and a case was missed.* The
+     honest limit of a cataloguing pass. Two things bound it: the sweep is
+     anchored on DanTerm's own reflow implementation and its ~40 resize/wrap
+     tests, which is a set already hardened against real incidents, and the
+     references were read for their *tests* as well as their code precisely
+     because a test suite is a record of what bit somebody. What would change
+     the answer is a case that needs stored width. The two trees that separate
+     text from wrap points -- iTerm2 and vte -- both keep every width-derived
+     number in a structure they are willing to throw away
+     (`references/iterm2/sources/iTermLineBlockArray.m#setAllBlocksMayHaveDoubleWidthCharacters`
+     discards the whole cache collection; vte's row stream "is regenerated when
+     the contents rewrap on resize"), which is weak but real evidence that the
+     category is empty.
+  2. *Case 2 is really a no-go in disguise -- a scan is a hidden cost, and a
+     hidden cost is a hidden dependency on width.* It is not: the scan reads the
+     record's own cells and the current width, both of which the design already
+     has. The flag that avoids the scan is a content property. `D1`'s trigger is
+     "requires storing wrap or width state", and no reading of case 2 reaches it.
+  3. *`ceil` was always known to be wrong and this finding is bookkeeping.* `F1`
+     Observation 2 explicitly reserved the question for `F4` rather than
+     assuming either answer, and `F2` measured a pass built on the `ceil`
+     assumption. Recording the correction is what keeps `F2`'s number from being
+     quoted at content it does not cover -- see Uncertainty.
+- Uncertainty:
+  - **`F2`'s counting pass is priced for narrow content only.** Its `mix` and
+    `full` stimuli are ASCII, so every line took the O(1) `ceil` path. A history
+    of CJK or emoji output makes the eager pass an O(cells) walk of the flagged
+    records. `H2` cleared its bound by 15.6x, so there is margin, but the margin
+    is not measured against a wide-content stimulus and must not be assumed to
+    transfer. This is a named Phase 2 measurement, not a resolved question.
+  - **The forced-split cap is derived, not measured.** Observation 3 gives it a
+    rule; no pathological input (`cat` of a binary, minified JSON) was fed to a
+    real engine to see what a session actually produces.
+  - **`references/windows-terminal/` in this checkout is partial** -- it has
+    `src/buffer/`, `src/terminal/`, `src/types/` and no `src/host/` or
+    `src/cascadia/` -- so its alternate-screen and selection behavior could not
+    be read, and cases 11-13 rest on the other six trees. Its reflow and cursor
+    evidence is complete.
+  - **iTerm2 has no LineBuffer unit tests in this tree.** Every iTerm2 citation
+    above is production code, and the category's existence proof is therefore an
+    argument from a shipping implementation rather than from its test suite.
+  - **The inventory is decisions, not code.** Nothing here has been implemented
+    or measured end to end; each row is a claim about what the design must do,
+    to be discharged by Phase 2's call-site enumeration.
+- Next action: `D1` Part B has `F4` in and its verdict is unchanged in
+  direction -- **still `go` on Part A, still open on Part B, and the no-go
+  trigger is now known not to fire.** Owed: `F3` (the admission probe) and the
+  simplification inequality. Two amendments this entry writes back into the
+  README: `H1`'s and the candidate direction's `ceil(cells / width)` becomes
+  "`ceil` for narrow records, scan for wide ones", and the forced-split cap's
+  open question closes into DD3's derivation. One new open question opens: the
+  eager counting pass is unpriced on wide content.

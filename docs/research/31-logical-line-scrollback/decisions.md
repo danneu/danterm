@@ -147,7 +147,9 @@ other deletion on the list descends from.
 #### Verdict
 
 - Status of the verdict: **Part A answered 2026-08-04. D1 remains open on Part
-  B.**
+  B, which now owes only F3 and the simplification inequality: F2 and F4 are
+  both in, and F4 -- the one input that could have made D1 no-go regardless of
+  F1 -- did not fire the trigger** (see "Part B, F4's outcome" below).
 - Selected direction (Part A, the read path): **go**.
 - Quantitative verification: [F1](findings.md), measured at `eee1832` plus the
   probe it adds. Median over 5 ABBA rounds of nanoseconds per display-row read,
@@ -199,7 +201,8 @@ other deletion on the list descends from.
   the simplification inequality above. No production storage change is licensed
   by this verdict, and `28/H7` remains the fallback until D1 closes. The
   disposition of Phase 1 -- whether to continue funding it on this evidence --
-  is a human decision.
+  is a human decision. *(F2 and F4 have since landed; see the two Part B
+  sections below. F3 and the inequality remain owed and this review stands.)*
 
 #### Part B, frozen rule for F2 (the eager counting pass)
 
@@ -319,3 +322,60 @@ one input and D1's direction is unchanged, exactly as the scope note above said
 it must be. The one design input F2 produces for Phase 2: the index stays
 offsets-only, because the primary source clears the bound without a parallel
 counts array.
+
+#### Part B, F4's outcome (the edge-case inventory)
+
+F4 needs no frozen measurement rule, because it produces no number: it is a
+reading-and-cataloguing pass, and the rule it is read against was already frozen
+at `de17e95` in the paragraph above titled "What the simplification inequality
+must show". That paragraph states the only way F4 can move D1:
+
+> **If F4 surfaces one edge case that genuinely requires storing wrap or width
+> state, D1 is no-go regardless of F1.**
+
+**Applied once to [F4](findings.md): the trigger does not fire.** 28 cases were
+catalogued from seven pinned reference trees plus DanTerm's own reflow path
+(`Terminal.swift#reconstructLogicalLines`, `Terminal.swift#pack`) and its
+resize/wrap test suites. Every case is decidable as a pure function of (logical
+line, current width) plus live-grid state. **No entry requires width-dependent
+data persisted in history**, so `H4` is confirmed and the property every
+deletion on D1's list descends from survives.
+
+Two cases want a bit in the record header, and neither is a width:
+
+- `hasWideCells` (case 2) -- a content property known free at admission, which
+  selects the O(1) `ceil` path or an O(cells) scan for display-row counting. It
+  is an optimization: always scanning would be correct, so the design does not
+  depend on it even being stored.
+- `forcedSplit` (case 26) -- the marker the candidate direction already
+  sketched, so that copy and search rejoin a split line logically.
+
+**What F4 changes, and what it does not.** It changes the *mechanism* stated in
+`H1` and assumed by `F2`: display rows are `ceil((cells + spacers) / width)`, not
+`ceil(cells / width)`, because a 2-cell cluster meeting a one-column gap starts
+the next row rather than splitting. That is a change to a derivation, not to
+what is stored, and so it is outside the frozen trigger's terms. It does not
+change D1's direction, and it does not open Phase 2.
+
+**One item is added to Part B's addition list**, which the simplification
+inequality must carry when D1 closes: the fast/slow display-row count split
+(header bit plus scan fallback). Against it, F4 removes work from the addition
+side too -- the four `attachments` computations in `Terminal.swift#resizeWidth`
+collapse into one address conversion, because a (logical line, offset) pair
+becomes the stored address rather than a per-resize transient.
+
+**One new condition on Phase 2, recorded here so it is not lost in the finding:**
+`F2`'s 0.016 ms counting pass was measured on ASCII stimuli, where every record
+took the `ceil` path. The wide-record scan is unpriced. `H2` cleared its bound by
+15.6x, but that margin is not measured against a wide-content stimulus and must
+not be quoted as though it were.
+
+F4 also records four deferred decisions (`DD1`-`DD4`: selection is remapped
+rather than cleared; eviction evicts whole records; the forced-split cap is
+65,536 cells derived as 1/32 of the byte budget; the wide-cell bit is per record
+rather than iTerm2's buffer-wide sticky flag). Each took the obvious, simple
+choice and each is a human's to revisit.
+
+**Part B therefore owes exactly two things: `F3` (the admission probe) and the
+simplification inequality.** `28/H7` remains the fallback until D1 closes, and
+no production storage change is licensed.

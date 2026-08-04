@@ -47,9 +47,14 @@ Two acceptance dimensions, and a change lands only on both:
 
 - **Design from first principles.** iTerm2 proves the category
   (`references/iterm2/sources/LineBuffer.h#unwrappedLineAtIndex` stores raw
-  lines and wraps per-width at read); every other pinned terminal stores
-  display rows and rewraps destructively (e.g.
-  `references/wezterm/term/src/screen.rs#rewrap_lines`). Read the references
+  lines and wraps per-width at read); most other pinned terminals store
+  display rows and rewrap destructively (e.g.
+  `references/wezterm/term/src/screen.rs#rewrap_lines`). **`F4` amends this:
+  vte is a second, partial member** -- its scrollback is a width-free text
+  stream plus a separately stored row stream that `references/vte/src/ring.hh`
+  says "is regenerated when the contents rewrap on resize", so it holds the
+  record format this design wants but regenerates wrap points eagerly at
+  resize instead of deriving them at read. Read the references
   to mine edge cases and failure inputs, cited `file#identifier` -- never to
   port structure. Any adopted mechanism is justified on DanTerm's own
   constraints or not adopted (`AGENTS.md`: references are input, not
@@ -166,6 +171,19 @@ Reject: any edge case that genuinely requires storing wrap state, which would
 break the design's core premise and is exactly the kind of thing the
 references' test suites exist to surface.
 
+**Confirmed 2026-08-04 by [F4](findings.md), and `D1`'s no-go trigger does not
+fire.** 28 cases were catalogued from seven reference implementations plus
+DanTerm's own reflow path and its ~40 resize/wrap tests, and every one is
+decidable from (logical line, width) plus live-grid state; **no entry needs
+width-dependent data persisted in history.** The sweep produced one correction
+to the *mechanism* `H1` states rather than to what is stored: display-row count
+is `ceil((cells + spacers) / width)`, not `ceil(cells / width)`, because a
+2-cell cluster meeting a one-column gap does not split. Two cases want a
+width-independent content bit in the record header (`hasWideCells`,
+`forcedSplit`), and both are optimizations or markers, not widths. What remains
+unverified: `F2` priced the counting pass on ASCII stimuli only, so the
+O(cells) fallback for wide records is unmeasured.
+
 ## Candidate direction, pending evidence
 
 Provisional sketch, recorded before any probe has run; F1-F4 exist to change
@@ -181,15 +199,24 @@ it.
   current width. Lookup: binary search over block totals, then an in-block
   scan. On width change: discard all block totals, recompute eagerly in one
   pass (H2 prices this). Nothing width-shaped survives a cache flush, which is
-  the purity property the whole design leans on.
+  the purity property the whole design leans on. **A record's display-row count
+  is `ceil(cells / width)` only when it holds no wide cells** (`F4`
+  Observation 1): a record whose `hasWideCells` header bit is set costs an
+  O(cells) scan because a 2-cell cluster meeting a one-column gap starts the
+  next row instead of splitting. The bit is a content property, not a width.
 - **The open-line rule at the live boundary.** A row scrolling off the live
   viewport appends its cells to the current open logical line; a hard newline
   closes the line. Scrolled-off content is immutable, so the open line only
   ever grows at its end, which the arena already supports.
 - **The forced-split rule for pathological lines.** Hard-split a logical line
-  at a fixed cell cap -- proposed 65,536 cells, to be justified or replaced in
-  F4 -- with a `forcedSplit` flag so copy and search rejoin logically. One
-  documented wart, bounded up front.
+  at a fixed cell cap, with a `forcedSplit` flag so copy and search rejoin
+  logically. One documented wart, bounded up front. **The cap is 65,536 cells,
+  now derived rather than guessed** (`F4` Observation 3, `DD3`): a C1 cell is 8
+  bytes and the byte budget is 16,777,216, so the rule is *no record exceeds
+  1/32 of the arena*, which bounds both hazards the cap exists for -- eviction
+  granularity and the wide-cell scan. No surveyed terminal caps a logical line
+  at all; the two near-precedents (wezterm's 1,024-cell scan limit, vte's
+  500-row BiDi limit) degrade a feature rather than split the line.
 - **What this deletes** (the simplification side of the acceptance gate):
   history reflow mutation, `productionScrollbackCellCap`,
   `productionScrollbackRowCap`, the `28/D8` cost-model derivations and their
@@ -225,13 +252,21 @@ it.
 - [ ] `RESEARCH` **F3, the admission probe.** Open-line append vs today's
   row-record admission on a feed-shaped stimulus. Expectation neutral
   (H3); verify, do not assume -- this is where the campaign's residuals live.
-- [ ] `RESEARCH` **F4, the edge-case inventory.** Sweep the reflow and
-  wrap-boundary tests in `references/` (kitty, wezterm, foot, vte,
-  windows-terminal) for inputs that bite: wide char at the last column,
-  cursor on a soft-wrapped line during resize, alternate screen, selection
-  endpoints across a width change, scroll anchoring, giant single lines.
-  Deliverable: a table of input -> intended DanTerm behavior, cited
-  `file#identifier`. Decisions, not ported code.
+- [x] `DONE` **F4, the edge-case inventory.** Recorded in [F4](findings.md);
+  `H4` **confirmed** and `D1`'s no-go trigger **does not fire**. 28 cases
+  catalogued from seven reference trees plus DanTerm's own reflow path and
+  tests; **zero require stored width**, two want a width-independent content
+  bit (`hasWideCells`, `forcedSplit`). Three things it hands forward: (a) the
+  arithmetic correction -- display rows are `ceil((cells + spacers) / width)`,
+  so a record holding wide cells needs an O(cells) scan; (b) the forced-split
+  cap is 65,536 cells *derived* as 1/32 of the byte budget, since no terminal
+  surveyed caps a logical line at all; (c) all three of today's writes into
+  retained history target the tail row only
+  (`Terminal.swift#severScrollbackWrapClaim`,
+  `#restoreWrapClaimBeforeCursor`, `#clearPreviousSpacer`), so the arena's
+  "middle immutable" premise holds and two of the three become header-bit
+  flips while the third disappears. Four deferred decisions are recorded in
+  F4 for the human to revisit.
 - [ ] `ACTIVE` **D1, the go/no-go gate.** Rule frozen at `eee1832`, in a commit
   that predates the probe's existence in the tree. **Part A (the read path,
   decided by F1) answers `go`.** Part B is still owed: F2, F3, F4, and the
@@ -239,10 +274,12 @@ it.
   stored width makes D1 no-go regardless of F1. Phase 2 does not open and no
   production storage change is licensed until D1 closes; `28/H7` remains the
   fallback. **Part B progress: F2 is in** (rule frozen at `497d181`, `H2`
-  confirmed) and it moved nothing about D1's direction, by its own rule. Still
-  owed: F3, F4, and the simplification inequality. Next concrete step: F4 --
-  it is the only remaining input that can flip the verdict, and it needs no
-  benchmark, so it is worth taking before F3.
+  confirmed) and it moved nothing about D1's direction, by its own rule.
+  **F4 is in** and, with it, the one input that could have flipped the verdict
+  is spent: no edge case requires stored width, so the no-go trigger the rule
+  names does not fire. Still owed: **F3 (the admission probe) and the
+  simplification inequality** -- and F4 adds one item to the inequality's
+  addition list (the `hasWideCells` fast/slow split). Next concrete step: F3.
 
 ### Phase 2 -- design (begin only after D1 answers go)
 
@@ -264,9 +301,17 @@ it.
 
 Rejected by standing rule, recorded so it is not re-litigated: iTerm2 is the
 existence proof that read-time wrapping ships in a mainstream macOS terminal,
-and its test-hardened edge cases feed F4 -- but its block-object structure
-encodes Objective-C history, not DanTerm's constraints. Individual mechanisms
-may be adopted only with a DanTerm-specific justification in a D entry.
+and its edge cases fed F4 -- but its block-object structure encodes
+Objective-C history, not DanTerm's constraints. Individual mechanisms may be
+adopted only with a DanTerm-specific justification in a D entry. **F4 adopted
+one and rejected one**, both on DanTerm's own constraints: the fast/slow split
+for display-row counting is taken (it is intrinsic to the content, not to
+iTerm2's structure), while iTerm2's sticky *buffer-wide*
+`mayHaveDoubleWidthCharacter` flag is rejected in favour of a per-record bit,
+because the buffer-wide version is what forces iTerm2's three further layers of
+memoization (`F4` `DD4`). F4 also found that iTerm2 has **no LineBuffer unit
+tests** in the pinned tree, so this doc's "test-hardened" framing of it was
+wrong: its edge cases are readable from production code, not from a suite.
 
 ### Hybrid mixed-width history (28/H7)
 
@@ -292,9 +337,21 @@ the reopening condition is now a depth rather than a doubt: an arena past
 
 - What does search operate on -- a straight scan of the arena's packed cells,
   or does it need its own index? Expectation is that logical lines make
-  search *simpler* (no wrap boundaries in the data); unverified.
-- The forced-split cap value (65,536 cells proposed) is a guess until F4
-  prices real pathological inputs (`cat` of a binary, minified JSON).
+  search *simpler* (no wrap boundaries in the data); unverified. `F4` case 20
+  and `wideGraphemeSearchRangeSpansSoftWrap` are the supporting evidence that
+  the wrap artifacts search has to step over today simply stop existing.
+- **The eager counting pass is unpriced on wide content.** `F2` measured
+  0.016 ms at trial depth on ASCII stimuli, where every record takes the O(1)
+  `ceil` path. `F4` Observation 1 establishes that a record holding wide cells
+  needs an O(cells) scan instead, so a CJK- or emoji-heavy history makes the
+  pass a walk of the flagged records' bytes. `H2` cleared its bound by 15.6x,
+  so there is margin -- but the margin is not measured against a wide-content
+  stimulus and must not be assumed to transfer. Re-running `F2`'s probe with a
+  wide stimulus is the cheapest way to close this, and it is Phase 2's.
+- The forced-split cap is **65,536 cells, derived** in `F4` Observation 3 as
+  1/32 of the byte budget rather than chosen. Still unpriced: what a real
+  pathological input (`cat` of a binary, minified JSON) actually produces --
+  the derivation bounds the hazard without saying how often it is reached.
 - `28/H8` (deferred packing) shares the amortized-background-work idea; a
   logical line is a natural compression unit if H8 is ever funded on top of
   this store. Noted as synergy, not a dependency in either direction.
