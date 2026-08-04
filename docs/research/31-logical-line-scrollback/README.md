@@ -594,6 +594,28 @@ licenses a production storage change; landing is the paired ladder's.
   Disposition of both rejects is a human's; the residency remedy `D4` names
   (capacity sized below the budget) costs **3.23%-15.29%** of depth measured,
   against the 1.61% `D4` derived. Four deferred decisions added (`DD29`-`DD32`).
+- [x] `DONE` **`F10`, the re-price after the optimization** (`D4` re-run
+  unchanged, the plan's inserted slices 4a and 4b). Recorded in
+  [F10](findings.md). The human took `F8`'s "optimize, then re-price" route; the
+  store's write path was changed and `D4`'s residency remedy shipped, then the
+  **same probe file, arms, stimuli, gates and thresholds** were run again with
+  nothing in `D4` edited. **Both of `F8`'s rejects are cleared.** Eviction reads
+  **neutral**: the write path is **0.856x-1.023x** today's per admitted display
+  row and eviction alone **0.151x-1.022x** per evicted display row on all four
+  verdict-bearing classes, so `D4`'s named condition is discharged by its first
+  clause rather than deferred to the ladder. Residency reads **narrow confirm**:
+  a cycled arena pane is **15.359 MiB** on `plain` and **18.234 MiB** on `mixed`
+  against today's 18.094 and 18.281 for the same fed inputs -- **0.849x** and
+  **0.997x**, where the reject trigger was 1.10x. What the run also found is a
+  **real fold defect** gate 1 caught: a `.spacerHead` dropped at a forced-split
+  seam could not be re-derived, so one retained display row in 14,486 read back
+  178 cells where today's store holds 179; it predates both measurements and is
+  fixed. `PO11` still holds on every class but its margin on `full` is down to
+  **0.9%**, which is `DD36`'s reserve paid in the open, and **gate 7 is now
+  unreadable** -- the trim step it times fell below the probe's 41.7 ns clock, so
+  it is recorded as *not measured* rather than as a pass (`DD38`). Three deferred
+  decisions added (`DD36`-`DD38`); `I2`'s restatement is still the human's to
+  ratify.
 - [x] `DONE` **`F9`, the wide-content counting pass** (`D1` condition 1).
   Recorded in [F9](findings.md); `D3` Decision 7's probe and three-way rule were
   frozen before it existed and were run mechanically (the plan's slice 2). It
@@ -826,6 +848,22 @@ and the attribution arm re-measured `F3`'s prototype of the same admission rule
 at 0.52x-0.64x of today's cost in the same session while the landed store cost
 3.01x-4.31x that prototype. The store as landed is what rejects, and it rejects
 on how it touches its own bytes.
+
+**`F10` re-ran the same rule after the human took the "optimize, then re-price"
+route, and both rejects are cleared.** Nothing in `D4` was edited: same probe
+file, same three arms, same five stimulus classes, same eight gates, same 1.09x
+and 1.10x lines. The write path is now **0.856x-1.023x** today's per admitted
+display row and eviction alone **0.151x-1.022x** per evicted display row --
+**neutral**, with two cells above 1.00x by more than the instrument's resolution
+and none within reach of 1.09x -- and a cycled arena pane is **0.849x** today's
+resident on `scrollback-plain` and **0.997x** on `scrollback-mixed`, which is
+**narrow confirm**. `D4`'s named condition is discharged by its first clause, on
+its own rule. Two things the re-run adds that the numbers do not: gate 1 caught a
+**real fold defect** -- a spacer dropped at a forced-split seam that no reader
+could re-derive, one display row in 14,486, predating both measurements and now
+fixed -- and gate 7 became **unreadable**, because the step it times fell below
+the probe's clock. Landing is still the paired ladder's, and `I2`'s restatement
+is still the human's to ratify.
 
 What this doc still owns after graduation is the verdict, not the work. `D1`'s
 scoping stands: no production storage change is licensed by any entry here, and

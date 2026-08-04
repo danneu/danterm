@@ -2204,7 +2204,23 @@ real implementation by construction.
   trigger (the arena resident at 1.118x today's store for the same fed input on
   `scrollback-mixed`). The rule was applied once, to the numbers as printed, and
   is not reopened by them; disposition of both rejects is a human's, as this
-  entry says it is. Two things `F8` reports that this rule could not anticipate
+  entry says it is. **Re-run unchanged 2026-08-04 as `F10`** after the human took
+  `F8`'s "optimize, then re-price" route: same probe file, same arms, same
+  stimuli, same eight gates, same thresholds, nothing in this entry edited.
+  **Both rules now read in their non-blocking branch** -- the eviction rule
+  **neutral** (0.856x-1.023x on `steady` and 0.151x-1.022x on `drain`, every
+  verdict-bearing cell inside the 1.09x line, two of them above 1.00x by more
+  than the A/A resolution so not `confirm`) and the `AR6` rule **narrow
+  confirm** (`mixed` at 1.140x of the charged bound, inside 1.50x, and no class
+  above 1.10x of today's resident for the same fed input). The named condition
+  this entry's reject branch attached is therefore discharged **by its first
+  clause** -- the implementation cleared 1.09x under this same rule -- rather
+  than by deferring to the ladder. Two things `F10` reports that this rule could
+  not anticipate: **gate 7 is now unreadable**, because the trim step it times
+  fell to ~19.4 ns against the probe's 41.7 ns clock, so it is recorded as *not
+  measured* under gate 8's discipline rather than as a pass (`DD38`); and the
+  re-run's gate 1 caught a real fold defect at the forced-split seam that
+  predates both measurements, which is what a validity gate is for. Two things `F8` reports that this rule could not anticipate
   and that a reader of the verdict needs: gate 7 **passes at 1.000x**, so the
   per-step complexity this rule was frozen against is what the landed code does;
   and the descriptive attribution arm puts the eviction reject in the landed

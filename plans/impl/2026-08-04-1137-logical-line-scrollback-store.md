@@ -237,11 +237,17 @@ Open conditions that the implementation, not the design, has to discharge:
   is `reject`**: the landed store's whole write path costs 1.418x-3.177x today's
   per admitted display row and its eviction alone 1.830x-3.114x per evicted
   display row, on all four verdict-bearing classes, against `31/D4`'s 1.09x line.
-  **The named condition `31/D4` attaches is therefore live: this store does not
-  land until either the eviction implementation clears 1.09x under that same
-  rule, or the paired ladder comes back not-`slower` on `terminal-feed` and
-  `scrollback-stream` against a real implementation** (`31/H3`'s own falsifier,
-  which `31/D4` says outranks a microbenchmark prediction). Disposition is a
+  **Re-priced 2026-08-04 as `31/F10` after the write path was optimized, and the
+  condition is discharged by its first clause**: under the same rule, the same
+  probe file and the same thresholds, the write path is now **0.856x-1.023x**
+  today's and eviction alone **0.151x-1.022x**, which reads **neutral**. The
+  original reject and the condition it attached follow verbatim, because the
+  condition is exactly what the re-run satisfies -- by its **first** clause, not
+  by deferring to the ladder: *the store does not land until either the eviction
+  implementation clears 1.09x under that same rule, or the paired ladder comes
+  back not-`slower` on `terminal-feed` and `scrollback-stream` against a real
+  implementation* (`31/H3`'s own falsifier, which `31/D4` says outranks a
+  microbenchmark prediction). Disposition was a
   human's. What the same finding rules out as the cause: `31/D4` gate 7 passes at
   1.000x, so `31/D2` Decision 2's per-step complexity is what the landed code
   does; and `31/F3`'s own prototype of the open-line rule re-measured at
@@ -259,7 +265,12 @@ Open conditions that the implementation, not the design, has to discharge:
   therefore linear in its display rows across a full drain, not quadratic.
 - **Resident pages are unmeasured** (`AR6`, promoted from an accepted risk by the
   external review of `31/D2` Decision 1). **Measured 2026-08-04 as `31/F8`, and
-  the verdict is `reject` on the second trigger**: the arena is resident at
+  the verdict is `reject` on the second trigger**, and **re-read 2026-08-04 as
+  `31/F10` after the remedy shipped, where it is `narrow confirm`**: the cycled
+  arena is now 0.849x today's resident on `scrollback-plain` and 0.997x on
+  `scrollback-mixed` for the same fed inputs, and 1.140x of the 16 MiB charged
+  bound on `mixed`, so neither reject trigger fires and the recorded condition is
+  on pane count. The original reject follows. The arena is resident at
   1.118x today's store for the same fed input on `scrollback-mixed`, over the
   1.10x line, and an *empty* arena pane is already 16.281 MiB resident because
   the reservation is dirty from construction rather than on first touch (which
@@ -400,6 +411,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
 - [x] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict, taking the resident-page reading (empty, partial, saturated, cycled) in the same slice
 - [x] 4a. perf(terminal): spend `31/F8`'s attributed headroom on the arena's write path, and ship `31/D4`'s residency remedy
+- [x] 4b. test(terminal): re-run `31/D4`'s frozen rule against the optimized store and record the verdict
 - [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
@@ -726,3 +738,27 @@ Open conditions that the implementation, not the design, has to discharge:
     behind the residency reject; the alternative -- charging `malloc_size` --
     would measure rather than model, and neither `Dictionary` nor its storage is
     reachable for that from inside the store.
+- **Slice 4b re-ran `31/D4` mechanically and both rejects cleared**, recorded as
+  `31/F10`: eviction **neutral** (0.856x-1.023x on `steady`, 0.151x-1.022x on
+  `drain`) and residency **narrow confirm** (0.849x and 0.997x of today's
+  resident on the two triggering classes). Three things the slice hands the plan
+  rather than the finding:
+  - **A defect fix landed between the two commits, and it is why there are
+    three.** `31/D4` gate 1 failed on `wide` in the invocation taken against the
+    optimized store: a `.spacerHead` dropped at a forced-split seam (`31/DD20`)
+    could not be re-derived, because the wide head that explains it is the
+    *follower* record's first cell. That is slice 3's defect, exposed by the new
+    capacity moving where the ring wraps, and it violated `I6` inside retained
+    history. It is fixed with its own test and its own commit, before the
+    recorded run, so no number here was measured against a store that failed a
+    gate.
+  - **`PO11`'s margin is now the reserve's ceiling, measured.** The arena still
+    retains at least as much as today's engine on every class, but `full`'s
+    margin is **0.9%** (1.009x) where `31/F8` measured 7.6%. Any future per-record
+    charge, and any larger reserve, comes out of that 0.9%.
+  - **`31/D4` gate 7 can no longer be read**, because the trim step it times
+    fell to ~19.4 ns against the probe's 41.7 ns clock. `31/F10` records it as
+    *not measured* under gate 8's discipline rather than as a pass (`31/DD38`),
+    with two independent readings of the same complexity claim beside it. A
+    human who wants it read literally has to batch the gated step, which is a
+    change to a frozen instrument.
