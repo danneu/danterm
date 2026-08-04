@@ -42,8 +42,11 @@ struct TerminalResizeProbeSupportTests {
         var terminal = makeSaturatedTerminal(recipe: recipe)
         let atCeiling = terminal.scrollbackRowCount
 
-        for line in 0..<200 {
-            terminal.feed(Array("DANTERM-RESIZE-OVERFEED-\(line) plain ascii retained row\r\n".utf8))
+        // The recipe's own payload, for the reason spelled out in
+        // `sparseRecipeReachesTheBudgetCeiling`: a denser overfeed evicts more than it
+        // admits under a content-denominated bound, and the count falls.
+        for line in recipe.lineCount..<(recipe.lineCount + 200) {
+            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
         }
 
         #expect(atCeiling > 0)
@@ -97,6 +100,39 @@ struct TerminalResizeProbeSupportTests {
         #expect(terminal.scrollbackRowCount == atCeiling)
     }
 
+    @Test("The wide payload fills the standard recipe's width exactly")
+    func widePayloadFillsTheStandardWidth() {
+        // Intent: `.wide` emits a line exactly as long as the recipe's 179 columns.
+        // Why it exists: this recipe exists to maximize retained *cells*, which is
+        //   the term a row cap does not bound. A payload one character short still
+        //   saturates and still prints a distribution; a payload one character long
+        //   soft-wraps every line into a second, nearly empty row and halves the
+        //   cells per row. Either drift measures a different regime silently.
+        #expect(ResizeProbePayload.wide.line(0).count == 179)
+        #expect(ResizeProbePayload.wide.line(7).count == 179)
+        #expect(ResizeProbeRecipe.wideSaturating.columns == 179)
+    }
+
+    @Test("The wide recipe fills the budget: feeding more lines buys no more rows")
+    func wideRecipeReachesTheBudgetCeiling() {
+        // Intent: `.wideSaturating`'s line count reaches the byte budget.
+        // Why it exists: the same premise the other two ceiling tests pin. Wide rows
+        //   are the most expensive content in the corpus, so this recipe needs the
+        //   fewest lines -- and is the one most likely to be left saturating by line
+        //   count if its budget-reaching depth is ever misjudged.
+        let recipe = ResizeProbeRecipe.wideSaturating
+        var terminal = makeSaturatedTerminal(recipe: recipe)
+        let atCeiling = terminal.scrollbackRowCount
+
+        for line in recipe.lineCount..<(recipe.lineCount + 200) {
+            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
+        }
+
+        #expect(atCeiling > 0)
+        #expect(atCeiling < recipe.lineCount)
+        #expect(terminal.scrollbackRowCount == atCeiling)
+    }
+
     @Test("A recipe's identity names its version, so v2's numbers cannot be read as v1's")
     func recipeIdentityNamesItsVersion() {
         // Intent: the two frozen recipes carry distinct, self-describing identities.
@@ -109,10 +145,15 @@ struct TerminalResizeProbeSupportTests {
             ResizeProbeRecipe.sparseSaturating.identity
                 .hasPrefix("saturated-sparse-resize-v1-")
         )
-        let identities = Set(
-            [ResizeProbeRecipe.standard, .saturating, .sparseSaturating].map(\.identity)
+        #expect(
+            ResizeProbeRecipe.wideSaturating.identity
+                .hasPrefix("saturated-wide-resize-v1-")
         )
-        #expect(identities.count == 3)
+        let identities = Set(
+            [ResizeProbeRecipe.standard, .saturating, .sparseSaturating, .wideSaturating]
+                .map(\.identity)
+        )
+        #expect(identities.count == 4)
     }
 
     @Test("The probe alternates widths, so no sample times a no-op resize")

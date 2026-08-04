@@ -13,7 +13,7 @@ import TerminalResizeProbeSupport
 var recipe = ResizeProbeRecipe.standard
 var arguments = Array(CommandLine.arguments.dropFirst())
 let usage = """
-usage: TerminalResizeProbe [--recipe standard|saturating|sparse] [--samples <count>] \
+usage: TerminalResizeProbe [--recipe standard|saturating|sparse|wide] [--samples <count>] \
 [--alternate-columns <count>]
 
 """
@@ -29,6 +29,7 @@ if let index = arguments.firstIndex(of: "--recipe") {
     case "standard": recipe = .standard
     case "saturating": recipe = .saturating
     case "sparse": recipe = .sparseSaturating
+    case "wide": recipe = .wideSaturating
     default:
         FileHandle.standardError.write(Data(usage.utf8))
         exit(2)

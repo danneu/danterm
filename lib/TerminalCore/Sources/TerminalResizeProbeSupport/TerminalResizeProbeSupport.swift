@@ -42,6 +42,16 @@ public enum ResizeProbePayload: String, Equatable, Sendable {
     /// Short shell-history lines, the regime where content-sized rows retain
     /// deepest. Stands in for `alacritty/history` (4.7 stored cells per row).
     case sparse
+    /// Lines that fill the pane's width, the regime that maximizes retained
+    /// *cells* rather than retained rows.
+    ///
+    /// Reflow cost is roughly `a x rows + b x cells` with the cell term dominant
+    /// at any real width, so this is the expensive end -- and it is the end a
+    /// **row** cap does not bound. Length is tied to `saturated-resize-v1`'s 179
+    /// columns on purpose, so a row here is exactly one full-width row;
+    /// `widePayloadFillsTheStandardWidth` pins that coupling rather than leaving
+    /// it to a reader to notice.
+    case wide
 
     /// Real short shell commands rather than a synthetic short string, so the row
     /// widths this recipe saturates with are widths a shell history really holds.
@@ -56,6 +66,11 @@ public enum ResizeProbePayload: String, Equatable, Sendable {
             return "DANTERM-RESIZE-\(String(format: "%05d", index)) plain ascii retained row"
         case .sparse:
             return Self.sparseCommands[index % Self.sparseCommands.count]
+        case .wide:
+            // Digits varying with `index` so no two rows are identical, in case a
+            // future representation ever shares storage between equal rows.
+            let unit = "abcdefgh\(index % 10)"
+            return String(String(repeating: unit, count: 20).prefix(179))
         }
     }
 }
@@ -144,6 +159,21 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
         scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
         alternateColumns: 100, sampleCount: 20, warmupCount: 4,
         name: "saturated-sparse-resize-v1", payload: .sparse
+    )
+
+    /// The wide saturating recipe: `v2`'s geometry and budget fed full-width lines.
+    ///
+    /// The third content regime, and the one that decides whether a **row** cap
+    /// bounds resize cost. Reflow is dominated by its per-cell term, and a row cap
+    /// leaves that term free: 8,192 rows of 179 columns is 1.47 M cells in ~2.15 MB,
+    /// so the byte budget never intervenes and the cap's row bound is not reached in
+    /// bytes either. Both other recipes understate this -- `v2`'s rows are ~45 cells
+    /// and `sparse`'s ~4.9.
+    public static let wideSaturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 60_000,
+        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-wide-resize-v1", payload: .wide
     )
 
     public init(
