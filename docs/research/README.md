@@ -28,8 +28,9 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Why stacked prompts survive a resize storm |
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
-| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | `D11` ships 10k-row bounds as a trial; its verdict picks keep / coalesce / `H7` |
+| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | `D11` ships 10k-row bounds as a trial; `H7` superseded by doc 31, verdict still owed |
 | 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | D1: single clip(to:) call, gated on incremental-mixed |
+| 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Phase 1 viability: the read-path probe (F1) gates design |
 
 ## Closed
 

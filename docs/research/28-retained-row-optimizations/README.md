@@ -324,6 +324,18 @@ tradeoff somewhere. Cite `file#identifier` per `AGENTS.md`. Design and
 implementation are explicitly **not** in scope until that read is recorded: this
 is a ledger entry opening an investigation, not a plan.
 
+**Superseded as the direction (2026-08-04).** The human chose a from-scratch
+redesign over this incremental hybrid:
+[doc 31](../31-logical-line-scrollback/README.md) owns storing history as
+unwrapped logical lines with wrapping computed at read time, which removes
+reflow-of-history entirely instead of deferring it. The three hard parts named
+above transfer there (the wrap-count index becomes `31`'s derived block index,
+scroll anchoring and the mixed-width invariant land in `31/H1` and `31/H4`),
+and the hybrid itself is recorded in doc 31's Rejected section as the fallback
+if its viability gate (`31/D1`) answers no-go. This entry stays as the record
+of the incremental alternative; nothing here is worked unless that fallback
+fires.
+
 ### H8 -- packing costs what it costs because of *when* it runs, not what it writes
 
 `H3`'s residual regressions are on the admission path, and the evidence that
@@ -564,7 +576,13 @@ implementation without that funding decision.
   exists, and points the other way from `D5`'s: C1 retains at **3.72 MB**, not
   C6's 0.78 MB (`F19`), so deep-history footprint is ~4x what the pivot's
   rejected representation would have left. Destination: `D11`.
-- [ ] `RESEARCH` Open `H7` -- viewport-adjacent reflow. Opened by `D8`, which
+- [x] `DONE` (superseded 2026-08-04) Open `H7` -- viewport-adjacent reflow. The
+  question this task would have opened moved to
+  [doc 31](../31-logical-line-scrollback/README.md), which pursues the
+  from-scratch alternative (logical-line storage, read-time wrapping) instead;
+  the references read survives as `31`'s F4 edge-case inventory. The hybrid
+  itself is doc 31's recorded fallback if `31/D1` answers no-go. Original task,
+  kept for the record: opened by `D8`, which
   capped retained depth because reflow visits every retained row, and which cost
   sparse content 3.08x its pre-packing depth to do it. **The first task is a read,
   not a design**: mine `references/` for how the pinned terminals reflow history
@@ -907,14 +925,14 @@ unanswered questions with named next steps, so this doc stays in `## Live`:
 1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
    reflow's dominant per-cell term the time goes. Renumbered eleven times and
    still owed; it is the prerequisite for `D8`'s cell cap ever rising.
-2. **`H7`, viewport-adjacent reflow** (`RESEARCH`) -- opened by `D8`, first task
-   is a read of `references/`, nothing designed. It is the mechanism that would
-   give sparse content back the 3.08x depth `D8` charged it. **`F23` sharpened
-   what waits on it**: reaching 10,000 retained rows of full-width content at 179
-   columns costs a measured 600.5 ms resize (4.00x `D8`'s budget) and ~15 MiB, so
-   `H7` is that target's prerequisite rather than a later refinement. **`D11` made
-   that concrete rather than hypothetical**: those bounds now ship, so the cost
-   `H7` would remove is one a user can feel today.
+2. **`H7`, viewport-adjacent reflow** -- superseded 2026-08-04 by
+   [doc 31](../31-logical-line-scrollback/README.md) (logical-line storage,
+   read-time wrapping), which removes what `H7` would have deferred. What `F23`
+   and `D11` established still stands and now motivates doc 31: reaching 10,000
+   retained rows of full-width content at 179 columns costs a measured 600.5 ms
+   resize (4.00x `D8`'s budget) and ~15 MiB, and those bounds ship today, so the
+   cost being removed is one a user can feel. `H7` remains only as doc 31's
+   fallback if `31/D1` answers no-go.
 3. **`H5`'s gate** (`TODO`, destination `D12`) -- undecided, and the post-landing
    evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
    rather than C6's 0.78 MB.
