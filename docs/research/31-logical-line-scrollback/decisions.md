@@ -811,3 +811,496 @@ the verdict is read.
     the fold moves to read time rather than being deleted (`F5` Observation 2).
 11. **`DD1`-`DD8` are a human's to revisit.** `DD7` in particular: the stricter
     reading of "width-dependent persisted state" would reopen `D1`.
+
+### D2 -- budget and eviction semantics: one charged-byte bound at the same 16 MiB, eviction display-row granular at the head, and no line-count knob
+
+- Status: **decided 2026-08-04.** This is Phase 2's second ledger task and it
+  discharges inherited conditions 4 and 7, ratifies `DD3`, amends `DD2`, and
+  advances 2, 5, 8, 9 and 10. It is a **design** decision: `D1`'s scoping is
+  unchanged, no production storage change is licensed by it, and the paired
+  ladder is still owed. No measurement was taken for this entry -- every number
+  below is either quoted from a prior finding or is arithmetic over quoted
+  numbers, and each is labelled as one or the other.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Evidence used: `F3` Observation 4 (the arena's measured footprint against what
+  the budget charges today -- the input `D1`'s closure names for this task),
+  `F3` Observation 2 (the stimuli's mean stored cells per row, which is what
+  converts a footprint into a depth), `F4` Observation 3 (the forced-split
+  derivation, offered for ratification here), `F4` case 27 and case 28 (eviction
+  granularity, and the blank-row regime the row cap exists for), `F6` `HR4`
+  (the tail truncation), `HR5` (what whole-record eviction costs in four anchors
+  and the scrollbar), `HR8` (the grand display-row total), `X13` (the six
+  per-row charge sites and the side-table question), `28/F23` Observations 1-3
+  (charged bytes per row, and which bound binds), `28/D8` (why there are three
+  bounds at all), `28/D11` (the trial bounds and their three exits), `15/F4`
+  (the eviction leak whose proof `DD11` restates), `F2` (the counting pass,
+  which is the only term that scales with record count).
+- Candidate solutions considered: (a) keep three bounds, re-denominated;
+  (b) **one charged-byte bound** with whole-record eviction (`DD2` as written);
+  (c) one charged-byte bound with head-granular eviction (`DD2`'s recorded
+  alternative); (d) a byte bound plus a user-facing "keep N lines" knob.
+
+#### Frozen inputs, stated before the decisions that read them
+
+Four facts this entry is built on, each with its provenance, so a reader can
+tell what was measured from what was reasoned.
+
+1. **Measured (`F3` Observation 4).** At ~10,000 admitted display rows and 179
+   columns the arena holds the same content in **0.744x-0.925x** of the bytes
+   today's budget charges: `mix` 9,982,856 B against 11,154,016; `full`
+   14,360,104 against 15,520,000; `stream` 4,880,000 against 6,560,000; `wide`
+   10,805,592 against 12,077,312. Records: 5,758 / 5,013 / 10,000 / 4,877.
+2. **Measured (`F3` Observation 2).** Mean stored cells per display row: `mix`
+   124.2, `full` 179.0, `stream` 60.0, `wide` 135.1.
+3. **In the tree today.** `Terminal.swift:761 productionScrollbackBudgetBytes`
+   is **16,777,216** (16 MiB), not the 10 MiB this doc's `README.md` trigger
+   section quotes from `28/F23`. `28/D11` raised it, *because the caps needed
+   it*: 89,500 rows x 1,552 charged B/row is 14.80 MiB and 10 MiB stopped a
+   full-width fill at 6,756 rows.
+4. **Correction, derived here from 1-3 (arithmetic, not measured).** The
+   README's "the byte budget binds nothing today" is a `28/D8`-era fact measured
+   at `D8`'s caps and a 10 MiB budget (peak 3.38 MB of 10 MiB). At `28/D11`'s
+   bounds it is no longer true: a class retains
+   `min(cellCap / cellsPerRow, rowCap, budget / chargedBytesPerRow)` rows, which
+   for `F3`'s four classes gives
+
+   | class | cells/row | cell cap gives | row cap gives | byte budget gives | binds today |
+   | --- | ---: | ---: | ---: | ---: | --- |
+   | `mix` | 124.2 | 14,412 | 89,500 | 15,041 | cell |
+   | `full` | 179.0 | 10,000 | 89,500 | 10,810 | cell |
+   | `stream` | 60.0 | 29,833 | 89,500 | 25,575 | **byte** |
+   | `wide` | 135.1 | 13,249 | 89,500 | 13,894 | cell |
+
+   So the budget already binds for short-line content, and `D11`'s cell cap
+   binds for everything else at exactly the depth it was sized to buy. The
+   README's trigger bullet is corrected in place to point here.
+
+#### Decision 1 -- the byte budget is the arena, the number stays 16 MiB, and it is re-derived rather than inherited
+
+**The bound.** One bound, and it is charged bytes:
+
+    arenaBytesInUse + indexBytes + sideTableBytes  <=  scrollbackBudgetBytes
+
+`28/D8`'s cell cap and row cap are deleted (`F6` `X6`, `X7`), because both exist
+only to bound the two terms of a reflow this design does not perform. What
+replaces "whichever of three binds first" is not a fourth bound but the
+observation that the surviving one is **denominated in the thing it protects**:
+the budget bounds memory, and memory is the only resource retained history still
+consumes proportionally.
+
+**The arena is the budget, allocated once.** The arena's capacity *is*
+`scrollbackBudgetBytes`. It is allocated once at pane construction and never
+grown, never compacted and never shrunk; the write cursor wraps and the head
+advances, so at steady state the store performs no allocation at all. Two
+alternatives rejected with reasons rather than left implicit:
+
+- *Grow geometrically to the budget.* Rejected: a doubling policy leaves up to
+  one growth step of resident slack that no charge model can see, which is the
+  exact shape of the error `15/F4` found (a charge that describes a model rather
+  than an allocation was wrong by 2.2x once already).
+- *Linear arena with `memmove` compaction.* Rejected: it puts a copy of up to
+  16 MiB on the admission path, and every stored offset has to be rebased.
+  `15/F4`'s leak was born in a compaction threshold
+  (`storageStart >= 1_024 && storageStart * 2 >= storage.count`); this design
+  does not need one and should not acquire one.
+
+Because the arena is written from the front and touched page by page, resident
+memory follows first touch rather than capacity, and a pane that never fills its
+history never pays for the region it reserved. The census must therefore report
+**capacity and bytes-in-use separately** -- that reporting requirement is what
+`DD11`'s restatement of `15/F4`'s leak proof becomes concrete against.
+
+**The headline property, which today's store does not have.** Total resident
+retained-history bytes are bounded by the budget *by construction*: in-use plus
+metadata is the bound, and capacity is the same number. Today's budget is a
+model of allocations checked against reality by a second model
+(`Terminal.swift:2307 recomputedScrollbackByteCount`); under the arena the
+arena's share of that identity is the distance between two pointers.
+
+**What is charged, answering `X13` and inherited condition 9.** Everything
+retained history allocates, and the side tables are **inside** the budget rather
+than beside it:
+
+| term | charge | note |
+| --- | --- | --- |
+| record header + cells | exact bytes written | an identity, not a model |
+| block index | 8 B per record, at the deque's *capacity* | doc 15's `D4` rule: charge what the allocator gave, not what was asked for |
+| per-block cached totals | ~1/256 of a record's index cost | amortized; not modelled separately |
+| spill table (`28/F11`: ~0.12% of rows) | its allocation, as today | the record format still owes its shape (condition 9) |
+| `hyperlinkId` / `contentIdentity` side tables | their allocations, at capacity | one table per *record* now, not per display row (`HR7`) |
+
+Charging the index per record is not bookkeeping: it is what bounds the
+degenerate regime `productionScrollbackRowCap` exists for. A blank logical line
+costs 8 arena bytes and 8 index bytes, so 16 MiB admits **1,048,576** blank
+records (derived). Without the index charge it would admit 2,097,152 and the
+index would silently double the store's footprint.
+
+**The number: 16 MiB, unchanged, and re-derived.** `28/D11`'s derivation
+(89,500 rows x 1,552 charged B/row) dies with the caps that produced it, so the
+number needs its own basis or it is inherited by accident. The basis is the same
+human-chosen depth target `D11` encoded -- **10,000 display rows of full-width
+179-column content** -- priced in arena terms from frozen input 1: 14,360,104
+arena bytes + 40,104 index bytes = **13.74 MiB measured**, and the next power of
+two is 16,777,216. The negative check: 10 MiB holds 7,281 rows of that class,
+below the depth the human has been dogfooding under `D11`, so reverting the
+budget to 10 MiB would be a user-visible loss taken at migration.
+
+**What the same 16 MiB buys, per content class** (derived from frozen inputs 1
+and 2; both columns exclude spills and the two side tables, which `F3` stripped
+from both arms, so the ratio is like-for-like and the absolute depths are
+upper bounds):
+
+| class | binds today | depth today | depth on the arena | change |
+| --- | --- | ---: | ---: | ---: |
+| `mix` (real-corpus distribution) | cell cap | 14,412 | **16,728** | 1.16x |
+| `full` (179-column saturation) | cell cap | 10,000 | **11,650** | 1.17x |
+| `stream` (CRLF short lines) | byte budget | 25,575 | **33,825** | 1.32x |
+| `wide` (CJK) | cell cap | 13,249 | **15,472** | 1.17x |
+| blank lines (degenerate) | row cap | 89,500 | **1,048,576** | 11.7x |
+
+**No content class loses depth at migration, and no default changes.** That is
+the migration property worth having: the store changes, the constant does not,
+and every measured class gets 1.16x-1.32x deeper for free because the arena
+spends fewer bytes on the same content.
+
+#### Decision 2 -- eviction is byte-driven, display-row granular at the head, and never copies
+
+`DD2`'s whole-record eviction is **amended** (see the amendment note below).
+`HR5` is the reason: a whole-record step drops up to 367 display rows at 179
+columns and 32,768 at the 2-column minimum, which is user-visible in four
+anchors and the scrollbar, and `F4` case 27 priced only its memory consequence.
+`DD2`'s own recorded alternative is taken now rather than later, exactly as
+`F6`'s next action recommends.
+
+**The eviction step.** While the charge exceeds the budget:
+
+1. Fold the head record from its current head cell offset at the **current
+   width** and take the cell offset that begins its next display row.
+2. If that offset reaches the record's end, drop the whole record: free its
+   header and cells, remove its index entry, and advance the head to the next
+   record.
+3. Otherwise **trim the head record's prefix**: advance the arena head past
+   those cells and rewrite the record's 8-byte header immediately before the new
+   head, with its cell count reduced, its semantic-mark slot cleared, and a
+   header bit marking it a mid-line continuation (Decision 5). The header write
+   always fits, because a display row is at least one cell and a cell is 8 bytes.
+4. Update, in the same step: the head record's index offset, the head block's
+   cached display-row total, the grand display-row total (`HR8`), the cached
+   browsing-anchor display row (`HR1`), `evictedRowCount`, and the charge.
+
+**Termination measure is display rows, not bytes.** A trim of a one-cell display
+row frees 8 bytes and spends 8 on the rewritten header, so a step can free
+nothing; every step nonetheless drops at least one display row and history is
+finite, so the loop terminates. Stating the measure explicitly is what keeps
+that from being a latent hang.
+
+**Nothing is copied and nothing moves.** Eviction advances a pointer and
+rewrites at most one header. This is the second and last place the writer
+touches the arena outside the tail, which narrows `F4` Observation 5's
+"mutation is tail-only" premise to its true form: **the middle is immutable; the
+head record's header and the tail record are the only writable bytes.**
+
+**Ring reuse, and the one wart.** The write cursor wraps to the front of the
+region when it reaches the end. A record must stay contiguous -- that contiguity
+is the whole of `F1`'s measured 1.64x -- so a record that would straddle the
+wrap point is preceded by a **pad record**: a header with a pad flag and a byte
+length, which the head skips like any other record and which is charged like any
+other bytes. The waste is bounded by one record, i.e. 1/32 of the arena by
+`DD3`, and in practice by one line. Splitting a record across the seam was
+rejected (every reader would have to handle two segments), as was copying the
+record down (a copy on the admission path).
+
+**The reader-facing contract does not change.** Because eviction stays
+display-row granular, `Terminal.swift:3873 handleEviction` keeps its shape and
+its semantics: it takes the count of display rows dropped, drops the selection
+when it is entirely evicted and clamps its start forward otherwise, releases the
+search occurrence and the hovered and armed links whose start precedes the new
+first retained row, and clamps the browsing anchor. **No anchor moves further
+per admitted row than it does today**, so `HR5`'s user-visible hazard is closed
+rather than accepted, and the scrollbar's per-eviction jump is unchanged.
+
+**`HR4`'s tail truncation is part of this mechanism, not a separate one.** The
+arena has exactly five mutating operations, and this entry owns the list:
+
+| # | operation | direction | effect on the arena |
+| ---: | --- | --- | --- |
+| 1 | admit a scrolled-off row (open-line append, `F3`) | back, grows | write cells at the cursor; per-block and grand totals += rows |
+| 2 | close / reopen the tail record (hard newline; `severScrollbackWrapClaim`, `restoreWrapClaimBeforeCursor`) | back, neutral | one header bit |
+| 3 | evict at the head (this decision) | front, shrinks | advance head; at most one header rewritten |
+| 4 | **truncate the tail** (`resizeHeight` grow, `Terminal.swift:4256`-`:4278`) | back, shrinks | fold the tail record at the current width, cut at the cell offset beginning the k-th-from-last display row, hand the suffix to the live grid, rewind the write cursor, rewrite the tail header and reopen it, decrement both totals by k and the charge by the cells freed; if the cut consumes the whole record, drop it and its index entry -- the new tail record is closed by construction, because a record boundary is a hard newline |
+| 5 | clear all history (ED 3, reset) | both | head = tail; `evictedRowCount` += the grand total; index emptied |
+
+Operations 3, 4 and 5 are the only ones that shrink the arena, and 4 is the only
+one that shrinks it from the back. Operation 4 does not touch
+`evictedRowCount` and moves no anchor: the rows keep their absolute stream
+positions and merely change which side of the history/live seam they sit on.
+
+**The invariant that replaces `isHistoryHeadTruncated`** (`DD10` deletes the
+public flag; the fact it asserted still has to be true of something):
+
+> `evictedRowCount` counts display rows dropped at the width in force when they
+> were dropped and only ever increases; the oldest retained record is a
+> **suffix** of the logical line that produced it whenever its head has been
+> trimmed, and it reads as a mid-line continuation for as long as it survives.
+
+That is testable without a public property -- it is a statement about what the
+fold emits at the top of history -- which is why `DD10` still stands.
+
+#### Decision 3 -- "keep N logical lines" ships as nothing: no user-facing knob, and if one is ever added its unit is bytes or lines, never display rows
+
+DanTerm exposes **no scrollback configuration at all** today: the three bounds
+are `static let` constants and the public initializer enforcing them is itself a
+pinned invariant. So the question is not "what does the existing knob become"
+but "does this design's cheapness justify inventing one", and the answer is no
+for milestone 1:
+
+- A record-count bound would restore the "three bounds, whichever binds first"
+  invariant that `F5` Observation 5 counts among the five deleted ones. Adding
+  it back to spend a cheapness is the trade this doc exists to refuse.
+- **"N lines" does not mean what a user thinks it means under this store.** Every
+  mainstream terminal's `scrollback_lines` counts *display rows* (`kitty` 2,000,
+  `tmux` 2,000, `alacritty` 10,000, `foot` 1,000, `xterm` 1,024). A logical line
+  can be 367 display rows, so "keep 10,000 logical lines" and "keep 10,000 lines
+  of scrollback" differ by up to two orders of magnitude on the same content.
+- **A display-row knob is the one denomination that is actually unsafe.** The
+  index maintains a grand display-row total, so `while grandTotal > N: evict` is
+  enforceable in O(1) per step -- and it would be *lossy under narrowing* in
+  precisely the way `28/D8`'s row cap is (`narrowThenWidenPreservesCappedHistory`
+  is the pinned failure), because narrowing multiplies display rows while leaving
+  content alone. That reintroduces `F5` invariant 2 -- "a narrow-then-widen cycle
+  must not evict" -- which this design otherwise makes *unrepresentable*. Any
+  future knob must therefore be denominated in **bytes** (the honest unit: it is
+  what the store spends) or, if lines are demanded, in **logical lines** (a
+  content property, safe under a width change).
+
+**What is enforceable, recorded so the option is not lost.** "Keep at most N
+logical lines" is one extra comparison in the eviction loop (`recordCount > N`)
+and needs no new state, because the index knows its record count. It is left
+unbuilt, not unavailable, and it is the fallback the open question below names.
+
+#### Decision 4 -- what happens to `28/D11`'s trial bounds at migration
+
+`28/D11` shipped three bounds as a dogfood trial with an explicit exit
+condition -- "this entry is provisional by construction and expires when the
+human picks exit 1, 2, or 3". Two of the three bounds are deleted by this design
+and the third survives unchanged, so the migration's obligation is to the
+*trial*, not to the numbers.
+
+| `28/D11` bound | value | disposition at migration |
+| --- | ---: | --- |
+| `productionScrollbackCellCap` | 1,790,000 | **deleted, no analogue.** It bounds reflow's dominant term (`0.352 us x cells`); there is no reflow of history to bound |
+| `productionScrollbackRowCap` | 89,500 | **deleted, no analogue.** It bounds reflow's row term and the blank-row regime; the row term is gone and the blank-row regime is bounded by the index charge (Decision 1) |
+| `productionScrollbackBudgetBytes` | 16,777,216 | **kept at the same number, on a new derivation** (Decision 1). `D11`'s derivation is deleted with the caps that produced it |
+
+**What the migration owes the trial's human verdict.** `D11` gave the human three
+exits and the recorded verdict is exit 1 (keep the caps; the ~600 ms hitch is
+livable), held in conversation and never written back as a doc 28 amendment.
+This design does not get to take that decision by deleting its subject. Two
+things follow, and this entry states both rather than assuming either:
+
+1. **The trial keeps running unchanged until the store lands.** Nothing here
+   edits a constant. `D11`'s reopening condition is its own verdict, and a
+   migration that silently deletes the caps would retire a live trial by side
+   effect.
+2. **The migration creates a fourth exit, and doc 28 has to record it.** Exit 4
+   -- *the cause is removed*: a width change stops touching history, so the
+   question "is a 600 ms reflow livable at this depth" becomes unrepresentable
+   rather than answered. The honest close is a doc 28 amendment that records the
+   human's exit-1 verdict **and** notes that the successor removed the cost the
+   verdict accepted, with the resize measurement re-taken against the new store.
+   Until that amendment exists, `D11` is an open trial and this doc's
+   implementation must not be read as closing it.
+
+The depth the human has been dogfooding is preserved: 10,000 display rows of
+full-width content becomes 11,650 (Decision 1's table), so exit 1's subjective
+verdict is not being reversed by a depth cut smuggled in with the store change.
+
+#### Decision 5 -- the head-trim's read semantics, and what this decision adds
+
+Trimming the head record's prefix (Decision 2) leaves a record whose first cell
+is not a line start, which the fold has to say something about. The choice, and
+it is chosen to *reproduce today's output* rather than for convenience:
+
+- The trimmed head record carries one header bit meaning **"this record starts
+  mid-line"**. Its first display row is stamped `.continuation` exactly as
+  today's retained rows are when the head is cut inside a logical line, which is
+  what `isHistoryHeadTruncated` described.
+- Its **semantic-mark slot is cleared**, because the mark referred to a line
+  start that no longer exists.
+- The bit is a content property, width-independent, set by the one writer, and
+  reachable only on the head record. It does not reopen `D1`'s stored-width
+  trigger, and `DD7`'s reading is untouched.
+
+**The addition-side accounting, stated because `F5`'s inequality is a live gate.**
+This entry adds three things to the addition list: a head cell offset plus the
+head re-head (one write site, one 8-byte header), one header bit, and the
+per-record index charge. It deletes two of the three bounds, their two
+derivations, their five maintenance sites and the "whichever binds first"
+invariant. The inequality is not close on this entry.
+
+#### Scoped out of this decision, deliberately
+
+Named so a later reader can tell a gap from a silence:
+
+- **Exact record, header and index layout** -- Phase 3's, for the plan file.
+  This entry fixes what is *charged* and what each operation must *update*, not
+  how the bytes are arranged.
+- **`HR1`, `HR2`, `HR4`'s fold arithmetic and `HR6`** -- the four design
+  decisions `F6` hands to the graduation task. Decision 2 states what operation
+  4 must update; it does not choose the anchor coordinate space (`HR2`) or the
+  `topRow` caching strategy (`HR1`).
+- **`HR3`** -- the severed-wrap BCE cell is a user-visible divergence for a
+  human to dispose of, and it is not a budget or eviction question.
+- **Whether the arena's capacity should ever shrink for an idle pane** --
+  `DD12`, taken as "no" for milestone 1.
+
+- Behavioral verification owed (none of it written by this entry; it is the test
+  list the implementation inherits, and every item is behavioral rather than
+  structure-coupled):
+  1. Feeding past the budget leaves total charged bytes at or under the budget,
+     for each of `F3`'s four content classes and for a blank-line history.
+  2. Eviction drops display rows one at a time under a pathological head record:
+     admit a record spanning many display rows, evict, and assert the browsing
+     anchor and the selection move by the same amount they move on ordinary
+     content. This is `HR5`'s regression test and it fails under `DD2` as
+     originally written.
+  3. A trimmed head record's first display row reads as a continuation and
+     carries no semantic mark; the fold output is otherwise identical to the
+     untrimmed record's tail. (`F3` gate 1's cross-arm checksum is the model.)
+  4. `resizeHeight` grow with the cursor on the last row pulls the right rows
+     back, and the grand display-row total, the per-block total and the charge
+     all agree with a recount afterwards.
+  5. A narrow-then-widen cycle evicts nothing, at any width down to 2 columns --
+     the property `28/D8`'s row cap could not hold and this design makes
+     unrepresentable.
+  6. `15/F4`'s leak proof in arena terms (`DD11`): bytes-in-use falls when
+     records are evicted, and capacity does not grow.
+- Quantitative verification: none, and none is claimed. Every figure here is
+  quoted from `F3`, `F2`, `28/F23` or the tree, or is arithmetic over them; the
+  arithmetic is labelled derived at each use.
+- Tradeoffs and correctness risks:
+  - **The blank-line regime grows 11.7x in record count** (89,500 -> 1,048,576).
+    Bytes are bounded, but record count is the input to `F2`'s eager counting
+    pass, and `F2` measured only to 100,000 lines. See the open question below;
+    this is the one place where a decision here could be wrong in a way a user
+    feels, and the fallback (a record-count bound) is one comparison away.
+  - **Eviction is still unmeasured** (inherited condition 2). This entry
+    specifies the mechanism so it *can* be measured; it does not measure it, and
+    the head-trim adds a fold walk per eviction step that today's `removeFirst`
+    does not pay.
+  - **The pad record wastes up to one record's bytes** at each wrap of the ring.
+    Bounded by `DD3` at 1/32 of the arena, typically one line, and charged.
+  - **Charging the index per record makes the depth content-dependent in a
+    second way.** Short lines now pay 8 bytes of index against ~500 bytes of
+    content; the effect is under 2% for every measured class and 50% only in the
+    degenerate blank-line case, which is the case the charge exists for.
+  - **First-touch residency is an assumption about the allocator**, not a
+    measurement. If the arena is allocated in a way that touches every page, an
+    empty pane costs 16 MiB resident instead of nearly nothing. That is an
+    implementation constraint this entry states, and the census test above is
+    what would catch a violation.
+- Decision and rationale: the design was funded to make the byte budget the only
+  bound, and this entry takes that literally -- one charged-byte bound, at the
+  same 16 MiB constant, re-derived from the arena's own measured footprint so
+  the number survives losing the derivation that produced it. Every measured
+  content class gets deeper at the same number, so migration costs the user no
+  scrollback. The one place the simple choice was refused is eviction
+  granularity: `DD2`'s whole-record step is simpler to implement and would have
+  been a silent user-visible regression in four anchors and the scrollbar, so
+  `DD2`'s own recorded alternative is adopted now, at the cost of one header bit
+  and one extra write site into the arena. And the knob the ledger asked about
+  is not built, because the honest unit for it (display rows) is the one
+  denomination that would reintroduce the narrow-then-widen lossiness this
+  design otherwise makes unrepresentable.
+- Direction review: this entry changes no constant, no code and no default. It
+  is a specification the graduation task consumes. `28/D11` remains a live trial
+  until doc 28 records its exit.
+- Reopening conditions:
+  1. The blank-line counting-pass probe (open question below) measures the eager
+     pass above one frame at 1,048,576 records -- then Decision 3's record-count
+     bound ships as an internal safety bound, sized to keep the pass under a
+     frame, and Decision 1's "one bound" becomes two.
+  2. A measured eviction regression against today's
+     `enforceScrollbackBudget` / `removeFirst` under a rule frozen before the
+     comparison is read -- then the head-trim's fold walk is the first suspect
+     and whole-record eviction (`DD2` as written) is the fallback, with `HR5`
+     accepted as a behavior change.
+  3. The budget's number moves -- then `DD3`'s forced-split cap moves with it by
+     construction, since the cap is stated as a fraction of the budget.
+  4. A human decision to expose scrollback configuration at all, which makes
+     Decision 3's unit question live rather than hypothetical.
+
+#### Ratifications, amendments and new deferred decisions
+
+- **`DD3` is ratified.** `F4` Observation 3 offered "no record exceeds 1/32 of
+  the byte budget" as a derivation to be ratified in Phase 2. Decision 1 keeps
+  the budget at 16,777,216, so the cap stays **65,536 cells** (524,288 B) and the
+  rule -- not the number -- is what is adopted: the cap moves if the budget does.
+- **`DD2` is amended, not overturned.** Its recorded form ("eviction evicts
+  whole records") is superseded by Decision 2's head-granular eviction, which is
+  `DD2`'s own recorded alternative ("advancing a head offset inside the first
+  record so eviction stays display-row granular ... not needed for milestone 1").
+  `F6` `HR5` is the evidence that changed the answer: the granularity is
+  user-visible in four anchors and the scrollbar, which `F4` case 27 did not see
+  because it priced only the memory consequence. The amendment is noted at
+  `DD2` in [findings.md](findings.md) rather than rewriting it.
+- **`DD10` stands.** `isHistoryHeadTruncated` is still deleted; Decision 2's
+  invariant plus Decision 5's header bit carry what it asserted, without a public
+  property.
+- **`DD11` is made concrete.** The census reports arena capacity and
+  bytes-in-use separately, and the leak proof becomes "bytes-in-use falls when
+  records are evicted, and capacity does not grow" -- which a fixed-capacity
+  arena makes trivially checkable.
+- **DD12 -- the arena is allocated once at the budget's size and never grows or
+  shrinks.** An idle pane keeps its reservation. The alternative, releasing the
+  region when history empties, buys back address space that costs nothing and
+  adds a state transition to the one data structure the whole design leans on.
+  Reopen if a real session's pane count makes the reservation visible in RSS.
+- **DD13 -- a trimmed head record reads as a mid-line continuation and loses its
+  semantic mark** (Decision 5). The alternative -- folding it as a fresh line
+  start -- is one bit cheaper and diverges from today's output, which inherited
+  condition 10 exists to prevent.
+- **DD14 -- a record that would straddle the ring's wrap point is preceded by a
+  pad record.** The alternatives are splitting the record (every reader handles
+  two segments, and `F1`'s win is contiguity) or copying it down (a copy on the
+  admission path). The pad wastes bounded bytes and is charged.
+
+#### Conditions discharged and advanced
+
+Against `D1`'s eleven carried-forward conditions:
+
+- **Discharged: 7** (budget and eviction semantics -- the task itself) and
+  **4** (`28/D11`'s trial bounds during migration; the disposition is stated,
+  and the doc 28 amendment it names is doc 28's to write).
+- **Advanced: 2** (eviction's mechanism is now specified precisely enough to
+  measure, and the probe is named below; the measurement is still owed),
+  **5** (the index's trigger points are now six -- width change, admission, head
+  eviction, tail truncation, forced split, clear-all -- each riding the cached
+  browsing-anchor row from `HR1`), **8** (`DD3` ratified against a budget that
+  is now derived rather than inherited; still unmeasured against a real
+  pathological input), **9** (the side tables are charged inside the budget;
+  their format is still owed), and **10** (Decision 5 adds a second case where
+  the fold must reproduce today's output, alongside `HR3`).
+- **Untouched: 1, 3, 6, 11.**
+
+#### One open question this entry could not decide without a measurement
+
+**Does the eager counting pass survive the blank-line regime?** Decision 1
+admits 1,048,576 blank records at 16 MiB (derived), against the 100,000 lines
+`F2` measured. `F2`'s numbers are 0.015-0.016 ms at 10,000 lines and
+0.545-0.641 ms at 100,000 -- so the per-line cost is roughly 1.6 ns at 10,000
+and 6 ns at 100,000, which `F2` Observation 3 attributes to cache residency. A
+linear extrapolation at the 100,000-line rate puts 1,048,576 records at ~6.4 ms;
+if residency degrades further it is worse. `F2`'s own reject bound is one 60 Hz
+frame (16.67 ms). **That is arithmetic, not a measurement, and it is inside the
+bound by less than 3x.**
+
+The probe, stated so it can be run without re-deriving it: re-run
+`TerminalLogicalLineIndexProbe`'s eager recompute at 1,048,576 zero-cell records
+under `F2`'s frozen rule -- same gates, same width changes, same statistic. The
+decision rule, frozen here before the number exists: **at or above 16.67 ms,
+Decision 3's record-count bound ships as an internal safety bound** sized to keep
+the pass under a frame at the measured per-record rate; **under 16.67 ms**, the
+one-bound design stands as decided. This is deliberately not run here -- this is
+a design task -- and it does not block the graduation task, because both
+outcomes are one comparison in one loop.

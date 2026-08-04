@@ -725,10 +725,23 @@ rather than blocking.
   undershoot by up to one record. The alternative -- advancing a head offset
   inside the first record so eviction stays display-row granular -- is real and
   cheap to add later, and is not needed for milestone 1.
+
+  **Amended 2026-08-04 by [`D2`](decisions.md), which takes the alternative
+  above for milestone 1 after all.** The entry above priced the granularity as a
+  *memory* consequence only; `F6` `HR5` found it is also user-visible -- a
+  whole-record step drops up to 367 display rows at 179 columns, clamping four
+  anchors and jumping the browsing viewport. `D2` Decision 2 evicts
+  display-row-granularly at the head (whole records while they fit, then a trim
+  of the head record's prefix with its header rewritten in place), so no anchor
+  moves further per admitted row than it does today. This paragraph stands as
+  the original reasoning; the decision it recorded is superseded.
 - **DD3 -- the forced-split cap is 65,536 cells, stated as "no record exceeds
   1/32 of the byte budget".** Same number the README proposed, now with a
   derivation (Observation 3) instead of a guess. Reopen if the budget changes
   shape or if Phase 2 finds the eviction granularity or the wide-cell scan binds.
+  **Ratified 2026-08-04 by [`D2`](decisions.md)**, which keeps the budget at
+  16,777,216 on a new derivation, so the cap stays 65,536 cells and it is the
+  *rule* that is adopted: the cap moves if the budget does.
 - **DD4 -- the `hasWideCells` header bit is carried per record, not per buffer.**
   iTerm2's buffer-wide sticky flag is the alternative and is rejected on
   DanTerm's own constraint: a per-record bit costs one flag in a header that
@@ -1774,14 +1787,21 @@ simply vanish is invariant 1, and `HR1`/`HR8` are where its remains sit.
     consumer -- 14 assertions in `TerminalScrollbackBudgetTests.swift` and
     nothing else -- so deleting costs less than documenting. Reopen if a
     consumer ever needs "did the last eviction cut inside a logical line", which
-    the evicted record's open/closed bit can still answer.
+    the evicted record's open/closed bit can still answer. **Still stands after
+    [`D2`](decisions.md)**, which makes head truncation reachable again: `D2`
+    Decision 5 carries it as a header bit on the head record and Decision 2
+    states the invariant it replaces, neither of which is a public property.
   - **DD11 -- the census's per-row leak proof is restated in arena terms.**
     `retainedCellStorageRowCount` (doc 15's `F4`) asserts that history does not
     hold storage for rows it has evicted; with one region there are no per-row
     allocations to count. The simple analogue: eviction must advance the arena's
     head and the region must not grow monotonically, asserted as bytes-in-use
     against capacity. Dropping the proof entirely was rejected -- doc 15's
-    regression was real and cost twice the promised memory.
+    regression was real and cost twice the promised memory. **Made concrete by
+    [`D2`](decisions.md) Decision 1**: the arena is allocated once at the
+    budget's size and never grows, so the proof reads "bytes-in-use falls when
+    records are evicted, and capacity does not grow", and the census reports the
+    two quantities separately.
 - Next action: Phase 2's second ledger task (budget and eviction semantics)
   inherits `HR5` (eviction granularity is user-visible in four anchors and the
   scrollbar, which is an argument for `DD2`'s head-offset alternative in

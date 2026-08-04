@@ -113,7 +113,12 @@ The chain that opened this doc, all measured in doc 28:
   reflows history deletes the caps' reason to exist.
 - The byte budget binds nothing today (`28/F23`: peak 3.38 MB of 10 MiB), so
   a design where the byte budget is the *only* bound is returning to the knob
-  the human originally wanted, not inventing a new one.
+  the human originally wanted, not inventing a new one. **`D2` corrects this
+  bullet**: 3.38 MB of 10 MiB is a `28/D8`-era reading, and at `28/D11`'s
+  shipped bounds (budget 16 MiB) the byte budget already binds for short-line
+  content while the cell cap binds for everything else. The conclusion is
+  unchanged -- one bound is still where this design lands -- but the premise
+  "the budget binds nothing" is no longer true of the tree.
 
 ## Current hypotheses
 
@@ -221,7 +226,12 @@ it.
   a small header (cell count, flags, a semantic-mark slot for OSC 133), then
   C1 cells, then style runs. Append at the back, evict at the front, middle
   immutable. The byte budget *is* the arena size -- memory is bounded by
-  construction and the byte budget becomes the only cap.
+  construction and the byte budget becomes the only cap. **`D2` settles this
+  bullet**: the arena's capacity is the budget, allocated once at 16 MiB and
+  never grown or compacted; the index and side tables are charged inside it;
+  eviction is display-row granular at the head; and "middle immutable" narrows
+  to its true form -- the head record's header and the tail record are the only
+  writable bytes.
 - **A derived wrap index, never a stored one.** A deque of record offsets,
   blocked ~256 lines per block, one cached display-row total per block at the
   current width. Lookup: binary search over block totals, then an in-block
@@ -374,10 +384,34 @@ work, that list is the constraint on it.
   deferred decisions added (`DD9`-`DD11`). `28/H7`'s entry names the invariant
   that dies -- "history is always at the current width" -- and F6 Observation 3
   says exactly which sites depended on it.
-- [ ] `TODO` Decide budget and eviction semantics: arena size as the byte
-  budget, what (if anything) "keep N logical lines" means as a user-facing
-  knob now that it is trivial to enforce, and what happens to the `28/D11`
-  trial bounds during migration.
+- [x] `DONE` **`D2`, budget and eviction semantics.** Recorded in
+  [decisions.md](decisions.md); it **discharges inherited conditions 4 and 7**,
+  ratifies `DD3`, amends `DD2`, and advances 2, 5, 8, 9 and 10. Five decisions:
+  (1) **one charged-byte bound at the same 16 MiB** -- the arena's capacity *is*
+  the budget, allocated once and never grown, compacted or shrunk, with the
+  block index (8 B per record), the spill table and the two side tables charged
+  **inside** it; the number is re-derived from `F3` Observation 4's measured
+  footprint (13.74 MiB for `28/D11`'s own 10,000-full-width-row target) rather
+  than inherited from the cap arithmetic that dies with the caps, and **every
+  measured content class gets 1.16x-1.32x deeper at the same constant**.
+  (2) **Eviction is byte-driven, display-row granular at the head and never
+  copies**: whole records while they fit, then a trim of the head record's
+  prefix with its 8-byte header rewritten in place -- which closes `HR5`'s
+  367-row anchor jump instead of accepting it, and **amends `DD2`** to its own
+  recorded alternative. The five mutating arena operations are enumerated there,
+  including `HR4`'s tail truncation, the only back-of-arena shrink. (3) **No
+  user-facing "keep N lines" knob ships**: a display-row denomination would
+  reintroduce `28/D8`'s narrow-then-widen lossiness, which this design otherwise
+  makes unrepresentable, so any future knob is denominated in bytes or logical
+  lines. (4) **`28/D11`'s cell and row caps are deleted with no analogue and its
+  budget survives unchanged**; the trial itself keeps running until doc 28
+  records an exit, and the migration creates a fourth exit ("the cause is
+  removed") that doc 28 owes an amendment for. (5) A trimmed head record reads
+  as a mid-line continuation and loses its semantic mark, which is what replaces
+  `isHistoryHeadTruncated` under `DD10`. Three deferred decisions added
+  (`DD12`-`DD14`) and one open question that needs a measurement: the blank-line
+  regime admits 1,048,576 records, 10.5x anything `F2` measured, with the
+  probe and its decision rule frozen in the entry.
 - [ ] `TODO` Graduate: when the design settles, extract it into a plan file
   (the `simplify-plan` admission test applies) and record here where it went.
 
@@ -463,8 +497,22 @@ add detail to it.
   path that was easy to isolate. Descriptively, `F3` Observation 4 found the
   arena holds the same content in **0.744x-0.925x** of the bytes the budget
   charges today, which is the input the budget-and-eviction task needs.
+  **`D2` has since spent that input and specified the mechanism** -- eviction is
+  byte-driven, display-row granular at the head, and copies nothing -- so what
+  remains owed is the measurement itself, against today's
+  `enforceScrollbackBudget` / `removeFirst`, under a rule frozen before the
+  comparison is read. The head-trim's per-step fold walk is the new term such a
+  probe has to see.
+- **The eager counting pass is also unpriced at the record counts the budget now
+  admits.** `D2` Decision 1 charges the index per record, which bounds a
+  blank-line history at **1,048,576 records** at 16 MiB -- 10.5x the deepest
+  `F2` measured. Extrapolating `F2`'s per-line rate puts the pass at ~6.4 ms
+  against its own one-frame reject bound, which is arithmetic and not a
+  measurement. `D2`'s open-question section names the probe and freezes the
+  decision rule; the fallback if it fails is an internal record-count bound.
 - The forced-split cap is **65,536 cells, derived** in `F4` Observation 3 as
-  1/32 of the byte budget rather than chosen. Still unpriced: what a real
+  1/32 of the byte budget rather than chosen, and **ratified by `D2`** now that
+  the budget it divides has its own derivation. Still unpriced: what a real
   pathological input (`cat` of a binary, minified JSON) actually produces --
   the derivation bounds the hazard without saying how often it is reached.
 - `28/H8` (deferred packing) shares the amortized-background-work idea; a
@@ -473,7 +521,12 @@ add detail to it.
 - The `28/D11` trial verdict (human: keep the caps, hitch is livable) is
   recorded in conversation but not yet as a doc 28 decision amendment; this
   doc does not depend on which exit D11 records, since it removes the
-  machinery all three exits negotiate with.
+  machinery all three exits negotiate with. **`D2` Decision 4 states the
+  migration's side of it**: the two caps are deleted with no analogue, the
+  budget survives at the same number on a new derivation, the trial keeps
+  running until doc 28 records an exit, and the migration creates a fourth exit
+  -- *the cause is removed* -- that doc 28 owes an amendment for. Landing this
+  store without that amendment retires a live trial by side effect.
 
 ## Outcome
 
