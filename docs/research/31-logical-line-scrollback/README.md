@@ -58,6 +58,18 @@ Two acceptance dimensions, and a change lands only on both:
   `agent-docs/measurement-discipline.md` before producing any number. Freeze
   each decision rule in [decisions.md](decisions.md) before reading the first
   comparison result it governs.
+- **The arc baseline is pinned: `de17e95`** (the commit that opened this doc;
+  no part of the design exists in the tree at that revision). When the
+  implementation is judged as a whole, its total performance difference is
+  measured against `de17e95` -- this doc's analogue of `28/F22`'s
+  wide-baseline audit. Two-tier discipline, per
+  `agent-docs/terminal-performance.md`: the wide reading is **descriptive
+  accounting only** (a wide gap attributes everything landed in between,
+  including work unrelated to this doc), and it never substitutes for
+  verdicts. Every individual change still earns its verdict against the
+  parent revision it forked from, under a rule frozen before the comparison
+  is read. Checkpoint sub-benchmarks during implementation are that
+  per-change tier, not this one.
 - Phase 1 prototypes live in scratch or test targets only. No production
   storage change of any kind before `D1` answers go.
 - **Eager index recompute is the milestone-1 choice, by explicit human
