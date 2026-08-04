@@ -717,7 +717,16 @@ implementation without that funding decision.
   promoted out of `plans/wip/` at closure, and shipped as C1 across
   `987927a`..`f364cd9`. The doc does **not** close with it: `H5`'s gate is
   undecided, `H7`'s reference read has not been done, and Phase 2 still owes the
-  resize *profile* (`F23`). See `## Outcome` for the liveness reading.
+  resize *profile* (`F24`). See `## Outcome` for the liveness reading.
+- [ ] `RESEARCH` Size the history-depth defaults against a stated line-count
+  target. `F23` measured what today's bounds retain at 179 columns (1,830 rows of
+  full-width content, 7,281 of program output, 16,384 of shell history), priced
+  two candidate bound sets for ~10,000 rows through `D8`'s model, and changed no
+  default. What is left is the human decision: which definition of "10,000 lines"
+  the product wants, and whether `D8`'s ~150 ms resize budget reopens to pay for
+  it. The harness is
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift`,
+  env-gated out of the `just test` gate.
 
 ## Rejected
 
@@ -892,15 +901,22 @@ byproducts that outlive the representation contest.
 **Live, and why each is work rather than a parked lead.** Three items are
 unanswered questions with named next steps, so this doc stays in `## Live`:
 
-1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F23`) -- where inside
-   reflow's dominant per-cell term the time goes. Renumbered ten times and still
-   owed; it is the prerequisite for `D8`'s cell cap ever rising.
+1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
+   reflow's dominant per-cell term the time goes. Renumbered eleven times and
+   still owed; it is the prerequisite for `D8`'s cell cap ever rising.
 2. **`H7`, viewport-adjacent reflow** (`RESEARCH`) -- opened by `D8`, first task
    is a read of `references/`, nothing designed. It is the mechanism that would
-   give sparse content back the 3.08x depth `D8` charged it.
+   give sparse content back the 3.08x depth `D8` charged it. **`F23` sharpened
+   what waits on it**: reaching 10,000 retained rows of full-width content at 179
+   columns costs a measured 600.5 ms resize (4.00x `D8`'s budget) and ~15 MiB, so
+   `H7` is that target's prerequisite rather than a later refinement.
 3. **`H5`'s gate** (`TODO`, destination `D11`) -- undecided, and the post-landing
    evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
    rather than C6's 0.78 MB.
+4. **The history-depth default** (`RESEARCH`, opened by `F23`) -- `F23` priced
+   two candidate bound sets against `D8`'s model and changed nothing. Picking a
+   definition of "10,000 lines", and whether to reopen `D8`'s resize budget to
+   pay for it, is a human decision this doc holds the evidence for.
 
 **Parked with stated conditions, not live.** `H4` (re-price before running --
 `D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore
