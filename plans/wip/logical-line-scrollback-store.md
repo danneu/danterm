@@ -16,8 +16,9 @@ shipped as a dogfood trial in `28/D11` exist only to bound that product.
 
 Desired outcome: history holds one record per logical line a program printed,
 wrapping is derived at read from (record, width), and a width change stops
-touching history -- the remaining resize work is refolding the live screen and
-one pass to recount display rows. Deleted with it: reflow of history, both caps
+walking or rebuilding retained history -- its only arena write is the bounded
+open-tail seam repair I11 requires, and the remaining resize work is refolding
+the live screen and one pass to recount display rows. Deleted with it: reflow of history, both caps
 and their `28/D8` derivations and tests, narrow-then-widen eviction machinery,
 and per-display-row continuation bookkeeping.
 
@@ -61,11 +62,13 @@ materializing a row per pointer query (`31/D3` Decision 5): the per-frame path
 already borrows and never goes through it, so milestone 1 lands the arena on
 exactly the path `31/F1` measured. Judged by the ladder.
 
-**Milestone 2 -- the borrowing cursor.** Replace the materializing facade with a
-borrowing cursor and a forward walk over records for whole-history reads.
-Scheduled after milestone 1 lands; promoted ahead of the rest of milestone 2 iff
-doc 21's `.character` drag-move at trial depth re-measures **above 121 us** under
-doc 21's own instrument (`31/D3` Decision 5, frozen before the number exists).
+**Follow-up plan -- the borrowing cursor.** Replacing the materializing facade
+with a borrowing cursor and a forward walk over records for whole-history reads
+is a separate plan, written after milestone 1 lands. It is not in this plan's
+scope, proof obligations or acceptance. Its priority is already frozen: it is
+promoted ahead of the rest of that work iff doc 21's `.character` drag-move at
+trial depth re-measures **above 121 us** under doc 21's own instrument
+(`31/D3` Decision 5, frozen before the number exists).
 
 ## Invariants
 
@@ -144,12 +147,29 @@ doc 21's own instrument (`31/D3` Decision 5, frozen before the number exists).
 - **PO10 (identity).** A hovered link's activation identity changes when any cell
   in its range is overprinted and not otherwise, with the range spanning the
   history/live seam.
-- **PO11 (gate).** `just test` passes, and the deletion list `31/F5` names is
+- **PO11 (I2, migration depth).** Under the production budget, the same fed input
+  retains at least as many logical lines and display rows in the new store as in
+  today's engine, on each of the four calibrated classes and on spill-heavy,
+  hyperlink-heavy and identity-heavy content, with the charge totalled worst-case
+  per class over records, index and every side table. This is what graduates the
+  record format: a class that retains less does not ship.
+- **PO12 (I5, I6).** Cycling variable-length records -- including near-cap records
+  and an open tail that grows across the wrap seam -- through several full
+  physical wraps of the arena, with head trims interleaved, leaves every reader
+  returning exactly the expected retained suffix, cell for cell and in order,
+  after each cycle.
+- **PO13 (record fidelity).** Multi-scalar spills, hyperlink ids and targets,
+  content identity and semantic marks survive admission, a width change, a forced
+  split and a head trim: a split logical line's mark appears exactly once and on
+  the piece that starts it, and spill and hyperlink content read back identically
+  on both sides of the split. (A trimmed head's mark clearing is PO5's.)
+- **PO14 (gate).** `just test` passes, and the deletion list `31/F5` names is
   actually gone from the tree rather than relocated.
 
 ## Acceptance
 
-Landing is decided by the paired benchmark ladder against a real
+This plan completes when milestone 1 passes every proof obligation above and the
+ladder below. Landing is decided by the paired benchmark ladder against a real
 implementation, not by any Phase 1 number:
 
 - **`retained-browse` is the go/no-go.** Not `slower` under its frozen rule in
@@ -206,8 +226,8 @@ Open conditions that the implementation, not the design, has to discharge:
   reintroduce narrow-then-widen lossiness (`31/D2` Decision 3).
 - No reflow, rewrap or background rewrap of retained history in any form.
 - No change to the stored cell format or to the live grid's refold.
-- Milestone 1 does not rewrite the projection readers; the whole-history
-  materialization stays as it is until milestone 2.
+- This plan does not rewrite the projection readers; the whole-history
+  materialization stays as it is until the borrowing-cursor follow-up plan.
 - No scheduling work: `28/F20`'s residual may be scheduling rather than encoding,
   and this store does not address it.
 
@@ -233,7 +253,10 @@ Open conditions that the implementation, not the design, has to discharge:
   counter is the only guard.
 - **AR6 -- first-touch residency is an assumption about the allocator.** If the
   arena is allocated in a way that touches every page, an idle pane costs its
-  whole capacity resident; PO3's census is what would catch it.
+  whole capacity resident. PO3's census cannot see this -- it reports capacity and
+  logical bytes-in-use, not pages dirtied -- so the check is a resident-page
+  measurement through `TerminalMemoryProbe` (`phys_footprint`, `--vmmap`) on an
+  empty, a partially filled and a saturated pane.
 - **AR7 -- the seam rule (I11) was discovered, not designed**, and no probe has
   exercised a width change with a logical line straddling the seam.
 
@@ -269,3 +292,13 @@ Open conditions that the implementation, not the design, has to discharge:
 - How the fold computes a cut offset, and how the ring's wrap seam is kept from
   splitting a record, provided a record stays contiguous and the waste is bounded
   and charged.
+
+## Commit progress
+
+- [ ] 1. docs(research): freeze the eviction comparison's decision rule before any eviction number exists
+- [ ] 2. test(terminal): run `31/D3` Decision 7's frozen wide-content counting probe and record its verdict
+- [ ] 3. feat(terminal): add the logical-line record arena, its derived index and the read-time fold
+- [ ] 4. test(terminal): price head-granular eviction against today's budget enforcement and record the verdict
+- [ ] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
+- [ ] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
+- [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
