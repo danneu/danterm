@@ -352,7 +352,7 @@ it.
   **eviction unmeasured on both sides**, the **paired ladder**, and the
   **`28/D11` trial bounds** this design's caps are currently shipped as.
 
-### Phase 2 -- design (open: D1 answered go on 2026-08-04)
+### Phase 2 -- design (complete: D1 answered go on 2026-08-04, graduated the same day)
 
 Read the "Conditions and unpriced terms Phase 2 inherits" list in
 [decisions.md](decisions.md) before starting any task below; the tasks are the
@@ -469,9 +469,35 @@ work, that list is the constraint on it.
   wide fallback is reframed and bracketed with existing numbers, and **its probe
   and three-way decision rule are frozen** for a follow-up to run mechanically.
   Three deferred decisions added (`DD16`-`DD18`).
-- [ ] `TODO` Graduate: the design has settled (`F6`, `D2`, `F7`, `D3`); extract
-  it into a plan file (the `simplify-plan` admission test applies) and record
-  here where it went.
+- [x] `DONE` **Graduate: the design is in
+  [`plans/wip/logical-line-scrollback-store.md`](../../../plans/wip/logical-line-scrollback-store.md).**
+  Written 2026-08-04 under the `simplify-plan` admission test, so it carries the
+  contract and cites this doc for everything else: eleven invariants, eleven
+  proof obligations, the two milestones `D3` named (milestone 1 the store with
+  the materializing facade, milestone 2 the borrowing cursor under `D3`
+  Decision 5's frozen 121 us drag-move rule), and the paired ladder as the
+  acceptance criterion with the -2% / -7% conversions labelled as the hypotheses
+  the ladder tests rather than outcomes to confirm. The still-open inherited
+  conditions ride there as a "Gates carried from the research doc" section: **2**
+  (eviction, owed before the ladder verdict is read), **1** (the wide-content
+  counting probe, frozen in `D3` Decision 7), **4** (`28/D11`'s trial and the doc
+  28 amendment it owes), **8** (the forced-split cap against a real pathological
+  input), **9**'s remainder (spill / hyperlink / semantic-mark formats), and the
+  `DD8` re-read `D3` requires against the landed implementation. What stayed
+  here rather than moving: every rationale, alternative, measured number and
+  disposition -- the plan cites `31/D2`, `31/F6-HR1` and the rest instead of
+  restating them. Two graduation-time choices are recorded as `DD19`.
+
+  - **DD19 -- one plan file covers both milestones, and the eviction measurement
+    is sequenced before the ladder verdict is read.** The first is the obvious
+    simple option: `D3` names two milestones of one design, and splitting them
+    across two plan files would duplicate the invariants both share; a second
+    file is one promotion away if milestone 2 grows. The second is an added
+    constraint this doc did not state -- inherited condition 2 says eviction is
+    unmeasured, not when to measure it -- and the plan puts it before the ladder
+    because a real pane evicts on every admitted row, so a ladder verdict read
+    with eviction unpriced would attribute a term nobody has looked at. Reopen
+    either if the implementation's slicing wants it: neither is a design change.
 
 ## Rejected
 
@@ -607,17 +633,29 @@ them. The verdict licenses Phase 2's **design** work only: no production storage
 change is licensed, and the paired ladder against a real implementation is the
 acceptance dimension still outstanding.
 
-Phase 2 is open and has four inputs: `F6` (the call-site enumeration), `D2`
+Phase 2 is complete and had four inputs: `F6` (the call-site enumeration), `D2`
 (budget and eviction semantics -- one charged-byte bound at the same 16 MiB,
 head-granular eviction, no user-facing knob), `F7` (the counting pass at the
 record count that budget admits: 0.761 ms against a 16.67 ms bound, so `D2`
 ships one bound rather than two) and `D3` (the five remaining `F6` hard cases
-and the wide-record fallback). **With `D3` the design has settled**: all eight of
-`F6`'s flagged sites are disposed of, the four decisions `F6` handed forward are
-made, and the only ledger task left is graduating the design into a plan file.
-No decision in Phase 2 is blocked on a measurement, and both measurements still
-owed have their mechanisms specified and change no decision on either outcome:
-**eviction** remains the largest unmeasured term on both sides, and the
-**wide-content counting pass** now has a frozen probe and decision rule. The
-acceptance dimension outstanding is unchanged and is not a design question: the
-paired ladder against a real implementation.
+and the wide-record fallback). **With `D3` the design settled** -- all eight of
+`F6`'s flagged sites disposed of, the four decisions `F6` handed forward made --
+and it **graduated on 2026-08-04 into
+[`plans/wip/logical-line-scrollback-store.md`](../../../plans/wip/logical-line-scrollback-store.md)**,
+which closes Phase 2. No decision in Phase 2 was blocked on a measurement, and
+both measurements still owed have their mechanisms specified and change no
+decision on either outcome: **eviction** remains the largest unmeasured term on
+both sides, and the **wide-content counting pass** has a frozen probe and
+decision rule. Both ride the plan as gates, alongside `28/D11`'s live trial, the
+forced-split cap's missing pathological input, and the record format's remaining
+side tables.
+
+What this doc still owns after graduation is the verdict, not the work. `D1`'s
+scoping stands: no production storage change is licensed by any entry here, and
+the acceptance dimension outstanding is not a design question but the **paired
+ladder against a real implementation** -- `retained-browse` as the go/no-go,
+`terminal-feed` and `scrollback-stream` carrying `H3`'s falsifier, under rules
+frozen before the comparisons are read. The -2% and -7% frame figures stay
+predictions through measured shares, and the plan states them as the hypotheses
+the ladder tests. A `slower` `retained-browse` verdict with `D3` Decision 1's two
+diagnostics holding is what reopens `28/H7`.
