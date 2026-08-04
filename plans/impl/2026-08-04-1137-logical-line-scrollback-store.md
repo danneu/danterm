@@ -207,6 +207,21 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 
 ## Acceptance
 
+**Measured 2026-08-04 as `31/F11`, and this section is NOT satisfied.** One valid
+`confirm` invocation against `28c54e1`, the pre-cutover parent: `retained-browse`
+**+60.44%** (frozen 1.05%), `terminal-feed` **+2.60%** (2.5%) and
+`scrollback-stream` **+141.42%** (1.85%, PTY drain 8.4 -> 1.3 MB/s) -- all three
+`slower`, the -2% / -7% hypotheses refuted in the opposite direction. The three
+history-free draw workloads read `inconclusive` / `faster` / `faster` on the same
+schedule. The diagnostic order below was run first and **both diagnostics hold**,
+which under the frozen rule is the condition that reopens `28/H7`; `31/F11`
+records that the rule fires and records why it fits the cutover's wiring better
+than the model (`retained-browse` feeds one-record-per-display-row content, `31/F1`
+measured that walk 1.64x faster, and the same pane is 8.62x resident with 0.007x
+the row allocations and a census explaining 5% of it). **Milestone 1 does not
+land on this evidence; the disposition is the human's and no further work is
+taken here.** The original statement of the section follows.
+
 This plan completes when milestone 1 passes every proof obligation above and the
 ladder below. Landing is decided by the paired benchmark ladder against a real
 implementation, not by any Phase 1 number:
@@ -324,12 +339,36 @@ Open conditions that the implementation, not the design, has to discharge:
   "the cause is removed" exit would retire a live trial by side effect. The
   amendment is doc 28's to write, and the resize measurement it names is taken
   against the new store.
-- **The forced-split cap is derived, not measured** (`31/D1` condition 8). No
-  pathological input has been fed to a real engine to see what a session
+- **The forced-split cap is derived, not measured** (`31/D1` condition 8).
+  **Discharged 2026-08-04 as `31/F12`**: `31/F4`'s named wezterm shape (1.5 MB of
+  minified JSON on one line) and a line larger than the whole arena were fed to
+  the real engine. The cap bounds every hazard it was derived for -- 23 pieces
+  exactly as predicted, copy reads one 1,499,979-character logical line, the
+  charge stays inside capacity, and the over-arena line evicts its own head and
+  stays readable as 32 records of one line. It **also** bounds one the derivation
+  never named: browsing a near-cap record costs **8,844.7 us per frame against
+  219.1 us in the same terminal's ordinary region (40.3x)**, measured linear at
+  ~1.95 ns per record-cell per display row, because `forEachFoldedCell`
+  re-enumerates the whole record to find one display row's cell range. That is
+  53% of a 60 Hz frame at the cap, and it is an implementation defect rather than
+  `AR2` (both stimuli are ASCII, and the arithmetic path exists but this walk does
+  not take it). Recorded, not fixed. The original statement of the gate follows.
+  No pathological input has been fed to a real engine to see what a session
   produces. Feed one; the cap bounds the hazard either way.
 - **`31/DD8` is re-read against the landed implementation** rather than quoted
   from `31/F5`: the invariant margin is now 4.5 against 4.5, so the simplification
   side of the acceptance gate is re-adjudicated on what actually landed.
+  **Re-read 2026-08-04 in `31/F11` Observation 4, and `31/DD8` reopens on both of
+  its clauses.** The tally against what landed is **4.5 deleted against 7.5
+  added** -- `I11`'s seam rule, `31/DD25`'s trailing-fill side table, `31/DD43`'s
+  seam-spacer reach and `historyEvictionsObserved`'s two-object protocol are all
+  additions the earlier tallies predate, with `31/DD37`'s maintained charge
+  cancelled against today's -- and the storage core landed at **2,419 production
+  lines** (`LogicalLineRecord` 337 + `LogicalLineStore` 2,082) against `31/F5`'s
+  ~350-400 prototype estimate, while `Terminal.swift` fell only 6,470 -> 6,431. The
+  cross-cutting-to-local asymmetry mostly survives -- six of the eight additions
+  have one writer and one gate -- with two exceptions that cross the store's
+  boundary. Disposition is a human's.
 - The record format still owes a shape for the spill table, the hyperlink table
   and the semantic-mark slot (`31/D1` condition 9, advanced by `31/D3`
   Decision 6).
@@ -429,7 +468,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 4b. test(terminal): re-run `31/D4`'s frozen rule against the optimized store and record the verdict
 - [x] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [x] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
-- [ ] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
+- [x] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
 
 ## Implementation notes
 
@@ -923,6 +962,48 @@ Open conditions that the implementation, not the design, has to discharge:
     findings for "resize measurement against the new store" will not find one, which is why
     both README ledger rows and doc 31's Phase 3 ledger name the amendment by its heading.
 
+- **Slice 7 records a failed acceptance, and the plan stops there rather than acting on
+  it.** The ladder is this plan's own gate and it read `slower` on all three rungs it
+  names, so the slice's deliverable -- the record -- is complete and the plan's Acceptance
+  is not. What the slice did in the order the plan fixed: ran `just benchmark-confirm
+  baseline=28c54e1` once (the pre-cutover parent, which is `9ad7cc5`'s parent and so
+  isolates the cutover from the four commits that built the store), read every rung against
+  its frozen threshold, then ran `31/D3` Decision 1's two diagnostics **before concluding
+  anything**, then took the residency and pathological readings the checklist also owes.
+  Nothing was optimised, profiled or reverted: the plan says the disposition of a `slower`
+  verdict is the human's, and `agent-docs/terminal-performance.md` says to report and pause
+  before optimizing.
+- **The ladder's result does not fit any probe boundary this campaign built, and the entry
+  says so rather than resolving it.** `31/F1` measured the read walk at 0.61x, `31/F3`
+  admission at 0.62x-0.69x, `31/F10` the whole write path at 0.856x-1.023x -- and the wired
+  engine browses 60% slower and drains a PTY 6.2x slower. Every one of those probes drives
+  `LogicalLineStore` directly; the ladder drives `Terminal`. The one new measurement that
+  narrows it is the pane-level residency reading (8.62x footprint, 0.007x row allocations,
+  census coverage 0.46 -> 0.05), which says the pages being dirtied are not retained
+  history and are not charged. A profile is the next instrument and is deliberately not
+  taken here.
+- **Two judgment calls, recorded as `31/DD49`-`31/DD50` continuing `DD48`'s numbering**,
+  each taken as the obvious simple option and each a human's to revisit:
+  - **DD49 -- the residency re-read is `31/D4`'s named pane-level instrument rather than a
+    re-run of `31/F10`'s in-test four-state ladder.** The store is wired now, so
+    `just terminal-memory-probe` -- which `D4` named and which `F8`/`F10` had to substitute
+    for -- measures a real pane for the first time; the four-state ladder's only store
+    change since `5cf61e0` is the index rings' minimum capacity, which moves an empty
+    store's floor and not a cycled one's; and the ladder verdict means no decision is
+    waiting on the number. What it costs, stated: `D4`'s second reject trigger is written
+    "in the same session", and today's store no longer exists in the tree, so no
+    same-session control can be built at this revision. The four states and the `blank`
+    regime are recorded as **not measured**, not as measured-zero.
+  - **DD50 -- the `DD8` tally cancels the arena's maintained metadata charge against
+    today's `scrollbackByteCost` maintenance** rather than counting it as a new invariant.
+    Both are the same obligation in two stores. Counting it instead makes the tally 4.5
+    against 8.5; the direction does not change either way, which is why it did not block.
+- **`31/F12`'s probe file is the one non-doc file this slice adds.** It is a test-target
+  probe gated behind `DANTERM_LOGICAL_LINE_PROBE`, exactly as every probe since `31/F1`,
+  and it touches nothing under `lib/TerminalCore/Sources/`. It is committed rather than run
+  from scratch because the campaign's convention is that a finding's instrument is
+  re-runnable, and because the fold hazard it measured is now a named target.
+
 ## Follow Up
 
 - **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
@@ -938,3 +1019,33 @@ Open conditions that the implementation, not the design, has to discharge:
   does not supersede it (exit 1 said a keep-the-caps successor would), because
   resize cost stopped being a function of history depth and a successor budget
   wants deriving against the live screen. Nothing currently bounds resize cost.
+- **The cutover's regression is unattributed and nothing is profiling it.** `31/F11` bounds
+  where the cost is not -- not the locate count, not the projection arithmetic, not the
+  content-identity table, not `LogicalLineStore.admit`/`evictOneDisplayRow` as `31/F10`
+  measured them -- and never names it. The next instrument is
+  `just benchmark-trace scrollback-stream template="Time Profiler" seconds=30` plus a browse
+  profile, and the residency reading (8.62x footprint, 0.007x row allocations, census
+  coverage 0.05) says to look for per-row allocation on the wired admission and read paths
+  rather than inside the arena.
+- **`LogicalLineStore.forEachFoldedCell` re-enumerates the whole record for every display
+  row it folds** (`LogicalLineStore.swift#forEachFoldedCell` calling
+  `LogicalLineRecord.LogicalLineFold.enumerateRows`), which `31/F12` measured at ~1.95 ns
+  per record-cell per display row -- 133 us per row and 8.8 ms per frame at the 65,536-cell
+  forced-split cap, 40.3x ordinary content. `rowCount` and `firstRowCellEnd` already have
+  the arithmetic fast path this walk lacks, and `31/D3` Decision 7 settled that the boundary
+  walk is `O(display rows)`. Independent of how the ladder question resolves.
+- **`31/DD8` has reopened and the README's second acceptance dimension with it.** Both
+  clauses are met (`31/F11` Observation 4). A human owes the choice of unit and, if the
+  invariant reading is kept, a disposition on the two additions that cross the store's
+  boundary: `31/DD43`'s seam-spacer reach at four `Terminal` call sites, and the
+  `historyEvictionsObserved` eviction-delta protocol.
+- **The residency gate is only partly re-read at the landed revision** (`31/DD49`).
+  `31/D4`'s four pane states and the `blank` regime are **not measured** there, and its
+  second reject trigger is unreadable by construction now that today's store is gone from
+  the tree. If the cutover is held, that gate wants a same-session instrument that does not
+  depend on the incumbent existing.
+- **`28/D8`'s ~150 ms resize budget is still unowned and `28/F24` still states a question
+  nobody can run.** Both were surfaced by slice 6 and neither is this plan's; they are
+  repeated here because slice 7 is the plan's last commit and they would otherwise leave
+  with it. `docs/research/28-retained-row-optimizations/README.md` Outcome item 1 and its
+  Phase 2 ledger row are the two places to edit.

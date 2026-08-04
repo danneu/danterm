@@ -1408,6 +1408,26 @@ why it is nonetheless not "width-dependent persisted state" in `D1`'s sense.
     met, and `DD8` requires both, so it stands. The graduation task must re-read
     it against the landed implementation rather than quoting `F5`'s original
     margin.
+
+    **Re-read 2026-08-04 by [`F11`](findings.md) Observation 4 against the landed
+    implementation, and `DD8` now reopens: both clauses are met.** Clause 1 by a
+    wide margin -- the storage core landed at **2,419 production lines**
+    (`LogicalLineRecord.swift` 337 + `LogicalLineStore.swift` 2,082) against the
+    ~350-400 this entry sized from the prototype, while `Terminal.swift` fell only
+    6,470 -> 6,431, so `lib/TerminalCore/Sources` is a net **+2,419** across the
+    arc and the line-count reading is not a wash but **inverted**. Clause 2
+    because the invariant tally reversed as well: **4.5 deleted against 7.5
+    added**, once `I11`'s seam rule, `DD25`'s trailing-fill side table, `DD43`'s
+    seam-spacer reach and `historyEvictionsObserved`'s two-object protocol are
+    counted, with `DD37`'s maintained charge cancelled against today's
+    (`DD50`). The qualitative claim this entry rested the verdict on **mostly
+    survives** -- six of the eight additions are contracts inside the store with
+    one writer and one gate -- but it now has two named exceptions that cross the
+    store's boundary, `DD43` at four call sites in `Terminal` and the eviction
+    delta. What reopening means here is narrow and is stated so it is not
+    over-read: the *choice of unit* is back on the table for a human, and with it
+    the README's second acceptance dimension. It settles nothing on its own, and
+    `F11` Observation 1 is where the acceptance actually failed.
 - Next action: `D1` closes. Its verdict, scoping, and the conditions Phase 2
   inherits are in [decisions.md](decisions.md); the ledger in
   [README.md](README.md) is updated to match. Phase 2 opens as a **design**
@@ -3259,3 +3279,493 @@ reject that no longer exists, so it stays where `D2` Decision 2 put it.
   resident, so `DD12` stays refuted and doc 28's `D11` amendment must still be
   read against it; and `PO11`'s margin on `full` is down to **0.9%**, which is
   the budget any future per-record charge has to come out of.
+
+### F11 -- the paired ladder against a real implementation: **all three acceptance rungs read `slower`**, `I7`'s two diagnostics both hold, and a pane costs 8.6x the resident bytes it did before the cutover
+
+- Status: complete, and it is the campaign's **first failed acceptance
+  criterion**. This is the acceptance dimension `D1`'s scoping reserved for the
+  paired ladder -- the one thing no Phase 1 or Phase 3 microbenchmark was allowed
+  to answer -- and it answers `slower` on `retained-browse` (the go/no-go), on
+  `terminal-feed` and on `scrollback-stream` (`H3`'s named falsifier). Nothing
+  here is a disposition: the plan's Acceptance section gives a `slower`
+  `retained-browse` verdict a fixed diagnostic order, this entry runs it, and
+  what to do about the result is a human's.
+- **Read this first.** The regression is enormous and is not the shape any
+  microbenchmark in this doc predicted: `retained-browse` **+60.44%** against a
+  1.05% threshold, and `scrollback-stream` **+141.42%** against 1.85%, whose
+  PTY drain rate fell from **8.4 MB/s to 1.3 MB/s** for the same corpus. `F1`
+  measured the read walk at **0.61x** today's and `F10` measured the whole write
+  path at **0.856x-1.023x** today's, both on the store this ladder judges, so the
+  cost the ladder sees is one **neither probe's boundary contained**. The
+  attribution work below narrows where it is not; it does not name what it is.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate is the working tree at `330c17b`
+  (tree `76eade551cd5`), which is the landed store plus the two untracked paths
+  present throughout this doc's work (`TODO.md`,
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`) and `F12`'s new probe
+  file, none of which is in the app build. Baseline is **`28c54e1`**
+  (tree `f7705cb0c767`), the last **pre-cutover** commit: the store existed and
+  was unwired, so the baseline-to-candidate diff is exactly slice 5's cutover
+  plus slice 6's docs. That is the "parent revision the change forks from" the
+  plan's Acceptance names -- `9ad7cc5`'s own parent -- and it is what isolates the
+  cutover from the four commits that built the store.
+- Commands, inputs, or reproduction:
+
+      just benchmark-confirm baseline=28c54e1
+
+  one invocation, the complete six-workload ladder at the frozen pair counts, no
+  block invalidated and no verdict withheld. `confirm` rather than `quick`
+  because this is the campaign's landing gate and
+  `agent-docs/terminal-performance.md` reserves the stronger evidence for exactly
+  that. Conditions: AC power, one-minute load **1.21 at invocation** and 1.49
+  before the first block, both far under any level that could produce effects of
+  this size. Diagnostics:
+
+      swift test --package-path lib/TerminalCore --filter TerminalFrameLocateTests
+      just terminal-memory-probe "--payload scrollback-plain --vmmap"
+
+- Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/76eade551cd5-0000/run.json`
+  (disposable; every decision-bearing value is quoted below).
+
+#### Observation 1 -- the ladder, each rung against its frozen threshold and beside the hypothesis it was testing
+
+The plan states the -2% and -7% figures as **hypotheses this ladder tests**, not
+outcomes to confirm. Both are refuted, and in the opposite direction.
+
+| workload | frozen rule (`confirm`) | hypothesis | measured | verdict |
+| --- | --- | --- | ---: | --- |
+| **`retained-browse`** (go/no-go) | 4 pairs, +/-1.05%, band 0.75% | **-2%** (`F1`'s 0.61x read walk through `28/F17`'s share) | **+60.44%** | **`slower`** |
+| **`terminal-feed`** (`H3` falsifier) | 2 pairs, +/-2.5% | neutral | **+2.60%** | **`slower`** |
+| **`scrollback-stream`** (`H3` falsifier) | 4 pairs, +/-1.85% | **-7%** (`F3`'s 0.624x admission through `28/F20`'s share); `F10` revised it to **-2.2%** | **+141.42%** | **`slower`** |
+| `content-churn` | 4 pairs, +/-2.15%, band 0.75% | -- | -2.12% | `inconclusive` |
+| `style-churn` | 4 pairs, +/-2.0% | -- | -3.09% | `faster` |
+| `incremental-mixed` | 6 pairs, +/-1.85% | -- | -5.16% | `faster` |
+
+`scrollback-stream`'s split, which is where its number becomes legible:
+drain **182.0 ms at 8.4 MB/s** (baseline) against **1136.4 ms at 1.3 MB/s**
+(candidate) for the same 1.53 MB corpus, with the draw tail *falling* from 15.4 ms
+to 11.4 ms. The block is ~96% drain by construction
+(`agent-docs/terminal-performance.md`), so this verdict is a throughput reading:
+**the app drains a PTY 6.2x slower than it did before the cutover.**
+
+The three draw workloads are the control this comparison cannot reach by design
+-- none of them displays history at all -- and two of them read *faster*. So the
+regression is not machine state, not the build, and not a broad slowdown: it is
+specific to the paths that touch retained history. Their plan-time lines are
+**+24% to +34%** (uncalibrated, no verdict) and move together with the two
+history verdicts, which is the co-movement `17/D6` says may be used to
+*undermine* a verdict -- here it corroborates rather than undermines, since the
+draw verdicts it accompanies went the other way.
+
+#### Observation 2 -- `D3` Decision 1's diagnostic order, run in the order it fixes, and both diagnostics hold
+
+The plan's Acceptance section: *"A `slower` `retained-browse` verdict falsifies
+the implementation before the design: check the locate counter (`I7`) and the
+arithmetic-only projection reads first, in that order. Only with both holding
+does it read as evidence against wrap-at-read, which is `28/H7`'s reopening
+condition."* Both were run before anything else was concluded, and **both pass**:
+
+1. **The locate counter (`PO7`, `I7`).**
+   `frameLocateCountIsConstantInHistoryDepth` passes: a planned frame spends at
+   most one locate per viewport traversal, and the count at 6,000 retained lines
+   equals the count at 60. `HR1`'s named hazard -- a per-row index lookup, priced
+   at 164-218 us per frame -- **is not what is happening.**
+2. **The arithmetic-only projection reads.**
+   `projectionArithmeticNeverTouchesTheIndex` passes: the projection totals and
+   the top row, the ~200-per-frame reads `HR1` counted, cost no locate at all.
+
+**What the campaign's own rule says follows from that, stated plainly because it
+is the finding's most consequential sentence:** with both diagnostics holding,
+the frozen rule reads the verdict as evidence against wrap-at-read and reopens
+`28/H7`. **This entry records that the rule fires and simultaneously records why
+it should not be executed yet**, because Observation 3 measures a mechanism the
+two diagnostics cannot see and which is not wrap-at-read. `D3` Decision 1 froze
+its diagnostics against `HR1`'s hazard, which was the only one known when it was
+written; the pair is necessary and, on this evidence, not sufficient. Whether to
+treat that as the rule working or as the rule being under-specified is a human's,
+and it is the single question this entry hands forward.
+
+#### Observation 3 -- the same pane costs 8.6x the resident bytes, and the per-row allocation the arena deleted is not what replaced it
+
+`D4`'s residency reading names `just terminal-memory-probe` as its instrument.
+`F8` and `F10` could not use it -- the store was internal and unwired, so both
+reproduced the instrument inside the test process against a bare
+`LogicalLineStore`. **The cutover makes the named instrument runnable against a
+real pane for the first time, and that is what changed about this reading's
+meaning:** `F10` priced the store, this prices the terminal.
+
+`--payload scrollback-plain`, 10,000 lines at 179x66, one process per reading,
+candidate at `330c17b` against baseline at `28c54e1`:
+
+| quantity | baseline (`28c54e1`) | candidate (`330c17b`) | ratio |
+| --- | ---: | ---: | ---: |
+| footprint delta | **9.47 MB** | **81.66 MB** | **8.62x** |
+| live heap | 5.45 MB | 15.55 MB | 2.85x |
+| bucket rounding | 1.08 MB | 11.18 MB | 10.4x |
+| row allocations | 10,001 | **66** | 0.007x |
+| census coverage of the delta | 0.46 | **0.05** | -- |
+| retained cells | 518,499 | 518,499 | 1.000x |
+| content identities | 510,000 | 510,000 | 1.000x |
+
+Four readings, and the third is the one that matters:
+
+- **The arena did exactly what it promised on allocations.** 66 row allocations
+  against 10,001: the per-row blob `F3` Observation 3 attributed its whole win to
+  is gone, and only the live screen allocates.
+- **`MALLOC_LARGE` is the arena and it is the expected 15.0 MB dirty**, on the
+  `empty` payload as well (15.48 MB footprint for a pane fed nothing, which is
+  `DD12` staying refuted at the pane level exactly as `F10` found it at the store
+  level).
+- **The census explains 5% of what the pane costs, against 46% before.** The
+  arena, the index and the side tables are all *charged*, and `PO3`'s census says
+  the charge holds -- so the ~66 MB the census cannot see is **not** retained
+  history. It is dirtied pages nothing in the store's charge model is about,
+  which is `15/F4`'s shape and `15/F2`'s error class at the same time, and it
+  sits on the same path whose throughput fell 6.2x.
+- **One lead was raised and refuted in the same reading.** 510,000 content
+  identities for 10,001 rows is ~1 per cell, which would have made `DD28`'s
+  identity run table degenerate to a per-cell fallback and explained both
+  history verdicts at once. The baseline reports the **identical** 510,000, so
+  the per-cell shape predates the cutover and is not the regression. Recorded
+  because a refuted lead is evidence about where the cost is not.
+
+#### Observation 4 -- the `DD8` re-read against what actually landed, and the honest tally runs the other way
+
+The gate `D3` Decision 5 set: *"`DD8` is re-read as `F6` asked"*, and the plan's
+premise 5 restates it as the cross-cutting-versus-local asymmetry rather than a
+count. `F5` Observation 5 tallied 5 cross-cutting invariants deleted against 3.5
+local ones added; `D3`'s amendment revised it to **4.5 against 4.5** and said the
+count no longer carries the inequality. Re-read against the landed diff:
+
+**The deletion side, verified symbol by symbol at `HEAD`.** All five hold as `D3`
+left them, and none is smaller than claimed. `ScrollbackBuffer`,
+`productionScrollbackCellCap`, `productionScrollbackRowCap`, `scrollbackByteCost`
+and `setScrollbackCell` are **gone from the tree** (5, 5, 5, 12 and 3 references
+at `de17e95`, zero now); `isHistoryHeadTruncated` survives only as two comment
+citations; `ReflowTextAttachment` is gone (7 references to zero). Two are reduced
+rather than deleted, both already priced: `reconstructLogicalLines` and
+`pack(line:columns:)` survive restricted to the **live** screen (`DD39`), and
+`boundaryDestinations` survives for the live half of the anchor restatement
+(`DD40`) -- which is the 0.5 `D3` already charged. **Deleted: 4.5, unchanged.**
+
+**The addition side is larger than either `F5` or `D3` counted**, because three
+of the landed contracts were decided after the tally and one crosses the store's
+boundary:
+
+| # | invariant added by what landed | who has to hold it | local? |
+| ---: | --- | --- | --- |
+| 1 | exactly one open record, always the arena tail | the admission path | local |
+| 2 | cached block totals valid for the current width, or discarded | the index, at six trigger points (`I9`; `F5` said four) | local |
+| 3 | no record exceeds 1/32 of the budget, readers rejoin splits by adjacency | admission + copy/search readers | local |
+| 3.5 | `hasWideCells` set iff the record holds a wide cell | the admission path, safe when wrong | local (half) |
+| 4 | capture anchors before the index recompute, restate after (`D3`'s addition) | the width-change path | local |
+| 5 | **`I11` -- the open tail ends on a display-row boundary at the current width** | admission **and** the width change's seam hand-back; `AR7` says it was discovered, not designed | local, two sites |
+| 6 | **the seam spacer is re-derived in `Terminal`, not in the store (`DD43`)** | `Terminal.seamSpacer`, reached at **four** sites, because the store cannot see the live grid's first cell | **cross-cutting** |
+| 7 | **a record's trailing fill lives in a side table gated by header bit 63, released on eviction, reopen and hand-back (`DD25` amended, `DD33`-`DD35`)** | the store | local |
+| 8 | **eviction is read as a delta against a monotone counter a hard reset restarts (`historyEvictionsObserved`)** | `Terminal` and the store together | **cross-cutting** (half) |
+
+That is **4.5 deleted against 7.5 added**, counting item 8 as a half and letting
+the arena's maintained metadata charge (`DD37`) **cancel** against today's
+`scrollbackByteCost` maintenance, which was the same obligation in the other
+store. The count now runs against the design, where `F5` had it 5-to-3.5 for and
+`D3` had it level.
+
+**Does the cross-cutting-to-local claim survive contact? Mostly, and with two
+named exceptions.** Six of the eight additions are contracts inside the store,
+enforceable by one writer and testable by one gate, exactly as `F5` claimed. Two
+are not: `DD43` puts a fold obligation on `Terminal` at four call sites, and the
+eviction-delta counter is a two-object protocol. Both are contracts between the
+store and something outside it -- the property `F5` used to distinguish the two
+sides.
+
+**Against `DD8`'s own reopening test, which requires both clauses:**
+
+- *Clause 1, "the implementation lands materially larger than the prototype
+  suggests":* **met, decisively.** `F5` Observation 4 sized the storage core at
+  ~350-400 prototype lines against ~720 net deleted. What landed is
+  `LogicalLineRecord.swift` (337) plus `LogicalLineStore.swift` (2,082) = **2,419
+  new production lines**, while `Terminal.swift` fell only **6,470 -> 6,431**
+  (-39). Across `lib/TerminalCore/Sources` the arc is **+3,337 / -918**, a net
+  **+2,419**. The prototype under-predicted by 6-7x and the deletion did not
+  arrive: on lines of code the inequality is not close to a wash, it is
+  **inverted**.
+- *Clause 2, "the invariant argument has weakened":* **met.** The count reversed
+  (4.5 against 7.5) and two added contracts cross the store boundary.
+
+**Both clauses are met, so `DD8` reopens on its own terms**, and with it the
+README's second acceptance dimension -- which says in terms that a design
+drifting to where the inequality no longer holds is "evidence against the
+direction, not a cost to absorb". This is an accounting pass and it decides
+nothing; what it removes is the option of quoting `F5`'s margin, which is exactly
+what the gate existed to prevent.
+
+- Observation: on one valid `confirm` invocation against the pre-cutover parent,
+  `retained-browse` reads **+60.44%**, `terminal-feed` **+2.60%** and
+  `scrollback-stream` **+141.42%**, all `slower` against frozen thresholds of
+  1.05%, 2.5% and 1.85%; the three history-free draw workloads read
+  `inconclusive`, `faster` and `faster`; both of `D3` Decision 1's diagnostics
+  hold; the same pane costs 8.62x the resident bytes with 0.007x the row
+  allocations and a census that explains 5% of it; and the `DD8` re-read finds
+  4.5 invariants deleted against 7.5 added with a 6-7x line-count
+  under-prediction.
+- Inference: **acceptance dimension 1 fails, and this store does not land on this
+  evidence.** Dimension 2's re-read reopens `DD8` on both its clauses. What the
+  evidence does **not** support is concluding against wrap-at-read: `F1` measured
+  this store's own read walk 1.64x *faster* on the same content shape
+  `retained-browse` feeds (short hard-terminated lines, one record per display
+  row), `F10` measured its write path at 0.856x-1.023x, and both `I7` diagnostics
+  hold -- so a 60% read regression and a 6.2x drain collapse are being produced
+  by something the four probe boundaries in this doc all exclude, which is the
+  wiring slice 5 added rather than the model `D1` licensed.
+- Competing interpretations:
+  1. *Wrap-at-read is simply slower in situ than in isolation, and `28/H7` should
+     reopen.* The reading `D3` Decision 1's rule produces mechanically. Against
+     it: `retained-browse`'s stimulus is 10,000 **short hard-terminated** lines
+     (`RETAINED_BROWSE_IDENTITY`), so every record folds to exactly one display
+     row and the fold is one `ceil` -- there is almost no wrapping to do at read,
+     and `F12` measures the fold's cost as a function of record size on the same
+     engine and finds it flat until records are thousands of cells. A design
+     whose read model is barely exercised cannot be what a 60% read regression
+     indicts. **This is the interpretation the frozen rule selects and the one
+     the evidence fits worst**, which is why it is stated first.
+  2. *The cutover's wiring allocates per admitted row and per read row, on top of
+     the arena.* Fits the most evidence: 8.62x resident with 0.007x row
+     allocations and 5% census coverage says the pages are being dirtied by
+     something that is not retained history and is not charged; a 6.2x PTY drain
+     collapse is an admission-path cost; and `F10`'s 0.856x-1.023x write path was
+     measured by driving `LogicalLineStore.admit` directly, which is precisely the
+     boundary that excludes whatever `Terminal` does around it. Unproven: no
+     profile was taken, because the plan's diagnostic order stops here and the
+     disposition is a human's.
+  3. *The comparison is confounded.* Refused on the run's own evidence: one valid
+     invocation, no invalidated block, load 1.21 at invocation, and three
+     history-free workloads on the same schedule reading -2.12%, -3.09% and
+     -5.16%. A machine-state artifact does not move six workloads in two
+     directions.
+  4. *`terminal-feed`'s +2.60% is inside the noise.* It is 1.04x its frozen 2.5%
+     threshold and is the weakest of the three `slower` readings; on its own it
+     would deserve a `confirm`-level re-read. It is not on its own.
+- Uncertainty:
+  - **The mechanism is unattributed.** This entry bounds where the cost is not
+    (not the locate count, not the projection arithmetic, not the identity table,
+    not the store's own admit/evict as `F10` measured them) and never names it. A
+    Time Profiler trace on `scrollback-stream` is the obvious next instrument and
+    was deliberately not run: `agent-docs/terminal-performance.md` says to report
+    findings and pause before optimizing, and the plan says the disposition is
+    the human's.
+  - **One invocation.** The pair counts are frozen precisely so a result cannot
+    be shopped for, so this is the verdict and re-running is not licensed. At
+    +60% and +141% against 1.05% and 1.85% thresholds, resolution is not the
+    open question.
+  - **The residency re-read is partial, and says so.** `F10`'s in-test four-state
+    instrument was **not** re-run at the landed revision (`DD49`); what is
+    reported is `D4`'s *named* instrument at the pane level on two payloads plus
+    `empty`. The four-state ladder and the `blank` regime are **not measured**,
+    not measured-zero.
+  - **The `DD8` tally is an accounting pass over invariants**, with the same
+    unit-choice objection `F5` Observation 4 conceded against itself; it is
+    reported so it can be disputed rather than to settle anything.
+- Deferred decisions, continuing `DD48`'s numbering; each took the obvious simple
+  option and each is a human's to revisit:
+  - **DD49 -- the residency re-read is `D4`'s named pane-level instrument, not a
+    re-run of `F10`'s in-test four-state ladder.** Three reasons, and the first
+    is the plan's. The ladder verdict fires the plan's STOP rule, so nothing
+    downstream is waiting on a residency number and spending an hour of process
+    launches to re-price a store whose landing is now in question buys nothing.
+    The store's four-state reading was taken 2026-08-04 at `5cf61e0` and the only
+    store change since is slice 5's (the index rings' minimum capacity, 16 -> 4),
+    which moves an empty store's floor and not a cycled one's. And the pane-level
+    instrument is the one `D4` actually named and the one the cutover makes
+    runnable, so it reads *more* of the gate than the substitute did, on the
+    quantity a user pays. What it costs: the second reject trigger ("> 1.10x
+    today's resident for the same fed input **in the same session**") is
+    **unreadable at the landed revision by construction** -- today's store no
+    longer exists in the tree, so no same-session control can be built, and the
+    8.62x above is two processes minutes apart on one machine rather than a
+    paired reading. At that ratio the distinction does not change the reading,
+    and it is stated rather than hidden.
+  - **DD50 -- the `DD8` tally counts `DD37`'s maintained metadata charge as
+    cancelling today's `scrollbackByteCost` maintenance rather than as a new
+    invariant.** Both are "a derived total is maintained at every mutation and
+    must equal a from-scratch recompute", one per store, and counting the new one
+    without discharging the old would inflate the addition side by an obligation
+    that merely moved. The alternative reading -- that the arena's version is
+    worse because it has six invalidation points against today's two -- is
+    `AR4`'s, is already carried there as a risk with no analogue, and would make
+    the tally 4.5 against 8.5 rather than 7.5. Either way the count runs the same
+    direction, which is why this was not worth blocking on.
+- Next action: **the human decides, and the plan says so before this entry was
+  written.** Three questions, in the order the evidence makes them tractable.
+  (1) Whether to profile `scrollback-stream` and the browse path before
+  concluding anything about the design -- Observation 2 records that the frozen
+  rule fires and that the evidence fits interpretation 2 rather than 1, and only
+  a profile separates them. (2) Whether `28/H7` reopens now or after that
+  profile. (3) Whether the cutover is reverted, held, or fixed forward while the
+  question is open; nothing in this doc licenses any of the three, and `D1`'s
+  scoping never licensed the production storage change that has already landed.
+
+### F12 -- the forced-split cap against a real pathological input: it bounds every hazard it was derived for, and binds a term nobody derived -- browsing a near-cap record costs 133 us per display row, 40x ordinary content
+
+- Status: complete. It discharges `D1` inherited **condition 8** -- "the
+  forced-split cap is derived, not measured; no pathological input has been fed
+  to a real engine to see what a session produces. Feed one; the cap bounds the
+  hazard either way." One was fed. The cap does bound the hazard, and the reading
+  adds a term to what "the hazard" means.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: `330c17b`, the landed store. **This finding adds one
+  file** --
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLinePathologicalProbe.swift`
+  -- and edits nothing under `lib/TerminalCore/Sources/`; `F1`'s, `F2`'s, `F3`'s,
+  `F7`'s, `F8`'s and `F9`'s probe files are unedited, which is the isolation
+  practice `F2` established.
+- Commands, inputs, or reproduction:
+
+      DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
+        --filter TerminalLogicalLinePathologicalProbe
+
+  Release, headless, 179x66, the 16,777,216-byte production budget, fed in 4 KiB
+  chunks (the memory probe's rule: a single-shot feed measures the parse spike).
+  Load average **1.41 before and 1.23 after**. Two stimuli, both fed through the
+  real `Terminal`: `31/F4`'s named wezterm shape (**1,499,979 bytes of minified
+  JSON on one line**, on top of 2,000 ordinary lines) and a line **larger than
+  the whole arena** (25,165,831 bytes, no newline), which is the case no
+  derivation covers.
+- Artifacts: none durable; every number below is stdout.
+
+#### Observation 1 -- what a 1.5 MB JSON line does
+
+The cap is **65,536 cells**, read from
+`LogicalLineRecord.forcedSplitCellCount(forCapacity:)` rather than transcribed,
+so it moves with the budget as `DD3` says it should. The line arrives as **23
+pieces**, exactly `ceil(1,499,979 / 65,536)`.
+
+| quantity | reading |
+| --- | ---: |
+| records retained (2,000 ordinary + 23 pieces) | 2,023 |
+| display rows retained | 12,315 |
+| arena bytes in use / capacity | 14,979,440 / 15,728,640 |
+| admission of the whole line | **102.1 ms** |
+| copy: text lines / longest line | 2,001 / **1,499,979** |
+| width change 179 -> 100 -> 179 | 5.99 ms / 5.00 ms |
+
+**Copy sees one logical line.** The 23 pieces rejoin by adjacency (`DD6`) into a
+single 1,499,979-character text line whose prefix is the JSON's own, which is
+`PO9`'s obligation met on a real input rather than a synthetic one. **The charge
+holds**: bytes in use stay under capacity, and the ordinary history is evicted
+byte-driven rather than the line being refused.
+
+#### Observation 2 -- the term the derivation did not price: the fold is `O(cells in the record)` per display row
+
+Browsing the split region, against two controls in the same process -- the same
+terminal's own ordinary region, which no difference between two terminals can
+reach, and a separate ordinary-content terminal at a comparable depth:
+
+| region | one frame (geometry + 66-row cell walk) | per display row |
+| --- | ---: | ---: |
+| the JSON region | **8,844.7 us** | 134.0 us |
+| same terminal, ordinary region | 219.1 us | 3.3 us |
+| separate ordinary control | 219.7 us | 3.3 us |
+| ratio | **40.3x** | -- |
+
+`agent-docs/measurement-discipline.md` says two points are not a trend, so the
+middle of the curve was measured -- retained depth held near 5,000 display rows,
+varying only cells per logical line:
+
+| cells per logical line | records | retained rows | one frame | per display row |
+| ---: | ---: | ---: | ---: | ---: |
+| 179 | 4,962 | 4,962 | 360.0 us | 5.45 us |
+| 512 | 1,736 | 5,206 | 389.2 us | 5.90 us |
+| 2,048 | 434 | 5,203 | 586.7 us | 8.89 us |
+| 8,192 | 108 | 4,949 | 1,388.8 us | 21.04 us |
+| 32,768 | 27 | 4,903 | 4,564.3 us | 69.16 us |
+| **65,536** (the cap) | 13 | 4,706 | **8,789.3 us** | **133.17 us** |
+
+Linear in cells per record at **~1.95 ns per record-cell per display row**, flat
+in retained depth. The mechanism is readable in the code and the arithmetic
+matches it to within the reading's precision:
+`LogicalLineStore.forEachFoldedCell` calls `LogicalLineFold.enumerateRows` over
+the **whole record** to find one display row's cell range, and `enumerateRows`
+walks cell by cell. A frame reads 66 rows through two traversals, so a near-cap
+record costs 66 x 65,536 x 2 = 8.65M cell steps -- which is the 8.8 ms measured.
+
+**So the cap is what bounds this, and the bound it yields is 8.8 ms per frame:
+53% of a 16.67 ms frame at 60 Hz.** `AR2` bracketed the wide-record fold as
+"`O(display rows)` with an O(1) test per boundary ... the bracket clears one
+frame by ~3x on an unmeasured constant". That bracket is about `rowCount`, which
+does take the arithmetic fast path; the **cell-range** walk that `forEachFoldedCell`
+performs has no such path, and it is the one a read actually spends. `F9`
+measured `O(display rows)` at 5.2-5.4 ns for the counting pass and was right
+about that pass; this is a different walk.
+
+#### Observation 3 -- a line larger than the arena degrades gracefully
+
+25,165,831 bytes on one line, into a 15.7 MB arena:
+
+| quantity | open tail | after the closing newline |
+| --- | ---: | ---: |
+| records retained | 32 | 32 |
+| display rows retained | 10,973 | 10,947 |
+| arena bytes in use / capacity | 15,717,192 / 15,728,640 | 15,678,624 / 15,728,640 |
+| admission (whole 24 MiB feed) | **1,713.2 ms** | -- |
+| copy: text lines / longest | -- | 1 / 1,975,844 |
+| ordinary lines surviving | **0** | -- |
+| browse, one frame | 8,775.3 us | -- |
+| width change 179 -> 100 -> 179 | 3.10 ms / 3.45 ms | -- |
+
+The line evicts its own head while it is still being printed, keeps the last
+~1.96M cells, and stays readable throughout: 32 records of a single logical line,
+one text line on copy, the charge inside capacity at every point, and the head
+piece reading as a mid-line continuation. Nothing traps, nothing is refused, and
+browse costs the same 8.8 ms the cap bounds it to. **This is the case
+`I10`'s derivation never covered and it is the one that behaves best**, because
+byte-driven head eviction and adjacency-rejoining readers compose without needing
+a rule of their own.
+
+- Observation: a 1.5 MB single logical line splits into exactly the 23 pieces the
+  cap predicts, reads back as one line for copy, holds the charge, resizes in
+  ~5-6 ms, and costs **8,844.7 us to browse one frame against 219.1 us on
+  ordinary content in the same terminal**; the cost is linear in cells per record
+  at ~1.95 ns per cell per display row; and a line larger than the whole arena
+  evicts its own head and stays readable.
+- Inference: **the cap bounds every hazard `DD3` derived it for** -- eviction
+  granularity, the wide-cell scan, and memory -- **and it also bounds one the
+  derivation never named**, the read-time fold, at a value of **53% of a 60 Hz
+  frame**. Two consequences. The derivation held in form (1/32 of the budget is
+  still the right shape of rule) and is now under-motivated: the binding term at
+  production width is the fold, not the two hazards the 1/32 was chosen for. And
+  `forEachFoldedCell`'s `O(cells in record)` walk is a defect of the
+  implementation rather than of the design -- `D3` Decision 7 already established
+  that the boundary walk is `O(display rows)`, and this walk is not it. Recorded,
+  not fixed: it is a production change outside the slice that measured it.
+- Competing interpretations:
+  1. *This is `AR2` coming due, so it was accepted in advance.* No. `AR2` is about
+     a record that holds **wide cells**, where a boundary probe per display row is
+     unavoidable; both stimuli here are ASCII, `hasWideCells` is false, and the
+     arithmetic path exists and is not taken by this walk.
+  2. *A 1.5 MB single line is not worth engineering for.* It is `F4`'s own named
+     shape from a real terminal's issue history, and it is what `cat` of a
+     minified bundle produces. The reading also shows the cost arriving long
+     before the cap: 8,192-cell lines already cost 6.4x an ordinary frame.
+  3. *The ratio is an artifact of comparing two terminals.* Refused by the
+     same-terminal control: 8,844.7 us in the JSON region against 219.1 us at the
+     top of the **same** history, 40.4x, which is the separate control's 40.3x.
+- Uncertainty:
+  - **One machine, one invocation per rung, no A/A control.** The gate asked what
+    a real input produces, not for a threshold, and the effect is 40x; a paired
+    instrument would be the wrong tool at that size.
+  - **The 8.8 ms frame is `forEachViewportCell` plus `geometry`, not
+    `planFrame`.** It is the store's contribution to a frame, not a frame; the
+    calibrated instrument for the latter is `retained-browse`, which does not
+    feed pathological content and so cannot see this at all.
+  - **Search and selection across a forced split are covered by `PO9`'s existing
+    tests**, not re-measured here; copy is, through `primaryHistoryText`.
+  - **The width-change readings are reported without attribution.** The JSON
+    history resizes in 5.99/5.00 ms against the control's 1.91/1.69 ms with a
+    fifth of the records, which is the opposite of what the counting pass alone
+    predicts; the live refold and the seam prefix are both in that number and
+    nothing here separates them.
+- Next action: none owed by this gate -- condition 8 is discharged. Two things it
+  hands forward: the fold's `O(cells in record)` walk is a named, measured,
+  reproducible target with a probe already committed, and `I10`'s cap now has a
+  **third** hazard to be derived against if the budget ever moves.
