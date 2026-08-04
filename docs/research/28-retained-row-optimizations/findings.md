@@ -1,9 +1,9 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F21**. Phase 2's open resize-*profile* task has now been renumbered
-eight times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`) without being written,
-because IDs go in the order findings are recorded and each time something more urgent
-was measured first; it is still owed and now claims `F21`. The scratch-reusing encoder
+Next free ID: **F22**. Phase 2's open resize-*profile* task has now been renumbered
+nine times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`, `F21`) without being
+written, because IDs go in the order findings are recorded and each time something more
+urgent was measured first; it is still owed and now claims `F22`. The scratch-reusing encoder
 lead that `F17` Observation 4 left open is **not** carried forward with it -- `D9`
 declined it on the ground that even its success leaves browsing over
 threshold. `F14` measured how
@@ -2377,3 +2377,102 @@ confirms the flag governs program-to-terminal output.
 - Next action: none taken. The disposition returns to the human as a decision
   package -- accept `scrollback-stream` as a trade, or fund further work on
   admission -- per the instruction not to improvise a second pivot.
+
+### F21 -- `style-churn` was never a control for this range: its read path changed. Isolating the change that changed it clears it at `equivalent`, and turns up a regression on a different workload
+
+- Status: recorded. It answers the control question `F19`/`F20` left open, and it
+  **does not invalidate either run** -- the invalidation branch required
+  `style-churn` to be untouched, and it is not. It also opens a new, isolated
+  `slower` reading on `incremental-mixed` that no prior finding attributes. Phase
+  2's resize-*profile* task is renumbered a ninth time and now claims `F22`.
+- Date and investigator: 2026-08-03, Claude (agent).
+- Commit and worktree state: audit over `678bfe9..3402656`. Isolation run:
+  baseline `52ac28b` (tree `ada2edf5fa5cf2f207fd0ae026f73dbe0b1528e8`), candidate
+  base `2ae37c4` (tree `994e47769b4c38fa8188c2845141e33191dc76b6`), no
+  working-tree changes -- an exact parent/child pair, measured out of a detached
+  worktree so the candidate arm is the commit itself.
+- Conditions: AC power, low-power mode off. Load at invocation 1.27/2.18/3.01
+  (0.13 per processor across 10), 1.77 before the first block; busiest external
+  `claude` 36.7%, `zsh` 3.4%, `DanTerm` 2.7%.
+- Commands:
+
+      git show 2ae37c4 -- lib/TerminalCore/Sources/TerminalCore/Terminal.swift
+      git worktree add --detach <scratch>/wt-2ae37c4 2ae37c4
+      python3 ./scripts/terminal-benchmark-compare.py confirm --baseline 52ac28b \
+          --repository-root <scratch>/wt-2ae37c4
+
+- Artifacts (disposable `.build/`, pointers only):
+  `.build/terminal-benchmark-comparisons/confirm/994e47769b4c-0002`.
+
+#### Observation 1 -- the claim "`style-churn` cannot be affected, it never calls `pack`" is true and irrelevant
+
+`style-churn` never scrolls a row into history (`terminal-benchmark-producer.py#redraw_screen`
+starts each frame at `ESC[H` and omits the final newline), so no admission code
+runs. That covers the *write* side only. The *read* side is where a draw workload
+spends its time, and `2ae37c4` rewrote both readers the frame planner uses --
+for **every** row, live rows included, not just retained ones:
+
+- `geometry` stopped materializing `presentedRows` and now builds
+  `presentedRowGeometry`, which allocates a blank-filled `[TerminalCellGeometry]`
+  per row and overwrites `min(row.cells.count, columnCount)` entries.
+- `forEachViewportCell(row:_:)` stopped iterating `windowRow.cells` inline. Every
+  cell now goes through a local `emit` closure that also writes
+  `storedCount = column + 1` per cell.
+
+A live row reaches both of those. So `style-churn` is **not a control for
+`678bfe9..HEAD`** -- a workload whose measured path the range edits cannot
+falsify the range.
+
+#### Observation 2 -- and yet the change that changed its path measures `equivalent` on it
+
+One `confirm` of `2ae37c4` against its parent `52ac28b`:
+
+| workload | threshold | symmetric median | verdict |
+| --- | ---: | ---: | --- |
+| `retained-browse` | 1.05% | +0.16% | equivalent |
+| `style-churn` | 2.0% | **-0.41%** | **equivalent** |
+| `scrollback-stream` | 1.85% | -0.17% | equivalent |
+| `content-churn` | 2.15% | +1.03% | inconclusive |
+| `terminal-feed` | 2.5% | -0.95% | inconclusive |
+| `incremental-mixed` | 1.85% | **+2.15%** | **slower** |
+
+So the `+2.36%` `F20` reported on `style-churn` is **not attributable to the
+commit that rewired its readers**, which is the only commit in the range that
+touches its path at all. It is left unexplained: either it is the harness's own
+spread on this workload (`agent-docs/terminal-performance.md` records 5 of 24
+pure-noise `style-churn` pairs exceeding its band), or it belongs to a commit
+whose mechanism nobody has proposed. No claim is made either way.
+
+#### Observation 3 -- `incremental-mixed` at `+2.15%`, isolated to the reader rewiring
+
+This is a new reading, not a restatement. `2ae37c4`'s own commit message priced
+itself on `retained-browse`; nobody measured what the same rewiring costs a
+workload that draws incremental updates over a *live* screen, where the new
+`presentedRowGeometry` allocates a full-width kind array per row per frame that
+the old path did not, and `forEachViewportCell` pays a closure call per cell. It
+answers `slower` at +2.15% against a 1.85% threshold, with plan time +5.99%.
+
+The whole-range runs read this workload at +1.27% (`F19`) and +1.17% (`F20`),
+both `inconclusive`, which is consistent with a real ~2% cost partly offset by
+the rest of the range -- `F19`/`F20` also measured plan time **24% faster**
+across the full range. It is not consistent with the two being the same number.
+
+#### Observation 4 -- what this does and does not license
+
+- It **does not** invalidate `F19` or `F20`. Invalidation was conditional on
+  `style-churn` being untouched by the range; Observation 1 shows it is not, so
+  there is no failed control, and therefore no ground to re-measure. `F20`'s
+  table stands as the deciding table and `H3` does not graduate on it.
+- It **does** retire the phrase "control failure" from this doc's vocabulary for
+  this range. `F20` used it, in good faith, on an argument that covered only the
+  admission path. The correct statement is narrower and worse: **the ladder as
+  run has no workload that this range provably cannot touch**, so nothing in it
+  was serving as a control.
+- The `incremental-mixed` reading is one `confirm` at one commit. It is a
+  finding, not a gate: it isolates a cost, and what to do about it is a decision.
+- Limits: no profile was taken of the `incremental-mixed` regression, so the
+  attribution to the two rewired readers is *by construction* (they are the only
+  production change in `2ae37c4`) and not *by measurement* of where the time
+  went.
+- Next action: none taken. This joins the decision package rather than starting
+  a fix, per the instruction not to change code before the table exists.

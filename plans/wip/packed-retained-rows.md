@@ -1,10 +1,21 @@
 # Packed retained rows (doc 28 / H3)
 
-## Status -- C1 IMPLEMENTED, MEASURED, AND TUNED; `scrollback-stream` still short at +4.13%
+## Status -- C1 IMPLEMENTED, MEASURED, AND TUNED; `scrollback-stream` still short at +4.13%; disposition with the human
 
 `F19` was the deciding run and `F20` is the write-pattern follow-up that halved
 what it found; read the `F20` paragraphs below before the `F19` ones, because one
 of `F19`'s stated mechanisms is retracted there.
+
+**`F21` settles the control question `F20` left hanging, and `F20`'s table
+stands.** `style-churn` is not a control for this range: `2ae37c4` rewrote
+`geometry` and `forEachViewportCell` for *every* row, live rows included, so the
+range edits the path that workload measures. Isolating that commit against its
+parent reads `style-churn` **`equivalent` at -0.41%**, so the +2.36% is not
+attributable to the only commit that touches it and stays unexplained. Because
+there was no valid control, there is no failed control -- and no ground to
+re-measure. `F21` also isolates a **new** `slower` reading the whole-range runs
+averaged away: `incremental-mixed` at **+2.15%** against a 1.85% threshold,
+attributable by construction to that same reader rewiring.
 
 `F19`, at `48f52b1` against `678bfe9` on an idle host (load
 1.88, 0.19 per processor). **The pivot did what `D9` chose it to do.**

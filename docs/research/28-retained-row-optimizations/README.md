@@ -308,6 +308,46 @@ tradeoff somewhere. Cite `file#identifier` per `AGENTS.md`. Design and
 implementation are explicitly **not** in scope until that read is recorded: this
 is a ledger entry opening an investigation, not a plan.
 
+### H8 -- packing costs what it costs because of *when* it runs, not what it writes
+
+`H3`'s residual regressions are on the admission path, and the evidence that
+they are a *scheduling* cost rather than an *encoding* cost is that they did not
+move between two representations 4x apart in per-row bytes: `F19` measured
+`scrollback-stream` and `terminal-feed` `slower` under `C6` at 128 B/row, and
+`F20` measured them `slower` under `C1` at 528 B/row after the write-pattern fix
+had already taken -6.69% out of the encoder. What both share is not a format --
+it is that a row is packed synchronously, on the thread draining the pty, at the
+moment it scrolls out of the viewport.
+
+The hypothesis: **admit rows by reference into a bounded unpacked tail of `K`
+rows, and pack in amortized steps on the pane's queue.** Admission stops doing
+per-cell work at all; the transient cost is bounded at `K x 1,808 B` (a
+179-column `[GridCell]` row), which is a constant a `D` entry can price against
+the 3.72 MB steady state. Feed and scrollback-stream become neutral *by
+construction* -- there is no longer any packing on the measured path -- while
+the memory win stays asymptotically intact, since the tail is bounded and
+everything behind it is packed.
+
+Named hard parts, so the research does not rediscover them:
+
+- **Two coexisting representations in scrollback.** Every reader that today sees
+  a `PackedRetainedRow` would see a sum type, on the paths `F17` made fast; the
+  risk is giving back that work at the dispatch.
+- **Budget accounting for the mixed state.** `D8`'s dual caps count *content*,
+  which survives the change, but `productionScrollbackBudgetBytes` and the census
+  price bytes -- and the tail's bytes are the live-cell stride, not the packed
+  payload. What the budget charges for an unpacked tail row, and whether the tail
+  counts against depth at all, is a decision and not an implementation detail.
+- **Scheduling the packing step against real queue occupancy.** Doc 19's
+  queue-occupancy evidence is the input: amortized background work is only free
+  if the queue has room, and the drain that would hand it work is the same one
+  competing for it. A step size that is wrong turns a bounded tail into an
+  unbounded one under sustained output -- exactly the `scrollback-stream` regime.
+
+Ledger entry only: no design and no implementation until `H3`'s disposition is
+decided, and funding it is one of that decision's options rather than a
+consequence of it.
+
 ## Task ledger
 
 ### Phase 1 -- close the shipped change's measurement residue
@@ -612,8 +652,17 @@ is a ledger entry opening an investigation, not a plan.
   The staircase belongs to the *probe*, which feeds the same corpus bytes with no
   tty in between -- two stimuli, one name. So the stimulus-fidelity question does
   not arise, there is no `23/D4`-style demotion to propose, and the regression is
-  over dense realistic rows, which makes it matter more rather than less. The
-  disposition returns to the human as a decision package.
+  over dense realistic rows, which makes it matter more rather than less.
+  **`F21` closes the control question and leaves `F20`'s table standing.**
+  `style-churn` is not a control for this range -- `2ae37c4` rewrote `geometry`
+  and `forEachViewportCell` for *every* row, live rows included -- so its
+  repeated `slower` reading is not a failed control and gives no ground to
+  re-measure. Isolating that commit against its parent reads `style-churn`
+  `equivalent` at **-0.41%**, so the +2.36% is unattributed. The same isolation
+  turns up a reading the whole-range runs averaged away: **`incremental-mixed`
+  `slower` at +2.15%** against 1.85%, plan time +5.99%, attributable by
+  construction to the reader rewiring. The disposition returns to the human as a
+  decision package, with `H8` registered as the funded-work option.
 - [ ] `TODO` Extract the selected direction into a plan file once the experiment
   answers; record where it went and close, or close with all hypotheses
   dispositioned.
