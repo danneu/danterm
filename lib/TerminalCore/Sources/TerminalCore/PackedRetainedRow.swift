@@ -314,10 +314,31 @@ extension Terminal {
         /// pathologically many style runs stays linear here rather than degrading to
         /// O(cells * log runs).
         func unpacked() -> GridRow {
-            let stored = storedCellCount
             var cells = [GridCell]()
-            cells.reserveCapacity(stored)
+            cells.reserveCapacity(storedCellCount)
+            forEachCell { cells.append($1) }
 
+            var row = GridRow(cells: cells)
+            row.isSoftWrapped = isSoftWrapped
+            row.semanticPrompt = semanticPrompt
+            return row
+        }
+
+        /// The linear cursor walk itself, yielding each stored cell instead of collecting
+        /// it. This is the shape every whole-row reader wants; `unpacked()` is just this
+        /// plus an array.
+        ///
+        /// Split out because the render path reads every visible retained row once per
+        /// frame and then discards it. Materializing first cost an allocation and a
+        /// 32-byte `GridCell` write per stored cell -- work the pre-packing representation
+        /// never did, since it could hand back its stored array by reference. `28/F17`
+        /// measured that as the dominant term in the browsing regression. Streaming keeps
+        /// the same single decoder, so the two readers cannot drift.
+        ///
+        /// Yields only columns the row *stores*: a content-sized row's padding tail is the
+        /// caller's to synthesize, as it always was.
+        func forEachCell(_ body: (_ column: Int, _ cell: GridCell) -> Void) {
+            let stored = storedCellCount
             let stride = scalarStrideBytes
             let scalarBase = scalarColumnOffset
             let styleBase = styleRunOffset
@@ -403,13 +424,140 @@ extension Terminal {
                     }
                 }
 
-                cells.append(cell)
+                body(column, cell)
             }
+        }
 
-            var row = GridRow(cells: cells)
-            row.isSoftWrapped = isSoftWrapped
-            row.semanticPrompt = semanticPrompt
-            return row
+        /// Walks the stored columns yielding only what the browsing render path draws:
+        /// scalars and the interned style id.
+        ///
+        /// Exists because `forEachCell` also resolves a hyperlink id and a content
+        /// identity for every cell, and the render walk discards both -- kind it takes
+        /// from geometry, hyperlinks from `activatableLink(at:)`, and identity has no
+        /// renderer at all. Skipping them drops two cursor advances and a `u32` read per
+        /// cell from the hottest loop in frame planning.
+        ///
+        /// This is the third walk over the same layout, and that repetition is the cost of
+        /// each reader paying only for what it reads. What keeps them honest is
+        /// `TerminalRetainedRowReadPathTests`, which asserts all three agree with the
+        /// public row reader on content that exercises every exception table.
+        func forEachContentCell(
+            _ body: (_ column: Int, _ scalars: TerminalScalars, _ styleId: StyleId) -> Void
+        ) {
+            let stored = storedCellCount
+            let stride = scalarStrideBytes
+            let scalarBase = scalarColumnOffset
+            let styleBase = styleRunOffset
+            let spillBase = spillExceptionOffset
+
+            var styleCursor = 0
+            var spillCursor = 0
+            var currentStyle = Terminal.defaultStyleId
+
+            // The scalar column is read through an unsafe buffer, with the stride resolved
+            // once outside the loop. Both matter only here, in the one walk that runs per
+            // visible cell per frame: the generic `0..<stride` byte loop cannot be unrolled
+            // when `stride` is a stored value, so every cell paid a loop plus a bounds
+            // check per byte to reassemble what is, at the overwhelmingly common 1-byte
+            // stride, a single load. The bounds this skips are ones the encoder already
+            // established -- `stored` is the count it wrote into the header, and it sized
+            // the column region at `stored * stride` bytes.
+            storage.withUnsafeBufferPointer { buffer in
+            let slots = buffer.baseAddress! + scalarBase
+
+            for column in 0..<stored {
+                var scalars = TerminalScalars.empty
+
+                let at = column * stride
+                var slot = UInt32(slots[at])
+                if stride > 1 {
+                    slot |= UInt32(slots[at + 1]) << 8
+                    if stride > 2 {
+                        slot |= UInt32(slots[at + 2]) << 16
+                        slot |= UInt32(slots[at + 3]) << 24
+                    }
+                }
+
+                if spillCursor < spillExceptionCount {
+                    let entry = spillBase + spillCursor * Header.spillEntryBytes
+                    if u16(entry) == column {
+                        scalars = TerminalScalars(spills[Int(u32(entry + 3))])
+                        spillCursor += 1
+                    }
+                }
+                if scalars.isEmpty, slot != 0, let scalar = Unicode.Scalar(slot) {
+                    scalars = TerminalScalars(scalar)
+                }
+
+                while styleCursor < styleRunCount {
+                    let entry = styleBase + styleCursor * Header.styleRunEntryBytes
+                    guard u16(entry) <= column else { break }
+                    currentStyle = u32(entry + 2)
+                    styleCursor += 1
+                }
+
+                body(column, scalars, currentStyle)
+            }
+            }
+        }
+
+        /// Walks the stored columns yielding only each cell's kind.
+        ///
+        /// Exists because `Terminal.geometry` projects kinds and nothing else, and paying
+        /// the full decode for them meant resolving a style, a hyperlink, and a content
+        /// identity per cell, plus retaining a `TerminalScalars` -- all discarded
+        /// immediately. Kind depends on exactly three inputs: whether the column spills,
+        /// whether its scalar slot is occupied, and whether a kind exception overrides
+        /// both. This reads those and stops, which is what makes it allocation-free and
+        /// ARC-free.
+        ///
+        /// Deliberately a second walk rather than a flag on `forEachCell`: the two have
+        /// different costs, and a caller that wants kinds should not have to know that
+        /// asking for them cheaply is possible.
+        func forEachKind(_ body: (_ column: Int, _ kind: TerminalCellKind) -> Void) {
+            let stored = storedCellCount
+            let stride = scalarStrideBytes
+            let scalarBase = scalarColumnOffset
+            let kindBase = kindExceptionOffset
+            let spillBase = spillExceptionOffset
+
+            var kindCursor = 0
+            var spillCursor = 0
+
+            for column in 0..<stored {
+                var kind = GridCell().kind
+
+                var slot: UInt32 = 0
+                let slotOffset = scalarBase + column * stride
+                for byte in 0..<stride {
+                    slot |= UInt32(storage[slotOffset + byte]) << (8 * byte)
+                }
+
+                // Same precedence `forEachCell` applies: spill, then an occupied slot,
+                // then a kind exception overriding either.
+                var spilled = false
+                if spillCursor < spillExceptionCount {
+                    let entry = spillBase + spillCursor * Header.spillEntryBytes
+                    if u16(entry) == column {
+                        kind = TerminalCellKind(packedCode: storage[entry + 2])
+                        spillCursor += 1
+                        spilled = true
+                    }
+                }
+                if spilled == false, slot != 0, Unicode.Scalar(slot) != nil {
+                    kind = .narrow
+                }
+
+                if kindCursor < kindExceptionCount {
+                    let entry = kindBase + kindCursor * Header.kindEntryBytes
+                    if u16(entry) == column {
+                        kind = TerminalCellKind(packedCode: storage[entry + 2])
+                        kindCursor += 1
+                    }
+                }
+
+                body(column, kind)
+            }
         }
 
         // MARK: - Packing

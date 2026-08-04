@@ -3151,6 +3151,42 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// The viewport projected to cell *kinds* only, which is all `geometry` carries.
+    ///
+    /// Separate from `presentedRows` because that materializes whole rows, and for a
+    /// retained row materializing means decoding a style, a hyperlink, and a content
+    /// identity per cell plus retaining a `TerminalScalars` -- every one of which
+    /// `TerminalGeometry` then drops. `28/F17` measured this as roughly half the browsing
+    /// regression, and it was pure waste: geometry has never read a scalar.
+    ///
+    /// Padding past a content-sized row's stored extent is synthesized here rather than
+    /// stored, which is the same contract `forEachViewportCell(row:_:)` honors.
+    private var presentedRowGeometry: [TerminalRowGeometry] {
+        let topRow = scrollProjection.topRow
+        let blankKind = GridCell().kind
+        return (topRow..<(topRow + rowCount)).map { index in
+            var kinds = [TerminalCellGeometry](
+                repeating: TerminalCellGeometry(kind: blankKind),
+                count: columnCount
+            )
+            if isAlternateScreenActive == false, scrollbackRows.indices.contains(index) {
+                let packed = scrollbackRows[index]
+                packed.forEachKind { column, kind in
+                    guard column < columnCount else { return }
+                    kinds[column] = TerminalCellGeometry(kind: kind)
+                }
+                return TerminalRowGeometry(cells: kinds, isSoftWrapped: packed.isSoftWrapped)
+            }
+            guard let row = viewportStreamRow(at: index) else {
+                preconditionFailure("viewport projection exceeded the active stream")
+            }
+            for column in 0..<min(row.cells.count, columnCount) {
+                kinds[column] = TerminalCellGeometry(kind: row.cells[column].kind)
+            }
+            return TerminalRowGeometry(cells: kinds, isSoftWrapped: row.isSoftWrapped)
+        }
+    }
+
     private func viewportStreamRow(at index: Int) -> GridRow? {
         guard index >= 0 else { return nil }
         if isAlternateScreenActive {
@@ -3948,21 +3984,14 @@ public struct Terminal: Equatable, Sendable {
     /// Projects cell roles, row wraps, and cursor state without exposing mutable storage.
     public var geometry: TerminalGeometry {
         let projection = scrollProjection
-        let windowRows = presentedRows
+        let windowRows = presentedRowGeometry
         let cursorStreamRow = isAlternateScreenActive
             ? cursor.row
             : scrollbackRows.count + cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return TerminalGeometry(
             columns: columnCount,
-            rows: windowRows.map { row in
-                TerminalRowGeometry(
-                    cells: (0..<columnCount).map {
-                        TerminalCellGeometry(kind: row.cell(at: $0).kind)
-                    },
-                    isSoftWrapped: row.isSoftWrapped
-                )
-            },
+            rows: windowRows,
             cursor: windowRows.indices.contains(cursorWindowRow)
                 ? TerminalCursor(
                     row: cursorWindowRow,
@@ -4019,26 +4048,43 @@ public struct Terminal: Equatable, Sendable {
     ) {
         guard row >= 0, row < rowCount else { return }
         let streamRow = scrollProjection.topRow + row
-        guard let windowRow = viewportStreamRow(at: streamRow) else { return }
         // Memoized because a row is a handful of style runs, not `columnCount` distinct styles:
         // without it every column would pay a dictionary lookup that the previous column already
         // did. Correct for any content -- a miss just re-resolves.
         var lastId: StyleId?
         var lastStyle = TerminalStyle()
-        for column in windowRow.cells.indices {
-            let cell = windowRow.cells[column]
-            if cell.styleId != lastId {
-                lastStyle = self.style(for: cell.styleId)
-                lastId = cell.styleId
+        var storedCount = 0
+        func emit(_ column: Int, _ scalars: TerminalScalars, _ styleId: StyleId) {
+            if styleId != lastId {
+                lastStyle = self.style(for: styleId)
+                lastId = styleId
             }
-            body(column, cell.scalars, lastStyle)
+            body(column, scalars, lastStyle)
+            storedCount = column + 1
         }
-        guard windowRow.cells.count < columnCount else { return }
+
+        // Retained rows stream out of packed storage rather than being materialized first.
+        // A frame reads every visible row once and discards it, so `unpacked()` here bought
+        // an allocation and a full `GridCell` write per cell that nothing outlived --
+        // `28/F17` measured that as the dominant term in the browsing regression, and the
+        // pre-packing representation never paid it because it could return its stored array
+        // by reference.
+        if isAlternateScreenActive == false, scrollbackRows.indices.contains(streamRow) {
+            scrollbackRows[streamRow].forEachContentCell { emit($0, $1, $2) }
+        } else {
+            guard let windowRow = viewportStreamRow(at: streamRow) else { return }
+            for column in windowRow.cells.indices {
+                let cell = windowRow.cells[column]
+                emit(column, cell.scalars, cell.styleId)
+            }
+        }
+
+        guard storedCount < columnCount else { return }
         let padding = GridCell()
         if padding.styleId != lastId {
             lastStyle = self.style(for: padding.styleId)
         }
-        for column in windowRow.cells.count..<columnCount {
+        for column in storedCount..<columnCount {
             body(column, padding.scalars, lastStyle)
         }
     }
