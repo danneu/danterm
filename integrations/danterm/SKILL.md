@@ -115,15 +115,23 @@ user-provided criteria.
 
 ## Isolated source-tree instances
 
-When an agent needs its own development app, run `just launch` from the source
-tree. The launcher builds without replacing the user's slot-zero app, claims a
-free slot from 1 through 8, prints one JSON handle, and then becomes the app
-process. Capture the handle from stdout and target its `socketPath` explicitly:
+In a fresh linked worktree, run `just provision-worktree` before the first
+build. It repeatably links the primary checkout's cached GhosttyKit framework,
+themes, and reference sources into the worktree without changing the primary
+checkout.
 
-    ./scripts/dev-slot-launcher.py > /tmp/danterm-slot.json &
+When an agent needs its own development app, run `just launch` from the source
+tree instead of `just build-run`. The launcher builds without replacing or
+focusing the user's slot-zero app, claims a free slot from 1 through 8, prints
+one JSON handle, and then becomes the app process. Capture the handle from
+stdout and target its `socketPath` explicitly:
+
+    SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
+    ./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
     DANTERM_SLOT_PID=$!
-    SLOT_SOCKET=$(jq -r '.socketPath' /tmp/danterm-slot.json)
-    danterm --socket "$SLOT_SOCKET" ls
+    while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
+        && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
+    test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
 
 The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the launched
 app because the launcher uses direct exec. The default is fresh, background,

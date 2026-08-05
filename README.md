@@ -613,6 +613,14 @@ Same trick works inside vim with `set mouse=a`, inside less, inside htop, etc.
 
 The dev loop is to make changes and `just build-run` to try them out.
 
+After creating a linked Git worktree, run `just provision-worktree` from that
+worktree before its first build. The repeatable command links the primary
+checkout's cached GhosttyKit framework, themes, and reference sources without
+modifying the primary checkout. Build or fetch those prerequisites in the
+primary checkout first if the command reports one missing. In a worktree, use
+the isolated `just launch` path below instead of `just build-run`, which replaces
+the user's canonical dev app.
+
 - `just build` or `bash ./dev-build.sh` to build a local dev app to
   ".build/DanTerm Dev.app" and copy to "~/Applications/DanTerm Dev.app".
 - `just build-run` or `bash ./dev-build-run.sh` to build + run it.
@@ -632,14 +640,28 @@ create a production release or publish anything.
 
 Isolated launches use slots 1 through 8; slot 0 remains the canonical
 `~/Applications/DanTerm Dev.app`. The launcher prints one JSON handle containing
-`slot`, `bundleId`, `socketPath`, and `pid`, then becomes the app process. Set
-`SLOT_SOCKET=$(jq -r '.socketPath' /tmp/danterm-slot.json)` from the captured
-handle, then drive that instance with `danterm --socket "$SLOT_SOCKET" ...`.
+`slot`, `bundleId`, `socketPath`, and `pid`, then becomes the app process. Capture
+that handle in a per-launch file, then drive the instance by its explicit socket:
+
+```sh
+SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
+./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
+DANTERM_SLOT_PID=$!
+while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
+    && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
+test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+```
+
 The explicit flag prevents an agent shell from falling back to the user's app.
-A slot is held by a kernel lock for the app lifetime and becomes reusable on
-any exit, including SIGKILL. If all slots are occupied, the launcher exits with
-status 75 without starting another app. Use `./dev-build.sh --no-install` when
-only the canonical `.build/DanTerm Dev.app` artifact is wanted.
+A slot is held by a kernel lock for the app lifetime and becomes reusable on any
+exit, including SIGKILL. If all slots are occupied, the launcher exits with status
+75 without starting another app. Use `./dev-build.sh --no-install` when only the
+canonical `.build/DanTerm Dev.app` artifact is wanted.
+
+Pass an environment-gated launch control only by naming its allowlisted variable,
+for example `DANTERM_TERMINAL_BACKEND=swift ./scripts/dev-slot-launcher.py
+--pass-env DANTERM_TERMINAL_BACKEND`. Unnamed launching-shell state is not
+forwarded into the slot.
 
 The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for
 its Powerline references. It requires

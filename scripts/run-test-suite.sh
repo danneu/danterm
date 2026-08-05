@@ -36,6 +36,7 @@ STEPS=(
     'swift test --scratch-path .build-app-tests'
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
+    './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/test-ui-harness_test.sh'
     './scripts/tests/terminal-characterization-harness_test.sh'
     './scripts/tests/research-index-lint_test.sh'

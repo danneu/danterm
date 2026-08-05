@@ -8,6 +8,10 @@ default:
 clean:
     rm -rf .spm-build .build lib/DanTermProtocol/.build lib/DanTermCore/.build lib/DanTermSupport/.build lib/TerminalCore/.build lib/TerminalPTY/.build
 
+# Link cached external prerequisites from the primary checkout into this worktree.
+provision-worktree:
+    ./scripts/provision-worktree.sh
+
 # Clone/fetch Ghostty source for reference (no xcframework build).
 fetch-ghostty:
     ./build-lib.sh fetch

@@ -279,6 +279,38 @@ func movePaneSplitRightThreadsPayload() {
 Run `./build-lib.sh` once to build the cached `GhosttyKit.xcframework` before
 the first Swift build. Re-run only when the pinned Ghostty version changes.
 
+### Isolated worktree development
+
+In a fresh linked worktree, run `just provision-worktree` once before building.
+It links the primary checkout's cached `GhosttyKit.xcframework`, themes, and
+reference sources into the worktree, and is safe to repeat. The primary checkout
+must already have those inputs; the command never fetches or rebuilds them.
+
+Agents working in a worktree must use `just launch`, not `just build-run`:
+`build-run` quits and replaces the user's canonical dev app, while `launch`
+claims an unattended slot from 1 through 8 without replacing or focusing it.
+Capture the launcher's JSON handle and pass its socket explicitly on every CLI
+call:
+
+```sh
+SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
+./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
+DANTERM_SLOT_PID=$!
+while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
+    && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
+test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+```
+
+Do not export `DANTERM_SOCK` for a slot. Keeping `--socket "$SLOT_SOCKET"` at
+each call site prevents an agent command from silently falling back to the
+user's app. To exercise an env-gated launch path, name each allowed value:
+
+```sh
+SWIFT_SLOT_HANDLE="$(mktemp /tmp/danterm-swift-slot.XXXXXX)"
+DANTERM_TERMINAL_BACKEND=swift ./scripts/dev-slot-launcher.py \
+  --pass-env DANTERM_TERMINAL_BACKEND > "$SWIFT_SLOT_HANDLE" &
+```
+
 - `just build` -- compile to `.build/DanTerm Dev.app` and install to `~/Applications/DanTerm Dev.app`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with production `DanTerm.app`.
 - `just build-run` -- same as `just build`, then launch the installed app.
 - `just build-optimized` -- compile the same `DanTerm Dev.app` identity with SwiftPM's release configuration and install it. This is an optimized dev build, not a production release or publish operation.
