@@ -199,6 +199,38 @@ struct TerminalWiredHistoryAttributionProbe {
         )
     }
 
+    // MARK: Equality
+
+    @Test("equality: what one whole-terminal comparison of a saturated pane costs")
+    func equalityAttribution() {
+        guard Self.probeIsEnabled else { return }
+        var terminal = Terminal(columns: Self.columns, rows: Self.rows)!
+        let bytes = Self.streamBytes()
+        var offset = 0
+        while offset < bytes.count {
+            let end = min(offset + Self.chunkBytes, bytes.count)
+            terminal.feed(Array(bytes[offset..<end]))
+            offset = end
+        }
+        // Two equal values, which is `applyPointer`'s own case: a pointer move does not touch
+        // history, so `terminal != previousTerminal` compares all of it before answering.
+        let other = terminal
+        var equal = 0
+        for _ in 0..<20 where terminal == other { equal += 1 }
+
+        let comparisons = 200
+        let started = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<comparisons where terminal == other { equal += 1 }
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started
+
+        print(
+            """
+            == equality (\(terminal.scrollbackRowCount) retained rows, equal values) ==
+              \(elapsed / UInt64(comparisons)) ns per comparison  (\(equal) equal)
+            """
+        )
+    }
+
     /// The kinds-only traversal `RenderFramePlanner` takes once per frame.
     static func geometryPass(_ terminal: Terminal) -> UInt64 {
         var total: UInt64 = 0

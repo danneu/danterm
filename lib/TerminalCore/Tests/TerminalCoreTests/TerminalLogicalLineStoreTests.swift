@@ -847,6 +847,69 @@ struct TerminalLogicalLineStoreTests {
         assertSurvives("after a head trim", offsetBy: 6)
     }
 
+    @Test("Equality separates histories that differ only in a side-table value")
+    func equalitySeesEverySideTableValue() {
+        // Intent: two stores fed the same rows compare equal, and stop comparing equal as soon
+        //   as any one of a scalar, a style, a hyperlink id, a content identity or a
+        //   multi-scalar spill payload differs -- including when the difference is in a table
+        //   the arena holds beside the cells rather than in the cells themselves.
+        // Why it exists: `31/F13` measured `LogicalLineStore.==` decoding every retained cell
+        //   into a fresh array per record, so it now compares stored bytes instead. That is
+        //   sound only because a record's bytes are a function of its content (`31/I1`), and
+        //   this is what holds the two readings together: the side tables are exactly the part
+        //   a byte comparison could get wrong by comparing the wrong region or skipping one.
+        // Every variant keeps the record's *table shape* -- the same hyperlink entry count and
+        // the same identity run count -- so a comparison that skipped the tables' bytes could
+        // not fall back on the header word to catch it. That is what the mutation is about.
+        func store(
+            mutating change: (_ column: Int, _ cell: inout Terminal.GridCell) -> Void = { _, _ in }
+        ) -> Terminal.LogicalLineStore {
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
+            var cells: [Terminal.GridCell] = []
+            for column in 0..<6 {
+                var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column))!)
+                cell.contentIdentity = Terminal.ContentIdentity(500 + column)
+                if column == 2 {
+                    cell.scalars = TerminalScalars([
+                        Unicode.Scalar(0x1F600)!, Unicode.Scalar(0xFE0F)!,
+                    ])
+                }
+                if column == 4 { cell.hyperlinkId = 7 }
+                change(column, &cell)
+                cells.append(cell)
+            }
+            var row = Terminal.GridRow(cells: cells)
+            row.isSoftWrapped = true
+            store.admit(row)
+            store.admit(Self.shortRow(width: 6, count: 3, seed: 40))
+            return store
+        }
+
+        #expect(store() == store())
+        #expect(store() != store { column, cell in
+            if column == 5 { cell.scalars = TerminalScalars("z" as Unicode.Scalar) }
+        })
+        #expect(store() != store { column, cell in
+            if column == 5 { cell.styleId = 12 }
+        })
+        // The same one hyperlink entry, pointing at a different target.
+        #expect(store() != store { column, cell in
+            if column == 4 { cell.hyperlinkId = 9 }
+        })
+        // The same one identity run, rebased -- so the run count cannot give it away.
+        #expect(store() != store { column, cell in
+            cell.contentIdentity = Terminal.ContentIdentity(900 + column)
+        })
+        // The same one spill slot, holding different scalars.
+        #expect(store() != store { column, cell in
+            if column == 2 {
+                cell.scalars = TerminalScalars([
+                    Unicode.Scalar(0x1F601)!, Unicode.Scalar(0xFE0F)!,
+                ])
+            }
+        })
+    }
+
     @Test("A record fragmented enough to outgrow its identity run table still round-trips")
     func fragmentedIdentityFallsBackPerCellWithoutLoss() {
         // Intent: alternating identified and unidentified cells -- the shape whose run table

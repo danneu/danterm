@@ -1189,6 +1189,13 @@ extension Terminal {
         /// the arena's byte offsets, its pads and its unwritten tail are placement, not content.
         /// So this compares the retained logical lines and the counters a reader can observe, on
         /// the same principle `Terminal`'s own `Equatable` states about equal screen state.
+        /// Nothing is decoded and nothing is allocated, which is the whole of the difference
+        /// from what this used to do: comparing `recordCells(at:)` per record built a fresh
+        /// `[Terminal.GridCell]` for every retained logical line and decoded every cell in it,
+        /// with both side-table probes, on both sides. `Terminal` is `Equatable` and declares
+        /// `history` before `rows`, so a single `terminal != previousTerminal` on the pointer
+        /// path walked all of retained history that way -- `31/F13` measured it at 9.3% of
+        /// whole-process CPU under ambient mouse motion.
         static func == (lhs: Self, rhs: Self) -> Bool {
             guard lhs.budget == rhs.budget,
                   lhs.width == rhs.width,
@@ -1197,11 +1204,89 @@ extension Terminal {
                   lhs.offsets.count == rhs.offsets.count
             else { return false }
             for index in 0..<lhs.offsets.count {
-                guard lhs.recordSummary(at: index) == rhs.recordSummary(at: index),
-                      lhs.recordCells(at: index) == rhs.recordCells(at: index)
-                else { return false }
+                guard recordsHoldTheSameContent(lhs, rhs, at: index) else { return false }
             }
             return true
+        }
+
+        /// Whether both stores' record at `index` holds the same content, compared as stored
+        /// bytes rather than as decoded cells.
+        ///
+        /// Sound because a record's bytes are a function of its content alone (`31/I1`): equal
+        /// header, equal cell words and equal side-table entries mean every reader sees the same
+        /// cells. The one thing the bytes do not carry is the key base the head record's tables
+        /// are read against, which a head trim moves (`31/D2` Decision 2 step 3) -- so a trimmed
+        /// head carrying a table falls back to comparing what a reader would actually see.
+        ///
+        /// The header word subsumes what `recordSummary` would compare and is why `==` no longer
+        /// builds one per record per side: the cell count, both table counts and every flag are
+        /// in it, the display-row count is derived from those and the width, and the two side
+        /// tables that live outside the arena are reached only when a header bit says a record
+        /// has an entry in them.
+        private static func recordsHoldTheSameContent(
+            _ lhs: Self,
+            _ rhs: Self,
+            at index: Int
+        ) -> Bool {
+            let leftOffset = lhs.offsets[index]
+            let rightOffset = rhs.offsets[index]
+            let left = lhs.record(at: leftOffset)
+            guard left.word == rhs.word(at: rightOffset) else { return false }
+
+            // The cells are one contiguous run of whole words in both arenas, so this walks two
+            // raw word pointers rather than paying a bounds check per subscript on each side --
+            // this loop is what a whole-terminal equality spends nearly all of its time in. The
+            // record's alignment tail is deliberately outside the run: those bytes are whatever
+            // the ring last wrote there, and comparing them would report equal content as
+            // different.
+            if left.cellCount > 0 {
+                let leftWord = (leftOffset >> 3) + 1
+                let rightWord = (rightOffset >> 3) + 1
+                let count = left.cellCount
+                let equal: Bool = lhs.arena.withUnsafeBufferPointer { leftWords in
+                    rhs.arena.withUnsafeBufferPointer { rightWords in
+                        let left = leftWords.baseAddress! + leftWord
+                        let right = rightWords.baseAddress! + rightWord
+                        for word in 0..<count where left[word] != right[word] { return false }
+                        return true
+                    }
+                }
+                guard equal else { return false }
+            }
+
+            if index == 0,
+               lhs.headTrimmedCells != rhs.headTrimmedCells,
+               left.hyperlinkCount > 0 || left.identityEntryCount > 0
+            {
+                for cell in 0..<left.cellCount {
+                    guard lhs.cell(recordIndex: 0, cellOffset: cell)
+                        == rhs.cell(recordIndex: 0, cellOffset: cell)
+                    else { return false }
+                }
+                return true
+            }
+
+            let leftBase = leftOffset + LogicalLineRecord.headerAndCells(left.cellCount)
+            let rightBase = rightOffset + LogicalLineRecord.headerAndCells(left.cellCount)
+            let tableBytes = left.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+                + left.identityByteCount
+            for field in stride(from: 0, to: tableBytes, by: 4) {
+                guard lhs.u32(leftBase + field) == rhs.u32(rightBase + field) else { return false }
+            }
+
+            if left.hasTrailingFill,
+               lhs.fillStylesBySequence[lhs.firstRecordSequence + index]
+                   != rhs.fillStylesBySequence[rhs.firstRecordSequence + index]
+            {
+                return false
+            }
+
+            // The spill payloads are the one part of a record that never lived in the arena
+            // (`31/DD28`), so they are compared through the table that holds them -- and only
+            // when there is one, which `spillBytes` answers for the whole store at once.
+            guard lhs.spillBytes > 0 || rhs.spillBytes > 0 else { return true }
+            return lhs.spillsBySequence[lhs.firstRecordSequence + index]
+                == rhs.spillsBySequence[rhs.firstRecordSequence + index]
         }
 
         /// Every retained display row, oldest first, as the renderer must paint it.
