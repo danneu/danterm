@@ -137,7 +137,7 @@ to settle. Nothing here blocks the audit being closed.
   doc comment cites. The libghostty-backed writes stay untouched. Verified: `just build`
   compiles the app target clean, plus the full 74-step gate.
 
-- [ ] **47 (docs obligation) -- record what `PO5` still covers.**
+- [x] **47 (docs obligation) -- record what `PO5` still covers.**
   Finding 47 deleted two wall-clock tests that guarded a `PackedRetainedRow` read path
   production no longer takes, and its verifier noted the retirement is broader than
   those two tests. **That framing needs correcting before it is written down:** the type
@@ -150,6 +150,18 @@ to settle. Nothing here blocks the audit being closed.
   logical-line store, not that the whole type is dead.
   Left undone because amending a dated `Status: Accepted` research record is the same
   class of call as the four deferred findings.
+  **Resolved 2026-08-05:** nothing above the line was edited. A dated
+  `## Postscript (2026-08-05)` section was appended to
+  `docs/research/28-retained-row-optimizations/decisions.md`, chosen over the folder's
+  other two files because this finding's verifier named `decisions.md:823` (`D7`'s
+  "`PO1`-`PO5` are green") as the claim that needed the note. It states the half
+  retirement -- subject retired, encoding survives -- and cites finding 47 and this plan
+  doc. Claims re-verified before writing: `PackedRetainedRow.pack` has zero callers in
+  `Sources/` (every mention there is a doc comment; the only live callers are test probes
+  using it as a reference encoder), and `LogicalLineStore` reads the `Header` bit-layout
+  constants in 19 places with `LogicalLineRecord` taking four byte constants from the same
+  header. Verified: `scripts/research-index-lint.sh` and the full 74-step gate green. One
+  unrelated flake on the first gate run (a PTY suite issue) cleared on rerun.
 
 ### Open: deliberate non-fixes, recorded so they are not re-litigated
 

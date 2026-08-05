@@ -1507,3 +1507,40 @@ history, which is why depth stopped setting the price.
   entry's ledger row names, was **deleted by `9ad7cc5`** -- it is written against
   the two caps, which no longer exist. The committed probe is what stays
   re-runnable, which is the whole reason `28/D1` pitch 2 insisted on one.
+
+## Postscript (2026-08-05) -- `PO5`'s subject is retired; its encoding is not
+
+Recorded here rather than by editing an entry above, because no decision changed:
+this is what became of a discharged obligation after doc 31's store landed. It
+amends nothing in `D1`-`D11`, and the `PO1`-`PO5` are green claim in `D7` above
+stays true of the revision it was written at.
+
+`PO5` -- the row-reader microbenchmark obligation, discharged against
+`Terminal.PackedRetainedRow` and cited above as green -- is now **half retired**,
+and the halves fall on opposite sides of the same type:
+
+- **The subject is retired.** `PO5` benchmarked the standalone packed-row read
+  path (`pack`, `unpacked()`, `cell(at:)`, the `forEach*` walks). Production no
+  longer takes it: `PackedRetainedRow.pack` has **no callers in `Sources/`** --
+  every remaining mention there is a doc comment citing it as precedent -- and
+  history is read through `LogicalLineStore`, which implements its own walks.
+  The only live callers are test probes that keep `pack` as a reference encoder
+  to check the store's bytes against.
+- **The encoding survives.** `PackedRetainedRow.Header`'s bit-layout constants
+  are load-bearing: `LogicalLineStore` reads and writes the C1 cell word through
+  `cellKindShift`, `cellKindMask`, `cellStyleShift`, `cellScalarMask` and
+  `cellSpillBit` in about nineteen places, and `LogicalLineRecord` takes its
+  `cellBytes` / `hyperlinkEntryBytes` / `identityRunEntryBytes` /
+  `identityCellBytes` straight from the same header. `D9`'s C1 cell is still the
+  shipped cell; only the container around it changed.
+
+So the honest reading of `PO5` today is that it proved a walk over a
+representation the store inherited, on a reader the store replaced. It is not
+evidence about the current read path, and it is not dead-lettered either.
+
+This is written down because finding 47 of
+[plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md](../../../plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md)
+deleted the two wall-clock tests that stood for `PO5`'s cost claim, on the
+grounds that they could no longer guard what their preambles said. Deleting them
+without this note would have silently lost the obligation's subject; the note is
+the replacement record, not a re-adjudication of the deletion.
