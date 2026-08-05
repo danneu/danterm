@@ -5,9 +5,14 @@ Research started: 2026-07-30. **Status: OPEN -- Phases 1-5 done (`F1`-`F15`,
 and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) cleared
 its gate and is landed as latest-wins coalescing at the host's submission
 boundary; `D4`'s claim that it would be measured by a new probe case is corrected
-at its own heading. What is still open is `F15`'s single-settled-resize test,
-which decides whether the stacked prompts are a storm artifact or a reflow cursor
-bug -- coalescing deliberately leaves that path untouched.**
+at its own heading. `F15`'s single-settled-resize test ran on 2026-08-05 and came
+back on `D4`'s first branch (`F16`): settled resizes are clean, the stacked prompts
+need the storm, and the debris is the shell's own redraw race -- it reproduces in
+Terminal.app and iTerm2 too. Every ledger item is now closed. The session's
+incidental discovery, rows that stop being painted after a settled resize, is a
+repaint defect rather than a reflow one and moved to
+[doc 32](32-post-resize-repaint-loss/README.md). What this file still owes is an
+`## Outcome` section before its row can move to `## Closed`.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -222,8 +227,12 @@ Added here, because the axis is different:
 - [x] Test `D1`'s fourth-ranked candidate against the live app before pitching it.
       **Done -- `F15`. Confirmed, and it is a rate problem rather than a cost
       problem, which `H2` had left open.**
-- [ ] Run the single-settled-resize test from `F15`, which decides whether `C4` is
-      a performance change or a correctness bug wearing one.
+- [x] Run the single-settled-resize test from `F15`, which decides whether `C4` is
+      a performance change or a correctness bug wearing one. **Done 2026-08-05 --
+      `F16`. `D4`'s first branch: settled single resizes are clean, the debris
+      needs the storm, and the debris is the shell's (reproduced in Terminal.app
+      and iTerm2). The session's incidental discovery -- rows that stop being
+      painted after a settled resize -- is a repaint defect and moved to doc 32.**
 - [x] ~~Add an N-distinct-grids drain case to `just terminal-occupancy-probe`.~~
       **Dropped, not done.** The probe measures `Terminal` directly and coalescing
       lives above it in the host, so no case it can carry observes the fix; the
@@ -700,6 +709,44 @@ caused by the storm and coalescing fixes both symptoms at once. If a single sett
 resize also duplicates a prompt, there is a reflow cursor bug underneath, which
 coalescing would only make rarer -- and that outranks the performance finding, the
 same way `F10` did.
+
+### `F16` -- the test ran: storm artifact, and it is the shell's
+
+Run 2026-08-05, interactively, in a `just build` dev app at `69f6cbc8` --
+`C4`'s coalescing (`02f3ba1a`, `0935ccc4`) and the logical-line cutover
+(`9ad7cc5`) both included. Human observation of a live pane, uninstrumented;
+full property lists and the three-terminal table are in `32/F1` and `32/F2`.
+
+**`D4`'s first branch.** A settled single-column resize does not duplicate a
+prompt, in either direction, in fish or in zsh. The duplication needs the storm,
+and the storm needs a continuous drag.
+
+**And the storm's debris is not ours.** The same fast-shake stimulus produces the
+same fragment debris in Terminal.app and iTerm2, in zsh and in fish, and all three
+terminals are clean under bash (`32/F2`). `F15` left two candidate explanations
+for the stacking -- our reflow's cursor placement, or the shell losing its own
+redraw race -- and this is the second. DanTerm renders faithfully what the shell
+emits under a SIGWINCH burst.
+
+**The lag half is separately settled.** `F15` priced a reflow step at ~53.7-64 ms
+and derived 4x-8x owner-queue utilization from it. `28/D11`'s amendment records the
+same `saturated-wide-resize-v1` recipe at 1.58 ms median after `9ad7cc5`, with the
+surviving live-screen refold at 1.46 ms widening and 2.65 ms narrowing. The pane no
+longer lags the window during a drag, which the session confirmed by hand.
+
+**What the test found instead.** On a settled single-column widen, rows above the
+live prompt stop being painted -- DanTerm-only, present with the shell integration
+disabled, and provably not a data loss: selecting the rows, scrolling them, or
+pushing content into scrollback brings them back unchanged. That is a repaint
+defect, not a reflow one, and it is nothing this doc predicted. It is out of scope
+here and owns its own doc: **[32-post-resize-repaint-loss](32-post-resize-repaint-loss/README.md)**.
+
+**Uncertainty.** The reproduction is a hand-driven mouse drag, and the fragment
+pattern differs from `F15`'s screenshot -- whole stacked prompts there, mid-row
+fragments here. Same class, possibly not the identical failure; not pursued,
+because the three-terminal control makes it the shell's either way.
+
+**Next action.** None owed by this doc.
 
 ## Decisions
 

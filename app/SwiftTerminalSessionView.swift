@@ -302,7 +302,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        let sizeChanged = newSize != frame.size
         super.setFrameSize(newSize)
+        // A resized layer gets a fresh backing store with no contents, so draw(_:)'s
+        // sparse-damage clip has no previous frame left to preserve: every row it clips
+        // away shows the bare layer background instead. Gate on the view's size rather
+        // than on the grid dimensions -- a sub-cell resize discards the contents just the
+        // same while leaving the column and row counts identical.
+        if sizeChanged {
+            invalidateFullDisplay()
+        }
         synchronizeGeometry()
     }
 

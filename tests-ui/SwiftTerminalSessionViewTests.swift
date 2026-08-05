@@ -381,6 +381,50 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("the first draw after a resize fills every row") {
+        // Intent: once the pane's size changes, the next draw fills the whole viewport even
+        //   when the engine reports damage for a single row.
+        // Why it exists: a resize hands the layer a new backing store with no contents, so
+        //   clipping the fill to sparse damage leaves every other row showing the bare
+        //   layer background rather than the previous frame. Bounding the fill to the
+        //   damaged spans is only sound while the layer still holds what the last draw put
+        //   there, and a resize is exactly when it does not.
+        // Scenario: widening a pane by one column. The shell repaints its two prompt rows
+        //   after SIGWINCH, and every row above them stopped being painted -- staying blank
+        //   because nothing further damaged them (docs/research/32, `F1`/`F5`/`F8`).
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+
+        // Width only, so cell metrics are untouched and just the column count moves. That is
+        // the widen case, and the one that reaches draw without a full invalidation.
+        pane.setFrameSize(NSSize(width: 96, height: 160))
+        // Stands in for the shell's post-SIGWINCH redraw: a small write on the very next
+        // frame, which is what makes the loss stick instead of being repainted.
+        controller.emitFrameForTest(damage: .init(rows: [8]))
+        try drawPane(pane, dirtyRect: pane.bounds)
+
+        let rects = pane.clipRectsForTesting.flatMap { $0 }
+        try uiExpect(rects.isEmpty == false, "the post-resize draw installed no clip rects")
+        let rowHeight = pane.bounds.height / CGFloat(RenderFramePlan.rowsForTesting)
+        let unfilled = (0..<RenderFramePlan.rowsForTesting).filter { row in
+            let middle = CGPoint(
+                x: pane.bounds.midX,
+                y: (CGFloat(row) + 0.5) * rowHeight
+            )
+            return rects.contains { $0.contains(middle) } == false
+        }
+        try uiExpect(
+            unfilled.isEmpty,
+            "rows the first draw after a resize left unfilled: \(unfilled)"
+        )
+    }
+
     uiTest("semantic notifications and progress cross the AppKit adapter") {
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)

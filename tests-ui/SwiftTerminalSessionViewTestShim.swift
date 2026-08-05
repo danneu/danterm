@@ -64,12 +64,19 @@ struct RenderTheme {
 }
 
 struct RenderFramePlan {
+    /// The fake viewport's row count, exposed so a test can enumerate every row without
+    /// restating the literal that `rows` and the initializer default already share.
+    static let rowsForTesting = 10
+
     let defaultBackground: RenderColor
     let columns = 10
-    let rows = 10
+    let rows = RenderFramePlan.rowsForTesting
     let includedRows: Set<Int>
 
-    init(defaultBackground: RenderColor, includedRows: Set<Int> = Set(0..<10)) {
+    init(
+        defaultBackground: RenderColor,
+        includedRows: Set<Int> = Set(0..<RenderFramePlan.rowsForTesting)
+    ) {
         self.defaultBackground = defaultBackground
         self.includedRows = includedRows
     }
