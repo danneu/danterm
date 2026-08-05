@@ -988,6 +988,18 @@ spends fewer bytes on the same content.
 
 #### Amendment 2026-08-04 -- the index carries a dense per-record header word, which is `F2`'s recorded alternative taken on a reading `F2` did not measure
 
+**REVERTED 2026-08-04, before this amendment's mechanism had shipped for a day.
+Read this first: every table below describes a store that no longer exists.** The
+paired instrument this amendment never ran -- the cache measured directly against
+the same store without it -- reads **`equivalent` at -0.10%** on the very rung the
+amendment was taken for (`F16` Observation 5). The mechanism is therefore a
+measured cost with no measured benefit and it is gone; the closing block "What the
+revert restores" below carries the re-derived numbers. What survives is `DD56`,
+which is correct independent of how many index words a record has. The amendment
+is left standing rather than deleted because the reasoning it froze -- and the
+falsification clause that turned out to be the wrong test -- is the record of how
+a subtraction got mistaken for a measurement.
+
 **What changes, in one sentence.** The index stops being offsets-only: it holds,
 densely and in lockstep with the offsets ring, **each live record's 8-byte header
 word**, so a reader that knows a record's *index* reads its header out of an
@@ -1152,6 +1164,50 @@ reading and the plan's Acceptance does not move; whether `DD55` is kept is a
 human's, and the honest instrument for the question clause 4 was trying to ask is
 a profile of the browse path, which still nobody has taken.
 
+#### What the revert restores, re-derived rather than quoted (2026-08-04)
+
+The store is back to one index word per record, plus `DD56`. Numbers re-measured
+or re-derived at the post-revert revision, not pasted from `F10`:
+
+- **Store-level census, `arena/plain/cycled`, measured** (`F8`'s arm, one
+  process): index **1.017 -> 0.517 MiB**, arena bytes in use 13.983 ->
+  **14.483**, retained display rows 35,208 -> **36,467**. That is **+3.58%**
+  depth recovered, against the -3.56% the cache cost -- the displacement model
+  running backwards, and the tightest confirmation available that the cost was
+  exactly what this amendment said it was. (It does not return to `F10`'s 36,507:
+  the remaining 40 rows are `D5`'s chunk-seam pads, which are not this
+  amendment's.)
+- **The reserve.** The index charge per record is 8 B again plus the block
+  totals, so at `F10`'s measured saturation record counts, with `D5`'s ~1,232 B
+  of backing overhead folded in: `stream` **0.259 MiB of the 1.000 MiB reserve**
+  (from 0.509), `mix` 0.130 (from 0.255), `full` and `wide` 0.066 each (from
+  0.128), `wrapped` 0.002. Every measured class is back inside a quarter of the
+  reserve.
+- **`PO11`.** The derived depth losses this amendment charged -- 131 rows on
+  `mix`, 46 on `full`, 537 on `stream`, 61 on `wide` -- are all given back, so
+  the margins revert to `F10`'s **measured** 1.038x / 1.009x / 1.238x / 1.016x /
+  1.042x. **`full`'s margin is 0.9% again**, not the 0.4% this amendment left it
+  at, and the sentence "`PO11`'s margin is now the binding constraint on any
+  further per-record charge" reverts to `DD36`'s original reading: the reserve is
+  what binds, and `PO11` has 0.9% of room rather than 0.4%.
+- **The blank regime** returns to `F10`'s measured **884,734** records
+  (3.375x today's engine), from the 524,288 the second index word imposed.
+
+**Why the revert needs no ladder re-read, stated exactly.** Acceptance is a
+reading against `28c54e1` and it is recorded MET. Reverting a change normally
+invalidates such a reading -- but here the change being removed has a **direct,
+paired, in-session estimate of its own effect**, and that estimate is
+`equivalent`: -0.10% on `retained-browse`, inside a 0.75% band declared before
+the comparison, with four pairs straddling zero. A mechanism measured to move the
+rung by nothing cannot, by removing it, move an acceptance reading of that rung.
+`terminal-feed` (-0.93%) and `scrollback-stream` (-2.18%) in the same paired run
+say the same for the two falsifier rungs, and neither was ever claimed for this
+amendment. So the paired null **is** the license, and no ladder invocation is
+spent re-reading a store that is byte-for-byte `1e4cb61`'s plus `DD56`. What a
+human is owed instead, and what this campaign still has not taken, is a **profile
+of the browse path** -- the instrument that would have answered the question this
+amendment guessed at.
+
 #### New deferred decisions
 
 - **DD55 -- the cache is the record's header *word*, in a ring parallel to the
@@ -1167,16 +1223,36 @@ a profile of the browse path, which still nobody has taken.
   refusing it is that lockstep is an invariant a test checks rather than one the
   type system holds, which is what `headerCacheAgreesWithArena()` exists for. A
   human's to revisit if the oracle ever catches a drift.
+
+  **REVERTED 2026-08-04 on `F16` Observation 5.** The whole entry is moot: the
+  cache it chooses between four shapes of does not exist. The paired null is why,
+  and the deliberation is left standing because it is a worked example of the
+  campaign's own failure mode -- four options weighed carefully against each
+  other, and none of them weighed against *not doing it*, because the benefit had
+  been inferred from a subtraction rather than measured. The next mechanism aimed
+  at this rung should be measured against nothing at all before it is measured
+  against its alternatives.
 - **DD56 -- the index's growth is charged before the append that would force it,
   rather than discovered after.** The alternative is to let the ring double and
   evict afterwards, which is what every other charge term does -- and it does not
   work here, because a ring never shrinks, so the doubling is not recoverable by
-  eviction. The cost of charging early: the store keeps its record count at the
-  ring's capacity rather than a little above it, so the blank regime's depth is a
-  power of two rather than the arena's own limit. Shrinking a ring on
-  `removeAll()` would recover the other half of this and is deliberately not
-  taken -- it is a second policy with its own failure mode, and no measurement
-  asks for it.
+  eviction: the pane retains nothing for the rest of its life. The cost of
+  charging early: the store keeps its record count at the ring's capacity rather
+  than a little above it. Shrinking a ring on `removeAll()` would recover the
+  other half of this and is deliberately not taken -- it is a second policy with
+  its own failure mode, and no measurement asks for it.
+
+  **KEPT through `DD55`'s revert, 2026-08-04, and it is not a leftover.** The
+  hazard was *found* with two index words per record and is not caused by them:
+  whether it fires is a property of the **budget**, because it needs a
+  power-of-two ring capacity to land in the window where its doubling costs more
+  than the arena can give back. With one word per record the production budget's
+  15,728,640-byte capacity misses that window -- and **144,000 and 288,000 hit
+  it**, measured with the guard removed at **0 retained records and 135,320
+  charged against a 135,000 capacity**, and 270,568 against 270,000. Their
+  neighbours (136,000, 152,000, 280,000, 296,000) retain normally, which is what
+  makes it a cliff rather than a slope. The test sweeps all six rather than
+  asserting one number, because the number is not the invariant.
 
 #### Decision 2 -- eviction is byte-driven, display-row granular at the head, and never copies
 

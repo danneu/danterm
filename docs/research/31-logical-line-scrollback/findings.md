@@ -4545,6 +4545,12 @@ the session.
   `PO11`'s derived margin on `full` from 0.9% to **0.4%**. The benefit it was
   taken for reads `equivalent`. **Whether to keep it is a human's**, and nothing
   is reverted here; the campaign's rule is to report rather than to act.
+  **Ruled 2026-08-04: reverted.** The index is back to one word per record and
+  the store is byte-for-byte `1e4cb61`'s plus `DD56`; the census arm above
+  re-measured at index **1.017 -> 0.517 MiB** and retained rows **35,208 ->
+  36,467** (+3.58%), giving back exactly what Observation 4 measured the cache
+  taking. `D2` Decision 1's amendment carries the re-derived margins and states
+  why this null is what licenses reverting without spending a ladder invocation.
 - **`F16`'s verdict is untouched.** Acceptance is against `28c54e1`, and the
   store at `27c6fb6` reads +0.94% on that comparison whatever the reason.
 - **It sharpens, rather than softens, this entry's "one invocation" caution.**

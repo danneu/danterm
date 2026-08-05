@@ -133,7 +133,6 @@ struct TerminalLogicalLineStoreTests {
 
         func check(_ label: Comment) {
             #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount(), label)
-            #expect(store.headerCacheAgreesWithArena(), label)
         }
 
         for line in 0..<12 {
@@ -165,108 +164,34 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordCount == 0)
     }
 
-    @Test("The dense header cache agrees with the arena after every operation that writes a header")
-    func headerCacheAgreesWithTheArenaAfterEveryMutation() {
-        // Intent: every cached record header still equals the header word the arena holds for
-        //   that record, after each of the store's mutating operations in turn -- including the
-        //   ones the six-trigger recount does not reach (reopen, spacer repair, trailing fill,
-        //   a head trim *inside* a record, a dropped head that stamps its follower, a chunk-seam
-        //   split, and a rebase).
-        // Why it exists: `31/D2` Decision 1 as amended caches a record's header word densely so
-        //   the browse path stops chasing it through the arena, which adds exactly one instance
-        //   of `31/AR4`'s failure mode -- a maintenance point that moves a record without
-        //   refreshing what is derived from it. The cache is only sound if every such point
-        //   updates it, and the display-row recount cannot see a drift in the fields it does not
-        //   read (the mark, the fill bit, the open and split bits, the mid-line flag).
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
-
-        func check(_ label: Comment) {
-            #expect(store.headerCacheAgreesWithArena(), label)
-        }
-
-        check("empty")
-
-        for line in 0..<12 {
-            store.admit(Self.filledRow(width: 16, seed: line, softWrapped: true, semanticPrompt: .prompt))
-            store.admit(Self.backgroundErasedRow(width: 16, count: 5, seed: line, fillStyle: 9))
-        }
-        check("admission with a mark and a trailing fill")
-
-        store.admit(Self.filledRow(width: 16, seed: 1, softWrapped: true))
-        check("open tail")
-
-        store.reopenTailRecord()
-        check("reopen")
-
-        _ = store.repairClearedSpacer(styleId: 11)
-        check("spacer repair")
-
-        store.forceSplitOpenRecord()
-        check("forced split")
-
-        store.admit(Self.filledRow(width: 16, seed: 2, softWrapped: true))
-        check("record opened after a split")
-
-        store.closeOpenRecord()
-        check("close")
-
-        for width in [9, 40, 2, 16] {
-            _ = store.setWidth(width)
-            check("width change to \(width)")
-        }
-
-        // A head record spanning many display rows, so the first steps trim inside it (moving
-        // both its offset and its header) and a later one drops it and stamps its follower.
-        var steps = 0
-        while store.recordCount > 1, evictOne(&store) {
-            steps += 1
-            check("head eviction step \(steps)")
-        }
-        #expect(steps > 5)
-
-        _ = store.truncateTail(displayRows: 3)
-        check("tail truncation")
-
-        let rebased = store.rebased(toBudgetBytes: 1 << 19)
-        #expect(rebased.headerCacheAgreesWithArena())
-
-        store.removeAll()
-        check("clear all")
-
-        // Cycling the ring past several chunk seams exercises the pad, the seam split and the
-        // wrap, each of which moves records without going through `admit`'s ordinary path.
-        var cycling = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 16)
-        for line in 0..<4_000 {
-            cycling.admit(Self.filledRow(width: 16, seed: line, softWrapped: true))
-            cycling.admit(Self.shortRow(width: 16, count: 7, seed: line))
-        }
-        #expect(cycling.headerCacheAgreesWithArena())
-        #expect(cycling.grandDisplayRowTotal == cycling.independentDisplayRowRecount())
-    }
-
-    @Test("A blank history past the index ring's doubling point keeps retaining rows")
-    func blankHistoryPastTheIndexRingDoublingPointKeepsRetaining() {
+    @Test("A blank history at a budget where the index ring must double keeps retaining rows")
+    func blankHistoryAtTheIndexRingDoublingPointKeepsRetaining() {
         // Intent: feeding a degenerate blank-line history far past the depth at which the index
-        //   rings would have to double leaves the store retaining a full ring's worth of rows,
-        //   with its charge inside capacity.
-        // Why it exists: `31/D2` Decision 1 as amended charges two 8-byte index words per record
-        //   where it charged one, which brings the ring's *doubling* inside the budget's reach in
-        //   the blank-line regime -- the one class where the index binds rather than the arena. A
-        //   ring never shrinks, so a doubling taken while the charge was already near capacity
-        //   would leave metadata permanently over the bound and eviction, which drops records
-        //   rather than capacity, could never get back under it: the pane would retain nothing at
-        //   all, for the rest of its life. Charging the growth before the append is what makes
-        //   that unreachable, and this is the test that says so.
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
-        for _ in 0..<20_000 {
-            store.admit(Self.shortRow(width: 16, count: 0, seed: 0))
-        }
+        //   ring would have to double leaves the store retaining rows, with its charge inside
+        //   capacity -- at the budgets where that doubling is the term that binds.
+        // Why it exists: `31/DD56`. A ring never shrinks, so a doubling taken while the charge
+        //   was already near the capacity leaves metadata permanently over the bound, and
+        //   eviction -- which drops records, not capacity -- can never get back under it: the
+        //   pane retains nothing at all for the rest of its life. Whether that is reachable is a
+        //   property of the *budget*, not of the design, which is why this sweeps rather than
+        //   asserting one number. Measured with the charge-before-append guard removed, budget
+        //   144,000 settles at 0 records with 135,320 charged against a 135,000 capacity, and
+        //   288,000 at 0 with 270,568 against 270,000; the neighbours retain normally.
+        // Scenario: a pane configured with a budget that happens to put a power-of-two ring
+        //   capacity in the window where its doubling costs more than the arena can give back.
+        let blank = Terminal.GridRow(cells: (0..<16).map { _ in Terminal.GridCell() })
 
-        #expect(store.recordCount > 4_000)
-        #expect(store.grandDisplayRowTotal == store.recordCount)
-        #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
-        #expect(store.chargedBytes <= store.capacityBytes)
-        #expect(store.headerCacheAgreesWithArena())
+        for budget in [136_000, 144_000, 152_000, 280_000, 288_000, 296_000] {
+            var store = Terminal.LogicalLineStore(budgetBytes: budget, width: 16)
+            for _ in 0..<60_000 {
+                store.admit(blank)
+            }
+
+            #expect(store.recordCount > 4_000, "budget \(budget) retained nothing")
+            #expect(store.grandDisplayRowTotal == store.recordCount)
+            #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
+            #expect(store.chargedBytes <= store.capacityBytes, "budget \(budget) is over capacity")
+        }
     }
 
     @Test("Clearing all history adds the retained rows to the evicted count")

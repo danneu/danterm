@@ -186,20 +186,6 @@ extension Terminal {
         /// term that bounds the degenerate blank-line regime (`31/D2` Decision 1).
         private var offsets: RingBuffer<Int>
 
-        /// Each live record's header word, dense and in lockstep with `offsets`
-        /// (`31/D2` Decision 1 as amended 2026-08-04; `31/F2`'s recorded alternative taken).
-        ///
-        /// A pure cache of `word(at: offsets[i])`, and **width-free**: a header word is a
-        /// function of the record's content alone (`31/I1`), so a width change neither reads nor
-        /// invalidates it and `31/AR4`'s invalidation points do not grow. What it buys is the
-        /// per-record read the browse path does most of -- `displayRowCount(recordIndex:)`,
-        /// `foldedRow`, `trailingFillStyle` -- which was three chunked arena chases per display
-        /// row on content whose every record is one display row (`31/F15` Observation 2).
-        ///
-        /// Maintained at exactly the operations that write a header or move a record, never
-        /// recomputed; `headerCacheAgreesWithArena()` is the oracle that catches a missed one.
-        private var headers: RingBuffer<UInt64>
-
         /// Cached display-row totals, one per `blockSize` records.
         private var blocks: RingBuffer<Block>
 
@@ -306,7 +292,6 @@ extension Terminal {
             self.width = width
             forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
-            headers = RingBuffer(filler: 0)
             blocks = RingBuffer(filler: Block(rowStart: 0, rowCount: 0))
             metadataBytes = indexChargeBytes + sideTableChargeBytes
         }
@@ -412,7 +397,6 @@ extension Terminal {
 
         private var indexChargeBytes: Int {
             offsets.capacity * MemoryLayout<Int>.stride
-                + headers.capacity * MemoryLayout<UInt64>.stride
                 + blocks.capacity * MemoryLayout<Block>.stride
                 + arenaBackingOverheadBytes
         }
@@ -635,17 +619,18 @@ extension Terminal {
         private mutating func setTrailingFillOnTail(_ styleId: Terminal.StyleId?) {
             guard offsets.count > 0 else { return }
             let index = offsets.count - 1
-            var record = header(at: index)
+            let offset = offsets[index]
+            var record = self.record(at: offset)
             guard let styleId else {
                 guard record.hasTrailingFill else { return }
                 record.hasTrailingFill = false
-                writeRecordHeader(record, at: index)
+                writeHeader(record, at: offset)
                 fillStylesBySequence.removeValue(forKey: firstRecordSequence + index)
                 refreshMetadataCharge()
                 return
             }
             record.hasTrailingFill = true
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             fillStylesBySequence[firstRecordSequence + index] = styleId
             refreshMetadataCharge()
         }
@@ -656,7 +641,7 @@ extension Terminal {
         /// header bit answers that case without touching the side table.
         func trailingFillStyle(at recordIndex: Int) -> Terminal.StyleId? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
-            guard header(at: recordIndex).hasTrailingFill else { return nil }
+            guard record(at: offsets[recordIndex]).hasTrailingFill else { return nil }
             return fillStylesBySequence[firstRecordSequence + recordIndex]
         }
 
@@ -668,11 +653,10 @@ extension Terminal {
         /// header bit plus the tables the open record had been accumulating.
         mutating func closeOpenRecord() {
             guard var record = openTailRecord() else { return }
-            let index = offsets.count - 1
-            let offset = offsets[index]
+            let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
             record.isOpen = false
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             bytesInUse += record.byteLength
                 - LogicalLineRecord.headerAndCells(record.cellCount)
             writeCursor = offset + record.byteLength
@@ -687,9 +671,8 @@ extension Terminal {
         /// (`31/DD35`).
         mutating func reopenTailRecord() {
             guard offsets.count > 0 else { return }
-            let index = offsets.count - 1
-            let offset = offsets[index]
-            var record = header(at: index)
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
             guard record.isOpen == false, record.isForcedSplit == false else { return }
             loadOpenScratch(from: record, at: offset)
             if record.hasTrailingFill {
@@ -701,7 +684,7 @@ extension Terminal {
             record.hyperlinkCount = 0
             record.identityEntryCount = 0
             record.identityPerCell = false
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             bytesInUse -= closedLength - record.byteLength
             writeCursor = offset + record.byteLength
             refreshMetadataCharge()
@@ -737,12 +720,11 @@ extension Terminal {
         /// record, which readers rejoin by adjacency (`31/DD6`).
         mutating func forceSplitOpenRecord() {
             guard var record = openTailRecord(), record.cellCount > 0 else { return }
-            let index = offsets.count - 1
-            let offset = offsets[index]
+            let offset = offsets[offsets.count - 1]
             flushOpenTables(into: &record, at: offset)
             record.isOpen = false
             record.isForcedSplit = true
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             bytesInUse += record.byteLength
                 - LogicalLineRecord.headerAndCells(record.cellCount)
             writeCursor = offset + record.byteLength
@@ -762,7 +744,7 @@ extension Terminal {
         mutating func evictOneDisplayRow() -> Bool {
             guard offsets.count > 0 else { return false }
             let offset = offsets[0]
-            let record = header(at: 0)
+            let record = self.record(at: offset)
             let cut = LogicalLineFold.firstRowCellEnd(
                 cellCount: record.cellCount,
                 width: width,
@@ -812,8 +794,8 @@ extension Terminal {
             // which is `.continuation` for a marked line and nothing at all for an unmarked one.
             trimmed.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
             let newOffset = offset + cut * LogicalLineRecord.cellBytes
+            writeHeader(trimmed, at: newOffset)
             offsets[0] = newOffset
-            writeRecordHeader(trimmed, at: 0)
             head = newOffset
             bytesInUse -= cut * LogicalLineRecord.cellBytes
             headTrimmedCells += cut
@@ -828,10 +810,11 @@ extension Terminal {
             // until the next record opens.
             let continues = record.isForcedSplit || record.isOpen
             if continues, offsets.count > 1 {
-                var follower = header(at: 1)
+                let followerOffset = offsets[1]
+                var follower = self.record(at: followerOffset)
                 follower.startsMidLine = true
                 follower.semanticPrompt = .none
-                writeRecordHeader(follower, at: 1)
+                writeHeader(follower, at: followerOffset)
             } else if continues {
                 pendingStartsMidLine = true
             }
@@ -851,7 +834,6 @@ extension Terminal {
                 refreshMetadataCharge()
             }
             offsets.removeFirst()
-            headers.removeFirst()
             firstRecordSequence += 1
             headTrimmedCells = 0
 
@@ -932,7 +914,7 @@ extension Terminal {
         private mutating func removeLastDisplayRow() {
             let index = offsets.count - 1
             let offset = offsets[index]
-            let record = header(at: index)
+            let record = self.record(at: offset)
             var lastStart = 0
             var lastEnd = record.cellCount
             var rows = 0
@@ -969,7 +951,6 @@ extension Terminal {
             refreshMetadataCharge()
             clearOpenScratch()
             offsets.removeLast()
-            headers.removeLast()
             bytesInUse -= record.byteLength
             writeCursor = offset
             if offsets.count == 0 {
@@ -1008,9 +989,9 @@ extension Terminal {
             }
             openPreviousIdentity = nil
 
-            var record = header(at: offsets.count - 1)
+            var record = self.record(at: offset)
             record.cellCount = newCellCount
-            writeRecordHeader(record, at: offsets.count - 1)
+            writeHeader(record, at: offset)
             bytesInUse -= (oldCellCount - newCellCount) * LogicalLineRecord.cellBytes
             writeCursor = offset + record.byteLength
             refreshMetadataCharge()
@@ -1023,7 +1004,6 @@ extension Terminal {
             grandDisplayRowTotal = 0
             firstRecordSequence += offsets.count
             offsets.removeAll()
-            headers.removeAll()
             resetToEmptyArena()
         }
 
@@ -1112,17 +1092,7 @@ extension Terminal {
         func independentDisplayRowRecount() -> Int {
             var total = 0
             for index in 0..<offsets.count {
-                // Straight off the arena, deliberately bypassing the dense header cache: an
-                // oracle that read the cache could not see a cached header that drifted from the
-                // record it names (`31/D2` Decision 1 as amended, `31/AR4`).
-                let offset = offsets[index]
-                let record = self.record(at: offset)
-                total += LogicalLineFold.rowCount(
-                    cellCount: record.cellCount,
-                    width: width,
-                    hasWideCells: record.hasWideCells,
-                    isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-                )
+                total += displayRowCount(recordIndex: index)
             }
             return total
         }
@@ -1212,7 +1182,7 @@ extension Terminal {
         /// terminal of that width running the same bytes would show. A line with a fill and no
         /// content paints its whole single row, which is the ED-with-background case.
         func paintedRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
-            let record = header(at: cursor.recordIndex)
+            let record = self.record(at: offsets[cursor.recordIndex])
             var cells: [Terminal.GridCell] = []
             cells.reserveCapacity(width)
             forEachFoldedCell(at: cursor, includeFill: true) { _, cell in cells.append(cell) }
@@ -1234,7 +1204,7 @@ extension Terminal {
 
         func recordSummary(at recordIndex: Int) -> RecordSummary? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
-            let record = header(at: recordIndex)
+            let record = self.record(at: offsets[recordIndex])
             return RecordSummary(
                 cellCount: record.cellCount,
                 displayRowCount: displayRowCount(recordIndex: recordIndex),
@@ -1255,7 +1225,7 @@ extension Terminal {
         /// logical line copies what the program printed and not what the erase painted.
         func recordCells(at recordIndex: Int) -> [Terminal.GridCell]? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
-            let record = header(at: recordIndex)
+            let record = self.record(at: offsets[recordIndex])
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
@@ -1273,7 +1243,7 @@ extension Terminal {
         func rebased(toBudgetBytes newBudget: Int) -> LogicalLineStore {
             var copy = LogicalLineStore(budgetBytes: newBudget, width: width)
             for index in 0..<offsets.count {
-                let record = header(at: index)
+                let record = self.record(at: offsets[index])
                 let cells = (0..<record.cellCount).map {
                     cell(recordIndex: index, cellOffset: $0)
                 }
@@ -1294,10 +1264,10 @@ extension Terminal {
 
         private mutating func markTailStartsMidLine() {
             guard offsets.count > 0 else { return }
-            let index = offsets.count - 1
-            var record = header(at: index)
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
             record.startsMidLine = true
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
         }
 
         /// Compares what history *holds*, not where it holds it.
@@ -1348,8 +1318,8 @@ extension Terminal {
         ) -> Bool {
             let leftOffset = lhs.offsets[index]
             let rightOffset = rhs.offsets[index]
-            let left = lhs.header(at: index)
-            guard left.word == rhs.headers[index] else { return false }
+            let left = lhs.record(at: leftOffset)
+            guard left.word == rhs.word(at: rightOffset) else { return false }
 
             // The cells are one contiguous run of whole words inside one backing chunk on each
             // side (`31/D5`: a record never straddles one), so this walks two raw word pointers
@@ -1521,7 +1491,7 @@ extension Terminal {
         func address(ofDisplayRow row: Int, column: Int) -> (recordIndex: Int, cellOffset: Int)? {
             guard let cursor = locate(displayRow: row) else { return nil }
             let offset = offsets[cursor.recordIndex]
-            let record = header(at: cursor.recordIndex)
+            let record = self.record(at: offset)
             var start = 0
             var end = record.cellCount
             LogicalLineFold.enumerateRows(
@@ -1547,7 +1517,7 @@ extension Terminal {
         ) -> (displayRow: Int, column: Int)? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
             let offset = offsets[recordIndex]
-            let record = header(at: recordIndex)
+            let record = self.record(at: offset)
             guard cellOffset >= 0, cellOffset <= record.cellCount else { return nil }
             var localRow = 0
             var column = 0
@@ -1587,32 +1557,16 @@ extension Terminal {
 
         /// Whether this display row wraps into the next one, without folding its cells.
         func isSoftWrapped(at cursor: DisplayRowCursor) -> Bool {
-            let record = header(at: cursor.recordIndex)
+            let record = self.record(at: offsets[cursor.recordIndex])
             let rows = displayRowCount(recordIndex: cursor.recordIndex)
             return cursor.rowWithinRecord + 1 < rows || record.isOpen || record.isForcedSplit
         }
 
         // MARK: - Fold
 
-        /// How many display rows a record folds to at the width in force.
-        ///
-        /// The browse path's most-repeated per-record read -- `locate`, `advance`,
-        /// `isSoftWrapped` and the index recompute all go through it -- so it reads the record's
-        /// header out of the dense cache and touches the arena only on the wide path, where a
-        /// boundary test needs a cell's kind (`31/D2` Decision 1 as amended).
         private func displayRowCount(recordIndex: Int) -> Int {
-            let record = header(at: recordIndex)
-            guard record.hasWideCells else {
-                // Arithmetic in the record's own fields, so a narrow record never resolves its
-                // arena offset at all.
-                return LogicalLineFold.rowCount(
-                    cellCount: record.cellCount,
-                    width: width,
-                    hasWideCells: false,
-                    isWideHead: { _ in false }
-                )
-            }
             let offset = offsets[recordIndex]
+            let record = self.record(at: offset)
             return LogicalLineFold.rowCount(
                 cellCount: record.cellCount,
                 width: width,
@@ -1622,7 +1576,7 @@ extension Terminal {
         }
 
         private func gridRow(recordIndex: Int, rowWithinRecord: Int) -> Terminal.GridRow {
-            let record = header(at: recordIndex)
+            let record = self.record(at: offsets[recordIndex])
             var cells: [Terminal.GridCell] = []
             cells.reserveCapacity(width)
             forEachFoldedCell(
@@ -1675,7 +1629,7 @@ extension Terminal {
         private func foldedRow(at cursor: DisplayRowCursor, includeFill: Bool) -> FoldedRow {
             let recordIndex = cursor.recordIndex
             let offset = offsets[recordIndex]
-            let record = header(at: recordIndex)
+            let record = self.record(at: offset)
             var shape = FoldedRow(recordOffset: offset, record: record)
             var spacer = false
             var rows: Int
@@ -1803,7 +1757,7 @@ extension Terminal {
             return cell(
                 recordIndex: recordIndex,
                 recordOffset: offset,
-                record: header(at: recordIndex),
+                record: record(at: offset),
                 cellOffset: cellOffset
             )
         }
@@ -1928,7 +1882,7 @@ extension Terminal {
             // A record opened after a forced split continues the previous line, so the mark
             // stays on the piece that started it (`31/PO13`).
             var effectiveMark = mark
-            if offsets.count > 0, header(at: offsets.count - 1).isForcedSplit {
+            if offsets.count > 0, record(at: offsets[offsets.count - 1]).isForcedSplit {
                 effectiveMark = .none
             }
             var record = LogicalLineRecord(semanticPrompt: effectiveMark, isOpen: true)
@@ -1937,7 +1891,7 @@ extension Terminal {
                 record.semanticPrompt = .none
             }
             writeHeader(record, at: writeCursor)
-            appendRecordOffset(writeCursor, header: record.word)
+            appendRecordOffset(writeCursor)
             writeCursor += LogicalLineRecord.Header.byteCount
             bytesInUse += LogicalLineRecord.Header.byteCount
             clearOpenScratch()
@@ -1971,9 +1925,8 @@ extension Terminal {
         /// the one shape that needs no per-cell decoding at all.
         private mutating func appendBlankCells(_ count: Int) {
             guard count > 0 else { return }
-            let index = offsets.count - 1
-            let offset = offsets[index]
-            var record = header(at: index)
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
             let blank = UInt64(TerminalCellKind.padding.packedCode)
                 << PackedRetainedRow.Header.cellKindShift
                 | UInt64(Terminal.defaultStyleId) << PackedRetainedRow.Header.cellStyleShift
@@ -1985,7 +1938,7 @@ extension Terminal {
             swap(&chunk, &chunks[chunkAt])
             openPreviousIdentity = nil
             record.cellCount += count
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             writeCursor += count * LogicalLineRecord.cellBytes
             bytesInUse += count * LogicalLineRecord.cellBytes
         }
@@ -1999,10 +1952,9 @@ extension Terminal {
         /// walks a row the same way for the same reason, so the two stores read a row alike.
         private mutating func appendCells(_ cells: UnsafeBufferPointer<Terminal.GridCell>) {
             guard cells.isEmpty == false else { return }
-            let index = offsets.count - 1
-            let offset = offsets[index]
-            var record = header(at: index)
-            let sequence = firstRecordSequence + index
+            let offset = offsets[offsets.count - 1]
+            var record = self.record(at: offset)
+            let sequence = firstRecordSequence + offsets.count - 1
             var spills = spillsBySequence[sequence] ?? []
             let spillsBefore = spills.count
             var sideTablesGrew = false
@@ -2064,7 +2016,7 @@ extension Terminal {
             spillBytes += spillCost(of: spills)
 
             record.cellCount += cells.count
-            writeRecordHeader(record, at: index)
+            writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
             bytesInUse += cells.count * LogicalLineRecord.cellBytes
             // The overwhelmingly common row moves no side table at all, and the charge only has
@@ -2199,21 +2151,25 @@ extension Terminal {
             }
         }
 
-        /// What opening one more record would add to the index's charge, counting the doubling an
-        /// append at capacity triggers.
+        /// What opening one more record would add to the index's charge, counting the doubling
+        /// an append at capacity triggers (`31/DD56`).
         ///
         /// Charged **before** the append rather than discovered after it, because a ring never
         /// shrinks: a doubling taken while the charge was already near the capacity would leave
         /// metadata permanently over the bound, and eviction -- which drops records, not
-        /// capacity -- could not get back under it. Evicting first instead leaves `count` below
-        /// `capacity`, so the append needs no doubling at all. Reachable only in the degenerate
-        /// blank-line regime, where the index is the term that binds (`31/D2` Decision 1 as
-        /// amended: two 8-byte words per record now, against one).
+        /// capacity -- could not get back under it, so the pane would retain nothing for the rest
+        /// of its life. Evicting first instead leaves `count` below `capacity`, so the append
+        /// needs no doubling at all.
+        ///
+        /// Whether it is reachable is a property of the budget rather than of the design: it
+        /// fires when a ring capacity that is a power of two lands between `capacity / 24.25` and
+        /// `capacity / 16.25` in the blank-line regime, which the production budget's 15,728,640
+        /// happens to miss and other budgets hit. That is exactly why the charge is stated by
+        /// construction instead of being checked against the one budget that ships.
         private var indexGrowthBytes: Int {
             var growth = 0
             if offsets.count == offsets.capacity {
                 growth += offsets.capacity * MemoryLayout<Int>.stride
-                    + headers.capacity * MemoryLayout<UInt64>.stride
             }
             // The block ring grows only when the record about to be opened starts a new block,
             // which is `appendRecordOffset`'s own test: charging it on every admission once the
@@ -2288,7 +2244,6 @@ extension Terminal {
                     grandDisplayRowTotal -= 1
                     if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
                     offsets.removeLast()
-                    headers.removeLast()
                     bytesInUse -= LogicalLineRecord.Header.byteCount
                     writeCursor = offset
                     clearOpenScratch()
@@ -2326,10 +2281,9 @@ extension Terminal {
 
         // MARK: - Index maintenance
 
-        private mutating func appendRecordOffset(_ offset: Int, header word: UInt64) {
+        private mutating func appendRecordOffset(_ offset: Int) {
             let sequence = firstRecordSequence + offsets.count
             offsets.append(offset)
-            headers.append(word)
             if offsets.count == 1 {
                 firstBlockNumber = sequence / Self.blockSize
                 blocks.removeAll()
@@ -2358,40 +2312,9 @@ extension Terminal {
             LogicalLineRecord(word: word(at: offset))
         }
 
-        /// The record at `recordIndex`, read from the dense header cache rather than chased
-        /// through the arena's chunked backing.
-        ///
-        /// Every read that already knows a record's *index* comes through here; only the arena
-        /// itself, the pad records the index does not name, and `headerCacheAgreesWithArena()`
-        /// still decode a header out of the chunks.
-        @inline(__always) private func header(at recordIndex: Int) -> LogicalLineRecord {
-            LogicalLineRecord(word: headers[recordIndex])
-        }
-
-        /// Writes a live record's header to the arena **and** to the cache, so the two cannot be
-        /// updated apart. Every header write on an indexed record goes through this.
-        private mutating func writeRecordHeader(_ record: LogicalLineRecord, at recordIndex: Int) {
-            setWord(record.word, at: offsets[recordIndex])
-            headers[recordIndex] = record.word
-        }
-
-        /// Whether every cached header word still matches the arena's.
-        ///
-        /// The oracle for the cache the way `independentDisplayRowRecount()` is the oracle for
-        /// the grand total: `31/AR4`'s failure mode is a maintenance point that moves a record
-        /// without refreshing what is derived from it, and a cache adds one more thing that can
-        /// go stale. Reads the arena directly, which is the whole point.
-        func headerCacheAgreesWithArena() -> Bool {
-            guard headers.count == offsets.count else { return false }
-            for index in 0..<offsets.count where headers[index] != word(at: offsets[index]) {
-                return false
-            }
-            return true
-        }
-
         private func openTailRecord() -> LogicalLineRecord? {
             guard offsets.count > 0 else { return nil }
-            let record = header(at: offsets.count - 1)
+            let record = self.record(at: offsets[offsets.count - 1])
             return record.isOpen ? record : nil
         }
 

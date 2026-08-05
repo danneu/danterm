@@ -859,7 +859,16 @@ licenses a production storage change; landing is the paired ladder's.
   and sends the question to a profile rather than to another round. Two deferred
   decisions added (`DD55`, `DD56`), the second for the failure mode two index
   words per record opens -- a ring never shrinks, so its doubling is charged
-  before the append rather than discovered after it.
+  before the append rather than discovered after it. **`DD55` is REVERTED
+  2026-08-04** on `F16` Observation 5's paired null (`equivalent` at -0.10% on the
+  rung the amendment was taken for): the cache was a measured cost with no
+  measured benefit, the index is back to one word per record, and the re-derived
+  margins are in the entry's closing block -- `stream` back to 0.259 of the 1 MiB
+  reserve, `PO11`'s `full` margin back to 0.9%, the blank regime back to 884,734
+  records, and 3.58% of depth given back on the measured `plain` stimulus.
+  **`DD56` is KEPT**: the doubling cliff is a property of the budget rather than
+  of the word count, and it fires at 144,000 and 288,000 with one word per
+  record.
 - [x] `DONE` **`F16`, the ladder re-run after the header cache -- and the
   acceptance dimension the whole campaign was pointed at PASSES** (fourth and
   final reading). Recorded in [F16](findings.md). One valid `confirm` invocation

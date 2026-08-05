@@ -228,7 +228,12 @@ the store with the cache paired against the same store without it, in one
 session -- the go/no-go rung reads **`equivalent` at -0.10%**, so the 0.45 points
 was session drift. This section's verdict does not move, because it is a reading
 against `28c54e1`; what moves is that slice 16's cache has a measured cost and no
-measured benefit, and whether to keep it is the human's. `31/D4`'s landing condition is now **fully spent**, its
+measured benefit, and whether to keep it is the human's. **Ruled and reverted in
+slice 18**: the cache is gone, the index is back to one word per record, and this
+section is **not** re-read for it -- a mechanism measured to move the rung by
+nothing cannot move an acceptance reading of that rung by removing it, which is
+stated in full in `31/D2` Decision 1's amendment. `31/DD56`'s charge-before-append
+guard survives the revert on its own evidence. `31/D4`'s landing condition is now **fully spent**, its
 second clause satisfied as well as its first. `28/H7`'s reopening is **spent**.
 Two cautions the finding states and this section carries: `terminal-feed` is
 `inconclusive` by **0.01 points** on the ladder's least-resolved cell (two pairs,
@@ -557,6 +562,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 15. docs(research): amend `31/D2` Decision 1 to a dense per-record header cache on the index, and freeze the re-run's expectation
 - [x] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
 - [x] 17. docs(research): re-run the frozen ladder once and record the verdict (`31/F16`) -- **acceptance MET**, and close what it closes
+- [x] 18. revert(terminal): drop `31/DD55`'s header cache on its own paired null, keeping `31/DD56`
 
 ## Implementation notes
 
@@ -1225,6 +1231,30 @@ Open conditions that the implementation, not the design, has to discharge:
   write cursor -- and the extra 8 B per record moved `wide`'s phase by one row in
   10,644. The claim those tests make is that 200 more fed lines buy no more depth,
   which is a direction; a one-sided bound was asserting the phase.
+
+- **Slice 18 reverts slice 16 and keeps one thing out of it.** `31/F16`
+  Observation 5 measured the header cache directly -- paired, in-session, against
+  the same store without it -- and read `equivalent` at -0.10% on the rung it was
+  taken for, so `31/DD55` was a measured cost with no measured benefit and the
+  human ruled it out. The store is restored to `1e4cb61`'s source exactly, then
+  `31/DD56` is re-applied on top; the revert is a checkout plus one re-application
+  rather than thirty reverse edits, so what landed is verifiably the pre-cache
+  store and not an approximation of it.
+- **`31/DD56` is kept and its test is restated, because the hazard is the budget's
+  and not the word count's.** With two index words per record it fired at the
+  production budget; with one it does not, and it fires at **144,000** and
+  **288,000** instead -- measured with the guard removed at 0 retained records and
+  135,320 charged against a 135,000 capacity. The test now sweeps six budgets
+  either side of both cliffs rather than asserting one number, and was verified to
+  fail for the right reason at both.
+- **The three saturating-recipe ceiling bands are kept rather than reverted with
+  the cache**, and that is a deliberate call worth flagging. The one-sided
+  assertion passes again now that the extra 8 B per record is gone, so nothing
+  forces the change -- but the phase-dependence it was loosened for is a property
+  of the store (`31/DD14`'s chunk-seam pads, display-row-granular eviction), not of
+  the cache, which only made it visible. Restoring the one-sided bound would
+  restore an assertion that pins a phase the store does not promise. Cheap to
+  overrule if a reader disagrees.
 
 ## Follow Up
 
