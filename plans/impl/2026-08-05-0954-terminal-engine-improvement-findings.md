@@ -76,6 +76,18 @@ before this audit is closed out.
   dependency of `TerminalDrawBenchmarkSupport` first. Carry both preconditions into the
   promoted function and update TerminalCoreBenchmarkSupport's file header, which would
   no longer be feed-specific.
+- [ ] **NEW (found while gating, not part of the original audit)** --
+  `TerminalHistoryTailTests#tailReadCostTracksTheBudgetNotTheCapacity` is a
+  wall-clock ratio test (`large < small * 4`) that fails intermittently inside the
+  74-step parallel `just test` pool: observed 0.244s vs 0.196s, a ratio of 5.0.
+  It passes 5/5 in isolation, and the failure mode it guards (a read that walks the
+  whole history) would show ~16x, so the threshold is simply too tight for a loaded
+  machine rather than the test catching a regression. Either make it load-robust or
+  move it off the parallel gate -- this is the same class of test finding 47 deleted
+  two of. Needs a human call on which.
+- [ ] **22 (residual)** -- `pointerDownDecision` still needs a `.link` arm for
+  exhaustiveness even though `pointerOwner` can never mint one; left as a comment
+  rather than restructuring, since splitting the enum again is the opposite of the fix.
 - [ ] **47** -- the verifier's note that PO5's whole subject (`PackedRetainedRow`) is
   retired, not just the two deleted tests, should be recorded in doc 28's `PO5` /
   `decisions.md`. Docs were deliberately not edited by the batch.
@@ -162,7 +174,7 @@ Latent bugs and edge-case handling problems in the engine. These are the finding
 
 ### 3. replay() reports an unsupported schema version as .invalidDimensions
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- dedicated `unsupportedVersion(Int)` case per the verifier, not a reuse of unsupportedEvent
 
 `lib/TerminalCore/Sources/TerminalCoreRecording/NeutralTerminalRecording.swift:616` -- high confidence, trivial effort, found by `core-rest`
 
@@ -398,7 +410,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 22. PointerOwnership duplicates TerminalPointerConsumption case-for-case
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- PointerOwnership and its identity map deleted; pointerOwners stores the consumption type directly
 
 `lib/TerminalCore/Sources/TerminalCore/TerminalInteractionPolicy.swift:198` -- high confidence, small effort, found by `core-rest`
 
@@ -518,7 +530,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 32. Duplicated capacity guard in EscapeAbsorber.dispatchCSI
 
-**Status:** `todo` -- batch `parser`
+**Status:** `partial` -- unreachable inner capacity guard deleted; the csiParameter arm fold left undone on purpose (the verifier marked it optional and the split mirrors csiEntry)
 
 `lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift:363` -- high confidence, trivial effort, found by `core-parser`
 
@@ -542,7 +554,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 34. canonicallyOrder builds the combining-class array before its early return
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- single-scalar early return hoisted above the combining-class array
 
 `lib/TerminalCore/Sources/TerminalCore/CanonicalCaseless.swift:76` -- high confidence, trivial effort, found by `core-rest`
 
@@ -630,7 +642,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 41. Unreachable OSC branches in EscapeAbsorber.consume
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- both dead OSC bodies deleted; the verifier-rejected 8-bit ST clause was not applied
 
 `lib/TerminalCore/Sources/TerminalCore/EscapeAbsorber.swift:105` -- high confidence, trivial effort, found by `core-parser`
 
@@ -778,7 +790,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 53. multipleFeedRepresentationsAreRejected duplicates a case of invalidEventFieldsAreRejected
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- duplicate deleted; the case in invalidEventFieldsAreRejected keeps the coverage
 
 `lib/TerminalCore/Tests/TerminalCoreTests/NeutralTerminalRecordingTests.swift:40` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -1222,7 +1234,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 89. mouseWheelButtonsRoundTrip's title promises wheel-direction behavior it never exercises
 
-**Status:** `todo` -- batch `parser`
+**Status:** `done` -- rename branch only, per the verifier (replay discards mouse output, so wheel bytes are unobservable)
 
 `lib/TerminalCore/Tests/TerminalCoreTests/NeutralTerminalRecordingTests.swift:341` -- high confidence, trivial effort, found by `tests-behavior-b`
 
