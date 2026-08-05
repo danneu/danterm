@@ -71,6 +71,11 @@ before this audit is closed out.
   Each is a one-line swap to the new `metrics.lightStrokePixels`.
 - [ ] **78** -- `BackgroundExecutionTests.swift`'s `largestOverflowingMetrics()` still
   duplicates the now-shared helper in `OverflowMetricsSupport.swift`.
+- [ ] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
+  TerminalCoreBenchmarkSupport needs `lib/TerminalCore/Package.swift` to add it as a
+  dependency of `TerminalDrawBenchmarkSupport` first. Carry both preconditions into the
+  promoted function and update TerminalCoreBenchmarkSupport's file header, which would
+  no longer be feed-specific.
 - [ ] **47** -- the verifier's note that PO5's whole subject (`PackedRetainedRow`) is
   retired, not just the two deleted tests, should be recorded in doc 28's `PO5` /
   `decisions.md`. Docs were deliberately not edited by the batch.
@@ -197,7 +202,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 6. --payload mode frees the rest of the payload matrix before its own baseline
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- payloads(named:) filters before materializing bytes; framed as removing an unquantified confound, one source of truth for names (both verifier adjustments)
 
 `lib/TerminalCore/Sources/TerminalMemoryProbe/main.swift:84` -- high confidence, small effort, found by `app-harness`
 
@@ -269,7 +274,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 12. Degenerate alternate width makes the resize probe report zeros as a distribution
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- validation lives in TerminalResizeProbe/main.swift (usage + exit 2, verified by running the binary); the support precondition is a documented backstop
 
 `lib/TerminalCore/Sources/TerminalResizeProbeSupport/TerminalResizeProbeSupport.swift:312` -- high confidence, trivial effort, found by `app-harness`
 
@@ -417,7 +422,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 24. strictlyDecodedUTF8 duplicates String(validating:as:), which the same file already uses
 
-**Status:** `todo` -- batch `terminal`
+**Status:** `done` -- strictlyDecodedUTF8 deleted, all eight sites use String(validating:as:); localFilePath/percentDecoded take slices, dropping five per-call array copies
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:1541` -- high confidence, small effort, found by `core-parser`
 
@@ -441,7 +446,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 26. Duration-floor calibration is duplicated across two benchmark support targets
 
-**Status:** `todo` -- batch `probes`
+**Status:** `blocked` -- promoting measureDurationStable needs a new dependency edge in lib/TerminalCore/Package.swift, outside the batch's ownership (see Orchestrator follow-ups)
 
 `lib/TerminalCore/Sources/TerminalDrawBenchmarkSupport/TerminalDrawBenchmarkSupport.swift:349` -- high confidence, small effort, found by `app-harness`
 
@@ -453,7 +458,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 27. setArmedLink recomputes canAdmitArmedLink's entire admission block
 
-**Status:** `todo` -- batch `terminal`
+**Status:** `done` -- one private admittedHyperlinkTargets(adding:replacing:) serves all four sites; an over-cap arm now walks retained history once instead of twice
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:2451` -- high confidence, medium effort, found by `core-parser`
 
@@ -489,7 +494,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 30. ReflowRowMetadata.startOffset and firstSourceKey are write-only
 
-**Status:** `todo` -- batch `terminal`
+**Status:** `done` -- write-only startOffset/firstSourceKey removed along with their writes and the unread return-tuple element
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:528` -- high confidence, trivial effort, found by `core-parser`
 
@@ -685,7 +690,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 46. Unreachable .zero arm in Terminal.print's width switch
 
-**Status:** `todo` -- batch `terminal`
+**Status:** `done` -- verifier form (doc-only): the switch stays, with a comment tying the unreachable arm to the guard and to the exhaustiveness check
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:5907` -- high confidence, trivial effort, found by `core-parser`
 
@@ -901,7 +906,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 63. Occupancy saturation test cannot detect an unsaturated corpus
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- now builds at the probe binary's shipped 179x66 / 30k lines and asserts eviction actually happened
 
 `lib/TerminalCore/Tests/TerminalOccupancyProbeSupportTests/OccupancyCorpusTests.swift:59` -- high confidence, small effort, found by `tests-pty-probes`
 
@@ -937,7 +942,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 66. Attribution probe reports green instead of skipped when disabled
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- all three attribution tests carry .enabled(if:); a disabled run now reports skipped, not green
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWiredHistoryAttributionProbe.swift:131` -- high confidence, trivial effort, found by `tests-storage`
 
@@ -985,7 +990,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 70. Both decodeBenchmarkChunks framing errors are unreachable from any test
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- negative tests added for both truncatedLength and truncatedChunk
 
 `lib/TerminalCore/Tests/TerminalCoreBenchmarkSupportTests/TerminalCoreBenchmarkSupportTests.swift:49` -- high confidence, small effort, found by `tests-pty-probes`
 
@@ -1129,7 +1134,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 82. Three budget-ceiling probe tests share a verbatim body and comment block
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- three verbatim bodies collapsed into one parameterized test; .standard deliberately excluded and noted inline
 
 `lib/TerminalCore/Tests/TerminalResizeProbeSupportTests/TerminalResizeProbeSupportTests.swift:86` -- high confidence, small effort, found by `tests-pty-probes`
 
@@ -1181,7 +1186,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 86. sustainedFeedRecreatesTerminalEachCycle title claims behavior its body never checks
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- retitled to the boundary claim the body actually verifies, with a pointer to the test that covers the fresh-terminal claim
 
 `lib/TerminalCore/Tests/TerminalCoreBenchmarkSupportTests/TerminalCoreBenchmarkSupportTests.swift:61` -- high confidence, trivial effort, found by `tests-pty-probes`
 
@@ -1269,7 +1274,7 @@ Comments and markdown whose factual claims contradict the current code.
 
 ### 93. Browse-benchmark file header still calls retained-browse an uncalibrated candidate
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- header and candidate-workload paragraph now name retained-browse as calibrated
 
 `lib/TerminalCore/Sources/TerminalBrowseBenchmarkSupport/TerminalBrowseBenchmarkSupport.swift:1` -- high confidence, trivial effort, found by `docs-comments`
 
@@ -1305,7 +1310,7 @@ Comments and markdown whose factual claims contradict the current code.
 
 ### 96. Terminal.swift's one-line header omits most of what the 6,582-line file owns
 
-**Status:** `todo` -- batch `terminal`
+**Status:** `done` -- one-line header replaced with the block AGENTS.md prescribes, including what deliberately lives elsewhere and the rule for new code
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:1` -- high confidence, small effort, found by `docs-comments`
 
@@ -1317,7 +1322,7 @@ Comments and markdown whose factual claims contradict the current code.
 
 ### 97. PackedRowModel's doc justifies it by a function that does not exist, and nothing uses the type
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- PackedRowModel deleted (public, zero call sites); stale doc sentences replaced with the extent claim the test checks
 
 `lib/TerminalCore/Sources/TerminalRetainedRowProbeSupport/TerminalRetainedRowProbeSupport.swift:75` -- high confidence, small effort, found by `docs-comments`
 
@@ -1341,7 +1346,7 @@ Comments and markdown whose factual claims contradict the current code.
 
 ### 99. runMatrix carries a stale leftover summary line
 
-**Status:** `todo` -- batch `probes`
+**Status:** `done` -- the two contradicting summary lines merged into one
 
 `lib/TerminalCore/Sources/TerminalMemoryProbeSupport/TerminalMemoryProbeSupport.swift:310` -- high confidence, trivial effort, found by `app-harness`
 
