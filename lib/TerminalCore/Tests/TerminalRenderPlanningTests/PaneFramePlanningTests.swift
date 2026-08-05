@@ -161,6 +161,47 @@ struct PaneFramePlanningTests {
         #expect(replanned == planFrame(for: terminal, presentation: blockCursor))
     }
 
+    @Test("Per-row hover, selection and padding stay on their own rows in one traversal")
+    func rowScopedOverlaysSurviveOneTraversal() throws {
+        // Intent: when one viewport traversal inspects several rows, each row's hovered
+        //   span, selected span and padding tail are the ones belonging to that row.
+        // Why it exists: the traversal resolves those three per row and reads them per
+        //   column, so any row-scoped state that is not reset exactly at a row boundary
+        //   leaks one row's underline or selection colour onto its neighbour -- and the
+        //   from-scratch comparison is what catches it, because a leak is self-consistent
+        //   within a single traversal.
+        // Scenario: a pane holds four short rows with a link on the first and a selection
+        //   on the third, and the middle rows are replanned while the outer ones are
+        //   reused -- so the traversal opens some rows, steps over others, and pads every
+        //   row it opens.
+        var terminal = try #require(Terminal(columns: 20, rows: 4))
+        feed("https://a.co\r\nbb\r\ncccc\r\nd", to: &terminal)
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        let hovered = terminal.setHoveredLink(link)
+        #expect(hovered)
+        terminal.setSelection(.init(
+            start: .init(row: 2, column: 1),
+            end: .init(row: 2, column: 3)
+        ))
+        _ = terminal.drainDamage()
+
+        var planner = PaneFramePlanner()
+        let full = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        #expect(full == planFrame(for: terminal, presentation: blockCursor))
+
+        // The link's underline belongs to row 0 alone and the selection colour to row 2
+        // alone, stated directly so the equality above cannot pass on two matching leaks.
+        #expect(full.decorationRuns.allSatisfy { $0.row == 0 })
+        #expect(full.selectionRuns.allSatisfy { $0.row == 2 })
+
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[42mZ".utf8))
+        let damage = terminal.drainDamage()
+        try #require(damage.isFull == false)
+        let reused = planner.planFrame(for: terminal, presentation: blockCursor, damage: damage)
+        #expect(reused == planFrame(for: terminal, presentation: blockCursor))
+        #expect(reused.decorationRuns.allSatisfy { $0.row == 0 })
+    }
+
     private var blockCursor: RenderPresentation {
         RenderPresentation(theme: .dark, isCursorVisible: true, cursorShape: .block)
     }

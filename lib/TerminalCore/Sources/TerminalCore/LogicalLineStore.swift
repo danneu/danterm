@@ -1233,8 +1233,43 @@ extension Terminal {
             at cursor: DisplayRowCursor,
             _ body: (_ column: Int, _ scalars: TerminalScalars, _ styleId: Terminal.StyleId) -> Void
         ) {
-            forEachFoldedCell(at: cursor, includeFill: true) { column, cell in
-                body(column, cell.scalars, cell.styleId)
+            let shape = foldedRow(at: cursor, includeFill: true)
+            let sequence = firstRecordSequence + cursor.recordIndex
+
+            var column = 0
+            for cellOffset in shape.start..<shape.end {
+                let word = cellWord(recordAt: shape.recordOffset, cell: cellOffset)
+                let styleId = Terminal.StyleId(
+                    truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
+                )
+                let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
+                if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                    body(column, TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? []), styleId)
+                } else if field != 0, let scalar = Unicode.Scalar(field) {
+                    body(column, TerminalScalars(scalar), styleId)
+                } else {
+                    body(column, .empty, styleId)
+                }
+                column += 1
+            }
+            if shape.spacerRecordIndex >= 0 {
+                // The spacer inherits the head it defers, and a renderer reads its style alone.
+                let head = cellWord(
+                    recordAt: offsets[shape.spacerRecordIndex],
+                    cell: shape.spacerOffset
+                )
+                body(
+                    column,
+                    .empty,
+                    Terminal.StyleId(
+                        truncatingIfNeeded: head >> PackedRetainedRow.Header.cellStyleShift
+                    )
+                )
+                column += 1
+            }
+            guard let fill = shape.fillStyle else { return }
+            for filled in fillColumns(shape) {
+                body(filled, .empty, fill)
             }
         }
 
@@ -1243,8 +1278,25 @@ extension Terminal {
             at cursor: DisplayRowCursor,
             _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
         ) {
-            forEachFoldedCell(at: cursor, includeFill: true) { column, cell in
-                body(column, cell.kind)
+            let shape = foldedRow(at: cursor, includeFill: true)
+            var column = 0
+            for cellOffset in shape.start..<shape.end {
+                let word = cellWord(recordAt: shape.recordOffset, cell: cellOffset)
+                body(column, TerminalCellKind(
+                    packedCode: UInt8(
+                        (word >> PackedRetainedRow.Header.cellKindShift)
+                            & PackedRetainedRow.Header.cellKindMask
+                    )
+                ))
+                column += 1
+            }
+            if shape.spacerRecordIndex >= 0 {
+                body(column, .spacerHead)
+                column += 1
+            }
+            guard shape.fillStyle != nil else { return }
+            for filled in fillColumns(shape) {
+                body(filled, .padding)
             }
         }
 
@@ -1364,49 +1416,81 @@ extension Terminal {
             return row
         }
 
-        /// The one definition of what a display row's columns are, so the materializing reads and
-        /// the borrowing ones cannot drift apart on a spacer, a split seam, or a trailing fill.
+        /// What columns one display row occupies: the record's cell range, the derived
+        /// `.spacerHead` that may follow it, and the trailing fill that may follow that.
+        ///
+        /// The **one** definition of a display row's shape, so the materializing read and the two
+        /// borrowing ones cannot drift apart on a spacer, a split seam or a fill. What each read
+        /// then does with a column is its own -- and is the whole point of having three
+        /// (`31/F13`: the frame path was materializing a `GridCell` per cell, plus both side-table
+        /// probes, for readers that keep two fields or three bits).
+        private struct FoldedRow {
+            var recordOffset = 0
+            var record = LogicalLineRecord()
+            /// Half-open cell range this display row draws from the record.
+            var start = 0
+            var end = 0
+            /// The record and cell offset of the wide head a derived spacer defers, or -1 for
+            /// none. It is a *different* record at a forced split's seam (`31/DD6`).
+            var spacerRecordIndex = -1
+            var spacerOffset = 0
+            /// The style this row's tail is painted in past `end`, when it carries one and the
+            /// caller asked for the painted walk.
+            var fillStyle: Terminal.StyleId?
+        }
+
+        /// Resolves one display row's shape.
         ///
         /// `includeFill` is the content/painted split (`31/DD25` as amended): the content walk
         /// stops at the line's cells because the fill is paint rather than text, and the painted
         /// walk runs it out to the right margin on the line's last display row.
-        private func forEachFoldedCell(
-            at cursor: DisplayRowCursor,
-            includeFill: Bool,
-            _ body: (_ column: Int, _ cell: Terminal.GridCell) -> Void
-        ) {
+        private func foldedRow(at cursor: DisplayRowCursor, includeFill: Bool) -> FoldedRow {
             let recordIndex = cursor.recordIndex
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
-            var start = 0
-            var end = record.cellCount
+            var shape = FoldedRow(recordOffset: offset, record: record)
             var spacer = false
-            var rows = 0
-            LogicalLineFold.enumerateRows(
-                cellCount: record.cellCount,
-                width: width,
-                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-            ) { rowIndex, cellStart, cellEnd, spacerAtEnd in
-                rows = rowIndex + 1
-                guard rowIndex == cursor.rowWithinRecord else { return }
-                start = cellStart
-                end = cellEnd
-                spacer = spacerAtEnd
+            var rows: Int
+
+            if record.hasWideCells == false || width < 2 {
+                // No wide cell can meet a boundary, so the walk `enumerateRows` performs has one
+                // possible answer and it is arithmetic (`31/DD4`, and the fast path `rowCount`
+                // and `firstRowCellEnd` already take). This is `31/F12`'s ~1.95 ns per
+                // record-cell per display row, which is what made browsing a near-cap record
+                // cost 40x ordinary content.
+                rows = max(1, (record.cellCount + width - 1) / width)
+                shape.start = min(cursor.rowWithinRecord * width, record.cellCount)
+                shape.end = min(shape.start + width, record.cellCount)
+            } else {
+                var start = 0
+                var end = record.cellCount
+                var counted = 0
+                LogicalLineFold.enumerateRows(
+                    cellCount: record.cellCount,
+                    width: width,
+                    isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
+                ) { rowIndex, cellStart, cellEnd, spacerAtEnd in
+                    counted = rowIndex + 1
+                    guard rowIndex == cursor.rowWithinRecord else { return }
+                    start = cellStart
+                    end = cellEnd
+                    spacer = spacerAtEnd
+                }
+                rows = counted
+                shape.start = start
+                shape.end = end
             }
 
-            var column = 0
-            for cellOffset in start..<end {
-                body(column, cell(recordIndex: recordIndex, cellOffset: cellOffset))
-                column += 1
-            }
-            if spacer, end < record.cellCount {
+            let drawn = shape.end - shape.start
+            if spacer, shape.end < record.cellCount {
                 // `Terminal.pack`'s rule: the spacer inherits the wide head it defers.
-                body(column, spacerDeferring(cell(recordIndex: recordIndex, cellOffset: end)))
-                column += 1
+                shape.spacerRecordIndex = recordIndex
+                shape.spacerOffset = shape.end
             } else if record.isForcedSplit,
-                      end == record.cellCount,
-                      column == width - 1,
-                      recordIndex + 1 < offsets.count
+                      shape.end == record.cellCount,
+                      drawn == self.width - 1,
+                      recordIndex + 1 < offsets.count,
+                      isWideHead(recordAt: offsets[recordIndex + 1], cell: 0)
             {
                 // The split cut the line exactly where admission dropped a spacer, so the wide
                 // head that explains the column is the *follower's* first cell rather than this
@@ -1415,25 +1499,60 @@ extension Terminal {
                 // which is what `31/F8`'s re-run caught as a gate 1 failure on `wide`. The open
                 // tail is deliberately not covered -- its short final row is the acknowledged
                 // divergence that ends as soon as the next row is admitted.
-                let follower = cell(recordIndex: recordIndex + 1, cellOffset: 0)
-                if follower.kind == .wideHead {
-                    body(column, spacerDeferring(follower))
-                    column += 1
-                }
+                shape.spacerRecordIndex = recordIndex + 1
+                shape.spacerOffset = 0
             }
 
             // `31/DD15`'s floor: a zero-cell record folds to one display row, and the
             // enumeration emits nothing for it -- so the record's last row is row 0, not row -1.
             // Missing this drops the fill on exactly the ED-with-background case it exists for.
-            guard includeFill,
-                  column < width,
-                  cursor.rowWithinRecord == max(1, rows) - 1,
-                  let fill = trailingFillStyle(at: recordIndex)
-            else { return }
-            let painted = Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fill)
-            while column < width {
-                body(column, painted)
+            if includeFill, cursor.rowWithinRecord == max(1, rows) - 1 {
+                shape.fillStyle = trailingFillStyle(at: recordIndex)
+            }
+            return shape
+        }
+
+        /// The columns past a row's content that its trailing fill paints, or an empty range.
+        private func fillColumns(_ shape: FoldedRow) -> Range<Int> {
+            guard shape.fillStyle != nil else { return 0..<0 }
+            let painted = shape.end - shape.start + (shape.spacerRecordIndex >= 0 ? 1 : 0)
+            return painted < width ? painted..<width : 0..<0
+        }
+
+        /// The materializing walk: one whole `GridCell` per column, for the readers that build a
+        /// `GridRow`. `forEachPaintedCell` and `forEachKind` deliberately do not come through here.
+        private func forEachFoldedCell(
+            at cursor: DisplayRowCursor,
+            includeFill: Bool,
+            _ body: (_ column: Int, _ cell: Terminal.GridCell) -> Void
+        ) {
+            let shape = foldedRow(at: cursor, includeFill: includeFill)
+            var column = 0
+            for cellOffset in shape.start..<shape.end {
+                body(
+                    column,
+                    cell(
+                        recordIndex: cursor.recordIndex,
+                        recordOffset: shape.recordOffset,
+                        record: shape.record,
+                        cellOffset: cellOffset
+                    )
+                )
                 column += 1
+            }
+            if shape.spacerRecordIndex >= 0 {
+                body(
+                    column,
+                    spacerDeferring(
+                        cell(recordIndex: shape.spacerRecordIndex, cellOffset: shape.spacerOffset)
+                    )
+                )
+                column += 1
+            }
+            guard let fill = shape.fillStyle else { return }
+            let painted = Terminal.GridCell(scalars: .empty, kind: .padding, styleId: fill)
+            for filled in fillColumns(shape) {
+                body(filled, painted)
             }
         }
 
@@ -1453,7 +1572,23 @@ extension Terminal {
 
         private func cell(recordIndex: Int, cellOffset: Int) -> Terminal.GridCell {
             let offset = offsets[recordIndex]
-            let record = self.record(at: offset)
+            return cell(
+                recordIndex: recordIndex,
+                recordOffset: offset,
+                record: record(at: offset),
+                cellOffset: cellOffset
+            )
+        }
+
+        /// The same decode with the record's address and header supplied by the caller, so a walk
+        /// over a row does not re-read the ring's offset slot and re-decode eleven header fields
+        /// once per column (`31/F13`).
+        private func cell(
+            recordIndex: Int,
+            recordOffset offset: Int,
+            record: LogicalLineRecord,
+            cellOffset: Int
+        ) -> Terminal.GridCell {
             let word = cellWord(recordAt: offset, cell: cellOffset)
             let sequence = firstRecordSequence + recordIndex
             let keyOffset = cellOffset + (recordIndex == 0 ? headTrimmedCells : 0)

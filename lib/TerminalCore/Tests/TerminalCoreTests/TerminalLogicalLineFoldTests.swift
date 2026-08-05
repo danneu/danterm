@@ -510,6 +510,61 @@ struct TerminalLogicalLineFoldTests {
         }
     }
 
+    @Test("The borrowing walks emit exactly the painted row's columns, on every content class")
+    func borrowingWalksAgreeWithThePaintedRow() throws {
+        // Intent: `forEachPaintedCell` and `forEachKind` visit the same columns, in the same
+        //   order, carrying the same scalars, style ids and kinds as `paintedRow` builds --
+        //   on every retained display row of every content class, and at a second width.
+        // Why it exists: the frame path reads history through the two borrowing walks and every
+        //   fidelity proof in this suite reads it through the materializing one, so nothing
+        //   else in the tree would notice the two disagreeing. They are three walks over one
+        //   `foldedRow` shape precisely so a spacer, a forced-split seam or a trailing fill
+        //   cannot land in one and not the others (`31/F13`: the borrowing walks stopped
+        //   materializing a whole `GridCell` per column, which is what made them separate
+        //   code).
+        for content in RetainedContent.allCases {
+            let retained = try liveDisplayRows(content.stimulus, columns: content.columns)
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: content.columns)
+            for row in retained { store.admit(row) }
+
+            for width in [content.columns, max(2, content.columns - 5)] {
+                _ = store.setWidth(width)
+                for index in 0..<store.grandDisplayRowTotal {
+                    let cursor = try #require(store.locate(displayRow: index))
+                    let expected = store.paintedRow(at: cursor)
+
+                    var painted: [(Int, TerminalScalars, Terminal.StyleId)] = []
+                    store.forEachPaintedCell(at: cursor) { painted.append(($0, $1, $2)) }
+                    var kinds: [(Int, TerminalCellKind)] = []
+                    store.forEachKind(at: cursor) { kinds.append(($0, $1)) }
+
+                    let label = "\(content) width \(width) row \(index)"
+                    #expect(painted.count == expected.cells.count, "\(label): painted column count")
+                    #expect(kinds.count == expected.cells.count, "\(label): kind column count")
+                    for (offset, visited) in painted.enumerated()
+                    where offset < expected.cells.count {
+                        #expect(visited.0 == offset, "\(label) column \(offset): order")
+                        #expect(
+                            visited.1 == expected.cells[offset].scalars,
+                            "\(label) column \(offset): scalars"
+                        )
+                        #expect(
+                            visited.2 == expected.cells[offset].styleId,
+                            "\(label) column \(offset): style"
+                        )
+                    }
+                    for (offset, visited) in kinds.enumerated() where offset < expected.cells.count {
+                        #expect(visited.0 == offset, "\(label) column \(offset): kind order")
+                        #expect(
+                            visited.1 == expected.cells[offset].kind,
+                            "\(label) column \(offset): kind"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Content classes whose retained rows exercise different corners of the fold.

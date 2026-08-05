@@ -3886,6 +3886,40 @@ public struct Terminal: Equatable, Sendable {
             _ style: TerminalStyle
         ) -> Void
     ) {
+        // `withoutActuallyEscaping` because the row visitor hands `body` down one more
+        // non-escaping level; nothing here outlives the call.
+        withoutActuallyEscaping(body) { forward in
+            forEachViewportRow(rows: requested, where: includesRow) { row, visit in
+                visit { column, scalars, style in forward(row, column, scalars, style) }
+            }
+        }
+    }
+
+    /// Visits every viewport row `rows` names in ascending order, handing each one a visitor for
+    /// its own columns.
+    ///
+    /// The frame path's entry point, and the shape `31/I7` needs: retained history is addressed
+    /// once, at the first row the traversal touches, and carried forward record by record for the
+    /// rest. Rows outside `rows` are skipped without being folded, so a damage-clipped frame pays
+    /// only for what it redraws. Out-of-viewport indices visit nothing.
+    ///
+    /// **Row-scoped rather than cell-scoped on purpose.** A caller that plans a row needs three
+    /// things resolved per row and read per column -- the row's cell kinds, its hovered span and
+    /// its selected span. Under a single per-cell closure those become captured mutable variables
+    /// that the closure re-reads on every column, and `31/F13` measured the result at 60% of the
+    /// browsing regression; handing the row out first lets the caller hold them as ordinary
+    /// locals, which is what the pre-plural spelling did. Calling `visit` is the caller's choice:
+    /// a row it declines to visit still steps the traversal forward correctly.
+    public func forEachViewportRow(
+        rows requested: Range<Int>,
+        where includesRow: (_ row: Int) -> Bool = { _ in true },
+        _ body: (
+            _ row: Int,
+            _ visit: (
+                (_ column: Int, _ scalars: TerminalScalars, _ style: TerminalStyle) -> Void
+            ) -> Void
+        ) -> Void
+    ) {
         let wanted = requested.clamped(to: 0..<rowCount)
         guard wanted.isEmpty == false else { return }
         let topRow = scrollProjection.topRow
@@ -3905,46 +3939,61 @@ public struct Terminal: Equatable, Sendable {
                 cursor = cursor.flatMap { history.advance($0) }
                 continue
             }
-            var storedCount = 0
-            func emit(_ column: Int, _ scalars: TerminalScalars, _ styleId: StyleId) {
-                if styleId != lastId {
-                    lastStyle = self.style(for: styleId)
-                    lastId = styleId
-                }
-                body(row, column, scalars, lastStyle)
-                storedCount = column + 1
-            }
+            let at = cursor
+            cursor = at.flatMap { history.advance($0) }
+            if at == nil, viewportStreamRow(at: streamRow) == nil { continue }
 
-            // Retained rows stream out of the arena rather than being materialized first.
-            // A frame reads every visible row once and discards it, so folding a `GridRow` here
-            // would buy an allocation and a full `GridCell` write per cell that nothing outlives
-            // -- `28/F17` measured that as the dominant term in the browsing regression.
-            if let at = cursor {
-                history.forEachPaintedCell(at: at) { emit($0, $1, $2) }
-                cursor = history.advance(at)
-                if cursor == nil, storedCount == columnCount - 1,
-                   history.hasOpenTailRecord,
-                   let head = rows.first?.cells.first, head.kind == .wideHead
-                {
-                    emit(storedCount, .empty, head.styleId)
-                }
-            } else if let windowRow = viewportStreamRow(at: streamRow) {
-                for column in windowRow.cells.indices {
-                    let cell = windowRow.cells[column]
-                    emit(column, cell.scalars, cell.styleId)
-                }
-            } else {
-                continue
-            }
+            body(row) { cellBody in
+                var storedCount = 0
 
-            guard storedCount < columnCount else { continue }
-            let padding = GridCell()
-            if padding.styleId != lastId {
-                lastStyle = self.style(for: padding.styleId)
-                lastId = padding.styleId
-            }
-            for column in storedCount..<columnCount {
-                body(row, column, padding.scalars, lastStyle)
+                // Retained rows stream out of the arena rather than being materialized first.
+                // A frame reads every visible row once and discards it, so folding a `GridRow`
+                // here would buy an allocation and a full `GridCell` write per cell that nothing
+                // outlives -- `28/F17` measured that as the dominant term in the browsing
+                // regression. The style memoization is written out at each site rather than
+                // funnelled through a nested function: a local function called from inside the
+                // fold's own closure is one more indirect call per cell, on the frame path.
+                if let at {
+                    history.forEachPaintedCell(at: at) { column, scalars, styleId in
+                        if styleId != lastId {
+                            lastStyle = self.style(for: styleId)
+                            lastId = styleId
+                        }
+                        cellBody(column, scalars, lastStyle)
+                        storedCount = column + 1
+                    }
+                    if cursor == nil, storedCount == columnCount - 1,
+                       history.hasOpenTailRecord,
+                       let head = rows.first?.cells.first, head.kind == .wideHead
+                    {
+                        if head.styleId != lastId {
+                            lastStyle = self.style(for: head.styleId)
+                            lastId = head.styleId
+                        }
+                        cellBody(storedCount, .empty, lastStyle)
+                        storedCount += 1
+                    }
+                } else if let windowRow = viewportStreamRow(at: streamRow) {
+                    for column in windowRow.cells.indices {
+                        let cell = windowRow.cells[column]
+                        if cell.styleId != lastId {
+                            lastStyle = self.style(for: cell.styleId)
+                            lastId = cell.styleId
+                        }
+                        cellBody(column, cell.scalars, lastStyle)
+                        storedCount = column + 1
+                    }
+                }
+
+                guard storedCount < columnCount else { return }
+                let padding = GridCell()
+                if padding.styleId != lastId {
+                    lastStyle = self.style(for: padding.styleId)
+                    lastId = padding.styleId
+                }
+                for column in storedCount..<columnCount {
+                    cellBody(column, padding.scalars, lastStyle)
+                }
             }
         }
     }

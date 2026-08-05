@@ -303,51 +303,45 @@ struct FramePlanner {
         geometry: TerminalGeometry,
         cursorSpan: CursorSpan?
     ) -> [[PlannedCell]] {
-        // Both row-scoped lookups are hoisted deliberately. `terminal.cell(row:column:)`
-        // re-resolved the viewport row on every column, and `isHovered` re-read
-        // `hoveredLink` and `scrollProjection` on every column; a profile put the
-        // resulting per-cell traffic at ~20% of `planFrame` (see
-        // docs/research/14-live-scroll-workload-profile.md, F10). Resolve each once per
-        // row, then walk the columns.
+        // Every row-scoped lookup is hoisted deliberately, and staying hoisted is what the
+        // row-scoped traversal is for. `terminal.cell(row:column:)` re-resolved the viewport row
+        // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
+        // column; a profile put that per-cell traffic at ~20% of `planFrame` (see
+        // docs/research/14-live-scroll-workload-profile.md, F10). Making the traversal plural
+        // (`31/DD45`) put three of them back inside a single per-cell closure -- the row's kind
+        // array, which is an array *extraction* and so a retain/release pair per cell, and the
+        // two overlay spans -- and `31/F13` measured the result at 60% of the browsing
+        // regression. `forEachViewportRow` hands the row out first precisely so all three can be
+        // `let`s of this closure's own frame again, which is what the per-row spelling had.
         var result = [[PlannedCell]](repeating: [], count: rows.count)
-        var hovered: Range<Int>?
-        var selected: Range<Int>?
-        var lastResolvedRow = -1
-
-        terminal.forEachViewportCell(rows: rows, where: replanning) {
-            row, column, scalars, semanticStyle in
+        terminal.forEachViewportRow(rows: rows, where: replanning) { row, visit in
             let kinds = geometry.rows[row].cells
-            guard column < kinds.count else { return }
-            if row != lastResolvedRow {
-                hovered = hoveredColumns(row: row, columns: geometry.columns)
-                selected = selectedColumns(row: row, columns: geometry.columns)
-                lastResolvedRow = row
-                result[row].reserveCapacity(kinds.count)
-            }
-            result[row].append(plannedCell(
-                row: row,
-                column: column,
-                kind: kinds[column].kind,
-                scalars: scalars,
-                semanticStyle: semanticStyle,
-                hovered: hovered,
-                selected: selected,
-                cursorSpan: cursorSpan
-            ))
-        }
-
-        // Columns the terminal row does not cover keep the empty/default content the
-        // previous `terminal.cell(...) -> nil` path produced for them.
-        for row in rows where replanning(row) {
-            let kinds = geometry.rows[row].cells
-            guard result[row].count < kinds.count else { continue }
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
             let selected = selectedColumns(row: row, columns: geometry.columns)
-            while result[row].count < kinds.count {
-                result[row].append(plannedCell(
+            var cells: [PlannedCell] = []
+            cells.reserveCapacity(kinds.count)
+
+            visit { column, scalars, semanticStyle in
+                guard column < kinds.count else { return }
+                cells.append(plannedCell(
                     row: row,
-                    column: result[row].count,
-                    kind: kinds[result[row].count].kind,
+                    column: column,
+                    kind: kinds[column].kind,
+                    scalars: scalars,
+                    semanticStyle: semanticStyle,
+                    hovered: hovered,
+                    selected: selected,
+                    cursorSpan: cursorSpan
+                ))
+            }
+
+            // Columns the terminal row does not cover keep the empty/default content the
+            // previous `terminal.cell(...) -> nil` path produced for them.
+            while cells.count < kinds.count {
+                cells.append(plannedCell(
+                    row: row,
+                    column: cells.count,
+                    kind: kinds[cells.count].kind,
                     scalars: .empty,
                     semanticStyle: TerminalStyle(),
                     hovered: hovered,
@@ -355,6 +349,29 @@ struct FramePlanner {
                     cursorSpan: cursorSpan
                 ))
             }
+            result[row] = cells
+        }
+
+        // A row the traversal never handed out -- one whose stream row does not resolve -- still
+        // owes its padding, and it is the only row this second pass can reach.
+        for row in rows where replanning(row) && result[row].count < geometry.rows[row].cells.count {
+            let kinds = geometry.rows[row].cells
+            let hovered = hoveredColumns(row: row, columns: geometry.columns)
+            let selected = selectedColumns(row: row, columns: geometry.columns)
+            var cells = result[row]
+            while cells.count < kinds.count {
+                cells.append(plannedCell(
+                    row: row,
+                    column: cells.count,
+                    kind: kinds[cells.count].kind,
+                    scalars: .empty,
+                    semanticStyle: TerminalStyle(),
+                    hovered: hovered,
+                    selected: selected,
+                    cursorSpan: cursorSpan
+                ))
+            }
+            result[row] = cells
         }
         return result
     }
