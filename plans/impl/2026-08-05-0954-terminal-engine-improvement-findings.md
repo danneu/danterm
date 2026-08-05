@@ -58,10 +58,10 @@ a new test file instead of editing the foreign one.
 Work surfaced by a batch that fell outside its file ownership. Each needs an owner
 before this audit is closed out.
 
-- [ ] **48** -- `TerminalScrollbackRetentionTests.swift` still exists (trimmed to its
+- [x] **48** -- `TerminalScrollbackRetentionTests.swift` still exists (trimmed to its
   unique eviction guards). Fold those two guards into `censusReportsRetentionHealth`
   in `TerminalMemoryCensusTests.swift` and delete the file. Assign to `tests-a`.
-- [ ] **80** -- move `primaryHistoryGenerationDifferential` out of the real-PTY
+- [x] **80** -- move `primaryHistoryGenerationDifferential` out of the real-PTY
   `TerminalPaneSessionControllerTests.swift` into `TerminalHistoryGenerationTests.swift`
   (crosses both a batch and a SwiftPM package boundary), and reword that file's
   "Two-sided proofs" header. Assign to `tests-a`.
