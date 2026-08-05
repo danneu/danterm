@@ -183,10 +183,12 @@ struct TerminalHyperlinkTests {
         //   hold simultaneously still resolves later links, and never resolves one to an earlier
         //   target's URI.
         // Why it exists: cell-held link ids are a narrow integer (doc 15's `D3`), so the id space
-        //   is exhaustible in a way an unbounded counter's was not. Two failures become possible
-        //   the moment it narrows -- running out of ids and silently dropping every later link,
-        //   or recycling an id a live cell still points at and showing that cell the wrong URI.
-        //   Both are invisible to every other test here, which uses a handful of links.
+        //   is exhaustible in a way an unbounded counter's was not, and the counter must therefore
+        //   wrap and recycle. This test covers the recycling half: an id handed out again while a
+        //   live cell still points at it would show that cell another target's URI. The half where
+        //   recycling is no longer possible -- every id occupied at once -- is
+        //   `fullIdSpaceRefusesFurtherOpens` below. Both are invisible to every other test here,
+        //   which uses a handful of links.
         // Scenario: a long-lived pane running a tool that emits a uniquely-identified link per
         //   line -- `ls --hyperlink`, a build log, a test runner -- for hours.
         // Walking the cursor to the wrap for real costs 65,536 targets, and admission is linear in
@@ -247,6 +249,40 @@ struct TerminalHyperlinkTests {
         // which is the property that keeps a narrow id sufficient in the first place. Failing this
         // also means no sweep ran, which would leave the recycled ids above pristine.
         #expect(terminal.retainedHyperlinkCount < linkCount)
+        expectValidGrid(terminal)
+    }
+
+    @Test("a full id space refuses further opens instead of spinning, and keeps the pen")
+    func fullIdSpaceRefusesFurtherOpens() {
+        // Intent: once every hyperlink id is taken, an OSC 8 open changes nothing -- no new
+        //   target, no new pen -- and later text keeps the link that was already open.
+        // Why it exists: `allocateHyperlinkId` scans forward from a rotating cursor for a free id,
+        //   so a completely occupied table has no terminating candidate; the count guard is the
+        //   only thing standing between a saturated pane and an infinite loop inside `feed`. The
+        //   sibling test above covers the other half of the id space -- the wrap, where ids are
+        //   still recyclable. Nothing covered this half, because a table that reaches 65,536
+        //   entries needs short URIs, and the padded targets that test needs steady-state at ~500.
+        // Scenario: a pane whose output alternates two very short OSC 8 targets. Each open dedupes
+        //   only against the current pen, so every one mints a fresh id while the one-byte URIs
+        //   keep the table far below the 256 KiB metadata cap -- the table grows until the ids,
+        //   not the bytes, run out.
+        var terminal = Terminal(columns: 4, rows: 1)!
+        terminal.primeHyperlinkIdSpaceForTesting()
+
+        // One id is still free, so this open must succeed -- and taking it is what saturates the
+        // space. Straddling the boundary with real feeds keeps the seam from deciding the outcome.
+        terminal.feed(osc8(uri: "https://last.test"))
+        terminal.feed(Array("x".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://last.test")
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
+
+        let saturated = terminal
+        terminal.feed(osc8(uri: "https://refused.test"))
+        #expect(terminal == saturated)
+
+        terminal.feed(Array("y".utf8))
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri == "https://last.test")
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
         expectValidGrid(terminal)
     }
 

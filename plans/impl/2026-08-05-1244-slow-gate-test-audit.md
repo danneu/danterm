@@ -43,7 +43,7 @@ Rules for each commit:
 |---|---|---|---|---|
 | 1 | [x] Bound the twin's rebase budget in `withUnlimitedScrollbackForTesting` (item "1.") | `--filter seededTwinOracleAndChunkInvariance` | 50-200x | 9.6s -> 0.7s |
 | 2 | [x] Seed the hyperlink id cursor near the `UInt16` wrap (item "2.") | `--filter linksSurviveIdSpaceExhaustion` | ~280x | 10.75s -> 0.09s |
-| 3 | [ ] Cover the never-reached `targets.count > HyperlinkId.max` refusal branch (item "2." bonus finding) | `--filter TerminalHyperlinkTests` | correctness | |
+| 3 | [x] Cover the never-reached `targets.count > HyperlinkId.max` refusal branch (item "2." bonus finding) | `--filter TerminalHyperlinkTests` | correctness | 0.66s -> 0.64s (additive; new test 0.09s, runs in parallel) |
 | 4 | [ ] Fix the vacuous `scrollbackRowCount < recipe.lineCount` assertion, or delete the test (item "probeTerminalIsBudgetSaturated") | `--filter probeTerminalIsBudgetSaturated` | gone | |
 | 5 | [ ] `saturationReachesDepth`: charge arithmetic + a real eviction assertion; fix the stale "10 MiB budget" comment in `TerminalOccupancyProbe/main.swift` | `--filter saturationReachesDepth` | 12-15x | |
 | 6 | [ ] `widthChangeEvictsNothing`: correct the false "saturated history" premise, shrink to ~800 lines or a genuinely saturating injected budget, hoist `expectValidGrid` out of the width loop | `--filter widthChangeEvictsNothing` | 5-10x | |

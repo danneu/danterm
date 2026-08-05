@@ -2278,6 +2278,18 @@ public struct Terminal: Equatable, Sendable {
         nextHyperlinkId = HyperlinkId.max
     }
 
+    /// Fills the live target table to one id short of the space, so a test can reach the
+    /// id-exhaustion refusal in `allocateHyperlinkId` without emitting 65,535 admissible OSC 8
+    /// opens. The placeholder URI is one byte on purpose: the byte cap must not be what refuses,
+    /// or the refusal under test is never reached. Duplicate URIs are the faithful shape -- a real
+    /// session reaches this by alternating two short targets, which dedupes only against the
+    /// current pen and so mints a fresh id every open.
+    mutating func primeHyperlinkIdSpaceForTesting() {
+        for id in 0..<HyperlinkId.max {
+            hyperlinkTargets[id] = TerminalHyperlink(uri: "x")
+        }
+    }
+
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
     ///
     /// Rebases history onto an arena at the production budget rather than raising a bound in
