@@ -117,17 +117,6 @@ private struct PromptAnchorFeedSpan {
     let rows: Int
 }
 
-private struct PromptAnchorSweepGenerator {
-    var state: UInt64
-
-    mutating func next() -> UInt64 {
-        state ^= state << 13
-        state ^= state >> 7
-        state ^= state << 17
-        return state
-    }
-}
-
 private enum PromptAnchorSweepError: Error {
     case noPromptMarks(String)
     case invalidRerunSelector(String)
@@ -152,7 +141,7 @@ private func promptAnchorResizeInjections(
     seed: UInt64
 ) throws -> [PromptAnchorResizeInjection] {
     let spans = promptAnchorFeedSpans(in: fixture)
-    var generator = PromptAnchorSweepGenerator(state: seed)
+    var generator = SeededByteGenerator(state: seed)
     let promptMarks = ["A", "N", "P"].map { Array("\u{1B}]133;\($0)".utf8) }
     let injectableEvents = Set(spans.map(\.eventIndex))
     let markCandidates = fixture.events.enumerated().flatMap { eventIndex, event -> [(Int, Int)] in
@@ -168,7 +157,7 @@ private func promptAnchorResizeInjections(
     guard markCandidates.isEmpty == false else {
         throw PromptAnchorSweepError.noPromptMarks(fixtureName)
     }
-    let mark = markCandidates[Int(generator.next() % UInt64(markCandidates.count))]
+    let mark = markCandidates[Int(generator.nextWord() % UInt64(markCandidates.count))]
     let span = try #require(spans.first { $0.eventIndex == mark.0 })
     let beforePromptMark = promptAnchorInjection(
         eventIndex: mark.0,

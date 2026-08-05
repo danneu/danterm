@@ -53,7 +53,7 @@ enum LegacyComputingSupplementSprite {
         let scale = metrics.displayScale
         let originX = column * metrics.cellWidthPixels
         let originY = row * metrics.cellHeightPixels
-        let thickness = max(1, Int((metrics.underlineThickness * scale).rounded()))
+        let thickness = metrics.lightStrokePixels
         for rect in LegacyComputingSupplementSpriteGeometry.rects(
             pattern: pattern,
             cellWidthPixels: metrics.cellWidthPixels,

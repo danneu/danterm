@@ -177,20 +177,4 @@ struct TerminalRegionScrollbackTests {
         #expect(decision.route == .localViewport)
         #expect(decision.localRowDelta != 0)
     }
-
-    private func labeledTerminal(
-        columns: Int,
-        rows: Int,
-        scrollbackBudgetBytes: Int = Terminal.productionScrollbackBudgetBytes
-    ) throws -> Terminal {
-        var terminal = try #require(
-            Terminal(columns: columns, rows: rows, scrollbackBudgetBytes: scrollbackBudgetBytes)
-        )
-        for row in 0..<rows {
-            let label = Unicode.Scalar(65 + row)!
-            terminal.feed(Array("\u{1B}[\(row + 1);1H".utf8))
-            terminal.feed(Array(String(label).utf8))
-        }
-        return terminal
-    }
 }

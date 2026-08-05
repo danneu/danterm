@@ -39,7 +39,7 @@ enum BranchDrawingSprite {
         column: Int,
         metrics: TerminalRenderMetrics
     ) -> BranchDrawingRenderGeometry {
-        let light = max(1, Int((metrics.underlineThickness * metrics.displayScale).rounded()))
+        let light = metrics.lightStrokePixels
         return BranchDrawingRenderGeometry(
             geometry: BranchDrawingSpriteGeometry.geometry(
                 pattern: pattern,

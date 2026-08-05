@@ -27,7 +27,7 @@ enum LegacyComputingSprite {
         let scale = metrics.displayScale
         let originX = column * metrics.cellWidthPixels
         let originY = row * metrics.cellHeightPixels
-        let light = max(1, Int((metrics.underlineThickness * metrics.displayScale).rounded()))
+        let light = metrics.lightStrokePixels
         for run in LegacyComputingSpriteGeometry.runs(
             pattern: pattern,
             cellWidthPixels: metrics.cellWidthPixels,

@@ -514,7 +514,7 @@ struct TerminalScrollbackBudgetTests {
         let tokens = ["a", "b", " ", "\u{754C}", "\u{1F642}", "\r\n", "\n", "\u{1B}[3J"]
         let budget = historyBudget(lines: 2, cells: 5)
         for seed in UInt64(1)...32 {
-            var generator = Generator(state: seed)
+            var generator = SeededByteGenerator(state: seed)
             var bounded = try #require(Terminal(
                 columns: 5,
                 rows: 2,
@@ -524,20 +524,20 @@ struct TerminalScrollbackBudgetTests {
 
             for _ in 0..<96 {
                 let action: Action
-                if generator.next().isMultiple(of: 5) {
-                    if generator.next().isMultiple(of: 2) {
+                if generator.nextWord().isMultiple(of: 5) {
+                    if generator.nextWord().isMultiple(of: 2) {
                         action = .resize(
-                            columns: 2 + Int(generator.next() % 6),
+                            columns: 2 + Int(generator.nextWord() % 6),
                             rows: bounded.geometry.rows.count
                         )
                     } else {
                         action = .resize(
                             columns: bounded.geometry.columns,
-                            rows: 1 + Int(generator.next() % 4)
+                            rows: 1 + Int(generator.nextWord() % 4)
                         )
                     }
                 } else {
-                    action = .feed(Array(tokens[Int(generator.next() % UInt64(tokens.count))].utf8))
+                    action = .feed(Array(tokens[Int(generator.nextWord() % UInt64(tokens.count))].utf8))
                 }
                 actions.append(action)
                 var unbounded = bounded.withUnlimitedScrollbackForTesting()
@@ -594,17 +594,6 @@ struct TerminalScrollbackBudgetTests {
     private enum Action {
         case feed([UInt8])
         case resize(columns: Int, rows: Int)
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt64 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return state
-        }
     }
 
     private func apply(_ action: Action, to terminal: inout Terminal, bytewise: Bool) {

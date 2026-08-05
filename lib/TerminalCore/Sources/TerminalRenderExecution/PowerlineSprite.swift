@@ -45,7 +45,7 @@ enum PowerlineSprite {
         column: Int,
         metrics: TerminalRenderMetrics
     ) -> [PowerlineRenderPath] {
-        let light = max(1, Int((metrics.underlineThickness * metrics.displayScale).rounded()))
+        let light = metrics.lightStrokePixels
         let geometry = PowerlineSpriteGeometry.geometry(
             pattern: pattern,
             cellWidthPixels: metrics.cellWidthPixels,

@@ -450,10 +450,10 @@ struct TerminalInputStreamTests {
         // Scenario: deterministic pseudo-random PTY blobs are followed by CAN
         //   and an ASCII sentinel that the next terminal layer must receive.
         for seed in UInt64(0)..<256 {
-            var generator = Generator(state: seed &+ 1)
+            var generator = SeededByteGenerator(state: seed &+ 1)
             var bytes: [UInt8] = []
             for _ in 0..<128 {
-                bytes.append(generator.next())
+                bytes.append(generator.nextByte())
             }
 
             var stream = TerminalInputStream()
@@ -471,17 +471,6 @@ struct TerminalInputStreamTests {
             actions.append(contentsOf: stream.feed(chunk))
         }
         return (actions, stream)
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt8 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return UInt8(truncatingIfNeeded: state)
-        }
     }
 
     struct MalformedFixture: Sendable {

@@ -434,34 +434,23 @@ struct TerminalResizeTests {
     func resizeFuzzMaintainsGridValidity() throws {
         let alphabet: [UInt8] = Array("ab \u{754C}\u{1F642}\r\n\u{001B}[2J".utf8)
         for seed in UInt64(1)...128 {
-            var generator = Generator(state: seed)
+            var generator = SeededByteGenerator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
             for _ in 0..<128 {
-                if generator.next().isMultiple(of: 4) {
+                if generator.nextByte().isMultiple(of: 4) {
                     let history = terminal.fullHistoryText
                     terminal.resize(
-                        columns: Int(generator.next() % 10),
-                        rows: Int(generator.next() % 6)
+                        columns: Int(generator.nextByte() % 10),
+                        rows: Int(generator.nextByte() % 6)
                     )
                     #expect(terminal.fullHistoryText == history)
                 } else {
-                    terminal.feed([alphabet[Int(generator.next()) % alphabet.count]])
+                    terminal.feed([alphabet[Int(generator.nextByte()) % alphabet.count]])
                 }
                 expectValidGrid(terminal)
             }
             terminal.feed([0x18, 0x7C])
             #expect(terminal.screenText.contains("|"))
-        }
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt8 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return UInt8(truncatingIfNeeded: state)
         }
     }
 }

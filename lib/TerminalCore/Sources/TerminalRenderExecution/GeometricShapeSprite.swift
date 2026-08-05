@@ -41,10 +41,7 @@ enum GeometricShapeSprite {
         column: Int,
         metrics: TerminalRenderMetrics
     ) -> GeometricShapeRenderTriangle? {
-        let strokeWidth = max(
-            1,
-            Int((metrics.underlineThickness * metrics.displayScale).rounded())
-        )
+        let strokeWidth = metrics.lightStrokePixels
         guard let geometry = GeometricShapeSpriteGeometry.triangle(
             corner: pattern.corner,
             style: pattern.style,

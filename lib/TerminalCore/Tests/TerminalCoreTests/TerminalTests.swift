@@ -371,9 +371,9 @@ struct TerminalTests {
         // Scenario: deterministic untrusted PTY blobs are canceled before a
         //   final sentinel that must remain visible in the viewport.
         for seed in UInt64(1)...256 {
-            var generator = Generator(state: seed)
+            var generator = SeededByteGenerator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
-            terminal.feed((0..<128).map { _ in generator.next() })
+            terminal.feed((0..<128).map { _ in generator.nextByte() })
             terminal.feed([0x18, 0x7C])
 
             #expect(terminal.screenText.contains("|"))
@@ -445,18 +445,18 @@ struct TerminalTests {
             + queryFragments + tabAndSaveFragments + repeatAndResetFragments
             + resizeFragments
         for seed in UInt64(1)...256 {
-            var generator = Generator(state: seed)
+            var generator = SeededByteGenerator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
             for fragment in sgrFragments + sliceSixFragments + modeFragments
                 + queryFragments + tabAndSaveFragments + repeatAndResetFragments
                 + resizeFragments
                 + (0..<256).map({ _ in
-                alphabet[Int(generator.next()) % alphabet.count]
+                alphabet[Int(generator.nextByte()) % alphabet.count]
             }) {
                 terminal.feed(fragment)
                 if resizeFragments.contains(fragment) {
-                    let columns = 2 + Int(generator.next()) % 8
-                    let rows = 1 + Int(generator.next()) % 5
+                    let columns = 2 + Int(generator.nextByte()) % 8
+                    let rows = 1 + Int(generator.nextByte()) % 5
                     terminal.resize(columns: columns, rows: rows)
                 }
             }
@@ -473,16 +473,5 @@ struct TerminalTests {
             terminal.feed(chunk)
         }
         return terminal
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt8 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return UInt8(truncatingIfNeeded: state)
-        }
     }
 }

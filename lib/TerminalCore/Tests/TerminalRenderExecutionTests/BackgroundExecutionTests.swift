@@ -53,7 +53,7 @@ struct BackgroundExecutionTests {
 
     @Test("Drawing an overflowing frame leaves the context untouched")
     func overflowingFrameDoesNoWork() throws {
-        let metrics = try #require(largestOverflowingMetrics())
+        let metrics = try #require(largestMetricsWhoseTwoColumnFrameOverflows())
         let plan = try makeTwoColumnPlan()
         let storage = UnsafeMutableRawPointer.allocate(byteCount: 4, alignment: 4)
         defer { storage.deallocate() }
@@ -74,21 +74,6 @@ struct BackgroundExecutionTests {
 
         #expect(Array(UnsafeRawBufferPointer(start: storage, count: 4)) == [37, 37, 37, 37])
     }
-}
-
-private func largestOverflowingMetrics() -> TerminalRenderMetrics? {
-    var accepted: CGFloat = 1
-    var refused = CGFloat(Int.max)
-    for _ in 0..<128 {
-        let candidate = accepted + (refused - accepted) / 2
-        if TerminalRenderMetrics(displayScale: candidate) == nil {
-            refused = candidate
-        } else {
-            accepted = candidate
-        }
-    }
-    let metrics = TerminalRenderMetrics(displayScale: accepted)
-    return metrics.flatMap { $0.cellWidthPixels > Int.max / 2 ? $0 : nil }
 }
 
 private func makeTwoColumnPlan() throws -> RenderFramePlan {

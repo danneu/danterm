@@ -257,14 +257,4 @@ struct TerminalEditingTests {
         }
         #expect(bytewise == expected)
     }
-
-    private func labeledTerminal(columns: Int, rows: Int) throws -> Terminal {
-        var terminal = try #require(Terminal(columns: columns, rows: rows))
-        for row in 0..<rows {
-            let label = Unicode.Scalar(65 + row)!
-            terminal.feed(Array("\u{1B}[\(row + 1);1H".utf8))
-            terminal.feed(String(label).utf8.map { $0 })
-        }
-        return terminal
-    }
 }

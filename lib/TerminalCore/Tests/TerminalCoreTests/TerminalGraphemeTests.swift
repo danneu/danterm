@@ -208,27 +208,16 @@ struct TerminalGraphemeTests {
         ]
 
         for seed in UInt64(1)...128 {
-            var generator = Generator(state: seed)
+            var generator = SeededByteGenerator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
             var bytes: [UInt8] = []
             for _ in 0..<128 {
-                bytes.append(contentsOf: alphabet[Int(generator.next()) % alphabet.count])
+                bytes.append(contentsOf: alphabet[Int(generator.nextByte()) % alphabet.count])
             }
             terminal.feed(bytes + [0x18, 0x7C])
 
             #expect(terminal.screenText.unicodeScalars.contains("|"))
             expectValidGrid(terminal)
-        }
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt8 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return UInt8(truncatingIfNeeded: state)
         }
     }
 }
