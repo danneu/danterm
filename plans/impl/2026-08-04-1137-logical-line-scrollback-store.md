@@ -514,7 +514,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 13. perf(terminal): back the arena with chunks so a published frame copies one, not all of it
 - [x] 14. docs(research): re-run the frozen ladder once and record the verdict (`31/F15`) -- **acceptance still not met, on the go/no-go rung**
 - [x] 15. docs(research): amend `31/D2` Decision 1 to a dense per-record header cache on the index, and freeze the re-run's expectation
-- [ ] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
+- [x] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
 - [ ] 17. docs(research): re-run the frozen ladder once and record the verdict
 
 ## Implementation notes
