@@ -121,7 +121,7 @@ struct TerminalGraphemeWidthTests {
         expectValidGrid(invalid)
     }
 
-    @Test("Regional Indicators are wide alone and in paired clusters")
+    @Test("Regional Indicators pair into wide clusters, and a third starts a new cluster")
     func regionalIndicatorGeometry() throws {
         var terminal = try #require(Terminal(columns: 7, rows: 1))
 

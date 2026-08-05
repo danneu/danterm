@@ -180,13 +180,18 @@ to settle. Nothing here blocks the audit being closed.
 
 ### Open: optional cosmetics, no coverage impact
 
-- [ ] **51** -- `TerminalGraphemeWidthTests#regionalIndicatorGeometry` (line 125) absorbed
+- [x] **51** -- `TerminalGraphemeWidthTests#regionalIndicatorGeometry` (line 125) absorbed
   the deleted `regionalIndicatorParity`'s coverage but not its title claim ("a third
   Regional Indicator starts a new cluster"). A retitle would make the surviving test
   self-describing.
-- [ ] **59** -- `tabClampsWithDefaultStopsPresent` stayed in `TerminalTests.swift:194`
+  **Resolved 2026-08-05:** retitled to "Regional Indicators pair into wide clusters, and a
+  third starts a new cluster"; body unchanged.
+- [x] **59** -- `tabClampsWithDefaultStopsPresent` stayed in `TerminalTests.swift:194`
   rather than moving to the adjacent `TerminalTabStopTests.swift`, because that file was
   outside the batch's ownership. One-test move if colocation is wanted.
+  **Resolved 2026-08-05:** moved verbatim into `TerminalTabStopTests`; the preamble's
+  cross-file reference to `TerminalTabStopTests.tabStopDispatch` dropped its type prefix
+  now that both tests share the file.
 
 ### Closed during the run
 

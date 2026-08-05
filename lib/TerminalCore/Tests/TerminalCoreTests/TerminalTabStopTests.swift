@@ -141,6 +141,24 @@ struct TerminalTabStopTests {
         #expect(terminal.geometry.cursor?.column == 19)
     }
 
+    @Test("tab past the last default stop clamps to the last column")
+    func tabClampsWithDefaultStopsPresent() throws {
+        // Intent: with the default every-eight stops intact and the cursor already past the
+        //   last one that fits, HT clamps to the final column instead of running off the row.
+        // Why it exists: `tabStopDispatch` reaches the clamp only after `ESC[3g` has cleared
+        //   every stop, so it exercises the empty-stop-set path. An implementation that kept
+        //   the set for custom stops only and computed the defaults arithmetically -- a
+        //   plausible optimization, since the stop filter runs per HT -- would answer 16 here
+        //   and still pass that test. This is the defaults-present case.
+        // Scenario: a 12-column pane where the shell tabs twice from the left margin.
+        var terminal = try #require(Terminal(columns: 12, rows: 1))
+
+        terminal.feed([0x09])
+        #expect(terminal.geometry.cursor?.column == 8)
+        terminal.feed([0x09])
+        #expect(terminal.geometry.cursor?.column == 11)
+    }
+
     @Test("tab stops participate in terminal equality")
     func tabStopsAffectEquality() throws {
         var customized = try #require(Terminal(columns: 10, rows: 1))
