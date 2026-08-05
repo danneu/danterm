@@ -5480,6 +5480,12 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// CSI K. Only EL 0 resets the row's soft wrap: erasing the right end destroys
+    /// the wrap point itself, while EL 1/2 blank cells without restructuring the
+    /// line -- a blanked row mid-line is a coherent state (rewrite-in-place).
+    /// Matches xterm (`util.c#ClearRight` is the only clear that drops the flag),
+    /// Ghostty, kitty, and foot; tmux severs on EL 2 and is the lone outlier.
+    /// Pinned by CSIEraseTests#eraseLineWrapAsymmetry.
     private mutating func eraseLine(mode: UInt16) {
         switch mode {
         case 0:

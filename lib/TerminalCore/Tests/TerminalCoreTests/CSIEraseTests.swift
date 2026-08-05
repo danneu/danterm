@@ -47,11 +47,17 @@ struct CSIEraseTests {
 
     @Test("EL right resets soft wrap while left and complete preserve it")
     func eraseLineWrapAsymmetry() throws {
-        // Intent: pin the reference-compatible difference between EL 0 and
-        //   the other line-erasure modes.
-        // Why it exists: clearing the same row does not imply clearing its
-        //   logical continuation flag for EL 1 or EL 2.
-        // Scenario: a soft-wrapped shell line is partially or fully erased.
+        // Intent: pin that only EL 0 resets the row's soft wrap; EL 1 and EL 2
+        //   blank cells but leave the line structure alone.
+        // Why it exists: EL is a cell-content operation, not a line-structure one,
+        //   and the references agree. Verified 2026-08-05: xterm drops the flag
+        //   only in util.c#ClearRight ("with the right part cleared, we can't be
+        //   wrapping"); Ghostty's Terminal.zig#eraseLine explicitly declined to
+        //   reset it for EL complete, to match xterm; kitty and foot touch no wrap
+        //   state in any EL mode. tmux severs on EL 2 (confirmed in a live PTY via
+        //   capture-pane -J joining) and is the one reference we do not follow.
+        // Scenario: a soft-wrapped shell line is partially or fully erased, e.g. a
+        //   redraw that blanks a mid-line row before refilling it.
         for (sequence, expectedWrap) in [
             ("\u{1B}[0K", false),
             ("\u{1B}[1K", true),

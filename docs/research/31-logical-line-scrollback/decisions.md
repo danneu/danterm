@@ -1396,6 +1396,22 @@ print resuming at the seam still reopens the record through
 `restoreWrapClaimBeforeCursor`, so an erase-severed record can legitimately be
 reopened later. `ED 3` is operation 5 and needs none of this.
 
+**Amended 2026-08-05, follow-up to finding 13: the `EL 2` exclusion is now
+verified, not just considered.** Finding 13's fix invited the question of
+whether the live-side asymmetry it leans on -- only `EL 0` resets a row's
+wrap -- was itself ever checked, or only pinned by its own test's say-so.
+Checked: xterm drops the flag only in `references/xterm/util.c#ClearRight`;
+Ghostty (`.ghostty-src/src/terminal/Terminal.zig#eraseLine`) explicitly
+declined to reset it for EL complete, to match xterm; kitty and foot touch
+no wrap state in any `EL` mode. tmux is the lone dissenter
+(`references/tmux/grid.c#grid_clear_lines`, confirmed in a live tmux PTY via
+`capture-pane -J`), and we do not follow it. The conceptual line: `EL` edits
+cell content, `ED` and newlines edit line structure. A blanked row that
+still continues its logical line is coherent -- seam claim and outgoing
+claim stay in agreement, unlike the half-cleared state finding 13 fixed --
+and refold already gives a soft-wrapped blank row its full width
+(`Terminal.swift#projectedCellEnd`).
+
 This is a DanTerm choice rather than a compatibility fix, and it diverges
 knowingly: kitty (`references/kitty/kitty/screen.c#screen_erase_in_display`) and
 xterm (`references/xterm/screen.c#ClearBufRows`) both clear only the erased
