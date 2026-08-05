@@ -20,23 +20,38 @@ Verdicts:
 
 Totals: 106 findings -- 71 confirmed, 32 downgraded, 3 rejected.
 
+## Outcome
+
+**Closed.** 102 done, 1 partial by design (32), 3 rejected by the original verifiers
+(104-106). Every accepted finding landed, gate green (`just test`, 74 steps) on each
+commit. Work spans `b1130938..HEAD`; commit messages cite this file by path and list
+the finding numbers they close.
+
+Four findings (5, 7, 9, 13) were parked mid-run as design decisions rather than
+mechanical fixes, briefed out separately, and resolved afterwards -- each one's Status
+line records what was decided and on what evidence. Their resolutions were *not* what
+the audit proposed in three of four cases; see those Status lines before trusting the
+recommendation text above them.
+
+What remains is in **Orchestrator follow-ups** below: nothing from the audit itself,
+but two deliberate non-fixes, two optional cosmetics, one new defect this work
+surfaced, one docs obligation, and two gate flakes needing a call.
+
 ## Work tracker
 
 Every numbered finding carries a `**Status:**` line. Statuses:
 
-- `todo` -- accepted, not yet started.
-- `in-progress` -- a batch agent owns it right now.
 - `done` -- applied and the gate passed.
-- `dropped` -- re-checked against current code and the finding no longer holds; the
-  status line says why.
-- `deferred` -- real, but the fix is a design decision (a deliberate divergence from
-  the reference terminals, a fixture/decisions-doc amendment, or a behavior change).
-  Parked for a human call; 5, 7, 9, 13.
+- `partial` -- part of the finding applied, the rest deliberately not; the status line
+  says which and why. Only finding 32.
 - `rejected` -- refuted by the original verifier; 104, 105, 106. No action.
+- (`todo` / `in-progress` / `deferred` / `dropped` were used while the work was in
+  flight and no longer appear.)
 
-Work is partitioned into batches by **exclusive file ownership** so concurrent agents
-never edit the same file. An agent needing new coverage in a file it does not own adds
-a new test file instead of editing the foreign one.
+Work was partitioned into batches by **exclusive file ownership** so concurrent agents
+never edited the same file; an agent needing coverage in a file it did not own added a
+new test file rather than editing the foreign one. The table is kept as the record of
+that partition -- it is not a to-do list.
 
 | Batch | Owns | Findings |
 | --- | --- | --- |
@@ -51,70 +66,120 @@ a new test file instead of editing the foreign one.
 | `tests-a` | `TerminalCoreTests` subset A | 49, 50, 51, 55, 56, 58, 59 |
 | `tests-b` | `TerminalCoreTests` subset B | 61, 64, 67, 68, 74, 85, 90 |
 | `docs` | prose under `docs/`, `agent-docs/` | 92, 94, 98, 102, 103 |
-| `solo` | cross-cutting duplicate-helper sweeps; run alone, last | 88 |
+| `solo` | cross-cutting duplicate-helper sweeps; run alone, last | 21, 78, 88, 90 |
+
+Findings 5, 7, 9 and 13 sat outside the batches: they were pulled out as design
+decisions and landed separately, after the twelve batches were done.
 
 ## Orchestrator follow-ups
 
-Work surfaced by a batch that fell outside its file ownership. Each needs an owner
-before this audit is closed out.
+Everything the audit itself asked for is done. What follows is what the work *left* --
+each entry says what the state is, why it is that way, and what a decision would have
+to settle. Nothing here blocks the audit being closed.
 
-- [x] **48** -- `TerminalScrollbackRetentionTests.swift` still exists (trimmed to its
-  unique eviction guards). Fold those two guards into `censusReportsRetentionHealth`
-  in `TerminalMemoryCensusTests.swift` and delete the file. Assign to `tests-a`.
-- [x] **80** -- move `primaryHistoryGenerationDifferential` out of the real-PTY
-  `TerminalPaneSessionControllerTests.swift` into `TerminalHistoryGenerationTests.swift`
-  (crosses both a batch and a SwiftPM package boundary), and reword that file's
-  "Two-sided proofs" header. Assign to `tests-a`.
-- [x] **21** -- five sprite files still re-derive the light-stroke pixel width:
-  `LegacyComputingSprite.swift`, `LegacyComputingSupplementSprite.swift`,
-  `PowerlineSprite.swift`, `BranchDrawingSprite.swift`, `GeometricShapeSprite.swift`.
-  Each is a one-line swap to the new `metrics.lightStrokePixels`.
-- [x] **78** -- `BackgroundExecutionTests.swift`'s `largestOverflowingMetrics()` still
-  duplicates the now-shared helper in `OverflowMetricsSupport.swift`.
-- [ ] **NEW (app, from finding 11)** -- `app/PaneWrapperView.swift:509` (copy cwd /
-  copy session id) writes `NSPasteboard.general` with no injectable seam, so those
-  actions stay untestable in isolation. Same shape as finding 11, different file.
-  The libghostty-backed paths in `TerminalView.swift` / `GhosttyApp.swift` were left
-  alone deliberately.
-- [x] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
-  TerminalCoreBenchmarkSupport needs `lib/TerminalCore/Package.swift` to add it as a
-  dependency of `TerminalDrawBenchmarkSupport` first. Carry both preconditions into the
-  promoted function and update TerminalCoreBenchmarkSupport's file header, which would
-  no longer be feed-specific.
-- [ ] **NEW (found while gating, not part of the original audit)** --
-  `TerminalHistoryTailTests#tailReadCostTracksTheBudgetNotTheCapacity` is a
-  wall-clock ratio test (`large < small * 4`) that fails intermittently inside the
-  74-step parallel `just test` pool: observed 0.244s vs 0.196s, a ratio of 5.0.
-  It passes 5/5 in isolation, and the failure mode it guards (a read that walks the
-  whole history) would show ~16x, so the threshold is simply too tight for a loaded
-  machine rather than the test catching a regression. Either make it load-robust or
-  move it off the parallel gate -- this is the same class of test finding 47 deleted
-  two of. Needs a human call on which.
-- [ ] **NEW (gate flake #2)** -- `scripts/tests/agent-notifications-live_test.py`
-  failed once inside the parallel gate with `OSError: [Errno 22] Invalid argument`
-  from `os.stat` on a symlink in a temp dir, then passed 22/22 standalone and on the
-  gate rerun. Unrelated to any audit finding; noted because two different gate steps
-  have now flaked under the 74-step parallel pool.
-- [x] **90 (residual)** -- six byte-identical generator copies remain, now that
-  `SeededByteGenerator` exists: `TerminalGraphemeTests`, `TerminalInputStreamTests`,
-  `TerminalResizeTests`, `TerminalTests`, the UInt64 variant in
-  `TerminalScrollbackBudgetTests` (must keep full-word width or its seeded sequence
-  changes), and `PromptAnchorSweepGenerator` in
-  `TerminalPromptAnchorResizeSweepTests`. Mechanical swaps. Fold into the `solo` batch.
-- [ ] **51 (optional)** -- retitle `regionalIndicatorGeometry` in
-  TerminalGraphemeWidthTests.swift to also carry the deleted test's claim. Coverage
-  unaffected.
-- [ ] **59 (optional)** -- `tabClampsWithDefaultStopsPresent` now lives in
-  TerminalTests rather than TerminalTabStopTests; a one-test move if colocation is
-  wanted.
-- [ ] **22 (residual)** -- `pointerDownDecision` still needs a `.link` arm for
-  exhaustiveness even though `pointerOwner` can never mint one; left as a comment
-  rather than restructuring, since splitting the enum again is the opposite of the fix.
-- [ ] **47** -- the verifier's note that PO5's whole subject (`PackedRetainedRow`) is
-  retired, not just the two deleted tests, should be recorded in doc 28's `PO5` /
-  `decisions.md`. Docs were deliberately not edited by the batch.
+### Open: needs a decision
+
+- [ ] **Gate flake A -- the tail-cost ratio test.**
+  `TerminalHistoryTailTests#tailReadCostTracksTheBudgetNotTheCapacity` asserts
+  `large < small * 4`, comparing a bounded tail read over 400 lines against one over
+  6,400. It failed twice inside the 74-step parallel `just test` pool (observed 0.244s
+  vs 0.196s, ratio 5.0) and passed 5/5 in isolation and on every rerun.
+  **Why it is not a regression:** the failure mode it guards -- a read that walks from
+  the head instead of the budget -- would show ~16x, matching the 16x history growth.
+  A ratio of 5.0 is scheduling noise, not a linear walk. The test's own comment says 4x
+  was chosen to leave "room for scheduling noise on a loaded machine"; the gate's
+  parallel pool is a heavier load than that estimate assumed.
+  **The decision:** loosen the threshold (say 8x, still far below 16x and still able to
+  fail a full walk), make the instrument load-robust (best-of-N rather than a single
+  timed pair), or move it off the parallel gate entirely. Note this is the same class
+  of wall-clock test that finding 47 deleted two of, so "delete it" is on the table --
+  but unlike those two it guards a live path (`I3`, the checkpoint tail read) with no
+  other cover, so deleting it needs a replacement that pins the bound structurally.
+
+- [ ] **Gate flake B -- the agent-notifications live test.**
+  `scripts/tests/agent-notifications-live_test.py::test_auth_symlink_cleanup_does_not_remove_auth_target`
+  failed once in the gate with `OSError: [Errno 22] Invalid argument` from `os.stat` on
+  a symlink under `/var/folders/.../auth.json`, inside a `drive_pty` readiness predicate
+  that polls `link.exists()` while the child unlinks it. Passed 22/22 standalone and on
+  the gate rerun.
+  **Unrelated to any audit finding** -- noted only because it is the second gate step to
+  flake under the parallel pool, which makes "the pool is oversubscribed" worth
+  considering as a common cause rather than treating each flake in isolation.
+  **The decision:** whether to harden the predicate (treat `OSError` as "not yet gone")
+  or leave it as accepted noise.
+
+- [ ] **New defect: `PaneWrapperView`'s clipboard writes have no seam.**
+  `app/PaneWrapperView.swift:509-516` -- the copy-cwd and copy-session-id menu actions
+  write `NSPasteboard.general` directly. Finding 11 gave the pane's own copy/paste an
+  injectable `selectionPasteboard` (`app/SwiftTerminalSessionView.swift:54`) precisely
+  so tests stop clobbering the developer's real clipboard; these two actions are the
+  same shape in a different file and were outside that batch's ownership.
+  **Not a latent bug** -- production behavior is correct -- but they cannot be tested in
+  isolation, and a future test for them would repeat the exact mistake finding 11 fixed.
+  The libghostty-backed paths (`app/TerminalView.swift:341`, `app/GhosttyApp.swift:222`
+  and `:250`) also write `NSPasteboard.general` and were left alone deliberately: that
+  code is on its way out with libghostty.
+
+- [ ] **47 (docs obligation) -- record what `PO5` still covers.**
+  Finding 47 deleted two wall-clock tests that guarded a `PackedRetainedRow` read path
+  production no longer takes, and its verifier noted the retirement is broader than
+  those two tests. **That framing needs correcting before it is written down:** the type
+  is only half retired. `PackedRetainedRow.pack` has no production callers -- every
+  remaining mention in `Sources/` is a doc comment citing it as precedent -- but
+  `PackedRetainedRow.Header`'s bit-layout constants are load-bearing, used live by
+  `LogicalLineStore` in a dozen places (`cellStyleShift`, `cellSpillBit`,
+  `cellKindMask`, ...). So the honest note for doc 28 is that `PO5`'s *subject* (the
+  standalone packed-row read path) is retired while its *encoding* survives inside the
+  logical-line store, not that the whole type is dead.
+  Left undone because amending a dated `Status: Accepted` research record is the same
+  class of call as the four deferred findings.
+
+### Open: deliberate non-fixes, recorded so they are not re-litigated
+
+- [ ] **22 (residual)** -- `pointerDownDecision` keeps a `.link` arm
+  (`TerminalInteractionPolicy.swift:520`) that `pointerOwner` can never mint, because
+  the Cmd-click path latches `.link` itself and returns earlier. It is marked with a
+  comment saying exactly that. Removing it would mean splitting the enum again, which is
+  the opposite of what finding 22 did. **Reopen only if** the ownership model changes so
+  that a link owner can be minted.
+
+- [ ] **32 (the one `partial`)** -- the unreachable inner capacity guard in
+  `EscapeAbsorber.dispatchCSI` is gone; the `csiParameter` `0x30...0x3A` / `0x3B` arm
+  fold was left undone. The verifier marked that half optional and noted the split
+  deliberately mirrors `csiEntry`, where 0x3A and 0x3B diverge. Folding it would save one
+  line and cost that symmetry. **Reopen only if** `csiEntry`'s arms stop diverging.
+
+### Open: optional cosmetics, no coverage impact
+
+- [ ] **51** -- `TerminalGraphemeWidthTests#regionalIndicatorGeometry` (line 125) absorbed
+  the deleted `regionalIndicatorParity`'s coverage but not its title claim ("a third
+  Regional Indicator starts a new cluster"). A retitle would make the surviving test
+  self-describing.
+- [ ] **59** -- `tabClampsWithDefaultStopsPresent` stayed in `TerminalTests.swift:194`
+  rather than moving to the adjacent `TerminalTabStopTests.swift`, because that file was
+  outside the batch's ownership. One-test move if colocation is wanted.
+
+### Closed during the run
+
+- [x] **21** -- five sprite files re-deriving the light-stroke width -> all six now use
+  `metrics.lightStrokePixels`; the `max(1, ...)` clamp each carried was dead.
+- [x] **26** -- `measureDurationStable` promoted into TerminalCoreBenchmarkSupport with
+  the `Package.swift` dependency edge and both preconditions carried over.
+- [x] **48** -- retention guards folded into `censusReportsRetentionHealth`; the file is
+  deleted.
+- [x] **78** -- `BackgroundExecutionTests`' duplicate overflow helper now calls the
+  shared one.
+- [x] **80** -- `primaryHistoryGenerationDifferential` moved off the serialized PTY gate
+  step into `TerminalHistoryGenerationTests`.
+- [x] **90 (residual)** -- all seven xorshift copies now use `SeededByteGenerator`, each
+  keeping its original byte/word width so the seeded sequences are bit-identical.
 
 ## Top picks
+
+Preserved as the audit wrote it, including the framing that later turned out wrong (item
+3's fix was narrowed, and the "deliberate decision" note at the end was resolved against
+libvterm). **Each finding's `Status:` line is authoritative for what actually happened**;
+this section is the original prioritization, not a report of it.
 
 The highest-value items across all sections, in recommended order:
 
