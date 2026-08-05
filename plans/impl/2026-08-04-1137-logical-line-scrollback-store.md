@@ -563,6 +563,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
 - [x] 17. docs(research): re-run the frozen ladder once and record the verdict (`31/F16`) -- **acceptance MET**, and close what it closes
 - [x] 18. revert(terminal): drop `31/DD55`'s header cache on its own paired null, keeping `31/DD56`
+- [x] 19. docs(research): profile the browse frame, attribute the residual, and record the one shave's null (`31/F17`)
 
 ## Implementation notes
 
@@ -1255,6 +1256,17 @@ Open conditions that the implementation, not the design, has to discharge:
   the cache, which only made it visible. Restoring the one-sided bound would
   restore an assertion that pins a phase the store does not promise. Cheap to
   overrule if a reader disagrees.
+
+- **Slice 19 takes the instrument the campaign had owed since `31/F15` and it
+  answers the question against the store's favour.** `31/F17` profiles the browse
+  frame at both revisions: the residual is +1.00%, the whole `LogicalLineStore`
+  subtree is **1.94%** of a browse frame, `LogicalLineFold` **0.02%**, `locate`
+  0.24% and `advance` 0.37% -- so `31/I7` and `31/AR2` are confirmed by
+  measurement, and every hypothesis that the *store* is what costs the browse
+  frame is closed. The residual is `31/DD45`/`31/DD51`'s traversal closure depth,
+  a shape `31/DD51` already measured against two alternatives. The one mechanical
+  shave available read `equivalent` at -0.27% and is kept as `31/DD57` on costing
+  nothing rather than on buying anything.
 
 ## Follow Up
 

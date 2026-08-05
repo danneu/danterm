@@ -1412,25 +1412,39 @@ extension Terminal {
             let sequence = firstRecordSequence + cursor.recordIndex
 
             // The record's cells are one run inside one backing chunk (`31/D5`), so the chunk is
-            // resolved once per display row and indexed directly per cell -- the same single
-            // subscript this loop paid when the arena was one buffer.
+            // resolved once per display row and read through a raw pointer per cell.
+            //
+            // The pointer rather than the array subscript because the subscript is the one place
+            // this loop pays for something it can prove: a bounds check per cell, plus the
+            // `immutableCount` load that feeds it, which a profile of the browse frame names as
+            // two separate per-frame costs. `recordsHoldTheSameContent` already reads the arena
+            // this way for the same reason. The buffer is borrowed from the **local** `chunk`,
+            // not from `self.chunks`, so `body` -- an arbitrary caller closure -- cannot conflict
+            // with the access and no dynamic exclusivity check replaces the static one
+            // (`31/DD51` measured what that costs when it happens).
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
-            for cellOffset in shape.start..<shape.end {
-                let word = chunk[cellsBase + cellOffset]
-                let styleId = Terminal.StyleId(
-                    truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
-                )
-                let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
-                if word & PackedRetainedRow.Header.cellSpillBit != 0 {
-                    body(column, TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? []), styleId)
-                } else if field != 0, let scalar = Unicode.Scalar(field) {
-                    body(column, TerminalScalars(scalar), styleId)
-                } else {
-                    body(column, .empty, styleId)
+            chunk.withUnsafeBufferPointer { words in
+                for cellOffset in shape.start..<shape.end {
+                    let word = words[cellsBase + cellOffset]
+                    let styleId = Terminal.StyleId(
+                        truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
+                    )
+                    let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
+                    if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                        body(
+                            column,
+                            TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? []),
+                            styleId
+                        )
+                    } else if field != 0, let scalar = Unicode.Scalar(field) {
+                        body(column, TerminalScalars(scalar), styleId)
+                    } else {
+                        body(column, .empty, styleId)
+                    }
+                    column += 1
                 }
-                column += 1
             }
             if shape.spacerRecordIndex >= 0 {
                 // The spacer inherits the head it defers, and a renderer reads its style alone.
@@ -1459,18 +1473,21 @@ extension Terminal {
             _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
+            // Same borrow as `forEachPaintedCell`, for the same reason.
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
-            for cellOffset in shape.start..<shape.end {
-                let word = chunk[cellsBase + cellOffset]
-                body(column, TerminalCellKind(
-                    packedCode: UInt8(
-                        (word >> PackedRetainedRow.Header.cellKindShift)
-                            & PackedRetainedRow.Header.cellKindMask
-                    )
-                ))
-                column += 1
+            chunk.withUnsafeBufferPointer { words in
+                for cellOffset in shape.start..<shape.end {
+                    let word = words[cellsBase + cellOffset]
+                    body(column, TerminalCellKind(
+                        packedCode: UInt8(
+                            (word >> PackedRetainedRow.Header.cellKindShift)
+                                & PackedRetainedRow.Header.cellKindMask
+                        )
+                    ))
+                    column += 1
+                }
             }
             if shape.spacerRecordIndex >= 0 {
                 body(column, .spacerHead)

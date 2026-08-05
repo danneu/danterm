@@ -4584,3 +4584,219 @@ the session.
   ratification, `DD8`'s reopened simplification dimension, the borrowing-cursor
   plan's frozen 121 us trigger, doc 28's `F24`/`D8` follow-ups, `DD52`'s equality
   residual and `DD53`'s untuned chunk size.
+
+### F17 -- the browse-frame profile nobody had taken: the residual is **closure-dispatch depth in the viewport traversal**, the store's whole read is 1.94% of the frame, and the one mechanical shave available reads `equivalent`
+
+- Status: complete, **diagnostic only, and it issues no verdict.** Acceptance is
+  recorded MET against `28c54e1` (`F16`) and nothing here moves it. This is the
+  instrument `F15` said was owed ("no profile of the post-`D5` browse path
+  exists"), `F16` repeated, and `D2` Decision 1's amendment named as what should
+  have been taken instead of guessing -- run at last, after the amendment it
+  would have prevented was reverted.
+- **Read this first.** The `retained-browse` residual is **+1.00% of the frame**
+  and the profile reconstructs it to within 0.06 points of the ladder's +0.94%.
+  It is **not the store**: the arena's entire read path is **1.94% of the browse
+  frame** and the fold is **0.02%**. It is **closure-dispatch depth in the
+  viewport traversal** -- `31/DD45`'s plural, row-scoped spelling puts **seven**
+  frames between `inspectedCells` and `plannedCell` where the incumbent's
+  singular spelling put **three** -- at **+8,206 ns of a 340,025 ns frame**. The
+  store's read is +2,359 ns on top. Every campaign probe that measured the store
+  fast was right, and the thing they were not measuring was the shape of the call
+  into it.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate `64112a4` (the cache revert), baseline
+  `28c54e1` extracted with `git archive` into a scratch checkout and built there,
+  with `TerminalWiredHistoryAttributionProbe.swift` copied in unchanged -- which
+  is the procedure that probe's own header prescribes. Both arms built and run in
+  the same session, minutes apart, on the same idle machine.
+- Commands, inputs, or reproduction:
+
+      DANTERM_WIRED_ATTRIBUTION_PROBE=1 swift test -c release \
+        --package-path lib/TerminalCore --filter TerminalWiredHistoryAttributionProbe
+
+      xctrace record --template "Time Profiler" --output <dir>.trace \
+        --target-stdout /dev/null --launch -- \
+        lib/TerminalCore/.build/release/TerminalBrowseBenchmark --measured 90000
+      just benchmark-report <dir>.trace
+
+  **Why not `just benchmark-trace`:** its sustained app workloads are
+  `scrollback-stream` and the btop recipe; `retained-browse` has no app workload
+  because it *is* a one-block command-line binary, and that binary is what the
+  ladder times. Profiling it directly measures the thing the rung measures.
+  Conditions: AC power, idle machine, ~30.5 s and ~30.4 s of on-CPU samples per
+  arm (Time Profiler records running samples only, so shares need no correction).
+- Artifacts: two `.trace` bundles plus their `profile-report.json` and
+  `profile-folded.txt`, under the session scratch directory (disposable; every
+  decision-bearing value is quoted below).
+
+#### Observation 1 -- the two viewport passes, with a same-session control
+
+`F13`'s committed probe, both arms, per planned frame:
+
+| pass | `28c54e1` | `64112a4` | ratio |
+| --- | ---: | ---: | ---: |
+| geometry pass (kinds only) | 12,992 ns | **9,241 ns** | **0.711x** |
+| cell pass (scalars + styles) | 40,398 ns | **51,472 ns** | **1.274x** |
+| both | 53,390 ns | 60,713 ns | 1.137x |
+
+The arena's geometry pass is **29% faster** and its cell pass **27% slower**. The
+probe spells both per row, which the cutover's real frame path does not, so it
+over-charges the arena for addressing -- which is why the profile below, not this
+table, is the attribution.
+
+Two readings the same probe carries, both re-measured rather than quoted:
+`D5`'s chunked backing is working as designed -- a feed with a published value
+copy every batch costs **188.49 -> 104.16 ns/byte** (1.833x -> **1.040x** of its
+own unshared feed) -- and **`DD52`'s equality residual is 14.8x**, 72,370 ->
+1,069,517 ns per comparison of a saturated pane, which is worse than the 13x that
+entry recorded and is still not on the frame path.
+
+#### Observation 2 -- where a browse frame's time goes, both arms, per frame
+
+Self time bucketed by frame name, converted at each arm's own measured frame cost
+(336,663 and 340,025 ns, from 2,000-frame runs of the same binaries):
+
+| bucket | `28c54e1` | `64112a4` | delta |
+| --- | ---: | ---: | ---: |
+| runtime / ARC / array | 139,133 ns | 137,651 ns | -1,482 |
+| planner (`plannedCell`, `resolveCellStyle`, runs, decoration) | 118,899 | 116,361 | -2,538 |
+| **traversal + closure dispatch** | **35,927** | **44,533** | **+8,606** |
+| other | 38,673 | 35,209 | -3,464 |
+| **history read** | **4,031** | **6,271** | **+2,240** |
+| **total** | **336,663** | **340,025** | **+3,362 (+1.00%)** |
+
+**+1.00% against the ladder's +0.94% is the cross-check that matters**: an
+independently built profile of a different binary in a different session
+reconstructs the rung's regression to within 0.06 points, so the buckets can be
+read as the rung's own composition rather than as a parallel measurement.
+
+#### Observation 3 -- the named mechanism, frame by frame
+
+The hot stack, which is where the shape is legible. Incumbent, `inspectedCells`
+to `plannedCell`:
+
+    inspectedCells(row:) -> forEachViewportCell(row:) -> partial apply closure #1 -> plannedCell
+
+Arena, the same span:
+
+    inspectedCells(rows:replanning:) -> forEachViewportRow(rows:where:)
+      -> partial apply closure #1 -> closure #1
+      -> partial apply closure #3 in forEachViewportRow -> closure #3
+      -> partial apply closure #1 in closure #1 -> plannedCell
+
+**Three intermediate frames became seven**, and the profile prices each side:
+
+| frame | ns/frame |
+| --- | ---: |
+| `partial apply for closure #1 in closure #1 in inspectedCells(rows:...)` | **+16,583** |
+| `closure #3 in Terminal.forEachViewportRow` (the `visit` closure) | **+13,597** |
+| `closure #1 in closure #1 in inspectedCells(rows:...)` | **+11,278** |
+| `closure #1 in closure #3 in Terminal.forEachViewportRow` | +2,464 |
+| `partial apply for closure #1 in inspectedCells(row:...)` | -19,392 |
+| `closure #1 in inspectedCells(row:...)` | -9,369 |
+| `specialized emit #1 in Terminal.forEachViewportCell(row:_:)` | -3,555 |
+| `Terminal.forEachViewportCell(row:_:)` | -3,400 |
+| **net** | **+8,206** |
+
+Spread over 66 rows x ~180 columns that is **~0.7 ns per cell** -- two or three
+instructions of extra indirection, which is exactly what a closure layer costs
+and exactly why no single frame looks alarming.
+
+The store's own side, for completeness: `forEachPaintedCell` +3,896,
+`foldedRow` +644, `word(at:)` +588, against the incumbent's
+`PackedRetainedRow.forEachContentCell` closure -2,769 -- **+2,359 ns/frame**.
+Inclusive, the whole `LogicalLineStore` subtree is **1.94%** of the frame,
+`LogicalLineFold` **0.02%**, `locate` 0.24% and `advance` 0.37%. **`31/I7` and
+`31/AR2` are both comfortable**, measured rather than argued.
+
+**What this says about the traversal shape, and why it is a stop rather than a
+target.** The depth is `DD45`'s (the plural spelling that fixed `HR1`'s
+one-locate-per-row hazard) and `DD51`'s (the row-scoped form). `DD51` already ran
+this optimization round: it measured a single closure holding row state in
+captured vars at **+13.9 us/frame** and a nested-function form at **~+210
+us/frame**, both worse than the +8.2 us the current shape costs. So the shape in
+the tree is already the best of three measured, and the two remaining ways down
+are not mechanical: making `Terminal.forEachViewportRow` `@inlinable` so the
+chain specializes across the `TerminalCore` / `TerminalRenderPlanning` target
+boundary (which pulls `scrollProjection`, `historyCursor`, `history`,
+`viewportStreamRow`, `style(for:)` and the row storage into the module's
+inlinable surface -- an ABI-surface decision, and exactly what
+`docs/design/2026-07-29-cross-module-value-dispatch.md` exists to govern), or a
+different traversal contract, which is design. Both are a human's.
+
+**It does not land on the materializing facade**, so it does not strengthen the
+borrowing-cursor plan's case: no `GridRow` materialization appears in the browse
+frame at all, because `D3` Decision 5's facade is not on this path -- the frame
+path borrows already. `D3` Decision 5's frozen 121 us trigger stands untouched
+and is still the only thing that should promote that plan.
+
+#### Observation 4 -- the one mechanical shave the profile named, and its paired null
+
+The profile named a cost that is mechanical and contract-free: the two hot
+per-row walks read the backing chunk through `ContiguousArray`'s subscript, so
+they pay a bounds check and its `immutableCount` load per cell --
+`ContiguousArray.subscript.getter` +1,376 ns/frame and
+`_ArrayBuffer.immutableCount.getter` +1,097 ns/frame. `recordsHoldTheSameContent`
+in the same file already borrows the chunk through `withUnsafeBufferPointer` for
+the same reason. Applied to `forEachPaintedCell` and `forEachKind`, borrowing
+from the **local** chunk copy so a caller's closure cannot conflict with the
+access (`DD51` measured what dynamic exclusivity enforcement costs when it does).
+
+Verified with the paired in-session instrument, `64112a4` as baseline:
+
+| workload | rule | estimate | verdict |
+| --- | --- | ---: | --- |
+| **`retained-browse`** | +/-1.05%, band 0.75% | **-0.27%** | **`equivalent`** |
+| `terminal-feed` | +/-2.5% | -0.63% | `equivalent` |
+| `scrollback-stream` | +/-1.85% | +0.59% | `equivalent` |
+| `content-churn` | +/-2.15%, band 0.75% | -3.20% | `faster` |
+| `style-churn` | +/-2.0% | -2.80% | `faster` |
+| `incremental-mixed` | +/-1.85% | +1.17% | `inconclusive` |
+
+`retained-browse`'s pairs are **-0.096, -0.356, -0.186, -0.619**: all four
+negative, none flagged, and the estimate is **a third of the equivalence band**.
+**Recorded as null.** The direction is consistent and the size is below what the
+rule declares meaningful, and the lesson this campaign just paid for is that a
+sub-band effect read as a win is how `DD55` happened. No second round is taken;
+that is the stop rule as frozen.
+
+#### Observation 5 -- an instrument caution the same run produced, and it bears on every earlier reading
+
+The change verified above touches **two functions in the retained-history read
+path** and nothing else. On that change, in one paired ABBA session,
+`content-churn` read **-3.20% `faster`** on four consistent pairs (-4.538,
+-2.463, -2.238, -3.932) and `style-churn` **-2.80%** on four (-0.951, -2.903,
+-2.695, -3.664). Those two workloads redraw the live screen and barely touch
+retained history; no mechanism in the diff can move them by 3%.
+`incremental-mixed` returned pairs from **-4.793 to +9.188** for the second
+session running.
+
+So the paired instrument's *within-session* estimate on the draw cells carries a
+systematic component of a few points that its pair spread does not reveal --
+four tight, consistent pairs that are nonetheless not the change. This does not
+touch `retained-browse`, whose cells have been well-behaved in every session
+(spreads of 0.36, 1.34 and 0.52 points), and it does not touch `F16`'s verdict.
+It is recorded because it is the same failure mode that produced `DD55`, seen
+from the other side: **consistency across pairs is not evidence of attribution**,
+and this campaign has now been fooled by it once and caught it twice.
+
+- Uncertainty:
+  - **Two profiles, one session, one arm each.** No repeat, and the bucket table
+    is a difference of two single traces. Its credibility rests on reconstructing
+    the ladder's independently measured +0.94% to within 0.06 points, not on its
+    own repetition.
+  - **Bucketing is by frame name and is the author's.** The `other` bucket is
+    10-12% and moves by -3,464 ns/frame, which is larger than the store's whole
+    delta; a different classifier would move numbers between rows. The two
+    conclusions that survive any classifier are the ones drawn: the store subtree
+    is 1.94% inclusive, and the traversal's candidate-only and baseline-only
+    closure frames net +8,206.
+  - **The shave's null is one paired invocation**, as the stop rule specifies.
+  - **`@inlinable` is named, not priced.** Nobody has measured what specializing
+    the traversal across the target boundary would buy.
+- Next action: none owed. The residual is attributed and it is not the store; the
+  one mechanical fix available reads `equivalent` and no further round is taken.
+  What this hands a human, in the order the evidence supports: the traversal's
+  closure depth is the named term and both routes down it are decisions rather
+  than fixes; `DD52`'s equality residual is 14.8x and unspent; and the draw cells'
+  paired estimates deserve a calibration before any future reading leans on them.

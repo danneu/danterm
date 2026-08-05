@@ -898,6 +898,35 @@ licenses a production storage change; landing is the paired ladder's.
   the entry's own: `terminal-feed` is `inconclusive` by **0.01 points** on the
   ladder's least-resolved cell, and the acceptance rests on **one** invocation.
 
+- [x] `DONE` **`F17`, the browse-frame profile** -- the instrument `F15` said was
+  owed, `F16` repeated, and `D2` Decision 1's amendment named as what should have
+  been taken instead of guessing. Recorded in [F17](findings.md). Two Time
+  Profiler traces of `TerminalBrowseBenchmark` -- the binary the rung actually
+  times -- at `64112a4` and at `28c54e1` built from an extracted checkout, same
+  session, read through `just benchmark-report`, plus `F13`'s committed probe at
+  both revisions. **The residual is +1.00% of the frame and the profile
+  reconstructs the ladder's +0.94% to within 0.06 points.** It is **not the
+  store**: the whole `LogicalLineStore` subtree is **1.94%** of the browse frame
+  and `LogicalLineFold` is **0.02%**, with `locate` at 0.24% and `advance` at
+  0.37% -- `I7` and `AR2` both confirmed by measurement rather than by argument.
+  It is **closure-dispatch depth in the viewport traversal**: `DD45`'s plural
+  row-scoped spelling puts **seven** frames between `inspectedCells` and
+  `plannedCell` where the incumbent's singular spelling put **three**, costing
+  **+8,206 ns of a 340,025 ns frame** (~0.7 ns per cell), with the store's own
+  read +2,359 ns on top. That shape is already the best of three `DD51` measured,
+  and the two ways further down -- an `@inlinable` traversal that specializes
+  across the target boundary, or a different traversal contract -- are a
+  decision and a design change, not fixes. The one mechanical shave the profile
+  did name (borrowing the backing chunk through a raw pointer in the two hot
+  per-row walks, which removes a per-cell bounds check) was taken and verified
+  paired against its own pre-shave revision: **`equivalent` at -0.27%**, all four
+  pairs negative but a third of the equivalence band, **recorded as null** with no
+  second round. Two readings the same run adds: `DD52`'s equality residual
+  re-measures at **14.8x** (72,370 -> 1,069,517 ns), and the paired instrument's
+  draw cells moved 3% on a two-function change that cannot reach them, which is
+  `DD55`'s failure mode seen from the other side. One deferred decision added
+  (`DD57`).
+
 ## Rejected
 
 ### Port iTerm2's LineBuffer
@@ -1320,6 +1349,22 @@ is that the change it licensed is not a regression. What is open:
   the tightest measured class (`F16`: `stream` at 0.509 of 1.000 MiB) and
   `PO11`'s margin on `full` down to a derived **0.4%**. That margin is the
   binding constraint on any further per-record charge.
+- ~~**No profile of the post-`D5` browse path exists**, and that is the next
+  instrument if a human wants the rung closed rather than accepted.~~ **Taken as
+  [`F17`](findings.md), and it closes the question the campaign had been deferring
+  since `F15`.** The `retained-browse` residual is +1.00% of the frame and it is
+  **not the store**: the whole `LogicalLineStore` subtree is 1.94% of a browse
+  frame and the fold is 0.02%. It is **closure-dispatch depth in the viewport
+  traversal** -- seven frames between `inspectedCells` and `plannedCell` against
+  the incumbent's three -- at +8,206 ns of a 340,025 ns frame. `DD51` had already
+  measured that shape against two alternatives and kept it as the best; the two
+  routes further down are an `@inlinable` traversal that specializes across the
+  target boundary (an ABI-surface decision under
+  `docs/design/2026-07-29-cross-module-value-dispatch.md`) and a different
+  traversal contract (design). Both are a human's, neither is a fix. The one
+  mechanical shave the profile named was taken and read **`equivalent` at
+  -0.27%**. **Every remaining hypothesis about the store being what costs the
+  browse frame is now closed by measurement.**
 - **`DD52`'s equality residual is unspent**: comparing stored bytes is 13x the
   incumbent's `Array ==` on buffer identity (0.91 ms against 0.069 ms on a
   saturated pane), and closing it needs a value identity on the store -- an origin

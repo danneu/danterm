@@ -1253,6 +1253,18 @@ amendment guessed at.
   neighbours (136,000, 152,000, 280,000, 296,000) retain normally, which is what
   makes it a cliff rather than a slope. The test sweeps all six rather than
   asserting one number, because the number is not the invariant.
+- **DD57 -- the two hot per-row walks borrow their backing chunk through a raw
+  pointer, and it is kept on costing nothing rather than on buying anything.**
+  `F17` measured it `equivalent` at -0.27%, a third of the equivalence band, with
+  all four pairs negative: directionally consistent, below the resolution the rule
+  declares meaningful, and **not banked**. It is kept because it has no cost to
+  weigh against that null -- no charge, no depth, no invariant, no API, no new
+  state -- and because it makes the two walks read the arena the way
+  `recordsHoldTheSameContent` in the same file already does. That is a different
+  test from `DD55`'s, which had a measured cost (1 MiB of index, 3.56% of depth,
+  half of `PO11`'s margin) weighed against the same kind of null, and it is
+  stated so the two calls are not read as one. Reverting it is one command and
+  loses nothing measurable; a reader who prefers the plainer loop should.
 
 #### Decision 2 -- eviction is byte-driven, display-row granular at the head, and never copies
 
