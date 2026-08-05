@@ -279,37 +279,14 @@ func movePaneSplitRightThreadsPayload() {
 Run `./build-lib.sh` once to build the cached `GhosttyKit.xcframework` before
 the first Swift build. Re-run only when the pinned Ghostty version changes.
 
-### Isolated worktree development
+### Worktrees
 
-In a fresh linked worktree, run `just provision-worktree` once before building.
-It links the primary checkout's cached `GhosttyKit.xcframework`, themes, and
-reference sources into the worktree, and is safe to repeat. The primary checkout
-must already have those inputs; the command never fetches or rebuilds them.
-
-Agents working in a worktree must use `just launch`, not `just build-run`:
-`build-run` quits and replaces the user's canonical dev app, while `launch`
-claims an unattended slot from 1 through 8 without replacing or focusing it.
-Capture the launcher's JSON handle and pass its socket explicitly on every CLI
-call:
-
-```sh
-SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
-./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
-DANTERM_SLOT_PID=$!
-while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
-    && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
-test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
-```
-
-Do not export `DANTERM_SOCK` for a slot. Keeping `--socket "$SLOT_SOCKET"` at
-each call site prevents an agent command from silently falling back to the
-user's app. To exercise an env-gated launch path, name each allowed value:
-
-```sh
-SWIFT_SLOT_HANDLE="$(mktemp /tmp/danterm-swift-slot.XXXXXX)"
-DANTERM_TERMINAL_BACKEND=swift ./scripts/dev-slot-launcher.py \
-  --pass-env DANTERM_TERMINAL_BACKEND > "$SWIFT_SLOT_HANDLE" &
-```
+Before building in a linked worktree, read
+[agent-docs/worktree-development.md](agent-docs/worktree-development.md) and run
+`just provision-worktree`. Use `just launch`, never `just build-run`, so the
+user's canonical dev app is not replaced. Drive the launched slot with an
+explicit `danterm --socket` argument on every call; do not rely on ambient
+`DANTERM_SOCK`.
 
 - `just build` -- compile to `.build/DanTerm Dev.app` and install to `~/Applications/DanTerm Dev.app`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with production `DanTerm.app`.
 - `just build-run` -- same as `just build`, then launch the installed app.
@@ -350,6 +327,7 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 - [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- HiDPI/Retina scaling, content scale invariants, zero-frame guards.
 - [docs/terminal-sprites.md](docs/terminal-sprites.md) -- procedural terminal glyph contract, pure geometry boundary, shared abstraction policy, family models, and behavioral test requirements. Read before changing sprite classification, geometry, rendering, or tests.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
+- [agent-docs/worktree-development.md](agent-docs/worktree-development.md) -- provisioning and safely launching an isolated development app from a linked worktree. Read before building or running from a worktree.
 - [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) -- real-app benchmarks, compatible history, profiler selection, CPU and memory profiling, and artifact handling. Read before measuring or optimizing terminal speed or memory footprint.
 - [agent-docs/measurement-discipline.md](agent-docs/measurement-discipline.md) -- how to build an instrument that can say "not measured", read a calibration gate, freeze a decision rule, and control a comparison. Read before adding a metric, freezing a threshold, or acting on a difference between two numbers.
 - [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) -- why hot value types crossing a SwiftPM target boundary need an inlinable surface, and how to tell witness-table dispatch from value-witness traffic in a profile. Read before removing an `@inlinable`/`@usableFromInline` annotation in `lib/TerminalCore`, adding a generic entry point that crosses a target boundary, or acting on an `outlined copy`/`outlined consume` frame.
