@@ -12,6 +12,20 @@
 // inherit the same problem.
 import TerminalCore
 
+/// The run the probe binary performs when it is given no flags -- the geometry and depth
+/// every number in doc 19 was measured at.
+///
+/// Lives here rather than as literals in `TerminalOccupancyProbe/main.swift` so the tests can
+/// assert the shipped values themselves. `lines` in particular is a calibration constant: it
+/// only means anything if it is large enough to drive `Terminal`'s production budget past
+/// saturation, and that is checked against these constants rather than against a copy of them.
+public enum OccupancyProbeDefaults {
+    public static let columns = 179
+    public static let rows = 66
+    public static let lines = 30_000
+    public static let iterations = 40
+}
+
 /// Names each measured case so a reader can map a row back to the job it prices.
 public enum OccupancyCase: String, Sendable, CaseIterable {
     case searchNewNeedle = "search: first press on a new needle"

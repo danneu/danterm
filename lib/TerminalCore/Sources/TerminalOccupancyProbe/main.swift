@@ -21,12 +21,15 @@ func flagValue(_ name: String, default fallback: Int) -> Int {
     return value
 }
 
-let columns = flagValue("--columns", default: 179)
-let rows = flagValue("--rows", default: 66)
-// Enough to drive the 10 MiB budget past saturation at 179 columns and stay saturated at
-// narrower ones; over-feeding costs setup time only, since evicted rows are gone.
-let lines = flagValue("--lines", default: 30_000)
-let iterations = flagValue("--iterations", default: 40)
+// The defaults live in the support module so a test can assert the depth really saturates;
+// see `OccupancyProbeDefaults`. At 179 columns the corpus charges ~1,563 B/line, so the
+// shipped 30,000 lines charge ~46.9 MB against the 16 MiB budget's ~15.7 MB arena -- ~3.0x,
+// enough to stay saturated at narrower widths too. Over-feeding costs setup time only, since
+// evicted rows are gone.
+let columns = flagValue("--columns", default: OccupancyProbeDefaults.columns)
+let rows = flagValue("--rows", default: OccupancyProbeDefaults.rows)
+let lines = flagValue("--lines", default: OccupancyProbeDefaults.lines)
+let iterations = flagValue("--iterations", default: OccupancyProbeDefaults.iterations)
 let wantsJSON = CommandLine.arguments.contains("--json")
 
 let report = runOccupancyProbe(

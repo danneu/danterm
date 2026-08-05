@@ -3,8 +3,11 @@
 // untested: a wall-clock bracket has no assertable value, which is exactly why everything
 // around it has to be.
 import Testing
-import TerminalCore
 
+// `@testable` for the budget-taking `Terminal` initializer, which is internal on purpose: the
+// public one pins production's 16 MiB. `saturationReachesDepth` needs a small budget to watch
+// eviction happen without paying for a production-sized history.
+@testable import TerminalCore
 @testable import TerminalOccupancyProbeSupport
 
 /// Guards the corpus against silently drifting away from the stimulus doc 19 measured.
@@ -48,26 +51,71 @@ struct OccupancyCorpusTests {
         #expect(occupancyCorpusLine(42) != occupancyCorpusLine(43))
     }
 
-    @Test("a saturated terminal evicts against the budget and still retains matches")
-    func saturationReachesDepth() {
-        // Intent: the corpus fed at the probe binary's own geometry and depth really
-        //   saturates -- eviction has run, so fewer rows are retained than were fed --
-        //   and matches survive in what is left.
+    @Test("the shipped depth charges past the budget, and an evicting history keeps matches")
+    func saturationReachesDepth() throws {
+        // Intent: two things, one arithmetic and one observed. The shipped default depth,
+        //   fed at the shipped geometry, charges several times the arena the production
+        //   budget admits -- so it must evict long before the feed ends. And a history
+        //   that has actually evicted still holds the corpus's needles, so the probe's
+        //   search cases have something to find at depth.
         // Why it exists: the probe's headline numbers are all "at a saturated history".
         //   If the feed were too short, every case would report the shallow-history cost
-        //   under a saturated label -- a wrong number that still looks reasonable. The
-        //   earlier form of this test built 4,000 lines at 80x24 and asserted only
-        //   `scrollbackRowCount > 0`, which any feed past one screen satisfies: it
-        //   charged ~3.4 MB against a ~15.7 MB arena, so nothing could have evicted and
-        //   the test proved the opposite of what its preamble claimed. Both the geometry
-        //   and the depth now match `TerminalOccupancyProbe`'s shipped defaults, and the
-        //   ceiling is asserted the way the resize probe's recipes assert theirs.
-        var terminal = makeOccupancyTerminal(columns: 179, rows: 66, lines: 30_000)
+        //   under a saturated label -- a wrong number that still looks reasonable. Two
+        //   earlier forms of this test failed to check that. The first asserted
+        //   `scrollbackRowCount > 0` at 4,000 lines; the second fed all 30,000 and
+        //   asserted `scrollbackRowCount < 30_000`, which the 66-row viewport satisfies
+        //   whether or not a single row is ever evicted -- the exact defect it was written
+        //   to fix. Neither could fail if the depth stopped saturating.
+        // Scenario: someone edits the corpus's line widths, or trims `lines` to make the
+        //   probe start faster, and doc 19's numbers silently become shallow-history
+        //   numbers under the same labels.
 
-        #expect(terminal.scrollbackRowCount > 0)
-        #expect(terminal.scrollbackRowCount < 30_000)
-        let found = terminal.beginSearch("NEEDLE_")
-        #expect(found)
+        // A prefix, not the shipped depth: the corpus's per-line charge is deterministic,
+        // so the budget question is arithmetic once the charge is measured, and measuring
+        // it costs a fifteenth of feeding all 30,000 lines.
+        let prefixLineCount = 2_048
+        var terminal = makeOccupancyTerminal(
+            columns: OccupancyProbeDefaults.columns,
+            rows: OccupancyProbeDefaults.rows,
+            lines: prefixLineCount
+        )
+
+        // The prefix itself must not have evicted, or the charge it reports is a budget
+        // ceiling rather than the corpus's own rate. The first line's needle still being
+        // findable is that statement: nothing has fallen off the front.
+        let prefixHoldsOldestNeedle = terminal.beginSearch("NEEDLE_0")
+        #expect(prefixHoldsOldestNeedle)
+        let census = terminal.memoryCensus
+        #expect(census.hasRetainedStorageOverdraft == false)
+
+        let chargePerLine = Double(census.retainedChargedBytes) / Double(prefixLineCount)
+        let projectedCharge = chargePerLine * Double(OccupancyProbeDefaults.lines)
+        // 1.5x, against a measured ~3.0x (~1,563 B/line x 30,000 = ~46.9 MB versus the
+        // 16 MiB budget's 15,728,640-byte arena). The prefix understates the full run --
+        // per-line charge creeps upward with depth as the index and side tables amortize
+        // (~1,463 B/line at 512 lines, ~1,563 at 2,048) -- so this is a conservative floor
+        // that still fails long before the depth could stop saturating by accident.
+        #expect(projectedCharge >= Double(census.retainedArenaCapacityBytes) * 1.5)
+
+        // The observed half, at an injected budget rather than the production one: the same
+        // corpus, fed past a capacity it exceeds, really does evict, and search still finds
+        // needles in what survives. `Terminal`'s budget-taking initializer is internal, which
+        // is why this file reaches for `@testable`; at the production budget the identical
+        // observation would cost the 30,000-line feed this test exists to avoid.
+        let anchorBudgetBytes = 1 << 19
+        var evicted = try #require(Terminal(
+            columns: OccupancyProbeDefaults.columns,
+            rows: OccupancyProbeDefaults.rows,
+            scrollbackBudgetBytes: anchorBudgetBytes
+        ))
+        feedOccupancyCorpus(into: &evicted, from: 0, count: 1_024)
+
+        // The oldest needle is gone -- that is eviction, and unlike a row count it cannot be
+        // satisfied by rows sitting in the viewport.
+        let evictedStillHoldsOldestNeedle = evicted.beginSearch("NEEDLE_0")
+        #expect(evictedStillHoldsOldestNeedle == false)
+        let evictedHoldsSomeNeedle = evicted.beginSearch("NEEDLE_")
+        #expect(evictedHoldsSomeNeedle)
     }
 }
 
