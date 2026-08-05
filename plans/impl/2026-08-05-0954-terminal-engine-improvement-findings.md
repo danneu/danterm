@@ -90,6 +90,12 @@ before this audit is closed out.
   from `os.stat` on a symlink in a temp dir, then passed 22/22 standalone and on the
   gate rerun. Unrelated to any audit finding; noted because two different gate steps
   have now flaked under the 74-step parallel pool.
+- [ ] **90 (residual)** -- six byte-identical generator copies remain, now that
+  `SeededByteGenerator` exists: `TerminalGraphemeTests`, `TerminalInputStreamTests`,
+  `TerminalResizeTests`, `TerminalTests`, the UInt64 variant in
+  `TerminalScrollbackBudgetTests` (must keep full-word width or its seeded sequence
+  changes), and `PromptAnchorSweepGenerator` in
+  `TerminalPromptAnchorResizeSweepTests`. Mechanical swaps. Fold into the `solo` batch.
 - [ ] **51 (optional)** -- retitle `regionalIndicatorGeometry` in
   TerminalGraphemeWidthTests.swift to also carry the deleted test's claim. Coverage
   unaffected.
@@ -905,7 +911,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 61. REP equality test passes on an unrelated field
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- both terminals now differ in lastPrintedCluster alone; confirmed by feeding identical bytes and watching equality hold
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalRepeatTests.swift:102` -- high confidence, trivial effort, found by `tests-behavior-a`
 
@@ -941,7 +947,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 64. Consumer-work generation never checked for staying put
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- inert-dispatch and re-damage legs added; the second leg had been passing incidentally off an already-damaged row
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalDamageTests.swift:20` -- high confidence, small effort, found by `tests-behavior-a`
 
@@ -977,7 +983,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 67. Style-table bound is 20,000x looser than the behavior
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- both bounds expressed against baseStyleSweepThreshold; real values are 111 and 444 against the old 19,999/1,999 tolerances
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalStyleTableTests.swift:63` -- high confidence, trivial effort, found by `tests-behavior-a`
 
@@ -989,7 +995,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 68. TerminalShellDialectTests re-implements the neutral recording decoder, with a dead hex path
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- decodes NeutralTerminalRecording directly; kept decode-only per the verifier, since provenance validation would reject three fixtures
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalShellDialectTests.swift:18` -- high confidence, small effort, found by `tests-behavior-b`
 
@@ -1061,7 +1067,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 74. Reflow style assertion is satisfied by an untouched cell
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- per-cell assertions replace the existential; the old form was confirmed to pass on an untouched cell
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalStyleTests.swift:141` -- high confidence, trivial effort, found by `tests-behavior-a`
 
@@ -1197,7 +1203,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 85. everyByteSplit's title says two-chunk while the body also sweeps three-chunk splits
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `done` -- verifier's retitle-only branch; both loops kept, no coverage lost
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalShellEventTests.swift:55` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -1257,7 +1263,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 90. Five test files each carry a private copy of the same xorshift Generator
 
-**Status:** `todo` -- batch `tests-b`
+**Status:** `partial` -- shared SeededByteGenerator added and TerminalSelectionTests switched over; six other copies remain (see Orchestrator follow-ups)
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSelectionTests.swift:487` -- high confidence, small effort, found by `tests-behavior-b`
 
