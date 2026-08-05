@@ -207,6 +207,23 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 
 ## Acceptance
 
+**Re-measured 2026-08-04 as `31/F14` after `31/F13` attributed the regression and
+three of its four mechanisms were fixed. This section is STILL NOT satisfied, and
+the go/no-go rung now passes.** Same frozen instrument, same base `28c54e1`, no
+threshold touched: `retained-browse` **+1.03%** (`inconclusive`, so **not
+`slower`** -- the plan's requirement for that rung is met), `scrollback-stream`
+**+4.92%** (`slower`, drain back from 1.3 MB/s to 7.8 against the baseline's 8.4)
+and `terminal-feed` **+2.68%** (`slower`, unmoved from +2.60%). The three
+history-free draw workloads read `equivalent` / `faster` / `faster`. **Two of the
+three rungs still read `slower`, so acceptance is not met and no further fix
+round was taken** -- that is the plan's own rule and
+`agent-docs/terminal-performance.md`'s. What is left, named: `31/F13`'s M1, the
+arena copied whole on every published frame (`memcpy` at 12.1%-16.1% of
+whole-process CPU), which is untouched because every fix for it changes what
+`31/D2` Decision 1 calls "one contiguous per-pane byte arena" -- a design change,
+not a wiring one. `terminal-feed` is explained by no named mechanism at all. The
+previous reading follows.
+
 **Measured 2026-08-04 as `31/F11`, and this section is NOT satisfied.** One valid
 `confirm` invocation against `28c54e1`, the pre-cutover parent: `retained-browse`
 **+60.44%** (frozen 1.05%), `terminal-feed` **+2.60%** (2.5%) and
@@ -469,6 +486,10 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 5. refactor(terminal): store retained history as logical-line records, deleting reflow of history, both caps and the per-row charge model
 - [x] 6. docs(research): record `28/D11`'s exit against the new store's resize measurement
 - [x] 7. docs(research): record the paired ladder verdict, the residency and pathological-input readings, and the `31/DD8` re-read
+- [x] 8. docs(research): attribute the cutover's regression to named mechanisms before fixing anything (`31/F13`)
+- [x] 9. perf(terminal): give the frame path back its two borrowing walks and its per-row hoists
+- [x] 10. perf(terminal): compare retained history as stored bytes instead of decoded cells
+- [x] 11. docs(research): re-run the frozen ladder once and record the verdict (`31/F14`) -- **acceptance still not met**
 
 ## Implementation notes
 
@@ -1004,6 +1025,47 @@ Open conditions that the implementation, not the design, has to discharge:
   from scratch because the campaign's convention is that a finding's instrument is
   re-runnable, and because the fold hazard it measured is now a named target.
 
+- **Slices 8-11 are the "profile, attribute, fix the wiring, re-run" round the human
+  chose after `31/F11`, and they are appended rather than folded into slice 7** for the
+  same reason `4a`/`4b` were inserted rather than renumbered: `31/F11`, `31/F13` and this
+  plan's own gates all refer to slice 7 by number. The rule-then-measure separation is
+  again a commit boundary -- slice 8 records the attribution and reads no fix, slices 9
+  and 10 change code with tests and read no verdict, slice 11 runs the frozen ladder.
+- **Three of `31/F13`'s four mechanisms were fixed and the fourth was refused on the
+  plan's own bounds.** What landed: the store's frame-path reads stopped materializing a
+  whole `GridCell` per column (`forEachPaintedCell` and `forEachKind` are their own walks
+  over a shared `foldedRow` shape, which also takes `31/F12`'s arithmetic fast path);
+  `forEachViewportRow` hands a row out before its columns so the planner's kind array,
+  hovered span and selected span are locals again rather than captures read per cell; and
+  `LogicalLineStore.==` compares stored bytes instead of decoding every retained cell into
+  a fresh array per record. What did not: the arena copied whole on every published frame.
+  `TerminalPTYHost.drainedFrameState()` publishes the `Terminal` **value**, so a single
+  15.75 MiB `ContiguousArray` goes non-unique and the next `admit` copies all of it; every
+  fix changes what the arena *is* (chunked backing, a shared immutable region, or a
+  publish that does not carry history), and `31/D2` Decision 1 says one contiguous arena.
+  That is a design change and this round's brief stopped at that line.
+- **Two judgment calls, recorded as `31/DD51`-`31/DD52` continuing `DD50`'s numbering**,
+  each taken as the obvious simple option and each a human's to revisit:
+  - **DD51 -- `forEachViewportRow` is a new public entry point rather than a reshaped
+    `forEachViewportCell`.** The plural cell spelling survives as a thin wrapper over it,
+    because four test suites and the pathological probe call it and none of them cares
+    about the row boundary. Two measured shapes were tried and rejected on the way: a
+    single closure holding the row's state in captured `var`s (which the compiler cannot
+    keep in registers across the call, +13.9 us per browsing frame) and one that closed a
+    row through a nested function (which defeats static exclusivity, and the dynamic
+    enforcement that replaces it cost ~210 us per frame). Both numbers are in this plan
+    rather than in `31/F14` because they are implementation readings, not evidence.
+  - **DD52 -- equality compares the arena's bytes and falls back to decoded cells for
+    exactly one case.** A record's bytes are a function of its content (`31/I1`), so equal
+    header, cell and side-table bytes mean equal cells -- except that a head trim moves the
+    key base the head record's in-arena tables are read against. A trimmed head carrying a
+    table therefore compares what a reader would see instead. The residual against the
+    incumbent is 13x (0.91 ms against 0.069 ms on a saturated pane) and is structural: the
+    old store's rows are shared blob objects, so `Array ==` answered on buffer identity,
+    and one contiguous arena has no analogue. Closing it needs a value identity on the
+    store -- an origin object plus a generation bumped by every mutation -- which trades a
+    measurable win for a silent-wrong-answer failure mode if one mutation ever forgets.
+
 ## Follow Up
 
 - **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
@@ -1019,14 +1081,24 @@ Open conditions that the implementation, not the design, has to discharge:
   does not supersede it (exit 1 said a keep-the-caps successor would), because
   resize cost stopped being a function of history depth and a successor budget
   wants deriving against the live screen. Nothing currently bounds resize cost.
-- **The cutover's regression is unattributed and nothing is profiling it.** `31/F11` bounds
-  where the cost is not -- not the locate count, not the projection arithmetic, not the
-  content-identity table, not `LogicalLineStore.admit`/`evictOneDisplayRow` as `31/F10`
-  measured them -- and never names it. The next instrument is
-  `just benchmark-trace scrollback-stream template="Time Profiler" seconds=30` plus a browse
-  profile, and the residency reading (8.62x footprint, 0.007x row allocations, census
-  coverage 0.05) says to look for per-row allocation on the wired admission and read paths
-  rather than inside the arena.
+- ~~**The cutover's regression is unattributed and nothing is profiling it.**~~
+  **Attributed 2026-08-04 as `31/F13`, and mostly fixed by slices 9 and 10. Two things are
+  left.** The named mechanism nobody took: the arena is copied whole on every published
+  frame -- `memcpy` at 12.1%-16.1% of whole-process CPU under
+  `applyOutput -> moveAndFillRows -> admit` -- because `TerminalPTYHost.drainedFrameState()`
+  publishes the `Terminal` value and makes a 15.75 MiB `ContiguousArray` non-unique. Taking
+  it reopens `31/D2` Decision 1's "one contiguous per-pane byte arena", so it is a human's,
+  and it is the first suspect for `scrollback-stream`'s residual +4.92%. The unexplained
+  rung: `terminal-feed` read +2.60% before the fixes and +2.68% after, and no measured
+  mechanism accounts for either -- the store's unshared write path is 0.96x-1.04x the
+  incumbent's per fed byte across three sessions, and that workload never publishes and
+  never draws.
+- ~~**`LogicalLineStore.forEachFoldedCell` re-enumerates the whole record for every display
+  row it folds**~~ **Fixed by slice 9**: the row's cell range is arithmetic whenever the
+  record carries no wide cell, which is the `31/DD4` fast path `rowCount` and
+  `firstRowCellEnd` already took. `31/F12`'s 40.3x cap-region frame cost is not re-measured
+  -- its probe is committed and runnable, and no decision is waiting on the number. The
+  original entry follows.
 - **`LogicalLineStore.forEachFoldedCell` re-enumerates the whole record for every display
   row it folds** (`LogicalLineStore.swift#forEachFoldedCell` calling
   `LogicalLineRecord.LogicalLineFold.enumerateRows`), which `31/F12` measured at ~1.95 ns

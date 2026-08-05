@@ -49,6 +49,20 @@ Two acceptance dimensions, and a change lands only on both:
    fold barely touches, and the same pane is 8.62x resident with 0.007x the row
    allocations. **The store does not land on this evidence**, and what to do
    about it is a human's.
+
+   **Re-measured 2026-08-04 by [F14](findings.md) after [F13](findings.md)
+   attributed the regression and three of its four mechanisms were fixed. The
+   dimension still FAILS, and by much less.** The go/no-go rung **passes**:
+   `retained-browse` is **+1.03%**, `inconclusive` rather than `slower`, against
+   the same frozen 1.05%. `scrollback-stream` fell from +141.42% to **+4.92%**
+   (drain 1.3 -> 7.8 MB/s against the baseline's 8.4) and `terminal-feed` did not
+   move at all (**+2.68%** against +2.60%). So the named fear -- scroll-speed
+   regression from wrap-at-read -- is **not** what the ladder is reporting; two
+   falsifier rungs sit just past their thresholds and the one mechanism `F13`
+   named and this work did not take is the arena's copy-on-write per published
+   frame, which is a change to `D2` Decision 1's "one contiguous arena" rather
+   than to the wiring. **The store still does not land**, and the disposition is
+   a human's.
 2. **Net simplification.** The deletion list (history reflow mutation, the
    cell cap, the row cap, their derivations and tests, narrow-then-widen
    machinery, continuation bookkeeping in retained history) must exceed the
@@ -747,6 +761,24 @@ licenses a production storage change; landing is the paired ladder's.
   Probe: `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWiredHistoryAttributionProbe.swift`,
   same env gate as every probe since `F1`, and written to run unchanged at
   `28c54e1`; all earlier probe files are unedited.
+- [x] `DONE` **`F14`, the ladder re-run after `F13`'s fixes** (the acceptance
+  dimension, second reading). Recorded in [F14](findings.md). One valid `confirm`
+  invocation against the same baseline, no threshold or pair count touched:
+  **`retained-browse` +60.44% -> +1.03%**, which is `inconclusive` and therefore
+  **not `slower`**, so the go/no-go rung is met; **`scrollback-stream` +141.42%
+  -> +4.92%** with its drain back from 1.3 MB/s to **7.8** against the baseline's
+  8.4; **`terminal-feed` +2.60% -> +2.68%**, unmoved. The baseline arm reproduces
+  `F11`'s own within 0.3%, which is what makes the two runs one comparison twice.
+  **Acceptance is still not met** -- the plan requires all three rungs
+  not-`slower` -- and the entry stops at the verdict. What it hands forward: the
+  one attributed mechanism left untaken is the arena copied whole on every
+  published frame (`memcpy` at 12.1%-16.1% of whole-process CPU in `F13`'s
+  profiles), and taking it reopens `D2` Decision 1's "one contiguous per-pane
+  byte arena"; `terminal-feed` is unexplained by any named mechanism and is the
+  ladder's least-resolved cell (two pairs, widest threshold). `DD49`'s residency
+  re-read is unchanged at **81.75 MB** and `F13` Observation 4 already separates
+  it into a 15.0 MB arena and 56.9 MB of unreturned allocator pages, with settled
+  residency at **0.92x** the incumbent's.
 
 ## Rejected
 
@@ -777,6 +809,17 @@ storage). **D1 answered `go` on 2026-08-04, so this stays rejected and its
 reopening condition changes**: it is no longer "if D1 answers no-go" but a
 `slower` verdict on the paired ladder against a real implementation. It remains
 the fallback that needs no storage rewrite.
+
+**Status 2026-08-04: the reopening condition fired on `F11` and `F14` narrows
+what it fired on.** The condition is a `slower` `retained-browse` verdict with
+`D3` Decision 1's two diagnostics holding, and `F11` recorded exactly that. After
+`F13` attributed the regression and its fixes landed, `retained-browse` reads
+**`inconclusive` at +1.03%** (`F14`) -- so the rung whose regression this
+reopening is *about* no longer regresses, and the two rungs that still read
+`slower` are a PTY drain and a headless feed, neither of which is a mixed-width
+read problem and neither of which the hybrid addresses. The condition remains
+formally fired and the entry remains rejected; executing it is a human's, and the
+evidence for doing so is weaker than it was when it fired.
 
 ### Lazy per-block index recompute (for milestone 1)
 
@@ -1074,5 +1117,10 @@ open, in the order the evidence makes it tractable:
   per-cell term goes and reflow of history no longer exists, and `28/D8`'s
   ~150 ms resize budget was deliberately not superseded, so nothing currently
   bounds resize cost.
-- **`F12`'s fold walk** is a named, measured, reproducible target with a
-  committed probe, independent of how the ladder question resolves.
+- ~~**`F12`'s fold walk** is a named, measured, reproducible target with a
+  committed probe, independent of how the ladder question resolves.~~ **Fixed
+  2026-08-04 alongside `F13`'s mechanisms**: the fold resolves a display row's
+  cell range arithmetically whenever the record carries no wide cell, which is
+  `DD4`'s fast path that `rowCount` and `firstRowCellEnd` already took. The 40.3x
+  cap-region frame cost is not re-measured -- the probe is committed and
+  runnable, and no decision waits on the number.

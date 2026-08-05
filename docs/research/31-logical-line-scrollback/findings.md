@@ -3987,3 +3987,148 @@ this workload does not reach and that is still owed.
 - Next action: fix the four mechanisms, each with a behavioral test, then re-run
   the frozen ladder once against `28c54e1`. If any rung still reads `slower`, the
   disposition returns to a human with `28/H7` on the table.
+
+### F14 -- the ladder re-run after `F13`'s fixes: `retained-browse` clears its go/no-go at +1.03%, `scrollback-stream` falls from +141% to +4.92% and `terminal-feed` does not move -- two rungs still read `slower`
+
+- Status: complete, and **acceptance is still not met**. The plan's Acceptance
+  section requires all three named rungs to read not-`slower`; one now does and
+  two do not. This entry records the verdict and stops there: the plan's own rule
+  says the disposition of a `slower` ladder is a human's, and
+  `agent-docs/terminal-performance.md` says to report rather than iterate.
+- **Read this first.** The regression `F11` recorded is mostly gone and the part
+  that remains is a different size of problem: `scrollback-stream` went from
+  **+141.42%** to **+4.92%** and its PTY drain from **1.3 MB/s back to 7.8 MB/s**
+  against the baseline's 8.4; `retained-browse`, the go/no-go, went from
+  **+60.44%** to **+1.03%**, which is `inconclusive` rather than `slower`. What
+  did not move at all is `terminal-feed`: **+2.60% -> +2.68%** against a 2.5%
+  threshold, the same reading twice.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate is `fa5fb74` (tree `3e11a79c39cb`), the
+  cutover plus `F13`'s attribution and the three fixes it names, with the two
+  untracked paths present throughout this doc's work captured by the harness and
+  absent from the app build. Baseline is **`28c54e1`**, byte-identical to `F11`'s
+  (tree `f7705cb0c767`), so the two runs are the same comparison twice.
+- Commands, inputs, or reproduction:
+
+      just benchmark-confirm baseline=28c54e1
+      just terminal-memory-probe "--payload scrollback-plain --vmmap"
+
+  One invocation, the complete six-workload ladder at the frozen pair counts, no
+  block invalidated and no verdict withheld. No threshold, pair count or
+  statistic was touched between `F11` and this run. Conditions: AC power,
+  one-minute load **1.74 at invocation** (0.17 per processor) and 2.22 before the
+  first block.
+- Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/3e11a79c39cb-0000/run.json`
+  (disposable; every decision-bearing value is quoted below).
+
+#### Observation 1 -- the ladder, before and after, against the same frozen thresholds
+
+| workload | frozen rule (`confirm`) | `F11` | this run | verdict |
+| --- | --- | ---: | ---: | --- |
+| **`retained-browse`** (go/no-go) | 4 pairs, +/-1.05%, band 0.75% | +60.44% `slower` | **+1.03%** | **`inconclusive`** |
+| **`terminal-feed`** (`H3` falsifier) | 2 pairs, +/-2.5% | +2.60% `slower` | **+2.68%** | **`slower`** |
+| **`scrollback-stream`** (`H3` falsifier) | 4 pairs, +/-1.85% | +141.42% `slower` | **+4.92%** | **`slower`** |
+| `content-churn` | 4 pairs, +/-2.15%, band 0.75% | -2.12% | -0.57% | `equivalent` |
+| `style-churn` | 4 pairs, +/-2.0% | -3.09% | -2.97% | `faster` |
+| `incremental-mixed` | 6 pairs, +/-1.85% | -5.16% | -10.18% | `faster` |
+
+`scrollback-stream`'s split, which is where the size of the change is legible:
+drain **182.6 ms at 8.4 MB/s** (baseline) against **196.3 ms at 7.8 MB/s**
+(candidate) for the same 1.53 MB corpus, with the draw tail again *falling*
+(15.2 -> 11.5 ms). `F11` read the same baseline at **182.0 ms and 8.4 MB/s**, so
+the baseline arm reproduces itself within 0.3% across the two sessions and the
+candidate arm moved from 1136.4 ms to 196.3 ms.
+
+**The go/no-go rung is met and the two falsifier rungs are not.** The plan's
+words are "not `slower` under its frozen rule", and `inconclusive` is not
+`slower`; `retained-browse` at +1.03% sits inside its 1.05% threshold and outside
+its 0.75% equivalence band, which is exactly what a change of no consequence
+reads as at four pairs.
+
+#### Observation 2 -- what the fixes bought, measured outside the ladder
+
+The three mechanisms `F13` named and fixed, each re-measured on the instrument
+that attributed it, interleaved against `28c54e1` in the same session:
+
+| reading | `28c54e1` | before the fixes | after |
+| --- | ---: | ---: | ---: |
+| `retained-browse`, headless, ns per planned frame | 335,196 | 626,000 (+86.7%) | **341,335 (+1.8%)** |
+| one frame's geometry pass over history, us | 13.0 | 48.1 | **9.8** |
+| one frame's cell pass over history, us | 40.3 | 83.6 | **49.3** |
+| one whole-terminal equality, saturated pane, ms | 0.069 | **44.31** | **0.91** |
+
+The equality reading is the one that changes size rather than sign: a single
+`terminal != previousTerminal` over 14,382 retained rows cost **44 ms** and now
+costs **0.9 ms**. `TerminalPTYHost.applyPointer` takes two of those per pointer
+event, so before this fix one mouse move over a saturated pane cost ~88 ms of CPU.
+It is still **13x** the incumbent's 0.069 ms, and the reason is structural: the
+incumbent compares `[PackedRetainedRow]`, whose elements are shared blob objects,
+so `Array ==` answers on buffer identity; one contiguous arena has no analogue.
+
+#### Observation 3 -- the mechanism `F13` named and this work did **not** fix
+
+`F13`'s M1 -- the arena copied on write once per published frame -- is untouched,
+and it is the largest single self frame in both of `F13`'s app profiles
+(`memcpy` at **12.10%** and **16.13%** of whole-process CPU, all of it under
+`applyOutput -> moveAndFillRows -> LogicalLineStore.admit`). It was left alone
+deliberately rather than missed: `TerminalPTYHost.drainedFrameState()` publishes
+the `Terminal` **value**, which makes a single 15.75 MiB `ContiguousArray`
+non-uniquely referenced, and every fix for that changes what the arena *is* --
+chunked backing, a shared-immutable region, or a publish that does not carry
+history. `D2`'s decision says "one contiguous per-pane byte arena", so that is a
+design change and not a wiring fix, and the brief for this work was to stop at
+that line. It is the obvious first suspect for `scrollback-stream`'s residual
++4.92%, and this entry does not claim to have proved that.
+
+`terminal-feed` is the reading that no named mechanism explains. It measures
+`Terminal.feed` on a fresh terminal per execution, it never publishes and never
+draws, and the headless drain arm measures the store's unshared write path at
+**0.96x-1.04x** the incumbent's per fed byte across three sessions. It read
++2.60% before the fixes and +2.68% after, against a 2.5% threshold -- a 0.18%
+overshoot of a directional threshold at **two pairs**, the smallest pair count on
+the ladder.
+
+#### Observation 4 -- `DD49`'s residency reading, re-taken on the same recipe
+
+`just terminal-memory-probe "--payload scrollback-plain --vmmap"`, the same pane
+recipe `F11` used:
+
+| quantity | `28c54e1` | `F11` (`330c17b`) | this run (`fa5fb74`) |
+| --- | ---: | ---: | ---: |
+| footprint delta | 9.16 MB | 81.66 MB | **81.75 MB** |
+| live heap | 5.43 MB | 15.55 MB | **15.55 MB** |
+| row allocations | 10,001 | 66 | **66** |
+| `vmmap` TOTAL DIRTY | 15.0 MB | 87.9 MB | **87.5 MB** |
+| of which `MALLOC_SMALL (empty)` | 16 K | 57.1 MB | **56.9 MB** |
+
+**Unchanged, and expected to be**: none of the three fixes touches allocation
+volume on the feed path, and `F13` Observation 4 already established what this
+number is -- 15.0 MB of it is the arena, and 56.9 MB is pages the allocator
+dirtied for transient small blocks and has not returned. The settled reading,
+taken with free pages returned first, is **+16.25 MiB** on the candidate against
+**+17.73 MiB** on the baseline for the same fed corpus. So `DD49`'s **8.62x
+stands as a footprint number and is still not a residency one**, and the honest
+statement is that this gate is answered by two instruments that disagree because
+they measure different things.
+
+- Uncertainty:
+  - **One invocation, as the plan's Acceptance specifies.** Both `slower`
+    verdicts are near their thresholds (+2.68% against 2.5%, +4.92% against
+    1.85%) rather than far past them, which is a different evidentiary position
+    from `F11`'s and worth saying: at these sizes a second invocation is a
+    reasonable thing for a human to want, and the rule does not require one.
+  - **`terminal-feed`'s two-pair rule.** The workload's frozen cell is the
+    ladder's smallest, and its 2.5% threshold is the widest; a +2.68% estimate
+    from two pairs is the least-resolved number in the table.
+  - **The residual is not attributed.** `F13`'s profiles predate the fixes, so no
+    profile exists of what `scrollback-stream` now spends its time on. M1 is a
+    named suspect with a measured share, not a demonstrated cause.
+  - **The `-2%` and `-7%` hypotheses stay refuted.** Nothing here reaches them;
+    the best rung is parity.
+- Next action: none taken here. The disposition is a human's, and the three
+  options the evidence supports are: take M1 (which reopens `D2` Decision 1's
+  "one contiguous arena"), accept two near-threshold `slower` rungs as a recorded
+  cost, or revert the cutover. `28/H7` remains reopened under `D3` Decision 1's
+  frozen rule, and this entry weakens rather than strengthens the case for
+  executing it: the go/no-go rung that rule is about now reads `inconclusive`.

@@ -2247,6 +2247,21 @@ real implementation by construction.
   prototype of the same rule re-measured at 0.52x-0.64x of today's admission in
   the same session. Four deferred decisions added (`DD29`-`DD32`), the first two
   of them the substitutions this rule's letter could not be executed with.
+  **The `AR6` residency reading is re-taken a third time in `F14`, at the pane
+  level and on `DD49`'s recipe, and it is unchanged: 81.75 MB of footprint
+  against 81.66 in `F11`.** That is not this rule's own instrument and does not
+  re-run it -- neither trigger can be read at a revision where today's store is
+  gone from the tree (`DD49`) -- but `F13` Observation 4 is what makes the number
+  legible, and it splits: **15.0 MB of it is the arena** (`vmmap`'s
+  `MALLOC_LARGE`, exactly the reservation) and **56.9 MB is `MALLOC_SMALL
+  (empty)`**, pages with no live allocation in them that the allocator has not
+  returned. Returned before the sample, the whole history costs **+16.25 MiB on
+  the candidate against +17.73 MiB on the pre-cutover baseline** for the same fed
+  corpus, which is 0.92x and consistent with this rule's own `narrow confirm`.
+  The disagreement between the two instruments is real and is recorded rather
+  than resolved: `just terminal-memory-probe` does not settle the allocator, so
+  its delta charges a pane for hysteresis it did not retain.
+
   This entry is the first slice of
   [the plan](../../../plans/impl/2026-08-04-1137-logical-line-scrollback-store.md)'s commit
   checklist and it produces **no number**: it states the arms, the stimuli, the
