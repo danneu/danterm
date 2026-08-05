@@ -513,6 +513,9 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 12. docs(research): amend `31/D2` Decision 1 to chunked backing and freeze the re-run's rule (`31/D5`)
 - [x] 13. perf(terminal): back the arena with chunks so a published frame copies one, not all of it
 - [x] 14. docs(research): re-run the frozen ladder once and record the verdict (`31/F15`) -- **acceptance still not met, on the go/no-go rung**
+- [x] 15. docs(research): amend `31/D2` Decision 1 to a dense per-record header cache on the index, and freeze the re-run's expectation
+- [ ] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
+- [ ] 17. docs(research): re-run the frozen ladder once and record the verdict
 
 ## Implementation notes
 
@@ -1139,6 +1142,21 @@ Open conditions that the implementation, not the design, has to discharge:
   under the floor, so small-budget tests keep today's placement exactly), and a row
   that does not fit one chunk retains nothing, which extends `31/DD46`'s rule to
   the chunk as the admissible unit.
+
+- **Slices 15-17 are the one mechanical round the human licensed after `31/F15`,
+  appended for the same reason `4a`/`4b`, `8`-`11` and `12`-`14` were**: every
+  earlier finding and gate refers to the earlier slices by number. The
+  rule-then-measure separation is again a commit boundary -- slice 15 freezes the
+  amendment and the re-run's expectation and reads no number, slice 16 changes
+  code with tests and reads no verdict, slice 17 runs the frozen ladder.
+- **The round is written as an amendment to `31/D2` Decision 1 rather than to
+  `31/D5`**, even though `31/D5`'s reopening is what licensed it. `31/D5` decided
+  the arena's *backing*, and its own free variable is the chunk size, which the
+  round deliberately does not tune; what the round changes is what the *index*
+  holds, which is `31/D2` Decision 1's, and specifically the offsets-only choice
+  that entry made with `31/F2`'s dense parallel array recorded beside it as
+  "priced and unbuilt". `31/D5` carries a disposition paragraph pointing at it so
+  the reopening is not left dangling.
 
 ## Follow Up
 

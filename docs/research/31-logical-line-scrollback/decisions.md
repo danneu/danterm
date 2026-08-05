@@ -946,7 +946,7 @@ than beside it:
 | term | charge | note |
 | --- | --- | --- |
 | record header + cells | exact bytes written | an identity, not a model |
-| block index | 8 B per record, at the deque's *capacity* | doc 15's `D4` rule: charge what the allocator gave, not what was asked for |
+| block index | 8 B per record, at the deque's *capacity* -- **16 B since the 2026-08-04 amendment below**, the offset and the record's cached header word | doc 15's `D4` rule: charge what the allocator gave, not what was asked for |
 | per-block cached totals | ~1/256 of a record's index cost | amortized; not modelled separately |
 | spill table (`28/F11`: ~0.12% of rows) | its allocation, as today | the record format still owes its shape (condition 9) |
 | `hyperlinkId` / `contentIdentity` side tables | their allocations, at capacity | one table per *record* now, not per display row (`HR7`) |
@@ -985,6 +985,186 @@ upper bounds):
 the migration property worth having: the store changes, the constant does not,
 and every measured class gets 1.16x-1.32x deeper for free because the arena
 spends fewer bytes on the same content.
+
+#### Amendment 2026-08-04 -- the index carries a dense per-record header word, which is `F2`'s recorded alternative taken on a reading `F2` did not measure
+
+**What changes, in one sentence.** The index stops being offsets-only: it holds,
+densely and in lockstep with the offsets ring, **each live record's 8-byte header
+word**, so a reader that knows a record's *index* reads its header out of an
+array instead of chasing it through the arena. Nothing else in this decision
+moves -- not the bound, not the arena, not eviction, not the number, not the
+census's capacity-versus-in-use requirement -- and no observable behavior
+changes. What moves is one row of the charge table and, with it, depth.
+
+**Why it is `F2`'s alternative and why it comes back now.** `F2` measured the
+eager counting pass with the count read two ways: chased through each record's
+header in the arena (**primary**, what this entry sketched) and read from a
+**dense parallel array** costing 8 bytes per line. The chase cleared `H2`'s bound
+on its own, so `F2`'s next action was explicit -- "keep the index offsets-only
+(the primary count-source clears the bound without the parallel array), and if a
+future design does want the counts array, this entry has already priced what it
+buys (4.3x on the pass at 100,000 lines, nothing that matters at trial depth)".
+That was the right call for the pass `F2` measured. The reading that reopens it
+is a different path: `F15` Observation 2 attributes `retained-browse`'s **+1.39%
+`slower`** -- 0.34 points past a frozen 1.05% threshold, the campaign's only
+remaining failing rung -- to the per-record header read, which `D5`'s chunked
+backing gave one more level of indirection, **on the one stimulus whose every
+record is exactly one display row**. So the term `F2` priced as unnecessary for a
+resize is the term a browse frame pays most often. The human licensed one
+mechanical round against exactly this target.
+
+**What is cached, and why the header word rather than the display-row count.**
+The cached value is the record's header word verbatim -- so `cellCount`,
+`hasWideCells`, `isOpen`, `isForcedSplit`, `startsMidLine`, `hasTrailingFill`,
+`isPad`, the semantic mark and the two in-arena tables' counts, all of it. **Every
+one of those is a function of the record's content alone, which is `I1`**, so the
+cache is **width-free**: a width change neither reads it nor invalidates it, and
+`setWidth`/`recomputeIndex` gain no maintenance point at all. A cached *display-row
+count* was the other candidate and is refused for that reason -- it is
+width-dependent, so it would add a seventh invalidation point on the one
+operation this whole design exists to make free, and it would serve only one of
+the three per-record reads the browse path makes. The header word serves all
+three: `displayRowCount(recordIndex:)` behind `locate`/`advance`/`isSoftWrapped`,
+`foldedRow`'s record, and `trailingFillStyle`'s header bit. On
+`retained-browse`'s stimulus that is **three chunked arena chases per display
+row per traversal, replaced by three dense reads**; the arena is still touched
+per *cell*, and on the wide path per boundary, neither of which changes.
+
+**Where the arena is still read, so the cache has an oracle.**
+`independentDisplayRowRecount()` -- `I9`'s independent recount, the only thing
+that catches a missed invalidation (`AR4`) -- is rewritten to read each header
+straight off the arena rather than through the cache, and a second oracle,
+`headerCacheAgreesWithArena()`, compares every cached word against the arena's.
+The suite asserts both after each of the six triggers and after every other
+operation that writes a header.
+
+**The charge: 8 B per record, at the ring's capacity, inside the budget.** The
+charge table's `block index` row is amended to read **16 B per record** -- the
+offset and the header word, each at its ring's *capacity*, which is `DD37`'s
+rule and `15/D4`'s before it. Nothing is charged outside the budget and `I2` is
+untouched in form: `arenaBytesInUse + indexBytes + sideTableBytes <=
+arenaCapacity`, with the capacity still the budget less `DD36`'s 1/16 reserve.
+
+**Does the added charge fit `DD36`'s reserve? On every measured class, yes;
+in the degenerate blank regime, no -- and it did not before either.** The reserve
+is `budget / 16` = **1,048,576 B** at the production budget. Derived from `F10`
+Observation 2's measured record counts by doubling each ring (backing overhead
+folded in):
+
+| class | records at saturation (`F10`) | index charge before | after | share of the 1 MiB reserve |
+| --- | ---: | ---: | ---: | ---: |
+| `mix` | 8,932 | 136,400 B | **267,472 B** | 25.5% (was 13.0%) |
+| `full` | 5,439 | 68,816 | **134,352** | 12.8% (was 6.6%) |
+| `stream` | 31,674 | 271,568 | **533,712** | **50.9%** (was 25.9%) |
+| `wrapped` | 34 | 2,000 | **2,512** | 0.2% |
+| `wide` | 7,080 | 68,816 | **134,352** | 12.8% (was 6.6%) |
+
+So the tightest measured class, `stream`, now spends **0.509 MiB of the reserve's
+1.000 MiB** where it spent 0.259. The blank-line regime is the one that does not
+fit and never did: at its new maximum of **524,288 records** the index is
+**8.126 MiB** (against 8.251 MiB at `F10`'s measured 884,734), which is `I2`'s
+already-recorded "capacity plus metadata" reading -- an arena plus ~8 MiB of
+index resident against a 16 MiB budget -- restated at a smaller record count
+rather than a new fact. Worst-case residency is therefore **unchanged**.
+
+**What it costs in depth, and `PO11`.** Added index bytes displace arena bytes
+one for one, so the depth cost is the added charge over the class's measured
+bytes per retained row. Derived from `F10` Observation 2, which is the last
+measurement that has both arms -- and it is *only* derivable, because `D4`'s
+probe needs the incumbent store and `DD49` records that it no longer exists in
+the tree:
+
+| class | today's engine | arena at `5cf61e0` | rows displaced | arena after | depth vs today |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `mix` | 15,049 | 15,628 | 131 | **15,497** | 1.030x (was 1.038x) |
+| `full` | 10,810 | 10,902 | 46 | **10,856** | **1.004x** (was 1.009x) |
+| `stream` | 25,575 | 31,674 | 537 | **31,137** | 1.218x (was 1.238x) |
+| `wrapped` | 10,835 | 11,006 | 0 | **11,006** | 1.016x (unchanged) |
+| `wide` | 13,901 | 14,486 | 61 | **14,425** | 1.038x (was 1.042x) |
+| blank | 262,144 | 884,734 | -- | **524,288** | 2.000x (was 3.375x) |
+
+**`PO11` holds on every class -- no class retains less than today's engine -- and
+`full`'s margin is now 0.4% where `F10` measured 0.9% and `F8` 7.6%.** That is
+this amendment's real price, stated in the open: **the margin `PO11` leaves is
+now thin enough that it is the binding constraint on any further per-record
+charge**, and a human who wants one has to amend `PO11`, raise the budget, or
+shrink the reserve. The blank regime loses depth for a different reason -- the
+index ring's *doubling* is what stops fitting, not the arena -- and 2.0x today's
+is still a comfortable pass.
+
+**One new failure mode the doubling opens, and how it is closed.** A ring never
+shrinks. With two 8-byte index words per record instead of one, the ring's
+doubling comes inside the budget's reach in the blank regime: a doubling taken
+while the charge was already near the capacity would leave metadata permanently
+over the bound, and eviction drops *records*, not *capacity*, so it could never
+get back under -- the pane would retain nothing for the rest of its life.
+Verified rather than reasoned: without a guard, a 1/4 MiB-budget blank history
+settles at **0 retained records with the charge 266,432 B over a 245,760 B
+capacity**. The guard is that opening a record charges the doubling it would
+force *before* taking it, so eviction runs first and the append needs no
+doubling. It is a charge test, not a room test -- index bytes never go in the
+arena -- and the store's own test pins both directions.
+
+**What `D4` says about this change: nothing new, and it cannot be made to.**
+`D4`'s eviction rule and its `AR6` residency reading are **not re-triggered**,
+because neither is runnable at this revision -- both are paired against today's
+store, which slice 5 deleted (`DD49`). Their recorded verdicts (`F10`: eviction
+**neutral**, residency **narrow confirm**) stand as readings of the store at
+`5cf61e0`. What this change does to each is derived and stated so it is not
+silently assumed: the write path gains **one dense 8-byte store per header write
+and one ring slot per record**, on a ring the same step already touches, and
+`D4`'s reject line is 1.09x against a per-admission cost of ~600-730 ns; residency
+gains the same 8 B per record, which on the two classes that triggered `AR6` is
+0.13-0.25 MiB against 15-18 MiB resident. **The instrument that actually reads
+this change is the ladder**, and its expectation is frozen below.
+
+**The frozen expectation for the re-run, stated before the implementation is
+measured.** The rule is unchanged: the plan's Acceptance section and the frozen
+thresholds in `scripts/terminal-benchmark-validation.py#DECISION_RULES`, one
+`just benchmark-confirm baseline=28c54e1` invocation, no threshold, pair count or
+statistic touched.
+
+1. **`retained-browse` must clear** -- not `slower`, where `F15` read +1.39%
+   against 1.05%. This is the rung the change targets and the only one it is
+   taken for.
+2. **`terminal-feed` and `scrollback-stream` must not regress past their
+   thresholds** (2.5% and 1.85%), where `F15` read +2.33% `inconclusive` and
+   -9.71% `faster`. This change *adds* work to the write path -- one store and
+   one ring slot per admitted record -- so a regression on either is **this
+   change's cost**, not an unexplained move.
+3. **Any rung `slower` means acceptance is not met and no further round is
+   taken.** That is `D5` rule 3 restated, and it stands.
+4. **If `retained-browse` does not clear, `F15`'s attribution was wrong**, and
+   the next instrument is the profile of the post-`D5` browse path that nobody
+   has taken -- not another mechanical round. `F15` says plainly that the
+   attribution is from the diff rather than from an instrument; this amendment
+   is the test of it.
+
+#### New deferred decisions
+
+- **DD55 -- the cache is the record's header *word*, in a ring parallel to the
+  offsets ring, rather than a display-row count, a per-block table, or a widened
+  offsets element.** Four options and one line each. A cached **count** is
+  width-dependent, so it adds an invalidation point on the width change and
+  serves one of the three per-record reads instead of all three. A **per-block**
+  table still leaves a chase per record inside the block, which is where the
+  browse path spends. A **widened element** -- one ring of `(offset, header)` --
+  makes lockstep structural rather than tested and puts both fields in one cache
+  line, and is refused only because it rewrites ~40 call sites for a locality win
+  that a 66-row viewport (528 B per ring) does not have room to show; the cost of
+  refusing it is that lockstep is an invariant a test checks rather than one the
+  type system holds, which is what `headerCacheAgreesWithArena()` exists for. A
+  human's to revisit if the oracle ever catches a drift.
+- **DD56 -- the index's growth is charged before the append that would force it,
+  rather than discovered after.** The alternative is to let the ring double and
+  evict afterwards, which is what every other charge term does -- and it does not
+  work here, because a ring never shrinks, so the doubling is not recoverable by
+  eviction. The cost of charging early: the store keeps its record count at the
+  ring's capacity rather than a little above it, so the blank regime's depth is a
+  power of two rather than the arena's own limit. Shrinking a ring on
+  `removeAll()` would recover the other half of this and is deliberately not
+  taken -- it is a second policy with its own failure mode, and no measurement
+  asks for it.
 
 #### Decision 2 -- eviction is byte-driven, display-row granular at the head, and never copies
 
@@ -2901,6 +3081,19 @@ Observation 2 attributes the +0.36 points to the per-record header read that
 gained an indirection (`record(at:)` / `displayRowCount(recordIndex:)`, once per
 record, on a stimulus whose every record is one display row) **from the code, not
 from a profile**, and no profile of the post-`D5` browse path exists.
+
+**The reopening's disposition, 2026-08-04: one mechanical round against the named
+term, and it is `D2` Decision 1's to take rather than this entry's.** The human
+licensed a single round -- a dense per-record header cache on the index, then one
+ladder re-run -- and the chunk size, which this entry names as its one free
+variable, is **not** tuned: the clause asks for a measurement rather than a
+tuning, and what the round does is remove the indirection the attribution names
+instead of making it cheaper by making chunks bigger. That is a change to what
+the *index* holds, so it is written as an amendment to `D2` Decision 1 ("the
+index carries a dense per-record header word"), which is where the index's shape
+was decided and where `F2`'s recorded alternative was left priced and unbuilt.
+This entry's decision -- chunked backing -- is untouched by it, and stop-if-slower
+stands: rule 3 above applies to the re-run unchanged.
 
 #### New deferred decisions
 
