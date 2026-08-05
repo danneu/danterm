@@ -1144,7 +1144,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 80. Pure TerminalCore generation test lives in the real-PTY pane-session suite
 
-**Status:** `done` -- moved into TerminalHistoryGenerationTests, off the serialized PTY gate step; the stale ESC[2J comment was left alone (deferred 13)
+**Status:** `done` -- moved into TerminalHistoryGenerationTests, off the serialized PTY gate step; the then-stale ESC[2J comment was later made true and rewritten by finding 13's fix (79564fbb)
 
 `lib/TerminalPTY/Tests/TerminalPaneSessionTests/TerminalPaneSessionControllerTests.swift:149` -- high confidence, small effort, found by `tests-pty-probes`
 
