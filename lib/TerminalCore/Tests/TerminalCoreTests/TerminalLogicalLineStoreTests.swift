@@ -164,11 +164,61 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordCount == 0)
     }
 
+    /// A blank-line history fed until the store visibly stopped getting deeper, plus how many
+    /// admissions that took.
+    ///
+    /// Separate from "the search ran out of admissions": an unsettled store is no evidence at
+    /// all about the doubling, so the two cases must not be confused at the call site.
+    private struct SettledBlankHistory {
+        var store: Terminal.LogicalLineStore
+        let admits: Int
+    }
+
+    /// Feeds blank rows until the store has evicted and then spent one whole ring block without
+    /// reaching a new depth, or gives up after `admitLimit`.
+    ///
+    /// The two conditions are both load-bearing. Every blank admission opens a record, so depth
+    /// climbs on literally every admission until the first eviction -- without the eviction test
+    /// a stall in the count could only mean the store had not started yet. And the block ring's
+    /// growth term is only tested when a record opens a new block (`indexGrowthBytes`), i.e.
+    /// once per `blockSize` records, so a full block of post-eviction admissions is the shortest
+    /// suffix that is guaranteed to put that arm of the doubling charge through the ceiling.
+    /// "No new depth" rather than "no change in depth": at these budgets the count keeps
+    /// oscillating by a row or two forever (budget 288,000 moves on every single admission out
+    /// to 60,000), so a stability test on equality never fires, while the high-water mark stops
+    /// moving at the first eviction.
+    private static func settledBlankHistory(
+        budgetBytes: Int,
+        width: Int,
+        admitLimit: Int
+    ) -> SettledBlankHistory? {
+        let blank = Terminal.GridRow(cells: (0..<width).map { _ in Terminal.GridCell() })
+        var store = Terminal.LogicalLineStore(budgetBytes: budgetBytes, width: width)
+        var deepestRecordCount = 0
+        var admitsSinceNewDepth = 0
+
+        for admit in 1...admitLimit {
+            store.admit(blank)
+            if store.recordCount > deepestRecordCount {
+                deepestRecordCount = store.recordCount
+                admitsSinceNewDepth = 0
+            } else {
+                admitsSinceNewDepth += 1
+            }
+            if store.evictedRowCount > 0,
+               admitsSinceNewDepth >= Terminal.LogicalLineStore.blockSize
+            {
+                return SettledBlankHistory(store: store, admits: admit)
+            }
+        }
+        return nil
+    }
+
     @Test("A blank history at a budget where the index ring must double keeps retaining rows")
-    func blankHistoryAtTheIndexRingDoublingPointKeepsRetaining() {
-        // Intent: feeding a degenerate blank-line history far past the depth at which the index
-        //   ring would have to double leaves the store retaining rows, with its charge inside
-        //   capacity -- at the budgets where that doubling is the term that binds.
+    func blankHistoryAtTheIndexRingDoublingPointKeepsRetaining() throws {
+        // Intent: feeding a degenerate blank-line history until it settles at the depth where the
+        //   index ring would have to double leaves the store retaining rows, with its charge
+        //   inside capacity -- at the budgets where that doubling is the term that binds.
         // Why it exists: `31/DD56`. A ring never shrinks, so a doubling taken while the charge
         //   was already near the capacity leaves metadata permanently over the bound, and
         //   eviction -- which drops records, not capacity -- can never get back under it: the
@@ -179,19 +229,34 @@ struct TerminalLogicalLineStoreTests {
         //   288,000 at 0 with 270,568 against 270,000; the neighbours retain normally.
         // Scenario: a pane configured with a budget that happens to put a power-of-two ring
         //   capacity in the window where its doubling costs more than the arena can give back.
-        let blank = Terminal.GridRow(cells: (0..<16).map { _ in Terminal.GridCell() })
-
+        // Each budget's settled depth lands inside its own doubling window
+        // (`capacity / 24.25 ..< capacity / 16.25`, `LogicalLineStore.indexGrowthBytes`), so the
+        // 60,000 is a hard search limit rather than the stimulus: failing to settle within it is
+        // a failure, not an assumed ceiling.
         for budget in [136_000, 144_000, 152_000, 280_000, 288_000, 296_000] {
-            var store = Terminal.LogicalLineStore(budgetBytes: budget, width: 16)
-            for _ in 0..<60_000 {
-                store.admit(blank)
-            }
+            let settled = try #require(
+                Self.settledBlankHistory(budgetBytes: budget, width: 16, admitLimit: 60_000),
+                "budget \(budget) never settled within 60,000 admits"
+            )
+            let store = settled.store
 
             #expect(store.recordCount > 4_000, "budget \(budget) retained nothing")
             #expect(store.grandDisplayRowTotal == store.recordCount)
             #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
             #expect(store.chargedBytes <= store.capacityBytes, "budget \(budget) is over capacity")
         }
+    }
+
+    @Test("A history that never fills its budget is not a settled blank history")
+    func unsaturatedBlankHistoryIsNotSettled() {
+        // Intent: the settle detector reports nothing for a store that is still growing.
+        // Why it exists: blank admissions leave the record count flat whenever an eviction
+        //   happens to match an admission, so a detector keyed on "the count stopped moving"
+        //   alone could stop before the index ring is anywhere near its doubling point and let
+        //   `blankHistoryAtTheIndexRingDoublingPointKeepsRetaining` pass without ever charging
+        //   for a doubling.
+        // Scenario: a budget with room for far more blank rows than the search will admit.
+        #expect(Self.settledBlankHistory(budgetBytes: 1 << 22, width: 16, admitLimit: 2_000) == nil)
     }
 
     @Test("Clearing all history adds the retained rows to the evicted count")
