@@ -303,6 +303,84 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("sparse damage clips through one rect list carrying one rect per span") {
+        // Intent: a partial draw installs a single clip whose rect list has one entry per
+        //   maximal damage span, instead of a built path plus a second stacked clip.
+        // Why it exists: the fold to one clip(to:) call must not merge disjoint spans into
+        //   their bounding rect -- that would repaint every untouched row between them, the
+        //   exact regression doc 29 fixed. One rect per span is what keeps the clip exact.
+        // Scenario: a TUI updates status rows near the top and bottom of a ten-row viewport,
+        //   the same stimulus as the drawn-row test above, read at the clip instead.
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+
+        controller.emitFrameForTest(damage: .init(rows: [1]))
+        controller.emitFrameForTest(damage: .init(rows: [8]))
+        pane.displayIfNeeded()
+
+        try uiExpect(
+            pane.clipRectsForTesting.count == 1,
+            "expected one clipped draw: \(pane.clipRectsForTesting)"
+        )
+        let rects = pane.clipRectsForTesting[0]
+        try uiExpect(rects.count == 2, "disjoint spans did not clip as two rects: \(rects)")
+        try uiExpect(
+            rects[0].maxY < rects[1].minY,
+            "span rects were not disjoint and ascending: \(rects)"
+        )
+        try uiExpect(
+            rects[0].height == rects[1].height,
+            "equal three-row halo spans produced unequal rects: \(rects)"
+        )
+        try uiExpect(
+            rects.allSatisfy { $0.minX == 0 && $0.width >= pane.bounds.width },
+            "span rects did not span the full row width: \(rects)"
+        )
+    }
+
+    uiTest("clip rects are clamped to the drawn rect") {
+        // Intent: each span rect is intersected with the rect being drawn before clipping, so
+        //   the single clip bounds glyphs to the region whose background this pass refilled.
+        // Why it exists: folding away the separate clip(to: dirtyRect) would silently drop that
+        //   guarantee if the spans were installed unclamped; an AppKit rect narrower than the
+        //   pending damage would then let antialiased glyph edges blend over unrefilled pixels.
+        // Scenario: AppKit asks for the top quarter of the view while damage spans its full
+        //   height -- the multi-callback case where a dirty rect is narrower than the damage.
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+
+        controller.emitFrameForTest(damage: .init(rows: [1]))
+        controller.emitFrameForTest(damage: .init(rows: [8]))
+        // Drawn through an explicit bitmap context rather than display(_:) so the test owns the
+        // dirty rect: AppKit coalesces its own invalid regions to their union, which is exactly
+        // the narrower-than-damage case this test needs to construct.
+        let drawnRect = NSRect(x: 0, y: 0, width: 80, height: 40)
+        try drawPane(pane, dirtyRect: drawnRect)
+
+        let rects = pane.clipRectsForTesting.flatMap { $0 }
+        try uiExpect(rects.isEmpty == false, "narrowed draw installed no clip rects")
+        try uiExpect(
+            rects.allSatisfy { drawnRect.contains($0) },
+            "clip rects escaped the drawn rect \(drawnRect): \(rects)"
+        )
+        try uiExpect(
+            rects.allSatisfy { $0.isEmpty == false },
+            "an empty clamped rect was submitted to the clip: \(rects)"
+        )
+    }
+
     uiTest("semantic notifications and progress cross the AppKit adapter") {
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
@@ -1164,6 +1242,28 @@ private func momentumPhaseCode(_ phase: NSEvent.Phase) -> Int64 {
 }
 
 @discardableResult
+/// Runs one `draw(_:)` pass against a bitmap context with a caller-chosen dirty rect, which
+/// AppKit's own display path will not do -- it always redraws the union of its invalid regions.
+@MainActor
+private func drawPane(_ pane: SwiftTerminalSessionView, dirtyRect: NSRect) throws {
+    guard let context = CGContext(
+        data: nil,
+        width: Int(pane.bounds.width),
+        height: Int(pane.bounds.height),
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+    ) else {
+        throw UITestFailure(message: "could not create the bitmap draw context")
+    }
+    let graphicsContext = NSGraphicsContext(cgContext: context, flipped: pane.isFlipped)
+    let previous = NSGraphicsContext.current
+    NSGraphicsContext.current = graphicsContext
+    defer { NSGraphicsContext.current = previous }
+    pane.draw(dirtyRect)
+}
+
 @MainActor
 private func makeMountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
     let pane = SwiftTerminalSessionView(controller: controller)

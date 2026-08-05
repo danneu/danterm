@@ -87,9 +87,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         publishedFrame?.plan.defaultBackground
     }
     private(set) var drawnRowSetsForTesting: [Set<Int>] = []
+    /// The exact rect list handed to the single clip call, per draw -- the drawn-row sets
+    /// pin which rows the plan carries, this pins the region CoreGraphics actually admits.
+    private(set) var clipRectsForTesting: [[CGRect]] = []
 
     func resetDrawnRowSetsForTesting() {
         drawnRowSetsForTesting = []
+        clipRectsForTesting = []
     }
     #endif
     #if DANTERM_TERMINAL_BENCHMARK
@@ -181,23 +185,33 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 ? frame.plan
                 : clipFramePlan(frame.plan, to: drawingDamage)
             context.saveGState()
-            if drawingDamage.isFull == false {
-                context.beginPath()
-                for span in terminalDamageMaximalContiguousSpans(drawingDamage.rows) {
-                    context.addRect(NSRect(
-                        x: 0,
-                        y: CGFloat(span.lowerBound) * frame.metrics.cellSize.height,
-                        width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
-                        height: CGFloat(span.count) * frame.metrics.cellSize.height
-                    ))
-                }
-                context.clip()
+            // One clip for both jobs: bounding the fill to the damaged spans, and bounding
+            // glyph ink to the region this pass just refilled. Clamping each span to
+            // dirtyRect up front makes the second guarantee structural rather than a
+            // second stacked clip, and drops single-span draws onto CoreGraphics'
+            // path-free rect-clip route.
+            let clipRects = drawingDamage.isFull
+                ? [dirtyRect]
+                : spanClipRects(
+                    drawingDamage,
+                    metrics: frame.metrics,
+                    columns: frame.plan.columns,
+                    clampedTo: dirtyRect
+                )
+            #if DANTERM_UI_TEST
+            clipRectsForTesting.append(clipRects)
+            #endif
+            // clip(to:) with an empty list is not documented to clip out everything; an
+            // explicit empty rect is. Reachable when the damage misses dirtyRect entirely.
+            if clipRects.isEmpty {
+                context.clip(to: .zero)
+            } else {
+                context.clip(to: clipRects)
             }
             context.fill(dirtyRect)
             #if DANTERM_UI_TEST
             drawnRowSetsForTesting.append(plan.includedRows)
             #endif
-            context.clip(to: dirtyRect)
             drawRenderFrame(plan, metrics: frame.metrics, in: context)
             context.restoreGState()
             #if DANTERM_TERMINAL_BENCHMARK
@@ -226,6 +240,31 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         } else {
             context.fill(dirtyRect)
         }
+    }
+
+    /// The clip region for a partial draw: one rect per maximal damage span, each clamped to
+    /// the rect being drawn. Empty results are dropped, so the rect count can fall below the
+    /// span count -- and an all-empty result means the damage lies entirely outside this draw.
+    private func spanClipRects(
+        _ damage: TerminalDamage,
+        metrics: TerminalRenderMetrics,
+        columns: Int,
+        clampedTo dirtyRect: NSRect
+    ) -> [NSRect] {
+        var rects: [NSRect] = []
+        for span in terminalDamageMaximalContiguousSpans(damage.rows) {
+            let spanRect = NSRect(
+                x: 0,
+                y: CGFloat(span.lowerBound) * metrics.cellSize.height,
+                width: CGFloat(columns) * metrics.cellSize.width,
+                height: CGFloat(span.count) * metrics.cellSize.height
+            )
+            let clamped = spanRect.intersection(dirtyRect)
+            if clamped.isEmpty == false {
+                rects.append(clamped)
+            }
+        }
+        return rects
     }
 
     /// Consumes exact engine damage when available and preserves AppKit-driven redraws as fallback.
