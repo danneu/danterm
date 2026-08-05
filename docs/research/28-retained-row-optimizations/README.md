@@ -963,7 +963,9 @@ one item that ended by having its subject removed and that is worth reading:
    `D11`'s amendment.** The trial ran with `D8`'s budget reopened by explicit
    human choice; the human's verdict was exit 1 (keep the caps, the hitch is
    livable) and it was **still unratified** when doc 31's store deleted reflow of
-   history out from under it. Re-measured on the same committed recipe at the
+   history out from under it. **That ratification slot is closed as MOOT
+   2026-08-05** (marked amendment at `D11`): the verdict has no subject left, so
+   nothing is waiting on it. Re-measured on the same committed recipe at the
    trial's own depth, the width change went **576.19 ms at 9,860 retained rows ->
    1.58 ms at 10,735**, so the subjective question the trial existed to answer no
    longer has a subject. Both caps are deleted with no analogue; the 16 MiB

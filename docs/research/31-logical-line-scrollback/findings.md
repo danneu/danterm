@@ -1428,6 +1428,25 @@ why it is nonetheless not "width-dependent persisted state" in `D1`'s sense.
     over-read: the *choice of unit* is back on the table for a human, and with it
     the README's second acceptance dimension. It settles nothing on its own, and
     `F11` Observation 1 is where the acceptance actually failed.
+
+    **ACCEPTED AND CLOSED 2026-08-05 by human judgment.** The tally above is not
+    revised and no measurement was taken for this: the reopened dimension is
+    closed by accepting the trade, not by re-arguing the count. What was weighed:
+    the **performance wins** (`28/D11`'s exit amendment measures saturated-wide
+    resize **576.19 ms -> 1.58 ms**, 364x, at greater depth; `F16` reads
+    `scrollback-stream` **-13.60%** with the PTY drain past the pre-cutover
+    engine's, and `retained-browse` at parity), the **bug class made
+    unrepresentable by construction** (`I3` -- a width change touches no retained
+    row, so `28/D8`'s lossy narrow-then-widen and the whole resize/reflow
+    correctness surface stop existing rather than being defended), and **reach**:
+    the 4.5 deleted rules were cross-cutting contracts spanning the store and
+    every reader, the 7.5 added ones are store-local, single-writer and
+    oracle-fenced. The two additions that cross the store's boundary -- `DD43`'s
+    seam-spacer reach at four `Terminal` call sites and the
+    `historyEvictionsObserved` eviction-delta protocol -- are accepted as named
+    exceptions. So the inequality is **not** claimed to hold on count; the human
+    judged the added local rules worth what they bought. `DD8` is closed and the
+    plan's second acceptance dimension with it.
 - Next action: `D1` closes. Its verdict, scoping, and the conditions Phase 2
   inherits are in [decisions.md](decisions.md); the ledger in
   [README.md](README.md) is updated to match. Phase 2 opens as a **design**
@@ -4800,3 +4819,25 @@ and this campaign has now been fooled by it once and caught it twice.
   closure depth is the named term and both routes down it are decisions rather
   than fixes; `DD52`'s equality residual is 14.8x and unspent; and the draw cells'
   paired estimates deserve a calibration before any future reading leans on them.
+
+#### Disposition 2026-08-05 -- the residual is ACCEPTED, no fix, and this entry becomes the first suspect for any future browse regression
+
+The human declines **both** routes down the residual: the `@inlinable` traversal
+that specializes across the target boundary (an ABI-surface decision under
+[`../../design/2026-07-29-cross-module-value-dispatch.md`](../../design/2026-07-29-cross-module-value-dispatch.md))
+and the different traversal contract (a design decision). Neither is a fix that
+can be taken without deciding something larger, and the quantity at stake is
+**+8,206 ns of a 340,025 ns frame -- about 3 us, +1.00%** -- which no user
+observes. Nothing above is revised; this appends the disposition.
+
+The standing note, which is why this is recorded rather than the item deleted:
+**any future `retained-browse` regression on a calibrated reading makes the
+viewport traversal's closure depth the first suspect.** The bucket table above is
+the before-picture to diff a new profile against, and the seven-frames-versus-three
+shape is the specific thing to re-count. `DD51` already priced the two
+alternatives to this spelling once; a regression is what would justify pricing
+them again.
+
+The other two items the entry handed forward are untouched by this disposition:
+`DD52`'s equality residual is still unspent, and the draw cells' paired estimates
+still want a calibration before any future reading leans on them.

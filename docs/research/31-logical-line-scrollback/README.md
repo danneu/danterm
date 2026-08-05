@@ -1130,6 +1130,17 @@ add detail to it.
 
 ## Outcome
 
+**Headline, 2026-08-05: both acceptance dimensions are settled, and the four
+things the campaign was still holding open are dispositioned.** The human
+ratified `I2`'s restatement as built (declining a simpler arena-only rule),
+accepted and closed `DD8`'s reopened simplification dimension on judgment rather
+than on a recount, closed `28/D11`'s exit-1 verdict slot as **moot** (its subject
+no longer exists), and **accepted** the `retained-browse` ~1% residual with no
+fix. Each disposition is a marked amendment at the entry that owns it -- `I2` and
+`DD8` at the plan and at [findings.md](findings.md), the browse residual at `F17`,
+and `D11`'s slot in [doc 28](../28-retained-row-optimizations/decisions.md). What
+follows is the record as it stood before them, unchanged.
+
 **Headline, 2026-08-04: the paired ladder passes.** `F16` reads all three
 acceptance rungs not-`slower` against the pre-cutover parent `28c54e1` --
 `retained-browse` **+0.94%** (go/no-go, 1.05%), `terminal-feed` **+2.49%**
@@ -1322,8 +1333,16 @@ is that the change it licensed is not a regression. What is open:
   the plan's Acceptance records a pass. **Not** answered on the complexity
   dimension -- see `DD8` below, which is now the only open acceptance question and
   is a human's judgment rather than a measurement.
-- **`DD8`'s simplification inequality is the campaign's remaining open acceptance
-  question, and no number will settle it.** `F11` Observation 4 re-read it
+- ~~**`DD8`'s simplification inequality is the campaign's remaining open acceptance
+  question, and no number will settle it.**~~ **ACCEPTED AND CLOSED 2026-08-05 by
+  human judgment**; the full reasoning is the marked disposition at `DD8` in
+  [findings.md](findings.md). In one line: the tally is not revised, and the human
+  judged the added store-local rules worth the performance wins (364x resize,
+  `scrollback-stream` -13.60%, browse at parity), the resize/reflow bug class made
+  unrepresentable by `I3`, and the reach asymmetry (deleted rules cross-cutting,
+  added rules store-local and oracle-fenced). The two boundary-crossing additions
+  are accepted as named exceptions rather than argued away. The reading the
+  closure is taken against follows. `F11` Observation 4 re-read it
   against what landed: **4.5 invariants deleted against 7.5 added** (`DD50`
   cancels the maintained charge against today's; counting it instead makes it 4.5
   against 8.5, and the direction does not change), a storage core of **2,419
@@ -1343,8 +1362,14 @@ is that the change it licensed is not a regression. What is open:
   re-measures above **121 us**). Its premise -- that the materializing facade is
   what costs -- is no longer supported by the ladder, which now clears with the
   facade in place, so the trigger is the only thing that should promote it.
-- **`I2`'s restatement is still unratified** by a human, as `F8`, `F10`, `F16`
-  and the plan all record, and `DD36`'s reserve still does not cover `mixed`'s
+- ~~**`I2`'s restatement is still unratified** by a human~~ **RATIFIED 2026-08-05
+  as built**, at the plan's `I2`: charged bytes bounded, arena capacity
+  **15,728,640** held below the **16,777,216** budget by a fixed metadata reserve,
+  resident bounded by capacity plus metadata. A simpler arena-only rule
+  (full-capacity arena, metadata riding along uncharged) was put and **declined**
+  in favour of keeping what is built and tested by `PO3`'s census. The reading
+  that was owed the ratification follows -- it was recorded by `F8`, `F10`, `F16`
+  and the plan -- and `DD36`'s reserve still does not cover `mixed`'s
   measured metadata share -- now with **half the reserve spent** on the index at
   the tightest measured class (`F16`: `stream` at 0.509 of 1.000 MiB) and
   `PO11`'s margin on `full` down to a derived **0.4%**. That margin is the
@@ -1364,7 +1389,13 @@ is that the change it licensed is not a regression. What is open:
   traversal contract (design). Both are a human's, neither is a fix. The one
   mechanical shave the profile named was taken and read **`equivalent` at
   -0.27%**. **Every remaining hypothesis about the store being what costs the
-  browse frame is now closed by measurement.**
+  browse frame is now closed by measurement.** **The residual is ACCEPTED with no
+  fix, 2026-08-05**: the human declines both routes, on the ground that ~3 us on a
+  ~340 us frame is invisible and neither remedy is a fix that can be taken without
+  deciding an ABI or a traversal contract. **The standing note is the reason the
+  item is kept rather than deleted: any future `retained-browse` regression on a
+  calibrated reading makes the traversal's closure depth the first suspect**, and
+  `F17`'s bucket table is the before-picture to diff against.
 - **`DD52`'s equality residual is unspent**: comparing stored bytes is 13x the
   incumbent's `Array ==` on buffer identity (0.91 ms against 0.069 ms on a
   saturated pane), and closing it needs a value identity on the store -- an origin

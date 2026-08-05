@@ -1363,6 +1363,13 @@ successor would (`D11` is still the last decision in this doc). So this entry
 does **not** claim the trial answered its subjective question. It claims the
 question stopped having a subject.
 
+**Amended 2026-08-05 -- the verdict slot is CLOSED AS MOOT.** The human closes it
+rather than leaving it standing as an open ratification: the exit-1 verdict is
+**moot**, because the trial's subject -- the two caps and the ~600 ms resize
+hitch they bought -- no longer exists for a verdict to be about. Nothing above is
+rewritten; what changes is that this slot is no longer something anyone is
+waiting on, and `D11` closes with it.
+
 ##### Exit 4, stated
 
 *The cause is removed.* `9ad7cc5` stores retained history as one record per

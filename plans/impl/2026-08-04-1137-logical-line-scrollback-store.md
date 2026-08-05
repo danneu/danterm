@@ -87,7 +87,16 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
   2026-08-04 as `31/D4`'s residency remedy shipped. The original sentence said
   "the arena's capacity *is* that budget", which the remedy makes false; `31/F8`
   and the slice-4 notes both record that this restatement is the human's to
-  ratify, so it is marked rather than folded in silently.)*** Charged bytes --
+  ratify, so it is marked rather than folded in silently.* **RATIFIED
+  2026-08-05, as built.** The restatement below is the invariant, not a proposal:
+  charged bytes are bounded, the arena's capacity is the 15,728,640 held below
+  the 16,777,216 budget, and resident is capacity plus metadata. A simpler
+  alternative was put and **declined**: an arena-only rule -- capacity equal to
+  the full budget, with the index and side tables riding along uncharged --
+  which buys one fewer quantity to explain at the cost of un-bounding the
+  metadata that `31/F8` measured at 3.23%-15.29% of the budget. The three-quantity
+  statement is what `PO3`'s census tests and what shipped, so it is kept.*)**
+  Charged bytes --
   arena bytes in use, plus the index, plus **every** side table at what its
   allocator gave rather than at what its live entries weigh -- never exceed the
   **arena's capacity**; the arena is allocated once, at a capacity held **below**
@@ -206,6 +215,14 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
   actually gone from the tree rather than relocated.
 
 ## Acceptance
+
+**COMPLETE 2026-08-05. Both dimensions are now settled**: the ladder dimension
+was MET on 2026-08-04 (`31/F16`, below), and the simplification dimension --
+`31/DD8`'s inequality, which no measurement could settle -- is **accepted and
+closed by human judgment** on the reasoning recorded at the `31/DD8` gate under
+"Gates carried from the research doc". `I2`'s restatement is **ratified as
+built** in the same pass. The full reading of the ladder dimension follows,
+unchanged.
 
 **MET, re-measured 2026-08-04 as `31/F16` after `31/D2` Decision 1's amendment
 put a dense per-record header word on the index.** Same frozen instrument, same
@@ -378,6 +395,12 @@ Open conditions that the implementation, not the design, has to discharge:
   what changes is that capacity and budget stop being the same number, which
   `I2`'s own wording ("the arena's capacity *is* that budget") is restated for
   above -- **marked as an amendment, and still owed the human's ratification**.
+  **RATIFIED 2026-08-05 as built**: the human took the restatement over the
+  simpler arena-only alternative (full-capacity arena, metadata uncharged), on
+  the ground that what is built is tested by `PO3`'s census and the alternative
+  would leave the metadata this finding measured at 3.23%-15.29% of the budget
+  outside any bound. `I2` above carries the ratification; nothing in the
+  invariant's wording changes.
   The original statement
   of the gate follows. `I2` bounds charged bytes, and `PO3`'s
   census can only see those; resident is capacity plus metadata once the ring
@@ -449,6 +472,21 @@ Open conditions that the implementation, not the design, has to discharge:
   `31/DD43`'s seam-spacer reach and the `historyEvictionsObserved` protocol. The
   header cache slice 16 added is a ninth mechanism with one writer and one oracle,
   and it is not counted into the tally, which was frozen at `31/F11`.
+  **ACCEPTED AND CLOSED 2026-08-05 by human judgment, with the tally standing as
+  written.** The unit question is not resolved by a recount and no measurement was
+  taken for it: the human judged the added local rules worth what the campaign
+  bought. What was weighed, in the order it was weighed -- the performance wins
+  (**364x** on saturated-wide resize per `28/D11`'s exit amendment, a PTY drain
+  past the pre-cutover engine's at `scrollback-stream` **-13.60%**, browse at
+  parity), the **bug class made unrepresentable by construction** (a width change
+  evicts nothing and cannot lossily reflow history -- `I3`, which `28/D8`'s row
+  cap could not achieve), and **reach**: the 4.5 deleted rules were cross-cutting
+  contracts spanning the store and every reader, while the 7.5 added ones are
+  store-local, single-writer and oracle-fenced. Two additions cross the store's
+  boundary and are accepted as named exceptions rather than argued away. The
+  inequality is therefore *not* claimed to hold on count; the trade is accepted on
+  shape and on what it bought. This is the plan's second acceptance dimension, and
+  with it the plan's acceptance is complete.
 - The record format still owes a shape for the spill table, the hyperlink table
   and the semantic-mark slot (`31/D1` condition 9, advanced by `31/D3`
   Decision 6).
@@ -1270,6 +1308,20 @@ Open conditions that the implementation, not the design, has to discharge:
 
 ## Follow Up
 
+- **The `retained-browse` ~1% residual is ACCEPTED with no fix, 2026-08-05.**
+  `31/F17` attributed it to closure-dispatch depth in the viewport traversal --
+  **+8,206 ns of a ~340,025 ns frame**, about **3 us** -- and named two routes
+  down: an `@inlinable` traversal that specializes across the target boundary (an
+  ABI-surface decision under
+  [`docs/design/2026-07-29-cross-module-value-dispatch.md`](../../docs/design/2026-07-29-cross-module-value-dispatch.md))
+  and a different traversal contract (a design decision). **The human declines
+  both for now.** At ~3 us on a ~340 us frame the residual is invisible to a user,
+  the store is measured not to be its cause, and neither remedy is a fix that can
+  be taken without deciding an ABI or a contract. The standing note, which is the
+  point of recording this rather than deleting the item: **any future
+  `retained-browse` regression on a calibrated reading makes the traversal's
+  closure depth the first suspect**, and `31/F17`'s bucket table is the
+  before-picture to diff against.
 - **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
   README entry still states the old one.** It asks where inside reflow's dominant
   per-cell term the time goes, and names itself "the prerequisite for `D8`'s cell
