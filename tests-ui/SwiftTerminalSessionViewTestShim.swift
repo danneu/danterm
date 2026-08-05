@@ -384,6 +384,8 @@ final class TerminalPaneSessionController {
     func readViewportText() -> String { "" }
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }
+    func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String? { { _, _ in nil } }
     private(set) var gridDimensions: [TerminalDimensions] = []
 
     func setGridDimensions(_ dimensions: TerminalDimensions) {
