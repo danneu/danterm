@@ -1,4 +1,5 @@
 // Proves retained primary rows and their shared logical-text projection.
+import Darwin
 import Testing
 
 @testable import TerminalCore
@@ -195,38 +196,47 @@ struct TerminalScrollbackTests {
         // Scenario: quitting with one long-lived pane hung the app for ~30s -- the quit
         //   checkpoint reads `primaryHistoryText` per pane on the main thread, and a
         //   budget-full 16 MB scrollback took 38s to project.
-        func projectionCost(lines: Int) throws -> (seconds: Double, characters: Int) {
-            var terminal = try #require(Terminal(columns: 200, rows: 50))
-            let line = Array((String(repeating: "abcdefghij", count: 19) + " end\r\n").utf8)
-            for _ in 0..<lines { terminal.feed(line) }
-            let start = ContinuousClock.now
+        // Thread CPU time, not the wall clock: the regression is `memmove` this thread runs,
+        // so preemption by whatever else the machine is doing is noise the measurement should
+        // not carry. Against a wall clock the same two populations below overlap far more --
+        // measured on a deliberately oversubscribed box, the linear arm reached 1.51x and the
+        // quadratic arm fell to 2.85x, which is a gate a loaded test pool can cross in both
+        // directions. On this clock they were 1.12x and 3.03x under the same load. Nothing in
+        // the measured region suspends, so the work stays on the thread being charged.
+        func projectionCost(lines: Int) throws -> (cpuSeconds: Double, characters: Int) {
+            let terminal = try historyProjectionTerminal(lines: lines)
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             let text = terminal.primaryHistoryText
-            let elapsed = (ContinuousClock.now - start).components
-            // `attoseconds` carries only the sub-second remainder, so a multi-second
-            // measurement -- exactly the regression case -- reads as a fraction without this.
-            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
-            return (seconds, text.unicodeScalars.count)
+            let end = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            return (Double(end - start) / 1e9, text.unicodeScalars.count)
         }
 
         _ = try projectionCost(lines: 200)  // warm up caches and any one-time growth
         let small = try projectionCost(lines: 400)
-        let large = try projectionCost(lines: 6_400)
+        let large = try projectionCost(lines: 3_200)
 
+        // A clock that reports nothing would make the ratio below 0/0 or a division by zero
+        // rather than a failure, so it has to say it measured something first.
+        #expect(
+            small.cpuSeconds > 0 && large.cpuSeconds > 0,
+            "thread CPU clock reported no time: \(small.cpuSeconds)s, \(large.cpuSeconds)s"
+        )
         // Cost per character, not total: under O(N) it is flat regardless of history length,
         // and under O(N^2) it rises with it. That ratio is what separates the two, and it
         // needs no absolute time budget, so a slower machine moves both terms together.
-        let smallPerCharacter = small.seconds / Double(small.characters)
-        let largePerCharacter = large.seconds / Double(large.characters)
+        let smallPerCharacter = small.cpuSeconds / Double(small.characters)
+        let largePerCharacter = large.cpuSeconds / Double(large.characters)
         #expect(
-            Double(large.characters) / Double(small.characters) > 8,
+            Double(large.characters) / Double(small.characters) > 7,
             "large history should dwarf the small one: \(small.characters) -> \(large.characters)"
         )
-        // Measured here (debug, the configuration tests run in): 1.04x with the linear
-        // accumulator, 5.5x with the quadratic one. 2.5x sits between with ~2.4x of margin
-        // on the passing side and ~2.2x on the failing side. Release separates them further
-        // still (0.69x vs 9.7x) because optimization strips the per-cell walk's own overhead.
+        // Measured here (debug, the configuration tests run in) over 22 idle and 12 contended
+        // trials: 0.99-1.12x with the linear accumulator, against 3.03-3.22x with the quadratic
+        // one restored. 2x sits between with ~1.8x of margin on the passing side and ~1.5x on
+        // the failing side. The 8x history spread is what buys that separation -- the quadratic
+        // ratio grows with it -- so shrink the sizes together or not at all.
         #expect(
-            largePerCharacter < smallPerCharacter * 2.5,
+            largePerCharacter < smallPerCharacter * 2,
             """
             per character: \(smallPerCharacter)s at \(small.characters) chars, \
             \(largePerCharacter)s at \(large.characters) chars

@@ -64,7 +64,7 @@ Rules for each commit:
 | 11 | [x] `saturatingRecipesReachTheBudgetCeiling`: charge arithmetic for two recipes, keep `.wideSaturating` on the observed-eviction path | `--filter TerminalResizeProbeSupportTests` (the test split in two) | 15-20x | 19.76s -> 9.35s (2.1x, not 15-20x: the anchored recipe's cost is denominated in *charged bytes*, not lines -- filling the 15.7 MB arena costs ~9.3s whichever payload does it, and `.wideSaturating` is cheapest in lines but not in bytes. The arithmetic arm covering all three recipes is 1.9s. Also: `.sparseSaturating` ships only a **1.003x** margin, so the finding's `>= capacity * 1.5` is unreachable for it) |
 | 12 | [x] `blankHistoryAtTheIndexRingDoublingPointKeepsRetaining`: early stop one ring-block past a stable record count (rescaled budgets deliberately deferred) | `--filter blankHistoryAtTheIndexRingDoublingPoint` | 5-7x | 1.759s -> 0.348s (5.1x. The finding's "stable record count" criterion does **not** terminate: at budget 288,000 the count moves on *every* admission out to 60,000, longest equal-run 0. Shipped criterion is a stable *high-water mark* -- one ring block (64) of admissions after the first eviction with no new maximum depth -- which settles at 7,538/8,257/8,256/15,949/16,449/16,449 admits, ~72,900 of 360,000) |
 | 13 | [x] `tailReadCostTracksTheBudgetNotTheCapacity`: replaced the wall-clock ratio with a deterministic row-visit count; 6,400 -> 3,200; `rows: 50 -> 4`; timing arm demoted to an env-gated probe | `--filter tailReadCostTracksTheBudgetNotTheCapacity` | ~5x | 13.951s -> 3.003s (4.6x, and no longer a timing test at all -- see below) |
-| 14 | [ ] `primaryHistoryTextStaysLinear`: 400 vs 3,200, `rows: 50 -> 4`, share the corpus builder with #13 | `--filter primaryHistoryTextStaysLinear` | 2-3x | |
+| 14 | [x] `primaryHistoryTextStaysLinear`: 400 vs 3,200, `rows: 50 -> 4`, shares `historyProjectionTerminal` with #13; timing moved from the wall clock to thread CPU time and the threshold from 2.5x to 2x | `--filter primaryHistoryTextStaysLinear` | 2-3x | 5.687s -> 3.203s (1.8x. Stayed a timing test as row #13 predicted, but not a wall-clock one -- see below) |
 | 15 | [ ] `dialectRecordingSweep`: dedupe by injection identity, boundary-chosen injections, compute `fullHistoryText` once, `@autoclosure` the diagnostic context, hoist `expectValidGrid` to per-fixture | `--filter dialectRecordingSweep` | 3-4x | |
 
 Base command for every filter above:
@@ -394,6 +394,33 @@ But the separation only needs the size ratio: 400 vs 3,200 keeps an 8x
 spread against the 2.5x threshold (measured 1.04x linear vs 5.5x quadratic),
 and `rows: 50 -> 4` avoids gratuitous viewport scrolling. Shares its corpus
 with item 6.
+
+**Correction, measured while implementing row #14.** The corpus really is
+byte-identical to item 6's (same 200-column line, same feed loop), so the test
+now builds through `historyProjectionTerminal(lines:)` and the sizes and row
+count are as prescribed. The threshold is not: at 400 vs 3,200 the two
+populations are much closer than the finding's 1.04x/5.5x, because that pair was
+measured at a 16x spread and the quadratic ratio grows with the spread. Measured
+here at 8x, idle: 0.97-1.03x linear (n=30) against 3.13-3.39x quadratic (n=6,
+`append(contentsOf:)` restored). 2.5x leaves the *failing* side only 1.24x of
+margin, and contention eats it -- with the box oversubscribed 1.6x the wall-clock
+linear arm reached 1.51x and the quadratic arm fell to 2.85x, so the gate is
+crossable in both directions. Contention moves the ratio because the small arm is
+68ms and the large 549ms, so a preemption burst is a much larger fraction of the
+small one; more samples do not bound that, per row #13.
+
+So the instrument is `clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)`, not
+`ContinuousClock`. The regression is `memmove` this thread runs, and nothing in
+the measured region suspends, so charging only this thread's CPU drops the
+scheduler out of the measurement entirely: under the same 1.6x oversubscription
+the linear arm stayed at 0.82-1.12x (n=12) and the quadratic at 3.03-3.13x. At 4x
+oversubscription the wall-clock linear arm ran 0.78-1.38x, confirming the noise is
+scheduling and not the load level. Threshold 2x: ~1.8x of margin on the passing
+side at the *worst* observed case, ~1.5x on the failing side.
+
+Verified by neutralization: restoring `result.unicodeScalars.append(contentsOf:)`
+takes the shipped test to 3.14x and it fails. A `#expect` that the clock reported
+nonzero time on both arms keeps a dead clock from passing as 0/0.
 
 ## Summary table
 
