@@ -81,7 +81,7 @@ empty rect list is possible when damage misses `dirtyRect` entirely, and
 `clip(to: [])` has no documented clip-out-everything guarantee, so `draw(_:)`
 falls back to an explicit `clip(to: .zero)`.
 
-## D2 -- derive spans from the bitset; drop the Set round-trip [VETTING]
+## D2 -- derive spans from the bitset; drop the Set round-trip [REJECTED]
 
 Depends on: F7. Begin only after D1 is decided (unentangled measurement).
 
@@ -109,6 +109,48 @@ diff shape that killed it.
 - Any `slower` verdict: REJECTED (would be genuinely surprising; attribute
   before concluding).
 - `faster`: adopt and report the measured verdict, nothing more.
+
+**Outcome (2026-08-05). REJECTED, unmeasured** -- rejected on the diff-shape
+clause of the gate above, which does not require a measurement to apply. Only
+the `Int.min` deletion was taken, separately (see below).
+
+**Why the cheap version does not exist.** The intermediate this decision was
+nearly narrowed to -- "have `drain()` emit ordered rows so the view's per-draw
+`sorted()` disappears, without changing `rows`'s type" -- was traced and does
+not work. Two order-destroying steps sit between drain and the sort:
+
+1. `SwiftTerminalSessionView#publish` runs the glyph halo on every published
+   frame, and `terminalDamageRowsWithGlyphHalo` returns a `Set<Int>`.
+2. Its result is `formUnion`'d into `pendingDisplayDamage`, which **accumulates
+   across several publishes** before one draw consumes it.
+
+So `terminalDamageMaximalContiguousSpans`' sort runs over an accumulated,
+haloed set, never over what `drain()` produced. Ordering created at drain is
+discarded twice before reaching it -- and with `rows` typed `Set<Int>` there is
+no order to emit in the first place. Deleting that sort therefore requires an
+ordered merge at the *accumulation* point (bitset words, word-wise OR), which
+is D2 in full. The narrow version buys nothing; there is no middle.
+
+**Why the full version is not worth it.** It trades a readable Set/sort loop for
+word shifts with cross-word carries, changes a type that is public within
+`TerminalCore`, and ripples into the halo helper, the benchmark topology
+accounting, and test fixtures -- to delete work that is O(n log n) on n <= ~100
+rows, once per partial draw. That is a different implementation, not a simpler
+one, which is exactly the disposition this gate's **Risks** clause names. F9
+adds the measurement-side reason it could never be justified empirically
+either: `incremental-mixed` cannot resolve a difference below ~4.9 points
+(31/F18), so no run of this ladder could show the deleted work mattering.
+
+**What was taken.** `terminalDamageMaximalContiguousSpanCount`'s `Int.min`
+guard is deleted, since F7 correctly established it unreachable. The invariant
+it rested on -- `TerminalDamage` filters negative indexes, `rows` is
+`private(set)` -- was itself untested, which was the real gap; it is now pinned
+by `TerminalDamageTests#negativeRowsCannotEnterDamage` and cited from the
+helper, so removing the filter fails there instead of becoming an overflow trap.
+
+**Reopen only if** the damage representation is being changed for another
+reason and the ordered form falls out for free. Do not reopen this for the
+sort.
 
 ## D3 -- verify device-pixel alignment of clip edges [DONE -- verified, no change]
 

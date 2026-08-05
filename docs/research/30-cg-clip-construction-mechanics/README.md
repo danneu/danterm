@@ -174,15 +174,23 @@ scale factor, which would open a new alignment task.
       non-regression** -- no `slower` verdict anywhere, and no resolvable win
       either. Verdict and classification recorded in decisions.md.
 
-### Phase 3 -- D2: bitset/range-native span derivation (begin only after D1
-is decided, so the two diffs are never measured entangled)
+### Phase 3 -- D2: bitset/range-native span derivation
 
-- [ ] Implement D2; delete `terminalDamageMaximalContiguousSpans`'s sort path
-      and the dead `Int.min` guard noted in F7.
-- [ ] `just test` green (core suites cover `TerminalDamage`).
-- [ ] `just benchmark-quick baseline=<parent> workload=terminal-feed`.
-- [ ] `just benchmark-quick baseline=<parent> workload=incremental-mixed`.
-- [ ] Apply D2's frozen rule; record verdict and diff-size judgment.
+- [x] **REJECTED 2026-08-05, unmeasured**, on the diff-shape clause of its own
+      gate; the benchmark steps below were never reached and are struck. The
+      sort cannot be deleted narrowly -- the halo and the cross-publish
+      `formUnion` both destroy ordering before it reaches the span helper, so
+      the only version that works is the full bitset rewrite, which is a
+      different implementation rather than a simpler one. Reasoning in
+      decisions.md/D2.
+- [x] Deleted the unreachable `Int.min` guard, the one piece worth taking, and
+      pinned the negative-row invariant it rested on (that invariant was
+      untested, which was the real finding).
+- [x] `just test` green (74/74).
+- ~~`just benchmark-quick baseline=<parent> workload=terminal-feed`~~ -- not
+      run; no candidate to measure.
+- ~~`just benchmark-quick baseline=<parent> workload=incremental-mixed`~~ --
+      not run; and per F9 it could not have resolved this change's size anyway.
 
 ### Phase 4 -- verify H4 and close
 
