@@ -18,8 +18,10 @@ of scheduling it better. Inherited boundary: C1's cell format is settled
 - [decisions.md](decisions.md) -- the auditable decision log; D1 is the
   go/no-go gate, whose rule was frozen before F1's comparison was read and
   which closed **`go`** on 2026-08-04, licensing Phase 2's design work only.
-  D4 is the newest entry and freezes the eviction comparison's rule -- and the
-  `AR6` residency reading sequenced with it -- before any such number exists.
+  D5 is the newest entry and amends `D2` Decision 1's single contiguous
+  allocation to chunked backing, so publishing a frame costs a bounded copy
+  rather than the whole arena; it freezes the re-run's rule before the
+  implementation exists.
 
 ## Purpose
 
@@ -779,6 +781,28 @@ licenses a production storage change; landing is the paired ladder's.
   re-read is unchanged at **81.75 MB** and `F13` Observation 4 already separates
   it into a 15.0 MB arena and 56.9 MB of unreturned allocator pages, with settled
   residency at **0.92x** the incumbent's.
+- [x] `DONE` **`D5`, the arena's backing amended to chunks** (`F13`'s M1, the one
+  attributed mechanism `F14` left untaken). Recorded in
+  [decisions.md](decisions.md), frozen before the implementation exists and
+  before the re-run's first number. `D2` Decision 1's "one contiguous per-pane
+  byte arena" is amended on its *allocation* clause only: the byte address space
+  stays one linear ring over `[0, capacity)` and the backing becomes 30
+  copy-on-write chunks of 512 KiB at the production budget, so the first write
+  after a publish copies **one chunk instead of 15.75 MiB**. A record never
+  straddles a chunk, which is what keeps the raw-pointer walks and the hot
+  per-row loops addressable from one hoisted chunk; the placement rule that
+  guarantees it is `DD14`'s pad and `DD20`'s forced split, already licensed as
+  implementation discretion. The two losing candidates are recorded with their
+  costs: a **shared-immutable region** removes the copy entirely and is refused
+  because the ring's head header, reopen and wrap all mutate bytes a published
+  snapshot reads, so it needs `DD52`'s refused failure mode with a torn frame as
+  its symptom; a **history-free publish** is refused because every history reader
+  -- including `retained-browse`, the go/no-go rung -- reads history off the
+  published value outside the owner's fence, so the handle would either race the
+  drain or re-materialize the copy. The re-run's rule is the plan's Acceptance
+  section and the frozen thresholds unchanged, and the entry states before the
+  run that this change **cannot** move `terminal-feed`, which never publishes.
+  Two deferred decisions added (`DD53`, `DD54`).
 
 ## Rejected
 

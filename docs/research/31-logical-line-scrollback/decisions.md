@@ -2690,3 +2690,220 @@ the loop prologue once per row and are upper bounds.
   conservative for the half. Reporting both keeps the exact conversion and the
   isolated term without choosing between them. Reopen if a future profile splits
   the subtree, which would give eviction its own share and its own exact bound.
+
+### D5 -- the arena is one address space over chunked backing, so publishing a frame costs a bounded copy instead of 15.75 MiB
+
+- Status: **decided 2026-08-04.** It **amends `D2` Decision 1** on one clause
+  only -- "one contiguous per-pane byte arena" as a single *allocation* -- and it
+  is the first entry in this doc that licenses a production storage change other
+  than through the plan's own slices. It is taken on `F13`'s M1 and `F14`
+  Observation 3, which name the copy as the last attributed mechanism and the
+  first suspect for `scrollback-stream`'s residual. The human licensed reopening
+  the clause; the mechanism, the decision rule for the re-run and the reopening
+  condition are this entry's.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Evidence used: `F13` Observation 3 M1 (`memcpy` at **12.10%** and **16.13%** of
+  whole-process CPU under
+  `applyOutput -> moveAndFillRows -> LogicalLineStore.admit -> ContiguousArray._makeMutableAndUnique -> _ArrayBuffer._consumeAndCreateNew`,
+  with `admit` at 16.42%/21.83% inclusive and 0.03%-0.04% self; the arena is
+  **15.75 MiB** and `TerminalPTYHost.drainedFrameState()` publishes the `Terminal`
+  **value**, so the buffer is non-unique at the next write); `F13`'s headless
+  publish arm (the incumbent pays **1.63x** its unshared feed at a 4 KiB publish
+  cadence, the arena **2.03x**, 165.5 against 197.8 ns per fed byte, while the
+  arena's *unshared* feed is **faster** at 97.4 against 101.5); `F14`
+  Observation 1 (the ladder state this change is trying to move:
+  `retained-browse` **+1.03%** `inconclusive`, `scrollback-stream` **+4.92%**
+  `slower`, `terminal-feed` **+2.68%** `slower`); `F14` Observation 3 (which
+  names the three candidate mechanisms and says the choice reopens this
+  decision); `F10`/`F14` Observation 4 (settled residency at **0.92x** the
+  incumbent's, which is the number a backing change must not spend); `F8`
+  Observation 3 (why the arena is words rather than bytes -- the same per-access
+  budget this entry has to stay inside); `PO11`'s margin as `F10` re-measured it
+  (**0.9%** on `full`, which is the depth a new placement waste has to fit
+  inside); `DD52` (equality's residual and the failure mode it refused, which is
+  the same failure mode option (b) below carries).
+- Candidate solutions considered, all three named by `F14` Observation 3:
+  (a) **chunked backing** -- the arena as fixed-size copy-on-write chunks, so a
+  post-publish mutation copies one chunk; (b) **a shared-immutable region** --
+  manually managed storage shared between the published value and the live
+  terminal under explicit uniqueness or generation discipline; (c) a
+  **history-free publish** -- `drainedFrameState()` publishes a frame value that
+  does not carry the history store.
+
+#### Decision -- (a), chunked backing, with the address space unchanged
+
+`D2` Decision 1's sentence "one contiguous per-pane byte arena" is amended to
+read **one contiguous per-pane byte *address space*, backed by a fixed number of
+equally sized copy-on-write chunks**. Concretely:
+
+- The arena's backing becomes `ContiguousArray<ContiguousArray<UInt64>>`. Byte
+  offsets are unchanged and remain global over `[0, arenaCapacity)`; a word is
+  addressed as `chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]`.
+  The chunk size is a power of two, so the split is two shifts and a mask and no
+  division.
+- **A record never straddles a chunk**, which is what keeps every existing
+  raw-pointer walk (equality's cell-run compare) and every hot per-row loop
+  addressable from one hoisted chunk. The mechanism that guarantees it is
+  already in the store and already licensed: `DD14`'s pad and `DD20`'s
+  forced-split-at-the-physical-end. A chunk boundary is simply a second kind of
+  physical end -- the open tail is force-split at it, a pad covers the remainder,
+  and the cursor resumes at the next chunk. The plan's Implementation discretion
+  section already licenses exactly this ("how a **closed** record's placement is
+  kept off the ring's wrap seam ... provided a record stays contiguous and the
+  waste is bounded and charged"); what needed a decision is the backing, not the
+  placement.
+- **The chunk size is 512 KiB at the production budget** and derived elsewhere:
+  the power of two nearest above `capacity / 32`, floored at 64 KiB and capped at
+  512 KiB, and a capacity at or under the floor is one chunk (which is today's
+  shape exactly, so every small-budget test keeps today's placement). At
+  `productionScrollbackBudgetBytes` the capacity is 15,728,640 B and the chunk is
+  524,288 B, which divides it into **exactly 30 chunks**.
+- **What a published frame now costs.** The first write after a publish copies
+  the outer array (30 references) plus the one chunk it touches. A drain between
+  two publishes writes at the tail and, when the budget binds, rewrites the head
+  record's header, so the steady-state cost is **one or two 512 KiB chunks per
+  published frame instead of 15.75 MiB** -- a 15x-30x reduction of the term
+  `F13` measured at 12.1%-16.1% of whole-process CPU.
+- **Value semantics are preserved exactly, and by the same mechanism the
+  incumbent used.** `[PackedRetainedRow]` was an outer copy-on-write array of
+  shared immutable blobs, so publishing cost one pointer copy per retained row
+  and never copied a blob. Chunked backing is that shape with a fixed element
+  count: the published `Terminal` keeps its own outer array, the owner's writes
+  copy only the chunk they touch, and no reader can observe a mutation the value
+  it holds did not have. Nothing about `Sendable`, the Elm-architecture value
+  commitment, or `docs/design/2026-07-29-cross-module-value-dispatch.md`'s
+  inlinable surface changes.
+
+#### Why (b) loses, stated as a cost rather than as a preference
+
+A shared-immutable region is the only candidate that removes the copy entirely,
+and it is refused on the store's own shape. The arena is a **ring**, and the
+bytes a published snapshot reads are not immutable while it holds them: eviction
+rewrites the head record's header in place (`D2` Decision 2 steps 1 and 4 persist
+the head cell offset there), `reopenTailRecord` clears a fill and reopens a
+record a snapshot may already be folding, and the write cursor eventually wraps
+into the region the snapshot addresses. Making that safe needs either a
+generation counter every mutation must remember to bump or a read lock the
+render thread takes against the PTY drain. The first is precisely the failure
+mode `DD52` declined for a **measurable** win on equality -- "a silent-wrong-answer
+failure mode if one mutation ever forgets" -- and the cost of forgetting here is
+worse than a wrong comparison: a torn frame, painted from two different histories,
+with no test that naturally catches it. The second puts the main thread's scroll
+behind the drain's queue, which is the hazard `28/F20`'s scheduling residual is
+already suspected of. Manual lifetime management is also
+`docs/design/2026-06-09-appkit-lifetime-safety.md`'s territory, and this store
+has no lifetime seam today.
+
+#### Why (c) loses, stated as a cost rather than as a preference
+
+A history-free publish is the cleanest thing to say and the thing the consumers
+refuse. Every reader of the published value that touches history reads it
+*outside* the owner's fence: the frame planner's two viewport traversals, the
+projection totals every clamp bound reads, `searchMatches`, Select All, history
+export, and the browsing path itself -- `retained-browse`, the go/no-go rung, is
+a workload whose whole content is retained history read off a published frame.
+Handing the frame layer a separate handle to the *live* store makes those reads
+race the drain; handing it an immutable handle re-materializes the snapshot,
+which is the copy this entry exists to remove. There is no third thing the handle
+could be. The option also changes what a published frame **is** -- today it is a
+self-contained value, which is what makes the render path testable without a PTY
+and what the Elm-architecture commitment rests on -- and it would do so to move a
+cost rather than to delete one.
+
+#### What does not move
+
+- **The charge model and `I2`.** Charged bytes are still
+  `arenaBytesInUse + indexBytes + sideTableBytes` against the arena's capacity,
+  the arena is still allocated once and never grown, compacted or shrunk, and the
+  capacity is still the budget less `DD36`'s 1/16 reserve. Chunking splits one
+  allocation into 30; the 30 array headers are new metadata and are charged as
+  metadata under `DD37`'s rule (charge what the allocator gave), which costs
+  ~960 B of a 15 MiB capacity.
+- **Placement waste is charged, as `DD14`'s pad already is.** A chunk boundary
+  costs at most one admitted row's bytes of pad, once per chunk: 30 boundaries x
+  ~1.4 KB at 179 columns is ~0.27% of capacity, inside `F10`'s measured 0.9%
+  `PO11` margin on `full`, and the pad is counted in `bytesInUse` exactly as the
+  physical-end pad is, so `PO3`'s census sees it.
+- **`I10`'s forced-split cap.** No record exceeds 1/32 of the budget, unchanged;
+  the chunk boundary adds a second *trigger* for the split `DD20` already
+  defines, not a second cap. `F12`'s 23-piece reading is a reading of the cap and
+  is not re-derived.
+- **`I1`, `I3`-`I9`, `I11`, and every proof obligation.** A record's bytes are
+  still a function of content alone; the fold, the index, eviction granularity,
+  the seam rule and the locate contract are untouched. `PO12`'s ring-cycling
+  obligation gains chunk seams as an instance of the seam it already covers.
+- **Residency.** 30 allocations of 512 KiB instead of one of 15 MiB is the same
+  page count in the same malloc zone; `F13` Observation 4's settled 0.92x is the
+  number the re-read is compared against, and this entry predicts no change to
+  it.
+
+#### The decision rule for the re-run, frozen before the implementation exists
+
+The rule is the plan's Acceptance section and the frozen thresholds in
+`scripts/terminal-benchmark-validation.py#DECISION_RULES`. Nothing here changes a
+threshold, a pair count or a statistic:
+
+1. **One `just benchmark-confirm baseline=28c54e1` invocation**, the same base
+   `F11` and `F14` paired against, the complete six-workload ladder, no block
+   invalidated and no verdict withheld.
+2. **Acceptance is met iff all three named rungs read not-`slower`**:
+   `retained-browse` (go/no-go, +/-1.05%), `terminal-feed` (+/-2.5%) and
+   `scrollback-stream` (+/-1.85%). `inconclusive`, `equivalent` and `faster` are
+   all not-`slower`; a `neutral` reading is a recorded cost, not a failure.
+3. **Any rung still `slower` means acceptance is not met, and no second fix round
+   is taken.** The disposition returns to the human with M1 **spent** -- after
+   this change nobody may name the arena's copy as the untaken mechanism.
+4. **`retained-browse` is also a guard rail on this change, not only on the
+   design.** It reads +1.03% inside a 1.05% threshold, so the chunked backing has
+   roughly 0.02 points of headroom on the go/no-go rung: a chunked read that
+   costs anything per cell will show up there as a `slower` verdict caused by this
+   entry rather than by wrap-at-read. That is why the decision requires a record
+   to stay inside one chunk and the hot per-row loops to hoist the chunk once --
+   and why a `slower` `retained-browse` after this change is read first as
+   evidence against **this mechanism**, and only then through `D3` Decision 1's
+   diagnostic order.
+
+**Stated before the run, so the result cannot be read as a surprise:** this
+change **cannot** move `terminal-feed`. That workload measures `Terminal.feed` on
+a fresh terminal per execution, never publishes and never draws, so no
+publish-driven copy is in its profile at all -- `F14` Observation 3 already says
+no named mechanism explains its +2.60%/+2.68%. The honest prior is therefore that
+`terminal-feed` reads `slower` again and acceptance is not met; what this entry
+predicts is movement on `scrollback-stream`, whose +4.92% M1 is the named suspect
+for. If `terminal-feed` moves at all, that is unexplained and must be recorded as
+unexplained rather than credited to this change.
+
+#### Reopening condition
+
+This decision reopens if **either**: the re-run shows `scrollback-stream` at or
+above `F14`'s +4.92% (the copy was not the residual, and a chunked backing bought
+nothing for the cost of a placement rule), **or** `retained-browse` reads
+`slower` where `F14` read +1.03% (the chunked read costs more than the copy
+saved). On the first, the next instrument is a profile of the post-fix
+`scrollback-stream`, which no one has taken. On the second, the chunk size is the
+one free variable -- a larger chunk trades copy reduction for fewer boundaries --
+and the entry is re-decided against a measurement rather than tuned silently.
+
+#### New deferred decisions
+
+- **DD53 -- the chunk size is derived from the capacity rather than fixed, and
+  the derivation is `nextPowerOfTwo(capacity / 32)` clamped to [64 KiB, 512 KiB]
+  with a capacity at or under the floor left as a single chunk.** The two ends
+  are what the clamp is for: at the production budget the ratio picks 512 KiB and
+  30 chunks, which is the copy reduction this entry is about; below the floor,
+  every small-budget unit test keeps exactly today's single-region placement, so
+  the suite's existing expectations are not silently re-based on a placement rule
+  they were never written against. The cost, stated: chunk-seam behavior is then
+  exercised only by the tests that use a budget above 64 KiB, which is why this
+  change adds seam tests at a budget that spans several chunks rather than
+  relying on the existing ones. A human's to revisit if a later reading wants
+  either end moved.
+- **DD54 -- a row that does not fit one chunk retains nothing, which extends
+  `DD46` rather than adding a rule.** `DD46` already says a budget too small to
+  hold one display row retains nothing rather than trapping; the admissible unit
+  is now the chunk rather than the capacity, because a record may not straddle
+  one. With the 64 KiB floor that bound is ~4,090 columns of worst-case
+  side-table content, so no reachable pane configuration changes behavior. The
+  alternative -- letting an oversized record straddle -- would put a boundary
+  test inside every hot per-cell loop, which is exactly the cost this entry is
+  spending the change to avoid.
