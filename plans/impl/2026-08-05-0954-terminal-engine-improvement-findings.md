@@ -79,7 +79,7 @@ to settle. Nothing here blocks the audit being closed.
 
 ### Open: needs a decision
 
-- [ ] **Gate flake A -- the tail-cost ratio test.**
+- [x] **Gate flake A -- the tail-cost ratio test.**
   `TerminalHistoryTailTests#tailReadCostTracksTheBudgetNotTheCapacity` asserts
   `large < small * 4`, comparing a bounded tail read over 400 lines against one over
   6,400. It failed twice inside the 74-step parallel `just test` pool (observed 0.244s
@@ -95,6 +95,12 @@ to settle. Nothing here blocks the audit being closed.
   of wall-clock test that finding 47 deleted two of, so "delete it" is on the table --
   but unlike those two it guards a live path (`I3`, the checkpoint tail read) with no
   other cover, so deleting it needs a replacement that pins the bound structurally.
+  **Resolved 2026-08-05:** fixed the instrument, not the bound. `tailCost` now runs three
+  times per size and the minimum is taken for each of `small` and `large`; noise is
+  one-sided (preemption only adds time), so min-of-3 strips it while a real full-history
+  walk still shows its ~16x. Threshold stays at 4x, the warm-up call stays, and the
+  comment block records the two observed gate failures. Verified: 6 consecutive isolated
+  runs green, plus the full 74-step gate.
 
 - [ ] **Gate flake B -- the agent-notifications live test.**
   `scripts/tests/agent-notifications-live_test.py::test_auth_symlink_cleanup_does_not_remove_auth_target`

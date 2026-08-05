@@ -153,9 +153,21 @@ struct TerminalHistoryTailTests {
             return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         }
 
+        // Min-of-3 per size, not a single timed pair. Noise is one-sided -- scheduler
+        // preemption only ever adds time -- so the minimum of repeated runs strips it while
+        // leaving a genuine full-history walk fully visible at its ~16x. A single sample
+        // failed this gate twice under the 74-step parallel `just test` pool (0.244s vs
+        // 0.196s, ratio 5.0) and passed in every isolated rerun; the threshold stays at 4x
+        // because the instrument, not the bound, was the thing that was fragile.
+        func bestTailCost(lines: Int) throws -> Double {
+            var best = Double.infinity
+            for _ in 0..<3 { best = min(best, try tailCost(lines: lines)) }
+            return best
+        }
+
         _ = try tailCost(lines: 200)  // warm up caches and any one-time growth
-        let small = try tailCost(lines: 400)
-        let large = try tailCost(lines: 6_400)
+        let small = try bestTailCost(lines: 400)
+        let large = try bestTailCost(lines: 6_400)
 
         // Sixteen times the history at the same budget. Under a bounded read the two costs are
         // the same walk, so their ratio sits near 1; under a full projection it tracks the 16x.
