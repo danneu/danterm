@@ -85,6 +85,17 @@ before this audit is closed out.
   machine rather than the test catching a regression. Either make it load-robust or
   move it off the parallel gate -- this is the same class of test finding 47 deleted
   two of. Needs a human call on which.
+- [ ] **NEW (gate flake #2)** -- `scripts/tests/agent-notifications-live_test.py`
+  failed once inside the parallel gate with `OSError: [Errno 22] Invalid argument`
+  from `os.stat` on a symlink in a temp dir, then passed 22/22 standalone and on the
+  gate rerun. Unrelated to any audit finding; noted because two different gate steps
+  have now flaked under the 74-step parallel pool.
+- [ ] **51 (optional)** -- retitle `regionalIndicatorGeometry` in
+  TerminalGraphemeWidthTests.swift to also carry the deleted test's claim. Coverage
+  unaffected.
+- [ ] **59 (optional)** -- `tabClampsWithDefaultStopsPresent` now lives in
+  TerminalTests rather than TerminalTabStopTests; a one-test move if colocation is
+  wanted.
 - [ ] **22 (residual)** -- `pointerDownDecision` still needs a `.link` arm for
   exhaustiveness even though `pointerOwner` can never mint one; left as a comment
   rather than restructuring, since splitting the enum again is the opposite of the fix.
@@ -730,7 +741,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 48. TerminalScrollbackRetentionTests duplicates the census retention proof
 
-**Status:** `partial` -- the two duplicated tests are deleted, but the file survives with its unique eviction guards; folding those into `censusReportsRetentionHealth` needs TerminalMemoryCensusTests.swift, which no batch owned (see orchestrator follow-up)
+**Status:** `done` -- guards folded into censusReportsRetentionHealth with the rationale carried over; TerminalScrollbackRetentionTests.swift deleted
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalScrollbackRetentionTests.swift:19` -- high confidence, small effort, found by `tests-storage`
 
@@ -742,7 +753,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 49. legacyNavigationMatrix is a strict subset of completeLegacySpecialKeyMatrix
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- all nine literals verified as produced by completeLegacySpecialKeyMatrix's sweeps
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalKeyEncodingTests.swift:147` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -754,7 +765,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 50. Dead helpers in the shared grid-assertion file
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- both dead helpers deleted after rg confirmed zero readers across lib/ and app/
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalGridAssertions.swift:6` -- high confidence, trivial effort, found by `tests-behavior-a`
 
@@ -766,7 +777,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 51. regionalIndicatorParity is duplicated by regionalIndicatorGeometry
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- deleted; regionalIndicatorGeometry is a strict superset
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalGraphemeTests.swift:28` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -814,7 +825,7 @@ Tests that duplicate surviving coverage, pin behavior that no longer exists, or 
 
 ### 55. characterizationNonBase64FeedsAreRejected tests a decoder that exists only in the test file
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- deleted; the policy stays enforced by replayCharacterizationCorpus and the schema-audit gate step
 
 `lib/TerminalCore/Tests/TerminalCoreTests/GhosttyInspectionRecoveryReplayTests.swift:9` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -830,7 +841,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 56. phase2LibvtermReplay re-runs fixtures replayFixtures already covers
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- verifier's adjustment: replaced with libvtermFixtureInventory pinning 51 recordings, so a silently deleted fixture still fails
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalFixtureTests.swift:22` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -854,7 +865,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 58. rawLiveCaptureIsNotFixtureAdmissible only re-pins a constant another test already asserts
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- verifier's adjustment: KEPT and retitled; it is the only can-fire proof of the admission guard (recordingCorpus passes vacuously)
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSemanticPromptInvariantTests.swift:49` -- high confidence, trivial effort, found by `tests-behavior-b`
 
@@ -866,7 +877,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 59. tabStopsAndPadding is subsumed by tabStopDispatch
 
-**Status:** `todo` -- batch `tests-a`
+**Status:** `done` -- verifier's adjustment: trimmed, not deleted; the defaults-present clamp is genuinely unique
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalTests.swift:193` -- medium confidence, trivial effort, found by `tests-behavior-a`
 
@@ -1122,7 +1133,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 80. Pure TerminalCore generation test lives in the real-PTY pane-session suite
 
-**Status:** `blocked` -- the fix is a move into TerminalCoreTests (another package/batch); orchestrator to reassign
+**Status:** `done` -- moved into TerminalHistoryGenerationTests, off the serialized PTY gate step; the stale ESC[2J comment was left alone (deferred 13)
 
 `lib/TerminalPTY/Tests/TerminalPaneSessionTests/TerminalPaneSessionControllerTests.swift:149` -- high confidence, small effort, found by `tests-pty-probes`
 
