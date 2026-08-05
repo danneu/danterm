@@ -22,6 +22,7 @@ STEPS=(
     'swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate -Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=500'
     './scripts/test-terminal-pty.sh'
     './scripts/tests/terminal-capture-api-gate_test.sh'
+    './scripts/tests/terminal-capture-api-gate-cache_test.sh'
     './scripts/tests/shell-integration_test.sh'
     'python3 ./scripts/tests/fetch_references_test.py'
     'swift test --package-path lib/DanTermCore'
