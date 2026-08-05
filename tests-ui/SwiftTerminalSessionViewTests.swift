@@ -998,10 +998,14 @@ func swiftTerminalSessionViewTests() {
         // Intent: both AppKit paste entry points submit raw clipboard text to owner-side policy.
         // Why it exists: bypassing the owner could admit escape injection or skip bracket markers.
         // Scenario: Edit > Paste and the pane menu paste text containing an embedded marker.
+        // The scratch pasteboard is not incidental: both entry points read
+        // `selectionPasteboard`, so assigning one here keeps the harness off the
+        // developer's real clipboard the way the copy tests above already do.
         let controller = TerminalPaneSessionController()
         controller.inputModes.bracketedPaste = true
         let pane = SwiftTerminalSessionView(controller: controller)
-        let pasteboard = NSPasteboard.general
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-paste-test"))
+        pane.selectionPasteboard = pasteboard
         pasteboard.clearContents()
         pasteboard.setString("one\u{1B}[201~\ntwo", forType: .string)
         let expected = Array("\u{1B}[200~one[201~\ntwo\u{1B}[201~".utf8)

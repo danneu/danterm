@@ -71,10 +71,25 @@ final class TerminalBenchmarkStateRecorder {
         record(reason: "occlusion-change")
     }
 
+    /// Records that a draw happened while the window was not locally presented.
+    ///
+    /// Runs inside AppKit's `draw(_:)`, so it collapses a sustained occlusion into a
+    /// single sample: `record(reason:)` re-serializes the whole `samples` array and
+    /// does an atomic write, which on every draw is O(n^2) work under the
+    /// CoreAnimation transaction -- the exact pattern `publishActivity`'s doc
+    /// explains was moved off the draw path. Consumers lose nothing, because the
+    /// validator invalidates a block on the first `visible: false` sample and dedupes
+    /// its reasons, so repeats of this reason buy no artifact content. State changes
+    /// during a sustained occlusion still land: the thermal, power, and active-space
+    /// observers record on change, and each of those interrupts the run of
+    /// consecutive occluded-draw samples so the next occluded draw is recorded again.
     func observeDrawState() {
         guard isWindowPresentedLocally() == false else { return }
-        record(reason: "draw-while-occluded")
+        guard samples.last?["reason"] as? String != Self.occludedDrawReason else { return }
+        record(reason: Self.occludedDrawReason)
     }
+
+    private static let occludedDrawReason = "draw-while-occluded"
 
     func finishBlock() -> [[String: Any]] {
         record(reason: "completion")
@@ -954,11 +969,15 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Attributes the work done since the previous accepted draw to this one:
-    /// planning, and whole-process CPU.
+    /// planning, fence stalls, and whole-process CPU.
     ///
-    /// Called from every site that appends a draw duration, so both series stay
-    /// index-aligned with `drawDurations` and all three normalize by the same
-    /// accepted-draw count.
+    /// Called from every site that appends to `localizedDrawDurations`, so
+    /// `acceptedPlanDurations` and `acceptedFenceStallDurations` stay index-aligned
+    /// with it. `acceptedProcessCPUDurations` is the exception: the monotonicity
+    /// guard below has no previous reading to difference against on the first
+    /// accepted draw, so that series starts one sample short and is not
+    /// index-aligned. Each series is therefore normalized by its own count when
+    /// emitted, not by a single shared accepted-draw count.
     ///
     /// The CPU delta covers the whole interval between two accepted draws, so it
     /// charges this draw with everything the process did in it -- this draw's

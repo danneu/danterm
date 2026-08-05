@@ -48,7 +48,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var fontFamily: String?
 
     weak var paneWrapper: PaneWrapperView?
-    /// Defaults explicit selection copies to the system pasteboard while keeping UI tests isolated.
+    /// The pane's clipboard in both directions -- explicit selection copies out and Edit > Paste
+    /// in. Defaults to the system pasteboard while keeping UI tests isolated, so a test that
+    /// assigns a scratch board neither reads nor destroys the developer's real clipboard.
     var selectionPasteboard = NSPasteboard.general
     /// Lets the UI harness observe owner-approved menu timing without entering AppKit menu tracking.
     var paneMenuHandler: ((TerminalViewportCell) -> Void)?
@@ -731,7 +733,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     func pasteClipboard() {
-        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        guard let text = selectionPasteboard.string(forType: .string) else { return }
         controller.sendPaste(text)
     }
 
