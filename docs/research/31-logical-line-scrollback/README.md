@@ -873,7 +873,13 @@ licenses a production storage change; landing is the paired ladder's.
   `faster` / `faster`. **All three acceptance rungs are not-`slower`, which is
   the plan's Acceptance condition in full.** `F15`'s code-only attribution of the
   go/no-go rung is thereby tested rather than asserted: removing exactly the term
-  it named moved the rung **0.45 points** against a predicted 0.36. Residency is
+  it named moved the rung **0.45 points** against a predicted 0.36. **That
+  sentence is WITHDRAWN by `F16` Observation 5 (2026-08-04)**: the cache measured
+  *directly* against the same store without it, paired in one session, reads
+  **`equivalent` at -0.10%**, so the 0.45 points is session drift and the cache is
+  not what moved the rung. The verdict above does not move -- it is a reading
+  against `28c54e1` -- but `DD55` now has a measured cost and no measured
+  benefit, and that disposition is a human's. Residency is
   at parity (footprint 82.23 MB against `F15`'s 82.00, TOTAL DIRTY 87.4 against
   88.3), and the store-level census shows the design working exactly as derived:
   the index doubled 0.516 -> **1.017 MiB** and the arena gave up exactly that

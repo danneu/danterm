@@ -220,9 +220,15 @@ clearing a 1.05% threshold on four paired values -- +1.119, +0.890, +0.995,
 is this section's condition in full**, and milestone 1's ladder is passed.
 
 What that settles and what it does not. `31/F15`'s attribution of the go/no-go
-rung -- made from the code and not from a profile -- is **tested and survives**:
-removing exactly the per-record header read it named moved the rung 0.45 points
-against a predicted 0.36. `31/D4`'s landing condition is now **fully spent**, its
+rung -- made from the code and not from a profile -- looked **tested and
+survived**: removing exactly the per-record header read it named moved the rung
+0.45 points against a predicted 0.36. **That reading is withdrawn by `31/F16`
+Observation 5, appended after this section was written.** Measured directly --
+the store with the cache paired against the same store without it, in one
+session -- the go/no-go rung reads **`equivalent` at -0.10%**, so the 0.45 points
+was session drift. This section's verdict does not move, because it is a reading
+against `28c54e1`; what moves is that slice 16's cache has a measured cost and no
+measured benefit, and whether to keep it is the human's. `31/D4`'s landing condition is now **fully spent**, its
 second clause satisfied as well as its first. `28/H7`'s reopening is **spent**.
 Two cautions the finding states and this section carries: `terminal-feed` is
 `inconclusive` by **0.01 points** on the ladder's least-resolved cell (two pairs,
@@ -1243,8 +1249,10 @@ Open conditions that the implementation, not the design, has to discharge:
   drain past the pre-cutover engine's, `terminal-feed` **+2.49% `inconclusive`**.
   Slice 16 removed the term `31/F15` named -- the per-record header read, once per
   record on a stimulus whose every record is one display row -- and the rung moved
-  0.45 points against a predicted 0.36, which is that code-only attribution tested
-  rather than asserted. What is still true and worth a reader's attention: **no
+  0.45 points against a predicted 0.36, which looked like that code-only
+  attribution tested rather than asserted. **`31/F16` Observation 5 withdraws
+  it**: measured directly, cache against no-cache paired in one session, the rung
+  reads **`equivalent` at -0.10%**, so the move was session drift. What is still true and worth a reader's attention: **no
   profile of the post-`31/D5` browse path was ever taken**, `terminal-feed` clears
   by 0.01 points on two pairs, and `31/DD53`'s chunk size remains untuned against
   any measurement. The previous entry, written when one rung still failed, follows.

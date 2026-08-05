@@ -4484,6 +4484,92 @@ binding constraint on any further per-record charge**.
     displacement model the derivation rests on and nothing more.
   - **The chunk size is still not tuned against a measurement** (`DD53`), and
     `D5` still names it the one free variable.
+#### Observation 5 -- APPENDED 2026-08-04 after this entry was recorded: the cache measured DIRECTLY reads `equivalent`, so Observation 2's reading of `F15`'s attribution is WITHDRAWN
+
+**Descriptive only, and it changes no verdict.** Acceptance is defined against
+`28c54e1` and was read once under a frozen rule; Observation 1 stands exactly as
+recorded and the plan's Acceptance stays MET. What this observation revises is
+this entry's own **attribution** and its caution list, which were the weakest
+things in it and are now measured rather than argued.
+
+**Why it was taken.** Observation 2 credited the header cache with the go/no-go
+rung's 0.45-point improvement by subtracting `F15`'s +1.39% from this entry's
++0.94% -- a **difference of two separately-run comparisons**, which
+`agent-docs/terminal-performance.md` classes as descriptive accounting rather
+than a verdict, and which this entry's own Uncertainty section flagged. The
+direct instrument was one command and was not run. It has now been run:
+
+      just benchmark-confirm baseline=1e4cb61
+
+with candidate `b7a7d81` (tree `d521d718dac8`) -- the store **with** the cache --
+against baseline `1e4cb61` (tree `3a5d427073`) -- the same store **without** it,
+which is `F15`'s candidate. One session, paired, ABBA-interleaved, the same
+frozen rules and pair counts. Conditions: AC power, load **1.53 at invocation**
+(busiest external `WindowServer` at 46.2%) and 2.95 before the first block.
+Artifact:
+`.build/terminal-benchmark-comparisons/confirm/d521d718dac8-0000/run.json`.
+
+| workload | frozen rule | `F15` -> `F16` by subtraction | **measured directly** | verdict |
+| --- | --- | ---: | ---: | --- |
+| **`retained-browse`** | ±1.05%, band 0.75% | -0.45 | **-0.10%** | **`equivalent`** |
+| `terminal-feed` | ±2.5% | +0.16 | -0.93% | `inconclusive` |
+| `scrollback-stream` | ±1.85% | -3.89 | -2.18% | `faster` |
+| `content-churn` | ±2.15%, band 0.75% | -1.95 | -0.08% | `equivalent` |
+| `style-churn` | ±2.0% | -2.32 | +0.69% | `equivalent` |
+| `incremental-mixed` | ±1.85% | +2.54 | +2.35% | `slower` |
+
+`retained-browse`'s four paired symmetric percentages are **+0.318, -0.274,
+-1.020, +0.064**, median -0.105, **no pair flagged an outlier**. They straddle
+zero. And `equivalent` is not "could not tell": under
+`scripts/terminal-benchmark-calibration.py#decision_from_estimate` it means the
+estimate sits inside the **0.75% equivalence band declared before the
+comparison**, which is a positive statement of no difference.
+
+**So the cache is not what moved the rung.** The 0.45 points Observation 2
+credited to it is session-to-session drift in the paired estimate, and the
+pair-distribution argument that seemed to corroborate it -- `F16`'s four values
+sitting below `F15`'s three highest -- was an artifact of the same drift.
+Observation 2's sentence "the inference survives its one available test" is
+**withdrawn**: what it tested was the subtraction, and the subtraction is not the
+measurement. `D2` Decision 1's amendment froze a falsification clause reading "if
+`retained-browse` does not clear, `F15`'s attribution was wrong"; the rung did
+clear, so the clause did not fire by its letter, and this observation records
+that **the clause was the wrong test** -- it could not distinguish the cache from
+the session.
+
+**What this does and does not imply.**
+
+- **`DD55` has a measured cost and no measured benefit.** The cost is exact and
+  reproduced in this entry's Observation 4: index **0.516 -> 1.017 MiB**, arena in
+  use 14.484 -> 13.983, retained depth **-3.56%** on the `plain` stimulus, and
+  `PO11`'s derived margin on `full` from 0.9% to **0.4%**. The benefit it was
+  taken for reads `equivalent`. **Whether to keep it is a human's**, and nothing
+  is reverted here; the campaign's rule is to report rather than to act.
+- **`F16`'s verdict is untouched.** Acceptance is against `28c54e1`, and the
+  store at `27c6fb6` reads +0.94% on that comparison whatever the reason.
+- **It sharpens, rather than softens, this entry's "one invocation" caution.**
+  `retained-browse` has now read +1.03% (`F14`), +1.39% (`F15`) and +0.94%
+  (`F16`) against the same baseline, a **0.45-point spread on a rung whose
+  threshold is 1.05%** -- and the direct comparison says the code changes between
+  those readings account for none of it. Acceptance therefore rests on one
+  invocation of a cell whose session-to-session variation is about half its own
+  threshold. A second `confirm baseline=28c54e1` is the instrument for that and
+  was not taken.
+- **`F15`'s +0.36-point charge against `D5`'s chunked backing is in the same
+  doubt, by the same argument**, and for the same reason it was never measured
+  directly. `D5`'s **decision** is unaffected: its mechanism was profiled
+  (`F13` M1, `memcpy` at 12.1%-16.1% of process CPU) and is independently
+  evidenced by `scrollback-stream`'s 14.6-point swing. What is in doubt is only
+  the cost it was charged on the browse rung.
+- **This invocation's own resolution is worse than `F16`'s and is stated so it is
+  not over-read.** `incremental-mixed` returned pairs from **-11.573 to +9.536**
+  and its `slower` +2.35% is not a usable estimate of anything; `scrollback-stream`
+  spans -4.868 to +1.403. Those cells are noise. The `retained-browse` cell is
+  not: four pairs inside a 1.34-point spread centred on zero with no outlier
+  flagged, which is what makes its null readable while its neighbours are not.
+  A reader who wants the null at higher confidence should re-run this
+  comparison, not this observation's neighbours.
+
 - Next action: none owed by this entry. Acceptance is met, so what follows is
   closure rather than another measurement: `D4`'s landing condition is spent on
   its second clause as well as its first, `28/H7`'s reopening is spent, and the

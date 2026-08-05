@@ -1140,6 +1140,18 @@ statistic touched.
    attribution is from the diff rather than from an instrument; this amendment
    is the test of it.
 
+**The rung cleared, and clause 4 turned out to be the wrong test (`F16`
+Observation 5, 2026-08-04).** It could not distinguish this change from the
+session it was measured in: `F16` read +0.94% against `28c54e1` where `F15` read
++1.39%, but the cache measured **directly** -- paired against the same store
+without it, in one session -- reads **`equivalent` at -0.10%**, inside a 0.75%
+band declared before the comparison. So this amendment's charge is **measured**
+(index 0.516 -> 1.017 MiB, retained depth -3.56% on `plain`, `PO11`'s `full`
+margin 0.9% -> 0.4%) and its **benefit is not**. Nothing is reverted on that
+reading and the plan's Acceptance does not move; whether `DD55` is kept is a
+human's, and the honest instrument for the question clause 4 was trying to ask is
+a profile of the browse path, which still nobody has taken.
+
 #### New deferred decisions
 
 - **DD55 -- the cache is the record's header *word*, in a ring parallel to the
