@@ -683,6 +683,17 @@ public final class TerminalPaneSessionController {
         cachedTerminal.primaryHistoryTailText(maxLines: maxLines, maxChars: maxChars)
     }
 
+    /// Copies the terminal now and returns the same bounded read, runnable off the main actor.
+    /// The copy is the point: `Terminal` is a value, so the checkpoint can project on its own
+    /// queue while this session keeps accepting output. Budgets stay plain `Int`s -- retention
+    /// is the app's policy, and this layer must not learn it.
+    public func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String {
+        let terminal = cachedTerminal
+        return { maxLines, maxChars in
+            terminal.primaryHistoryTailText(maxLines: maxLines, maxChars: maxChars)
+        }
+    }
+
     /// Returns completed child-session evidence without making capture a default app surface.
     #if DANTERM_TERMINAL_CHARACTERIZATION
     public func capturedRecording(test: String) -> NeutralTerminalRecording? {

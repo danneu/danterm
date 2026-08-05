@@ -192,8 +192,8 @@ class AppRuntime {
     )
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
-    // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
-    private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
+    // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
+    private static let checkpointWriter = CheckpointWriter()
     private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
@@ -800,14 +800,16 @@ class AppRuntime {
             enqueueNotificationRequest(request)
 
         case .exportState(let snapshot):
-            let enrichedSnapshot = graftScrollback(onto: snapshot, scrollbackByPaneId: scrollbackByPaneId())
-            let initFile = toInitFile(snapshot: enrichedSnapshot)
-
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            // Same pipeline as a checkpoint, run here rather than queued: export is a deliberate
+            // user action that blocks on a save panel anyway, and its bytes are human-readable.
+            let capture = CheckpointCapture(
+                snapshot: snapshot,
+                scrollbackReads: captureScrollbackReads(keeping: .checkpoint)
+            )
+            let encode = capture.encoder(prettyPrinted: true)
             let data: Data
             do {
-                data = try encoder.encode(initFile)
+                data = try encode()
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Export Failed"
@@ -1176,7 +1178,7 @@ class AppRuntime {
         if checkpointPending {
             performLightCheckpoint(async: false)
         } else {
-            Self.checkpointIOQueue.sync {}
+            Self.checkpointWriter.drain()
         }
     }
 
@@ -1249,84 +1251,65 @@ class AppRuntime {
     }
 
     /// Write a light checkpoint: pure model serialization with scrollback: nil.
-    /// Cheap — no Ghostty surface interaction.
+    /// Cheap — no terminal interaction.
     private func performLightCheckpoint(async: Bool) {
         checkpointPending = false
-        let initFile = toInitFile(model)
-        writeCheckpoint(initFile, to: lightCheckpointURL(), async: async)
+        // The same pipeline with nothing to read: no pane reads means the graft is the identity
+        // and every leaf goes out with `scrollback: nil`, which is what "light" has always been.
+        let capture = CheckpointCapture(snapshot: toSnapshot(model), scrollbackReads: [:])
+        Self.checkpointWriter.write(
+            to: lightCheckpointURL(),
+            async: async,
+            encode: capture.encoder()
+        )
     }
 
-    /// Read scrollback text from each live surface, keyed by pane id. The impure
-    /// half of scrollback enrichment; the pure `graftScrollback(onto:...)` embeds
-    /// this map into a snapshot's tree leaves.
-    private func scrollbackByPaneId() -> [PaneId: String] {
-        var result: [PaneId: String] = [:]
-        // One value for both halves, so the read cannot under-cover the cut it feeds.
-        let retention = ScrollbackRetention.checkpoint
+    /// Take each live pane's bounded scrollback read without performing it, so the projection
+    /// lands on the checkpoint queue. A backend that can only read on the main actor has no
+    /// deferred reader and is read here instead, leaving the pipeline downstream uniform.
+    private func captureScrollbackReads(
+        keeping retention: ScrollbackRetention
+    ) -> [PaneId: CheckpointScrollbackRead] {
+        var reads: [PaneId: CheckpointScrollbackRead] = [:]
         for (paneId, session) in surfaces {
-            // Read only what the truncation below can keep. Retained history is sized by the
-            // pane's whole scrollback budget, so projecting all of it to store this tail made
-            // every checkpoint cost the capacity instead of what it writes.
-            guard let rawText = session.readPrimaryHistoryTail(
-                      maxLines: retention.maxLines,
-                      maxChars: retention.maxChars
-                  ),
-                  let scrollback = truncateScrollback(rawText, keeping: retention) else {
-                continue
+            if let deferred = session.primaryHistoryTailReader() {
+                reads[paneId] = deferred
+            } else if let text = session.readPrimaryHistoryTail(
+                maxLines: retention.maxLines,
+                maxChars: retention.maxChars
+            ) {
+                reads[paneId] = { _ in text }
             }
-            result[paneId] = scrollback
         }
-        return result
+        return reads
     }
 
-    /// Write an enriched checkpoint: model snapshot + scrollback text read from
-    /// each live Ghostty surface. Expensive but gives full restore fidelity.
-    /// Called by the periodic timer and once at clean termination.
+    /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
+    /// Everything after this is a pure function of the returned value, which is what lets the
+    /// projection, truncation, graft, and encode run on the checkpoint queue instead of here.
+    private func captureEnrichedCheckpoint() -> CheckpointCapture {
+        let retention = ScrollbackRetention.checkpoint
+        return CheckpointCapture(
+            snapshot: toSnapshot(model),
+            scrollbackReads: captureScrollbackReads(keeping: retention),
+            retention: retention
+        )
+    }
+
+    /// Write an enriched checkpoint: model snapshot + each pane's primary history. Expensive but
+    /// gives full restore fidelity, so only the capture happens here — the cost rides the
+    /// checkpoint queue. Called by the mutation-driven policy and once at clean termination.
     func performEnrichedCheckpoint(
         async: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        let enrichedSnapshot = graftScrollback(onto: toSnapshot(model), scrollbackByPaneId: scrollbackByPaneId())
-        writeCheckpoint(
-            toInitFile(snapshot: enrichedSnapshot),
+        let capture = captureEnrichedCheckpoint()
+        Self.checkpointWriter.write(
             to: enrichedCheckpointURL(),
             async: async,
+            encode: capture.encoder(),
             completion: completion
         )
-    }
-
-    /// Encode and atomically write a checkpoint to the given URL.
-    /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
-    private func writeCheckpoint(
-        _ initFile: AppInitFile,
-        to url: URL,
-        async: Bool,
-        completion: ((Bool) -> Void)? = nil
-    ) {
-        let dir = recoveryDirectoryURL()
-        let work = DispatchWorkItem {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let succeeded: Bool
-            do {
-                let data = try encoder.encode(initFile)
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                try data.write(to: url, options: .atomic)
-                succeeded = true
-            } catch {
-                succeeded = false
-            }
-            guard let completion else { return }
-            DispatchQueue.main.async {
-                completion(succeeded)
-            }
-        }
-
-        if async {
-            Self.checkpointIOQueue.async(execute: work)
-        } else {
-            Self.checkpointIOQueue.sync(execute: work)
-        }
     }
 
     // MARK: - State Import
@@ -1694,7 +1677,7 @@ class AppRuntime {
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
-        if truncateScrollback(initialRecoveryCandidate) != nil {
+        if hasCheckpointableScrollback(initialRecoveryCandidate) {
             notePrimaryHistoryMutation()
         }
         return session

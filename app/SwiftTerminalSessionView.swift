@@ -585,6 +585,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return controller.readPrimaryHistoryTail(maxLines: maxLines, maxChars: maxChars)
     }
 
+    func primaryHistoryTailReader() -> CheckpointScrollbackRead? {
+        // Synchronizing has to happen here, on the main actor, so the copy the reader closes
+        // over includes everything the session has accepted; projecting it does not.
+        controller.synchronizeState()
+        let read = controller.primaryHistoryTailReader()
+        return { retention in read(retention.maxLines, retention.maxChars) }
+    }
+
     #if !DANTERM_UI_TEST
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
         guard let snapshot = controller.flightRecordingSnapshot() else { return nil }

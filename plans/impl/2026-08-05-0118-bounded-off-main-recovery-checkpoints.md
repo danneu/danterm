@@ -221,7 +221,7 @@ independently measurable" changes, and each leaves the tree green.
 
 - [x] 1. D2 -- bounded tail read: project only the tail of retained history under
   the caller's budget, and have the checkpoint use it (PO2, PO3).
-- [ ] 2. D3 -- move the enriched checkpoint pipeline off the main thread, with the
+- [x] 2. D3 -- move the enriched checkpoint pipeline off the main thread, with the
   pure capture-to-bytes stage outside `app/` (PO4, PO5, PO6, PO7).
 - [ ] 3. D4 -- lint guard rejecting the generic-sequence
   `unicodeScalars.append(contentsOf:)` overload inside `TerminalCore`.
@@ -301,3 +301,60 @@ cannot see `DanTermCore` types in any case. Cost: five `ExportTests` call sites
 construct the value explicitly, and the four that only exercise the line bound
 now say `maxChars: .max` rather than inheriting the checkpoint's character
 budget, which states outright that the character bound is not what they pin.
+
+**D3 -- the capture hands over reads, not text or terminals.** "Implementation
+discretion" left open whether the off-main capture passes terminal values or a
+narrower per-pane snapshot; it passes neither directly. `CheckpointCapture`
+holds one `@Sendable (ScrollbackRetention) -> String?` per pane, and the Swift
+session builds that closure over a copied `Terminal`. This is the shape
+`flightRecordingEncoder()` already uses on the same protocol -- capture on the
+main actor, return work that runs elsewhere -- so the checkpoint reads like its
+neighbours. It also keeps the Ghostty backend working without touching it: a
+backend with no deferred reader is read eagerly at capture time and hands over a
+closure returning that text, so everything downstream is uniform and the old
+backend pays exactly what it paid before.
+
+**D3 -- deferral is the mechanism, so `encoder()` is the only route to bytes.**
+`CheckpointCapture` exposes no way to resolve itself; it returns a closure. That
+is deliberate: the pure pipeline living outside `app/` proves the payload is
+right, but nothing about it would stop a caller from running the closure on the
+main thread and putting the whole cost back. Making the closure the sole exit
+means the capture site cannot resolve anything even by accident, and the lint
+below only has to check that `app/` does not assemble a payload by hand.
+
+**D3 -- both checkpoint tiers now share one pipeline.** A light checkpoint is a
+capture with no reads: the graft is the identity and every leaf keeps
+`scrollback: nil`. That is worth one test on its own, because the light tier now
+passes through `graftScrollback`, which rebuilds each group and tab field by
+field -- a field added to `TabSnapshot` but not to that rebuild would silently
+vanish from the frequent checkpoint. `captureWithoutReadsMatchesTheLightCheckpoint`
+populates the optional fields (collapsed group, custom title, colour, tab and
+pane todos, agent session) and compares bytes against `toInitFile(model)`;
+verified to fail when a field is dropped from the rebuild.
+
+**D3 -- the write queue moved to `DanTermSupport` (PO7).** PO7 asks for a test
+over the pure pipeline *and its write step*, and the write step was a private
+`AppRuntime` method around a `static` queue -- untestable there. `CheckpointWriter`
+is the same serial queue and the same atomic write, relocated: portable IO next
+to the `RecoveryStore` that already owns the checkpoint paths. It takes the
+encode as `@Sendable () throws -> Data` rather than finished bytes, which is what
+puts the encode on the queue, and which lets support host it without seeing a
+`DanTermCore` type. Its tests pin submission order, the synchronous write's
+fence, and the encode running off the calling thread; all three fail if the queue
+is made concurrent. `completionQueue` is a defaulted seam (production: `.main`)
+because no test can service the main queue.
+
+**D3 -- PO4 is discharged by a test plus a lint, not a lint alone.** The earlier
+note found PO4's premise wrong about `app/` having no test target, and said D3
+should reconsider. It splits in two. That the capture performs no projection is
+behaviour of a value, tested in `CheckpointCaptureTests`; that the deferred work
+actually runs on the queue is behaviour of the writer, tested in
+`CheckpointWriterTests`. What remains is placement -- that `app/` hands the work
+over instead of doing it -- and that genuinely has no behavioural signature: a
+runtime that grafted and encoded at the capture site would produce identical
+bytes and pass every test above while freezing the UI exactly as before.
+`scripts/checkpoint-off-main-lint.sh` covers that residue by rejecting
+`graftScrollback(`, `truncateScrollback(`, `toInitFile(`, and `JSONEncoder(` in
+`app/AppRuntime.swift`. To leave the runtime with no exemption to carve out, the
+one place it legitimately asked the truncation a question now calls
+`hasCheckpointableScrollback`, which asks it by name.

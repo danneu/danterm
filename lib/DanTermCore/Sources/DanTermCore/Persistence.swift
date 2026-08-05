@@ -262,3 +262,10 @@ func truncateScrollback(_ text: String, keeping: ScrollbackRetention = .checkpoi
 
   return result
 }
+
+/// Whether this text would leave anything behind after truncation -- i.e. whether a pane holding
+/// it has scrollback worth checkpointing at all. Named for the question the caller is asking, so
+/// deciding to checkpoint does not read as assembling a checkpoint payload.
+func hasCheckpointableScrollback(_ text: String) -> Bool {
+  truncateScrollback(text) != nil
+}

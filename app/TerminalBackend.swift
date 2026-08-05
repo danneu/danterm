@@ -103,6 +103,10 @@ protocol TerminalSession: AnyObject {
     func readPrimaryHistoryText() -> String?
     /// Reads only the primary-history tail a truncation at this budget can keep.
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String?
+    /// Copies the pane's terminal now and returns that same bounded read, deferred off the main
+    /// actor -- the recovery checkpoint's expensive half. nil when the backend can only read on
+    /// the main thread, which leaves the caller to read eagerly instead.
+    func primaryHistoryTailReader() -> CheckpointScrollbackRead?
     /// Copies the pane tape now and returns work that can encode it away from the main actor.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)?
     /// Fences the chosen stream origin and defers its protocol adaptation off the main actor.
@@ -150,6 +154,10 @@ extension TerminalSession {
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
         readPrimaryHistoryText()
     }
+
+    /// A backend whose history can only be read on the main actor has no deferred reader; the
+    /// checkpoint falls back to reading it eagerly, paying on the main thread as it always did.
+    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
 
     /// Backends without the dev-only recorder advertise the unsupported state explicitly.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
