@@ -133,49 +133,74 @@ struct TerminalHistoryTailTests {
         #expect(tail == "alpha\nbeta\ngamma")
     }
 
-    @Test("reading the tail costs the budget rather than the retained history")
+    @Test("reading the tail walks the budget's rows rather than the retained history's")
     func tailReadCostTracksTheBudgetNotTheCapacity() throws {
         // Intent: the bounded read's cost is set by the budget it is given, so growing the
-        //   retained scrollback behind it does not make it slower.
+        //   retained scrollback behind it does not make it walk further.
         // Why it exists: `I3`. The checkpoint projected every pane's entire retained history
         //   and then kept only its last 4000 lines / 400K characters, which made a periodic
-        //   checkpoint cost the 16 MiB scrollback capacity rather than what it stores. A tail
-        //   read that still walked from the head would satisfy every equivalence test above
-        //   and change none of that.
+        //   checkpoint cost the 16 MiB scrollback capacity rather than what it stores -- tens
+        //   of seconds per pane. A tail read that still walked from the head would return the
+        //   correct suffix and satisfy every equivalence test above, so nothing else here
+        //   would catch it.
         // Scenario: a long-lived pane at a budget-full history, checkpointed every 600s.
-        func tailCost(lines: Int) throws -> Double {
-            var terminal = try #require(Terminal(columns: 200, rows: 50))
-            let line = Array((String(repeating: "abcdefghij", count: 19) + " end\r\n").utf8)
-            for _ in 0..<lines { terminal.feed(line) }
-            let start = ContinuousClock.now
-            _ = terminal.primaryHistoryTailText(maxLines: 200, maxChars: 20_000)
-            let elapsed = (ContinuousClock.now - start).components
-            return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        //
+        // Rows walked, not seconds elapsed. The rows *are* the cost, they are exactly what the
+        // contract bounds, and they are deterministic -- so this needs none of the warm-up,
+        // interleaving and best-of-N sampling a wall-clock ratio needs to survive the parallel
+        // `just test` pool, and it still cannot be satisfied by an implementation that projects
+        // everything and slices the suffix. The timing form this replaced is kept as an
+        // env-gated probe (`TerminalHistoryTailCostProbe`) for the wall clock itself.
+        let budget = (maxLines: 200, maxChars: 20_000)
+        let smallTerminal = try historyProjectionTerminal(lines: 400)
+        let largeTerminal = try historyProjectionTerminal(lines: 3_200)
+
+        let smallTailRows = ProjectionRowCounter.measure {
+            _ = smallTerminal.primaryHistoryTailText(
+                maxLines: budget.maxLines, maxChars: budget.maxChars
+            )
+        }
+        let largeTailRows = ProjectionRowCounter.measure {
+            _ = largeTerminal.primaryHistoryTailText(
+                maxLines: budget.maxLines, maxChars: budget.maxChars
+            )
         }
 
-        // Min-of-3 per size, not a single timed pair. Noise is one-sided -- scheduler
-        // preemption only ever adds time -- so the minimum of repeated runs strips it while
-        // leaving a genuine full-history walk fully visible at its ~16x. A single sample
-        // failed this gate twice under the 74-step parallel `just test` pool (0.244s vs
-        // 0.196s, ratio 5.0) and passed in every isolated rerun; the threshold stays at 4x
-        // because the instrument, not the bound, was the thing that was fragile.
-        func bestTailCost(lines: Int) throws -> Double {
-            var best = Double.infinity
-            for _ in 0..<3 { best = min(best, try tailCost(lines: lines)) }
-            return best
-        }
-
-        _ = try tailCost(lines: 200)  // warm up caches and any one-time growth
-        let small = try bestTailCost(lines: 400)
-        let large = try bestTailCost(lines: 6_400)
-
-        // Sixteen times the history at the same budget. Under a bounded read the two costs are
-        // the same walk, so their ratio sits near 1; under a full projection it tracks the 16x.
-        // 4x sits between with room for scheduling noise on a loaded machine, and is still far
-        // enough below 16 to fail a read that walks the whole history.
+        // The whole-projection reads over the same two terminals, which is what this counter
+        // has to separate the tail read from. It is also the control that keeps the equality
+        // above from passing vacuously: a counter wired to nothing, or to a path neither read
+        // takes, reports equal row counts for the bounded read *and* for the unbounded one.
+        let smallFullRows = ProjectionRowCounter.measure { _ = smallTerminal.primaryHistoryText }
+        let largeFullRows = ProjectionRowCounter.measure { _ = largeTerminal.primaryHistoryText }
         #expect(
-            large < small * 4,
-            "tail read at a fixed budget: \(small)s over 400 lines, \(large)s over 6400 lines"
+            largeFullRows > smallFullRows * 4,
+            """
+            control: the unbounded projection must track history size, or this counter is not \
+            measuring the walk -- \(smallFullRows) rows over 400 lines, \(largeFullRows) over 3200
+            """
+        )
+
+        // Eight times the history, at the same budget, walking the same rows. Exact equality
+        // rather than a ratio: the tail read's start row is computed from the budget and the
+        // stream end, so nothing about the depth behind it may enter the count.
+        #expect(
+            smallTailRows == largeTailRows,
+            """
+            tail read at a fixed budget: \(smallTailRows) rows over 400 lines, \
+            \(largeTailRows) rows over 3200 lines
+            """
+        )
+
+        // And the absolute bound the caller is promised, not merely that the two agree -- two
+        // reads that both walked everything would satisfy the equality above. `maxLines` rows
+        // plus the live screen plus one is the first reach `primaryHistoryTailText` tries, and
+        // `2x` that is the ceiling its own doc gives for the `rowBudget *= 2` retry ("retrying
+        // costs at most twice the text finally read"). This corpus covers on the first pass and
+        // measures exactly `reach`, so the assertion has a full doubling of headroom.
+        let reach = budget.maxLines + 4 + 1
+        #expect(
+            largeTailRows <= reach * 2,
+            "tail read walked \(largeTailRows) rows for a \(budget.maxLines)-line budget"
         )
     }
 }

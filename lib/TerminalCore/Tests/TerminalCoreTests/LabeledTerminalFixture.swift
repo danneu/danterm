@@ -30,3 +30,25 @@ func labeledTerminal(
     }
     return terminal
 }
+
+/// Builds a terminal holding `lines` full-width plain-text history lines -- the corpus the two
+/// history-projection cost tests (`primaryHistoryTextStaysLinear`,
+/// `tailReadCostTracksTheBudgetNotTheCapacity`) compare a small history against a large one on.
+/// Both want the same thing from it: retained character count proportional to `lines` and nothing
+/// else varying between the two sizes, so it must stay a plain unstyled corpus. `rows` is small by
+/// default because a viewport wider than a handful of rows only adds scroll shuffling to the build,
+/// which neither test measures.
+func historyProjectionTerminal(
+    lines: Int,
+    columns: Int = 200,
+    rows: Int = 4,
+    sourceLocation: SourceLocation = #_sourceLocation
+) throws -> Terminal {
+    var terminal = try #require(
+        Terminal(columns: columns, rows: rows),
+        sourceLocation: sourceLocation
+    )
+    let line = Array((String(repeating: "abcdefghij", count: 19) + " end\r\n").utf8)
+    for _ in 0..<lines { terminal.feed(line) }
+    return terminal
+}

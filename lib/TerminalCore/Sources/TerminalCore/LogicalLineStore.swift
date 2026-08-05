@@ -61,6 +61,43 @@ enum LocateCounter {
     }
 }
 
+/// Counts the display rows a history-text projection materializes and walks.
+///
+/// Exists so `primaryHistoryTailText`'s reason for existing -- that a bounded read costs the
+/// budget it is given and not the scrollback behind it -- is assertable as an exact number
+/// rather than a wall clock. That claim used to be pinned by timing two histories and bounding
+/// their ratio, which no amount of warm-up or best-of-N sampling makes reliable inside a
+/// parallel test pool; the rows walked are the cost, and they are deterministic.
+///
+/// Same free-global, task-local shape as `LocateCounter` above, and for the same two reasons:
+/// the claim spans several reads of a `Sendable` value type, and a process-wide counter would
+/// tally every terminal the parallel suite is driving at once. It records once per projection
+/// with the whole stream length rather than once per row, so the read path pays a single
+/// task-local lookup per call and nothing per cell.
+enum ProjectionRowCounter {
+    /// The tally one `measure` is collecting. A class for the same reason as `LocateCounter.Tally`.
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records a projection of `rows` display rows against whatever `measure` is in scope.
+    @inline(__always)
+    static func record(rows: Int) {
+        active?.count += rows
+    }
+
+    /// Runs `body` and reports the display rows the projections inside it walked.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///

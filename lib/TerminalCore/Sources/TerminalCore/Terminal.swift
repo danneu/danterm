@@ -3143,6 +3143,10 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func projectedHistoryText(from stream: [GridRow]) -> String {
+        // The single funnel every history-text projection passes through, so counting the stream
+        // here measures what a bounded read actually walks -- including the `rowBudget *= 2`
+        // retries in `primaryHistoryTailText`, which are real cost and are summed in.
+        ProjectionRowCounter.record(rows: stream.count)
         var result = ""
         forEachProjectionUnit(from: stream, absoluteBase: 0) { unit in
             // Scalar at a time, not `append(contentsOf:)`. The generic-sequence overload

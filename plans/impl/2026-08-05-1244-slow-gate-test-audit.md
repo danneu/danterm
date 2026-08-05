@@ -63,7 +63,7 @@ Rules for each commit:
 | 10 | [x] `replayFixtures`: assert chunk-invariance by checkpoint-snapshot-vector equality instead of re-running every expectation block | `--filter replayFixtures` | ~10x, stronger | 5.72s -> 5.78s (stronger, not faster -- no speedup was available. See the corrected cost model under item "3."; a whole-`Terminal` snapshot vector over all ~3,700 split replays measured *slower*, so the vector is recorded on the authored and bytewise runs only) |
 | 11 | [x] `saturatingRecipesReachTheBudgetCeiling`: charge arithmetic for two recipes, keep `.wideSaturating` on the observed-eviction path | `--filter TerminalResizeProbeSupportTests` (the test split in two) | 15-20x | 19.76s -> 9.35s (2.1x, not 15-20x: the anchored recipe's cost is denominated in *charged bytes*, not lines -- filling the 15.7 MB arena costs ~9.3s whichever payload does it, and `.wideSaturating` is cheapest in lines but not in bytes. The arithmetic arm covering all three recipes is 1.9s. Also: `.sparseSaturating` ships only a **1.003x** margin, so the finding's `>= capacity * 1.5` is unreachable for it) |
 | 12 | [x] `blankHistoryAtTheIndexRingDoublingPointKeepsRetaining`: early stop one ring-block past a stable record count (rescaled budgets deliberately deferred) | `--filter blankHistoryAtTheIndexRingDoublingPoint` | 5-7x | 1.759s -> 0.348s (5.1x. The finding's "stable record count" criterion does **not** terminate: at budget 288,000 the count moves on *every* admission out to 60,000, longest equal-run 0. Shipped criterion is a stable *high-water mark* -- one ring block (64) of admissions after the first eviction with no new maximum depth -- which settles at 7,538/8,257/8,256/15,949/16,449/16,449 admits, ~72,900 of 360,000) |
-| 13 | [ ] `tailReadCostTracksTheBudgetNotTheCapacity`: build each terminal once and sample the non-mutating read 3x; 6,400 -> 3,200; `rows: 50 -> 4` | `--filter tailReadCostTracksTheBudgetNotTheCapacity` | ~5x | |
+| 13 | [x] `tailReadCostTracksTheBudgetNotTheCapacity`: replaced the wall-clock ratio with a deterministic row-visit count; 6,400 -> 3,200; `rows: 50 -> 4`; timing arm demoted to an env-gated probe | `--filter tailReadCostTracksTheBudgetNotTheCapacity` | ~5x | 13.951s -> 3.003s (4.6x, and no longer a timing test at all -- see below) |
 | 14 | [ ] `primaryHistoryTextStaysLinear`: 400 vs 3,200, `rows: 50 -> 4`, share the corpus builder with #13 | `--filter primaryHistoryTextStaysLinear` | 2-3x | |
 | 15 | [ ] `dialectRecordingSweep`: dedupe by injection identity, boundary-chosen injections, compute `fullHistoryText` once, `@autoclosure` the diagnostic context, hoist `expectValidGrid` to per-fixture | `--filter dialectRecordingSweep` | 3-4x | |
 
@@ -295,6 +295,53 @@ the min of 3 reads (also a better instrument). Then 6,400 -> 3,200 keeps an
 shuffling. Its corpus is byte-identical to `primaryHistoryTextStaysLinear`'s
 (same 200-col line, same 400/6,400 counts) -- the pair could share one
 builder.
+
+**Correction, measured while implementing row #13: the wall clock was the wrong
+instrument, and this row's prescribed fix would have shipped a still-flaky one.**
+Build-once + min-of-N + 3,200 was implemented and measured first. It works when
+the machine is idle -- ten trials gave a ratio of 0.99-1.02, against 7.92-8.10
+with the row budget neutralized so the read walks from the head, so the 4x
+threshold does separate the two. But under contention it does not hold up: with
+the box oversubscribed, a min-of-3 trial reached **3.81x** against that 4x bound.
+A controlled comparison (one sample stream, ratios recomputed at N=3/5/9) showed
+that more samples tightens the typical trial but does not bound the worst case,
+because sustained preemption inflates every sample in the trial. No amount of
+warm-up, interleaving, or best-of-N fixes that.
+
+What shipped instead: **the claim is asserted in display rows walked, not
+seconds.** A new `ProjectionRowCounter` (`LogicalLineStore.swift`, the same
+free-global task-local shape as the existing `LocateCounter`, recording once per
+projection with the stream length so the read path pays one task-local lookup
+per call and nothing per cell) is recorded at the single funnel every
+history-text projection passes through, `Terminal.projectedHistoryText(from:)`.
+The test then asserts the real contract directly:
+
+- the bounded read walks the *same* row count at 400 and at 3,200 lines
+  (measured: 205 both -- exact equality, not a ratio),
+- it stays under the API's own documented ceiling, `(maxLines + rows + 1) * 2`,
+  so two reads that both walked everything cannot satisfy the equality,
+- and, as the control that keeps the whole thing from passing vacuously, the
+  *unbounded* projection over the same two terminals must still track history
+  size (measured: 401 -> 3,201 rows). A counter wired to nothing, or to a path
+  neither read takes, reports equal counts for both reads and fails this.
+
+Verified by neutralization (`rowBudget = totalRows`): the bounded read jumps to
+401 vs 3,201 rows and both assertions fire. No warm-up, no sampling, no
+threshold that scheduling noise can cross.
+
+The wall clock is still worth being able to look at -- rows are a proxy, and a
+change that kept the row count while making each row far more expensive would
+pass the gate -- so the timing form is kept as `TerminalHistoryTailCostProbe`,
+env-gated behind `DANTERM_HISTORY_TAIL_PROBE` and out of `just test`. It prints
+and asserts nothing. On an idle machine it reports tail 0.0357s/0.0362s (ratio
+1.01) against full 0.0685s/0.549s (ratio 8.02).
+
+Note for row #14: this does **not** generalize to `primaryHistoryTextStaysLinear`.
+That test's regression lived in `String` copy-on-append *inside* the projection
+walk, which a row counter cannot see -- the row count is identical either way.
+Row #14 legitimately stays a wall-clock test. The shared corpus builder it was
+told to reuse is `historyProjectionTerminal(lines:columns:rows:)` in
+`LabeledTerminalFixture.swift`, defaulting to 200 columns and 4 rows.
 
 ### 7. `TerminalLogicalLineStoreTests.blankHistoryAtTheIndexRingDoublingPointKeepsRetaining` -- ~5x now, ~30x later
 
