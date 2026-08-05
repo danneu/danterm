@@ -46,8 +46,17 @@ struct TerminalSemanticPromptInvariantTests {
         }
     }
 
-    @Test("raw live captures are rejected before fixture provenance normalization")
+    @Test("the corpus admission guard actually fires on a raw live capture")
     func rawLiveCaptureIsNotFixtureAdmissible() {
+        // Intent: `admitDanTermRecordingFixture` rejects a `.liveCapture()` provenance.
+        // Why it exists: this is the only case that makes the guard fire. `recordingCorpus`
+        //   runs it over every committed fixture, none of which is a live capture, so it
+        //   passes whether the guard is correct, inverted, or gone -- and nothing else in
+        //   the gate enforces "no raw live capture under Fixtures/danterm" while the
+        //   live-capture pipeline (scripts/terminal-tape-to-fixture.py, PaneTapeFollow) is
+        //   real and one `--force` away from committing one.
+        // Scenario: a tape captured from a live pane is dropped into the fixture corpus
+        //   without being normalized to a `.danTerm(test:)` provenance first.
         #expect(throws: DanTermRecordingFixtureAdmissionError.rawLiveCapture) {
             try admitDanTermRecordingFixture(.liveCapture())
         }

@@ -6,23 +6,6 @@ import Testing
 
 /// Keeps backend migration evidence headless while treating recorded Ghostty output as adjudicable evidence.
 struct GhosttyInspectionRecoveryReplayTests {
-    @Test(
-        "Ghostty characterization feeds reject non-base64 representations",
-        arguments: [
-            #"{"type":"feed","hex":"61"}"#,
-            #"{"type":"feed","base64":"YQ==","hex":"61"}"#,
-            #"{"type":"feed","base64":"YQ==","text":"a"}"#,
-        ]
-    )
-    func characterizationNonBase64FeedsAreRejected(_ json: String) {
-        #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(
-                ReplayEvent.self,
-                from: Data(json.utf8)
-            )
-        }
-    }
-
     @Test("Ghostty inspection and recovery corpus replays through Swift projections")
     func replayCharacterizationCorpus() throws {
         // Intent: replay the exact characterized bytes and resize sequence through

@@ -154,18 +154,31 @@ struct TerminalMemoryCensusTests {
         //   record arena, so any future measurement carries its own proof that it is not
         //   measuring retained garbage.
         // Why it exists: F4's waste -- storage held for rows already evicted -- was invisible to
-        //   every existing accessor. With one region there are no per-row allocations left to
+        //   every existing accessor, and it failed while the admission accounting stayed correct:
+        //   accounting and effect are separate observables, which is why this test reads resident
+        //   bytes rather than the ledger. With one region there are no per-row allocations left to
         //   strand, so the proof becomes "bytes in use fall when records are evicted, and the
-        //   capacity never grows" (`31/DD11`).
+        //   capacity never grows" (`31/DD11`). The `sawEviction` and eviction-depth expectations
+        //   guard the guard: a peak-charge bound that is never approached is satisfied both by a
+        //   store that retains nothing and by one that retains everything it was fed, so the
+        //   fixture's eviction depth has to be checked rather than assumed.
+        // Scenario: a long-running session streaming output far past its scrollback budget -- the
+        //   steady state of the `scrollback-stream` benchmark, and of any shell that outlives its
+        //   history.
         var terminal = try #require(Terminal(columns: 8, rows: 2, scrollbackBudgetBytes: 6_000))
         let capacity = terminal.memoryCensus.retainedArenaCapacityBytes
         var peak = 0
+        var sawEviction = false
         for line in 1...1_200 {
+            let before = terminal.scrollbackRowCount
             terminal.feed(Array("\(line % 10)\r\n".utf8))
+            if terminal.scrollbackRowCount <= before, before > 0 { sawEviction = true }
             peak = max(peak, terminal.memoryCensus.retainedChargedBytes)
         }
 
         let census = terminal.memoryCensus
+        #expect(sawEviction)
+        #expect(1_200 - terminal.scrollbackRowCount > 100)
         #expect(census.scrollbackRowCount > 0)
         #expect(census.retainedArenaCapacityBytes == capacity)
         #expect(peak <= capacity)

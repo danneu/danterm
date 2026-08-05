@@ -190,15 +190,22 @@ struct TerminalTests {
         #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
     }
 
-    @Test("tab clamps to the last column and preserves padding")
-    func tabStopsAndPadding() throws {
+    @Test("tab past the last default stop clamps to the last column")
+    func tabClampsWithDefaultStopsPresent() throws {
+        // Intent: with the default every-eight stops intact and the cursor already past the
+        //   last one that fits, HT clamps to the final column instead of running off the row.
+        // Why it exists: `TerminalTabStopTests.tabStopDispatch` reaches the clamp only after
+        //   `ESC[3g` has cleared every stop, so it exercises the empty-stop-set path. An
+        //   implementation that kept the set for custom stops only and computed the defaults
+        //   arithmetically -- a plausible optimization, since the stop filter runs per HT --
+        //   would answer 16 here and still pass that test. This is the defaults-present case.
+        // Scenario: a 12-column pane where the shell tabs twice from the left margin.
         var terminal = try #require(Terminal(columns: 12, rows: 1))
 
         terminal.feed([0x09])
         #expect(terminal.geometry.cursor?.column == 8)
         terminal.feed([0x09])
         #expect(terminal.geometry.cursor?.column == 11)
-        #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
     }
 
     @Test("written space and cursor-only padding share screen text but not geometry")

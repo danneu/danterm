@@ -4,21 +4,6 @@ import Testing
 @testable import TerminalCore
 
 func expectValidGrid(
-    _ geometry: TerminalGeometry,
-    context: Comment? = nil,
-    sourceLocation: SourceLocation = #_sourceLocation
-) {
-    for row in geometry.rows {
-        expectValidRow(
-            kinds: row.cells.map(\.kind),
-            isSoftWrapped: row.isSoftWrapped,
-            context: context,
-            sourceLocation: sourceLocation
-        )
-    }
-}
-
-func expectValidGrid(
     _ terminal: Terminal,
     context: Comment? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
@@ -318,12 +303,12 @@ private func fullWidthRowFloor(columns: Int) -> Int {
 
 /// The record arena's fixed charges, so a fixture can spell out what a logical line is made of.
 ///
-/// Mirrors `Terminal.LogicalLineRecord` deliberately rather than reading it: a fixture that
-/// asked the store what it charges could not pin the encoding.
+/// Restates `Terminal.LogicalLineRecord`'s charges deliberately rather than reading them: a
+/// fixture that asked the store what it charges could not pin the encoding. Only the charges a
+/// fixture actually spells out live here -- an unread constant pins nothing.
 enum RecordCharge {
     static let header = 8
     static let cell = 8
-    static let hyperlinkEntry = 4
     static let identityRun = 8
     static let identityCell = 4
 }

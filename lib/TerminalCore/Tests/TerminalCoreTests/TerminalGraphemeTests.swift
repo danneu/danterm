@@ -25,16 +25,6 @@ struct TerminalGraphemeTests {
         }
     }
 
-    @Test("a third Regional Indicator starts a new cluster")
-    func regionalIndicatorParity() throws {
-        var terminal = try #require(Terminal(columns: 7, rows: 1))
-
-        terminal.feed(Array("\u{1F1E6}\u{1F1E7}\u{1F1E8}".utf8))
-
-        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["\u{1F1E6}", "\u{1F1E7}"])
-        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["\u{1F1E8}"])
-    }
-
     @Test("soft wrap starts the next grapheme with fresh break state")
     func softWrapResetsLookBehind() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))

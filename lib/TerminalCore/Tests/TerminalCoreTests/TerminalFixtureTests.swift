@@ -19,17 +19,20 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test(
-        "Phase 2 libvterm recordings replay their public behavior",
-        arguments: Self.phase2LibvtermRecordings
-    )
-    func phase2LibvtermReplay(_ name: String) throws {
-        let url = try #require(Bundle.module.url(
-            forResource: name,
-            withExtension: "json",
-            subdirectory: "Fixtures/libvterm"
-        ))
-        try replayFixture(at: url)
+    @Test("the libvterm fixture directory holds exactly the recordings named here")
+    func libvtermFixtureInventory() throws {
+        // Intent: the checked-in libvterm corpus is exactly this name set -- no fixture
+        //   silently disappears, and a new one has to be declared.
+        // Why it exists: `replayFixtures` runs whatever is on disk, so a deleted recording
+        //   makes it faster rather than red, and `libvtermManifestCoverage` pins upstream
+        //   case names rather than fixture files. This is the only thing that fails when a
+        //   vttest or state-mouse recording stops existing, which is what the same-shaped
+        //   `alacrittyManifestCoverage` fixtureNames check does for the Alacritty corpus.
+        // Scenario: the pinned libvterm corpus is regenerated or pruned.
+        let names = Set(
+            try libvtermFixtureURLs().map { $0.deletingPathExtension().lastPathComponent }
+        )
+        #expect(names == Self.expectedLibvtermRecordings)
     }
 
     @Test(
@@ -293,6 +296,15 @@ struct TerminalFixtureTests {
         .sorted { $0.path < $1.path }
     }
 
+    private func libvtermFixtureURLs() throws -> [URL] {
+        let root = try #require(Bundle.module.resourceURL)
+            .appending(path: "Fixtures/libvterm", directoryHint: .isDirectory)
+        return try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+    }
+
     private func alacrittyFixtureURLs() throws -> [URL] {
         let root = try #require(Bundle.module.resourceURL)
             .appending(path: "Fixtures/alacritty", directoryHint: .isDirectory)
@@ -362,15 +374,20 @@ struct TerminalFixtureTests {
         "tmux_git_log", "tmux_htop", "vim_24bitcolors_bce", "vim_large_window_scroll", "vim_simple_edit",
     ]
 
-    private static let phase2LibvtermRecordings = [
-        "state-mouse-idempotent-1002",
-        "vttest-movement-2",
-        "vttest-movement-3",
-        "vttest-movement-4",
-        "vttest-screen-1",
-        "vttest-screen-2",
-        "vttest-screen-3",
-        "vttest-screen-4",
+    private static let expectedLibvtermRecordings: Set<String> = [
+        "edit-characters", "edit-lines", "edit-lines-scrollback", "encoding-utf8",
+        "erase-scrollback", "flow-hard-boundary", "flow-soft-wrap", "parser-csi",
+        "parser-strings", "reflow-narrow-wide", "reflow-shell-prompt", "resize-altscreen",
+        "resize-grow-phantom", "resize-height-transfer", "resize-mid-csi", "screen-altscreen",
+        "screen-copycell", "screen-damage", "screen-pen", "screen-unicode",
+        "scroll-boundaries", "scroll-controls", "scroll-region-index", "scroll-region-linefeed",
+        "scroll-region-up-down", "scroll-up-down", "scrollback-pushline", "state-input",
+        "state-mode", "state-mouse", "state-mouse-idempotent-1002", "state-movecursor",
+        "state-pen", "state-putglyph", "state-query", "state-rep",
+        "state-rep-edge", "state-reset", "state-reset-erase", "state-save",
+        "state-selection", "state-tabstops", "state-wrapping", "state-wrapping-bottom",
+        "vttest-movement-2", "vttest-movement-3", "vttest-movement-4", "vttest-screen-1",
+        "vttest-screen-2", "vttest-screen-3", "vttest-screen-4",
     ]
 
     private static let expectedAlacrittyRecordings: Set<String> = [

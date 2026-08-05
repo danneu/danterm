@@ -1,12 +1,15 @@
-// Two-sided proofs that `primaryHistoryGeneration` tracks primary-history content and only
-// primary-history content. The forward half pins that every structurally distinct content
+// Proofs that `primaryHistoryGeneration` tracks primary-history content and only
+// primary-history content. The forward test pins that every structurally distinct content
 // funnel advances the generation while the viewport is scrolled back -- the state in which
-// `recordDamage(since:)` used to supply a blanket bump that masked them all. The converse half
+// `recordDamage(since:)` used to supply a blanket bump that masked them all. The converse test
 // pins that presentation-only interaction (cursor, selection, hover, scroll, search
-// navigation) leaves the generation alone. They live together because each is only
-// meaningful as the other's counterweight: drop the forward half and the converse invites
-// silently dropping emissions; drop the converse and the generation degrades back into a
-// render-damage token no recovery consumer can trust.
+// navigation) leaves the generation alone. Those two are each only meaningful as the other's
+// counterweight: drop the forward half and the converse invites silently dropping emissions;
+// drop the converse and the generation degrades back into a render-damage token no recovery
+// consumer can trust. The third test sweeps a whole session's worth of mixed frames --
+// unchanged frames, coalesced edits, alternate-screen output, a truncating resize -- against
+// `primaryHistoryText`, so the pair's per-funnel and per-interaction claims are also checked
+// end to end against the text a recovery consumer actually reads.
 
 import Testing
 @testable import TerminalCore
@@ -110,6 +113,49 @@ struct TerminalHistoryGenerationTests {
         let movedToNewerMatch = terminal.searchPrevious()
         #expect(movedToNewerMatch)
         #expect(terminal.primaryHistoryGeneration == baseline, "search navigation")
+    }
+
+    @Test("primary-history generation covers every session string mutation")
+    func primaryHistoryGenerationDifferential() throws {
+        // Intent: every recovery projection change advances the primary-history generation.
+        // Why it exists: recovery callbacks must stay complete while generation over-approximation
+        //   remains free to trade a redundant write for simpler mutation tracking.
+        // Scenario: unchanged frames, primary edits, coalesced edits, alternate-screen output, and
+        //   a truncating resize are observed through both the old and new frame classifiers.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        var lastText = terminal.primaryHistoryText
+        var lastGeneration = terminal.primaryHistoryGeneration
+
+        func verifyMutation(_ mutate: (inout Terminal) -> Void, terminal: inout Terminal) {
+            mutate(&terminal)
+            let text = terminal.primaryHistoryText
+            // Over-approximation is safe (a redundant recovery write); a missed emission is not.
+            if text != lastText {
+                #expect(terminal.primaryHistoryGeneration != lastGeneration)
+            }
+            lastText = text
+            lastGeneration = terminal.primaryHistoryGeneration
+        }
+
+        func verifyFrame(_ bytes: [UInt8], terminal: inout Terminal) {
+            verifyMutation({ $0.feed(bytes) }, terminal: &terminal)
+        }
+
+        verifyFrame(Array("\u{1B}[?25l".utf8), terminal: &terminal)
+        verifyFrame(Array("A".utf8), terminal: &terminal)
+        verifyFrame(Array("BC\rZ".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[2K".utf8), terminal: &terminal)
+        verifyFrame(Array("1\r\n2\r\n3\r\n4".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[3J".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[?1049hALT\u{1B}[?1049l".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[31m".utf8), terminal: &terminal)
+        verifyFrame(Array("D".utf8), terminal: &terminal)
+
+        terminal = try #require(Terminal(columns: 4, rows: 1, scrollbackBudgetBytes: 352))
+        terminal.feed(Array("ABCDEFGHI".utf8))
+        lastText = terminal.primaryHistoryText
+        lastGeneration = terminal.primaryHistoryGeneration
+        verifyMutation({ $0.resize(columns: 2, rows: 1) }, terminal: &terminal)
     }
 
     /// Builds a terminal browsing its scrollback, the state where the funnel proofs are load-bearing.

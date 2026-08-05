@@ -146,49 +146,6 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("primary-history generation covers every session string mutation")
-    func primaryHistoryGenerationDifferential() throws {
-        // Intent: every recovery projection change advances the primary-history generation.
-        // Why it exists: recovery callbacks must stay complete while generation over-approximation
-        //   remains free to trade a redundant write for simpler mutation tracking.
-        // Scenario: unchanged frames, primary edits, coalesced edits, alternate-screen output, and
-        //   a truncating resize are observed through both the old and new frame classifiers.
-        var terminal = try #require(Terminal(columns: 8, rows: 3))
-        var lastText = terminal.primaryHistoryText
-        var lastGeneration = terminal.primaryHistoryGeneration
-
-        func verifyMutation(_ mutate: (inout Terminal) -> Void, terminal: inout Terminal) {
-            mutate(&terminal)
-            let text = terminal.primaryHistoryText
-            // Over-approximation is safe (a redundant recovery write); a missed emission is not.
-            if text != lastText {
-                #expect(terminal.primaryHistoryGeneration != lastGeneration)
-            }
-            lastText = text
-            lastGeneration = terminal.primaryHistoryGeneration
-        }
-
-        func verifyFrame(_ bytes: [UInt8], terminal: inout Terminal) {
-            verifyMutation({ $0.feed(bytes) }, terminal: &terminal)
-        }
-
-        verifyFrame(Array("\u{1B}[?25l".utf8), terminal: &terminal)
-        verifyFrame(Array("A".utf8), terminal: &terminal)
-        verifyFrame(Array("BC\rZ".utf8), terminal: &terminal)
-        verifyFrame(Array("\u{1B}[2K".utf8), terminal: &terminal)
-        verifyFrame(Array("1\r\n2\r\n3\r\n4".utf8), terminal: &terminal)
-        verifyFrame(Array("\u{1B}[3J".utf8), terminal: &terminal)
-        verifyFrame(Array("\u{1B}[?1049hALT\u{1B}[?1049l".utf8), terminal: &terminal)
-        verifyFrame(Array("\u{1B}[31m".utf8), terminal: &terminal)
-        verifyFrame(Array("D".utf8), terminal: &terminal)
-
-        terminal = try #require(Terminal(columns: 4, rows: 1, scrollbackBudgetBytes: 352))
-        terminal.feed(Array("ABCDEFGHI".utf8))
-        lastText = terminal.primaryHistoryText
-        lastGeneration = terminal.primaryHistoryGeneration
-        verifyMutation({ $0.resize(columns: 2, rows: 1) }, terminal: &terminal)
-    }
-
     @Test(
         "zsh, bash, and fish integrations deliver typed events through a real PTY",
         .timeLimit(.minutes(1))

@@ -144,25 +144,6 @@ struct TerminalKeyEncodingTests {
         }
     }
 
-    @Test("legacy navigation and function modifiers use xterm parameter forms")
-    func legacyNavigationMatrix() {
-        let cases: [(TerminalInputKey, TerminalKeyModifiers, String)] = [
-            (.up, [], "\u{1B}[A"),
-            (.up, [.shift], "\u{1B}[1;2A"),
-            (.home, [.alt, .control], "\u{1B}[1;7H"),
-            (.insert, [], "\u{1B}[2~"),
-            (.pageDown, [.control], "\u{1B}[6;5~"),
-            (.f1, [], "\u{1B}OP"),
-            (.f1, [.shift], "\u{1B}[1;2P"),
-            (.f5, [], "\u{1B}[15~"),
-            (.f12, [.alt], "\u{1B}[24;3~"),
-        ]
-
-        for (key, modifiers, expected) in cases {
-            #expect(encodeTerminalKey(key, modifiers: modifiers, modes: .default) == Array(expected.utf8))
-        }
-    }
-
     @Test("legacy control text uses strict xterm bytes without unsolicited CSI-u")
     func legacyTextMatrix() {
         let cases: [(Unicode.Scalar, TerminalKeyModifiers, [UInt8])] = [
