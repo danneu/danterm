@@ -12,6 +12,12 @@ import TerminalCore
 
 @Suite("Saturated-history resize probe")
 struct TerminalResizeProbeSupportTests {
+    /// Evidence that a bounded recipe prefix forced retained-history eviction.
+    private struct SaturationEvidence {
+        var terminal: Terminal
+        let linesFed: Int
+    }
+
     @Test("The probe terminal is saturated against the budget, not merely deep")
     func probeTerminalIsBudgetSaturated() {
         // Intent: after setup, the retained history has been evicted down to the
@@ -28,17 +34,16 @@ struct TerminalResizeProbeSupportTests {
     }
 
     @Test(
-        "A saturating recipe fills the budget: feeding more lines buys no more rows",
+        "A saturating recipe evicts within its bound and remains at the budget ceiling",
         arguments: [
             ResizeProbeRecipe.saturating,
             ResizeProbeRecipe.sparseSaturating,
             ResizeProbeRecipe.wideSaturating,
         ]
     )
-    func saturatingRecipesReachTheBudgetCeiling(recipe: ResizeProbeRecipe) {
-        // Intent: each saturating recipe's line count is enough that retained depth
-        //   is decided by the byte budget rather than by how many lines were fed --
-        //   feeding a further 200 lines adds no retained row.
+    func saturatingRecipesReachTheBudgetCeiling(recipe: ResizeProbeRecipe) throws {
+        // Intent: each saturating recipe produces observed eviction within its declared
+        //   line bound, then 200 more lines leave retained depth at the byte-budget ceiling.
         // Why it exists: a recipe that quietly stops saturating still prints a full
         //   distribution, and nobody reading the report can tell it now describes
         //   resizing a shallow history. Each recipe carries its own version of that
@@ -57,19 +62,21 @@ struct TerminalResizeProbeSupportTests {
         //     saturating by line count if its budget-reaching depth is misjudged.
         // `.standard` is deliberately absent: it is the non-saturating v1 recipe,
         // covered by `probeTerminalIsBudgetSaturated` instead.
-        var terminal = makeSaturatedTerminal(recipe: recipe)
+        let evidence = try #require(saturationEvidence(for: recipe))
+        #expect(evidence.linesFed > 0)
+        #expect(evidence.linesFed <= recipe.lineCount)
+
+        var terminal = evidence.terminal
         let atCeiling = terminal.scrollbackRowCount
 
         // Overfed with the recipe's *own* payload, not a longer marker line. A
         // denser overfeed evicts more cheap rows than it admits under a
         // content-denominated bound and the count falls, which reads as a failure
         // while actually confirming saturation.
-        for line in recipe.lineCount..<(recipe.lineCount + 200) {
-            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
-        }
+        terminal.feed(recipeBytes(for: recipe, in: evidence.linesFed..<(evidence.linesFed + 200)))
 
         #expect(atCeiling > 0)
-        #expect(atCeiling < recipe.lineCount)
+        #expect(atCeiling < evidence.linesFed)
         // A band rather than an equality or a one-sided bound since doc 31: the bound is charged
         // bytes, and where the equilibrium settles inside a row is phase-dependent -- a trimmed
         // head frees a display row without freeing a whole line's charge, and the ring's
@@ -79,6 +86,60 @@ struct TerminalResizeProbeSupportTests {
         // and a couple of rows against 200 fed is that claim holding, in either direction.
         #expect(terminal.scrollbackRowCount < atCeiling + 100)
         #expect(terminal.scrollbackRowCount > atCeiling - 100)
+        #expect(terminal.memoryCensus.hasRetainedStorageOverdraft == false)
+    }
+
+    @Test("A shallow production-budget recipe is not saturation evidence")
+    func shallowRecipeDoesNotReportSaturation() {
+        // Intent: ordinary scrollback growth without eviction produces no saturation evidence.
+        // Why it exists: a detector that mistakes viewport fill or retained-history growth for
+        //   eviction would make the optimized guard pass before reaching the production budget.
+        // Scenario: a short dense transcript scrolls well beyond the viewport but remains far
+        //   below the production history budget.
+        let recipe = ResizeProbeRecipe(
+            columns: 179, rows: 66, lineCount: 1_000,
+            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            alternateColumns: 100, sampleCount: 1, warmupCount: 0
+        )
+
+        #expect(saturationEvidence(for: recipe) == nil)
+    }
+
+    private func saturationEvidence(for recipe: ResizeProbeRecipe) -> SaturationEvidence? {
+        guard recipe.scrollbackBudgetBytes == Terminal.productionScrollbackBudgetBytes,
+              var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)
+        else { return nil }
+
+        let batchLineCount = 2_048
+        var nextLine = 0
+        while nextLine < recipe.lineCount {
+            let batchEnd = min(nextLine + batchLineCount, recipe.lineCount)
+            let retainedRowsBeforeBatch = terminal.scrollbackRowCount
+            terminal.feed(recipeBytes(for: recipe, in: nextLine..<batchEnd))
+            let linesInBatch = batchEnd - nextLine
+            nextLine = batchEnd
+
+            if retainedRowsBeforeBatch > 0,
+               terminal.scrollbackRowCount < retainedRowsBeforeBatch + linesInBatch
+            {
+                return SaturationEvidence(terminal: terminal, linesFed: nextLine)
+            }
+        }
+        return nil
+    }
+
+    private func recipeBytes(
+        for recipe: ResizeProbeRecipe,
+        in lines: Range<Int>
+    ) -> [UInt8] {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(lines.count * (recipe.columns + 2))
+        for line in lines {
+            bytes.append(contentsOf: recipe.payload.line(line).utf8)
+            bytes.append(0x0D)
+            bytes.append(0x0A)
+        }
+        return bytes
     }
 
     @Test("The sparse recipe's rows are a fraction of the dense recipe's width")
