@@ -25,7 +25,6 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | # | Doc | Owns | Next |
 | --- | --- | --- | --- |
 | 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance measurement gates `L6`/`L5`; the shipped span clip moved the bracket again |
-| 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | `F16` answered the last item; owes an `## Outcome` before it can close |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
 | 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize -- not the storm debris, which is the shell's | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
 
@@ -49,6 +48,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 15 | [Memory footprint](15-memory-footprint.md) | Resident bytes per cell, per row, and per pane | Shipped -- the same history for 57-59% less; cell 72 -> 32 bytes |
 | 16 | [Cell padding](16-cell-padding.md) | The padding left in the 32-byte cell | Rejected -- stride 24 wins memory, loses cache alignment |
 | 17 | [CPU profile sweep](17-cpu-profile-sweep.md) | An on-CPU profile sweep across every workload | Shipped -- POD damage snapshot -14.59% feed; A and C closed |
+| 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Shipped -- `C1` and `C4` landed; `C2`/`C3`/`C5` premature, reopen at 4x history |
 | 20 | [PTY throughput](20-pty-throughput-and-interactive-stimulus.md) | What the drain costs, and what stimulus to replay | Tooling -- throughput reporting; block lengthening declined |
 | 21 | [Selection gesture cost](21-selection-gesture-cost.md) | What a pointer-driven selection query costs | Shipped -- point-local projection; double-click 13.6 ms -> 5.5 us, flat in history |
 | 22 | [Application-exit crash](22-application-exit-job-corruption.md) | A crash in the application-exit job path | Shipped -- exit path removed; the corrupting write never identified |

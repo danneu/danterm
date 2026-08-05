@@ -1,8 +1,8 @@
 # Owner-queue occupancy and the main-thread fence
 
-Research started: 2026-07-30. **Status: OPEN -- Phases 1-5 done (`F1`-`F15`,
-`D1`-`D4`). The search thread is closed: `C1` is landed and measured (`257bfee`),
-and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) cleared
+Research started: 2026-07-30. **Status: CLOSED -- Phases 1-5 done (`F1`-`F16`,
+`D1`-`D4`); see `## Outcome`. The search thread is closed: `C1` is landed and
+measured (`257bfee`), and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) cleared
 its gate and is landed as latest-wins coalescing at the host's submission
 boundary; `D4`'s claim that it would be measured by a new probe case is corrected
 at its own heading. `F15`'s single-settled-resize test ran on 2026-08-05 and came
@@ -13,9 +13,7 @@ incidental discovery, rows that stop being painted after a settled resize, is a
 repaint defect rather than a reflow one; it -- **and not the debris** -- moved to
 [doc 32](32-post-resize-repaint-loss/README.md), which fixed it in `44b875cd`.
 The debris remains attributed to the shell and owned by no doc; `F16` records
-under "what nobody owns" the one question that attribution left open. What this
-file still owes is an `## Outcome` section before its row can move to
-`## Closed`.**
+under "what nobody owns" the one question that attribution left open.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -1114,3 +1112,50 @@ fixing.
 - **Undoing the fence.** The atomicity it provides is the fix for a real
   published-stale-row bug, verified red-then-green. Occupancy is the price, and
   this file is about paying it down, not about refunding it.
+
+## Outcome
+
+**Shipped, and the queue question is answered.** The deliverable was an inventory
+of every job on `TerminalPTYHost`'s serial queue with its bound, an occupancy
+measurement for the unbounded ones, and a per-candidate verdict. All three exist:
+`F1` inventories the four unbounded jobs, `F5` prices the three user-facing ones
+at 3-5x a frame, and `D1` and `D4` between them dispose of all five candidates.
+
+Two landed. `C1` -- stop rebuilding the match list per step -- landed in
+`257bfee` and is measured. `C4` -- latest-wins resize coalescing at the host's
+submission boundary -- landed in `02f3ba1a` and `0935ccc4`, verified by
+`supersededResizesSkipBothWinsizeAndReflow` rather than by a benchmark, because
+coalescing is a **countable** property and not a durational one (`D4`'s own
+amendment, which corrects the probe case that decision had promised).
+
+Three did not. `C2`, `C3`, and `C5` are rejected by `D4` as premature on one
+shared argument: a candidate whose whole benefit lands on an action the user
+already reports as responsive is not worth its complexity. They stay listed
+rather than deleted.
+
+**What outlived the candidates.** `D4` replaced the deciding rule `D1` had used,
+and that reversal is the file's most portable result. Ranking by "does this
+exceed the 16.7 ms frame budget" is wrong; the budget that predicts felt
+behavior is **the interval at which the driving gesture can re-trigger the job**.
+A job several frames long is invisible when nothing queues behind it. That single
+change of rule rejected three candidates and promoted the fourth.
+
+Twice in this file the live-app symptom that looked like slowness had a
+correctness bug inside it: `F10` in the streaming case, and again in `F16`, whose
+single-settled-resize test was run to price a performance change and instead
+found rows that stop being painted. Both times the performance framing would have
+buried the bug -- `C4`'s coalescing in particular would have made the repaint
+defect rarer without fixing it.
+
+**Reopening condition.** A history materially deeper than doc 15's ~1,768 rows
+reopens `C2`, `C3`, and `C5` together. `F6`'s per-cell cost is flat, so at
+roughly 4x that depth the first scan reaches ~210 ms and crosses the threshold
+for a discrete action on its own. Nothing else here reopens: the fence and the
+read cap that motivated the file are unchanged, and the queue's remaining
+unbounded jobs are the ones `D4` deliberately left.
+
+**What left this file, and what did not.** The repaint defect `F16` found owns
+[doc 32](32-post-resize-repaint-loss/README.md); it was attributed to `d3780961`
+and fixed in `44b875cd`. The resize-storm debris did **not** leave with it. It is
+the shell's own redraw race, confirmed at the grid by `32/F9`, and `F16`'s "what
+nobody owns" records the one question that attribution left open.
