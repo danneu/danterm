@@ -1677,10 +1677,23 @@ public struct Terminal: Equatable, Sendable {
         avoiding targets: [HyperlinkId: TerminalHyperlink]
     ) -> HyperlinkId? {
         guard targets.count <= Int(HyperlinkId.max) else { return nil }
+        // The scan is bounded by the id space itself rather than trusting the count guard above
+        // to keep it terminating. A table that is full *in fact* -- however a count came to
+        // disagree -- must refuse the open like any other exhaustion, not spin forever inside
+        // `feed`. The bound also makes this function safe to probe: removing the guard is the
+        // natural way to check that `fullIdSpaceRefusesFurtherOpens` still discriminates, and an
+        // unbounded scan turns that into a hang nothing in the test framework can interrupt --
+        // `.timeLimit` cancels a task, and Swift cancellation is cooperative, so it cannot stop
+        // a synchronous loop (measured: a 60s limit did not fire in 130s).
         var candidate = nextHyperlinkId
-        while targets[candidate] != nil { candidate &+= 1 }
-        nextHyperlinkId = candidate &+ 1
-        return candidate
+        for _ in 0...Int(HyperlinkId.max) {
+            if targets[candidate] == nil {
+                nextHyperlinkId = candidate &+ 1
+                return candidate
+            }
+            candidate &+= 1
+        }
+        return nil
     }
 
     private func osc8ExplicitId(in params: String) -> String? {

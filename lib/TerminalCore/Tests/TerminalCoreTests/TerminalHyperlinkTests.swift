@@ -257,8 +257,10 @@ struct TerminalHyperlinkTests {
         // Intent: once every hyperlink id is taken, an OSC 8 open changes nothing -- no new
         //   target, no new pen -- and later text keeps the link that was already open.
         // Why it exists: `allocateHyperlinkId` scans forward from a rotating cursor for a free id,
-        //   so a completely occupied table has no terminating candidate; the count guard is the
-        //   only thing standing between a saturated pane and an infinite loop inside `feed`. The
+        //   so a completely occupied table has no free candidate to find. Two independent things
+        //   make that a refusal rather than an infinite loop inside `feed` -- the count guard's
+        //   early return, and the scan's own bound over the id space -- and this pins the
+        //   behavior they agree on, so neutralizing either one alone still leaves it green. The
         //   sibling test above covers the other half of the id space -- the wrap, where ids are
         //   still recyclable. Nothing covered this half, because a table that reaches 65,536
         //   entries needs short URIs, and the padded targets that test needs steady-state at ~500.
