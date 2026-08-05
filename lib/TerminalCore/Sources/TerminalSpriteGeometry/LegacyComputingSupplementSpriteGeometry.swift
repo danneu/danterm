@@ -233,20 +233,25 @@ public enum LegacyComputingSupplementSpriteGeometry {
     ) -> [SpritePixelRect] {
         guard radiusX > 0 && radiusY > 0 else { return [] }
         let tolerance = Double(thickness) / max(1, min(radiusX, radiusY))
+        // Shared by the main scan and the empty-result fallback below: the fallback is
+        // what keeps the degenerate-size nearest-pixel pick inside the requested
+        // quadrant, so a second copy edited on one side only would silently move it.
+        func inCorner(_ dx: Double, _ dy: Double) -> Bool {
+            switch corner {
+            case .topLeft: dx <= 0 && dy <= 0
+            case .topRight: dx >= 0 && dy <= 0
+            case .bottomLeft: dx <= 0 && dy >= 0
+            case .bottomRight: dx >= 0 && dy >= 0
+            case nil: true
+            }
+        }
         var result: [SpritePixelRect] = []
         for y in 0..<height {
             for x in 0..<width {
                 let dx = (Double(x) + 0.5 - centerX) / radiusX
                 let dy = (Double(y) + 0.5 - centerY) / radiusY
                 let distance = sqrt(dx * dx + dy * dy)
-                let inCorner = switch corner {
-                case .topLeft: dx <= 0 && dy <= 0
-                case .topRight: dx >= 0 && dy <= 0
-                case .bottomLeft: dx <= 0 && dy >= 0
-                case .bottomRight: dx >= 0 && dy >= 0
-                case nil: true
-                }
-                if inCorner && abs(distance - 1) <= tolerance {
+                if inCorner(dx, dy) && abs(distance - 1) <= tolerance {
                     result.append(SpritePixelRect(x: x, y: y, width: 1, height: 1))
                 }
             }
@@ -257,14 +262,7 @@ public enum LegacyComputingSupplementSpriteGeometry {
                 for x in 0..<width {
                     let dx = (Double(x) + 0.5 - centerX) / radiusX
                     let dy = (Double(y) + 0.5 - centerY) / radiusY
-                    let inCorner = switch corner {
-                    case .topLeft: dx <= 0 && dy <= 0
-                    case .topRight: dx >= 0 && dy <= 0
-                    case .bottomLeft: dx <= 0 && dy >= 0
-                    case .bottomRight: dx >= 0 && dy >= 0
-                    case nil: true
-                    }
-                    guard inCorner else { continue }
+                    guard inCorner(dx, dy) else { continue }
                     let error = abs(sqrt(dx * dx + dy * dy) - 1)
                     if error < nearest.error {
                         nearest = (x, y, error)

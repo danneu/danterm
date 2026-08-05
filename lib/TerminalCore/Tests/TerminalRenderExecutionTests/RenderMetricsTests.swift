@@ -160,7 +160,7 @@ struct RenderMetricsTests {
     @Test("Frame sizing returns exact point and pixel extents")
     func frameSizing() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 1.5))
-        let plan = try makePlan(columns: 7, rows: 3)
+        let plan = try makePlan(input: "", columns: 7, rows: 3)
         let size = try #require(renderFrameSize(for: plan, metrics: metrics))
 
         #expect(size.pointSize == CGSize(
@@ -173,7 +173,7 @@ struct RenderMetricsTests {
 
     @Test("Frame sizing refuses pixel extents that overflow")
     func frameSizingOverflow() throws {
-        let plan = try makePlan(columns: 2, rows: 1)
+        let plan = try makePlan(input: "", columns: 2, rows: 1)
         let metrics = try #require(largestMetricsWhoseTwoColumnFrameOverflows())
 
         #expect(renderFrameSize(for: plan, metrics: metrics) == nil)
@@ -233,31 +233,4 @@ struct RenderMetricsTests {
 
         #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4) == 0..<4)
     }
-}
-
-private func largestMetricsWhoseTwoColumnFrameOverflows() -> TerminalRenderMetrics? {
-    var accepted: CGFloat = 1
-    var refused = CGFloat(Int.max)
-    for _ in 0..<128 {
-        let candidate = accepted + (refused - accepted) / 2
-        if TerminalRenderMetrics(displayScale: candidate) == nil {
-            refused = candidate
-        } else {
-            accepted = candidate
-        }
-    }
-    let metrics = TerminalRenderMetrics(displayScale: accepted)
-    return metrics.flatMap { $0.cellWidthPixels > Int.max / 2 ? $0 : nil }
-}
-
-private func makePlan(columns: Int, rows: Int) throws -> RenderFramePlan {
-    let terminal = try #require(Terminal(columns: columns, rows: rows))
-    return planFrame(
-        for: terminal,
-        presentation: RenderPresentation(
-            theme: .dark,
-            isCursorVisible: false,
-            cursorShape: .block
-        )
-    )
 }

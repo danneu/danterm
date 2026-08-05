@@ -43,7 +43,7 @@ enum BoxDrawingSprite {
         rects: inout [CGRect],
         strokes: inout [BoxDrawingRenderStroke]
     ) {
-        let light = max(1, Int((metrics.underlineThickness * metrics.displayScale).rounded()))
+        let light = metrics.lightStrokePixels
         let geometry = BoxDrawingSpriteGeometry.geometry(
             pattern: pattern,
             cellWidthPixels: metrics.cellWidthPixels,

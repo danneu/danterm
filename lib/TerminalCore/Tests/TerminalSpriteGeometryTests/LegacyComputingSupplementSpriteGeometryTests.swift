@@ -87,19 +87,40 @@ struct LegacyComputingSupplementSpriteGeometryTests {
         }
     }
 
-    @Test("Adjacent top twelfths share one translated ellipse center")
-    func adjacentTwelfthsShareEllipse() {
-        let left = LegacySupplementCirclePiece(
-            xCells: 0, yCells: 0, widthCells: 2, heightCells: 2, corner: .topLeft
-        )
-        let next = LegacySupplementCirclePiece(
-            xCells: 1, yCells: 0, widthCells: 2, heightCells: 2, corner: .topLeft
-        )
-        let cellWidth = 8.0
-        let leftGlobalCenter = -left.xCells * cellWidth
-        let nextGlobalCenter = cellWidth
-            - next.xCells * cellWidth
-        #expect(leftGlobalCenter == nextGlobalCenter)
+    @Test("Adjacent cells of one arc are windows on the same translated ellipse")
+    func adjacentCellsShareOneEllipse() {
+        // Intent: consecutive cells of a multi-cell arc translate the ellipse center by
+        //   exactly one cell width, so their ink joins into a single unbroken, monotone
+        //   arc when the second cell is placed to the right of the first.
+        // Why it exists: this test used to compute `-left.xCells * cellWidth` and
+        //   `cellWidth - next.xCells * cellWidth` from properties it had just set and
+        //   assert 0 == 0 -- it never called the geometry, so no change to
+        //   `circlePiece`/`ellipseOutline` could fail it. The property that actually
+        //   matters, and that the center translation is what delivers, is that the two
+        //   cells' arcs meet: dropping the `-xOffset` term restarts the second cell's
+        //   arc at the first cell's starting height and breaks monotonicity here.
+        // Scenario: spec-first; no incident.
+        let width = 12
+        let height = 16
+        func columnMinimumRows(xCells: Double) -> [Int: Int] {
+            let rects = LegacyComputingSupplementSpriteGeometry.rects(
+                pattern: .circlePieces([LegacySupplementCirclePiece(
+                    xCells: xCells, yCells: 0, widthCells: 2, heightCells: 1,
+                    corner: .topLeft
+                )]),
+                cellWidthPixels: width, cellHeightPixels: height, thicknessPixels: 2
+            )
+            return rects.reduce(into: [:]) { minimums, rect in
+                minimums[rect.x] = min(minimums[rect.x] ?? Int.max, rect.y)
+            }
+        }
+        let leftCell = columnMinimumRows(xCells: 0)
+        let rightCell = columnMinimumRows(xCells: 1)
+        let joined = (0..<width).map { leftCell[$0] } + (0..<width).map { rightCell[$0] }
+
+        #expect(joined.allSatisfy { $0 != nil }, "every column of the two-cell arc has ink")
+        let tops = joined.compactMap { $0 }
+        #expect(zip(tops, tops.dropFirst()).allSatisfy { $0 >= $1 }, "the joined arc only descends")
     }
 
     @Test("Every arc corner intersects the expected two cell edges")

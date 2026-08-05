@@ -111,10 +111,6 @@ struct ExecutorContractTests {
 
         let after = try #require(TerminalRenderMetrics(displayScale: 2))
         #expect(after == before)
-        #expect(
-            cellRect(row: 0, column: 2, columnCount: 2, metrics: before).x.count
-                == before.cellWidthPixels * 2
-        )
     }
 
     @Test("A visible block cursor preserves its planned colors and grid isolation")

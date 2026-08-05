@@ -3,11 +3,16 @@
 /// The finite Unicode scalar vocabulary implemented by Ghostty's legacy-computing drawer.
 public struct LegacyComputingPattern: Equatable, Sendable {
     public let scalar: UInt32
-    public let topology: LegacyComputingTopology
+
+    /// Computed, not stored: `runs` re-switches on `scalar` and never reads this, so
+    /// decoding it eagerly made every legacy-computing cell of every frame build and
+    /// retain a `String`-carrying enum only the tests observe. It stays a pure function
+    /// of `scalar`, which is also what keeps synthesized `Equatable` (now over `scalar`
+    /// alone) equivalent to the previous stored form.
+    public var topology: LegacyComputingTopology { LegacyComputingTopology.decode(scalar) }
 
     public init(scalar: UInt32) {
         self.scalar = scalar
-        self.topology = LegacyComputingTopology.decode(scalar)
     }
 }
 
@@ -29,6 +34,12 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
     case cellDiagonals(segments: String)
     case legacyCircle(shape: String)
 
+    /// A scalar outside the family's vocabulary. Exists so `decode` agrees with `runs`,
+    /// which answers the same scalars with no ink rather than trapping: the type is
+    /// public and `LegacyComputingPattern(scalar:)` is unguarded, so the only membership
+    /// predicate lives in another module and cannot protect a direct caller.
+    case unsupported
+
     // Compile-time-constant decode tables. Hoisted to `static let` so classifying a
     // scalar reuses one shared instance instead of rebuilding an array literal per call.
     private static let blockPolicies = [
@@ -44,7 +55,6 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
         "medium-full+solid-right", "checker-even", "checker-odd",
         "horizontal-bands-second-fourth",
     ]
-    private static let cornerDiagonalMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
     private static let cellDiagonalSegments = [
         "MR-LL", "UR-ML", "UL-MR", "ML-LR",
         "UL-LC", "UC-LR", "UR-LC", "UC-LL",
@@ -81,7 +91,9 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
         case 0x1FB9C...0x1FB9F:
             return .shadedCorner(index: Int(value - 0x1FB9C))
         case 0x1FBA0...0x1FBAE:
-            return .cornerDiagonals(mask: cornerDiagonalMasks[Int(value - 0x1FBA0)])
+            return .cornerDiagonals(
+                mask: LegacyComputingSpriteGeometry.cornerDiagonalMasks[Int(value - 0x1FBA0)]
+            )
         case 0x1FBAF:
             return .mixedCross
         case 0x1FBBD...0x1FBBF:
@@ -90,8 +102,10 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
             return .fractionalLeft(thirds: value == 0x1FBCE ? 2 : 1)
         case 0x1FBD0...0x1FBDF:
             return .cellDiagonals(segments: cellDiagonalSegments[Int(value - 0x1FBD0)])
-        default:
+        case 0x1FBE0...0x1FBEF:
             return .legacyCircle(shape: legacyCircleShapes[Int(value - 0x1FBE0)])
+        default:
+            return .unsupported
         }
     }
 }
@@ -128,7 +142,11 @@ public enum LegacyComputingSpriteGeometry {
     private static let boxEdgePairs = [(0, 3), (0, 1), (2, 1), (2, 3), (1, 3)]
     private static let horizontalEighthBands = [0, 2, 4, 7]
     private static let partialEighthCounts = [2, 3, 5, 6, 7]
-    private static let cornerDiagonalMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
+
+    // `fileprivate` so `LegacyComputingTopology.decode` reads the same table `runs`
+    // draws from -- the decoded topology and the drawn pixels are keyed off the same
+    // 0x1FBA0 offset and must not be two literals that can drift apart.
+    fileprivate static let cornerDiagonalMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
 
     public static func runs(
         pattern: LegacyComputingPattern,
@@ -206,7 +224,7 @@ public enum LegacyComputingSpriteGeometry {
         }
         func checker(_ parity: Int) {
             let rows = max(1, Int((4 * Double(height) / Double(width)).rounded()))
-            for y in 0..<rows where y < rows {
+            for y in 0..<rows {
                 for x in 0..<4 where (x + y) % 2 == parity {
                     fill(x * width / 4, (x + 1) * width / 4, y * height / rows, (y + 1) * height / rows)
                 }

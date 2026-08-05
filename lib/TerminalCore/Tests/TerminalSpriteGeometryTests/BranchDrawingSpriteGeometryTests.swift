@@ -111,6 +111,40 @@ struct BranchDrawingSpriteGeometryTests {
         #expect(geometry.rects.contains { $0.rect.y + $0.rect.height == 17 })
     }
 
+    @Test("Each single-direction node anchors its connector to that direction's edge")
+    func nodeConnectorEdges() {
+        // Intent: a node requesting exactly one direction emits exactly one connector
+        //   rect, touching that direction's cell edge and no other.
+        // Why it exists: `nodeConnectivity` requests all four directions at once, so its
+        //   four edge-contact assertions are satisfied by the set of rects no matter
+        //   which arm produced which; swapping the `.up` and `.down` (or `.left` and
+        //   `.right`) arms of the geometry's `append` drew every one-connector node with
+        //   its connector on the wrong edge while the whole suite stayed green.
+        // Scenario: spec-first; no incident.
+        let width = 9
+        let height = 17
+        let cases: [(BranchDirections, (SpritePixelRect) -> Bool)] = [
+            (.up, { $0.y == 0 }),
+            (.down, { $0.y + $0.height == height }),
+            (.left, { $0.x == 0 }),
+            (.right, { $0.x + $0.width == width }),
+        ]
+        for (direction, touchesRequestedEdge) in cases {
+            let geometry = BranchDrawingSpriteGeometry.geometry(
+                pattern: .node(.init(directions: direction, filled: false)),
+                cellWidthPixels: width, cellHeightPixels: height, lightStrokePixels: 1
+            )
+            let context = Comment(rawValue: "\(direction)")
+            #expect(geometry.rects.count == 1, context)
+            guard let rect = geometry.rects.first?.rect else { continue }
+            #expect(touchesRequestedEdge(rect), context)
+            let otherEdges: [(SpritePixelRect) -> Bool] = cases
+                .filter { $0.0 != direction }
+                .map(\.1)
+            #expect(otherEdges.allSatisfy { $0(rect) == false }, context)
+        }
+    }
+
     @Test("Zero-sized cells degrade to empty geometry")
     func zeroSized() {
         #expect(BranchDrawingSpriteGeometry.geometry(

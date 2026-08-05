@@ -74,6 +74,15 @@ struct PowerlineSpriteGeometryTests {
 
     @Test("Left and right forms are exact horizontal mirrors")
     func horizontalMirrors() {
+        // Intent: each left-hand Powerline form is the right-hand form reflected about
+        //   the cell's vertical centerline, with y and style untouched.
+        // Why it exists: `PowerlineSpriteGeometry.geometry` derives seven of these nine
+        //   right-hand patterns by calling the production
+        //   `PowerlinePixelGeometry.mirroredHorizontally` itself, so asserting against
+        //   that same function restated the implementation -- a bug inside it (mirroring
+        //   y, dropping a cubic control point) changed both sides and stayed green. The
+        //   independent `testMirror` oracle below is what makes the pairs falsifiable.
+        // Scenario: spec-first; no incident.
         let pairs: [(PowerlinePattern, PowerlinePattern)] = [
             (.rightHard, .leftHard), (.rightThin, .leftThin),
             (.rightHardRounded, .leftHardRounded), (.rightThinRounded, .leftThinRounded),
@@ -90,7 +99,13 @@ struct PowerlineSpriteGeometryTests {
             let rhs = PowerlineSpriteGeometry.geometry(
                 pattern: right, cellWidthPixels: 7, cellHeightPixels: 15, lightStrokePixels: 1
             )
-            #expect(rhs == lhs.mirroredHorizontally(cellWidthPixels: 7))
+            let context = Comment(rawValue: "\(left) -> \(right)")
+            #expect(rhs.paths.map(\.style) == lhs.paths.map(\.style), context)
+            #expect(
+                rhs.paths.map(\.commands)
+                    == lhs.paths.map { testMirror($0.commands, cellWidthPixels: 7) },
+                context
+            )
         }
     }
 
@@ -106,6 +121,28 @@ struct PowerlineSpriteGeometryTests {
             lightStrokePixels: 4
         )
         #expect(tiny.paths[0].style == .innerStroke(widthPixels: 1))
+    }
+}
+
+/// Reflects path commands about the cell's vertical centerline independently of the
+/// production mirror, so `horizontalMirrors` has an oracle the implementation cannot
+/// satisfy by construction. Deliberately spelled out the naive way: `x -> width - x`,
+/// `y` and command kind unchanged.
+private func testMirror(
+    _ commands: [PowerlinePixelPathCommand],
+    cellWidthPixels width: Int
+) -> [PowerlinePixelPathCommand] {
+    func flip(_ point: PowerlinePixelPoint) -> PowerlinePixelPoint {
+        PowerlinePixelPoint(x: Double(width) - point.x, y: point.y)
+    }
+    return commands.map { command in
+        switch command {
+        case let .move(point): .move(flip(point))
+        case let .line(point): .line(flip(point))
+        case let .cubic(control1, control2, end):
+            .cubic(control1: flip(control1), control2: flip(control2), end: flip(end))
+        case .close: .close
+        }
     }
 }
 

@@ -30,6 +30,14 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     /// Pixel-snapped decoration thickness, never less than one backing pixel.
     public let underlineThickness: CGFloat
 
+    /// The decoration thickness as the whole backing-pixel count it was quantized from,
+    /// which is also the light stroke width every sprite family draws with. Stored rather
+    /// than re-derived at each sprite call site: `underlineThickness` is exactly this
+    /// count divided by `displayScale`, so multiplying it back out was a round trip six
+    /// sprite files each spelled out independently. Internal because the sprite files are
+    /// same-module and no caller outside them needs pixel-space thickness.
+    let lightStrokePixels: Int
+
     /// Top-edge offset for strikethrough in point space.
     public let strikethroughOffset: CGFloat
 
@@ -106,6 +114,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             CGFloat(cellHeightPixels) / displayScale
         )
         self.underlineThickness = CGFloat(underlinePixels) / displayScale
+        self.lightStrokePixels = underlinePixels
         self.underlineOffset = pixelAlignedOffset(
             self.baselineOffset - CTFontGetUnderlinePosition(font),
             scale: displayScale,
@@ -406,21 +415,21 @@ public func drawRenderFrame(
 
     for run in plan.backgroundRuns {
         context.setFillColor(run.color.cgColor(in: colorSpace))
-        context.fill(CGRect(
-            x: CGFloat(run.startColumn) * metrics.cellSize.width,
-            y: CGFloat(run.row) * metrics.cellSize.height,
-            width: CGFloat(run.columnCount) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        context.fill(cellRect(
+            row: run.row,
+            startColumn: run.startColumn,
+            columnCount: run.columnCount,
+            metrics: metrics
         ))
     }
 
     context.setFillColor(plan.selectionBackground.cgColor(in: colorSpace))
     for run in plan.selectionRuns {
-        context.fill(CGRect(
-            x: CGFloat(run.startColumn) * metrics.cellSize.width,
-            y: CGFloat(run.row) * metrics.cellSize.height,
-            width: CGFloat(run.columnCount) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        context.fill(cellRect(
+            row: run.row,
+            startColumn: run.startColumn,
+            columnCount: run.columnCount,
+            metrics: metrics
         ))
     }
 
@@ -428,11 +437,11 @@ public func drawRenderFrame(
     // the one that has to be visible.
     context.setFillColor(plan.searchMatchBackground.cgColor(in: colorSpace))
     for run in plan.searchMatchRuns {
-        context.fill(CGRect(
-            x: CGFloat(run.startColumn) * metrics.cellSize.width,
-            y: CGFloat(run.row) * metrics.cellSize.height,
-            width: CGFloat(run.columnCount) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        context.fill(cellRect(
+            row: run.row,
+            startColumn: run.startColumn,
+            columnCount: run.columnCount,
+            metrics: metrics
         ))
     }
 
@@ -441,11 +450,11 @@ public func drawRenderFrame(
     // search cannot hide it while the planned cursor-text foreground remains visible.
     if let cursor = plan.cursor, cursor.shape == .block {
         context.setFillColor(cursor.color.cgColor(in: colorSpace))
-        context.fill(CGRect(
-            x: CGFloat(cursor.column) * metrics.cellSize.width,
-            y: CGFloat(cursor.row) * metrics.cellSize.height,
-            width: CGFloat(cursor.columnWidth) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        context.fill(cellRect(
+            row: cursor.row,
+            startColumn: cursor.column,
+            columnCount: cursor.columnWidth,
+            metrics: metrics
         ))
     }
 
@@ -536,6 +545,25 @@ let spriteClassificationMinimumScalar: UInt32 = 0x2500
 /// top-left coordinates. Its own function because two paths -- the precomputed
 /// ASCII table and the batched cmap residue -- now derive it, and they must not
 /// drift apart by half a pixel.
+/// The point-space rectangle a run of `columnCount` cells occupies on `row`. Its own
+/// function for the same reason as `glyphOrigin`: seven sites -- background, selection,
+/// search-match, the block-cursor fill, the cursor overlay, one text cell, one decoration
+/// run -- derived this rectangle independently, and any of them could drift a half pixel
+/// from the others while every test still passed.
+private func cellRect(
+    row: Int,
+    startColumn: Int,
+    columnCount: Int,
+    metrics: TerminalRenderMetrics
+) -> CGRect {
+    CGRect(
+        x: CGFloat(startColumn) * metrics.cellSize.width,
+        y: CGFloat(row) * metrics.cellSize.height,
+        width: CGFloat(columnCount) * metrics.cellSize.width,
+        height: metrics.cellSize.height
+    )
+}
+
 private func glyphOrigin(
     row: Int,
     column: Int,
@@ -553,36 +581,37 @@ private extension CGContext {
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace
     ) {
-        guard cursor.shape != .block else { return }
-        let cellRect = CGRect(
-            x: CGFloat(cursor.column) * metrics.cellSize.width,
-            y: CGFloat(cursor.row) * metrics.cellSize.height,
-            width: CGFloat(cursor.columnWidth) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        let cell = cellRect(
+            row: cursor.row,
+            startColumn: cursor.column,
+            columnCount: cursor.columnWidth,
+            metrics: metrics
         )
         let thickness = metrics.underlineThickness
         let overlayRect: CGRect
         switch cursor.shape {
         case .block:
+            // A block cursor is drawn as a cell background fill in `drawRenderFrame`,
+            // before glyphs, so there is no overlay stroke to add here.
             return
         case .underline:
             overlayRect = CGRect(
-                x: cellRect.minX,
-                y: cellRect.maxY - thickness,
-                width: cellRect.width,
+                x: cell.minX,
+                y: cell.maxY - thickness,
+                width: cell.width,
                 height: thickness
             )
         case .bar:
             overlayRect = CGRect(
-                x: cellRect.minX,
-                y: cellRect.minY,
+                x: cell.minX,
+                y: cell.minY,
                 width: thickness,
-                height: cellRect.height
+                height: cell.height
             )
         }
 
         saveGState()
-        clip(to: cellRect)
+        clip(to: cell)
         setBlendMode(.copy)
         setFillColor(cursor.color.cgColor(in: colorSpace))
         fill(overlayRect)
@@ -1129,11 +1158,11 @@ private extension CGContext {
         attributes: [NSAttributedString.Key: Any],
         metrics: TerminalRenderMetrics
     ) {
-        let cellRect = CGRect(
-            x: CGFloat(column) * metrics.cellSize.width,
-            y: CGFloat(row) * metrics.cellSize.height,
-            width: CGFloat(cell.columnWidth) * metrics.cellSize.width,
-            height: metrics.cellSize.height
+        let rect = cellRect(
+            row: row,
+            startColumn: column,
+            columnCount: cell.columnWidth,
+            metrics: metrics
         )
         var scalarView = String.UnicodeScalarView()
         scalarView.append(contentsOf: cell.scalars)
@@ -1143,7 +1172,7 @@ private extension CGContext {
         ))
 
         saveGState()
-        clip(to: cellRect)
+        clip(to: rect)
         // CoreText expects y-up text space, so reflect the glyph outlines while
         // keeping the baseline measured down from the cell's top edge.
         textMatrix = CGAffineTransform(
@@ -1151,8 +1180,8 @@ private extension CGContext {
             b: 0,
             c: 0,
             d: -1,
-            tx: cellRect.minX,
-            ty: cellRect.minY + metrics.baselineOffset
+            tx: rect.minX,
+            ty: rect.minY + metrics.baselineOffset
         )
         CTLineDraw(line, self)
         restoreGState()
@@ -1164,11 +1193,11 @@ private extension CGContext {
         colorSpace: CGColorSpace
     ) {
         for run in runs {
-            let runRect = CGRect(
-                x: CGFloat(run.startColumn) * metrics.cellSize.width,
-                y: CGFloat(run.row) * metrics.cellSize.height,
-                width: CGFloat(run.columnCount) * metrics.cellSize.width,
-                height: metrics.cellSize.height
+            let runRect = cellRect(
+                row: run.row,
+                startColumn: run.startColumn,
+                columnCount: run.columnCount,
+                metrics: metrics
             )
             saveGState()
             clip(to: runRect)
