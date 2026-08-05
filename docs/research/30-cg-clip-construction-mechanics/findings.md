@@ -362,6 +362,116 @@ readable in the cited code.
 **Unlocks.** D4 (the standing gate for instrumentation changes) and the
 matching investigation rule in README.md.
 
+## F9 -- D1 measured: adopted as a simplification, with no regression anywhere and no win the instrument can resolve
+
+Candidate: the folded single `clip(to:)` over dirtyRect-clamped span rects.
+Parent: `b6556f1c`. All arms same machine session, 2026-08-05.
+
+**Gates.** `just test` 74/74 and `just test-ui` 207/207, including the two new
+clip-region tests below and the inherited drawn-row-set tests.
+
+**Calibrated verdicts** (`terminal-benchmark-compare.py quick`, immutable
+source snapshots of both arms):
+
+| Workload | Harness verdict | Symmetric median | 31/F18 A/A reading rule | Resolves? |
+| --- | --- | --- | --- | --- |
+| `incremental-mixed` | faster | -4.23% (2 pairs); process CPU -2.56% | 4.9 points | **no** |
+| `content-churn` | inconclusive | -2.04% (2 pairs); process CPU -2.77% | 2.2 points | **no** |
+
+`content-churn` stands in for the gate's `synchronized-frames` arm, which doc
+23/F9 demoted to a collectable candidate; the harness now rejects that name, so
+it can issue no verdict. The substitution was frozen in decisions.md before its
+result was read.
+
+**Neither number survives its own cell's A/A calibration, so neither is a win.**
+Doc 31/F18 -- taken 2026-08-05 on this host, one commit before this candidate's
+parent -- ran eight `confirm` invocations with both arms at byte-identical
+source. `incremental-mixed` is *the worst cell on the ladder*: it produced a
+-4.43% `faster` and a +4.85% `slower` verdict on code that could not differ, and
+F18's reading rule for it is that differences below **4.9 points** are
+indistinguishable from noise. This candidate's -4.23% is below that, and below
+the -4.43% the same cell produced against itself. `content-churn`'s rule is 2.2
+points against this candidate's 2.04%. Both of these `quick` runs also carry
+*fewer* pairs than the `confirm` invocations F18 calibrated (2 versus 6 and 4),
+which can only widen the wobble, not narrow it.
+
+So the harness's `faster` string on `incremental-mixed` is recorded above because
+it is what the instrument printed, and it must not be repeated anywhere as a
+result. The decision-bearing content of both rows is the *absence of a resolvable
+regression*, which is exactly what D1's gate needs and all it needs.
+
+**Acceptance diagnostics** (`scripts/terminal-draw-acceptance.py`, 8 batches
+above a 200 ms floor, 179x66 at scale 2, both arms this session; the parent arm
+ran from a clean worktree at `b6556f1c`). Diagnostic only, per that script's own
+docstring -- these support no cross-session regression claim:
+
+| Stimulus | Quantity | Parent | Candidate | Delta |
+| --- | --- | --- | --- | --- |
+| single span (shipped stimulus, 3 dirty rows) | direct draw | 203.1 us | 201.2 us | -0.9% |
+| | process CPU | 1440.8 us | 1429.6 us | -0.8% |
+| | plan time (control) | 66.8 us | 63.3 us | -5.2% |
+| 17 spans (29/F5 endpoint) | direct draw | 2423.4 us | 2403.7 us | -0.8% |
+| | process CPU | 8811.3 us | 8804.5 us | -0.1% |
+| | plan time (control) | 175.7 us | 172.5 us | -1.9% |
+
+**Read the control before the result.** Plan time is produced by code this diff
+does not touch, so its true delta is zero. It moved -5.2% and -1.9%. Both
+stimuli's draw and CPU deltas are smaller than, or comparable to, that drift.
+These two runs therefore establish **no regression at either span-count
+endpoint** and nothing more. Note that this control and 31/F18's A/A calibration
+are independent instruments reaching the same conclusion about this session: the
+differences in play here are smaller than what the measurement apparatus does on
+its own. **No win is claimed by this finding, on any workload or stimulus.**
+
+**The 17-span endpoint needed a temporary stimulus.** The shipped
+`localized-draw-acceptance` producer writes one row per update
+(`scripts/terminal-benchmark-producer.py#run_localized_draw_workload`, row
+`lines // 2`), so it exercises the single-span route only -- convenient for H1,
+useless for the many-span route. Doc 29's stride-four producer no longer exists
+in the tree. Both arms were patched identically to write 17 stride-four rows per
+update, measured, then reverted; the patch script is disposable scratch, and the
+edit is reproducible from this paragraph in five minutes. **If the many-span
+route is going to be re-measured again, promote that stimulus into the producer
+rather than hand-patching two trees a third time.**
+
+**Behavioral coverage added.** Two UI tests in
+`tests-ui/SwiftTerminalSessionViewTests.swift#swiftTerminalSessionViewTests`
+read the clip itself, which the drawn-row-set tests cannot see: one pins one
+rect per maximal span (a bounding-rect merge of disjoint spans fails it), one
+pins the dirtyRect clamp that replaced the second stacked clip. The clamp test
+drives `draw(_:)` against a bitmap context, because AppKit's own display path
+always redraws the union of its invalid regions and so cannot construct a dirty
+rect narrower than the pending damage. Both were verified to fail before the
+change, and the clamp test was re-verified by mutation (dropping the
+`intersection` call fails it).
+
+**Confidence.** High on non-regression: two calibrated workloads plus both span
+endpoints, every quantity favorable in direction, nothing approaching a `slower`
+verdict. **Zero on any speedup** -- and that is a settled reading, not a pending
+one. H1 predicted the single-span fast path would be equivalent-or-faster and
+never slower; what was measured is consistent with that prediction and cannot
+distinguish it from exact equivalence. Do not reopen this by re-running the same
+instrument. `incremental-mixed` would need a difference above ~4.9 points to say
+anything, which is roughly 20x the effect any mechanism in F2--F5 predicts;
+resolving H1's magnitude needs a different instrument, not more runs of this one.
+
+## F10 -- clip-rect edges are device-pixel aligned by construction (H4 verified)
+
+`TerminalRenderMetrics.init`
+(`lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift#init(displayScale:fontSize:fontFamily:symbolsFontURL:)`)
+quantizes the font's advance and line height to whole device pixels
+(`quantizedPixelCount`) and *then* derives the point-space cell size as
+`CGFloat(cellHeightPixels) / displayScale`. So `cellSize.height * displayScale`
+is integral by construction -- at every scale factor, not merely 1x and 2x, and
+the same holds for `cellSize.width`. Span rects are integer multiples of that
+height at integer row offsets with `x = 0`, so every clip edge lands on a device
+pixel and no rect clip can fall into antialiased coverage.
+
+H4 is confirmed and D3 closes as verified with no code change and no follow-up
+task. The invariant to preserve: quantize to pixels first, divide by scale
+second. Any future metrics path that computes a point-space cell size directly
+from font metrics would break it silently.
+
 ## Citations
 
 - macOS SDK `CoreGraphics.framework/Headers/CGContext.h` -- clipping and

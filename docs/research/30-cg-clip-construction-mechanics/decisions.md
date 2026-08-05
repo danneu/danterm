@@ -5,7 +5,7 @@ before the first comparison result for that candidate is read. States follow
 the ledger vocabulary: VETTING (proposal awaiting evidence), ACTIVE, DONE,
 REJECTED.
 
-## D1 -- one `clip(to:)` call over dirtyRect-clamped span rects [VETTING]
+## D1 -- one `clip(to:)` call over dirtyRect-clamped span rects [DONE -- adopted]
 
 Depends on: F2, F3, F5, F6.
 
@@ -36,6 +36,16 @@ must be verified against an explicit empty-rect fallback while implementing.
 parent on `incremental-mixed`, `synchronized-frames`, and both 29/F6
 acceptance stimuli (two-distant-row, 17-span endpoint).
 
+**Gate amendment, frozen 2026-08-05 before its first result was read.** The
+`synchronized-frames` arm of this gate is unrunnable: doc 23/F9 demoted that
+workload to a collectable candidate, and `terminal-benchmark-compare.py`
+now rejects the name outright, so it can issue no verdict. Its job here was
+to guard the multi-span route. `content-churn` -- the surviving verdict
+workload whose damage is churn-shaped rather than append-shaped -- takes that
+slot, alongside the 17-span acceptance endpoint that already covers the
+many-span topology directly. Same disposition rules apply to the substitute:
+any `slower` verdict is a rejection.
+
 - Any `slower` verdict or test failure: REJECTED, revert, record.
 - Otherwise (all `equivalent`, or any `faster` with none slower): adopt.
   Classify honestly in the outcome: "simplification, measured equivalent"
@@ -45,6 +55,31 @@ acceptance stimuli (two-distant-row, 17-span endpoint).
 `synchronized-frames` would mean the clamped multi-rect path costs more than
 the stacked clips somewhere unmodeled -- that result must be attributed, not
 argued away, before any retry.
+
+**Outcome (2026-08-05, evidence in F9).** Adopted. Gates green (74/74, 207/207);
+`incremental-mixed` printed `faster` at -4.23%; `content-churn` inconclusive at
+-2.04%; both span-count acceptance endpoints favorable in direction. No `slower`
+verdict anywhere, so the frozen rule adopts.
+
+Classified honestly, per this gate's own instruction: **simplification, measured
+non-regression.** The `faster` string does *not* promote this to a measured
+improvement. Doc 31/F18 calibrated `incremental-mixed` on this host one commit
+before this candidate's parent and found it the worst-resolved cell on the
+ladder -- it returned both a -4.43% `faster` and a +4.85% `slower` verdict on
+byte-identical source, giving a reading rule of 4.9 points. This candidate's
+-4.23% is inside that. `content-churn`'s 2.04% is likewise inside its 2.2-point
+rule. F9's independent plan-time control on the acceptance runs says the same
+thing about the same session.
+
+D1 therefore lands on the gate's second acceptance route (simplification with
+proven non-regression), which the README declares an explicitly acceptable
+outcome. **No performance claim may be made for this change, and re-running the
+same workloads cannot produce one.**
+
+The empty-clamped-rect edge case named under **Risks** resolved as predicted: an
+empty rect list is possible when damage misses `dirtyRect` entirely, and
+`clip(to: [])` has no documented clip-out-everything guarantee, so `draw(_:)`
+falls back to an explicit `clip(to: .zero)`.
 
 ## D2 -- derive spans from the bitset; drop the Set round-trip [VETTING]
 
@@ -75,7 +110,7 @@ diff shape that killed it.
   before concluding).
 - `faster`: adopt and report the measured verdict, nothing more.
 
-## D3 -- verify device-pixel alignment of clip edges [VETTING, verify-only]
+## D3 -- verify device-pixel alignment of clip edges [DONE -- verified, no change]
 
 Depends on: H4; produces F10.
 
@@ -87,6 +122,11 @@ invariant that keeps rect clips antialiasing-free. If fractional: open a new
 task with its own gate -- alignment changes move glyph geometry and need the
 full draw-workload ladder plus visual verification, which is beyond this
 doc's scope.
+
+**Outcome (2026-08-05, F10).** Integral, and at every scale factor rather than
+just the two checked: metrics quantize to whole device pixels first and derive
+the point-space cell size by dividing by the scale. Closed as verified; no
+follow-up task opens.
 
 ## D4 -- instrumentation changes carry their own non-degradation gate [ADOPTED as standing rule]
 

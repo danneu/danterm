@@ -144,24 +144,35 @@ scale factor, which would open a new alignment task.
 - [x] Audit the benchmark instrumentation's own cost posture -- production
       compile-out, verdict-run gating, draw-path IO -- and freeze it as the
       bar for future instrumentation changes (F8, D4). DONE 2026-08-03.
-- [ ] RESEARCH: collect `damageTopology` histograms from three stimuli
-      (interactive typing, `scrollback-stream`-style output, live btop) and
-      record the `spans=1` share per stimulus under F9. This weights H1's
-      expected impact; it does not gate D1, which is justified as a
-      simplification even at zero measured win.
+- [x] DROPPED 2026-08-05: collect `damageTopology` histograms from three
+      stimuli to weight H1's expected impact. It gated nothing -- D1 was
+      adopted on its own measured gate -- and F9 makes it moot for
+      attribution: this session's drift on untouched code exceeded the effect
+      the histogram would have weighted, so a `spans=1` share could not settle
+      where `incremental-mixed`'s win came from. Reopen only alongside an
+      attribution instrument that can resolve it.
 
 ### Phase 2 -- D1: single `clip(to:)` call with dirtyRect-clamped spans
 
-- [ ] Implement D1 (see decisions.md for the frozen gate) on top of a noted
-      parent revision; keep the diff to `draw(_:)` and the span helpers.
-- [ ] `just test` and `just test-ui` green, including the drawn-row-set tests.
-- [ ] `just benchmark-quick baseline=<parent> workload=incremental-mixed`.
-- [ ] `just benchmark-quick baseline=<parent> workload=synchronized-frames`.
-- [ ] Re-run the 29/F6 acceptance pair: two-distant-row stimulus and the
-      17-span endpoint via `scripts/terminal-draw-acceptance.py`, candidate vs
-      parent.
-- [ ] Apply D1's frozen rule; record the verdict and disposition in
-      decisions.md.
+- [x] Implement D1 on top of parent `b6556f1c`; the diff is `draw(_:)`, one new
+      private `spanClipRects` helper, and the two UI tests.
+- [x] `just test` (74/74) and `just test-ui` (207/207) green, including the
+      drawn-row-set tests and two new clip-region tests (F9).
+- [x] `just benchmark-quick baseline=b6556f1c workload=incremental-mixed` --
+      printed `faster` at -4.23%, which is **inside** that cell's 4.9-point A/A
+      reading rule (31/F18) and so resolves nothing. Not a win.
+- [x] `just benchmark-quick baseline=b6556f1c workload=content-churn` --
+      inconclusive, -2.04%, likewise inside its 2.2-point rule. Substituted for
+      `synchronized-frames`, which doc 23/F9 demoted and the harness now rejects
+      outright; the substitution was frozen in decisions.md before its result
+      was read.
+- [x] Acceptance pair via `scripts/terminal-draw-acceptance.py`, candidate vs
+      parent: the shipped single-span stimulus and the 17-span endpoint (a
+      temporary stride-four producer applied identically to both arms, then
+      reverted). Both favorable in direction and inside session drift (F9).
+- [x] Apply D1's frozen rule: adopted as a **simplification with measured
+      non-regression** -- no `slower` verdict anywhere, and no resolvable win
+      either. Verdict and classification recorded in decisions.md.
 
 ### Phase 3 -- D2: bitset/range-native span derivation (begin only after D1
 is decided, so the two diffs are never measured entangled)
@@ -175,8 +186,10 @@ is decided, so the two diffs are never measured entangled)
 
 ### Phase 4 -- verify H4 and close
 
-- [ ] Record where cell metrics are computed, whether device-space cell
-      height is integral at 1x and 2x, and cite the code (F10 when done).
+- [x] Record where cell metrics are computed, whether device-space cell
+      height is integral at 1x and 2x, and cite the code. DONE 2026-08-05:
+      integral at every scale factor by construction (F10); D3 closed as
+      verified with no code change.
 - [ ] `just benchmark-confirm baseline=<pre-doc-30 revision>` over whatever
       landed, as the closing all-workload measurement.
 - [ ] Write `## Outcome`, move this doc's index row to `## Closed`, and
@@ -198,9 +211,15 @@ is decided, so the two diffs are never measured entangled)
 
 ## Open questions
 
-- Does the `spans=1` share differ enough across stimuli that H1's fast path
-  matters in practice, or is this purely the simplification case? (Phase 1
-  histogram task.)
+- ~~Does the `spans=1` share differ enough across stimuli that H1's fast path
+  matters in practice, or is this purely the simplification case?~~
+  **Answered for this doc's purposes: purely the simplification case (F9).**
+  Not because the share was measured -- the histogram task was dropped -- but
+  because the available instruments cannot resolve an effect of the size any
+  mechanism in F2--F5 predicts. `incremental-mixed` needs >4.9 points to speak
+  (31/F18); the acceptance stimuli drift by more than the effect on untouched
+  code. The share would only weight an impact nothing here can detect. This
+  reopens only behind a new instrument.
 - Is AppKit's pre-clip of the drawing context to the update region reliable
   enough on layer-backed views to *ever* rely on, or should DanTerm keep
   treating it as undocumented behavior? F6 records the doc-quote evidence
