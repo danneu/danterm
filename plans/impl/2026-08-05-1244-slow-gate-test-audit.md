@@ -90,6 +90,34 @@ its own `--filter` (row #9) and 23.0s here: it is not slower, it is sharing ten
 cores with everything else, so the next factor available on this package is
 scheduling the two long poles first, not shrinking another test.
 
+**That scheduling idea was investigated and dropped.** Swift Testing exposes no
+ordering or priority API -- the whole public trait set is `ConditionTrait`,
+`IssueHandlingTrait`, `ParallelizationTrait` (whose only member is
+`.serialized`), and `TimeLimitTrait` -- so "run the long poles first" is not
+expressible. It would not pay anyway: in `just test` this package's step takes
+45s against `test-terminal-pty.sh`'s 54s, and the gate finishes in 53s, so it is
+bound by the pty step and not by this one. A job-count sweep confirmed there is
+nothing to tune at the pool level either: jobs 3/4/5/6/8 -> 69/52/53/52/57s, flat
+across 4-6 with the `ncpu/2` default inside the flat region. The steps are each
+internally multithreaded, so pool width moves contention around rather than
+removing it. Further wall-clock work belongs on `test-terminal-pty.sh` and
+`terminal-capture-api-gate_test.sh`, not here.
+
+## Follow-ups
+
+Found while implementing the rows above; each is its own commit, same rules.
+
+| # | Fix | Why | Done |
+|---|---|---|---|
+| F1 | Raise `ResizeProbeRecipe.sparseSaturating.lineCount` 250,000 -> 500,000 and give the guard an explicit margin bound | Discovered by row #11: the shipped recipe saturates by **1.005x** (implied depth ~248,700 vs 250,000 lines) and the guard asserts only `impliedDepth <= lineCount`, so it cannot tell 1.003x from 3x. An unrelated charge-rate change would silently make doc 28's sparse numbers stop meaning saturation. Row #11 decoupled the guard's cost from `lineCount`, so only the manually-run probe pays for the increase. Verify empirically that the probe's reported numbers do not move -- once budget-bound, retained depth should stay ~248,700 either way. | [ ] |
+| F2 | `.timeLimit(.minutes(1))` on `TerminalHyperlinkTests.fullIdSpaceRefusesFurtherOpens` | Row #3 established that removing the `targets.count > HyperlinkId.max` guard makes `allocateHyperlinkId` spin forever, so the test **hangs instead of failing** under exactly the neutralization this plan's discipline calls for. It already cost one leaked run that pinned a core for 95 minutes. `.timeLimit` is the house pattern (`TerminalPaneSessionControllerTests`). | [ ] |
+
+Considered and declined: a per-step timeout in `scripts/run-test-suite.sh`. The
+gate has never hung -- a stray neutralization run outside it did, which F2 fixes
+at the source -- and macOS ships no `timeout(1)`, so it means hand-rolling
+watchdog plumbing into a script with its own contract self-tests. Revisit if a
+gate step ever does hang.
+
 ## Superfluous, redundant, or broken
 
 ### `TerminalScrollbackBudgetTests.historyRespectsItsBudgetInRealBytes` -- mostly redundant
