@@ -415,29 +415,29 @@ struct TerminalSelectionTests {
         // Intent: check the cross-product invariants after every operation, not just endpoints.
         // Why it exists: reflow, eviction, and mutation hooks compose in orders examples miss.
         // Scenario: deterministic shell-like output alternates with resize and inspection actions.
-        var generator = Generator(state: 0xDAD0_6EED)
+        var generator = SeededByteGenerator(state: 0xDAD0_6EED)
         var terminal = try #require(Terminal(columns: 6, rows: 3))
         let bytes = Array("abxy \r\n".utf8)
 
         for _ in 0..<128 {
-            switch generator.next() % 4 {
+            switch generator.nextByte() % 4 {
             case 0:
-                terminal.feed([bytes[Int(generator.next()) % bytes.count]])
+                terminal.feed([bytes[Int(generator.nextByte()) % bytes.count]])
             case 1:
                 terminal.resize(
-                    columns: 3 + Int(generator.next() % 6),
-                    rows: 1 + Int(generator.next() % 4)
+                    columns: 3 + Int(generator.nextByte() % 6),
+                    rows: 1 + Int(generator.nextByte() % 4)
                 )
             case 2:
                 let streamRows = terminal.scrollbackRowCount + terminal.geometry.rows.count
                 terminal.setSelection(
                     from: TerminalTextPosition(
-                        row: Int(generator.next()) % streamRows,
-                        column: Int(generator.next()) % terminal.geometry.columns
+                        row: Int(generator.nextByte()) % streamRows,
+                        column: Int(generator.nextByte()) % terminal.geometry.columns
                     ),
                     to: TerminalTextPosition(
-                        row: Int(generator.next()) % streamRows,
-                        column: Int(generator.next()) % terminal.geometry.columns
+                        row: Int(generator.nextByte()) % streamRows,
+                        column: Int(generator.nextByte()) % terminal.geometry.columns
                     )
                 )
             default:
@@ -482,16 +482,5 @@ struct TerminalSelectionTests {
         let viewportRow = position.row - terminal.scrollbackRowCount
         guard terminal.geometry.rows.indices.contains(viewportRow) else { return nil }
         return terminal.geometry.rows[viewportRow].cells[position.column].kind
-    }
-
-    private struct Generator {
-        var state: UInt64
-
-        mutating func next() -> UInt8 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return UInt8(truncatingIfNeeded: state)
-        }
     }
 }

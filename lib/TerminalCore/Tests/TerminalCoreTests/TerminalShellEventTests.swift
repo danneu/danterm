@@ -52,7 +52,7 @@ struct TerminalShellEventTests {
         #expect(terminal.drainSemanticEvents() == [.commandStarted("echo ok")])
     }
 
-    @Test("a native event survives every two-chunk byte split")
+    @Test("a native event survives every two- and three-chunk byte split")
     func everyByteSplit() throws {
         let encoded = Data("echo español".utf8).base64EncodedString()
         let bytes = Array(

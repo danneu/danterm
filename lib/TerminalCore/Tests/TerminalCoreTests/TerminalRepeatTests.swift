@@ -94,11 +94,21 @@ struct TerminalRepeatTests {
 
     @Test("last-cluster memory participates in terminal equality")
     func memoryAffectsEquality() throws {
+        // Intent: `lastPrintedCluster` is a stored property of `Terminal`, so two terminals that
+        //   differ only in the cluster they last printed must compare unequal.
+        // Why it exists: `Terminal` relies on synthesized `Equatable` over every stored property,
+        //   so the two operands have to be built to leave the cluster memory as the *only*
+        //   difference. An earlier version compared a printed terminal against a cursor-moved one,
+        //   which also differed in `nextContentIdentity` and `damage` -- it stayed green even with
+        //   `lastPrintedCluster` deleted from the type outright.
+        // Scenario: REP and combining-mark handling read this memory, so equality has to see it.
         var remembered = try #require(Terminal(columns: 3, rows: 1))
         remembered.feed(Array("A\u{1B}[2J".utf8))
         var plain = try #require(Terminal(columns: 3, rows: 1))
-        plain.moveCursor(row: 0, column: 1)
+        plain.feed(Array("B\u{1B}[2J".utf8))
 
+        // Both fed one narrow cell then ED 2, so grids, cursors, damage and the content-identity
+        // counter all match; only the remembered cluster ("A" vs "B") differs.
         #expect(remembered != plain)
     }
 }

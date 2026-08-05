@@ -10,7 +10,9 @@ struct TerminalDamageTests {
         // Intent: a cheap generation token identifies every feed that changes pending consumer work.
         // Why it exists: the PTY host must stop copying the full terminal without changing wakeups.
         // Scenario: independent and combined redraw, clipboard, coalesced semantic, and discrete
-        //   mutations accumulate, drain, and then advance the generation again.
+        //   mutations accumulate, drain, and then advance the generation again -- and a feed that
+        //   adds no new pending work leaves the token where it was, which is the half of the
+        //   contract that keeps the host from waking once per read.
         var terminal = try #require(Terminal(columns: 8, rows: 3))
         _ = terminal.drainDamage()
 
@@ -43,6 +45,23 @@ struct TerminalDamageTests {
         _ = terminal.drainPendingClipboardWrite()
         _ = terminal.drainSemanticEvents()
         verify(Array("again".utf8), terminal: &terminal)
+
+        // Negative legs. Without these the suite is satisfied by a regression that bumps the
+        // generation on every `feed`, which would restore a wakeup per read.
+        _ = terminal.drainDamage()
+        _ = terminal.drainPendingClipboardWrite()
+        _ = terminal.drainSemanticEvents()
+        let quiescent = terminal.pendingConsumerWorkGeneration
+        // An unrecognized CSI final falls through `dispatchCSI` and mutates nothing.
+        terminal.feed(Array("\u{1B}[9z".utf8))
+        #expect(terminal.pendingConsumerWorkGeneration == quiescent)
+        // A print into an already-damaged row re-sets a bit that is already set, so
+        // `TerminalDamageAccumulator.record(row:)` returns false and nothing bumps. Both prints
+        // stay on the same row so neither can scroll and escalate to full damage.
+        terminal.feed(Array("\u{1B}[1;1HP".utf8))
+        let damagedRow = terminal.pendingConsumerWorkGeneration
+        terminal.feed(Array("\u{1B}[1;3HQ".utf8))
+        #expect(terminal.pendingConsumerWorkGeneration == damagedRow)
     }
 
     @Test("row damage crosses storage word boundaries without changing public indexes")

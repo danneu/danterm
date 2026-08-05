@@ -59,8 +59,11 @@ struct TerminalStyleTableTests {
         #expect(terminal.cell(row: 0, column: 0)?.style.foreground == color(0))
         #expect(terminal.cell(row: 0, column: 1)?.style.foreground == color(styleCount - 1))
         // The live table must stay bounded rather than growing with the number of styles seen,
-        // which is the property that makes the id cheaper than the style it replaced.
-        #expect(terminal.retainedStyleCount < styleCount)
+        // which is the property that makes the id cheaper than the style it replaced. `internStyle`
+        // sweeps at `styleSweepThreshold`, which never leaves `baseStyleSweepThreshold` while the
+        // live set stays this small -- so that constant, not `styleCount`, is the real bound. A
+        // `< styleCount` bound here passed with 19,999 entries retained.
+        #expect(terminal.retainedStyleCount <= Terminal.baseStyleSweepThreshold)
         expectValidGrid(terminal)
     }
 
@@ -88,8 +91,10 @@ struct TerminalStyleTableTests {
         // still reachable from a cell are a small constant. The table is swept lazily rather than
         // on every eviction -- a walk of every cell is far more expensive than the entries it
         // frees -- so the assertion is that it stays *bounded*, not that it is minimal. A table
-        // that never swept would sit at `styleCount`.
-        #expect(terminal.retainedStyleCount < styleCount / 2)
+        // that never swept would sit at `styleCount`. The bound is `baseStyleSweepThreshold`, the
+        // point `internStyle` sweeps at while the live set stays this small; `< styleCount / 2`
+        // was two orders of magnitude looser than the behavior.
+        #expect(terminal.retainedStyleCount <= Terminal.baseStyleSweepThreshold)
         expectValidGrid(terminal)
     }
 

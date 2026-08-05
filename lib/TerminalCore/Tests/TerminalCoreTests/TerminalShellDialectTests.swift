@@ -9,36 +9,22 @@
 // for the marks themselves stay in TerminalOSC133Tests.
 import Foundation
 import Testing
+import TerminalCoreRecording
 
 @testable import TerminalCore
 
 /// Pins the shipped shell integrations' emitted dialect to the resize behavior it buys.
 struct TerminalShellDialectTests {
-    /// A recorded `{feed, resize}` stream in the shared neutral-fixture schema.
-    private struct Recording: Decodable {
-        let initial: Initial
-        let events: [Event]
-
-        struct Initial: Decodable {
-            let columns: Int
-            let rows: Int
-        }
-
-        struct Event: Decodable {
-            let type: String
-            let hex: String?
-            let base64: String?
-            let columns: Int?
-            let rows: Int?
-        }
-    }
-
     /// A token from the upper prompt row. It is the row a wrong `redraw` value either
     /// erases outright or strands a copy of on every resize step, so it is the one
     /// worth counting; the lower row is rewritten in place either way.
     private static let upperRow = "repo:"
 
-    private func recording(_ name: String) throws -> Recording {
+    /// Decodes a fixture without replaying it. `NeutralTerminalRecording.replay` is deliberately
+    /// not used: several of these recordings carry free-form `provenance.source` strings that
+    /// `NeutralTerminalProvenance.validate()` rejects, and the redraw-override variants have to
+    /// rewrite the feed bytes between the decode and the terminal anyway.
+    private func recording(_ name: String) throws -> NeutralTerminalRecording {
         let url = try #require(
             Bundle.module.url(
                 forResource: name,
@@ -46,7 +32,7 @@ struct TerminalShellDialectTests {
                 subdirectory: "Fixtures/danterm"
             )
         )
-        return try JSONDecoder().decode(Recording.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(NeutralTerminalRecording.self, from: Data(contentsOf: url))
     }
 
     /// Replays a recording, optionally rewriting the `redraw` option on every mark in
@@ -57,27 +43,9 @@ struct TerminalShellDialectTests {
             Terminal(columns: recording.initial.columns, rows: recording.initial.rows)
         )
         for (eventIndex, event) in recording.events.enumerated() {
-            guard event.type != "resize" else {
-                terminal.resize(columns: try #require(event.columns), rows: try #require(event.rows))
-                expectSemanticPromptInvariants(
-                    terminal,
-                    context: "\(name) transformed event \(eventIndex)"
-                )
-                continue
-            }
-            var bytes = try Self.bytes(from: event)
-            if let redrawOverride {
-                var text = String(decoding: bytes, as: UTF8.self)
-                for existing in ["redraw=1", "redraw=last", "redraw=0"] {
-                    text = text.replacingOccurrences(of: existing, with: redrawOverride)
-                }
-                bytes = Array(text.utf8)
-            }
-            terminal.feed(bytes)
-            expectSemanticPromptInvariants(
-                terminal,
-                context: "\(name) transformed event \(eventIndex)"
-            )
+            let context = "\(name) transformed event \(eventIndex)"
+            try Self.apply(event, to: &terminal, redrawOverride: redrawOverride, context: context)
+            expectSemanticPromptInvariants(terminal, context: context)
         }
         return terminal
     }
@@ -86,23 +54,33 @@ struct TerminalShellDialectTests {
         terminal.fullHistoryText.components(separatedBy: Self.upperRow).count - 1
     }
 
-    private static func bytes(fromHex hex: String) -> [UInt8] {
-        var out: [UInt8] = []
-        out.reserveCapacity(hex.count / 2)
-        var index = hex.startIndex
-        while index < hex.endIndex,
-            let next = hex.index(index, offsetBy: 2, limitedBy: hex.endIndex) {
-            out.append(UInt8(hex[index..<next], radix: 16) ?? 0)
-            index = next
+    /// Drives one recorded event into `terminal`, optionally rewriting the `redraw` option in a
+    /// feed's bytes first. Every event kind these fixtures do not contain is a hard failure rather
+    /// than a skip -- silently ignoring an input or viewport event would change what the replayed
+    /// stream means without changing any assertion.
+    private static func apply(
+        _ event: NeutralTerminalRecordingEvent,
+        to terminal: inout Terminal,
+        redrawOverride: String?,
+        context: String
+    ) throws {
+        switch event {
+        case .resize(let columns, let rows):
+            terminal.resize(columns: columns, rows: rows)
+        case .feed(let bytes):
+            terminal.feed(overriding(redrawOverride, in: bytes))
+        case .input, .paste, .focus, .mouse, .viewport, .checkpoint:
+            throw ShellDialectFixtureError.unsupportedEvent(context)
         }
-        return out
     }
 
-    private static func bytes(from event: Recording.Event) throws -> [UInt8] {
-        if let base64 = event.base64 {
-            return Array(try #require(Data(base64Encoded: base64)))
+    private static func overriding(_ redrawOverride: String?, in bytes: [UInt8]) -> [UInt8] {
+        guard let redrawOverride else { return bytes }
+        var text = String(decoding: bytes, as: UTF8.self)
+        for existing in ["redraw=1", "redraw=last", "redraw=0"] {
+            text = text.replacingOccurrences(of: existing, with: redrawOverride)
         }
-        return bytes(fromHex: try #require(event.hex))
+        return Array(text.utf8)
     }
 
     @Test("the recorded staircase incident is fixed by the redraw declaration and only by it")
@@ -276,7 +254,12 @@ struct TerminalShellDialectTests {
         for shell in ["zsh", "bash"] {
             let recording = try recording("\(shell)-dialect-width-sweep")
             var terminal = try #require(Terminal(columns: 100, rows: 10))
-            terminal.feed(try Self.bytes(from: recording.events[0]))
+            try Self.apply(
+                recording.events[0],
+                to: &terminal,
+                redrawOverride: nil,
+                context: "\(shell)-dialect-width-sweep event 0"
+            )
             terminal.feed(Array("\u{1B}]133;C\u{7}BUILD-OUTPUT-LINE\r\n".utf8))
             for width in [96, 92, 88, 84] {
                 terminal.resize(columns: width, rows: 10)
@@ -330,19 +313,9 @@ struct TerminalShellDialectTests {
             Terminal(columns: recording.initial.columns, rows: recording.initial.rows)
         )
         for (eventIndex, event) in recording.events.prefix(limit).enumerated() {
-            guard event.type != "resize" else {
-                terminal.resize(columns: try #require(event.columns), rows: try #require(event.rows))
-                expectSemanticPromptInvariants(
-                    terminal,
-                    context: "zsh-stale-width-repaint prefix event \(eventIndex)"
-                )
-                continue
-            }
-            terminal.feed(try Self.bytes(from: event))
-            expectSemanticPromptInvariants(
-                terminal,
-                context: "zsh-stale-width-repaint prefix event \(eventIndex)"
-            )
+            let context = "zsh-stale-width-repaint prefix event \(eventIndex)"
+            try Self.apply(event, to: &terminal, redrawOverride: nil, context: context)
+            expectSemanticPromptInvariants(terminal, context: context)
         }
 
         #expect(terminal.screenText.components(separatedBy: "╭ ~").count - 1 == 1)
@@ -389,4 +362,10 @@ struct TerminalShellDialectTests {
         #expect(terminal.screenText.contains("$ cmd2"))
         expectValidGrid(terminal)
     }
+}
+
+/// Signals a fixture event kind this suite has no meaning for, so the replay fails loudly
+/// instead of silently dropping it.
+private enum ShellDialectFixtureError: Error {
+    case unsupportedEvent(String)
 }

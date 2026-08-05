@@ -138,11 +138,12 @@ struct TerminalStyleTests {
         #expect(terminal.cell(row: 0, column: 1)?.style == styled)
 
         terminal.resize(columns: 2, rows: 2)
-        #expect(terminal.geometry.rows.indices.contains { row in
-            terminal.geometry.rows[row].cells.indices.contains { column in
-                terminal.cell(row: row, column: column)?.style == styled
-            }
-        })
+        // Row 0 holds "AC": column 0 is the pre-DECSC cell and column 1 is the one the restored
+        // pen wrote, which is the cell this test is about. Assert both concretely -- an existential
+        // over the grid was satisfied by column 0 alone, so dropping the underline color from the
+        // reflowed DECRC cell still passed.
+        #expect(terminal.cell(row: 0, column: 0)?.style == styled)
+        #expect(terminal.cell(row: 0, column: 1)?.style == styled)
 
         terminal.feed(Array("\u{1B}[58:2:1:2;4:5m".utf8))
         #expect(terminal.currentStyle.underline == .dashed)
