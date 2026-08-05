@@ -1056,6 +1056,79 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.locate(displayRow: -1) == nil)
     }
 
+    // MARK: - Chunked backing (`31/D5`)
+
+    @Test("a published value and the next admission share every chunk but the one written")
+    func publishedValueThenAdmitCopiesOneChunkNotTheWholeArena() {
+        // Intent: after the store's value has been copied -- which is what publishing a frame
+        //   does -- the next admission copies only the backing chunk it writes into, not the
+        //   whole arena.
+        // Why it exists: this is `31/D5`'s whole mechanism, observably. `31/F13` M1 measured the
+        //   single-allocation arena being copied whole on every published frame (`memcpy` at
+        //   12.1%-16.1% of whole-process CPU under `admit`), and a timing assertion would not
+        //   say *why*; chunk storage identity says exactly which backing was copied and which
+        //   was shared through.
+        // Scenario: `TerminalPTYHost.drainedFrameState()` puts the `Terminal` value into a frame
+        //   the pane session holds until the next publish, so every admitted row between two
+        //   published frames writes into a non-uniquely-referenced arena.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+        for seed in 0..<3_000 {
+            store.admit(Self.filledRow(width: 80, seed: seed, softWrapped: false))
+        }
+
+        let published = store
+        let before = published.chunkStorageIdentitiesForTesting()
+        store.admit(Self.filledRow(width: 80, seed: 4_001, softWrapped: false))
+        let after = store.chunkStorageIdentitiesForTesting()
+
+        let copied = zip(before, after).reduce(into: 0) { $0 += $1.0 == $1.1 ? 0 : 1 }
+        #expect(before.count > 1, "the production-shaped budget must have more than one chunk")
+        #expect(copied >= 1, "the admission has to have written somewhere")
+        #expect(
+            copied * store.chunkCapacityBytesForTesting <= store.capacityBytes / 4,
+            "one admission after a publish copied \(copied) of \(before.count) chunks"
+        )
+    }
+
+    @Test("history cycles the ring across chunk seams and reads back exactly")
+    func ringCyclesAcrossChunkSeamsAndKeepsItsRetainedSuffix() {
+        // Intent: at a budget spanning several backing chunks, feeding many full cycles of the
+        //   ring leaves every reader returning the retained suffix cell for cell, and the charge
+        //   inside capacity throughout.
+        // Why it exists: `31/PO12` states this for the arena's one physical seam; `31/D5` adds a
+        //   seam per chunk boundary, which is where the open tail is force-split and a pad
+        //   covers the remainder. This is that obligation at the new seam count.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+        var admitted: [[Unicode.Scalar]] = []
+        var seed = 0
+        for line in 0..<3_000 {
+            var scalars: [Unicode.Scalar] = []
+            for _ in 0..<(line % 7) {
+                let row = Self.filledRow(width: 80, seed: seed, softWrapped: true)
+                scalars.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+                store.admit(row)
+                seed += 1
+            }
+            let count = 1 + line % 79
+            let last = Self.shortRow(width: 80, count: count, seed: seed)
+            scalars.append(contentsOf: last.cells.prefix(count).compactMap { $0.scalars.first })
+            store.admit(last)
+            seed += 1
+            admitted.append(scalars)
+            #expect(store.census.chargedBytes <= store.capacityBytes)
+        }
+
+        let retained = Self.readLogicalLines(store)
+        #expect(retained.isEmpty == false)
+        #expect(store.independentDisplayRowRecount() == store.grandDisplayRowTotal)
+        // The retained lines are a suffix of what was fed, with the oldest one possibly trimmed
+        // at the head (`31/I4`) and every later one whole.
+        let tail = Array(admitted.suffix(retained.count))
+        #expect(retained.count > 1)
+        #expect(Array(retained.dropFirst()) == Array(tail.dropFirst()))
+        #expect(Self.isSuffix(retained[0], of: tail[0]))
+    }
+
     // MARK: - Helpers
 
     /// Steps eviction outside `#expect`, whose macro expansion binds its operand immutably and

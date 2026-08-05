@@ -145,17 +145,34 @@ extension Terminal {
 
         // MARK: - Stored state
 
-        /// The arena, stored as 64-bit words. Allocated once at `arenaCapacity` and never
-        /// resized -- `31/D2` Decision 1 rejected both geometric growth (resident slack no charge
-        /// model can see, the shape of `15/F4`'s leak) and `memmove` compaction (a 16 MiB copy on
-        /// the admission path).
+        /// The arena, stored as 64-bit words over a fixed number of copy-on-write chunks.
+        /// Allocated once at `arenaCapacity` and never resized -- `31/D2` Decision 1 rejected
+        /// both geometric growth (resident slack no charge model can see, the shape of `15/F4`'s
+        /// leak) and `memmove` compaction (a 16 MiB copy on the admission path).
         ///
         /// Words rather than bytes because every offset in the store is a byte offset on an
         /// 8-byte grain -- headers, cells and both in-arena tables all are -- so a word is
         /// addressed as `offset >> 3` and read or written whole. `31/F8` Observation 3 priced the
         /// alternative: composing a word out of eight checked `[UInt8]` subscripts put admission
         /// at ~1.1 ns per stored cell byte, which was the whole of that finding's reject.
-        private var arena: ContiguousArray<UInt64>
+        ///
+        /// **Chunked rather than one allocation (`31/D5`, amending `31/D2` Decision 1).** The
+        /// byte address space is still one linear ring over `[0, arenaCapacity)`; only the
+        /// backing is split. `TerminalPTYHost.drainedFrameState()` publishes the `Terminal`
+        /// **value**, so between two published frames the arena is non-uniquely referenced and
+        /// the next write copies it: with one buffer that was all 15.75 MiB, which `31/F13` M1
+        /// measured as `memcpy` at 12.1%-16.1% of whole-process CPU under `admit`. With chunks
+        /// it is the one chunk the write touches. **A record never straddles a chunk** -- a
+        /// chunk boundary is a second kind of physical end, force-split and padded exactly as
+        /// `31/DD20` and `31/DD14` treat the arena's own -- which is what lets every walk below
+        /// hoist one chunk and index it the way it indexed the single arena.
+        private var chunks: ContiguousArray<ContiguousArray<UInt64>>
+
+        /// The chunk size as a power of two, so a byte offset splits into a chunk index and an
+        /// in-chunk word index with two shifts and a mask and no division (`31/DD53`).
+        private let chunkByteShift: Int
+        private let chunkByteMask: Int
+        private let chunkBytes: Int
 
         /// Byte offset of the oldest retained record's header.
         private var head = 0
@@ -260,7 +277,18 @@ extension Terminal {
             precondition(width >= 1)
             budget = budgetBytes
             arenaCapacity = budgetBytes - Self.metadataReserveBytes(forBudget: budgetBytes)
-            arena = ContiguousArray(repeating: 0, count: arenaCapacity / 8)
+            let shift = Self.chunkByteShift(forCapacity: arenaCapacity)
+            chunkByteShift = shift
+            chunkByteMask = (1 << shift) - 1
+            chunkBytes = 1 << shift
+            var backing = ContiguousArray<ContiguousArray<UInt64>>()
+            var placed = 0
+            while placed < arenaCapacity {
+                let size = min(1 << shift, arenaCapacity - placed)
+                backing.append(ContiguousArray(repeating: 0, count: size / 8))
+                placed += size
+            }
+            chunks = backing
             self.width = width
             forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
@@ -290,6 +318,51 @@ extension Terminal {
         static func metadataReserveBytes(forBudget budget: Int) -> Int {
             ((budget / 16) + 7) & ~7
         }
+
+        /// 64 KiB, the smallest chunk this store will build (`31/DD53`).
+        ///
+        /// The floor is what keeps `31/DD54`'s admissible unit generous: a record may not
+        /// straddle a chunk, so the chunk bounds the widest admissible row, and 64 KiB holds
+        /// ~4,090 columns of worst-case side-table content -- past anything a pane reaches.
+        static let minimumChunkByteShift = 16
+
+        /// 512 KiB, the largest. Bigger chunks copy more per published frame, which is the whole
+        /// cost `31/D5` exists to bound.
+        static let maximumChunkByteShift = 19
+
+        /// `31/DD53`: the power of two at or above `capacity / 32`, clamped to
+        /// [64 KiB, 512 KiB], with a capacity at or under the floor left as a single chunk.
+        ///
+        /// At the production budget the capacity is 15,728,640 B and this returns 19, dividing
+        /// the arena into exactly 30 chunks of 512 KiB. Below the floor it returns the smallest
+        /// shift that covers the whole capacity, so a small-budget store keeps exactly the
+        /// single-region placement it had before `31/D5` -- which is what keeps the suite's
+        /// existing expectations resting on the placement rule they were written against.
+        static func chunkByteShift(forCapacity capacity: Int) -> Int {
+            precondition(capacity >= 8)
+            if capacity <= 1 << minimumChunkByteShift {
+                var shift = 3
+                while (1 << shift) < capacity { shift += 1 }
+                return shift
+            }
+            var shift = minimumChunkByteShift
+            while shift < maximumChunkByteShift, (1 << shift) * 32 < capacity { shift += 1 }
+            return shift
+        }
+
+        /// Test support: the identity of each backing chunk's storage.
+        ///
+        /// The only way to assert `31/D5`'s mechanism rather than time it: after a value copy,
+        /// the chunks a mutation did *not* write must still be the same buffers the copy holds.
+        func chunkStorageIdentitiesForTesting() -> [UInt] {
+            chunks.map { chunk in
+                chunk.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress) }
+            }
+        }
+
+        /// Test support: the byte size of a full backing chunk, which is what one post-publish
+        /// mutation copies at most.
+        var chunkCapacityBytesForTesting: Int { regionCapacityBytes }
 
         // MARK: - Census
 
@@ -325,6 +398,19 @@ extension Terminal {
         private var indexChargeBytes: Int {
             offsets.capacity * MemoryLayout<Int>.stride
                 + blocks.capacity * MemoryLayout<Block>.stride
+                + arenaBackingOverheadBytes
+        }
+
+        /// What splitting the arena's backing costs beyond the bytes it holds (`31/D5`).
+        ///
+        /// One array storage header per chunk plus the outer array that names them --
+        /// ~1.2 KiB of a 15 MiB capacity at the production budget. Charged rather than ignored
+        /// on `31/DD37`'s rule: a charge that describes a model rather than an allocation is
+        /// `15/F2`'s error class, and the backing change is exactly the kind of thing that would
+        /// hide inside it.
+        private var arenaBackingOverheadBytes: Int {
+            Terminal.arrayStorageHeaderBytes * (chunks.count + 1)
+                + chunks.count * MemoryLayout<ContiguousArray<UInt64>>.stride
         }
 
         private var sideTableChargeBytes: Int {
@@ -400,13 +486,15 @@ extension Terminal {
 
             // A budget too small to hold one display row of this width retains nothing rather
             // than trapping. The arena is reserved once and never grown (`31/I2`), so there is
-            // no room to make for a row that does not fit an empty arena; the honest answer is
+            // no room to make for a row that does not fit an empty region; the honest answer is
             // that such a pane has no history, and the degenerate configuration stays reachable
-            // instead of being a crash.
+            // instead of being a crash. The unit is a backing chunk rather than the capacity
+            // because a record may not straddle one (`31/DD54`), which at the 64 KiB chunk floor
+            // is ~4,090 columns of worst-case side-table content.
             let worstCase = LogicalLineRecord.Header.byteCount
                 + max(1, admission.contentEnd) * LogicalLineRecord.cellBytes
                 + projectedTableBytes(addingCells: max(1, admission.contentEnd))
-            guard worstCase <= arenaCapacity else { return }
+            guard worstCase <= regionCapacityBytes else { return }
 
             // A hard-ended row with no content still occupies a display row when the line
             // already has cells, and a zero-cell append would fold that row away. One blank
@@ -1233,18 +1321,20 @@ extension Terminal {
             let left = lhs.record(at: leftOffset)
             guard left.word == rhs.word(at: rightOffset) else { return false }
 
-            // The cells are one contiguous run of whole words in both arenas, so this walks two
-            // raw word pointers rather than paying a bounds check per subscript on each side --
-            // this loop is what a whole-terminal equality spends nearly all of its time in. The
-            // record's alignment tail is deliberately outside the run: those bytes are whatever
-            // the ring last wrote there, and comparing them would report equal content as
-            // different.
+            // The cells are one contiguous run of whole words inside one backing chunk on each
+            // side (`31/D5`: a record never straddles one), so this walks two raw word pointers
+            // rather than paying a bounds check per subscript -- this loop is what a
+            // whole-terminal equality spends nearly all of its time in. The record's alignment
+            // tail is deliberately outside the run: those bytes are whatever the ring last wrote
+            // there, and comparing them would report equal content as different.
             if left.cellCount > 0 {
-                let leftWord = (leftOffset >> 3) + 1
-                let rightWord = (rightOffset >> 3) + 1
+                let leftWord = lhs.chunkWordIndex(of: leftOffset) + 1
+                let rightWord = rhs.chunkWordIndex(of: rightOffset) + 1
                 let count = left.cellCount
-                let equal: Bool = lhs.arena.withUnsafeBufferPointer { leftWords in
-                    rhs.arena.withUnsafeBufferPointer { rightWords in
+                let leftChunk = lhs.chunks[lhs.chunkIndex(of: leftOffset)]
+                let rightChunk = rhs.chunks[rhs.chunkIndex(of: rightOffset)]
+                let equal: Bool = leftChunk.withUnsafeBufferPointer { leftWords in
+                    rightChunk.withUnsafeBufferPointer { rightWords in
                         let left = leftWords.baseAddress! + leftWord
                         let right = rightWords.baseAddress! + rightWord
                         for word in 0..<count where left[word] != right[word] { return false }
@@ -1321,9 +1411,14 @@ extension Terminal {
             let shape = foldedRow(at: cursor, includeFill: true)
             let sequence = firstRecordSequence + cursor.recordIndex
 
+            // The record's cells are one run inside one backing chunk (`31/D5`), so the chunk is
+            // resolved once per display row and indexed directly per cell -- the same single
+            // subscript this loop paid when the arena was one buffer.
+            let chunk = chunks[chunkIndex(of: shape.recordOffset)]
+            let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
             for cellOffset in shape.start..<shape.end {
-                let word = cellWord(recordAt: shape.recordOffset, cell: cellOffset)
+                let word = chunk[cellsBase + cellOffset]
                 let styleId = Terminal.StyleId(
                     truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
                 )
@@ -1364,9 +1459,11 @@ extension Terminal {
             _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
+            let chunk = chunks[chunkIndex(of: shape.recordOffset)]
+            let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
             for cellOffset in shape.start..<shape.end {
-                let word = cellWord(recordAt: shape.recordOffset, cell: cellOffset)
+                let word = chunk[cellsBase + cellOffset]
                 body(column, TerminalCellKind(
                     packedCode: UInt8(
                         (word >> PackedRetainedRow.Header.cellKindShift)
@@ -1833,9 +1930,12 @@ extension Terminal {
             let blank = UInt64(TerminalCellKind.padding.packedCode)
                 << PackedRetainedRow.Header.cellKindShift
                 | UInt64(Terminal.defaultStyleId) << PackedRetainedRow.Header.cellStyleShift
-            for index in 0..<count {
-                setWord(blank, at: offset + LogicalLineRecord.headerAndCells(record.cellCount + index))
-            }
+            let chunkAt = chunkIndex(of: offset)
+            let base = chunkWordIndex(of: offset) + 1 + record.cellCount
+            var chunk = ContiguousArray<UInt64>()
+            swap(&chunk, &chunks[chunkAt])
+            for index in 0..<count { chunk[base + index] = blank }
+            swap(&chunk, &chunks[chunkAt])
             openPreviousIdentity = nil
             record.cellCount += count
             writeHeader(record, at: offset)
@@ -1860,6 +1960,18 @@ extension Terminal {
             var sideTablesGrew = false
             spillBytes -= spillCost(of: spillsBySequence[sequence])
 
+            // The record's cells are one run inside one backing chunk (`31/D5`), and moving that
+            // chunk into a local for the loop keeps the store's per-cell write the single
+            // uniqueness check and single bounds check it was when the arena was one buffer.
+            // The first write here after a publish is what pays copy-on-write -- of this chunk,
+            // not of the arena, which is the whole of what `31/F13` M1 measured.
+            // Nothing between the two swaps may read the arena: the chunk is out of `chunks`
+            // until the second one, and a stray read would trap on bounds rather than lie.
+            let chunkAt = chunkIndex(of: offset)
+            let cellsBase = chunkWordIndex(of: offset) + 1 + record.cellCount
+            var chunk = ContiguousArray<UInt64>()
+            swap(&chunk, &chunks[chunkAt])
+
             for index in 0..<cells.count {
                 let cellOffset = record.cellCount + index
                 let kind = cells[index].kind
@@ -1872,7 +1984,7 @@ extension Terminal {
                     word |= PackedRetainedRow.Header.cellSpillBit | UInt64(spills.count)
                     spills.append(Array(cells[index].scalars))
                 }
-                setWord(word, at: offset + LogicalLineRecord.headerAndCells(cellOffset))
+                chunk[cellsBase + index] = word
 
                 if let id = cells[index].hyperlinkId {
                     openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
@@ -1897,6 +2009,8 @@ extension Terminal {
                 }
                 if kind == .wideHead { record.hasWideCells = true }
             }
+
+            swap(&chunk, &chunks[chunkAt])
 
             if spills.isEmpty == false { spillsBySequence[sequence] = spills }
             spillBytes += spillCost(of: spills)
@@ -2017,15 +2131,42 @@ extension Terminal {
                 }
                 if offsets.count == 0 {
                     resetToEmptyArena()
-                    precondition(arenaCapacity >= need, "a record cannot exceed the arena")
+                    precondition(
+                        regionCapacityBytes >= need,
+                        "a record cannot exceed one backing chunk"
+                    )
                     return
                 }
-                if contiguousRoomAtCursor < need, writeCursorPrecedesHead == false {
-                    wrapWriteCursorAtSeam()
+                if contiguousRoomAtCursor < need, let boundary = padBoundaryAtCursor {
+                    wrapWriteCursorAtSeam(to: boundary)
                     continue
                 }
                 guard evictOneDisplayRow() else { return }
             }
+        }
+
+        /// The largest contiguous run one record may occupy: a backing chunk, or the whole
+        /// capacity when the capacity is smaller than one (`31/D5`, `31/DD54`).
+        private var regionCapacityBytes: Int { min(chunkBytes, arenaCapacity) }
+
+        /// The region end at the write cursor: the next chunk boundary, capped at the arena's
+        /// physical end.
+        private var regionEndAtCursor: Int {
+            min(((writeCursor >> chunkByteShift) + 1) << chunkByteShift, arenaCapacity)
+        }
+
+        /// The region end the cursor may pad forward to without colliding with the head, or nil
+        /// when it cannot and eviction is the only way to make room.
+        ///
+        /// `31/D5`: a chunk boundary is a second kind of physical end, so `31/DD14`'s pad and
+        /// `31/DD20`'s forced split fire at it on exactly the terms they fire at the arena's own.
+        /// The head bounds it for the same reason it bounds `contiguousRoomAtCursor` -- padding
+        /// up to or past the head would write over live bytes and leave a cursor that reads as
+        /// an empty ring.
+        private var padBoundaryAtCursor: Int? {
+            let boundary = regionEndAtCursor
+            guard writeCursorPrecedesHead else { return boundary }
+            return boundary < head ? boundary : nil
         }
 
         /// True when the in-use region has wrapped, so the tail's room is bounded by the head
@@ -2035,12 +2176,13 @@ extension Terminal {
         }
 
         private var contiguousRoomAtCursor: Int {
-            if bytesInUse == 0 { return arenaCapacity - writeCursor }
-            if writeCursor > head { return arenaCapacity - writeCursor }
-            return head - writeCursor
+            // Bounded by the head when the ring has wrapped, and by the region end always: a
+            // record may not straddle a backing chunk (`31/D5`).
+            let limit = writeCursorPrecedesHead ? head : arenaCapacity
+            return min(limit, regionEndAtCursor) - writeCursor
         }
 
-        /// `31/DD20`: the open tail is forced-split at the arena's physical end rather than
+        /// `31/DD20`: the open tail is forced-split at a region's physical end rather than
         /// reserved for.
         ///
         /// A pad needs a record's length at placement time, which is true of a closed record and
@@ -2049,7 +2191,11 @@ extension Terminal {
         /// which *is* a display-row boundary at the admitting width, a pad covers the sub-row
         /// remainder, and the continuation opens at offset 0. The two edges: an empty open record
         /// needs no split, and the pad is omitted when the remainder is zero.
-        private mutating func wrapWriteCursorAtSeam() {
+        ///
+        /// `31/D5` generalizes the seam from the arena's end to any region end: `boundary` is a
+        /// backing chunk boundary or the physical end, and only the physical end wraps the
+        /// cursor back to zero.
+        private mutating func wrapWriteCursorAtSeam(to boundary: Int) {
             if let open = openTailRecord() {
                 if open.cellCount > 0 {
                     forceSplitOpenRecord()
@@ -2067,7 +2213,7 @@ extension Terminal {
                     retireEmptyTailBlocks()
                 }
             }
-            let remainder = arenaCapacity - writeCursor
+            let remainder = boundary - writeCursor
             precondition(remainder % LogicalLineRecord.cellBytes == 0)
             if remainder >= LogicalLineRecord.Header.byteCount {
                 let units = (remainder - LogicalLineRecord.Header.byteCount)
@@ -2078,7 +2224,7 @@ extension Terminal {
                 // skips it, so the two can never drift.
                 bytesInUse += pad.byteLength
             }
-            writeCursor = 0
+            writeCursor = boundary == arenaCapacity ? 0 : boundary
         }
 
         /// An upper bound on the bytes the open record's side tables will need when it closes.
@@ -2164,39 +2310,56 @@ extension Terminal {
         // of these has a carry path. The assertions state it where a future layout change would
         // break it.
 
+        /// Which backing chunk a byte offset lives in, and where in it (`31/D5`).
+        ///
+        /// A record never straddles a chunk, so every walk over one record's bytes can call
+        /// these once and index the chunk directly afterwards.
+        @inline(__always) private func chunkIndex(of offset: Int) -> Int {
+            offset >> chunkByteShift
+        }
+
+        @inline(__always) private func chunkWordIndex(of offset: Int) -> Int {
+            (offset & chunkByteMask) >> 3
+        }
+
         private func word(at offset: Int) -> UInt64 {
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
-            return arena[offset >> 3]
+            return chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
         }
 
         private mutating func setWord(_ value: UInt64, at offset: Int) {
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
-            arena[offset >> 3] = value
+            chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3] = value
         }
 
         private func u16(_ offset: Int) -> Int {
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
-            return Int((arena[offset >> 3] >> UInt64((offset & 7) << 3)) & 0xFFFF)
+            let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
+            return Int((word >> UInt64((offset & 7) << 3)) & 0xFFFF)
         }
 
         private func u32(_ offset: Int) -> UInt32 {
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
-            return UInt32(truncatingIfNeeded: arena[offset >> 3] >> UInt64((offset & 7) << 3))
+            let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
+            return UInt32(truncatingIfNeeded: word >> UInt64((offset & 7) << 3))
         }
 
         private mutating func setU16(_ value: Int, at offset: Int) {
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
             let shift = UInt64((offset & 7) << 3)
-            let index = offset >> 3
-            arena[index] = arena[index] & ~(0xFFFF << shift)
+            let chunk = offset >> chunkByteShift
+            let index = (offset & chunkByteMask) >> 3
+            chunks[chunk][index] = chunks[chunk][index] & ~(0xFFFF << shift)
                 | (UInt64(UInt16(truncatingIfNeeded: value)) << shift)
         }
 
         private mutating func setU32(_ value: UInt32, at offset: Int) {
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
             let shift = UInt64((offset & 7) << 3)
-            let index = offset >> 3
-            arena[index] = arena[index] & ~(0xFFFF_FFFF << shift) | (UInt64(value) << shift)
+            let chunk = offset >> chunkByteShift
+            let index = (offset & chunkByteMask) >> 3
+            chunks[chunk][index] = chunks[chunk][index] & ~(0xFFFF_FFFF << shift)
+                | (UInt64(value) << shift)
         }
 
         private func spillCost(of spills: [[Unicode.Scalar]]?) -> Int {
