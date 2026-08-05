@@ -318,9 +318,11 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   re-lay-out on resize -- it stays wrapped at the width it was written at, and
   DanTerm reflows it as the soft-wrapped logical line it is. Confirmed not a
   DanTerm limitation by the source above; zsh and fish repaint and Bash does not.
-- [x] Decided: the live-pane tape is a permanent instrument
-  (`TerminalPTY/Sources/TerminalPTYHost/TerminalTapeRecorder.swift`, off unless
-  `DANTERM_TAPE_PATH` is set). It was removed as temporary in `e97345e` and had
+- [x] Decided: the live-pane tape is a permanent instrument, env-gated and off by
+  default. It shipped as `TerminalTapeRecorder.swift`; `a304e693` then folded it
+  into the one recording format the repo now keeps, so the instrument lives in
+  `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalFlightRecorder.swift` and the
+  standalone tape recorder is gone. It was removed as temporary in `e97345e` and had
   to be rebuilt twice within the same day for rounds two and three, each time to
   answer the same question -- does a bare `Terminal` reproduce this. Two call
   sites behind an env gate is less than the cost of restoring it a fourth time.

@@ -132,10 +132,13 @@ The authored dialect, decision by decision. The bytes themselves are in
     copy instead of moving the first. The emitter's dedup strips its own line out
     of a multi-line element rather than only matching whole elements, and the
     mark count drops to exactly one `A` per prompt.
-- Known gap, still open: a second `B` appears on Bash's SIGWINCH repaint, because
-  readline rewrites the final prompt line and that line ends in `B`. It re-stamps
-  a row already stamped, and the same duplicate is present with no marks
-  installed at all, so it is readline's shape rather than the dialect's.
+- Known gap, **retired by F19**: a second `B` appears on Bash's SIGWINCH repaint,
+  because readline rewrites the final prompt line and that line ends in `B`. It
+  re-stamps a row already stamped, and the same duplicate is present with no marks
+  installed at all, so it is readline's shape rather than the dialect's. It was
+  carried as a gap only because it had been parser-checked and never rendered;
+  F19 rendered the Bash dialect in a real pane over a width drag and found no
+  debris from it, which is what readline's one-line repaint predicts.
 - Decision and rationale: the redraw mode is a promise about what the shell will
   repaint. Bash promises one line, so DanTerm may blank one line. `P` rather than
   `A` inside `PS1` because readline redisplays mid-line (README, rejected ideas).

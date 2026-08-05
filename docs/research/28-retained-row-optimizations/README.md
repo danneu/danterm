@@ -278,6 +278,17 @@ the cheaper hypotheses land or are rejected. The canonical representation
 makes the demotion boundary well-defined (stored content is already exactly
 the observable content).
 
+**Parked by `D12` (2026-08-05), and not rejected.** The gate `D3`/`D5` deferred
+it to cannot be read here any more: `9ad7cc5` moved retained storage into doc
+31's `LogicalLineStore`, whose footprint is bounded by the arena's capacity
+rather than by what rows charge, so `F19`'s 3.72 MB is a pre-cutover number about
+a container that no longer exists. Doc 31's own readings (settled residency
+**0.92x** the incumbent's, live heap inside capacity) say deep history is not
+over budget, which is the premise `H5` needs. `D12` carries the reopening
+condition: a measured deep-history residency figure against the *store* that is
+judged unacceptable at the shipped budget, with lowering the budget already ruled
+out as the lever.
+
 ### H6 -- canonical rows make scrollback persistence cheap enough to be a feature
 
 Storage is now a pure function of observable content: content-sized and
@@ -580,12 +591,16 @@ implementation without that funding decision.
   fixed stride keeps a **column read O(1)** -- and `retained-browse` is the guard
   `D3` says is most likely to fire. `H4` composes in for a further 36% and lands as
   a separately measured second step.
-- [ ] `TODO` Gate: H5 -- live only if the selected H3/H4 direction leaves
-  deep-history footprint on the table. `D5`'s priced 9.41x makes this very likely
-  dead on sizing, but that is decided on post-landing evidence -- which now
-  exists, and points the other way from `D5`'s: C1 retains at **3.72 MB**, not
-  C6's 0.78 MB (`F19`), so deep-history footprint is ~4x what the pivot's
-  rejected representation would have left. Destination: `D11`.
+- [x] `DONE` (parked 2026-08-05) Gate: H5 -- live only if the selected H3/H4
+  direction leaves deep-history footprint on the table. `D5`'s priced 9.41x made
+  this look dead on sizing; the post-landing evidence pointed the other way
+  (C1 retains at **3.72 MB**, not C6's 0.78 MB -- `F19`), and then the subject
+  moved: `9ad7cc5` replaced retained-row storage with doc 31's
+  `LogicalLineStore`, whose footprint is bounded by the arena's capacity rather
+  than by a per-row charge. **Closed by `D12` as a park, not a verdict**: the
+  gate's number no longer describes the engine, doc 31's residency readings do
+  not show deep history over budget, and reopening now needs a residency figure
+  measured against the store. Destination: `D12`.
 - [x] `DONE` (superseded 2026-08-04) Open `H7` -- viewport-adjacent reflow. The
   question this task would have opened moved to
   [doc 31](../31-logical-line-scrollback/README.md), which pursues the
@@ -743,11 +758,11 @@ implementation without that funding decision.
   answers; record where it went. **It went to
   [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)**,
   promoted out of `plans/wip/` at closure, and shipped as C1 across
-  `987927a`..`f364cd9`. The doc does **not** close with it: `H5`'s gate is
-  undecided, `H7`'s reference read has not been done, and Phase 2 still owes the
-  resize *profile* (`F24`). See `## Outcome` for the liveness reading. **Of those
-  three, only `H5`'s gate is still open**: `H7` was superseded 2026-08-04 and the
-  `F24` profile is obsolete as of 2026-08-05, both by doc 31's store.
+  `987927a`..`f364cd9`. The doc did not close with it -- three things outlived
+  it, and **all three are now closed**: `H7` was superseded 2026-08-04 by doc 31
+  and its reopening spent by `31/F16`, Phase 2's resize *profile* (`F24`) went
+  obsolete 2026-08-05 when `9ad7cc5` deleted its subject, and `H5`'s gate is
+  parked by `D12`. See `## Outcome`.
 - [x] `DONE` (trial closed 2026-08-04 on exit 4) Size the history-depth defaults
   against a stated line-count target. `F23` measured what today's bounds retain
   at 179 columns (1,830 rows of full-width content, 7,281 of program output,
@@ -758,9 +773,11 @@ implementation without that funding decision.
   paying a measured 600.5 ms worst-case reflow and ~14.8 MB per deep pane.
   Deliberately no mitigation shipped with the raise. **`D11`'s amendment closes
   it on a fourth exit, *the cause is removed*:** the human's exit-1 verdict is
-  recorded, and recorded as still unratified, because
+  recorded, and was unratified when
   [doc 31](../31-logical-line-scrollback/README.md)'s store deleted reflow of
-  history before it was acted on. Re-measured on the committed
+  history out from under it. **That ratification slot was closed as MOOT
+  2026-08-05** (marked amendment at `D11`), so nothing is waiting on it.
+  Re-measured on the committed
   `saturated-wide-resize-v1` recipe at both revisions, the same width change at
   the trial's own depth went **576.19 ms at 9,860 retained rows -> 1.58 ms at
   10,735**: deeper history, and 0.011x `D8`'s budget instead of 3.84x. Both caps
@@ -926,9 +943,10 @@ non-ASCII, which is the one regime where variable width wins on bytes
 
 ## Outcome
 
-Investigation in progress. **`H3` is settled and the doc is not**, which is the
-whole of the liveness reading and is worth stating explicitly because the doc's
-largest thread just ended.
+**Closed 2026-08-05.** `H3` shipped, and every thread that outlived it is now
+answered, spent, or parked with a condition -- three of the four by having their
+subject removed rather than their question answered, which is the thing worth
+reading here.
 
 **Settled.** `H3` graduated as accepted-with-trade (`D10`), shipping C1 across
 `987927a`..`f364cd9` via
@@ -940,11 +958,11 @@ C6 is rejected on measurement (`D9`), and C3/C4 on pricing plus read shape
 (`D5`/`D6`). `D8`'s dual caps and `F17`'s streaming readers are the two shipped
 byproducts that outlive the representation contest.
 
-**Live, and why each is work rather than a parked lead.** **Item 3 is the only
-one still open**, and it is what keeps this doc in `## Live`. Items 1, 2 and 4 are
-kept in place and **marked closed** rather than deleted, because all three ended
-the same way and that is the thing worth reading: their subject was removed by
-doc 31's store rather than their question answered.
+**The four threads that kept this doc live, and how each ended.** All four are
+kept in place and marked closed rather than deleted. Items 1, 2 and 4 ended the
+same way -- their subject was removed by doc 31's store rather than their
+question answered -- and item 3 ended one day later for the same underlying
+reason.
 
 1. ~~**Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
    reflow's dominant per-cell term the time goes. Renumbered eleven times and
@@ -978,9 +996,18 @@ doc 31's store rather than their question answered.
    `scrollback-stream` **-13.60%**, the last drawing its PTY faster than the
    pre-cutover engine). The hybrid was never worked and needs no work; a future
    reopening needs a new rule against new evidence.
-3. **`H5`'s gate** (`TODO`, destination `D12`) -- undecided, and the post-landing
-   evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
-   rather than C6's 0.78 MB.
+3. **`H5`'s gate** -- **PARKED 2026-08-05 by `D12`**, the entry that closes this
+   doc. The gate `D3`/`D5` deferred it to asked whether the selected direction
+   left deep-history footprint on the table, and the post-landing evidence did
+   point that way (C1 retains at 3.72 MB rather than C6's 0.78 MB). Then the
+   subject moved: `9ad7cc5` put retained storage inside doc 31's
+   `LogicalLineStore`, whose footprint is bounded by the arena's capacity rather
+   than by a per-row charge, so `F19`'s figure is a pre-cutover number about a
+   container that no longer exists. Doc 31's readings -- settled residency 0.92x
+   the incumbent's, live heap inside capacity -- do not show deep history over
+   budget, which is the premise a compressed tier needs. Parked rather than
+   rejected because the evidence that would decide it must be measured against
+   the store, and this doc does not own the store.
 4. **The history-depth default** (opened by `F23`, shipped provisionally by
    `D11`) -- **CLOSED 2026-08-04 on a fourth exit, *the cause is removed*, by
    `D11`'s amendment.** The trial ran with `D8`'s budget reopened by explicit
@@ -1000,10 +1027,15 @@ doc 31's store rather than their question answered.
    to whoever reopens resize work, derived against the live screen.
 
 **Parked with stated conditions, not live.** `H4` (re-price before running --
-`D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore
-of terminal content becoming a product goal), `H8` (designated successor to
-`D10`'s trade, deliberately unfunded), and `H2`'s reopening condition.
+`D5`'s 36% was computed against a ~1-byte cell), `H5` (`D12`: reopens on a
+deep-history residency figure measured against `LogicalLineStore` and judged
+unacceptable at the shipped budget, with lowering the budget ruled out as the
+lever), `H6` (waits on session restore of terminal content becoming a product
+goal), `H8` (designated successor to `D10`'s trade, deliberately unfunded), and
+`H2`'s reopening condition.
 
 Reopening conditions for the settled work live in `D10` and `D9`; the shortest
 statement of what would restart the admission thread is **`H8` funded, or a
 measured `scrollback-stream` cost worse than the +4.13% `D10` accepted**.
+Closure is one-way: any of those conditions firing opens a new numbered doc that
+cites this one, not an edit here.

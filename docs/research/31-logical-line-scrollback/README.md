@@ -80,6 +80,27 @@ Two acceptance dimensions, and a change lands only on both:
    more than the copy saved. So M1 is spent, five of six workloads read `faster`,
    and the one rung this doc calls the go/no-go is `slower` by 0.34 points.
    **The store still does not land**, and the disposition is a human's.
+
+   **Re-measured 2026-08-04 by [F16](findings.md) after `D2` Decision 1's dense
+   per-record header cache removed the term `F15` named, and this dimension
+   PASSES.** One valid `confirm` invocation against the same pre-cutover parent
+   `28c54e1`, no threshold or pair count touched: `retained-browse` **+1.39% ->
+   +0.94% `inconclusive`** against an unchanged 1.05%, on four paired values none
+   of which exceeds it; `scrollback-stream` **-9.71% -> -13.60% `faster`**, its
+   PTY drain at **10.0 MB/s against the engine it replaced at 8.6**; and
+   `terminal-feed` **+2.33% -> +2.49% `inconclusive`** against 2.5%. **All three
+   acceptance rungs read not-`slower`, which is the plan's Acceptance condition
+   in full**, on the same comparison that read +60.44% / +2.60% / +141.42% three
+   sessions earlier. Two cautions the entry carries itself: `terminal-feed`
+   clears by **0.01 points** on the ladder's least-resolved cell, and the reading
+   rests on **one** invocation. `F16` Observation 5 also withdraws the claim that
+   the header cache is what moved the rung -- measured directly and paired in one
+   session it reads `equivalent` at -0.10% -- and `DD55` was reverted on that
+   null; the verdict above is unaffected, being a reading against `28c54e1`.
+   [F17](findings.md) then profiled the browse frame and attributed the +0.94%
+   residual away from the store entirely (the whole `LogicalLineStore` subtree is
+   1.94% of the frame, the fold 0.02%); the human **accepted** that residual with
+   no fix on 2026-08-05. See `## Outcome` for the full disposition.
 2. **Net simplification.** The deletion list (history reflow mutation, the
    cell cap, the row cap, their derivations and tests, narrow-then-widen
    machinery, continuation bookkeeping in retained history) must exceed the
@@ -109,6 +130,20 @@ Two acceptance dimensions, and a change lands only on both:
    claim mostly survives: six of the eight additions are contracts inside the
    store, with two named exceptions that cross its boundary (`DD43`'s seam-spacer
    reach at four `Terminal` call sites, and the eviction-delta counter).
+
+   **ACCEPTED AND CLOSED 2026-08-05 by human judgment**, which is what this
+   dimension always said it needed once no number could settle it; the full
+   reasoning is the marked disposition at `DD8` in [findings.md](findings.md).
+   **The tally is not revised** -- it stands at 4.5 invariants deleted against
+   7.5 added, with the 2,419-line storage core as `F11` recorded it -- and the
+   human judged the added store-local rules worth what they bought: the 364x
+   resize (`576.19 ms -> 1.58 ms` at greater depth), `scrollback-stream`
+   **-13.60%** with browse at parity, the resize/reflow bug class made
+   unrepresentable by `I3`, and the **reach asymmetry** (the deleted rules are
+   cross-cutting, the added ones store-local and oracle-fenced). The two
+   boundary-crossing additions are **accepted as named exceptions** rather than
+   argued away. So both acceptance dimensions are settled: dimension 1 by `F16`'s
+   measurement, dimension 2 by this judgment.
 
 ## Investigation rules
 

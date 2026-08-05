@@ -1,15 +1,15 @@
 # Decisions -- auditable decision log
 
-Next free ID: **D12**, which the remaining Phase 3 direction gate in
-[README.md](README.md) (H5) claims. `D2` was spent on the browsing freeze, `D3`
-on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on selecting H3's packing
-representation, `D6` on correcting its pricing, `D7` on the resize-for-depth
-trade, `D8` on the bounds that resolve it, `D9` on rejecting C6 for C1, `D10` on
-accepting C1's residuals and graduating H3, and `D11` on reopening `D8`'s resize
-budget for a dogfood trial of `F23`'s candidate (b). IDs are allocated in the
-order entries are written, not reserved in advance -- the H5 gate has now moved
-from `D5` to `D6` to `D7` to `D8` to `D9` to `D10` to `D11` to `D12` for that
-reason, and is now the longest-deferred item in the doc.
+Next free ID: **D13**; nothing in this doc claims it. `D2` was spent on the
+browsing freeze, `D3` on the H3-vs-H4 direction, `D4` on rejecting H2, `D5` on
+selecting H3's packing representation, `D6` on correcting its pricing, `D7` on
+the resize-for-depth trade, `D8` on the bounds that resolve it, `D9` on rejecting
+C6 for C1, `D10` on accepting C1's residuals and graduating H3, `D11` on
+reopening `D8`'s resize budget for a dogfood trial of `F23`'s candidate (b), and
+`D12` on parking H5. IDs are allocated in the order entries are written, not
+reserved in advance -- the H5 gate moved from `D5` to `D6` to `D7` to `D8` to
+`D9` to `D10` to `D11` to `D12` for that reason, and `D12` is the entry that
+finally disposed of it.
 
 ### D1 -- benchmark coverage for retained history, and two instrument gaps the Phase 1 runs exposed
 
@@ -1507,6 +1507,85 @@ history, which is why depth stopped setting the price.
   entry's ledger row names, was **deleted by `9ad7cc5`** -- it is written against
   the two caps, which no longer exist. The committed probe is what stays
   re-runnable, which is the whole reason `28/D1` pitch 2 insisted on one.
+
+### D12 -- `H5` is parked, not decided on sizing: the deep-history footprint question moved to doc 31's store
+
+- Status: **decided as a direction gate, and it is a park rather than a
+  rejection.** `H5` is the last open item in this doc, and closing it is what
+  lets the doc close. It is parked rather than rejected because the evidence that
+  would decide it no longer describes the engine: the gate was written against a
+  footprint this doc's own representation produced, and that representation is
+  now a layer inside someone else's store. Nothing waits on this entry, and no
+  code changes with it.
+- Date and investigator: 2026-08-05, Claude (agent), at doc closure.
+- Evidence used: `D3` and `D5` (which deferred `H5` and stated its gating
+  condition), `F19` (C1's 3.72 MB at 179x66, the number the gate was to be read
+  against), `D10` (the trade that banked it), `D11`'s amendment and `31/D2`
+  Decision 1 (the 16 MiB budget and the deletion of both caps), and doc 31's
+  residency readings for the landed store (settled residency **0.92x** the
+  incumbent's; live heap 14.673 MiB against a 15.000 MiB capacity).
+
+#### The decision
+
+**`H5` -- "ancient history can demote to a compressed tier" -- is parked.** It
+does not proceed to a design, an experiment, or a plan, and it is not rejected on
+sizing either. It leaves this doc with the reopening condition below.
+
+#### Why a park and not a verdict
+
+`D3` and `D5` gated `H5` on one question: does the selected `H3`/`H4` direction
+leave deep-history footprint on the table? That question was answerable while
+this doc owned the representation. It is not answerable here any more, for a
+reason that is structural rather than a missing measurement:
+
+1. **The subject changed owner.** `9ad7cc5` replaced per-row retained storage
+   with `LogicalLineStore`, one record per logical line inside a per-pane byte
+   arena sized by `productionScrollbackBudgetBytes`. `D9`'s C1 cell survives
+   inside it (see the postscript below), but the container, the charge model and
+   both caps do not. `F19`'s 3.72 MB was a property of the container.
+2. **The gate's number no longer means what it meant.** `H5` was to be read
+   against "what a saturated pane costs at the production budget". That figure is
+   now set by the arena's capacity rather than by what rows happen to charge --
+   the budget *is* the allocation (`31/D2` Decision 1) -- so a compressed ancient
+   tier would be competing against a bound, not against a measured overshoot.
+   Deciding `H5` on `F19`'s figure would be quoting a pre-cutover number at a
+   post-cutover engine, which this doc's evidence floor forbids in its own terms.
+3. **What evidence there is points away from it, but not far enough to reject.**
+   Doc 31's own residency readings put the landed store at **0.92x** the
+   incumbent's settled residency for the same fed corpus, with the store's live
+   heap inside its capacity (14.673 MiB against 15.000). Nothing there says deep
+   history is over budget, which is the premise `H5` needs. But those readings
+   were taken to adjudicate the store, not to size a demotion tier, so they are
+   grounds to stop working `H5` rather than grounds to close it out.
+
+`H5` was always the most mechanism for the fewest bytes -- that framing is from
+`D3` and survives the cutover unchanged. A park is the honest disposition: the
+idea is not wrong, it is unmotivated, and the thing that would motivate it is a
+measurement against a store this doc does not own.
+
+#### The reopening condition, stated so nobody re-derives the gate
+
+`H5` reopens on **one** piece of evidence:
+
+> A measured deep-history **residency** figure for `LogicalLineStore` -- taken
+> against the landed store, not against this doc's retained-row numbers -- that
+> is judged unacceptable at the shipped `productionScrollbackBudgetBytes`, with
+> the budget itself already ruled out as the lever.
+
+The second clause is load-bearing and is why this is not a low bar. The store's
+footprint is capacity-bounded, so the first response to "deep history costs too
+much" is to lower the budget, which costs one constant and no mechanism. `H5`
+only becomes the answer when the depth is *wanted* at a residency that is *not*,
+which is exactly the trade a compressed tier exists to make and the only regime
+where its mechanism pays. Whoever reopens it starts a new doc per this project's
+one-way closure rule, cites `28/H5` and this entry, and re-derives the sizing
+against the store rather than inheriting `F19`.
+
+- Behavioral verification: none; this entry writes no code and changes no
+  engine or app behavior.
+- Quantitative verification: none new, deliberately. The park rests on the
+  cited readings already recorded in doc 31; producing a fresh number here
+  would be sizing a hypothesis nobody is funding.
 
 ## Postscript (2026-08-05) -- `PO5`'s subject is retired; its encoding is not
 

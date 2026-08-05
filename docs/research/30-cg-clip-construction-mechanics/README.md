@@ -198,11 +198,26 @@ scale factor, which would open a new alignment task.
       height is integral at 1x and 2x, and cite the code. DONE 2026-08-05:
       integral at every scale factor by construction (F10); D3 closed as
       verified with no code change.
-- [ ] `just benchmark-confirm baseline=<pre-doc-30 revision>` over whatever
-      landed, as the closing all-workload measurement.
-- [ ] Write `## Outcome`, move this doc's index row to `## Closed`, and
-      graduate the durable CG clip-mechanics lesson (F2--F4's dispatch map) to
-      the guide that owns drawing performance if it proves reusable.
+- [x] DROPPED 2026-08-05: `just benchmark-confirm baseline=<pre-doc-30
+      revision>` as the closing all-workload measurement. It cannot decide
+      anything about what landed. F9 establishes that this ladder's noise floor
+      exceeds any effect the mechanisms in F2--F5 predict -- `incremental-mixed`
+      needs >4.9 points to speak (31/F18), roughly 20x the predicted effect --
+      and the only two changes that landed are a region-identical clip fold
+      (`c4fc65f7`, already measured against its parent on two calibrated
+      workloads plus both span-count acceptance endpoints) and the deletion of
+      an unreachable branch (`f31e1d77`, provably zero-effect). A confirm run
+      would spend the ladder to print numbers no one may read. Reopen only
+      behind an instrument that can resolve the effect (see `## Outcome`).
+- [x] CG clip-mechanics lesson: **not graduated as a dispatch map.** F2--F4 are
+      disassembly pinned to one OS build and specific to this one call site, so
+      they stay here. The one durable, API-contract-level sentence they support
+      -- prefer a single `clip(to: [CGRect])` over a manual
+      `beginPath()`/`addRect`/`clip()` loop, since rect clips and path clips are
+      separate routes in CoreGraphics and a one-rect list takes the path-free
+      one (F1, F2, F3) -- is *recommended* for
+      `agent-docs/terminal-performance.md`, not applied here.
+- [x] Write `## Outcome`. DONE 2026-08-05.
 
 ## Rejected ideas
 
@@ -232,3 +247,69 @@ scale factor, which would open a new alignment task.
   enough on layer-backed views to *ever* rely on, or should DanTerm keep
   treating it as undocumented behavior? F6 records the doc-quote evidence
   either way; D1 deliberately does not depend on the answer.
+
+## Outcome
+
+Closed 2026-08-05. One change shipped, one candidate rejected, one invariant
+verified, one standing rule adopted.
+
+**The arc.** F1--F5 established the mechanics: CoreGraphics treats rect clips
+and path clips as separate routes, `CGContextClipToRects` auto-dispatches a
+one-rect list to the path-free `CGGStateClipToRect` road (F2, F3), no rect-list
+clip exists on the path route (F4), and the shipped `beginPath()`/`addRect`/
+`clip()` loop therefore always took the generic route while stacking a second
+`clip(to: dirtyRect)` on top of it (F5, F6). That produced three candidates.
+
+- **D1 -- shipped** (`c4fc65f7`): one `clip(to:)` call over span rects already
+  intersected with `dirtyRect`, replacing both stacked clips. The region is
+  identical by construction (F6); the second clip's double-blend guarantee
+  becomes structural instead of a separate clip-stack entry; an empty clamped
+  rect list falls back to an explicit `clip(to: .zero)`. Adopted on the
+  *simplification* route, not the measured-improvement one (F9).
+- **D2 -- rejected**, unmeasured, on its own gate's diff-shape clause. The
+  narrow version does not exist: the halo and the cross-publish `formUnion`
+  both destroy ordering before it reaches the span helper, so the only version
+  that works is the full bitset rewrite -- a different implementation, not a
+  simpler one. Only the unreachable `Int.min` guard was taken (`f31e1d77`),
+  along with the test that pins the negative-row invariant it rested on.
+- **D3 -- verified, no code change** (F10): metrics quantize to whole device
+  pixels and *then* divide by the scale, so `cellSize.height * displayScale` is
+  integral at every scale factor and no clip edge can fall into antialiased
+  coverage. The invariant to preserve is the ordering: quantize first, divide
+  second.
+- **D4 -- standing rule**, not a change: the four-part non-degradation gate any
+  future benchmark/profiling change must pass (production compile-out,
+  verdict-run no-op, no draw-path IO, arms symmetric). It outlives this doc.
+
+**No performance claim, on any workload or stimulus.** The harness printed
+`faster` at -4.23% on `incremental-mixed`; that string is recorded in F9 only
+because it is what the instrument printed. 31/F18 calibrated that exact cell on
+this host one commit before D1's parent and found it the worst-resolved on the
+ladder -- a -4.43% `faster` and a +4.85% `slower` on byte-identical source, for
+a reading rule of 4.9 points. `content-churn`'s -2.04% is likewise inside its
+2.2-point rule, and F9's independent plan-time control (untouched code moving
+-5.2%) says the same about the same session. **Re-running the same ladder cannot
+produce a win here**, which is why Phase 4's closing `benchmark-confirm` was
+dropped rather than run: it would spend the ladder to print numbers no one may
+read. What the measurements do establish -- the absence of a resolvable
+regression at both span-count endpoints -- is all D1's gate needed.
+
+**Caveats that stay live.**
+
+- Whether AppKit's pre-clip of the drawing context to the update region is
+  reliable on layer-backed views is still unanswered (see Open questions). D1
+  deliberately does not depend on it, and R1 refuses to.
+- F2--F4 are local disassembly pinned to **macOS 26.5.2 (25F84), arm64**. Re-verify
+  on a new macOS major before citing them as current; the reproduction recipe in
+  findings.md F2 makes that a five-minute check.
+
+**Reopening condition.** Not by re-running this ladder. H1's magnitude -- how
+much the single-rect fast path is actually worth -- needs a *different*
+instrument, one that can resolve roughly 1/20th of `incremental-mixed`'s reading
+rule. And before the many-span route is measured again, promote F9's 17-span
+stride-four stimulus into
+`scripts/terminal-benchmark-producer.py#run_localized_draw_workload` rather than
+hand-patching two trees a third time; the shipped producer writes one row per
+update and exercises the single-span route only. D2 reopens only if the damage
+representation is being changed for another reason and the ordered form falls
+out for free -- never for the sort alone.

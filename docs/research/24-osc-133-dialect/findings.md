@@ -1026,9 +1026,10 @@ Evidence for the OSC 133 dialect. Parser probes feed
 
 ### F20 -- the prompt blink during a resize is DanTerm's blanking, not the shell re-running its prompt
 
-- Status: settled as a diagnosis, open as a fix. **Reopens one item after Phase
-  4 closed** -- the dialect is correct and complete; what this finding measures
-  is the cost of the blanking contract it buys.
+- Status: settled as a diagnosis; the fix was prototyped as F21 and **rejected**.
+  The dialect is correct and complete -- what this finding measures is the cost
+  of the blanking contract it buys, and the maintainer decided that cost is worth
+  paying rather than carrying the state F21 would need. Nothing here is open.
 - Date and investigator: 2026-07-31 (measurement), 2026-08-01 (maintainer
   confirmation).
 - Commit and worktree state: this finding's commit. The deferral described below

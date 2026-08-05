@@ -10,7 +10,7 @@ This file is the index: what exists, what is live, and the project-local
 pointers a reader needs. The format contract -- how a doc is stored, its
 required shape, and how to run one -- is [FORMAT.md](FORMAT.md).
 
-Reviewed 2026-07-31. **Table membership is the only record of liveness** -- a
+Reviewed 2026-08-05. **Table membership is the only record of liveness** -- a
 doc is live iff its row sits in `## Live`, and closing it moves the row to
 `## Closed`. Closed means the questions it opened have answers and nothing in it
 is waiting on anyone -- not that every idea in it was implemented. Several
@@ -24,13 +24,9 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 
 | # | Doc | Owns | Next |
 | --- | --- | --- | --- |
-| 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | A variance measurement that gates the last two leads |
-| 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Why stacked prompts survive a resize storm |
-| 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
-| 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
-| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | `D11` ships 10k-row bounds as a trial; `H7` superseded by doc 31, verdict still owed |
-| 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | D1: single clip(to:) call, gated on incremental-mixed |
-| 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Ladder **passes**: all three acceptance rungs not-`slower`; `DD8`'s complexity tally still open |
+| 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance measurement gates `L6`/`L5`; the shipped span clip moved the bracket again |
+| 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | One settled resize: does a prompt still duplicate? Live test, never run |
+| 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
 
 ## Closed
 
@@ -56,9 +52,13 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 21 | [Selection gesture cost](21-selection-gesture-cost.md) | What a pointer-driven selection query costs | Shipped -- point-local projection; double-click 13.6 ms -> 5.5 us, flat in history |
 | 22 | [Application-exit crash](22-application-exit-job-corruption.md) | A crash in the application-exit job path | Shipped -- exit path removed; the corrupting write never identified |
 | 23 | [PTY benchmark alignment](23-pty-benchmark-alignment.md) | Whether the benchmarks still match the rewritten PTY | Shipped -- one atomic timed consume fence; `synchronized-frames` demoted |
+| 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Shipped -- all three integrations emit it; `F21`'s anti-flicker prompt hold rejected |
 | 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Shipped -- 8 cases reclassified, two corpora mined, M9's external gate passes |
 | 27 | [swift-collections adoption](27-swift-collections-adoption/README.md) | Where library containers fit DanTerm storage | Rejected -- all twelve sites failed the adoption bar; no new conversion |
+| 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | Shipped -- `C1`'s 8-byte retained cell, 10.49 -> 3.72 MB at 1.11x depth; `H5`/`H8` parked |
 | 29 | [Sparse AppKit damage clip topology](29-sparse-appkit-damage-clip-topology/README.md) | Exact sparse clips across AppKit and Core Animation | Shipped -- maximal spans retain the sparse win without btop regression |
+| 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | Shipped -- one folded clip(to:) call as a simplification; no win the ladder can resolve |
+| 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Shipped -- reflow of history and both caps deleted; ladder passes, resize 576 ms -> 1.58 ms |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
