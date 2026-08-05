@@ -27,8 +27,8 @@ struct TerminalResizeProbeSupportTests {
         //   arena admits.
         // Why it exists: `.standard` is the frozen v1 recipe the probe binary still
         //   ships as its default, and every other test in this file reads it as "the
-        //   non-saturating one" -- `saturatingRecipesReachTheBudgetCeiling` names it
-        //   as such to justify its own absence from that argument list. That premise
+        //   non-saturating one" -- `saturatingRecipesChargePastTheBudgetCeiling` names
+        //   it as such to justify its own absence from that argument list. That premise
         //   was never actually asserted: the assertion this replaced claimed
         //   saturation and tested `scrollbackRowCount < lineCount`, which the
         //   viewport's own rows satisfy whether or not a single line is ever evicted.
@@ -62,16 +62,18 @@ struct TerminalResizeProbeSupportTests {
     }
 
     @Test(
-        "A saturating recipe evicts within its bound and remains at the budget ceiling",
+        "Each saturating recipe's shipped line count charges past the arena it fills",
         arguments: [
             ResizeProbeRecipe.saturating,
             ResizeProbeRecipe.sparseSaturating,
             ResizeProbeRecipe.wideSaturating,
         ]
     )
-    func saturatingRecipesReachTheBudgetCeiling(recipe: ResizeProbeRecipe) throws {
-        // Intent: each saturating recipe produces observed eviction within its declared
-        //   line bound, then 200 more lines leave retained depth at the byte-budget ceiling.
+    func saturatingRecipesChargePastTheBudgetCeiling(recipe: ResizeProbeRecipe) {
+        // Intent: for each saturating recipe, the depth at which its own payload's
+        //   charge fills the production arena is at or before the `lineCount` it
+        //   ships -- so the recipe reaches the budget ceiling rather than stopping
+        //   at its line bound.
         // Why it exists: a recipe that quietly stops saturating still prints a full
         //   distribution, and nobody reading the report can tell it now describes
         //   resizing a shallow history. Each recipe carries its own version of that
@@ -90,6 +92,74 @@ struct TerminalResizeProbeSupportTests {
         //     saturating by line count if its budget-reaching depth is misjudged.
         // `.standard` is deliberately absent: it is the non-saturating v1 recipe,
         // covered by `standardRecipeIsLineBoundedNotBudgetBounded` instead.
+        //
+        // Arithmetic rather than observation, because observing the ceiling costs
+        // ~301,000 line feeds across the three recipes. Each payload is a fixed shape,
+        // so per-line charge is deterministic and the saturation depth is a division;
+        // `wideSaturatingRecipeEvictsWithinItsBound` keeps the cheapest of the three on
+        // the observed path so this division stays tied to a measured eviction.
+        let prefixLineCount = Self.chargeMeasurementPrefixLineCount(for: recipe)
+        var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)!
+        terminal.feed(recipeBytes(for: recipe, in: 0..<prefixLineCount))
+
+        // The prefix must not itself have evicted, or the charge read below is the
+        // arena's ceiling rather than the payload's rate and the division degenerates
+        // into `capacity / (capacity / prefix) == prefix`, which passes for any recipe
+        // whose `lineCount` exceeds the prefix. Exact equality is that guard and also
+        // pins one payload line to one retained row, so a payload or width that started
+        // soft-wrapping fails here instead of halving the rate silently.
+        #expect(terminal.scrollbackRowCount == prefixLineCount - (recipe.rows - 1))
+
+        let census = terminal.memoryCensus
+        #expect(census.hasRetainedStorageOverdraft == false)
+        let chargePerLine = Double(census.retainedChargedBytes) / Double(prefixLineCount)
+        #expect(chargePerLine > 0)
+        // Stated as a depth rather than a projected byte total so a failure names the
+        // number that has to change: the line count the recipe ships.
+        //
+        // Conservative in the safe direction, with no fudge factor needed: per-line
+        // charge creeps *upward* with depth as the index and side tables amortize
+        // (measured, per payload: dense 339 -> 373 B/line between 512 and 2,048 lines,
+        // sparse 58.7 -> 63.1 between 512 and 16,384, wide 1,278 -> 1,415 between 512
+        // and 2,048). A prefix therefore understates the rate and *overstates* the depth
+        // at which the arena fills, so clearing this bound from a prefix implies clearing
+        // it at full depth.
+        let impliedSaturationLineCount =
+            Double(census.retainedArenaCapacityBytes) / chargePerLine
+        #expect(impliedSaturationLineCount <= Double(recipe.lineCount))
+    }
+
+    /// The prefix `saturatingRecipesChargePastTheBudgetCeiling` measures each payload's
+    /// per-line charge over.
+    ///
+    /// Per payload rather than one constant because the shipped recipes' margins differ
+    /// by two orders of magnitude, and a prefix only proves saturation once its
+    /// understated rate has amortized past the margin being claimed. `.dense` implies
+    /// 42,100 lines against a shipped 120,000 (2.8x) and `.wide` 11,100 against 60,000
+    /// (5.4x), both settled by 2,048 lines. `.sparse` ships only ~1.005x -- 250,000 lines
+    /// against an implied ~249,200 -- so at 2,048 its rate is still 1.3% short and the
+    /// division reports 253,200, i.e. it cannot yet tell a saturating recipe from a
+    /// non-saturating one. 16,384 is where the rate has amortized enough to decide it.
+    /// That the sparse recipe has under 1% of headroom is itself the thing to know: it
+    /// is one representation change away from silently measuring a line-bounded history.
+    private static func chargeMeasurementPrefixLineCount(for recipe: ResizeProbeRecipe) -> Int {
+        recipe.payload == .sparse ? 16_384 : 2_048
+    }
+
+    @Test("The wide recipe's ceiling is observed, not projected")
+    func wideSaturatingRecipeEvictsWithinItsBound() throws {
+        // Intent: `.wideSaturating` produces observed eviction within its declared line
+        //   bound, and 200 more lines past that point leave retained depth where it was
+        //   -- the byte budget, not the feed, is deciding depth.
+        // Why it exists: `saturatingRecipesChargePastTheBudgetCeiling` decides all three
+        //   recipes by arithmetic on a measured charge rate, and arithmetic can be right
+        //   about bytes while wrong about the machine -- the arena could refuse to fill,
+        //   or fill without evicting. One recipe therefore stays on the path that watches
+        //   an eviction happen, which anchors the division for the other two.
+        //   `.wideSaturating` is the one, because it is the cheapest to saturate of the
+        //   three: its rows are the most expensive content in the corpus, so it reaches
+        //   the ceiling in ~12,000 lines where `.sparseSaturating` needs ~248,000.
+        let recipe = ResizeProbeRecipe.wideSaturating
         let evidence = try #require(saturationEvidence(for: recipe))
         #expect(evidence.linesFed > 0)
         #expect(evidence.linesFed <= recipe.lineCount)
