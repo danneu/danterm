@@ -6,7 +6,8 @@
 ## Context
 
 DanTerm decides render-path performance changes with a paired A/B benchmark
-(`just benchmark-quick` / `just benchmark-confirm`) across five workloads. One of
+(`just benchmark-quick` / `just benchmark-confirm`) across the calibrated
+workload ladder. One of
 them, `incremental-mixed`, is the only workload that measures
 damage-*proportional* work, so it is the only instrument that can catch a
 regression in damage scoping -- the optimization area the Swift engine's render

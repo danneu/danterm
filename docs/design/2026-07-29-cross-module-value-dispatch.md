@@ -5,7 +5,7 @@
 
 ## Context
 
-`lib/TerminalCore` is not one module. It is nine SwiftPM targets, and the render
+`lib/TerminalCore` is not one module. It is a package of many SwiftPM targets, and the render
 path crosses their boundaries on every frame: `TerminalCore` owns the grid and
 the cell payload, `TerminalRenderPlanning` builds the frame plan from it, and
 `TerminalRenderExecution` draws that plan. No target sets a

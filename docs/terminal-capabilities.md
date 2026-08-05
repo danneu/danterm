@@ -195,7 +195,7 @@ These numeric limits are part of the public contract:
 | `handoff-metadata` | 262144 | bytes | TerminalMetadataIntegrationTests |
 | `model-metadata` | 524288 | bytes | TerminalMetadataIntegrationTests |
 | `pending-query-replies` | 65536 | bytes | TerminalQueryTests |
-| `scrollback` | 10485760 | bytes | TerminalScrollbackBudgetTests |
+| `scrollback` | 16777216 | bytes | TerminalScrollbackBudgetTests |
 
 In particular, control strings retain at most 2 MiB encoded input; decoded
 clipboard writes are limited to 1 MiB; a title, cwd, link, shell payload, or
@@ -208,7 +208,7 @@ Metadata retention is bounded independently at each layer rather than by one
 cross-layer sum: the engine caps its own retention at 256 KiB; the model caps
 every terminal-originated field at 64 KiB per value and retains at most 100
 alerts, so its total metadata scales with live pane count rather than a fixed
-app-wide byte bound. Scrollback is limited to 10 MiB and damage is bounded by
+app-wide byte bound. Scrollback is limited to 16 MiB and damage is bounded by
 current grid state. Oversized or malformed input has no partial effect, does
 not retain a second unbounded copy, and cannot prevent later valid input from
 being processed. A query reply that cannot fit is dropped as one complete unit.

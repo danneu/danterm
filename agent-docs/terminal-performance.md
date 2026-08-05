@@ -21,7 +21,7 @@ run -- see "Profile memory" below.
     just benchmark-confirm baseline=<revision>
 
 `benchmark-quick` compares one selected workload; `benchmark-confirm` compares
-all five. Both require an explicit baseline revision -- anything `git rev-parse`
+all six. Both require an explicit baseline revision -- anything `git rev-parse`
 accepts (`HEAD~5`, a SHA, a tag, a branch). Neither infers it from `HEAD`,
 merge-base, history, or the candidate.
 
@@ -329,7 +329,7 @@ compilation, which the command reports separately from the comparison phase.
 
 Run `quick` for the routine question. Run `confirm` when the quick result is
 close, the change crosses workload boundaries, or the decision warrants the
-stronger five-workload evidence.
+stronger six-workload evidence.
 
 ### What this instrument does on identical source (A/A), per workload
 
@@ -846,8 +846,9 @@ about the app.
   zero-byte existence flag.
 
 `TerminalBenchmarkMarkersTests` is the only automated cover for detection
-semantics, since `app/` has no test target; it checks the scan against a
-transcription of the replaced implementation. Changing detection means changing
+semantics, since `DanTermAppTests` does not build with
+`DANTERM_TERMINAL_BENCHMARK` and so never compiles the observer; it checks the
+scan against a transcription of the replaced implementation. Changing detection means changing
 that test, and `just test-terminal-benchmark-gui` is what proves the
 acknowledgments still flow.
 
