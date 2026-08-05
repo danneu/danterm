@@ -21,6 +21,16 @@ Two cross-cutting cost drivers recur throughout:
 - Debug builds magnify per-`#expect` Swift Testing event machinery and eager
   string interpolation everywhere.
 
+**Correction, measured while implementing row #8:** the second driver is half
+wrong. A *passing* `#expect` costs roughly 0.3us, so the 100,170 of them in
+`officialNormalizationCorpusMatches` accounted for ~0.03s of its 0.73s -- the
+assertion count is not a meaningful cost anywhere in this plan. Eager string
+interpolation at a call site *is* real (it runs whether or not the expectation
+fails); the Swift Testing event machinery around a passing expectation is not.
+Any remaining row whose payoff estimate rests on "N `#expect`s dominate" must
+be re-derived before it is worked -- this applies to row #10's "~53,900
+assertion blocks" and to the `@autoclosure` half of row #15.
+
 ## Commit progress
 
 One commit per unchecked box, worked top to bottom. Each entry names the fix,
