@@ -946,6 +946,15 @@ one item that ended by having its subject removed and that is worth reading:
    measured removed rather than predicted removed: `D11`'s amendment reads the
    same recipe at **1.58 ms** against the trial's 576.19 ms, at greater depth.
    `H7` remains only as doc 31's fallback if wrap-at-read is ever reverted.
+   **Closed 2026-08-04.** Doc 31's frozen rule reopened `H7` on its ladder's
+   first reading (`31/F11`, `retained-browse` +60.44% with both diagnostics
+   holding) and that reopening is now **spent**: `31/F13` attributed the
+   regression to four wiring and backing mechanisms with wrap-at-read in none of
+   them, and taking all four brought every acceptance rung inside its frozen
+   threshold (`31/F16`: `retained-browse` **+0.94%**, `terminal-feed` +2.49%,
+   `scrollback-stream` **-13.60%**, the last drawing its PTY faster than the
+   pre-cutover engine). The hybrid was never worked and needs no work; a future
+   reopening needs a new rule against new evidence.
 3. **`H5`'s gate** (`TODO`, destination `D12`) -- undecided, and the post-landing
    evidence `D5` deferred it to now points the other way: C1 retains at 3.72 MB
    rather than C6's 0.78 MB.

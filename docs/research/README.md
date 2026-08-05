@@ -30,7 +30,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
 | 28 | [Retained-row optimizations](28-retained-row-optimizations/README.md) | Follow-on wins opened by compact retained rows | `D11` ships 10k-row bounds as a trial; `H7` superseded by doc 31, verdict still owed |
 | 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | D1: single clip(to:) call, gated on incremental-mixed |
-| 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Ladder ran and **failed**: all three acceptance rungs `slower`; disposition is a human's |
+| 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Ladder **passes**: all three acceptance rungs not-`slower`; `DD8`'s complexity tally still open |
 
 ## Closed
 

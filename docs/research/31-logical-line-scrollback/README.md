@@ -837,6 +837,51 @@ licenses a production storage change; landing is the paired ladder's.
   the store's settled live heap **14.673 MiB against a 15.000 MiB capacity**.
   **Acceptance is still not met**, no second fix round was taken, and the
   disposition is a human's.
+- [x] `DONE` **`D2` Decision 1's dense header-cache amendment** (`D5`'s second
+  reopening condition, disposed of by the human as one mechanical round).
+  Recorded in [decisions.md](decisions.md), frozen before the implementation
+  exists and before the re-run's first number. The index stops being
+  offsets-only and carries each live record's **header word** densely beside its
+  offset -- which is `F2`'s own recorded alternative (a dense parallel array,
+  8 B per record, "priced and unbuilt") taken on a reading `F2` never measured:
+  `F15` attributed the go/no-go rung's failure to the per-record header read, and
+  a browse frame pays that read where a resize's counting pass does not. The word
+  is a function of content alone (`I1`), so the cache is **width-free** and a
+  width change gains no invalidation point; it serves all three per-record reads
+  the browse path makes where a cached row *count* would serve one and add a
+  seventh invalidation point on the one operation this design exists to make
+  free. The charge goes 8 -> **16 B per record** at the rings' capacity on
+  `DD37`'s rule: still inside `DD36`'s 1/16 reserve on every measured class
+  (`stream` tightest at **0.509 of 1.000 MiB**, from 0.259), and `PO11` holds
+  everywhere with `full`'s derived margin down to **0.4%** from 0.9%. The
+  re-run's expectation is frozen in the entry, including its falsification
+  clause: a `retained-browse` that does not clear falsifies `F15`'s attribution
+  and sends the question to a profile rather than to another round. Two deferred
+  decisions added (`DD55`, `DD56`), the second for the failure mode two index
+  words per record opens -- a ring never shrinks, so its doubling is charged
+  before the append rather than discovered after it.
+- [x] `DONE` **`F16`, the ladder re-run after the header cache -- and the
+  acceptance dimension the whole campaign was pointed at PASSES** (fourth and
+  final reading). Recorded in [F16](findings.md). One valid `confirm` invocation
+  against the same baseline, no threshold or pair count touched: **`retained-browse`
+  +1.39% -> +0.94% `inconclusive`** against an unchanged 1.05% threshold, on four
+  paired values (+1.119, +0.890, +0.995, +0.759) **none of which exceeds it and
+  none of which was flagged an outlier**; **`scrollback-stream` -9.71% ->
+  -13.60% `faster`**, drain **10.0 MB/s against the baseline's 8.6** (152.7 ms
+  against 176.8 for the same 1.53 MB corpus); **`terminal-feed` +2.33% -> +2.49%
+  `inconclusive`**. The three history-free draw workloads read `faster` /
+  `faster` / `faster`. **All three acceptance rungs are not-`slower`, which is
+  the plan's Acceptance condition in full.** `F15`'s code-only attribution of the
+  go/no-go rung is thereby tested rather than asserted: removing exactly the term
+  it named moved the rung **0.45 points** against a predicted 0.36. Residency is
+  at parity (footprint 82.23 MB against `F15`'s 82.00, TOTAL DIRTY 87.4 against
+  88.3), and the store-level census shows the design working exactly as derived:
+  the index doubled 0.516 -> **1.017 MiB** and the arena gave up exactly that
+  (14.484 -> 13.983), for **-3.56%** depth on that stimulus -- the worst end of
+  the derived range, because charging at the ring's *capacity* makes a record
+  count just past a power of two pay a full doubling. **Two named cautions**, both
+  the entry's own: `terminal-feed` is `inconclusive` by **0.01 points** on the
+  ladder's least-resolved cell, and the acceptance rests on **one** invocation.
 
 ## Rejected
 
@@ -868,16 +913,32 @@ reopening condition changes**: it is no longer "if D1 answers no-go" but a
 `slower` verdict on the paired ladder against a real implementation. It remains
 the fallback that needs no storage rewrite.
 
-**Status 2026-08-04: the reopening condition fired on `F11` and `F14` narrows
-what it fired on.** The condition is a `slower` `retained-browse` verdict with
-`D3` Decision 1's two diagnostics holding, and `F11` recorded exactly that. After
-`F13` attributed the regression and its fixes landed, `retained-browse` reads
-**`inconclusive` at +1.03%** (`F14`) -- so the rung whose regression this
-reopening is *about* no longer regresses, and the two rungs that still read
-`slower` are a PTY drain and a headless feed, neither of which is a mixed-width
-read problem and neither of which the hybrid addresses. The condition remains
-formally fired and the entry remains rejected; executing it is a human's, and the
-evidence for doing so is weaker than it was when it fired.
+**Status 2026-08-04: the reopening fired on `F11`, was narrowed by `F14`, and is
+now SPENT -- the entry is closed, not merely rejected.** The condition is a
+`slower` `retained-browse` verdict with `D3` Decision 1's two diagnostics
+holding, and `F11` recorded exactly that: +60.44%, both diagnostics holding. Its
+whole content was "the read model may be the problem". It is spent because the
+model was never the problem and the record now says so with numbers rather than
+with an argument:
+
+- **`F13` attributed the regression to four mechanisms and none of them was
+  wrap-at-read** -- `LogicalLineFold.enumerateRows` appears in neither app
+  profile's self table, and the store's unshared write path measured 0.96x the
+  incumbent's per fed byte.
+- **Every one of the four was a wiring or backing cost, and taking all four
+  cleared every rung.** `retained-browse` went +60.44% -> +1.03% -> +1.39% ->
+  **+0.94% `inconclusive`** (`F16`), inside a threshold frozen before any of it;
+  `scrollback-stream` went +141.42% -> **-13.60% `faster`**, its PTY drain past
+  the pre-cutover engine's; `terminal-feed` reads +2.49% `inconclusive`.
+- **So the rung this reopening is about passes**, and the two that carried the
+  admission falsifier pass, on the same comparison the reopening was read from.
+
+Nothing in the hybrid was ever worked, and nothing should be: it adds the
+invariant this design deletes (every reader handles two widths) to fix a cost
+that turned out not to exist. The entry stays **rejected**, and its reopening
+condition is now **exhausted** rather than pending -- a future reopening needs a
+new rule against new evidence, not this one. Doc 28's own ledger item 2 carries
+the same closure.
 
 ### Lazy per-block index recompute (for milestone 1)
 
@@ -1025,7 +1086,19 @@ add detail to it.
 
 ## Outcome
 
-Investigation in progress. Phase 1 is complete: `D1` closed **`go`** on
+**Headline, 2026-08-04: the paired ladder passes.** `F16` reads all three
+acceptance rungs not-`slower` against the pre-cutover parent `28c54e1` --
+`retained-browse` **+0.94%** (go/no-go, 1.05%), `terminal-feed` **+2.49%**
+(2.5%), `scrollback-stream` **-13.60% `faster`** (1.85%) with its PTY drain at
+10.0 MB/s against the engine it replaced at 8.6 -- so the plan's Acceptance
+section is satisfied and `D4`'s landing condition and `28/H7`'s reopening are
+both spent. The campaign's **second** acceptance dimension, `DD8`'s
+simplification inequality, is **not** satisfied and is a human's judgment rather
+than a measurement; it is the last open question and it is stated at the end of
+this section. The narrative below is kept in the order it happened, including
+three sessions in which the ladder failed.
+
+Investigation otherwise in progress. Phase 1 is complete: `D1` closed **`go`** on
 2026-08-04 on five inputs -- `F1` (read path 1.64x faster), `F2` (the eager
 counting pass 15.6x inside its bound), `F3` (admission 1.45x-1.60x cheaper),
 `F4` (28 edge cases, zero requiring stored width) and `F5` (the simplification
@@ -1144,11 +1217,46 @@ prototype's ~350-400, and both of `DD8`'s reopening clauses met. The
 cross-cutting-to-local asymmetry mostly survives contact, with two named
 exceptions.
 
+**`F16` closed the acceptance dimension, and it passes.** Two more rounds
+followed `F11`'s failure, each rule-frozen before its code existed. `D5` amended
+the arena's *backing* to 30 copy-on-write chunks so publishing a frame stops
+copying 15.75 MiB, which settled that `F13`'s M1 was the residual --
+`scrollback-stream` went +4.92% to -9.71% -- and cost the go/no-go rung 0.36
+points to one more level of indirection on the per-record header read (`F15`).
+`D2` Decision 1's amendment then took `F2`'s own priced-and-unbuilt
+alternative -- a dense per-record header word on the index, width-free by `I1` --
+which removed exactly that read. **`F16` reads `retained-browse` +0.94%,
+`terminal-feed` +2.49% and `scrollback-stream` -13.60% against thresholds of
+1.05%, 2.5% and 1.85%: all three not-`slower`, which is the plan's Acceptance
+condition in full, on the same comparison against the same pre-cutover parent
+that read +60.44% / +2.60% / +141.42% three sessions earlier.** The PTY drain is
+now **faster than the engine the store replaced** (10.0 against 8.6 MB/s), which
+is the `H3` hypothesis this doc opened with reaching its own number rather than
+being excused.
+
+**What that verdict is and is not.** It is the ladder saying the store does not
+cost what it was feared to cost, measured against a real implementation on a
+frozen rule read as written. It is **one invocation**, with `terminal-feed`
+`inconclusive` by a hundredth of a point on the ladder's least-resolved cell, and
+the plan's second acceptance dimension -- `DD8`'s simplification inequality --
+**did not pass and is not made to by this**: 4.5 invariants deleted against 7.5
+added, and a 2,419-line storage core against a ~350-400-line prototype estimate.
+The campaign bought its performance claim and owes a human the judgment on what
+it paid in complexity.
+
+**Two things closed with it.** `D4`'s landing condition is **fully spent** -- it
+was discharged by its first clause when `F10` re-priced eviction as neutral, and
+its second clause (the paired ladder not-`slower` on both admission falsifiers)
+is now satisfied too. And **`28/H7`'s reopening is spent**: it fired on `F11`'s
+`slower` `retained-browse` under `D3` Decision 1's frozen rule, was narrowed by
+`F14`, and is exhausted by `F16` -- the rung it is about passes, `F13` put
+wrap-at-read in none of the four attributed mechanisms, and the hybrid was never
+worked. A future reopening needs a new rule against new evidence.
+
 **Where that leaves the campaign.** `D1`'s scoping never licensed a production
-storage change, and one has landed; the ladder that was supposed to license it
-says `slower` on all three rungs. Nothing in this doc disposes of that -- the
-plan said before the numbers existed that the disposition is a human's. What is
-open, in the order the evidence makes it tractable:
+storage change and one landed before the ladder cleared; that ordering is on the
+record in `F11` and does not become retroactively fine. What the record now says
+is that the change it licensed is not a regression. What is open:
 
 - ~~**Attribute the regression before concluding anything about the design.** No
   profile has been taken.~~ **Done by [`F13`](findings.md)**, which names four
@@ -1159,18 +1267,50 @@ open, in the order the evidence makes it tractable:
   headless browse regression), and a whole-terminal equality that decodes every
   retained cell. All four are wiring; the fold does not appear in either app
   profile's self table.
-- **Then decide `28/H7`.** It reopens under the frozen rule today; whether that
+- ~~**Then decide `28/H7`.** It reopens under the frozen rule today; whether that
   rule should be executed on evidence that fits the wiring better than the model
-  is the question `F11` hands over.
-- **Then decide the cutover's fate** -- revert, hold, or fix forward.
+  is the question `F11` hands over.~~ **Closed by [`F16`](findings.md)**: the rung
+  the reopening is about reads `+0.94% inconclusive`, so the condition is
+  exhausted rather than pending. The Rejected entry carries the full closure.
+- ~~**Then decide the cutover's fate** -- revert, hold, or fix forward.~~
+  **Answered on the performance dimension by [`F16`](findings.md)**: every
+  acceptance rung is not-`slower`, so "revert on the ladder" is off the table and
+  the plan's Acceptance records a pass. **Not** answered on the complexity
+  dimension -- see `DD8` below, which is now the only open acceptance question and
+  is a human's judgment rather than a measurement.
+- **`DD8`'s simplification inequality is the campaign's remaining open acceptance
+  question, and no number will settle it.** `F11` Observation 4 re-read it
+  against what landed: **4.5 invariants deleted against 7.5 added** (`DD50`
+  cancels the maintained charge against today's; counting it instead makes it 4.5
+  against 8.5, and the direction does not change), a storage core of **2,419
+  production lines** against `F5`'s ~350-400 prototype estimate, and
+  `Terminal.swift` down only 6,470 -> 6,431. Both of `DD8`'s reopening clauses are
+  met and neither has been retired. What a human owes: the **choice of unit** --
+  `F5` argued the inequality holds on the *shape* of the invariants (cross-cutting
+  deleted, local added) rather than on their count, and six of the eight additions
+  do have one writer and one gate -- and, if the invariant reading is kept, a
+  **disposition on the two additions that cross the store's boundary**: `DD43`'s
+  seam-spacer reach at four `Terminal` call sites, and the
+  `historyEvictionsObserved` eviction-delta protocol. The header cache this
+  round added is a ninth mechanism with one writer and one oracle, and it is not
+  counted into the tally above, which was frozen at `F11`.
 - **The borrowing-cursor follow-up plan** keeps its frozen priority rule (`D3`
   Decision 5: promoted ahead of the rest iff doc 21's `.character` drag-move
-  re-measures above **121 us**), and its premise -- that the materializing facade
-  is what costs -- is now a live candidate for the ladder's own result rather
-  than a milestone-2 nicety.
-- **`I2`'s restatement is still unratified** by a human, as `F8`, `F10` and the
-  plan all record, and `DD36`'s reserve still does not cover `mixed`'s measured
-  metadata share.
+  re-measures above **121 us**). Its premise -- that the materializing facade is
+  what costs -- is no longer supported by the ladder, which now clears with the
+  facade in place, so the trigger is the only thing that should promote it.
+- **`I2`'s restatement is still unratified** by a human, as `F8`, `F10`, `F16`
+  and the plan all record, and `DD36`'s reserve still does not cover `mixed`'s
+  measured metadata share -- now with **half the reserve spent** on the index at
+  the tightest measured class (`F16`: `stream` at 0.509 of 1.000 MiB) and
+  `PO11`'s margin on `full` down to a derived **0.4%**. That margin is the
+  binding constraint on any further per-record charge.
+- **`DD52`'s equality residual is unspent**: comparing stored bytes is 13x the
+  incumbent's `Array ==` on buffer identity (0.91 ms against 0.069 ms on a
+  saturated pane), and closing it needs a value identity on the store -- an origin
+  object plus a generation every mutation bumps -- which the entry declined for
+  its silent-wrong-answer failure mode. **`DD53`'s chunk size is still untuned**
+  against any measurement, and `D5` still names it the one free variable.
 - **Doc 28's `F24`/`D8` follow-ups are unowned**: `F24` asks where reflow's
   per-cell term goes and reflow of history no longer exists, and `28/D8`'s
   ~150 ms resize budget was deliberately not superseded, so nothing currently

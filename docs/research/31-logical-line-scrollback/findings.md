@@ -4298,3 +4298,197 @@ built at this revision.
   entry weakens the case for executing it further: the rung that rule is about is
   `slower` by 0.34 points against a store whose two admission falsifiers now read
   `inconclusive` and `faster`.
+
+### F16 -- the ladder re-run after the index's dense header cache: `retained-browse` clears at **+0.94% `inconclusive`**, and with it **every acceptance rung reads not-`slower` for the first time**
+
+- Status: complete, and **acceptance is met.** The plan's Acceptance section
+  requires `retained-browse`, `terminal-feed` and `scrollback-stream` all
+  not-`slower` under their frozen rules against `28c54e1`; all three are, on one
+  valid `confirm` invocation with nothing in the rule touched. This is the fourth
+  reading of the same comparison (`F11`, `F14`, `F15`, this) and the first that
+  clears.
+- **Read this first.** `retained-browse`, the go/no-go rung, went **+1.39%
+  `slower` -> +0.94% `inconclusive`** against an unchanged 1.05% threshold, on
+  four paired values none of which exceeds it. That is `F15` Observation 2's
+  attribution confirmed by the only test it had: `F15` named the per-record header
+  read -- given one more indirection by `D5`'s chunked backing, taken once per
+  record on a stimulus whose every record is one display row -- **from the code
+  rather than from a profile**, and removing exactly that read moved the rung by
+  **0.45 points**, slightly more than the 0.36 the attribution predicted.
+  `scrollback-stream` improved again, **-9.71% -> -13.60% `faster`**, its drain
+  from 9.2 to **10.0 MB/s** against the baseline's 8.6. `terminal-feed` moved the
+  other way, **+2.33% -> +2.49%**, and is `inconclusive` by **0.01 points**;
+  Observation 3 refuses to read that as clearance rather than as arithmetic.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate is `27c6fb6` (tree `32ae842c86f9`), which
+  is `1e4cb61` plus `D2` Decision 1's dense header-cache amendment and its
+  implementation, with the two untracked paths present throughout this doc's work
+  captured by the harness and absent from the app build (`TODO.md`,
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`). Baseline is **`28c54e1`**
+  (tree `f7705cb0c767`), byte-identical to `F11`'s, `F14`'s and `F15`'s, so the
+  four runs are the same comparison four times.
+- Commands, inputs, or reproduction:
+
+      just benchmark-confirm baseline=28c54e1
+      just terminal-memory-probe "--payload scrollback-plain --vmmap"
+      DANTERM_LOGICAL_LINE_PROBE=1 DANTERM_RESIDENCY_CASE=arena/plain/cycled \
+        swift test -c release --package-path lib/TerminalCore --filter residencyReading
+
+  One `confirm` invocation, the complete six-workload ladder at the frozen pair
+  counts, no block invalidated and no verdict withheld. No threshold, pair count
+  or statistic was touched between `F15` and this run. Conditions: AC power, low
+  power off, thermal state nominal on every sampled block, one-minute load
+  **1.83 at invocation** (0.18 per processor across 10) and 1.66 before the first
+  block, the second reading confounded by the run's own builds.
+- Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/32ae842c86f9-0000/run.json`
+  (disposable; every decision-bearing value is quoted below).
+
+#### Observation 1 -- the ladder, all four readings, against the same frozen thresholds
+
+| workload | frozen rule (`confirm`) | `F11` | `F14` | `F15` | this run | verdict |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| **`retained-browse`** (go/no-go) | 4 pairs, +/-1.05%, band 0.75% | +60.44% | +1.03% | +1.39% | **+0.94%** | **`inconclusive`** |
+| **`terminal-feed`** (`H3` falsifier) | 2 pairs, +/-2.5% | +2.60% | +2.68% | +2.33% | **+2.49%** | **`inconclusive`** |
+| **`scrollback-stream`** (`H3` falsifier) | 4 pairs, +/-1.85% | +141.42% | +4.92% | -9.71% | **-13.60%** | **`faster`** |
+| `content-churn` | 4 pairs, +/-2.15%, band 0.75% | -2.12% | -0.57% | -2.86% | **-4.81%** | `faster` |
+| `style-churn` | 4 pairs, +/-2.0% | -3.09% | -2.97% | -2.12% | **-4.44%** | `faster` |
+| `incremental-mixed` | 6 pairs, +/-1.85% | -5.16% | -10.18% | -5.20% | **-2.66%** | `faster` |
+
+**All three named rungs are not-`slower`, which is the plan's Acceptance
+condition stated in full.** No block was invalidated and no verdict withheld.
+
+`retained-browse`'s four paired symmetric percentages are **+1.119, +0.890,
++0.995, +0.759**, median +0.942, **no pair flagged as an outlier** -- against
+`F15`'s +0.582/+1.327/+1.446/+1.502 where three of four sat above the threshold.
+The move is visible pair by pair rather than in a median's choice among scattered
+values, which is the reading `F15` explicitly could not claim.
+
+`scrollback-stream`'s split: drain **176.8 ms at 8.6 MB/s** (baseline) against
+**152.7 ms at 10.0 MB/s** (candidate) for the same 1,525,084-byte corpus, with
+the draw tail at 9.4 against 12.4 ms. One pair (-9.84% against three at -13.6%)
+was flagged as an outlier and retained in the estimate, as the rule specifies.
+
+#### Observation 2 -- what the header cache bought, and why this is `F15`'s attribution being tested rather than confirmed by assertion
+
+`F15` Observation 2 said, in as many words, that "the per-record header read
+gained an indirection" is a fact about the diff and "that it is *the* +0.36
+points is an inference". `D2` Decision 1's amendment was written as the test of
+that inference, with its own falsification clause frozen before the code existed:
+*if `retained-browse` does not clear, `F15`'s attribution was wrong and the next
+instrument is a profile.* It cleared, by 0.45 points against a predicted 0.36, so
+the inference survives its one available test. What that does **not** license: a
+claim that the +0.45 is *entirely* the three removed chases. No profile of either
+browse path exists, this run is one invocation, and the change also removed a
+`LogicalLineFold.rowCount` call's offset resolution on narrow records and put the
+record's header in the same cache line neighbourhood as its offset. The honest
+statement is that the named term was removed and the rung moved past its
+threshold in the predicted direction and by a little more than the predicted
+size.
+
+Three per-record arena chases became three dense reads, per viewport traversal:
+`displayRowCount(recordIndex:)` behind `advance`, `foldedRow`'s record, and
+`trailingFillStyle`'s header bit. A planned frame makes two traversals
+(`DD44`), so the stimulus -- 10,000 short hard-terminated lines, one record per
+display row, 9,935 retained -- pays six per row where it paid none before the
+cutover and six chunked ones after `D5`.
+
+#### Observation 3 -- `terminal-feed` moved back, this time in the direction the amendment predicted, and is 0.01 points from `slower`
+
+The rung reads **+2.49%** on two paired values, **+1.902 and +3.078**, against a
++/-2.5% threshold. It is `inconclusive` under the frozen rule, and it is
+`inconclusive` **by one hundredth of a point**. Three things are true and this
+entry banks none of them:
+
+- **The direction is the one `D2`'s amendment predicted.** That entry stated
+  before the run that the change *adds* work to the write path -- one dense
+  8-byte store per header write and one ring slot per record -- and that a
+  regression on `terminal-feed` or `scrollback-stream` would be "this change's
+  cost, not an unexplained move". `terminal-feed` moved +0.16 points. That is the
+  predicted sign at a size the instrument cannot separate from its own noise.
+- **The rung is the ladder's least-resolved cell** and has now read +2.60,
+  +2.68, +2.33 and +2.49 across four sessions of the same comparison -- a
+  0.35-point spread with no candidate change able to explain more than a fraction
+  of it. `F15` Observation 3 recorded its own move as unexplained; this entry
+  records the move back the same way.
+- **A verdict 0.01 points inside a threshold is a verdict**, under a rule frozen
+  before the number existed, and the campaign's discipline is that the rule is
+  read as written or not at all. It is also the single most fragile cell in the
+  acceptance and the first thing a human should want a second invocation of.
+  `scrollback-stream`, the *other* falsifier for the same hypothesis, reads
+  -13.60% `faster` with its drain past the baseline's, which is what makes the
+  admission falsifier's overall reading unambiguous even though this cell is not.
+
+#### Observation 4 -- residency, which the index's growth was expected to move and moved by less than the instrument resolves
+
+`DD49`'s named pane-level recipe, same payload as `F11`, `F14` and `F15`:
+
+| quantity | `28c54e1` (`F13`) | `F14` | `F15` | this run |
+| --- | ---: | ---: | ---: | ---: |
+| footprint delta | 9.16 MB | 81.75 MB | 82.00 MB | **82.23 MB** |
+| live heap | 5.43 MB | 15.55 MB | 16.01 MB | **16.15 MB** |
+| row allocations | 10,001 | 66 | 66 | **66** |
+| `vmmap` TOTAL DIRTY | 15.0 MB | 87.5 MB | 88.3 MB | **87.4 MB** |
+| of which `MALLOC_SMALL (empty)` | 16 K | 56.9 MB | 56.8 MB | **56.4 MB** |
+
+**Parity.** Footprint is +0.23 MB on `F15` and TOTAL DIRTY is -0.9 MB, on a
+number whose 56 MB majority is `F13` Observation 4's unreturned transient pages;
+neither difference is resolvable against that. `F13`'s settled **0.92x** against
+the incumbent is quoted rather than re-measured, for `DD49`'s recorded reason.
+
+The store-level reading is the one that shows the change, because it reports the
+index separately. `F8`'s `arena/plain/cycled` arm at this revision:
+
+| quantity | `F10` (`5cf61e0`) | this run |
+| --- | ---: | ---: |
+| census capacity | 15.000 MiB | 15.000 MiB |
+| arena bytes in use | 14.484 | **13.983** |
+| index | 0.516 | **1.017** |
+| side tables | 0.000 | 0.000 |
+| charged | 14.999 | 14.999 |
+| `charged/budget` | 0.9375x | 0.9375x |
+| retained display rows | 36,507 | **35,208** |
+| `censusIdentity(charged <= capacity)` | true | **true** |
+
+**The index exactly doubled and the arena gave up exactly what it gained**
+(+0.501 MiB against -0.501 MiB), which is the displacement model `D2`'s amendment
+derived its depth table from, measured. The depth cost on this stimulus is
+**-3.56%** (36,507 -> 35,208 rows), which is at the *worst* end of the amendment's
+derived 0.4%-1.7% range for a reason the amendment names: the index is charged at
+the ring's **capacity** (`DD37`), and this stimulus's ~36,500 records sit just
+past a power-of-two boundary, so it pays a full doubling for the 3,700 records
+over it. A class whose record count sits just *below* one pays nothing. Nothing
+here is a `PO11` failure -- that obligation is against today's engine, whose
+measured margins were 1.009x-1.238x (`F10`) and whose arm no longer exists in the
+tree (`DD49`) -- but it is the number that says **`PO11`'s margin is now the
+binding constraint on any further per-record charge**.
+
+- Uncertainty:
+  - **One invocation, as the plan's Acceptance specifies.** Three of the six
+    rungs are inside a point of their thresholds in one direction or the other,
+    and `terminal-feed` is inside a hundredth of one. A human who wants the
+    acceptance to rest on two invocations rather than one is asking for something
+    the rule does not require and the evidence would not resent.
+  - **`terminal-feed`'s +2.49% is a pass on the number and a coin toss on the
+    mechanism**, per Observation 3.
+  - **The +0.45-point `retained-browse` move is not profiled.** No profile of the
+    browse path exists at any revision after `D5`. The attribution survived its
+    test; it was not independently confirmed.
+  - **`scrollback-stream` has now read +141.42%, +4.92%, -9.71% and -13.60%
+    across four sessions.** The baseline arm has reproduced itself throughout,
+    which is what makes the candidate arm's movement readable; the -13.60% itself
+    has no second invocation, and this change has no mechanism that should have
+    improved it by a further 3.9 points.
+  - **`PO11` is derived at this revision, not measured**, because `D4`'s probe
+    needs the incumbent store. The store-level reading above confirms the
+    displacement model the derivation rests on and nothing more.
+  - **The chunk size is still not tuned against a measurement** (`DD53`), and
+    `D5` still names it the one free variable.
+- Next action: none owed by this entry. Acceptance is met, so what follows is
+  closure rather than another measurement: `D4`'s landing condition is spent on
+  its second clause as well as its first, `28/H7`'s reopening is spent, and the
+  plan's Acceptance section records a pass. What stays open is listed in this
+  doc's Outcome and is unchanged by this reading -- `I2`'s restatement awaiting
+  ratification, `DD8`'s reopened simplification dimension, the borrowing-cursor
+  plan's frozen 121 us trigger, doc 28's `F24`/`D8` follow-ups, `DD52`'s equality
+  residual and `DD53`'s untuned chunk size.

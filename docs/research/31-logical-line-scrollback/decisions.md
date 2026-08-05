@@ -2715,6 +2715,18 @@ worst cell across both statistics and every verdict-bearing class.
   decision, and a reject is not by itself a design failure -- `D3` Decision 1's
   diagnostic discipline applies here too.
 
+  **The condition is fully spent, 2026-08-04.** It fired on `F8`'s reject, was
+  discharged by its **first** clause when `F10` re-priced eviction as **neutral**
+  (0.856x-1.023x on `steady`, 0.151x-1.022x on `drain`), and its **second** clause
+  is now satisfied too: `F16` reads `terminal-feed` **+2.49% `inconclusive`** and
+  `scrollback-stream` **-13.60% `faster`** against a real implementation, so both
+  falsifier rungs are not-`slower`. Nothing in `D4` is left owing. What the entry
+  still hands forward is `F10`'s recorded cost (`full`'s write path at +2.3%,
+  `stream`'s eviction alone at +2.2%), which the ladder has now re-read and
+  absorbed, and `DD38`'s gate 7 recorded as *not measured*. Note for anyone
+  tempted to re-run this rule: it is **unrunnable at HEAD**, because its arm A is
+  today's store and slice 5 deleted it (`DD49`).
+
 **The `AR1` whole-record fallback, and the honest bar for taking it.** A reject
 does not authorize it. All three of the following must hold, and the third is not
 this rule's to satisfy:

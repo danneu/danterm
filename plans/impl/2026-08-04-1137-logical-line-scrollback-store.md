@@ -207,6 +207,32 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 
 ## Acceptance
 
+**MET, re-measured 2026-08-04 as `31/F16` after `31/D2` Decision 1's amendment
+put a dense per-record header word on the index.** Same frozen instrument, same
+base `28c54e1`, no threshold touched, one `confirm` invocation, no block
+invalidated: `retained-browse` **+0.94%** (`inconclusive`, the go/no-go rung
+clearing a 1.05% threshold on four paired values -- +1.119, +0.890, +0.995,
++0.759 -- none of which exceeds it and none flagged an outlier), `terminal-feed`
+**+2.49%** (`inconclusive` against 2.5%) and `scrollback-stream` **-13.60%**
+(`faster`; drain **10.0 MB/s** against the baseline's 8.6, 152.7 ms against
+176.8 for the same 1.53 MB corpus). The three history-free draw workloads read
+`faster` / `faster` / `faster`. **All three named rungs are not-`slower`, which
+is this section's condition in full**, and milestone 1's ladder is passed.
+
+What that settles and what it does not. `31/F15`'s attribution of the go/no-go
+rung -- made from the code and not from a profile -- is **tested and survives**:
+removing exactly the per-record header read it named moved the rung 0.45 points
+against a predicted 0.36. `31/D4`'s landing condition is now **fully spent**, its
+second clause satisfied as well as its first. `28/H7`'s reopening is **spent**.
+Two cautions the finding states and this section carries: `terminal-feed` is
+`inconclusive` by **0.01 points** on the ladder's least-resolved cell (two pairs,
+widest threshold, a 0.35-point spread across four sessions of the same
+comparison), and the acceptance rests on **one** invocation, which is what this
+section specifies and not more than that. The plan's **other** acceptance
+dimension, `31/DD8`'s simplification inequality, is separately gated below and
+**did not pass**; it is a human's judgment and this ladder does not touch it. The
+previous reading follows.
+
 **Re-measured 2026-08-04 as `31/F15` after `31/D5` amended the arena to chunked
 backing and took `31/F13`'s M1, the last attributed mechanism. This section is
 STILL NOT satisfied, and it now fails on the go/no-go rung rather than on the two
@@ -405,7 +431,13 @@ Open conditions that the implementation, not the design, has to discharge:
   ~350-400 prototype estimate, while `Terminal.swift` fell only 6,470 -> 6,431. The
   cross-cutting-to-local asymmetry mostly survives -- six of the eight additions
   have one writer and one gate -- with two exceptions that cross the store's
-  boundary. Disposition is a human's.
+  boundary. Disposition is a human's. **Since `31/F16` passed the ladder this is
+  the plan's ONLY unmet acceptance dimension**, and no measurement settles it:
+  what is owed is the choice of unit (count against shape, which `31/F5` argued
+  and `31/F11` re-read) and, if the invariant reading is kept, a disposition on
+  `31/DD43`'s seam-spacer reach and the `historyEvictionsObserved` protocol. The
+  header cache slice 16 added is a ninth mechanism with one writer and one oracle,
+  and it is not counted into the tally, which was frozen at `31/F11`.
 - The record format still owes a shape for the spill table, the hyperlink table
   and the semantic-mark slot (`31/D1` condition 9, advanced by `31/D3`
   Decision 6).
@@ -459,8 +491,11 @@ Open conditions that the implementation, not the design, has to discharge:
 
 - **The mixed-width hybrid (`28/H7`)** -- reflow viewport-adjacent rows and tag
   the rest by width. It adds the invariant this design deletes (every reader
-  handles two widths). Reopens only on a `slower` ladder verdict with I7's
-  diagnostics holding.
+  handles two widths). Reopened only on a `slower` ladder verdict with I7's
+  diagnostics holding -- which fired on `31/F11` and is **spent as of `31/F16`**:
+  the rung the condition is about reads `+0.94% inconclusive`, `31/F13` put
+  wrap-at-read in none of the four attributed mechanisms, and the hybrid was
+  never worked. A future reopening needs a new rule against new evidence.
 - **Porting iTerm2's LineBuffer.** Its block structure encodes Objective-C
   history; individual mechanisms are adopted only on DanTerm's own justification,
   as `31/F4` did for the wide-cell fast/slow split.
@@ -515,7 +550,7 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 14. docs(research): re-run the frozen ladder once and record the verdict (`31/F15`) -- **acceptance still not met, on the go/no-go rung**
 - [x] 15. docs(research): amend `31/D2` Decision 1 to a dense per-record header cache on the index, and freeze the re-run's expectation
 - [x] 16. perf(terminal): cache each record's header word on the index so the browse path stops chasing it through the arena
-- [ ] 17. docs(research): re-run the frozen ladder once and record the verdict
+- [x] 17. docs(research): re-run the frozen ladder once and record the verdict (`31/F16`) -- **acceptance MET**, and close what it closes
 
 ## Implementation notes
 
@@ -1158,6 +1193,33 @@ Open conditions that the implementation, not the design, has to discharge:
   "priced and unbuilt". `31/D5` carries a disposition paragraph pointing at it so
   the reopening is not left dangling.
 
+- **Slice 16's implementation, in one shape.** The index gains a `RingBuffer<UInt64>`
+  parallel to `offsets`, holding each live record's header word; every header write on
+  an indexed record goes through one function that writes the arena and the cache
+  together, and the pad records the index does not name still write the arena alone.
+  `31/I9`'s `independentDisplayRowRecount()` is rewritten to read headers **off the
+  arena** rather than through the cache -- an oracle that read the cache could not see
+  the drift it exists to catch -- and a second oracle, `headerCacheAgreesWithArena()`,
+  compares every cached word against the arena's. Both are asserted after each of the
+  six triggers and after every other operation that writes a header. The new test was
+  verified to fail for the right reason by removing one maintenance point.
+- **One judgment call beyond the two the decision records, and it is a defect the slice
+  found rather than a preference.** Two 8-byte index words per record brings the index
+  ring's *doubling* inside the budget's reach in the blank-line regime, and a ring never
+  shrinks -- so a doubling taken near the capacity strands metadata over the bound with
+  no way back, and the pane retains nothing thereafter. Measured, not reasoned: 0
+  records with 266,432 charged against a 245,760 capacity. `31/DD56` charges the growth
+  before the append. It is a **charge** test and not a **room** test: index bytes never
+  go in the arena, and adding them to the contiguous-run requirement made the ring pad
+  to a chunk boundary looking for space it did not need.
+- **Three saturating-recipe ceiling assertions became bands, which is a test contract
+  change worth naming.** They asserted `rowCount <= atCeiling` after an overfeed. Where
+  the equilibrium settles *inside* a row is phase-dependent -- a trimmed head frees a
+  row without freeing a line's charge, and `31/DD14`'s chunk-seam pads move with the
+  write cursor -- and the extra 8 B per record moved `wide`'s phase by one row in
+  10,644. The claim those tests make is that 200 more fed lines buy no more depth,
+  which is a direction; a one-sided bound was asserting the phase.
+
 ## Follow Up
 
 - **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
@@ -1174,8 +1236,19 @@ Open conditions that the implementation, not the design, has to discharge:
   resize cost stopped being a function of history depth and a successor budget
   wants deriving against the live screen. Nothing currently bounds resize cost.
 - ~~**The cutover's regression is unattributed and nothing is profiling it.**~~
-  **Attributed 2026-08-04 as `31/F13`, fixed by slices 9, 10 and 13, and re-measured as
-  `31/F15`. What is left is one rung and one unattributed 0.36 points.** M1 is **spent**:
+  **Attributed 2026-08-04 as `31/F13`, fixed by slices 9, 10, 13 and 16, and
+  re-measured four times. CLOSED as of `31/F16`: every acceptance rung is
+  not-`slower`.** `retained-browse` +60.44% -> +1.03% -> +1.39% -> **+0.94%
+  `inconclusive`**, `scrollback-stream` +141.42% -> **-13.60% `faster`** with its
+  drain past the pre-cutover engine's, `terminal-feed` **+2.49% `inconclusive`**.
+  Slice 16 removed the term `31/F15` named -- the per-record header read, once per
+  record on a stimulus whose every record is one display row -- and the rung moved
+  0.45 points against a predicted 0.36, which is that code-only attribution tested
+  rather than asserted. What is still true and worth a reader's attention: **no
+  profile of the post-`31/D5` browse path was ever taken**, `terminal-feed` clears
+  by 0.01 points on two pairs, and `31/DD53`'s chunk size remains untuned against
+  any measurement. The previous entry, written when one rung still failed, follows.
+- ~~**One rung, and 0.36 points nobody profiled.**~~ M1 is **spent**:
   the arena is no longer copied per published frame, and `scrollback-stream` went
   +4.92% -> **-9.71% `faster`**, which settles that M1 was the residual.
   `terminal-feed` cleared to +2.33% `inconclusive` and is **still unexplained** --
