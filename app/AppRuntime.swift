@@ -1261,15 +1261,17 @@ class AppRuntime {
     /// this map into a snapshot's tree leaves.
     private func scrollbackByPaneId() -> [PaneId: String] {
         var result: [PaneId: String] = [:]
+        // One value for both halves, so the read cannot under-cover the cut it feeds.
+        let retention = ScrollbackRetention.checkpoint
         for (paneId, session) in surfaces {
             // Read only what the truncation below can keep. Retained history is sized by the
             // pane's whole scrollback budget, so projecting all of it to store this tail made
             // every checkpoint cost the capacity instead of what it writes.
             guard let rawText = session.readPrimaryHistoryTail(
-                      maxLines: scrollbackRetentionMaxLines,
-                      maxChars: scrollbackRetentionMaxChars
+                      maxLines: retention.maxLines,
+                      maxChars: retention.maxChars
                   ),
-                  let scrollback = truncateScrollback(rawText) else {
+                  let scrollback = truncateScrollback(rawText, keeping: retention) else {
                 continue
             }
             result[paneId] = scrollback

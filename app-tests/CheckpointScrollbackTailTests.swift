@@ -67,16 +67,16 @@ struct CheckpointScrollbackTailTests {
         ),
     ]
 
-    private static let budgets: [(maxLines: Int, maxChars: Int)] = [
+    private static let budgets: [ScrollbackRetention] = [
         // A zero line budget is "no line cut": counting breaks backward from the end never
         // reaches a zeroth one, so every line is kept and only the character bound applies.
         // The tail read has to read the same way round, and cannot conclude it is already done.
-        (maxLines: 0, maxChars: 400_000),
-        (maxLines: 1, maxChars: 1),
-        (maxLines: 4, maxChars: 20),
-        (maxLines: 10, maxChars: 120),
-        (maxLines: 25, maxChars: 60),
-        (maxLines: scrollbackRetentionMaxLines, maxChars: scrollbackRetentionMaxChars),
+        ScrollbackRetention(maxLines: 0, maxChars: 400_000),
+        ScrollbackRetention(maxLines: 1, maxChars: 1),
+        ScrollbackRetention(maxLines: 4, maxChars: 20),
+        ScrollbackRetention(maxLines: 10, maxChars: 120),
+        ScrollbackRetention(maxLines: 25, maxChars: 60),
+        .checkpoint,
     ]
 
     @Test("truncating the bounded tail read stores what truncating the full projection would")
@@ -100,12 +100,8 @@ struct CheckpointScrollbackTailTests {
                     maxLines: budget.maxLines,
                     maxChars: budget.maxChars
                 )
-                let fromTail = truncateScrollback(
-                    tail, maxLines: budget.maxLines, maxChars: budget.maxChars
-                )
-                let fromFull = truncateScrollback(
-                    full, maxLines: budget.maxLines, maxChars: budget.maxChars
-                )
+                let fromTail = truncateScrollback(tail, keeping: budget)
+                let fromFull = truncateScrollback(full, keeping: budget)
                 #expect(
                     fromTail == fromFull,
                     "\(scenario.name) at \(budget): bounded read stored different scrollback"

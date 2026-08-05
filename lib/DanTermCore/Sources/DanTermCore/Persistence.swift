@@ -217,19 +217,21 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
 
 // MARK: - Scrollback Truncation
 
-/// How much scrollback a checkpoint keeps per pane. Named rather than left as literal defaults
-/// because the read that feeds `truncateScrollback` is now bounded by the same numbers -- the
-/// two have to agree, or the reader hands over less than the truncation would have kept.
-let scrollbackRetentionMaxLines = 4000
-let scrollbackRetentionMaxChars = 400_000
+/// How much scrollback a checkpoint keeps per pane, as one value rather than two loose numbers.
+/// The bounded history read and the truncation it feeds have to agree -- a read that stops short
+/// of what the cut would have kept silently stores less than the pane is owed -- so the call site
+/// hands both the same value and the pairing is structural rather than a convention to remember.
+struct ScrollbackRetention {
+  var maxLines: Int
+  var maxChars: Int
 
-/// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.
-/// Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
-func truncateScrollback(
-  _ text: String,
-  maxLines: Int = scrollbackRetentionMaxLines,
-  maxChars: Int = scrollbackRetentionMaxChars
-) -> String? {
+  /// The only policy in use: what an enriched checkpoint reads from each pane and stores.
+  static let checkpoint = ScrollbackRetention(maxLines: 4000, maxChars: 400_000)
+}
+
+/// Truncate scrollback text to the last `keeping.maxLines` lines and `keeping.maxChars`
+/// characters. Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
+func truncateScrollback(_ text: String, keeping: ScrollbackRetention = .checkpoint) -> String? {
   // Strip trailing whitespace
   let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !trimmed.isEmpty else { return nil }
@@ -240,7 +242,7 @@ func truncateScrollback(
   for i in trimmed.indices.reversed() {
     if trimmed[i] == "\n" {
       newlineCount += 1
-      if newlineCount == maxLines {
+      if newlineCount == keeping.maxLines {
         cutIndex = trimmed.index(after: i)
         break
       }
@@ -249,8 +251,8 @@ func truncateScrollback(
   var result = cutIndex != nil ? String(trimmed[cutIndex!...]) + "\n" : trimmed + "\n"
 
   // If still over maxChars, take last maxChars breaking at nearest newline
-  if result.count > maxChars {
-    let tail = result.suffix(maxChars)
+  if result.count > keeping.maxChars {
+    let tail = result.suffix(keeping.maxChars)
     if let newlineIdx = tail.firstIndex(of: "\n") {
       result = String(tail[tail.index(after: newlineIdx)...])
     } else {

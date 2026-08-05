@@ -287,3 +287,17 @@ it is in the `just test` gate. That does not change D3's placement decision --
 the pure pipeline still belongs outside `app/` on its own merits -- but the
 "there is nowhere to test it" argument for discharging PO4 by lint alone does not
 hold, and D3 should reconsider it.
+
+**D2 -- the retention budget is one value, not two loose numbers.** The first cut
+named the truncation's literal defaults as two `let` constants and passed them
+separately to the read and the cut, which left "these two call sites agree" a
+convention. `ScrollbackRetention` (`maxLines`/`maxChars`, with the policy as
+`.checkpoint`) makes the pairing structural instead: `scrollbackByPaneId` binds
+one value and hands it to both halves, so a future budget change cannot move one
+side without the other. `truncateScrollback` takes it as `keeping:`.
+`Terminal.primaryHistoryTailText(maxLines:maxChars:)` keeps plain `Int`s -- the
+engine staying policy-free is this plan's own layering rule, and `TerminalCore`
+cannot see `DanTermCore` types in any case. Cost: five `ExportTests` call sites
+construct the value explicitly, and the four that only exercise the line bound
+now say `maxChars: .max` rather than inheriting the checkpoint's character
+budget, which states outright that the character bound is not what they pin.

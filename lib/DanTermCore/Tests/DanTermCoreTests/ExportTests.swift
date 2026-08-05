@@ -129,7 +129,8 @@ import Testing
         //   surfaces lines 1001..5000.
         let lines = (1...5000).map { "line \($0)" }
         let text = lines.joined(separator: "\n")
-        let result = truncateScrollback(text, maxLines: 4000)!
+        let result = truncateScrollback(
+            text, keeping: ScrollbackRetention(maxLines: 4000, maxChars: .max))!
         let resultLines = result.split(separator: "\n")
         #expect(resultLines.count == 4000)
         #expect(String(resultLines.first!) == "line 1001")
@@ -149,7 +150,8 @@ import Testing
         let lines = (1...100).map { _ in longLine }
         let text = lines.joined(separator: "\n")
         // maxChars=500 with 100-char lines + newlines
-        let result = truncateScrollback(text, maxLines: 10000, maxChars: 500)!
+        let result = truncateScrollback(
+            text, keeping: ScrollbackRetention(maxLines: 10000, maxChars: 500))!
         #expect(result.count <= 500, "result should be at most maxChars")
         // Should break at a newline boundary
         #expect(!result.hasPrefix("\n"), "should not start with newline")
@@ -163,7 +165,8 @@ import Testing
         //   sneak in.
         // Scenario: spec-first boundary -- 2 lines at maxLines=2 keeps
         //   both.
-        let result = truncateScrollback("a\nb", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "a\nb\n")
     }
 
@@ -174,7 +177,8 @@ import Testing
         // Why it exists: pins the tail-keep direction at the boundary.
         // Scenario: spec-first boundary -- 3 lines at maxLines=2 keeps
         //   the latter two.
-        let result = truncateScrollback("a\nb\nc", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\nb\nc", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "b\nc\n")
     }
 
@@ -187,7 +191,8 @@ import Testing
         //   in the middle aren't silently coalesced.
         // Scenario: spec-first count -- "a\n\n\nb" at maxLines=2 keeps
         //   one empty line and "b".
-        let result = truncateScrollback("a\n\n\nb", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\n\n\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "\nb\n")
     }
 
