@@ -2269,6 +2269,15 @@ public struct Terminal: Equatable, Sendable {
         nextStyleId = StyleId.max
     }
 
+    /// Drives the hyperlink id cursor to the last value before it wraps, so a test can reach the
+    /// wrap without emitting 2^16 distinct OSC 8 targets. Same rationale as the two seams above,
+    /// with a sharper cost: admission is linear in the live target table, so walking the cursor
+    /// there for real is quadratic, and the failure it guards is a recycled id repainting a live
+    /// cell with another target's URI -- see `allocateHyperlinkId`.
+    mutating func primeHyperlinkIdWrapForTesting() {
+        nextHyperlinkId = HyperlinkId.max
+    }
+
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
     ///
     /// Rebases history onto an arena at the production budget rather than raising a bound in

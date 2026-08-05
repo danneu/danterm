@@ -189,7 +189,15 @@ struct TerminalHyperlinkTests {
         //   Both are invisible to every other test here, which uses a handful of links.
         // Scenario: a long-lived pane running a tool that emits a uniquely-identified link per
         //   line -- `ls --hyperlink`, a build log, a test runner -- for hours.
-        let linkCount = 70_000
+        // Walking the cursor to the wrap for real costs 65,536 targets, and admission is linear in
+        // the live table, so that is quadratic work for one boundary crossing. The warm-up below
+        // is sized only to force at least one metadata sweep -- which is what puts previously
+        // issued low ids back in the free pool -- and `primeHyperlinkIdWrapForTesting` then jumps
+        // the cursor to the last id before the wrap. The recycled ids the post-wrap phase hands
+        // out are therefore genuinely reissued, not pristine.
+        let warmUpCount = 600
+        let postWrapCount = 120
+        let linkCount = warmUpCount + postWrapCount
         var terminal = Terminal(columns: 8, rows: 2)!
 
         // Column 0 is written once and never touched again, so its link stays live for the whole
@@ -197,13 +205,14 @@ struct TerminalHyperlinkTests {
         // points at -- the assertion below reads the *old* URI, not the newest one.
         terminal.feed(osc8(uri: "https://pinned.test"))
         terminal.feed(Array("a".utf8))
+        let pinnedId = terminal.liveRowForTesting(at: 0)?.cell(at: 0).hyperlinkId
 
         // Padded to ~512 bytes so the 256 KiB metadata cap admits only a few hundred targets at a
         // time. Short URIs would let the table grow into the thousands between sweeps, and
         // admission is linear in table size, which makes this test minutes long for no extra
         // coverage -- the property under test is the *id* space, not the byte cap.
         let padding = String(repeating: "p", count: 480)
-        for index in 0..<linkCount {
+        func emit(_ index: Int) {
             // Rewrite column 1 in place. Nothing scrolls, so the pinned cell above survives, and
             // each link's only cell dies as the next one overwrites it.
             terminal.feed(Array("\u{1B}[1;2H".utf8))
@@ -211,11 +220,32 @@ struct TerminalHyperlinkTests {
             terminal.feed(Array("x".utf8))
         }
 
+        for index in 0..<warmUpCount { emit(index) }
+
+        terminal.primeHyperlinkIdWrapForTesting()
+        var idsAfterPriming = Set<Terminal.HyperlinkId>()
+        for index in warmUpCount..<linkCount {
+            emit(index)
+            if let id = terminal.liveRowForTesting(at: 0)?.cell(at: 1).hyperlinkId {
+                idsAfterPriming.insert(id)
+            }
+        }
+
         #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://pinned.test")
         #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri
             == "https://h\(linkCount - 1).test/\(padding)")
+        // The wrap really happened, and the allocator walked back into the low ids rather than
+        // refusing or reissuing the one the pinned cell still holds. Asserting the issued ids
+        // directly is what keeps the priming honest: a seam that failed to reach the boundary,
+        // or a skip that stopped skipping, changes this set rather than passing silently.
+        #expect(pinnedId == 1)
+        #expect(idsAfterPriming.contains(Terminal.HyperlinkId.max))
+        #expect(idsAfterPriming.contains(0))
+        #expect(idsAfterPriming.contains(2))
+        #expect(idsAfterPriming.contains(1) == false)
         // The live table must stay bounded rather than growing with the number of targets seen,
-        // which is the property that keeps a narrow id sufficient in the first place.
+        // which is the property that keeps a narrow id sufficient in the first place. Failing this
+        // also means no sweep ran, which would leave the recycled ids above pristine.
         #expect(terminal.retainedHyperlinkCount < linkCount)
         expectValidGrid(terminal)
     }
