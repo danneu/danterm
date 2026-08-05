@@ -37,14 +37,37 @@ import Testing
         //   partial table cannot pass through representative fixtures alone.
         // Scenario: spec-first regeneration of Unicode 17.0 data must preserve
         //   terminal width and Extended_Pictographic classification everywhere.
+        var classifiedScalarCount = 0
+        var mismatchedScalarCount = 0
+        var firstMismatch: String?
         for range in unicodeReferenceRanges {
             for value in range.lowerBound...range.upperBound {
                 guard let scalar = Unicode.Scalar(value) else { continue }
+                classifiedScalarCount += 1
                 let properties = terminalUnicodeClassification(for: scalar).properties
-                #expect(properties.cellWidth.rawValue == range.cellWidth)
-                #expect(properties.isExtendedPictographic == range.isExtendedPictographic)
-                #expect(properties.isEmojiModifier == range.isEmojiModifier)
+                guard properties.cellWidth.rawValue == range.cellWidth,
+                      properties.isExtendedPictographic == range.isExtendedPictographic,
+                      properties.isEmojiModifier == range.isEmojiModifier
+                else {
+                    mismatchedScalarCount += 1
+                    if firstMismatch == nil {
+                        firstMismatch =
+                            "U+\(String(value, radix: 16, uppercase: true)) "
+                            + "expected width=\(range.cellWidth), "
+                            + "extendedPictographic=\(range.isExtendedPictographic), "
+                            + "emojiModifier=\(range.isEmojiModifier); "
+                            + "got width=\(properties.cellWidth.rawValue), "
+                            + "extendedPictographic=\(properties.isExtendedPictographic), "
+                            + "emojiModifier=\(properties.isEmojiModifier)"
+                    }
+                    continue
+                }
             }
         }
+        #expect(classifiedScalarCount == 1_112_064)
+        #expect(
+            mismatchedScalarCount == 0,
+            "\(mismatchedScalarCount) mismatched scalars; first: \(firstMismatch ?? "none")"
+        )
     }
 }

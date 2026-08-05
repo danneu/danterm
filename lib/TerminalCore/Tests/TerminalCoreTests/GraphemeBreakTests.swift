@@ -13,17 +13,35 @@ import Testing
         //   on stale, partial, or toolchain-provided Unicode properties.
         // Scenario: regenerating Unicode 17.0 data preserves both properties over
         //   the complete scalar range before terminal assembly consumes them.
+        var classifiedScalarCount = 0
+        var mismatchedScalarCount = 0
+        var firstMismatch: String?
         for range in unicodeGraphemeReferenceRanges {
             for value in range.lowerBound...range.upperBound {
                 guard let scalar = Unicode.Scalar(value) else { continue }
+                classifiedScalarCount += 1
                 let classification = terminalUnicodeClassification(for: scalar)
-                #expect(classification.graphemeBreakClass.rawValue == range.breakClass)
-                #expect(
-                    classification.properties.isEmojiVariationBase
-                        == range.isEmojiVariationBase
-                )
+                guard classification.graphemeBreakClass.rawValue == range.breakClass,
+                      classification.properties.isEmojiVariationBase == range.isEmojiVariationBase
+                else {
+                    mismatchedScalarCount += 1
+                    if firstMismatch == nil {
+                        firstMismatch =
+                            "U+\(String(value, radix: 16, uppercase: true)) "
+                            + "expected breakClass=\(range.breakClass), "
+                            + "emojiVariationBase=\(range.isEmojiVariationBase); "
+                            + "got breakClass=\(classification.graphemeBreakClass.rawValue), "
+                            + "emojiVariationBase=\(classification.properties.isEmojiVariationBase)"
+                    }
+                    continue
+                }
             }
         }
+        #expect(classifiedScalarCount == 1_112_064)
+        #expect(
+            mismatchedScalarCount == 0,
+            "\(mismatchedScalarCount) mismatched scalars; first: \(firstMismatch ?? "none")"
+        )
     }
 
     @Test("pairwise segmenter matches every Unicode 17.0 grapheme boundary")
