@@ -223,25 +223,52 @@ struct TerminalScrollbackBudgetTests {
 
     @Test("a width change evicts nothing, at any width down to the engine minimum")
     func widthChangeEvictsNothing() throws {
-        // Intent: narrowing a saturated history and widening it back retains every logical line
-        //   and every scalar, at every width between the engine minimum and the original.
+        // Intent: narrowing a history that is already sitting on its budget ceiling, and widening
+        //   it back, retains every logical line and every scalar, at every width between the
+        //   engine minimum and the original.
         // Why it exists: this is `31/I3`, and it is the invariant that replaces the deleted row
         //   cap. `narrowThenWidenPreservesCappedHistory` pinned the *mitigation* for a lossiness
         //   the row cap could not avoid -- narrowing multiplies display rows while leaving
         //   content alone, so a display-row bound evicts what widening cannot restore. Storing
         //   logical lines makes that lossiness unrepresentable rather than mitigated, so the
-        //   property is now stated directly on the store instead of on a cap ratio.
+        //   property is now stated directly on the store instead of on a cap ratio. Saturation is
+        //   the regime that matters here: with headroom, a width change that did charge for the
+        //   refold would evict nothing anyway and the test would pass on a broken engine. An
+        //   earlier form fed 4,000 lines at the production budget and called the result
+        //   saturated; at ~1,461 charged bytes a line that is ~5.8 MB against a 15,728,640-byte
+        //   arena, so nothing was ever evicted and the premise was simply false.
+        //   `TerminalLogicalLineStoreTests.widthChangeIsANoOpOnRetainedStorage` states the
+        //   arena-byte and cell-for-cell half of `31/I1` at the store; what is unique here is
+        //   `Terminal.resize` driving it on a history deep enough to span many arena chunks.
         // Scenario: a user drags a pane narrow and back with a full history of full-width output.
         let wide = 179
+        // Small enough to reach the ceiling in ~340 lines, large enough that the arena is still
+        // many chunks (records may not straddle one, `31/DD54`, so the seams force-split records
+        // exactly as they do at the production budget) -- asserted below rather than assumed.
+        let budgetBytes = 1 << 19
         var terminal = try #require(Terminal(
             columns: wide,
             rows: 1,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes
+            scrollbackBudgetBytes: budgetBytes
         ))
-        for index in 0..<4_000 {
-            let line = String(String(repeating: "abcdefgh\(index % 10)", count: 20).prefix(wide))
+        let lineCount = 1_024
+        for index in 0..<lineCount {
+            let body = String(repeating: "abcdefgh\(index % 10)", count: 20)
+            let line = String(("L\(index)-" + body).prefix(wide))
             terminal.feed(Array((line + "\r\n").utf8))
         }
+
+        // The premise, observed rather than claimed. The oldest line being unfindable is
+        // eviction; a record or row count is not, since the viewport accounts for a shortfall
+        // whether or not anything was ever evicted.
+        #expect(terminal.primaryHistoryText.contains("L0-") == false)
+        let census = terminal.scrollbackCensus
+        #expect(census.chargedBytes <= census.capacityBytes)
+        // On the ceiling, not merely past the first eviction: within a sixteenth of capacity.
+        #expect(census.chargedBytes * 16 >= census.capacityBytes * 15)
+        let chunkShift = Terminal.LogicalLineStore.chunkByteShift(forCapacity: census.capacityBytes)
+        let chunkBytes = 1 << chunkShift
+        #expect(census.capacityBytes >= chunkBytes * 4)
 
         let records = terminal.scrollbackRecordCount
         let textAtWide = terminal.primaryHistoryText
@@ -253,13 +280,20 @@ struct TerminalScrollbackBudgetTests {
             // is what made a display-row bound lossy in the first place.
             #expect(terminal.scrollbackRecordCount == records)
             #expect(terminal.scrollbackRowCount > rowsAtWide)
-            expectValidGrid(terminal)
+            // Every scalar too, not just every record: history text is a function of the retained
+            // logical lines, so a width that dropped or clipped one shows up here even when the
+            // record count survives it.
+            #expect(terminal.primaryHistoryText == textAtWide)
         }
 
         terminal.resize(columns: wide, rows: 1)
         #expect(terminal.scrollbackRecordCount == records)
         #expect(terminal.scrollbackRowCount == rowsAtWide)
         #expect(terminal.primaryHistoryText == textAtWide)
+        // Once, on the width the cycle returns to. Each call folds the whole history a second
+        // time and copies the terminal twice, and `resizePathsEnforceBudget` already runs it on
+        // a two-column refold; the depth here is what this test contributes, not the width.
+        expectValidGrid(terminal)
     }
 
     @Test("a trimmed head reads as a mid-line continuation and carries no mark")
