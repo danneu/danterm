@@ -721,6 +721,32 @@ licenses a production storage change; landing is the paired ladder's.
   is recorded rather than fixed. Probe:
   `lib/TerminalCore/Tests/TerminalCoreTests/TerminalLogicalLinePathologicalProbe.swift`,
   same env gate as every probe since `F1`; all earlier probe files are unedited.
+- [x] `DONE` **`F13`, the cutover regression attributed to four named
+  mechanisms** (the instrument `F11` asked for and deliberately did not take).
+  Recorded in [F13](findings.md). Two `Time Profiler` traces of the real app plus
+  two paired headless instruments run interleaved against `28c54e1` in the same
+  session. `retained-browse` reproduces headlessly at **+86.7%**, so it is
+  attributable without the app: differenced per frame, **60.2%** of it is
+  `FramePlanner.inspectedCells`' closure, which lost three per-row hoists when
+  `DD45` made the traversal plural and now extracts an array, subscripts a nested
+  array and re-resolves hover/selection **per cell**; **19.4%** is the store's
+  per-cell decode, which builds a whole `GridCell` and probes both side tables for
+  readers that keep the scalars, the style id or three bits of kind. In the app,
+  `admit` is **16.4%/21.8% inclusive with 0.03% self** -- the difference is
+  `memcpy` at **12.1%/16.1%**, the arena copied whole because
+  `TerminalPTYHost.drainedFrameState()` publishes the `Terminal` **value** and
+  makes a 15.75 MiB `ContiguousArray` non-unique. A fourth mechanism,
+  input-conditional and reported as such: `LogicalLineStore.==` decodes every
+  retained cell into a fresh array per record, 9.32% of process CPU under ambient
+  pointer motion and 0.00% with the pointer parked. **`DD49`'s 8.62x is mostly
+  allocator hysteresis** -- `vmmap` puts 57.1 MB of it in `MALLOC_SMALL (empty)`,
+  pages with no live allocation in them -- and settled residency is **0.92x** the
+  incumbent's for the same fed corpus. **None of the four is wrap-at-read**:
+  `LogicalLineFold.enumerateRows` appears in neither app profile's self table and
+  the store's unshared write path is **0.96x** the incumbent's per fed byte.
+  Probe: `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWiredHistoryAttributionProbe.swift`,
+  same env gate as every probe since `F1`, and written to run unchanged at
+  `28c54e1`; all earlier probe files are unedited.
 
 ## Rejected
 
@@ -1023,10 +1049,15 @@ says `slower` on all three rungs. Nothing in this doc disposes of that -- the
 plan said before the numbers existed that the disposition is a human's. What is
 open, in the order the evidence makes it tractable:
 
-- **Attribute the regression before concluding anything about the design.** No
-  profile has been taken. `just benchmark-trace scrollback-stream` and the browse
-  path are the obvious instruments, and `agent-docs/terminal-performance.md`'s own
-  rule is to report and pause before optimizing, which is what `F11` does.
+- ~~**Attribute the regression before concluding anything about the design.** No
+  profile has been taken.~~ **Done by [`F13`](findings.md)**, which names four
+  mechanisms with shares: the arena copied on write once per published frame
+  (12.1%-16.1% of whole-process CPU in `memcpy` alone), the frame path
+  materializing a whole `GridCell` per cell where the incumbent decoded two
+  fields, the planner's plural traversal hoisting nothing per row (60.2% of the
+  headless browse regression), and a whole-terminal equality that decodes every
+  retained cell. All four are wiring; the fold does not appear in either app
+  profile's self table.
 - **Then decide `28/H7`.** It reopens under the frozen rule today; whether that
   rule should be executed on evidence that fits the wiring better than the model
   is the question `F11` hands over.

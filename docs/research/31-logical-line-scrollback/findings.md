@@ -3769,3 +3769,221 @@ a rule of their own.
   hands forward: the fold's `O(cells in record)` walk is a named, measured,
   reproducible target with a probe already committed, and `I10`'s cap now has a
   **third** hazard to be derived against if the budget ever moves.
+
+### F13 -- the cutover's regression, attributed: a 15.75 MiB arena copied per published frame, a per-cell record decode where the incumbent decoded two fields, a planner traversal that hoists nothing, and a whole-terminal equality that materializes every retained cell
+
+- Status: complete, and it is an **attribution rather than a verdict**. `F11`
+  bounded where the cost is *not* and never named it; this entry names four
+  mechanisms, each with a share of a real profile or a paired headless number, and
+  each of them is wiring rather than `D2`/`D3`'s model. Nothing here re-runs the
+  ladder and nothing here disposes of `F11`.
+- **Read this first.** Every named mechanism is in the code slice 5 wrote between
+  `LogicalLineStore` and `Terminal`, or in the planner slice 5 changed. **None of
+  them is wrap-at-read**: the fold is not in the top thirty self frames of either
+  app profile, `LogicalLineFold.enumerateRows` does not appear at all, and the
+  store's own write path measures *faster* than the incumbent's on
+  `scrollback-stream`'s own stimulus (97.4 against 101.5 ns per fed byte). So
+  `28/H7`'s reopening condition -- which `F11` records as fired -- is fired on
+  evidence that this entry attributes elsewhere.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate is the working tree at `0baf98d`
+  (tree `a27a9d2695f5`), which is the landed cutover plus this entry's own probe
+  file and the two untracked paths present throughout this doc's work (`TODO.md`,
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`), none of which is in any
+  build measured here. Baseline is **`28c54e1`**, the pre-cutover parent `F11`
+  paired against, checked out into a second worktree and built in the same
+  session, so every ratio below has a control the change cannot reach
+  (`agent-docs/measurement-discipline.md`).
+- Commands, inputs, or reproduction:
+
+      # two app profiles, `agent-docs/terminal-performance.md`'s share instrument
+      just benchmark-trace scrollback-stream "Time Profiler" 30      # x2
+
+      # the headless paired arms, run interleaved at both revisions
+      swift build -c release --package-path lib/TerminalCore --product TerminalBrowseBenchmark
+      .build/release/TerminalBrowseBenchmark --measured 2000         # x3 per arm, interleaved
+      sample <pid> 15 1                                              # per arm
+
+      DANTERM_WIRED_ATTRIBUTION_PROBE=1 swift test -c release \
+        --package-path lib/TerminalCore --filter TerminalWiredHistoryAttributionProbe
+
+      just terminal-memory-probe "--payload scrollback-plain --vmmap"   # per arm
+
+  The probe file is
+  `lib/TerminalCore/Tests/TerminalCoreTests/TerminalWiredHistoryAttributionProbe.swift`,
+  behind `DANTERM_WIRED_ATTRIBUTION_PROBE` exactly as every probe since `F1`, and
+  it is written to compile and run unchanged at `28c54e1`. No earlier probe file
+  is edited and nothing under `lib/TerminalCore/Sources/` is touched by it.
+- Artifacts: `.build/terminal-benchmark-profiles/2026-08-04-184812-40616/` and
+  `.build/terminal-benchmark-profiles/2026-08-04-185157-42293/` (disposable;
+  every decision-bearing value is quoted below).
+
+#### Observation 1 -- `retained-browse` reproduces headlessly at +86.7%, which makes it an attributable workload rather than an app measurement
+
+`retained-browse` is a pure headless product (`TerminalBrowseBenchmark`), so the
+regression can be reproduced and profiled without the app at all. Three
+interleaved invocations per arm, same session, same machine state:
+
+| arm | ns per planned frame | retained rows | plan cell checksum |
+| --- | ---: | ---: | ---: |
+| `28c54e1` | 335,086 / 335,877 / 335,066 | 9,935 | 5,940,000 |
+| `0baf98d` | 625,208 / 626,534 / 626,254 | 9,935 | 5,940,000 |
+
+**+86.7%**, with the checksum and the retained row count identical, so both arms
+planned the same cells over the same history. The ladder's `confirm` number is
++60.44%; this arm is untrimmed and unpaired and reads higher, which is the
+expected direction for a raw ratio against a winsorized one. What matters is that
+the effect survives outside the app, so `sample` can attribute it.
+
+#### Observation 2 -- the browse profile, differenced per frame, puts 60% of the regression in the planner's traversal and 19% in the store's per-cell decode
+
+`sample <pid> 15 1` on each arm, converted to nanoseconds per planned frame with
+each arm's own measured frame rate (`agent-docs/terminal-performance.md`'s
+per-frame rule). Self time only; the two arms' totals are 278.5 and 512.3 us
+against measured 335.1 and 626.0, so the table covers 83% and 82% of each frame.
+
+| frame | base ns/frame | candidate ns/frame | delta | share of +233.8 us |
+| --- | ---: | ---: | ---: | ---: |
+| `FramePlanner.inspectedCells` closure + its partial apply | 81,555 | 222,355 | **+140,800** | **60.2%** |
+| `LogicalLineStore.cell(recordIndex:cellOffset:)` | 0 | 24,289 | +24,289 | 10.4% |
+| `LogicalLineStore.contentIdentity(record:at:keyOffset:)` | 0 | 16,860 | +16,860 | 7.2% |
+| `Terminal.forEachViewportCell` (both spellings) | 2,996 | 17,486 | +14,490 | 6.2% |
+| `swift_release` + `swift_retain` + bridge-object pairs | 11,504 | 42,700 | +31,196 | 13.3% |
+| `LogicalLineRecord.init(word:)` | 0 | 7,971 | +7,971 | 3.4% |
+| `LogicalLineStore.hyperlinkId(record:at:keyOffset:)` | 0 | 5,718 | +5,718 | 2.4% |
+| `Terminal.presentedRowGeometry.getter` | 2,370 | 6,302 | +3,932 | 1.7% |
+| `PackedRetainedRow.forEachContentCell` + `u64` | 11,022 | 0 | -11,022 | -4.7% |
+| `FramePlanner.decorationRuns` | 18,019 | 15,107 | -2,912 | -1.2% |
+
+`LogicalLineFold.enumerateRows` does not appear in either arm's self table. The
+fold is not the cost.
+
+#### Observation 3 -- the four mechanisms, named in the code, with what each replaced
+
+**M1 -- the arena is copied on write once per published frame.** `admit` is
+16.42% and 21.83% inclusive of whole-process CPU in the two app profiles with
+**0.03%-0.04% self**; the difference is one frame:
+`memcpy` under
+`applyOutput -> moveAndFillRows -> LogicalLineStore.admit -> ContiguousArray._makeMutableAndUnique -> _ArrayBuffer._consumeAndCreateNew`,
+at **12.10%** and **16.13%** of whole-process CPU. `_consumeAndCreateNew` is the
+non-unique path: the buffer had another reference, so the mutation copied it.
+The other reference is the frame consumer's --
+`TerminalPTYHost.drainedFrameState()` puts the whole `Terminal` **value** into a
+`TerminalPTYFrameState` and hands it to the pane session, which holds it until the
+next publish. Under the incumbent that made history's `[PackedRetainedRow]`
+non-unique and cost one element copy per retained row; under the arena it makes a
+single `ContiguousArray<UInt64>` of **15.75 MiB** non-unique and copies all of it.
+Priced headlessly on `scrollback-stream`'s own stimulus, publishing at a 4 KiB
+cadence: the incumbent pays **1.63x** its unshared feed, the arena pays
+**2.03x**, and per fed byte the two are 165.5 against 197.8 ns. The arena's
+unshared feed is *faster* (97.4 against 101.5 ns/byte), which is `F10`'s reading
+holding: the copy is the whole of the difference.
+
+**M2 -- the frame path materializes a whole `GridCell` per cell where the
+incumbent decoded the two fields a renderer reads.** `forEachPaintedCell` and
+`forEachKind` both funnel through `forEachFoldedCell`, which calls
+`cell(recordIndex:cellOffset:)` per column; that function re-reads
+`offsets[recordIndex]`, re-decodes the eleven-field record header
+(`LogicalLineRecord.init(word:)`, +7,971 ns/frame), builds a full `GridCell`
+including a retained `TerminalScalars`, and probes both side tables --
+`contentIdentity` (+16,860) and `hyperlinkId` (+5,718) -- **for readers that
+discard all three**. `forEachKind` keeps three bits of it. The incumbent had
+exactly this split and `28/F17` is why: `forEachContentCell` yielded
+`(column, scalars, styleId)` through one unsafe buffer, and `forEachKind` read
+one word and masked. Headless, per frame at 9,935 retained rows: the geometry
+pass costs **13.0 -> 48.1 us** (3.69x) and the cell pass **40.3 -> 83.6 us**
+(2.07x).
+
+**M3 -- the planner's plural traversal hoists nothing per row.** `DD45` gave
+`forEachViewportCell` a plural spelling so a frame spends one locate, and moved
+`FramePlanner.inspectedCells` inside a single closure. Three hoists the per-row
+version had were lost with it, and all three now run **per cell**:
+`let kinds = geometry.rows[row].cells` (an array extraction, so a retain/release
+pair per cell -- `swift_retain`/`swift_release` and the bridge-object stubs are
++31,196 ns/frame between the arms), `result[row].append(...)` (a nested-array
+subscript, so a uniqueness check on two buffers per cell --
+`swift_isUniquelyReferenced_nonNull_native` +3,434), and `hovered`/`selected`,
+which became captured `var`s re-read per cell. The closure is **4.34% and 3.25%
+self** in the two app profiles and **+140,800 ns/frame** headless. It is the
+largest single term and it costs the same on a live-grid frame as on a browsing
+one, which is why it is visible on `scrollback-stream` at all.
+
+**M4 -- one whole-terminal equality decodes every retained cell into a fresh
+array per record.** `LogicalLineStore.==` compares `recordCells(at:)` per record,
+and `recordCells` is `(0..<record.cellCount).map { cell(...) }` -- an allocation
+per record and a full decode per cell. `Terminal` is `Equatable` with `history`
+declared before `rows`, so this runs first. In the first app profile it is
+**9.32%** of whole-process CPU, reached from
+`TerminalPTYHost.applyPointer -> LogicalLineStore.== -> recordCells -> cell`,
+plus **0.78%** in `GridCell.__derived_struct_equals`. **In the second profile,
+taken with the pointer warped away from the window, it is 0.00%** -- so this term
+is *input-conditional* and this entry does not claim it is inside `F11`'s
+number. It is reported because the mechanism is real at any depth: `applyPointer`
+takes `let previousTerminal = terminal` and compares, so one mouse move over a
+pane with saturated history walks every retained cell **and** makes the arena
+non-unique, priming M1's 15.75 MiB copy. The incumbent's `ScrollbackBuffer.==`
+compared `[UInt8]` blobs, which is a memcmp with an identity fast path.
+
+#### Observation 4 -- `DD49`'s 8.62x is mostly allocator hysteresis, and settled residency is at parity
+
+`just terminal-memory-probe "--payload scrollback-plain --vmmap"`, run at both
+revisions in this session, and its `vmmap` split is what separates the two
+readings:
+
+| `vmmap --summary` DIRTY | `28c54e1` | `0baf98d` |
+| --- | ---: | ---: |
+| `MALLOC_LARGE` (the arena) | -- | **15.0 MB** |
+| `MALLOC_SMALL` | 9,216 K | 7,776 K |
+| `MALLOC_SMALL (empty)` | **16 K** | **57.1 MB** |
+| `MALLOC_LARGE (empty)` | 4,240 K | 6,368 K |
+| TOTAL DIRTY | **15.0 MB** | **87.9 MB** |
+| probe footprint delta | 9.16 MB | 81.64 MB |
+
+`MALLOC_SMALL (empty)` is 17 regions with **no live allocation in them**: pages
+the allocator dirtied for transient small blocks and has not returned. The
+incumbent had 10,001 live packed-row blobs recycling that zone; the arena has 66
+row allocations, so the same transient traffic -- one 5.7 KB blank cell array per
+scrolled row from `makeBlankRow`, which neither revision changed -- spreads
+across fresh regions and stays dirty. **Returning free pages before the sample
+collapses the difference**: the probe arm here calls
+`malloc_zone_pressure_relief` before its settled reading and measures the whole
+history at **+16.27 MiB** on the candidate against **+17.73 MiB** on the
+baseline, for the same fed corpus, with the arena's reservation charged to the
+candidate. That is **0.92x**, which is `F10`'s "narrow confirm" residency reading
+holding at the pane level. `DD49`'s 8.62x is a real footprint number and a
+misleading residency one, and `just terminal-memory-probe` not settling the
+allocator is why.
+
+#### Observation 5 -- what this leaves for the model
+
+`D2` Decision 2's operations, `D3` Decision 1's locate contract and the fold are
+all clear on this evidence: the store's unshared write path is 0.96x the
+incumbent's per fed byte, `enumerateRows` is absent from both profiles' self
+tables, and `F11` already recorded both locate diagnostics holding. Every named
+mechanism is a call-site or a facade, and each has a mechanical fix that changes
+no invariant: give the store back the two-field and kind-only walks `28/F17`
+established, hoist the planner's per-row lookups out of its per-cell closure,
+stop the publish from making the arena non-unique, and make `==` compare stored
+bytes instead of decoded cells. `F12`'s re-enumeration is a fifth mechanism that
+this workload does not reach and that is still owed.
+
+- Uncertainty:
+  - **M4's share is input-conditional and the two profiles disagree by
+    construction.** 9.32% with ambient pointer motion, 0.00% with the pointer
+    parked. Whether `F11`'s invocation had pointer traffic is unknowable now.
+  - **The per-frame conversion of a `sample` profile carries the frame rate as a
+    divisor**, so the two arms' shares are only as comparable as their measured
+    ns-per-frame, which is a three-invocation median rather than a paired
+    statistic.
+  - **Neither app profile has a baseline arm.** The app-side shares are
+    candidate-only; every *ratio* in this entry comes from the two headless
+    instruments, which do have one.
+  - **The headless drain does not reproduce `F11`'s 6.2x**, and this entry does
+    not claim it does: at a 4 KiB publish cadence the arena is 1.19x the
+    incumbent per fed byte, not 6.2x. What the app adds is a publish cadence set
+    by the display, a fence the drain queues behind, and the planner's per-frame
+    cost on the same queue. The four mechanisms are what a profile attributes;
+    whether they sum to the ladder's number is the ladder's to say.
+- Next action: fix the four mechanisms, each with a behavioral test, then re-run
+  the frozen ladder once against `28c54e1`. If any rung still reads `slower`, the
+  disposition returns to a human with `28/H7` on the table.
