@@ -331,6 +331,49 @@ Run `quick` for the routine question. Run `confirm` when the quick result is
 close, the change crosses workload boundaries, or the decision warrants the
 stronger five-workload evidence.
 
+### What this instrument does on identical source (A/A), per workload
+
+Measured 2026-08-05 as `docs/research/31-logical-line-scrollback/findings.md`
+`F18`: **eight complete `confirm` invocations with both arms at byte-identical
+source**, one MacBookPro18,1, AC power, 179x66, no invalidated block. Read that
+entry for the evidence, the per-invocation pair series, and the caveats; what
+follows is the operational half.
+
+| workload | frozen threshold | worst A/A estimate seen | reading rule | directional A/A verdicts |
+| --- | ---: | ---: | --- | ---: |
+| `terminal-feed` | 2.50% | 0.86 | distrust differences under **0.9 points** | 0 / 8 |
+| `scrollback-stream` | 1.85% | 3.48 | distrust differences under **3.5 points** | **3 / 8** |
+| `content-churn` | 2.15% | 2.14 | distrust differences under **2.2 points** | 0 / 8 |
+| `style-churn` | 2.00% | 3.43 | distrust differences under **3.5 points** | **2 / 8** |
+| `incremental-mixed` | 1.85% | 4.85 | distrust differences under **4.9 points** | **3 / 8** |
+| `retained-browse` | 1.05% | 0.89 | **0.3 points** with the arm slot held fixed; **0.9** across slots | 0 / 8 |
+
+Three things to carry away, and none of them changes a threshold -- the frozen
+rules in `scripts/terminal-benchmark-validation.py#DECISION_RULES` are untouched
+and this table proposes no replacement.
+
+1. **The three draw workloads returned `faster`/`slower` verdicts on code that
+   could not differ.** `incremental-mixed` answered in *both* directions across
+   two adjacent invocations (+4.85% `slower`, then -4.43% `faster`). Treat a bare
+   directional verdict on `scrollback-stream`, `style-churn` or
+   `incremental-mixed` as a reason to look for a mechanism, never as the evidence
+   itself. If no mechanism in the diff can reach the workload, it did not move --
+   `31/F17` Observation 5 caught the same shape from the other side.
+2. **`retained-browse` is the ladder's most repeatable cell and its margin is
+   still mostly spent.** Run-to-run scatter is 0.06-0.28 points, the best here --
+   but the *physical arm slot*, which `physical_candidate_arm` derives from the
+   candidate tree's own hex parity, moves the estimate by ~0.6 points against a
+   1.05% threshold. Re-running the same candidate tree measures the same thing to
+   within 0.3 points; changing the tree can move the cell by 0.6 with no code
+   change at all.
+3. **This is between-invocation noise, which is a wider quantity than the frozen
+   rules were screened against.** Those screens (`28/F5`, `28/F6`, doc 8) resample
+   a single 24-pair series, so they measure scatter *inside* one collection; this
+   table adds two arm builds, two app launch cycles, the slot assignment, and the
+   host's own drift. The larger number is expected, not contradictory. One host,
+   one session, and the host was lightly loaded rather than idle -- `31/F18` says
+   how much and in which direction that cuts.
+
 ## When to measure
 
 Running a comparison on your own initiative is welcome -- you do not need to be

@@ -4838,6 +4838,266 @@ shape is the specific thing to re-count. `DD51` already priced the two
 alternatives to this spelling once; a regression is what would justify pricing
 them again.
 
-The other two items the entry handed forward are untouched by this disposition:
-`DD52`'s equality residual is still unspent, and the draw cells' paired estimates
-still want a calibration before any future reading leans on them.
+The other two items the entry handed forward: `DD52`'s equality residual is still
+unspent, and the calibration of the draw cells' paired estimates **was taken, as
+`F18` below** -- it confirms the caution this entry raised and widens it: three of
+the six ladder cells return a directional verdict on byte-identical source.
+
+### F18 -- the paired ladder's A/A wobble, measured per workload: three of the six cells return a directional verdict on identical source, and `retained-browse`'s whole error budget is a slot-linked offset rather than noise
+
+- Status: complete, **descriptive instrumentation context only.** It **issues no
+  verdict, reopens nothing, reinterprets no recorded reading, proposes no
+  threshold, and changes no frozen rule.** Every threshold in
+  `scripts/terminal-benchmark-validation.py#DECISION_RULES` stands exactly as it
+  did. The audience is whoever freezes or reads a rule on this instrument next.
+- **Read this first.** Eight complete `confirm` invocations of the six-workload
+  ladder, candidate and baseline at **byte-identical source**, taken back to back
+  in one session on one host. Three cells -- `scrollback-stream`, `style-churn`,
+  `incremental-mixed` -- returned a **directional** (`faster`/`slower`) verdict on
+  code that cannot differ, `incremental-mixed` in **both directions** across two
+  adjacent invocations (+4.85% `slower`, then -4.43% `faster`). `content-churn`
+  missed by 0.01 points. `retained-browse` and `terminal-feed` never crossed. And
+  `retained-browse`'s spread is not noise at all: within one physical arm
+  assignment it is **0.28 and 0.06 points**, while the assignment itself moves the
+  estimate by **~0.6 points**.
+- Date and investigator: 2026-08-05, Claude (agent).
+- Why it exists: this campaign twice came close to concluding from
+  between-session drift. `F16` Observation 5 withdrew a header cache built on a
+  -0.45-point subtraction that a direct paired run then measured at -0.10%, and
+  the same observation recorded four tight consistent pairs on two draw workloads
+  a two-function retained-history diff cannot reach. `F17`'s Next action handed
+  the calibration forward in as many words. `agent-docs/measurement-discipline.md`
+  is the standing rule this discharges: *give every comparison a control the
+  change cannot reach, measured in the same session* -- an A/A run is that control
+  with the change set to nothing.
+
+#### Commit and worktree state, and why this is a legitimate A/A
+
+- Both arms are `0b777d486a90` (`HEAD` at the time), the docs commit that opens
+  this entry's own campaign closure. `benchmark-confirm` **refuses** a baseline
+  that resolves to the candidate's own tree, so an exactly-identical pair cannot
+  be run. The pair used instead differs by **three untracked non-source files**
+  and nothing else: `TODO.md`, `docs/scratch/2026-08-04-scroll-sample-breakdown.md`
+  and `dump.txt`, which `git add -A` sweeps into the candidate snapshot. The
+  command prints them, and `run.json` records them as the candidate's complete
+  changed-path list.
+- Verified rather than asserted: `diff -rq` across the two exported arm roots
+  reports **only those three files**, plus one `scripts/__pycache__/*.pyc` that
+  each arm's own driver import generates after export. No `.swift`, no
+  `Package.swift`, no fixture, no script. The two arms compile the same program.
+- Both arms build separately, into separate cache entries, exactly as a real
+  comparison does. That is deliberate: the point is to measure what a whole
+  invocation does, builds and app launches included, not what one series does.
+
+#### Commands, and the host conditions each invocation ran under
+
+      just benchmark-confirm baseline=HEAD          # x8
+
+| # | artifact | candidate slot | load at invocation | busiest external | invalidations |
+| ---: | --- | --- | ---: | --- | --- |
+| 1 | `confirm/33040fdc648e-0000` | `b` | 3.05 (0.31/cpu) | claude 20.9%, PerfPowerServices 7.9% | none |
+| 2 | `confirm/33040fdc648e-0001` | `b` | 3.82 (0.38/cpu) | claude 28.4%, DanTerm 7.4% | none |
+| 3 | `confirm/33040fdc648e-0002` | `b` | 5.01 (0.50/cpu) | claude 22.4%, DanTerm 9.1% | none |
+| 4 | `confirm/33040fdc648e-0003` | `b` | 4.78 (0.48/cpu) | claude 29.1%, DanTerm 8.0% | none |
+| 5 | `confirm/33040fdc648e-0004` | `b` | 5.35 (0.53/cpu) | claude 22.7%, DanTerm 10.5% | none |
+| 6 | `confirm/09e3a8250ccd-0000` | `a` | 3.46 (0.35/cpu) | claude 23.2%, DanTerm 7.9% | none |
+| 7 | `confirm/09e3a8250ccd-0001` | `a` | 5.40 (0.54/cpu) | claude, DanTerm | none |
+| 8 | `confirm/09e3a8250ccd-0002` | `a` | 5.24 (0.52/cpu) | claude, DanTerm | none |
+
+AC power throughout, `lowpowermode 0`, MacBookPro18,1, 10 processors, the same
+179x66 geometry every frozen rule is calibrated for. No invocation invalidated a
+block, so all eight are complete valid runs by the harness's own rule. Wall time
+118-284 s each; the first and the sixth paid an arm build.
+
+**The one stated condition that was not met, said plainly.** The guide requires
+the machine otherwise idle. It was not: the agent process driving this session
+sat at **20-29% of one processor** in every invocation, and the user's own
+DanTerm at 5-10%, both of them external to the harness and so excluded from its
+own-descendant filter. Load-per-processor ran 0.31-0.54. That load was roughly
+constant across all eight, so it is a condition of the whole table rather than a
+confound between its rows -- but the wobble below should be read as **this
+instrument on a lightly loaded host**, which is plausibly an upper bound on an
+idle one. Nothing here licenses relaxing the idleness rule; it licenses knowing
+what a mildly non-idle host costs.
+
+#### The wobble table -- eight A/A estimates per workload, against the frozen threshold
+
+Estimates are the invocation's own symmetric median, the exact number the verdict
+is read from. Slot `b` is invocations 1-5, slot `a` is 6-8.
+
+| workload | pairs | frozen threshold | A/A estimates, slot `b` \| slot `a` | full spread | worst \|estimate\| | directional A/A verdicts |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| `terminal-feed` | 2 | 2.50% | -0.36 -0.37 +0.17 +0.25 -0.53 \| -0.83 -0.86 -0.55 | 1.11 | **0.86** | 0 / 8 |
+| `scrollback-stream` | 4 | 1.85% | -0.67 -1.00 -2.12 +0.35 -3.48 \| -2.43 -1.78 -1.01 | 3.84 | **3.48** | **3 / 8** (all `faster`) |
+| `content-churn` | 4 | 2.15% | -0.95 -1.75 -1.06 -0.56 +2.07 \| -1.87 -2.14 -0.40 | 4.21 | **2.14** | 0 / 8 |
+| `style-churn` | 4 | 2.00% | +0.56 +0.86 +0.32 +0.97 -0.04 \| -2.01 +0.54 -3.43 | 4.39 | **3.43** | **2 / 8** (both `faster`) |
+| `incremental-mixed` | 6 | 1.85% | +4.85 -4.43 +1.19 +0.20 +0.83 \| -1.53 +0.18 -2.76 | 9.27 | **4.85** | **3 / 8** (1 `slower`, 2 `faster`) |
+| `retained-browse` | 4 | 1.05% | +0.63 +0.61 +0.78 +0.89 +0.68 \| +0.14 +0.08 +0.11 | 0.81 | **0.89** | 0 / 8 |
+
+Per-invocation paired values, which is what a reader checks a suspicious estimate
+against. Each row is one invocation's complete pair series.
+
+| workload | slot `b`, invocations 1-5 | slot `a`, invocations 6-8 |
+| --- | --- | --- |
+| `terminal-feed` | (-0.600 -0.127) (-0.397 -0.340) (+0.223 +0.107) (+0.279 +0.216) (-0.348 -0.703) | (-0.536 -1.121) (-0.955 -0.760) (-0.574 -0.524) |
+| `scrollback-stream` | (-3.104 +0.311 -1.651 +2.291) (-5.400 -1.076 +2.276 -0.930) (-7.048 -1.432 -2.812 -0.757) (-1.332 +3.600 -0.116 +0.823) (-5.092 -3.131 -3.834 +1.747) | (-2.853 -2.278 +1.577 -2.580) (-2.868 -1.580 +0.790 -1.984) (+0.001 +0.086 -2.018 -2.509) |
+| `content-churn` | (-1.898 -0.915 -0.975 +0.190) (-2.756 -5.649 -0.741 +2.018) (-1.092 -1.024 -0.353 -3.129) (+0.273 -2.460 +0.237 -1.356) (+2.463 +0.585 +3.530 +1.676) | (-2.020 +1.334 -1.711 -3.573) (-3.868 -4.223 -0.213 -0.416) (-8.030 -0.376 +0.928 -0.432) |
+| `style-churn` | (+0.005 -1.850 +3.164 +1.107) (+2.136 +0.508 +1.202 -0.469) (+1.774 -5.456 +1.284 -0.650) (+2.585 -0.134 -0.613 +2.067) (-0.969 +0.882 +1.554 -1.193) | (-0.871 -3.461 -0.770 -3.157) (+0.834 +1.158 -0.407 +0.236) (-4.078 +1.481 -2.776 -6.836) |
+| `incremental-mixed` | (+6.031 -3.648 -6.693 +7.248 +3.666 +7.378) (-9.305 -6.160 -2.692 -10.033 -1.651 +3.662) (-0.824 +3.244 +3.197 -7.176 -3.462 +4.674) (+1.434 +7.547 +0.905 -0.514 -1.345 -1.407) (-6.175 +10.263 +1.236 +0.430 -3.659 +5.842) | (-11.414 +4.253 -1.547 -9.636 +1.984 -1.518) (-2.616 +2.468 +4.105 -2.110 -5.721 +8.289) (-1.299 -9.733 +2.727 -19.999 -3.230 -2.282) |
+| `retained-browse` | (+0.901 +0.643 +0.249 +0.608) (+0.552 +0.672 +0.148 +1.170) (+0.747 +1.323 +0.668 +0.804) (+0.355 +1.093 +0.745 +1.033) (+0.922 +0.448 +1.145 +0.395) | (-0.005 +0.141 +0.134 +0.319) (+0.274 -0.409 +0.157 +0.002) (+0.171 -0.162 +0.053 +0.263) |
+
+#### Observation 1 -- one reading rule per workload, and which cells are well-resolved
+
+The rule is stated as the largest A/A estimate the workload produced, rounded up.
+It is deliberately the crudest available statistic: no resampling, no quantile,
+no call into `select_candidate`. `agent-docs/measurement-discipline.md` says to
+read a gate from the code that owns it, and that gate belongs to
+`scripts/terminal-benchmark-calibration.py`, which screens a *series* rather than
+a set of invocations. This entry is not a screen and must not be usable as one.
+
+| workload | reading rule on this host | against its threshold |
+| --- | --- | --- |
+| `terminal-feed` | Differences smaller than **0.9 points** are indistinguishable from noise. | **Well-resolved.** 2.5% is 2.9x the worst A/A estimate. |
+| `scrollback-stream` | Differences smaller than **3.5 points** are indistinguishable from noise. | **Not resolved.** 1.85% is *below* the wobble; the cell produced three `faster` verdicts on identical source. |
+| `content-churn` | Differences smaller than **2.2 points** are indistinguishable from noise. | **Threshold-marginal.** 2.15% sits 0.01 points above the worst A/A estimate. |
+| `style-churn` | Differences smaller than **3.5 points** are indistinguishable from noise. | **Not resolved.** 2.0% is below the wobble; two `faster` verdicts on identical source. |
+| `incremental-mixed` | Differences smaller than **4.9 points** are indistinguishable from noise. | **Not resolved, and the worst cell on the ladder.** 1.85% is a quarter of the wobble, and the cell answered in both directions. |
+| `retained-browse` | **With the physical slot held fixed: 0.3 points.** Across slots: **0.9 points**. | **Threshold-marginal, and for a reason that is not noise** -- see Observation 2. Within a slot the cell is by far the best-behaved on the ladder. |
+
+The expectation this entry was opened with is **half confirmed and half refuted**.
+`retained-browse` was named as the suspect and is indeed marginal, but not the way
+predicted: its run-to-run scatter is the smallest on the ladder and its margin is
+eaten by a systematic instead. `terminal-feed`'s two-pair cell was the other named
+suspect and is the **best-resolved cell here**, at 2.9x margin. The three draw
+workloads, which nobody flagged, are where the instrument actually fails.
+
+#### Observation 2 -- `retained-browse`'s error budget is a physical-slot offset, and the ABBA schedule does not remove it
+
+`physical_candidate_arm` derives the candidate's slot from the candidate tree's
+own hex parity, so it is fixed for the whole of one invocation and identical
+across every invocation that shares a candidate tree. Invocations 1-5 shared one;
+invocations 6-8 were taken deliberately against a second candidate tree, chosen
+only so its parity landed the candidate in the other slot, and otherwise the same
+byte-identical source.
+
+| | slot `b` (n=5) | slot `a` (n=3) |
+| --- | ---: | ---: |
+| mean A/A estimate | **+0.72%** | **+0.11%** |
+| spread within the slot | **0.28** points | **0.06** points |
+| every estimate positive | yes (5/5) | yes (3/3, one pair negative) |
+
+So the ladder's quietest cell separates into a **~0.6-point slot term** plus a
+run-to-run scatter of **0.06-0.28 points**, against a 1.05% threshold and a 0.75%
+equivalence band. Two consequences worth a reader's attention, both descriptive:
+
+1. **A `retained-browse` comparison is far more repeatable than its threshold
+   suggests, provided the slot does not change.** Five invocations of the same
+   tree pair landed inside 0.28 points of each other. That is a usable property:
+   re-running the *same* candidate tree measures the same thing.
+2. **A change that alters the candidate tree can move this cell by ~0.6 points
+   with no code difference at all**, because the tree hash decides the slot. Every
+   comparison in this campaign changed the candidate tree between rounds.
+
+The mechanism is **not determined here**, and this entry declines to guess it into
+a conclusion. What is ruled out is a pure slot mirror: a purely positional effect
+would put one slot at `+x` and the other at `-x`, and both slots read positive
+(+0.72 and +0.11), so there is a common positive component of roughly +0.42 as
+well as a slot component of roughly +/-0.31. Naming the mechanism needs a probe
+this entry does not run.
+
+#### Observation 3 -- `scrollback-stream` is biased negative on identical source, and it is not the slot
+
+Six of eight estimates are negative, both slot means are negative (-1.38 and
+-1.74), and the three directional verdicts are all `faster`. So unlike
+`retained-browse` this is not a slot term; the whole cell leans one way. On a
+workload whose block is ~93% PTY drain, the plausible sources are within-invocation
+warm-up and page-cache state -- the drain figures the harness prints are
+themselves nearly identical between arms every time (165.2-168.1 ms, 9.1-9.2 MB/s
+on both arms in all eight runs), which is worth noticing: **the composition line
+is stable to ~1% while the deciding metric swings 3.8 points.** Not attributed,
+and named as the first thing a follow-up would measure.
+
+#### Observation 4 -- what this does and does not say about the frozen rules
+
+Stated explicitly because the table above is easy to over-read.
+
+- **It does not say the thresholds are wrong**, and it proposes no replacement.
+  The rules were frozen off A/A screens (`28/F5`, `28/F6` for `retained-browse`,
+  doc 8 for the rest) that resample a **single 24-pair series** at 50,000-100,000
+  trials. That measures the scatter *inside* one collection. This entry measures
+  the scatter *between* whole invocations, which additionally contains two arm
+  builds, two app launch cycles, the slot assignment, and whatever the host did in
+  between. The two numbers are not the same quantity and the second being larger
+  is expected rather than contradictory. Which one a decision should be read
+  against is a rule-freezer's question, not this entry's.
+- **It does not reopen or reinterpret any recorded verdict.** `F11`, `F14`, `F15`,
+  `F16` and `F17` stand exactly as written, including `F16`'s acceptance reading
+  and the two cautions `F16` already carried in its own text.
+- **Eight invocations is a small n**, and "3 of 8 returned a direction" supports
+  *"this cell returns directional verdicts on identical source"* and does **not**
+  support a rate. Reading 37.5% off it would be the error this campaign already
+  paid for once.
+- **`scripts/terminal-benchmark-plan-calibration.py` was deliberately not used.**
+  It screens only the auxiliary metrics in `CALIBRATABLE_METRIC_TABLES` (plan
+  time, process CPU), never the deciding metric; it binds both physical arms to
+  one immutable root, so it structurally cannot observe the slot effect
+  Observation 2 found; and it reduces to one series rather than repeated whole
+  invocations. It answers a different question well and this one not at all.
+
+- Uncertainty:
+  - **One host, one session, one geometry, one afternoon.** Nothing here
+    generalizes to another machine, and the guide already says a machine change
+    requires recalibration.
+  - **The host was not idle** (see the conditions block). The wobble is plausibly
+    an upper bound for an idle host, and that direction is an argument, not a
+    measurement.
+  - **n=3 in slot `a`.** Observation 2's decomposition into a common term and a
+    slot term rests on three invocations on one side and five on the other.
+  - **No mechanism is attributed** for either systematic. Both observations name
+    what a follow-up would measure and stop there.
+  - **The reading rule is the worst observed estimate**, which is a sample maximum
+    and rises with n by construction. It is a floor on what to distrust, not an
+    estimate of a distribution.
+- Next action: none owed, and nothing is blocked on it. The durable half -- one
+  reading rule per workload and the two systematics -- is written into
+  `agent-docs/terminal-performance.md` under "Run it under the stated conditions",
+  which is where a reader looks before measuring. Three deferred decisions are
+  recorded below. What a future rule-freezer would measure next,
+  in the order the evidence supports: alternate the slot *within* one invocation's
+  schedule and see whether `retained-browse`'s offset survives it; take a
+  `scrollback-stream` A/A series long enough to say whether its negative lean is
+  warm-up or thermal; and repeat the whole table on a genuinely idle host.
+
+#### New deferred decisions
+
+- **DD58 -- the calibration is recorded as a finding in this doc rather than as a
+  new research doc or a guide-only note.** `F17`'s Next action handed the
+  calibration forward as this doc's owed item, so the evidence belongs on this
+  doc's chain; `../FORMAT.md` then routes the durable cross-cutting half out to
+  the guide that owns the subject, which is why one reading rule per workload
+  lives in `agent-docs/terminal-performance.md` and the table lives here. The
+  alternative -- opening doc 32 for benchmark noise -- is the better shape the
+  moment a second host or a second session is measured, because at that point the
+  subject is the instrument rather than this campaign. Reopen it then.
+- **DD59 -- three extra invocations were taken with the physical slot inverted,
+  making eight rather than the five planned.** Five invocations all shared one
+  candidate tree and so one slot, which cannot separate a slot-linked systematic
+  from an A/A offset -- and `agent-docs/measurement-discipline.md` forbids
+  deriving what one more run could measure. The inversion was obtained by adding
+  one disposable non-source file to the working tree until the candidate tree's
+  hex parity flipped the assignment, then deleting it; the arms stayed
+  byte-identical in source throughout. The cost is that the eight runs are not one
+  homogeneous sample: five share one candidate tree and three share another. The
+  table reports both groups separately rather than pooling them, which is the
+  whole reason the slot effect is visible at all.
+- **DD60 -- the reading rule is denominated as the largest A/A estimate observed,
+  not as a resampled quantile, and `select_candidate` is deliberately not
+  called.** That gate is owned by `scripts/terminal-benchmark-calibration.py` and
+  takes its conditions from a single series; calling it on a set of whole
+  invocations would produce a number shaped like a frozen threshold out of
+  evidence that is not one, which is exactly the confusion
+  `agent-docs/measurement-discipline.md` records under "read a gate from the code
+  that owns it". A sample maximum is crude and rises with n, and both properties
+  are stated where the rule is. A human who wants a real threshold on
+  between-invocation noise should build the screen for it rather than reuse this
+  table.

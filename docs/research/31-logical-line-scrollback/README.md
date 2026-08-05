@@ -926,6 +926,24 @@ licenses a production storage change; landing is the paired ladder's.
   draw cells moved 3% on a two-function change that cannot reach them, which is
   `DD55`'s failure mode seen from the other side. One deferred decision added
   (`DD57`).
+- [x] `DONE` **`F18`, the paired ladder's A/A wobble** -- the calibration `F17`'s
+  Next action handed forward, and the answer to the drift this campaign twice
+  nearly concluded from. Recorded in [F18](findings.md). **Eight complete
+  `confirm` invocations with both arms at byte-identical source** (verified by
+  `diff -rq` across the exported arm roots: three untracked non-source files and
+  nothing else), one session, no invalidated block. **Three of the six cells
+  returned a directional verdict on code that cannot differ** --
+  `scrollback-stream` 3/8 `faster`, `style-churn` 2/8 `faster`,
+  `incremental-mixed` 3/8 in *both* directions (+4.85% `slower`, then -4.43%
+  `faster` on adjacent runs) -- and `content-churn` missed by 0.01 points. The two
+  cells the campaign worried about did not cross: `terminal-feed` is the
+  **best-resolved** cell at 2.9x margin, and `retained-browse` has the smallest
+  run-to-run scatter on the ladder (**0.06-0.28 points**) with its margin eaten
+  instead by a **~0.6-point physical-arm-slot systematic** that the ABBA schedule
+  does not remove. One reading rule per workload graduated to
+  [`agent-docs/terminal-performance.md`](../../../agent-docs/terminal-performance.md).
+  **Descriptive only: no threshold moved, no verdict reopened, no rule proposed.**
+  Three deferred decisions added (`DD58`-`DD60`).
 
 ## Rejected
 
@@ -1396,6 +1414,16 @@ is that the change it licensed is not a regression. What is open:
   item is kept rather than deleted: any future `retained-browse` regression on a
   calibrated reading makes the traversal's closure depth the first suspect**, and
   `F17`'s bucket table is the before-picture to diff against.
+- **The ladder's own A/A wobble is now measured, and three cells are wider than
+  their thresholds** ([`F18`](findings.md)): `scrollback-stream`, `style-churn`
+  and `incremental-mixed` each returned a directional verdict on byte-identical
+  source across eight `confirm` invocations, and `retained-browse` carries a
+  ~0.6-point physical-slot systematic against a 1.05% threshold. **Nothing is
+  reopened by it and no threshold moved** -- it is instrument context for whoever
+  freezes or reads a rule next, and the operational half is in
+  [`agent-docs/terminal-performance.md`](../../../agent-docs/terminal-performance.md).
+  What is still open is the mechanism behind either systematic; `F18`'s Next
+  action names the three probes in order.
 - **`DD52`'s equality residual is unspent**: comparing stored bytes is 13x the
   incumbent's `Array ==` on buffer identity (0.91 ms against 0.069 ms on a
   saturated pane), and closing it needs a value identity on the store -- an origin
