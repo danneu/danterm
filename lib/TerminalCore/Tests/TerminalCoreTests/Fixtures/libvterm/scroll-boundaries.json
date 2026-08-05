@@ -7,7 +7,9 @@
     "upstreamCase": "Invalid boundaries; DECSTBM resets cursor position",
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
-    "recordedDeviations": []
+    "recordedDeviations": [
+      "DanTerm ignores invalid DECSTBM boundaries entirely, matching xterm, kitty, ghostty, alacritty, and tmux; libvterm resets to full screen and homes the cursor, but its own suite asserts nothing for this case."
+    ]
   },
   "initial": { "columns": 5, "rows": 4 },
   "events": [
@@ -31,7 +33,7 @@
     {
       "type": "expect",
       "expect": {
-        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "cursor": { "row": 2, "column": 0, "pendingWrap": false },
         "scrollbackCount": 0
       }
     }

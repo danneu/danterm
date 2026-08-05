@@ -248,7 +248,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 7. Invalid DECSTBM resets the region and homes the cursor instead of being ignored
 
-**Status:** `deferred` -- parked for a human design decision
+**Status:** `done` -- invalid DECSTBM is now a complete no-op (margins and cursor untouched); valid DECSTBM still homes. Taken as a deliberate 5-of-6 divergence from libvterm (xterm, kitty, ghostty, alacritty, tmux no-op; only libvterm resets and homes, and its own suite asserts nothing for the invalid case), and `scroll-boundaries.json` now carries a `recordedDeviations` entry with the manifest case reclassified `adapted`.
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:6262` -- high confidence, small effort, found by `core-parser`
 

@@ -240,8 +240,8 @@
         },
         {
           "name": "Invalid boundaries",
-          "disposition": "adopted",
-          "rationale": "scroll-boundaries.json pins inverted and wholly out-of-range DECSTBM boundaries to normalized full-screen behavior."
+          "disposition": "adapted",
+          "rationale": "scroll-boundaries.json replays the upstream pushes but pins inverted and wholly out-of-range DECSTBM boundaries as a complete no-op (margins and cursor untouched), the behavior xterm, kitty, ghostty, alacritty, and tmux share; upstream asserts nothing here, so libvterm's reset-and-home is an implementation detail, and the fixture records the divergence."
         },
         {
           "name": "Scroll Down move+erase emulation",

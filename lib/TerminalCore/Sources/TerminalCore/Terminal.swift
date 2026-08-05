@@ -6268,12 +6268,15 @@ public struct Terminal: Equatable, Sendable {
         let bottom = bottomParameter == 0
             ? rowCount
             : min(Int(bottomParameter), rowCount)
-        if bottom <= top {
-            scrollRegion = nil
-        } else {
-            let candidate = (top - 1)..<bottom
-            scrollRegion = candidate == 0..<rowCount ? nil : candidate
-        }
+        // An invalid region is a complete no-op: neither the margins nor the cursor move.
+        // xterm, kitty, ghostty, alacritty, and tmux all guard the whole body on
+        // `bottom > top`; only libvterm resets to full screen and homes, and its own
+        // suite asserts nothing for this case. See the finding-7 entry in
+        // plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md.
+        guard bottom > top else { return }
+
+        let candidate = (top - 1)..<bottom
+        scrollRegion = candidate == 0..<rowCount ? nil : candidate
         moveCursor(row: positioningOriginRow, column: 0)
     }
 

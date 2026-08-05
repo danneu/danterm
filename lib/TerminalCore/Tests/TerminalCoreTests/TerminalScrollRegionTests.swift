@@ -5,21 +5,27 @@ import Testing
 
 /// Locks region-aware scrolling to deterministic grid, history, and side-state behavior.
 struct TerminalScrollRegionTests {
-    @Test("DECSTBM normalizes bounds, homes the cursor, and rejects excess parameters")
+    @Test("DECSTBM normalizes bounds, homes the cursor, ignores invalid ones, and rejects excess parameters")
     func decstbmNormalizationAndArity() throws {
-        // Intent: pin every DECSTBM clamping row and its cursor-home side effect.
-        // Why it exists: an invalid region must normalize to full-screen while
-        //   excess parameters must leave even pending attachment state untouched.
+        // Intent: pin every DECSTBM clamping row, the cursor-home side effect a valid
+        //   region carries, and the total no-op an invalid one is.
+        // Why it exists: a region whose normalized bottom is not below its top must
+        //   leave both the margins and the cursor untouched -- xterm, kitty, ghostty,
+        //   alacritty, and tmux all guard the whole body on `bottom > top`, so a TUI
+        //   that probes with a degenerate region keeps its margins and its position.
+        //   Excess parameters must likewise leave even pending attachment state alone.
         // Scenario: a TUI establishes valid, partial, defaulted, inverted, and
         //   out-of-bounds margins before requesting a cursor-independent scroll.
-        let fixtures: [(sequence: String, screen: String, scrollback: Int)] = [
-            ("\u{1B}[2;3r", "A \nC \n  \nD ", 0),
-            ("\u{1B}[2r", "A \nC \nD \n  ", 0),
-            ("\u{1B}[;3r", "B \nC \n  \nD ", 1),
-            ("\u{1B}[r", "B \nC \nD \n  ", 1),
-            ("\u{1B}[0;0r", "B \nC \nD \n  ", 1),
-            ("\u{1B}[5;2r", "B \nC \nD \n  ", 1),
-            ("\u{1B}[100;105r", "B \nC \nD \n  ", 1),
+        let home = TerminalCursor(row: 0, column: 0, isPendingWrap: false)
+        let unmoved = TerminalCursor(row: 3, column: 1, isPendingWrap: false)
+        let fixtures: [(sequence: String, cursor: TerminalCursor, screen: String, scrollback: Int)] = [
+            ("\u{1B}[2;3r", home, "A \nC \n  \nD ", 0),
+            ("\u{1B}[2r", home, "A \nC \nD \n  ", 0),
+            ("\u{1B}[;3r", home, "B \nC \n  \nD ", 1),
+            ("\u{1B}[r", home, "B \nC \nD \n  ", 1),
+            ("\u{1B}[0;0r", home, "B \nC \nD \n  ", 1),
+            ("\u{1B}[5;2r", unmoved, "B \nC \nD \n  ", 1),
+            ("\u{1B}[100;105r", unmoved, "B \nC \nD \n  ", 1),
         ]
 
         for fixture in fixtures {
@@ -28,7 +34,7 @@ struct TerminalScrollRegionTests {
 
             terminal.feed(Array(fixture.sequence.utf8))
 
-            #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+            #expect(terminal.geometry.cursor == fixture.cursor)
             terminal.feed(Array("\u{1B}[S".utf8))
             #expect(terminal.screenText == fixture.screen)
             #expect(terminal.scrollbackRowCount == fixture.scrollback)
