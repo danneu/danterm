@@ -71,6 +71,11 @@ before this audit is closed out.
   Each is a one-line swap to the new `metrics.lightStrokePixels`.
 - [x] **78** -- `BackgroundExecutionTests.swift`'s `largestOverflowingMetrics()` still
   duplicates the now-shared helper in `OverflowMetricsSupport.swift`.
+- [ ] **NEW (app, from finding 11)** -- `app/PaneWrapperView.swift:509` (copy cwd /
+  copy session id) writes `NSPasteboard.general` with no injectable seam, so those
+  actions stay untestable in isolation. Same shape as finding 11, different file.
+  The libghostty-backed paths in `TerminalView.swift` / `GhosttyApp.swift` were left
+  alone deliberately.
 - [ ] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
   TerminalCoreBenchmarkSupport needs `lib/TerminalCore/Package.swift` to add it as a
   dependency of `TerminalDrawBenchmarkSupport` first. Carry both preconditions into the
@@ -179,7 +184,7 @@ Latent bugs and edge-case handling problems in the engine. These are the finding
 
 ### 2. Occluded draws re-serialize and rewrite the whole sample file per draw
 
-**Status:** `todo` -- batch `app`
+**Status:** `done` -- sustained occlusion now contributes one sample and one checkpoint write
 
 `app/TerminalBenchmark.swift:76` -- high confidence, trivial effort, found by `app-harness`
 
@@ -291,7 +296,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 11. pasteClipboard bypasses the injectable pasteboard seam
 
-**Status:** `todo` -- batch `app`
+**Status:** `done` -- paste reads the seam, and the existing UI test (which the finding wrongly said did not exist) now uses a scratch pasteboard instead of clobbering the real clipboard
 
 `app/SwiftTerminalSessionView.swift:734` -- high confidence, trivial effort, found by `app-harness`
 
@@ -1387,7 +1392,7 @@ Comments and markdown whose factual claims contradict the current code.
 
 ### 100. acceptPendingWork's doc names a nonexistent series and omits the fence-stall one
 
-**Status:** `todo` -- batch `app`
+**Status:** `done` -- all three attributed series named, plus the verifier's bonus about the process-CPU series starting one sample short
 
 `app/TerminalBenchmark.swift:956` -- high confidence, trivial effort, found by `docs-comments`
 
