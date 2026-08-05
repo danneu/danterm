@@ -117,31 +117,44 @@ struct TerminalResizeProbeSupportTests {
         // Stated as a depth rather than a projected byte total so a failure names the
         // number that has to change: the line count the recipe ships.
         //
-        // Conservative in the safe direction, with no fudge factor needed: per-line
-        // charge creeps *upward* with depth as the index and side tables amortize
-        // (measured, per payload: dense 339 -> 373 B/line between 512 and 2,048 lines,
-        // sparse 58.7 -> 63.1 between 512 and 16,384, wide 1,278 -> 1,415 between 512
-        // and 2,048). A prefix therefore understates the rate and *overstates* the depth
-        // at which the arena fills, so clearing this bound from a prefix implies clearing
-        // it at full depth.
+        // Conservative in the safe direction: per-line charge creeps *upward* with depth
+        // as the index and side tables amortize (measured, per payload: dense 339 -> 373
+        // B/line between 512 and 2,048 lines, sparse 58.7 -> 63.1 between 512 and 16,384,
+        // wide 1,278 -> 1,415 between 512 and 2,048). A prefix therefore understates the
+        // rate and *overstates* the depth at which the arena fills, so clearing this bound
+        // from a prefix implies clearing it at full depth.
+        //
+        // A margin, not just the ceiling: `impliedDepth <= lineCount` passes at 1.003x,
+        // which is how `.sparseSaturating` came to ship a margin of exactly that and
+        // nobody noticed. A bound that cannot tell "saturates" from "barely saturates"
+        // lets a charge-rate change erode the last percent silently, and the recipe then
+        // prints a full distribution of a line-bounded history. 1.5x is the largest factor
+        // every shipped recipe clears -- measured margins are dense 2.85x, sparse 2.01x,
+        // wide 5.40x -- so the tightest recipe still has 1.34x of headroom, and the
+        // measurement is exact integer arithmetic over a deterministic payload, so there
+        // is no sampling noise for that headroom to absorb. It fails while the recipe is
+        // still saturating, which is the point: the fix is an edit to a constant, not an
+        // incident.
         let impliedSaturationLineCount =
             Double(census.retainedArenaCapacityBytes) / chargePerLine
-        #expect(impliedSaturationLineCount <= Double(recipe.lineCount))
+        #expect(impliedSaturationLineCount * 1.5 <= Double(recipe.lineCount))
     }
 
     /// The prefix `saturatingRecipesChargePastTheBudgetCeiling` measures each payload's
     /// per-line charge over.
     ///
-    /// Per payload rather than one constant because the shipped recipes' margins differ
-    /// by two orders of magnitude, and a prefix only proves saturation once its
-    /// understated rate has amortized past the margin being claimed. `.dense` implies
-    /// 42,100 lines against a shipped 120,000 (2.8x) and `.wide` 11,100 against 60,000
-    /// (5.4x), both settled by 2,048 lines. `.sparse` ships only ~1.005x -- 250,000 lines
-    /// against an implied ~249,200 -- so at 2,048 its rate is still 1.3% short and the
-    /// division reports 253,200, i.e. it cannot yet tell a saturating recipe from a
-    /// non-saturating one. 16,384 is where the rate has amortized enough to decide it.
-    /// That the sparse recipe has under 1% of headroom is itself the thing to know: it
-    /// is one representation change away from silently measuring a line-bounded history.
+    /// Per payload rather than one constant because the rate a prefix reports is an
+    /// understatement that shrinks with depth, and the margin bound above is only as
+    /// trustworthy as the rate. `.dense` implies 42,100 lines against a shipped 120,000
+    /// (2.85x) and `.wide` 11,100 against 60,000 (5.40x), both settled by 2,048 lines.
+    /// `.sparse` is the slowest to amortize -- 58.7 B/line at 512, 63.1 at 16,384 -- and
+    /// it is also the tightest recipe (500,000 against an implied 249,200, 2.01x), so it
+    /// reads its rate at 16,384, which is within 0.2% of the 63.24 B/line the rate
+    /// asymptotes to, against the 1.8% short it still is at 2,048.
+    ///
+    /// The prefix cost is fixed by these constants and not by any recipe's `lineCount`,
+    /// which is what lets `.sparseSaturating` carry a real margin without this test
+    /// paying for it -- only the manually-run probe binary feeds the shipped counts.
     private static func chargeMeasurementPrefixLineCount(for recipe: ResizeProbeRecipe) -> Int {
         recipe.payload == .sparse ? 16_384 : 2_048
     }

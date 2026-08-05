@@ -151,11 +151,23 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// question for the cheapest regime and reports it as the answer.
     ///
     /// Geometry, budget, and alternation are `v2`'s exactly, so content density is
-    /// the only variable between the two and their numbers subtract. The line count
-    /// is much larger because these rows are much cheaper;
-    /// `sparseRecipeReachesTheBudgetCeiling` pins that it still saturates.
+    /// the only variable between the two and their numbers subtract. `lineCount` is
+    /// therefore the only lever, and it is much larger because these rows are much
+    /// cheaper -- ~63.2 B/line, so the arena fills at ~248,700 lines.
+    ///
+    /// It carries a **2.0x** margin over that depth rather than sitting just above it.
+    /// The margin is the point: a line count that only just clears the ceiling stops
+    /// clearing it the moment anything makes a retained row cheaper, and the probe
+    /// would then print a full distribution of a *line-bounded* history under a
+    /// saturated label. The shipped 250,000 had drifted to 1.003x before anyone
+    /// looked. `saturatingRecipesChargePastTheBudgetCeiling` asserts the margin, not
+    /// just the ceiling, so the next erosion fails a test while headroom remains.
+    /// The extra lines are paid for only by the manually-run probe binary -- once
+    /// history is budget-bound the surplus evicts, and retained depth is unmoved
+    /// (measured: 246,595 records / 13,564,656 arena bytes at 250,000 lines against
+    /// 246,596 / 13,564,592 at 500,000).
     public static let sparseSaturating = ResizeProbeRecipe(
-        columns: 179, rows: 66, lineCount: 250_000,
+        columns: 179, rows: 66, lineCount: 500_000,
         scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
         alternateColumns: 100, sampleCount: 20, warmupCount: 4,
         name: "saturated-sparse-resize-v1", payload: .sparse
