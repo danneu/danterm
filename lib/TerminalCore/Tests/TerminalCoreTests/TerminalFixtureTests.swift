@@ -7,16 +7,34 @@ import TerminalCoreRecording
 
 /// Proves external behavioral cases use only public inspection views and remain chunk-invariant.
 struct TerminalFixtureTests {
-    @Test("neutral replay fixtures pass every expectation under all feed splits")
-    func replayFixtures() throws {
-        let urls = try fixtureURLs().filter {
-            Self.milestone8AlacrittyRecordings.contains($0.deletingPathExtension().lastPathComponent) == false
-        }
-        #expect(urls.isEmpty == false)
+    @Test(
+        "neutral replay fixtures pass every expectation under all feed splits",
+        arguments: try TerminalFixtureTests.chunkInvariantFixtureNames()
+    )
+    func replayFixtures(_ name: String) throws {
+        try replayFixture(at: Self.fixtureURL(named: name))
+    }
 
-        for url in urls {
-            try replayFixture(at: url)
-        }
+    @Test("the chunk-invariance replay covers every external fixture except the Milestone 8 five")
+    func chunkInvariantFixtureInventory() throws {
+        // Intent: the argument list `replayFixtures` is parameterized over is exactly the
+        //   external corpus minus the five Milestone 8 recordings replayed at authored
+        //   chunking by `milestone8ApplicationReplay`.
+        // Why it exists: a parameterized test whose arguments come back short runs fewer
+        //   cases and still reports green, so the corpus has to be pinned somewhere other
+        //   than inside the parameterized test itself. This is that somewhere.
+        // Scenario: a fixture directory is renamed, a recording is dropped, or the
+        //   Milestone 8 exclusion list drifts away from the files on disk.
+        let expected = Set(
+            Self.expectedLibvtermRecordings.map { "libvterm/\($0)" }
+                + Self.adoptedAlacrittyRecordings
+                    .subtracting(Self.milestone8AlacrittyRecordings)
+                    .map { "alacritty/\($0)" }
+                + ["windows-terminal/osc52-unicode"]
+        )
+        let names = try Self.chunkInvariantFixtureNames()
+        #expect(names.count == 67)
+        #expect(Set(names) == expected)
     }
 
     @Test("the libvterm fixture directory holds exactly the recordings named here")
@@ -270,17 +288,41 @@ struct TerminalFixtureTests {
         }
     }
 
-    private func fixtureURLs() throws -> [URL] {
-        let root = try #require(Bundle.module.resourceURL)
-            .appending(path: "Fixtures", directoryHint: .isDirectory)
+    /// The `directory/name` identifiers `replayFixtures` is parameterized over, static because a
+    /// `@Test(arguments:)` list is evaluated before any suite instance exists. Names rather than
+    /// URLs so a failing case reads as the fixture it replayed; `chunkInvariantFixtureInventory`
+    /// pins the result so a short list cannot quietly shrink the corpus.
+    private static func chunkInvariantFixtureNames() throws -> [String] {
+        guard let resources = Bundle.module.resourceURL else {
+            throw FixtureError.missingResourceRoot
+        }
+        let root = resources.appending(path: "Fixtures", directoryHint: .isDirectory)
         return try ["libvterm", "alacritty", "windows-terminal"].flatMap { directory in
             try FileManager.default.contentsOfDirectory(
                 at: root.appending(path: directory, directoryHint: .isDirectory),
                 includingPropertiesForKeys: nil
             )
             .filter { $0.pathExtension == "json" }
+            .map { "\(directory)/\($0.deletingPathExtension().lastPathComponent)" }
         }
-        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        .filter { name in
+            Self.milestone8AlacrittyRecordings.contains(name.split(separator: "/").last.map(String.init) ?? "") == false
+        }
+        .sorted()
+    }
+
+    private static func fixtureURL(named name: String) throws -> URL {
+        let parts = name.split(separator: "/")
+        guard parts.count == 2,
+              let url = Bundle.module.url(
+                  forResource: String(parts[1]),
+                  withExtension: "json",
+                  subdirectory: "Fixtures/\(parts[0])"
+              )
+        else {
+            throw FixtureError.unknownFixture(name)
+        }
+        return url
     }
 
     private func recordingFixtureURLs() throws -> [URL] {
@@ -1061,6 +1103,8 @@ private enum ChunkStrategy {
 }
 
 private enum FixtureError: Error {
+    case missingResourceRoot
+    case unknownFixture(String)
     case invalidStyleToken(String)
     case invalidCursorShape(String)
     case invalidMouseTrackingMode(String)
