@@ -9,6 +9,7 @@ import CoreGraphics
 import Dispatch
 import Foundation
 import TerminalCore
+import TerminalCoreBenchmarkSupport
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
@@ -344,43 +345,4 @@ private final class PreparedDraw {
         guard let context else { return }
         drawRenderFrame(plan, metrics: metrics, in: context)
     }
-}
-
-private func measureDurationStable(
-    iterations: Int,
-    targetNanoseconds: UInt64,
-    measureBatch: (Int) -> UInt64
-) -> (batchCount: Int, totals: [UInt64]) {
-    var batchCount = 1
-    var calibration = measureBatch(batchCount)
-    while calibration < targetNanoseconds {
-        batchCount = scaledBatchCount(
-            current: batchCount,
-            observedNanoseconds: calibration,
-            targetNanoseconds: targetNanoseconds
-        )
-        calibration = measureBatch(batchCount)
-    }
-    while true {
-        let totals = (0..<iterations).map { _ in measureBatch(batchCount) }
-        if totals.allSatisfy({ $0 >= targetNanoseconds }) {
-            return (batchCount, totals)
-        }
-        batchCount = scaledBatchCount(
-            current: batchCount,
-            observedNanoseconds: totals.min() ?? 0,
-            targetNanoseconds: targetNanoseconds
-        )
-    }
-}
-
-private func scaledBatchCount(
-    current: Int,
-    observedNanoseconds: UInt64,
-    targetNanoseconds: UInt64
-) -> Int {
-    guard observedNanoseconds > 0 else { return current + 1 }
-    let numerator = UInt64(current) * targetNanoseconds
-    let scaled = (numerator + observedNanoseconds - 1) / observedNanoseconds
-    return max(current + 1, Int(scaled))
 }

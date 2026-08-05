@@ -156,7 +156,12 @@ let package = Package(
         ),
         .target(
             name: "TerminalDrawBenchmarkSupport",
-            dependencies: ["TerminalCore", "TerminalRenderPlanning", "TerminalRenderExecution"],
+            dependencies: [
+                "TerminalCore",
+                "TerminalCoreBenchmarkSupport",
+                "TerminalRenderPlanning",
+                "TerminalRenderExecution",
+            ],
             path: "Sources/TerminalDrawBenchmarkSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

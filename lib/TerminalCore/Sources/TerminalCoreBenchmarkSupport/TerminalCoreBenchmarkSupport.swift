@@ -1,4 +1,6 @@
-// Testable timing policy for the headless Terminal.feed benchmark executable.
+// Testable timing policy for the headless benchmark executables: the duration-floor
+// calibration both the Terminal.feed and draw benchmarks measure against, plus the
+// feed benchmark's own sampling and reporting shape.
 import Dispatch
 import Foundation
 import TerminalCore
@@ -88,12 +90,16 @@ public func runSustainedFeed(
     return completed
 }
 
-/// Calibrates outside the reported samples, then retries with one fixed batch until every sample meets the floor.
-public func measureDurationStableFeed(
+/// The duration-floor policy every reported sample in both benchmark executables rests on:
+/// calibrate outside the reported samples, then retry with one fixed batch until every sample
+/// meets the floor. Public because the draw benchmark runs the same policy over a different
+/// batch body -- keeping one copy is the point, since a drift here silently changes what both
+/// benchmarks report.
+public func measureDurationStable(
     iterations: Int,
     targetNanoseconds: UInt64,
     measureBatch: (Int) -> UInt64
-) -> CoreBenchmarkMeasurements {
+) -> (batchCount: Int, totals: [UInt64]) {
     precondition(iterations >= 2)
     precondition(targetNanoseconds > 0)
 
@@ -111,11 +117,7 @@ public func measureDurationStableFeed(
     while true {
         let totals = (0..<iterations).map { _ in measureBatch(batchCount) }
         guard let shortest = totals.min(), shortest < targetNanoseconds else {
-            return CoreBenchmarkMeasurements(
-                batchCount: batchCount,
-                feedDurationNanoseconds: totals.map { $0 / UInt64(batchCount) },
-                sampleDurationNanoseconds: totals
-            )
+            return (batchCount, totals)
         }
         batchCount = scaledBatchCount(
             current: batchCount,
@@ -123,6 +125,24 @@ public func measureDurationStableFeed(
             targetNanoseconds: targetNanoseconds
         )
     }
+}
+
+/// Wraps the shared floor policy in the feed benchmark's reporting shape.
+public func measureDurationStableFeed(
+    iterations: Int,
+    targetNanoseconds: UInt64,
+    measureBatch: (Int) -> UInt64
+) -> CoreBenchmarkMeasurements {
+    let stable = measureDurationStable(
+        iterations: iterations,
+        targetNanoseconds: targetNanoseconds,
+        measureBatch: measureBatch
+    )
+    return CoreBenchmarkMeasurements(
+        batchCount: stable.batchCount,
+        feedDurationNanoseconds: stable.totals.map { $0 / UInt64(stable.batchCount) },
+        sampleDurationNanoseconds: stable.totals
+    )
 }
 
 private func scaledBatchCount(
