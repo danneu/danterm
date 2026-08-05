@@ -1,4 +1,30 @@
-// Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
+// `Terminal`, the pure headless terminal reduction: bytes in, grid and metadata state out,
+// with no IO, no AppKit, and no clock. Everything that reads or writes the live screen state
+// lives here, which is why the file is large and why it is one file.
+//
+// What it owns:
+//   - Ingestion and dispatch: `feed`, the print path, C0/C1 controls, execution of the CSI,
+//     OSC, and DCS actions the parser hands back, mode state, and queries with their replies.
+//   - The grid itself: cursor, margins, tab stops, scroll regions, erase and edit operations,
+//     the alternate screen, resize and reflow (`reconstructLogicalLines`, `pack`).
+//   - State layered over the grid that only makes sense against a live coordinate space:
+//     selection, search, hyperlink hover/arm interaction, OSC 133 semantic prompt anchoring
+//     (vacate on resize, reclaim of stale heads), and damage/inspection invalidation.
+//   - The boundary to retained history: admitting scrolled-off rows into `LogicalLineStore`
+//     with its canonical trimming, and the `memoryCensus` walk that prices the whole engine.
+//
+// What deliberately lives elsewhere: retained-history storage and its arena/eviction policy
+// (`LogicalLineStore`), the retained record and its row folding (`LogicalLineRecord`,
+// `LogicalLineFold`), the packed row representation (`PackedRetainedRow`), escape-sequence
+// recognition into actions (`TerminalInputStream`, `EscapeAbsorber`), Unicode width and
+// grapheme tables (generated), key/mouse encoding (`TerminalInputEncoding`), and the
+// pointer-gesture policy (`TerminalInteractionPolicy`). The rule for what belongs here: if it
+// mutates or interprets the live screen, or anchors something to a live coordinate, it is in
+// this file; if it is a representation, a table, or a decision that can be made without the
+// screen, it is not.
+//
+// Keep it pure. `Terminal` is value-semantic and fully testable by feeding bytes and reading
+// back state, which is the property the whole engine's test suite rests on.
 
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
 public struct TerminalTextPosition: Equatable, Sendable {
@@ -523,12 +549,8 @@ public struct Terminal: Equatable, Sendable {
     /// Relates an old visual row to its transient logical line and boundary.
     private struct ReflowRowMetadata {
         var line: Int
-        /// The logical offset this row's first cell sits at in its line, which is what turns a
-        /// live (row, column) anchor into the boundary key `pack` produces destinations for.
-        var startOffset: Int
         var boundaryOffset: Int
         var retainedEnd: Int
-        var firstSourceKey: Int?
     }
 
     /// Distinguishes cursor meanings that require different resize attachment rules.
@@ -1351,9 +1373,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchTitle(_ payload: [UInt8], selectorEnd: Int) {
-        let valueBytes = Array(payload[payload.index(after: selectorEnd)...])
+        let valueBytes = payload[payload.index(after: selectorEnd)...]
         guard valueBytes.count <= Self.maximumSemanticValueBytes,
-              let value = strictlyDecodedUTF8(valueBytes)
+              let value = String(validating: valueBytes, as: UTF8.self)
         else { return }
         titleUsesWorkingDirectory = value.isEmpty
         pendingConsumerWork.setTitle(admittedCoalescedSemanticEvent(
@@ -1432,8 +1454,8 @@ public struct Terminal: Equatable, Sendable {
         bodyBytes: ArraySlice<UInt8>
     ) {
         guard titleBytes.count + bodyBytes.count <= Self.maximumSemanticValueBytes,
-              let title = strictlyDecodedUTF8(Array(titleBytes)),
-              let body = strictlyDecodedUTF8(Array(bodyBytes))
+              let title = String(validating: titleBytes, as: UTF8.self),
+              let body = String(validating: bodyBytes, as: UTF8.self)
         else { return }
         admitDiscreteSemanticEvent(.desktopNotification(title: title, body: body))
     }
@@ -1483,7 +1505,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchOSC7(_ payload: [UInt8], selectorEnd: Int) {
-        let valueBytes = Array(payload[payload.index(after: selectorEnd)...])
+        let valueBytes = payload[payload.index(after: selectorEnd)...]
         guard valueBytes.count <= Self.maximumSemanticValueBytes else { return }
         let cwd: String?
         if valueBytes.isEmpty {
@@ -1538,22 +1560,16 @@ public struct Terminal: Equatable, Sendable {
         return retainedTerminalMetadataBytes + byteCount <= Self.maximumTerminalMetadataBytes
     }
 
-    private func strictlyDecodedUTF8(_ bytes: [UInt8]) -> String? {
-        let value = String(decoding: bytes, as: UTF8.self)
-        return Array(value.utf8) == bytes ? value : nil
-    }
-
-    private func localFilePath(from bytes: [UInt8]) -> String? {
-        let prefix = Array("file://".utf8)
-        guard bytes.starts(with: prefix),
-              let slash = bytes[prefix.count...].firstIndex(of: 0x2F)
+    private func localFilePath(from bytes: ArraySlice<UInt8>) -> String? {
+        let hostStart = bytes.index(bytes.startIndex, offsetBy: 7, limitedBy: bytes.endIndex)
+        guard bytes.starts(with: "file://".utf8), let hostStart,
+              let slash = bytes[hostStart...].firstIndex(of: 0x2F)
         else { return nil }
-        let hostBytes = Array(bytes[prefix.count..<slash])
-        guard let host = strictlyDecodedUTF8(hostBytes),
+        guard let host = String(validating: bytes[hostStart..<slash], as: UTF8.self),
               Self.namesThisMachine(host, machineHostname: machineHostname)
         else { return nil }
-        guard let decodedPathBytes = percentDecoded(Array(bytes[slash...])),
-              let path = strictlyDecodedUTF8(decodedPathBytes)
+        guard let decodedPathBytes = percentDecoded(bytes[slash...]),
+              let path = String(validating: decodedPathBytes, as: UTF8.self)
         else { return nil }
         return path
     }
@@ -1585,16 +1601,16 @@ public struct Terminal: Equatable, Sendable {
         return bytes
     }
 
-    private func percentDecoded(_ bytes: [UInt8]) -> [UInt8]? {
+    private func percentDecoded(_ bytes: ArraySlice<UInt8>) -> [UInt8]? {
         var result: [UInt8] = []
-        var index = 0
-        while index < bytes.count {
+        var index = bytes.startIndex
+        while index < bytes.endIndex {
             if bytes[index] != 0x25 {
                 result.append(bytes[index])
                 index += 1
                 continue
             }
-            guard index + 2 < bytes.count,
+            guard index + 2 < bytes.endIndex,
                   let high = hexadecimalValue(bytes[index + 1]),
                   let low = hexadecimalValue(bytes[index + 2])
             else { return nil }
@@ -1617,17 +1633,14 @@ public struct Terminal: Equatable, Sendable {
         let paramsStart = payload.index(after: selectorEnd)
         guard let paramsEnd = payload[paramsStart...].firstIndex(of: 0x3B) else { return }
         let uriStart = payload.index(after: paramsEnd)
-        let uriBytes = Array(payload[uriStart...])
-        let uri = String(decoding: uriBytes, as: UTF8.self)
-        guard Array(uri.utf8) == uriBytes else { return }
+        guard let uri = String(validating: payload[uriStart...], as: UTF8.self) else { return }
         if uri.isEmpty {
             hyperlinkPen = nil
             return
         }
 
-        let paramsBytes = Array(payload[paramsStart..<paramsEnd])
-        let params = String(decoding: paramsBytes, as: UTF8.self)
-        let explicitId = Array(params.utf8) == paramsBytes ? osc8ExplicitId(in: params) : nil
+        let params = String(validating: payload[paramsStart..<paramsEnd], as: UTF8.self)
+        let explicitId = params.flatMap { osc8ExplicitId(in: $0) }
         let target = TerminalHyperlink(uri: uri, explicitId: explicitId)
         guard hyperlinkByteCost(target) <= Self.maximumHyperlinkTargetBytes else { return }
 
@@ -1641,22 +1654,9 @@ public struct Terminal: Equatable, Sendable {
             return
         }
 
-        var candidateTargets = hyperlinkTargets
-        let interactionCost = (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
-            + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
-        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
-                > Self.maximumTerminalMetadataBytes
-        {
-            let live = liveHyperlinkIds()
-            candidateTargets = candidateTargets.filter { live.contains($0.key) }
-        }
-        guard candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
-                <= Self.maximumTerminalMetadataBytes
+        guard var candidateTargets = admittedHyperlinkTargets(adding: target, replacing: nil),
+              let id = allocateHyperlinkId(avoiding: candidateTargets)
         else { return }
-
-        guard let id = allocateHyperlinkId(avoiding: candidateTargets) else { return }
         candidateTargets[id] = target
         hyperlinkTargets = candidateTargets
         hyperlinkPen = id
@@ -1697,6 +1697,44 @@ public struct Terminal: Equatable, Sendable {
         target.uri.utf8.count + (target.explicitId?.utf8.count ?? 0)
     }
 
+    /// Names the interaction slot a caller is about to overwrite, whose current occupant
+    /// therefore does not count against the admission sum.
+    private enum InteractionLinkSlot {
+        case hover
+        case arm
+    }
+
+    /// Prices one more hyperlink against the pane-wide metadata cap, reclaiming dead targets
+    /// once if the table does not fit otherwise, and returns the table to store on success.
+    ///
+    /// The single spelling of an arithmetic that OSC 8 admission, hover, and arm all have to
+    /// agree on: the retained targets, both interaction slots (minus the one being replaced),
+    /// and the retained semantic events share one budget. Returning the reclaimed table rather
+    /// than a `Bool` is what lets a caller commit the sweep it just paid for -- `liveHyperlinkIds`
+    /// walks all of retained history, so a caller that discarded it would walk history twice.
+    /// Non-mutating so callers keep control of their own damage bracketing.
+    private func admittedHyperlinkTargets(
+        adding target: TerminalHyperlink,
+        replacing slot: InteractionLinkSlot?
+    ) -> [HyperlinkId: TerminalHyperlink]? {
+        let interactionCost =
+            (slot == .hover ? 0 : hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+            + (slot == .arm ? 0 : armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+        let fixedCost = interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
+
+        var candidateTargets = hyperlinkTargets
+        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) }) + fixedCost
+            > Self.maximumTerminalMetadataBytes
+        {
+            let live = liveHyperlinkIds()
+            candidateTargets = candidateTargets.filter { live.contains($0.key) }
+        }
+        guard candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) }) + fixedCost
+            <= Self.maximumTerminalMetadataBytes
+        else { return nil }
+        return candidateTargets
+    }
+
     private func liveHyperlinkIds() -> Set<HyperlinkId> {
         var live = Set<HyperlinkId>()
         func collect(_ rows: [GridRow], into live: inout Set<HyperlinkId>) {
@@ -1729,10 +1767,9 @@ public struct Terminal: Equatable, Sendable {
         let dataStart = payload.index(after: targetEnd)
         let encoded = payload[dataStart...]
         guard encoded.elementsEqual([0x3F]) == false,
-              let decoded = decodeBase64(encoded, maximumByteCount: 1_048_576)
+              let decoded = decodeBase64(encoded, maximumByteCount: 1_048_576),
+              let value = String(validating: decoded, as: UTF8.self)
         else { return }
-        let value = String(decoding: decoded, as: UTF8.self)
-        guard Array(value.utf8) == decoded else { return }
         pendingConsumerWork.setClipboardWrite(value)
     }
 
@@ -2395,19 +2432,10 @@ public struct Terminal: Equatable, Sendable {
         else { return false }
 
         let before = damageActionSnapshot
-        var candidateTargets = hyperlinkTargets
-        let armCost = armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
-        let retainedCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
-        if retainedCost + armCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumTerminalMetadataBytes
-        {
-            let live = liveHyperlinkIds()
-            candidateTargets = candidateTargets.filter { live.contains($0.key) }
-        }
-        let candidateCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
-        guard candidateCost + armCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
-            <= Self.maximumTerminalMetadataBytes
-        else { return false }
+        guard let candidateTargets = admittedHyperlinkTargets(
+            adding: link.hyperlink,
+            replacing: .hover
+        ) else { return false }
 
         let ordered = textPositionPrecedes(link.range.start, link.range.end)
             ? (link.range.start, link.range.end)
@@ -2430,33 +2458,19 @@ public struct Terminal: Equatable, Sendable {
         guard isActivatableHTTPLink(link.hyperlink.uri),
               hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
         else { return false }
-        var candidateTargets = hyperlinkTargets
-        let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
-        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumTerminalMetadataBytes
-        {
-            let live = liveHyperlinkIds()
-            candidateTargets = candidateTargets.filter { live.contains($0.key) }
-        }
-        return candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
-            <= Self.maximumTerminalMetadataBytes
+        return admittedHyperlinkTargets(adding: link.hyperlink, replacing: .arm) != nil
     }
 
     /// Atomically reserves a validated originating run for click-time revalidation.
     @discardableResult
     public mutating func setArmedLink(_ link: TerminalResolvedLink) -> Bool {
-        guard canAdmitArmedLink(link) else { return false }
-        var candidateTargets = hyperlinkTargets
-        let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
-        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumTerminalMetadataBytes
-        {
-            let live = liveHyperlinkIds()
-            candidateTargets = candidateTargets.filter { live.contains($0.key) }
-        }
+        guard isActivatableHTTPLink(link.hyperlink.uri),
+              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes,
+              let candidateTargets = admittedHyperlinkTargets(
+                  adding: link.hyperlink,
+                  replacing: .arm
+              )
+        else { return false }
         let ordered = textPositionPrecedes(link.range.start, link.range.end)
             ? (link.range.start, link.range.end)
             : (link.range.end, link.range.start)
@@ -4688,8 +4702,7 @@ public struct Terminal: Equatable, Sendable {
     ) -> (
         lines: [ReflowLine],
         anchor: ReflowCursorAnchor,
-        cursorLine: Int,
-        rowMetadata: [ReflowRowMetadata]
+        cursorLine: Int
     ) {
         var lines: [ReflowLine] = []
         var currentLine = ReflowLine()
@@ -4737,19 +4750,15 @@ public struct Terminal: Equatable, Sendable {
             }
             let retainedEnd = retainedContentEnd(in: row)
             let iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd
-            let startOffset = logicalOffset
             var column = 0
-            var firstSourceKey: Int?
             while column < iterationEnd {
                 let cell = row.cell(at: column)
                 let key = sourceKey(row: rowIndex, column: column, columns: oldColumnCount)
                 switch cell.kind {
                 case .spacerHead:
-                    firstSourceKey = firstSourceKey ?? key
                     pendingSpacerKeys.append(key)
                     column += 1
                 case .wideHead:
-                    firstSourceKey = firstSourceKey ?? key
                     var sources = pendingSpacerKeys.map { (key: $0, offset: 0) }
                     pendingSpacerKeys.removeAll(keepingCapacity: true)
                     sources.append((key: key, offset: 0))
@@ -4781,7 +4790,6 @@ public struct Terminal: Equatable, Sendable {
                     logicalOffset += 2
                     column += 2
                 case .narrow, .padding:
-                    firstSourceKey = firstSourceKey ?? key
                     currentLine.units.append(ReflowUnit(
                         cells: [cell],
                         sourceOffsets: [(key: key, offset: 0)]
@@ -4796,10 +4804,8 @@ public struct Terminal: Equatable, Sendable {
 
             metadata.append(ReflowRowMetadata(
                 line: lines.count,
-                startOffset: startOffset,
                 boundaryOffset: logicalOffset,
-                retainedEnd: retainedEnd,
-                firstSourceKey: firstSourceKey
+                retainedEnd: retainedEnd
             ))
             if row.isSoftWrapped == false {
                 lines.append(currentLine)
@@ -4840,7 +4846,7 @@ public struct Terminal: Equatable, Sendable {
             )
         }
 
-        return (lines, anchor, cursorMetadata.line, metadata)
+        return (lines, anchor, cursorMetadata.line)
     }
 
     private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
@@ -5905,6 +5911,9 @@ public struct Terminal: Equatable, Sendable {
 
         switch properties.cellWidth {
         case .zero:
+            // Unreachable: the guard above returns on .zero. The arm stays because
+            // TerminalCellWidth has three cases and the exhaustiveness check is what
+            // would fail the build if the generated table ever grew a fourth.
             break
         case .narrow:
             printNarrow(scalar, breakClass: classification.graphemeBreakClass)
