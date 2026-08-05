@@ -152,7 +152,7 @@ struct TerminalMemoryCensusTests {
     func censusReportsRetentionHealth() throws {
         // Intent: the census surfaces the invariant doc 15's F4 found broken, restated for the
         //   record arena, so any future measurement carries its own proof that it is not
-        //   measuring retained garbage.
+        //   measuring retained garbage -- and prices a retained cell while that is true.
         // Why it exists: F4's waste -- storage held for rows already evicted -- was invisible to
         //   every existing accessor, and it failed while the admission accounting stayed correct:
         //   accounting and effect are separate observables, which is why this test reads resident
@@ -187,5 +187,26 @@ struct TerminalMemoryCensusTests {
         terminal.feed(Array("\u{1B}[3J".utf8))
         #expect(terminal.memoryCensus.retainedArenaBytesInUse == 0)
         #expect(terminal.memoryCensus.retainedArenaCapacityBytes == capacity)
+
+        // What a retained cell costs, migrated here from the deleted
+        // `TerminalScrollbackBudgetTests.historyRespectsItsBudgetInRealBytes`, which priced it
+        // over 20,000 lines against the production arena and so only ever in the regime where
+        // nothing is reclaimed. It needs its own fixture: the per-record header is amortized over
+        // a record's cells, and the one-character lines above hold one cell each, so their average
+        // is all header. Ordinary-width lines at the same small budget put it in the evicting
+        // regime instead, which is where the number matters.
+        var wide = try #require(Terminal(columns: 179, rows: 2, scrollbackBudgetBytes: 6_000))
+        for line in 0..<200 {
+            wide.feed(Array("DANTERM-BUDGET-\(line) sustained plain-text output payload\r\n".utf8))
+        }
+        let wideCensus = wide.memoryCensus
+        // Eviction is observed, not inferred from a row count the viewport could account for.
+        #expect(wide.primaryHistoryText.contains("DANTERM-BUDGET-0 ") == false)
+        #expect(wideCensus.retainedStoredCellCount > 0)
+        // Bounded on both sides: a record's cell is 8 bytes, so the floor says a retained cell
+        // really is packed, and the ceiling says the header and side tables have not grown into
+        // a second cell's worth.
+        #expect(wideCensus.retainedBytesPerStoredCell > 8)
+        #expect(wideCensus.retainedBytesPerStoredCell < Double(wideCensus.cellStrideBytes) / 3)
     }
 }

@@ -662,33 +662,4 @@ struct TerminalScrollbackBudgetTests {
             terminal.resize(columns: columns, rows: rows)
         }
     }
-
-    @Test("history holds no more real memory than the budget it was given")
-    func historyRespectsItsBudgetInRealBytes() throws {
-        // Intent: after sustained output, what history actually holds fits inside the byte
-        //   budget the terminal was configured with.
-        // Why it exists: the pre-doc-15 cost model charged 40 bytes for a cell whose real cost
-        //   was a 72-byte stride, so a 10 MB budget admitted ~22 MB of scrollback. Every other
-        //   test here checks the model against itself and so could not see it; this one checks
-        //   the model against what the store is really holding.
-        // Scenario: any long-running session that has filled its history.
-        let columns = 179
-        var terminal = try #require(Terminal(columns: columns, rows: 66))
-        for line in 0..<20_000 {
-            terminal.feed(Array("DANTERM-BUDGET-\(line) sustained plain-text output payload\r\n".utf8))
-        }
-
-        let census = terminal.memoryCensus
-        #expect(census.scrollbackRowCount > 0)
-        #expect(census.retainedChargedBytes <= census.retainedArenaCapacityBytes)
-        #expect(census.retainedArenaCapacityBytes < Terminal.productionScrollbackBudgetBytes)
-        #expect(census.hasRetainedStorageOverdraft == false)
-        // The depth the smaller charge bought, stated rather than implied.
-        #expect(census.retainedStoredCellCount > 0)
-        // Bounded on both sides: a record's cell is 8 bytes, so the floor says a retained cell
-        // really is packed, and the ceiling says the header and side tables have not grown into
-        // a second cell's worth.
-        #expect(census.retainedBytesPerStoredCell > 8)
-        #expect(census.retainedBytesPerStoredCell < Double(census.cellStrideBytes) / 3)
-    }
 }
