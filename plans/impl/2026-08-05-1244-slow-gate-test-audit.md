@@ -65,7 +65,7 @@ Rules for each commit:
 | 12 | [x] `blankHistoryAtTheIndexRingDoublingPointKeepsRetaining`: early stop one ring-block past a stable record count (rescaled budgets deliberately deferred) | `--filter blankHistoryAtTheIndexRingDoublingPoint` | 5-7x | 1.759s -> 0.348s (5.1x. The finding's "stable record count" criterion does **not** terminate: at budget 288,000 the count moves on *every* admission out to 60,000, longest equal-run 0. Shipped criterion is a stable *high-water mark* -- one ring block (64) of admissions after the first eviction with no new maximum depth -- which settles at 7,538/8,257/8,256/15,949/16,449/16,449 admits, ~72,900 of 360,000) |
 | 13 | [x] `tailReadCostTracksTheBudgetNotTheCapacity`: replaced the wall-clock ratio with a deterministic row-visit count; 6,400 -> 3,200; `rows: 50 -> 4`; timing arm demoted to an env-gated probe | `--filter tailReadCostTracksTheBudgetNotTheCapacity` | ~5x | 13.951s -> 3.003s (4.6x, and no longer a timing test at all -- see below) |
 | 14 | [x] `primaryHistoryTextStaysLinear`: 400 vs 3,200, `rows: 50 -> 4`, shares `historyProjectionTerminal` with #13; timing moved from the wall clock to thread CPU time and the threshold from 2.5x to 2x | `--filter primaryHistoryTextStaysLinear` | 2-3x | 5.687s -> 3.203s (1.8x. Stayed a timing test as row #13 predicted, but not a wall-clock one -- see below) |
-| 15 | [ ] `dialectRecordingSweep`: dedupe by injection identity, boundary-chosen injections, compute `fullHistoryText` once, `@autoclosure` the diagnostic context, hoist `expectValidGrid` to per-fixture | `--filter dialectRecordingSweep` | 3-4x | |
+| 15 | [x] `dialectRecordingSweep`: dedupe by injection identity, boundary-chosen injections, compute `fullHistoryText` once, hoist `expectValidGrid` to per-fixture (the `@autoclosure` half declined) | `--filter dialectRecordingSweep` | 3-4x | 2.299s -> 1.253s (1.8x. 40 cases -> 25; the cost is one full recording replay per case, so the factor is the case count and the case count is the coverage. The `@autoclosure` half measured **0** -- 2.30s -> 2.33-2.39s, i.e. slower if anything -- and was reverted, per the Correction above) |
 
 Base command for every filter above:
 
@@ -79,6 +79,16 @@ except #5, whose suite lives in
 After the last box, run the full `swift test --package-path lib/TerminalCore`
 and record the new wall clock against the ~44s baseline in the header above,
 then `just test` once as the real gate.
+
+**Measured after row #15: 24.30s**, against the ~44s baseline -- 1.8x off the
+whole package's wall clock, 975 tests. The plateau the header describes is gone:
+no single test now trickles in behind the pack. What sets the clock instead is
+two parameterized suites that saturate the pool for the whole run --
+`TerminalFixtureTests.replayFixtures` (67 cases, 23.0s) and
+`RenderCorpusPlanningTests` (24.3s). Note `replayFixtures` measures 5.7s under
+its own `--filter` (row #9) and 23.0s here: it is not slower, it is sharing ten
+cores with everything else, so the next factor available on this package is
+scheduling the two long poles first, not shrinking another test.
 
 ## Superfluous, redundant, or broken
 
