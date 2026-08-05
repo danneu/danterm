@@ -65,11 +65,11 @@ before this audit is closed out.
   `TerminalPaneSessionControllerTests.swift` into `TerminalHistoryGenerationTests.swift`
   (crosses both a batch and a SwiftPM package boundary), and reword that file's
   "Two-sided proofs" header. Assign to `tests-a`.
-- [ ] **21** -- five sprite files still re-derive the light-stroke pixel width:
+- [x] **21** -- five sprite files still re-derive the light-stroke pixel width:
   `LegacyComputingSprite.swift`, `LegacyComputingSupplementSprite.swift`,
   `PowerlineSprite.swift`, `BranchDrawingSprite.swift`, `GeometricShapeSprite.swift`.
   Each is a one-line swap to the new `metrics.lightStrokePixels`.
-- [ ] **78** -- `BackgroundExecutionTests.swift`'s `largestOverflowingMetrics()` still
+- [x] **78** -- `BackgroundExecutionTests.swift`'s `largestOverflowingMetrics()` still
   duplicates the now-shared helper in `OverflowMetricsSupport.swift`.
 - [ ] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
   TerminalCoreBenchmarkSupport needs `lib/TerminalCore/Package.swift` to add it as a
@@ -90,7 +90,7 @@ before this audit is closed out.
   from `os.stat` on a symlink in a temp dir, then passed 22/22 standalone and on the
   gate rerun. Unrelated to any audit finding; noted because two different gate steps
   have now flaked under the 74-step parallel pool.
-- [ ] **90 (residual)** -- six byte-identical generator copies remain, now that
+- [x] **90 (residual)** -- six byte-identical generator copies remain, now that
   `SeededByteGenerator` exists: `TerminalGraphemeTests`, `TerminalInputStreamTests`,
   `TerminalResizeTests`, `TerminalTests`, the UInt64 variant in
   `TerminalScrollbackBudgetTests` (must keep full-word width or its seeded sequence
@@ -415,7 +415,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 21. Light-stroke pixel width re-derived from metrics in six sprite files
 
-**Status:** `partial` -- `TerminalRenderMetrics.lightStrokePixels` added and used in BoxDrawingSprite; five sprite files outside the batch's ownership still re-derive it (see Orchestrator follow-ups)
+**Status:** `done` -- all six sprite files now use `metrics.lightStrokePixels`; all derived it identically and the max(1, ...) clamp each carried was dead
 
 `lib/TerminalCore/Sources/TerminalRenderExecution/BoxDrawingSprite.swift:46` -- high confidence, small effort, found by `core-render`
 
@@ -1115,7 +1115,7 @@ Assertions too weak to catch the regression the test names, missing calibration 
 
 ### 78. Two identical overflow-metrics helpers and three redundant plan builders in one test target
 
-**Status:** `partial` -- shared OverflowMetricsSupport.swift added and RenderMetricsTests' copy deleted; BackgroundExecutionTests' identical copy is outside the batch's ownership (see Orchestrator follow-ups)
+**Status:** `done` -- shared OverflowMetricsSupport.swift; both copies now call it
 
 `lib/TerminalCore/Tests/TerminalRenderExecutionTests/RenderMetricsTests.swift:238` -- high confidence, small effort, found by `tests-render`
 
@@ -1239,7 +1239,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 88. labeledTerminal fixture builder copied into three suites
 
-**Status:** `todo` -- batch `solo`
+**Status:** `done` -- builder moved to its own LabeledTerminalFixture.swift per the verifier (not into TerminalGridAssertions), all three copies deleted
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalEditingTests.swift:261` -- high confidence, small effort, found by `tests-behavior-a`
 
@@ -1263,7 +1263,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 90. Five test files each carry a private copy of the same xorshift Generator
 
-**Status:** `partial` -- shared SeededByteGenerator added and TerminalSelectionTests switched over; six other copies remain (see Orchestrator follow-ups)
+**Status:** `done` -- shared SeededByteGenerator; all seven copies switched over, each keeping its original byte/word width so the seeded sequences are bit-identical
 
 `lib/TerminalCore/Tests/TerminalCoreTests/TerminalSelectionTests.swift:487` -- high confidence, small effort, found by `tests-behavior-b`
 
