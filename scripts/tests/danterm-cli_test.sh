@@ -88,6 +88,7 @@ grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
 grep -qE '^ *doctor +Check DanTerm integration health' "$err"
 ! grep -qF 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
+grep -qF 'danterm [--socket <path>] <command> [args]' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
 ! grep -qF 'DANTERM_TAB' "$err"
@@ -111,6 +112,7 @@ for help_arg in help --help -h; do
     grep -qE '^ *doctor +Check DanTerm integration health' "$out"
     ! grep -qF 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
+    grep -qF 'danterm [--socket <path>] <command> [args]' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
     ! grep -qF 'DANTERM_TAB' "$out"
@@ -164,14 +166,18 @@ if [[ -z "$socket" ]]; then
 fi
 
 export DANTERM=1
-export DANTERM_SOCK="$socket"
+export DANTERM_SOCK="$launch_output/wrong.sock"
+
+slot_cli() {
+    "$CLI_PATH" --socket "$socket" "$@"
+}
 
 model=""
 pane_id=""
 tab_id=""
 group_id=""
 for _ in $(seq 1 30); do
-    if model="$("$CLI_PATH" ls 2>/dev/null)" \
+    if model="$(slot_cli ls 2>/dev/null)" \
         && tab_id="$(printf '%s\n' "$model" | jq -er '.selectedTabId // empty')" \
         && pane_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[].tabs[] | select(.id == $tab) | .focusedPaneId // empty')" \
         && group_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[] | select([.tabs[].id] | index($tab)) | .id')"; then
@@ -186,38 +192,38 @@ fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
-"$CLI_PATH" pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
+slot_cli pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
 
-info="$("$CLI_PATH" pane info --pane "$pane_id")"
+info="$(slot_cli pane info --pane "$pane_id")"
 printf '%s\n' "$info" | jq -e \
     --arg pane "$pane_id" \
     --arg tab "$tab_id" \
     --arg group "$group_id" \
     '.pane.id == $pane and .tab.id == $tab and .group.id == $group' >/dev/null
 
-"$CLI_PATH" tab rename --tab "$tab_id" test123
-"$CLI_PATH" ls | jq -e \
+slot_cli tab rename --tab "$tab_id" test123
+slot_cli ls | jq -e \
     --arg tab "$tab_id" \
     '.groups[].tabs[] | select(.id == $tab and .customTitle == "test123")' >/dev/null
 
-"$CLI_PATH" tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
-"$CLI_PATH" tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
-close_id="$("$CLI_PATH" tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
-"$CLI_PATH" tab close --tab "$close_id"
-"$CLI_PATH" ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
-split_pane_id="$("$CLI_PATH" pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
+slot_cli tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
+slot_cli tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
+close_id="$(slot_cli tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
+slot_cli tab close --tab "$close_id"
+slot_cli ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
+split_pane_id="$(slot_cli pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
 
-"$CLI_PATH" theme set --pane "$pane_id" SmokeTheme
-"$CLI_PATH" theme set --pane "$pane_id" --clear
+slot_cli theme set --pane "$pane_id" SmokeTheme
+slot_cli theme set --pane "$pane_id" --clear
 
-todo_id="$("$CLI_PATH" todo add 'ship cli' | jq -r '.todo.id')"
-"$CLI_PATH" todo list --pane "$pane_id" | jq -e --arg id "$todo_id" '.todos[] | select(.id == $id)' >/dev/null
-"$CLI_PATH" todo edit --pane "$pane_id" "$todo_id" 'ship cli v2'
-"$CLI_PATH" todo "done" --pane "$pane_id" "$todo_id"
-"$CLI_PATH" todo delete --pane "$pane_id" "$todo_id"
+todo_id="$(slot_cli todo add 'ship cli' | jq -r '.todo.id')"
+slot_cli todo list --pane "$pane_id" | jq -e --arg id "$todo_id" '.todos[] | select(.id == $id)' >/dev/null
+slot_cli todo edit --pane "$pane_id" "$todo_id" 'ship cli v2'
+slot_cli todo "done" --pane "$pane_id" "$todo_id"
+slot_cli todo delete --pane "$pane_id" "$todo_id"
 
-/usr/bin/python3 - "$DANTERM_SOCK" <<'PY'
+/usr/bin/python3 - "$socket" <<'PY'
 import json
 import socket
 import sys
@@ -247,7 +253,7 @@ for _ in $(seq 1 10); do
     [[ ! -S "$socket" ]] && break
     sleep 0.5
 done
-if env -u DANTERM_PANE "$CLI_PATH" ls >"$smoke_output" 2>"$smoke_error"; then
+if env -u DANTERM_PANE "$CLI_PATH" --socket "$socket" ls >"$smoke_output" 2>"$smoke_error"; then
     echo "danterm ls unexpectedly succeeded after app quit" >&2
     exit 1
 fi

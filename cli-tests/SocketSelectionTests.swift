@@ -7,6 +7,18 @@ struct SocketSelectionTests {
     @Test("explicit non-empty socket target wins")
     func explicitTargetWins() throws {
         let selected = try selectControlSocketPath(
+            explicit: "/tmp/flag.sock",
+            environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
+            fallback: "/tmp/fallback.sock"
+        )
+
+        #expect(selected == "/tmp/flag.sock")
+    }
+
+    @Test("environment socket remains the explicit ambient target")
+    func environmentTargetWinsWithoutFlag() throws {
+        let selected = try selectControlSocketPath(
+            explicit: nil,
             environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
             fallback: "/tmp/fallback.sock"
         )
@@ -23,6 +35,7 @@ struct SocketSelectionTests {
         // Scenario: a pane receives DANTERM=1 and an empty DANTERM_SOCK overlay.
         do {
             _ = try selectControlSocketPath(
+                explicit: nil,
                 environment: [EnvVars.flag: "1", EnvVars.sock: ""],
                 fallback: "/tmp/other-instance.sock"
             )
@@ -37,6 +50,7 @@ struct SocketSelectionTests {
     @Test("ordinary terminal uses identity-derived fallback")
     func externalProcessUsesFallback() throws {
         let selected = try selectControlSocketPath(
+            explicit: nil,
             environment: [:],
             fallback: "/tmp/identity.sock"
         )

@@ -19,6 +19,18 @@ public struct CLICommand: Equatable {
     }
 }
 
+/// Keeps process-local targeting separate from the JSON-RPC command so an
+/// explicit instance choice can never leak into method parameters.
+public struct CLIInvocation: Equatable {
+    public let socketPath: String?
+    public let command: CLICommand
+
+    public init(socketPath: String?, command: CLICommand) {
+        self.socketPath = socketPath
+        self.command = command
+    }
+}
+
 public struct CLIParseError: Error, Equatable, LocalizedError {
     public let message: String
 
@@ -27,6 +39,30 @@ public struct CLIParseError: Error, Equatable, LocalizedError {
     }
 
     public var errorDescription: String? { message }
+}
+
+/// Parses global process options before delegating the remaining arguments to
+/// the command parser shared by the executable and protocol tests.
+public func parseCLIInvocation(_ args: [String]) throws -> CLIInvocation {
+    var remaining = args
+    var socketPath: String?
+
+    while remaining.first == "--socket" {
+        guard remaining.count >= 2 else {
+            throw CLIParseError("usage: danterm --socket <path> <command> [args]")
+        }
+        guard socketPath == nil else {
+            throw CLIParseError("--socket may be specified only once")
+        }
+        let candidate = remaining[1]
+        guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIParseError("--socket requires a non-empty path")
+        }
+        socketPath = candidate
+        remaining.removeFirst(2)
+    }
+
+    return CLIInvocation(socketPath: socketPath, command: try parseCLI(remaining))
 }
 
 public func parseCLI(_ args: [String]) throws -> CLICommand {

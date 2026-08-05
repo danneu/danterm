@@ -633,11 +633,13 @@ create a production release or publish anything.
 Isolated launches use slots 1 through 8; slot 0 remains the canonical
 `~/Applications/DanTerm Dev.app`. The launcher prints one JSON handle containing
 `slot`, `bundleId`, `socketPath`, and `pid`, then becomes the app process. Set
-`DANTERM_SOCK` to the reported socket when driving that instance. A slot is held
-by a kernel lock for the app lifetime and becomes reusable on any exit, including
-SIGKILL. If all slots are occupied, the launcher exits with status 75 without
-starting another app. Use `./dev-build.sh --no-install` when only the canonical
-`.build/DanTerm Dev.app` artifact is wanted.
+`SLOT_SOCKET=$(jq -r '.socketPath' /tmp/danterm-slot.json)` from the captured
+handle, then drive that instance with `danterm --socket "$SLOT_SOCKET" ...`.
+The explicit flag prevents an agent shell from falling back to the user's app.
+A slot is held by a kernel lock for the app lifetime and becomes reusable on
+any exit, including SIGKILL. If all slots are occupied, the launcher exits with
+status 75 without starting another app. Use `./dev-build.sh --no-install` when
+only the canonical `.build/DanTerm Dev.app` artifact is wanted.
 
 The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for
 its Powerline references. It requires

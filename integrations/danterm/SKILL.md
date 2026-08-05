@@ -16,6 +16,10 @@ cases agents hit in practice.
 Keep this section synced with `danterm help` and the parser in
 `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
 
+Every IPC command accepts `--socket <path>` before the command name. This
+explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
+lookup.
+
     danterm ls
     danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
     danterm tab rename [--tab <tab-id>] <name>|--clear
@@ -64,6 +68,9 @@ the app's currently focused group, tab, or pane.
   `danterm pane info --pane "$DANTERM_PANE"` when deriving live ids.
 - `danterm` may still work outside DanTerm if the app is running, but agents
   must use explicit ids for mutation commands.
+- When driving an isolated source-tree instance, agents must also pass
+  `--socket <path>` before every command. Do not export `DANTERM_SOCK`: the
+  target should remain visible at each call site.
 - If `$DANTERM_PANE` is absent, start with `danterm ls` and select targets only
   from explicit user-provided criteria visible in the JSON: id, exact group
   name, exact tab `customTitle`, exact pane title, or cwd. If the criteria do
@@ -99,7 +106,8 @@ DanTerm sets these per pane:
 - `DANTERM_SOCK` -- control socket path. Rarely needed; the CLI resolves it.
   Inside DanTerm, an absent or empty value means that process does not own a
   control socket, so the CLI reports that DanTerm is not running instead of
-  falling back to another same-identity instance.
+  falling back to another same-identity instance. `--socket <path>` overrides
+  this value.
 
 If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique
@@ -114,8 +122,8 @@ process. Capture the handle from stdout and target its `socketPath` explicitly:
 
     ./scripts/dev-slot-launcher.py > /tmp/danterm-slot.json &
     DANTERM_SLOT_PID=$!
-    DANTERM_SOCK=$(jq -r '.socketPath' /tmp/danterm-slot.json)
-    export DANTERM_SOCK
+    SLOT_SOCKET=$(jq -r '.socketPath' /tmp/danterm-slot.json)
+    danterm --socket "$SLOT_SOCKET" ls
 
 The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the launched
 app because the launcher uses direct exec. The default is fresh, background,

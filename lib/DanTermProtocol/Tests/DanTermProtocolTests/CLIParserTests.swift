@@ -4,6 +4,36 @@ import Testing
 @testable import DanTermProtocol
 
 struct CLIParserTests {
+    @Test("global socket target parses before the command")
+    func globalSocketTargetParsesBeforeCommand() throws {
+        let invocation = try parseCLIInvocation(["--socket", "/tmp/slot.sock", "ls"])
+
+        #expect(invocation.socketPath == "/tmp/slot.sock")
+        #expect(invocation.command == CLICommand(method: Methods.ls, params: [:], outputMode: .json))
+    }
+
+    @Test("invocation without a socket target preserves command parsing")
+    func invocationWithoutSocketPreservesCommandParsing() throws {
+        let invocation = try parseCLIInvocation(["ls"])
+        let command = try parseCLI(["ls"])
+
+        #expect(invocation.socketPath == nil)
+        #expect(invocation.command == command)
+    }
+
+    @Test("global socket target rejects unusable forms", arguments: [
+        (["--socket"], "usage: danterm --socket <path> <command> [args]"),
+        (["--socket", "", "ls"], "--socket requires a non-empty path"),
+        (["--socket", "/tmp/one.sock", "--socket", "/tmp/two.sock", "ls"], "--socket may be specified only once"),
+    ] as [([String], String)])
+    func globalSocketTargetRejectsUnusableForms(_ testCase: ([String], String)) {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLIInvocation(testCase.0)
+        }
+
+        #expect(error?.message == testCase.1)
+    }
+
     @Test("tab new parses launch flags")
     func tabNewParsesLaunchFlags() throws {
         let command = try parseCLI(["tab", "new", "--cmd", "foo", "--cwd", "/x", "--title", "t"])

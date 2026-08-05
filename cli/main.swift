@@ -23,7 +23,7 @@ struct DanTermCLI {
         danterm -- control DanTerm from the shell
 
         Usage:
-          danterm <command> [args]
+          danterm [--socket <path>] <command> [args]
 
         Commands:
           ls                          Print the full app snapshot as JSON
@@ -73,6 +73,8 @@ struct DanTermCLI {
           help, --help, -h            Print this message
 
         CLI defaults:
+          --socket explicitly targets one DanTerm instance and overrides
+          DANTERM_SOCK and identity-derived socket lookup.
           tab new opens in the background at the target group end by default.
           Position flags change placement; --foreground selects the new tab.
           pane split opens in the background by default; --foreground focuses
@@ -103,9 +105,11 @@ struct DanTermCLI {
                 try runDoctor(Array(rawArgs.dropFirst()))
                 return
             }
-            let command = try parseCLI(rawArgs)
+            let invocation = try parseCLIInvocation(rawArgs)
+            let command = invocation.command
             let environment = ProcessInfo.processInfo.environment
             let socketPath = try selectControlSocketPath(
+                explicit: invocation.socketPath,
                 environment: environment,
                 fallback: controlSocketPath().path
             )
@@ -381,6 +385,7 @@ struct DanTermCLI {
 
 /// Selects an explicit owner or the external-process fallback without crossing instances.
 func selectControlSocketPath(
+    explicit: String?,
     environment: [String: String],
     fallback: String
 ) throws -> String {
@@ -389,6 +394,9 @@ func selectControlSocketPath(
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    if let explicit = nonEmptyValue(explicit) {
+        return explicit
+    }
     if let explicit = nonEmptyValue(environment[EnvVars.sock]) {
         return explicit
     }
