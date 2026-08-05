@@ -98,6 +98,17 @@ public func utf8ByteCount(of scalar: Unicode.Scalar) -> Int {
 /// about `styleRunCounts`, a text-packed payload about `utf8ByteCounts`, a narrow scalar
 /// slot about `nonASCIIScalarCounts` -- and a row that is styled *and* multi-scalar must be
 /// countable in both. Row-level classification is the driver's reduction, not this type's.
+///
+/// Every array here is per display row. The three `contentIdentity` axes that used to sit
+/// alongside them -- run counts, identified cells, strict run counts -- were retired with
+/// the per-row representation they priced: they measured doc 28's per-row candidates
+/// `C1`-`C6`, and since doc 31's record arena shipped the engine picks a record's identity
+/// encoding at admission time (`LogicalLineStore`'s `identityPerCell` fallback), so the
+/// question they were built to answer is closed. This is the same retirement
+/// `packedPayloadModelBytes` took. `Terminal.scrollbackRecordContentIdentityShape` survives
+/// in the engine, so a future model that needs the axis can re-add it *per record* -- which
+/// is the unit it is now measured in, and the mismatch with these per-row arrays that made
+/// carrying it here a driver-level length error.
 public struct RetainedRowComposition: Codable, Equatable, Sendable {
     /// Stored cells whose style differs from the default -- what a style side-table or a
     /// run-length style encoding has to represent.
@@ -146,29 +157,6 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
     /// is measured rather than assumed because the whole 1-byte tier stands or falls on it.
     public let maxSingleScalarValues: [Int]
 
-    /// Maximal runs of cells whose `contentIdentity` is contiguous in print order.
-    ///
-    /// The axis that decides how a packed row preserves `contentIdentity`. The counter
-    /// advances by one per printed cell, so a row printed straight through is one run and
-    /// encodes in a per-run base plus extent, while a row assembled by cursor moves or
-    /// overwrites fragments into many and approaches 4 bytes per stored cell. `F11` inferred
-    /// the contiguous case was the common one at depth and never measured it; this is the
-    /// measurement.
-    public let contentIdentityRunCounts: [Int]
-
-    /// Stored cells carrying an identity at all -- the population a run-based encoding must
-    /// cover, and the denominator that keeps a run count from flattering rows that are
-    /// mostly unidentified padding.
-    public let identifiedCellCounts: [Int]
-
-    /// Runs whose identities step by exactly one -- what the shipped packed row really
-    /// charges, as against `contentIdentityRunCounts`, which is `F12`'s looser definition.
-    ///
-    /// Carried separately rather than replacing it: `F12`'s 85.14% was measured under the
-    /// looser rule and stays re-derivable, while the payload model below has to use this one
-    /// or it would predict a size the encoder does not produce.
-    public let strictContentIdentityRunCounts: [Int]
-
     public init(
         styledCellCounts: [Int],
         multiScalarCellCounts: [Int],
@@ -180,10 +168,7 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         distinctStyleCounts: [Int],
         wideCellCounts: [Int],
         hyperlinkCellCounts: [Int],
-        maxSingleScalarValues: [Int],
-        contentIdentityRunCounts: [Int],
-        identifiedCellCounts: [Int],
-        strictContentIdentityRunCounts: [Int]
+        maxSingleScalarValues: [Int]
     ) {
         self.styledCellCounts = styledCellCounts
         self.multiScalarCellCounts = multiScalarCellCounts
@@ -196,15 +181,7 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
         self.wideCellCounts = wideCellCounts
         self.hyperlinkCellCounts = hyperlinkCellCounts
         self.maxSingleScalarValues = maxSingleScalarValues
-        self.contentIdentityRunCounts = contentIdentityRunCounts
-        self.identifiedCellCounts = identifiedCellCounts
-        self.strictContentIdentityRunCounts = strictContentIdentityRunCounts
     }
-
-    /// Retained rows whose identities form a single contiguous run -- the fraction `PR1`
-    /// selects the `contentIdentity` encoding by. A row with no identities at all (a blank
-    /// row) is counted as single-run: it costs the run encoding nothing.
-    public var singleRunRowCount: Int { contentIdentityRunCounts.count(where: { $0 <= 1 }) }
 
     /// Retained rows holding at least one styled cell.
     public var styledRowCount: Int { styledCellCounts.count(where: { $0 > 0 }) }
@@ -409,9 +386,6 @@ public func readRetainedRowShape(
     var wideCellCounts: [Int] = []
     var hyperlinkCellCounts: [Int] = []
     var maxSingleScalarValues: [Int] = []
-    var contentIdentityRunCounts: [Int] = []
-    var identifiedCellCounts: [Int] = []
-    var strictContentIdentityRunCounts: [Int] = []
     let defaultStyle = TerminalStyle()
 
     for index in 0..<terminal.scrollbackRowCount {
@@ -465,23 +439,6 @@ public func readRetainedRowShape(
         wideCellCounts.append(wide)
         hyperlinkCellCounts.append(hyperlinks)
         maxSingleScalarValues.append(maxSingleScalar)
-
-        // Read through the engine rather than derived here: `contentIdentity` is deliberately
-        // absent from the public cell, so this is the one axis the probe cannot reconstruct
-        // from a materialized row. The engine reads its own stored prefix, which canonical
-        // form makes identical to the extent derived above -- `derivationMatchesCensus` is
-        // what holds those two together.
-    }
-
-    // Sampled per *logical line*, which is the unit the store holds and the one the reader is
-    // denominated in since doc 31 (`31/D3` Decision 6, `31/DD17`). Doc 28's `PR1` consumes these
-    // in aggregate, so what changed for it is the sample unit rather than the quantity -- the
-    // arrays above stay per display row, and these three do not.
-    for index in 0..<terminal.scrollbackRecordCount {
-        let identityShape = terminal.scrollbackRecordContentIdentityShape(at: index)
-        contentIdentityRunCounts.append(identityShape?.runCount ?? 0)
-        identifiedCellCounts.append(identityShape?.identifiedCellCount ?? 0)
-        strictContentIdentityRunCounts.append(identityShape?.strictRunCount ?? 0)
     }
 
     // Live screen rows are always full width -- the grid materializes them at construction
@@ -518,10 +475,7 @@ public func readRetainedRowShape(
             distinctStyleCounts: distinctStyleCounts,
             wideCellCounts: wideCellCounts,
             hyperlinkCellCounts: hyperlinkCellCounts,
-            maxSingleScalarValues: maxSingleScalarValues,
-            contentIdentityRunCounts: contentIdentityRunCounts,
-            identifiedCellCounts: identifiedCellCounts,
-            strictContentIdentityRunCounts: strictContentIdentityRunCounts
+            maxSingleScalarValues: maxSingleScalarValues
         ),
         screenRowCount: census.screenRowCount,
         censusCellStorageBytes: census.cellStorageBytes,

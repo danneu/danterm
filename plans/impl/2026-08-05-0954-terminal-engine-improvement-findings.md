@@ -272,7 +272,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 9. Three composition arrays are per record, not per display row
 
-**Status:** `deferred` -- parked for a human design decision
+**Status:** `done` -- the three identity axes were *retired*, not re-denominated: they priced doc 28's per-row candidates C1-C6, and the engine now picks a record's identity encoding at admission time, so the question is closed (same retirement `packedPayloadModelBytes` took in 9ad7cc55). Gone with them: `singleRunRowCount`, the driver's `identity_charge` + byte constants + `identity=` variants, `singleRunRowFraction` / `meanIdentityRunsPerRow`, the `packingIdentityFloor` pool and the identity render columns. `Terminal.scrollbackRecordContentIdentityShape` survives in the engine. Pre-fix the corpus aborted with `RuntimeError: benchmark/scrollback-stream: contentIdentityRunCounts has 10750 entries for 14334 rows`; it now completes.
 
 `lib/TerminalCore/Sources/TerminalRetainedRowProbeSupport/TerminalRetainedRowProbeSupport.swift:506` -- high confidence, medium effort, found by `app-harness`
 

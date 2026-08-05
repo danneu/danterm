@@ -325,7 +325,6 @@ def row_facts(report):
         "scalarCounts", "nonASCIIScalarCounts", "utf8ByteCounts",
         "styleRunCounts", "distinctStyleCounts", "wideCellCounts",
         "hyperlinkCellCounts", "maxSingleScalarValues",
-        "contentIdentityRunCounts", "identifiedCellCounts",
     )
     for key in keys:
         if len(composition[key]) != len(counts):
@@ -350,8 +349,6 @@ def row_facts(report):
             "wide": composition["wideCellCounts"][index],
             "hyperlinks": composition["hyperlinkCellCounts"][index],
             "maxSingleScalar": composition["maxSingleScalarValues"][index],
-            "identityRuns": composition["contentIdentityRunCounts"][index],
-            "identifiedCells": composition["identifiedCellCounts"][index],
             # Scalars living in spill arrays: everything not held by a single-scalar
             # cell. The engine charges each spill separately, and so does every
             # candidate below, so this term cancels in a saving -- it is carried
@@ -459,16 +456,6 @@ def compose_facts(facts, stride):
         "nonASCIIScalarFraction": (totals["nonASCIIScalars"] / totals["scalars"]) if totals["scalars"] else 0.0,
         "wideCellFraction": (totals["wideCells"] / totals["storedCells"]) if totals["storedCells"] else 0.0,
         "meanStyleRunsPerRow": (totals["styleRuns"] / len(facts)) if facts else 0.0,
-        # Denominated in rows, not runs: the `contentIdentity` encoding is chosen per
-        # row, so the question is how many rows are cheap. A mean over runs would let
-        # one pathologically fragmented row speak for a history of contiguous ones.
-        # A row with no identities at all is single-run -- it costs the encoding nothing.
-        "singleRunRowFraction": (
-            sum(1 for f in facts if f["identityRuns"] <= 1) / len(facts)
-        ) if facts else 0.0,
-        "meanIdentityRunsPerRow": (
-            sum(f["identityRuns"] for f in facts) / len(facts)
-        ) if facts else 0.0,
         "meanUTF8BytesPerCell": (totals["utf8Bytes"] / totals["storedCells"]) if totals["storedCells"] else 0.0,
     }
 
@@ -496,15 +483,11 @@ def compose_facts(facts, stride):
 # already spent), so each owes a side-table entry. The original C6 named hyperlink cells
 # in its design and charged them nowhere, which is the defect this constant closes.
 #
-# `IDENTITY_CELL_BYTES` / `IDENTITY_RUN_ENTRY_BYTES` -- the two ways to preserve
-# `contentIdentity`, which `activationIdentity` reads back out of retained rows and so
-# cannot be dropped. Either 4 B on every stored cell, or, because the counter advances
-# by one per printed cell, 4 B of run base plus 2 B start column and 2 B extent for each
-# maximal contiguous run. Which one a candidate really pays is a property of recorded
-# content, so both are priced and the measured contiguity selects.
+# `contentIdentity` used to be charged here too, under two variants selected by a measured
+# per-row contiguity fraction. Both were retired with the per-row candidates they priced:
+# the engine now picks a record's identity encoding at admission time, so the pricing
+# question is closed and the probe no longer carries the axis.
 HYPERLINK_ENTRY_BYTES = 4
-IDENTITY_CELL_BYTES = 4
-IDENTITY_RUN_ENTRY_BYTES = 8
 
 # A spill reference: the index a packed row holds to reach a multi-scalar cell's own
 # allocation, which `spill_charge` prices separately. Four bytes matches the index C1
@@ -512,23 +495,9 @@ IDENTITY_RUN_ENTRY_BYTES = 8
 SPILL_REFERENCE_BYTES = 4
 
 
-def identity_charge(fact, variant):
-    """What preserving one row's `contentIdentity` costs, under either variant.
-
-    The run variant is capped at the flat per-cell form: a real encoder facing a row
-    whose run table would outgrow its cells writes the cells instead. Without the cap the
-    table would report the run variant as *dearer* than the floor on fragmented rows,
-    which would be an artifact of this model rather than a fact about the design.
-    """
-    floor = fact["stored"] * IDENTITY_CELL_BYTES
-    if variant == "floor":
-        return floor
-    return min(floor, fact["identityRuns"] * IDENTITY_RUN_ENTRY_BYTES)
-
-
-def metadata_charge(fact, variant):
+def metadata_charge(fact):
     """Storage every candidate owes for fields none of them encode in their cells."""
-    return fact["hyperlinks"] * HYPERLINK_ENTRY_BYTES + identity_charge(fact, variant)
+    return fact["hyperlinks"] * HYPERLINK_ENTRY_BYTES
 
 
 def pack_narrow_cell(fact):
@@ -544,11 +513,9 @@ def pack_narrow_cell(fact):
     O(1) -- and under this shape a column read is one load with nothing to decode, which
     is what `28/F17` measured `C6` paying ~3.8 ns per cell to avoid needing.
 
-    Hyperlink and `contentIdentity` storage are *not* in these 8 bytes and are charged
-    separately, like every other candidate. An earlier version of this docstring claimed
-    a retained cell's `contentIdentity` has no reader; that is false --
-    `Terminal.activationIdentity` takes a max over a `ProjectionRows` range, which spans
-    retained rows, so link activation reads it out of history.
+    Hyperlink storage is *not* in these 8 bytes and is charged separately, like every
+    other candidate. `contentIdentity` was charged the same way until the engine started
+    choosing its encoding per record at admission time; see `metadata_charge`.
 
     Like every candidate here it is charged no per-row header (`F13` Observation 2). C1's
     is 7 bytes; `28/F18` adds it back when pricing the pivot, and a reader pricing a new
@@ -655,21 +622,13 @@ PACKINGS = {
 }
 
 
-def price(report, identity="target"):
+def price(report):
     """Charge every candidate representation for this stimulus's exact rows."""
-    return price_facts(row_facts(report), report["cellStrideBytes"], identity=identity)
+    return price_facts(row_facts(report), report["cellStrideBytes"])
 
 
-def price_facts(facts, stride, identity="target"):
-    """Charge every candidate representation for a row population's exact rows.
-
-    `identity` selects how `contentIdentity` is preserved -- `"floor"` charges 4 B on
-    every stored cell, `"target"` charges per contiguous run. Both are reported, and the
-    measured single-run fraction is what says which one a candidate really pays. Neither
-    is a default answer: the floor is what recorded content forces if it is fragmented,
-    and quoting the target without the contiguity number beside it would be the
-    assumption `PR1` exists to remove.
-    """
+def price_facts(facts, stride):
+    """Charge every candidate representation for a row population's exact rows."""
     if not facts:
         return {}
     current = [row_charge(f["stored"] * stride, f) for f in facts]
@@ -680,7 +639,7 @@ def price_facts(facts, stride, identity="target"):
         # Composed here rather than inside each candidate so a new candidate cannot be
         # added that quietly stores a retained row without a field the row must keep.
         def payload(fact, packing=packing):
-            return packing(fact) + metadata_charge(fact, identity)
+            return packing(fact) + metadata_charge(fact)
 
         charged = [row_charge(payload(f), f) for f in facts]
         total = sum(charged)
@@ -798,11 +757,7 @@ def summarize(reports):
         facts = [f for report in pool for f in row_facts(report)]
         stride = pool[0]["cellStrideBytes"] if pool else 32
         summary[name]["composition"] = compose_facts(facts, stride)
-        # Both `contentIdentity` variants, side by side and neither privileged. The
-        # pool's own `singleRunRowFraction` is what says which one its rows really pay,
-        # so a reader who quotes a headline without it has skipped the selection.
-        summary[name]["packing"] = price_facts(facts, stride, identity="target")
-        summary[name]["packingIdentityFloor"] = price_facts(facts, stride, identity="floor")
+        summary[name]["packing"] = price_facts(facts, stride)
     return summary
 
 
@@ -852,7 +807,7 @@ def render_composition(reports, summary):
     header = (
         f"{'stimulus':44s} {'rows':>6s} {'styled%':>8s} {'multi%':>7s} "
         f"{'empty%':>7s} {'n-ascii%':>9s} {'wide%':>7s} {'runs/row':>9s} "
-        f"{'utf8/cell':>10s} {'1-run%':>8s} {'runs/row':>9s} "
+        f"{'utf8/cell':>10s} "
         f"{'plain rows':>11s} {'styled rows':>12s}"
     )
     print(header)
@@ -870,8 +825,6 @@ def render_composition(reports, summary):
             f"{100 * c['wideCellFraction']:6.2f}% "
             f"{c['meanStyleRunsPerRow']:9.2f} "
             f"{c['meanUTF8BytesPerCell']:10.2f} "
-            f"{100 * c['singleRunRowFraction']:7.2f}% "
-            f"{c['meanIdentityRunsPerRow']:9.2f} "
             f"{100 * classes['plain']['rowFraction']:10.1f}% "
             f"{100 * (classes['styled']['rowFraction'] + classes['styledMultiScalar']['rowFraction']):11.1f}%"
         )
@@ -890,45 +843,36 @@ def render_composition(reports, summary):
 
 
 def render_packing(summary):
-    """Print what each candidate representation would charge -- `F11`'s second half.
-
-    Both `contentIdentity` variants are printed for every pool, with the pool's own
-    single-run fraction above them, because that fraction is what selects between the
-    two. Printing only one would be stating a headline the content may not support.
-    """
+    """Print what each candidate representation would charge -- `F11`'s second half."""
     print()
     for name, pool in summary.items():
-        for variant, key in (("run-encoded", "packing"), ("per-cell floor", "packingIdentityFloor")):
-            packing = pool[key]
-            if not packing:
+        packing = pool["packing"]
+        if not packing:
+            continue
+        current = packing["current"]
+        print(
+            f"pool {name} packing (current: "
+            f"{current['meanChargeBytes']:.1f} B/row, "
+            f"depth {current['depthAtBudget']} rows at 10 MiB):"
+        )
+        header = (
+            f"    {'candidate':26s} {'B/row':>8s} {'saving':>8s} {'depth':>8s} "
+            f"{'x depth':>8s} {'drop class':>11s} {'+H4 B/row':>10s} {'+H4 depth':>10s}"
+        )
+        print(header)
+        for candidate, entry in packing.items():
+            if candidate == "current":
                 continue
-            current = packing["current"]
-            composition = pool["composition"]
             print(
-                f"pool {name} packing, contentIdentity {variant} "
-                f"(single-run rows {100 * composition['singleRunRowFraction']:.2f}%, "
-                f"{composition['meanIdentityRunsPerRow']:.2f} runs/row; current: "
-                f"{current['meanChargeBytes']:.1f} B/row, "
-                f"depth {current['depthAtBudget']} rows at 10 MiB):"
+                f"    {candidate:26s} {entry['meanChargeBytes']:8.1f} "
+                f"{100 * entry['savingFraction']:7.1f}% "
+                f"{entry['depthAtBudget']:8d} "
+                f"{entry['depthMultiple']:7.2f}x "
+                f"{100 * entry['rowsDroppingAClassFraction']:10.1f}% "
+                f"{entry['arenaMeanChargeBytes']:10.1f} "
+                f"{entry['arenaDepthAtBudget']:10d}"
             )
-            header = (
-                f"    {'candidate':26s} {'B/row':>8s} {'saving':>8s} {'depth':>8s} "
-                f"{'x depth':>8s} {'drop class':>11s} {'+H4 B/row':>10s} {'+H4 depth':>10s}"
-            )
-            print(header)
-            for candidate, entry in packing.items():
-                if candidate == "current":
-                    continue
-                print(
-                    f"    {candidate:26s} {entry['meanChargeBytes']:8.1f} "
-                    f"{100 * entry['savingFraction']:7.1f}% "
-                    f"{entry['depthAtBudget']:8d} "
-                    f"{entry['depthMultiple']:7.2f}x "
-                    f"{100 * entry['rowsDroppingAClassFraction']:10.1f}% "
-                    f"{entry['arenaMeanChargeBytes']:10.1f} "
-                    f"{entry['arenaDepthAtBudget']:10d}"
-                )
-            print()
+        print()
 
 
 def main():

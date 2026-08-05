@@ -215,45 +215,6 @@ struct TerminalRetainedRowProbeSupportTests {
         }
     }
 
-    @Test("Content-identity runs are carried per row, index-aligned with the stored extents")
-    func contentIdentityRunsAreCarriedPerRow() {
-        // Intent: rows printed left-to-right report one identity run each, covering every
-        //   stored cell, and the arrays are index-aligned with `storedCellCounts`.
-        // Why it exists: `PR1` prices preserving `contentIdentity` two ways -- 4 bytes on
-        //   every stored cell, or a constant per contiguous run -- and the single-run
-        //   fraction is what selects between them. If this axis silently reported zeros the
-        //   way `hyperlinkCellCounts` did, the cheap variant would price itself into
-        //   existence on content that never earned it.
-        let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
-        let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
-        let report = readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
-        let composition = report.composition
-
-        #expect(composition.contentIdentityRunCounts.count == report.retainedRowCount)
-        #expect(composition.identifiedCellCounts.count == report.retainedRowCount)
-        for (index, stored) in report.storedCellCounts.enumerated() {
-            #expect(composition.contentIdentityRunCounts[index] == 1)
-            #expect(composition.identifiedCellCounts[index] == stored)
-        }
-    }
-
-    @Test("A fragmented row reports more runs than a contiguous one of the same length")
-    func fragmentedRowsReportMoreRuns() {
-        // Intent: a row assembled with a cursor jump reports more than one identity run,
-        //   while a row of the same stored width printed straight through reports one.
-        // Why it exists: the measurement only decides anything if it can come back *bad*.
-        //   A reader that returned one run for every row would make the contiguity fraction
-        //   1.0 by construction, and `PR1` would select the cheap encoding from an
-        //   instrument incapable of contradicting it.
-        var terminal = Terminal(columns: 40, rows: 4)!
-        for _ in 0..<20 { terminal.feed(Array("ab\u{1B}[10Gcd\r\n".utf8)) }
-        let report = readRetainedRowShape(of: terminal, stimulus: "fragmented", fedByteCount: 0)
-
-        #expect(report.retainedRowCount > 0)
-        #expect(report.composition.contentIdentityRunCounts.allSatisfy { $0 == 2 })
-        #expect(report.composition.identifiedCellCounts.allSatisfy { $0 == 4 })
-    }
-
     @Test("UTF-8 byte counts follow the encoding's own boundaries")
     func utf8ByteCountsMatchTheEncoding() {
         // Intent: `utf8ByteCount` returns 1/2/3/4 at the encoding's real boundaries.

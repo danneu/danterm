@@ -31,7 +31,7 @@ shape = _load("terminal_retained_row_shape", "terminal-retained-row-shape.py")
 
 def make_report(kind, stored, *, blank=0, columns=80, styled=None, runs=None,
                 multi=None, utf8=None, max_scalar=None, hyperlinks=None,
-                wide=None, identity_runs=None, identified=None):
+                wide=None):
     """Build a probe-shaped report for the reductions to chew on.
 
     Composition defaults to plain single-scalar ASCII printed left to right, so a
@@ -65,8 +65,6 @@ def make_report(kind, stored, *, blank=0, columns=80, styled=None, runs=None,
             "wideCellCounts": list(wide) if wide else zeros,
             "hyperlinkCellCounts": list(hyperlinks) if hyperlinks else zeros,
             "maxSingleScalarValues": list(max_scalar) if max_scalar else [ord("x")] * count,
-            "contentIdentityRunCounts": list(identity_runs) if identity_runs else [1] * count,
-            "identifiedCellCounts": list(identified) if identified else list(stored),
         },
     }
 
@@ -196,16 +194,21 @@ class ChargeModelTests(unittest.TestCase):
         self.assertEqual(shape.charged_bytes(content), 1808)
 
     def test_misaligned_composition_fails_loudly(self):
-        """A composition array that stops matching the row count must raise.
+        """Every per-row composition array must be length-checked, not just one.
 
         Silent misalignment is the failure mode that would produce a complete,
         plausible, wrong table -- styled fractions attributed to the wrong rows.
+        The check is swept across all eleven arrays because that is exactly how the
+        three retired `contentIdentity` axes went wrong: they stopped being per row
+        while the type still claimed they were.
         """
-        report = make_report("recording", [5, 5])
-        report["composition"]["styleRunCounts"] = [1]
-
-        with self.assertRaises(RuntimeError):
-            shape.row_facts(report)
+        keys = list(make_report("recording", [5, 5])["composition"])
+        self.assertEqual(len(keys), 11)
+        for key in keys:
+            report = make_report("recording", [5, 5])
+            report["composition"][key] = report["composition"][key][:1]
+            with self.assertRaises(RuntimeError, msg=f"{key} is not length-checked"):
+                shape.row_facts(report)
 
 
 class PackingTests(unittest.TestCase):
@@ -276,9 +279,9 @@ class MetadataChargeCompletenessTests(unittest.TestCase):
     real undercharge and pass.
     """
 
-    def arena_per_row(self, report, identity="target"):
+    def arena_per_row(self, report):
         facts = shape.row_facts(report)
-        priced = shape.price_facts(facts, 32, identity=identity)
+        priced = shape.price_facts(facts, 32)
         return {
             name: entry["arenaMeanChargeBytes"]
             for name, entry in priced.items()
@@ -302,57 +305,6 @@ class MetadataChargeCompletenessTests(unittest.TestCase):
                 f"{candidate} does not charge hyperlink metadata",
             )
 
-    def test_every_candidate_charges_content_identity_under_both_variants(self):
-        """Both `contentIdentity` variants must reach every candidate.
-
-        `activationIdentity` reads the field out of retained rows, so no
-        representation may store a row without it. Charging it in one variant and
-        not the other would let the table report a target price nothing pays.
-        """
-        report = make_report("recording", [51], identity_runs=[1], identified=[51])
-        floor = self.arena_per_row(report, identity="floor")
-        target = self.arena_per_row(report, identity="target")
-
-        for candidate, floor_bytes in floor.items():
-            self.assertEqual(
-                floor_bytes - target[candidate],
-                51 * shape.IDENTITY_CELL_BYTES - 1 * shape.IDENTITY_RUN_ENTRY_BYTES,
-                f"{candidate} prices the two identity variants identically",
-            )
-
-    def test_fragmenting_identities_moves_the_target_variant_toward_the_floor(self):
-        """The run variant must get dearer as rows fragment, and cap at the floor.
-
-        The measurement only decides anything if the cheap variant can stop being
-        cheap. A row printed straight through is one run; a row assembled by cursor
-        moves is many, and at the limit the run table costs more than the field it
-        replaces -- which is the outcome that would send C6 back to the floor.
-        """
-        contiguous = self.arena_per_row(
-            make_report("recording", [80], identity_runs=[1]), identity="target"
-        )
-        fragmented = self.arena_per_row(
-            make_report("recording", [80], identity_runs=[20]), identity="target"
-        )
-
-        for candidate, cheap in contiguous.items():
-            self.assertGreater(fragmented[candidate], cheap)
-
-    def test_the_identity_charge_is_capped_at_the_floor(self):
-        """A pathologically fragmented row must never be charged above per-cell.
-
-        A real encoder would fall back to the flat per-cell form rather than store
-        a run table longer than the cells it describes. Without the cap the table
-        would report the run variant as *worse* than the floor on fragmented
-        content, which is an artifact of the model, not a property of the design.
-        """
-        report = make_report("recording", [80], identity_runs=[80], identified=[80])
-        floor = self.arena_per_row(report, identity="floor")
-        target = self.arena_per_row(report, identity="target")
-
-        for candidate, floor_bytes in floor.items():
-            self.assertLessEqual(target[candidate], floor_bytes)
-
     def test_a_combined_metadata_row_moves_the_candidates_that_owe_each_axis(self):
         """One row carrying every axis at once, raised one axis at a time.
 
@@ -363,13 +315,12 @@ class MetadataChargeCompletenessTests(unittest.TestCase):
         Which candidates owe which axis is not uniform, and asserting that it is
         would be a wrong test rather than a strict one: C1's 8-byte cell already
         spends a kind byte on every cell, so wide-cell geometry costs it nothing
-        extra, and its per-cell style id makes style runs free. Only the axes no
-        candidate encodes per cell -- hyperlink metadata and `contentIdentity` --
-        are owed by all six, and those are the two the original table omitted.
+        extra, and its per-cell style id makes style runs free. The one axis no
+        candidate encodes per cell -- hyperlink metadata -- is owed by all six, and
+        it is the one the original table omitted.
         """
         universal = {
             "hyperlinks": {"hyperlinks": [3]},
-            "identity fragmentation": {"identity_runs": [7]},
         }
         exception_list_only = {
             "wide cells": ({"wide": [6]}, ["C6 stride+runs+exceptions"]),
@@ -381,7 +332,7 @@ class MetadataChargeCompletenessTests(unittest.TestCase):
         }
         base_kwargs = dict(
             stored=[60], styled=[30], runs=[3], multi=[1], wide=[2],
-            hyperlinks=[1], identity_runs=[2], identified=[60],
+            hyperlinks=[1],
         )
         base = self.arena_per_row(make_report("recording", **base_kwargs))
 
@@ -420,22 +371,6 @@ class MetadataChargeCompletenessTests(unittest.TestCase):
             shape.pack_stride_runs_exceptions(multi_row),
             shape.pack_stride_runs_exceptions(wide_row),
         )
-
-
-class ContiguityReductionTests(unittest.TestCase):
-    def test_single_run_fraction_counts_rows_not_runs(self):
-        """The fraction `PR1` selects a variant by must be denominated in rows.
-
-        A mean over runs would let one pathologically fragmented row drag the
-        number below the line while every other row remains contiguous, which is
-        the opposite of what the encoding cares about: the encoding is chosen per
-        row, so the question is how many rows are cheap, not how many runs exist.
-        """
-        report = make_report("recording", [10] * 4, identity_runs=[1, 1, 1, 9])
-        composed = shape.compose(report)
-
-        self.assertEqual(composed["singleRunRowFraction"], 0.75)
-        self.assertEqual(composed["meanIdentityRunsPerRow"], 3.0)
 
 
 if __name__ == "__main__":
