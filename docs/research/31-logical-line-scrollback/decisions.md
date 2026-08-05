@@ -2884,6 +2884,24 @@ saved). On the first, the next instrument is a profile of the post-fix
 one free variable -- a larger chunk trades copy reduction for fewer boundaries --
 and the entry is re-decided against a measurement rather than tuned silently.
 
+**Fired 2026-08-04 on the second clause, and not on the first.** `F15` ran the
+rule as frozen: `scrollback-stream` **+4.92% -> -9.71% `faster`** (drain 7.8 ->
+**9.2 MB/s** against the baseline's 8.4, so the copy *was* the residual and the
+first clause is refuted in the opposite direction), `terminal-feed`
+**+2.68% -> +2.33% `inconclusive`** (a move this entry said in advance it could
+not explain, and `F15` Observation 3 records it as unexplained rather than
+banking it), and **`retained-browse` +1.03% -> +1.39% `slower`** against an
+unchanged 1.05% threshold. So **this decision is reopened**, the mechanism it
+chose is not vindicated by the ladder even though the mechanism it replaced was
+the residual, and rule 3 applies: acceptance is not met, no second fix round is
+taken, and the disposition is a human's. **M1 is spent** -- nobody may name the
+arena's copy as the untaken mechanism after this. What the reopening asks for,
+per the clause's own words, is a measurement rather than a tuning: `F15`
+Observation 2 attributes the +0.36 points to the per-record header read that
+gained an indirection (`record(at:)` / `displayRowCount(recordIndex:)`, once per
+record, on a stimulus whose every record is one display row) **from the code, not
+from a profile**, and no profile of the post-`D5` browse path exists.
+
 #### New deferred decisions
 
 - **DD53 -- the chunk size is derived from the capacity rather than fixed, and

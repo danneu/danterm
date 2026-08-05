@@ -207,6 +207,26 @@ trial depth re-measures **above 121 us** under doc 21's own instrument
 
 ## Acceptance
 
+**Re-measured 2026-08-04 as `31/F15` after `31/D5` amended the arena to chunked
+backing and took `31/F13`'s M1, the last attributed mechanism. This section is
+STILL NOT satisfied, and it now fails on the go/no-go rung rather than on the two
+falsifiers.** Same frozen instrument, same base `28c54e1`, no threshold touched:
+`scrollback-stream` **-9.71%** (`faster`; drain **9.2 MB/s** against the
+baseline's own 8.4, the campaign's first rung to reach `31/F3`'s ~-7%
+hypothesis), `terminal-feed` **+2.33%** (`inconclusive`, so **not `slower`**, and
+`31/F15` Observation 3 records the move as unexplained rather than banking it),
+and `retained-browse` **+1.39%** (**`slower`**, up from +1.03% against an
+unchanged 1.05% threshold). The three history-free draw workloads read `faster` /
+`faster` / `faster`. **One of the three rungs reads `slower`, so acceptance is not
+met and no further fix round was taken** -- that is `31/D5`'s own frozen rule and
+this plan's. What is settled that was not: `31/F13`'s M1 **was** the residual, the
+arena is no longer copied per published frame, and M1 is spent. What is new and
+named: the chunked read costs the go/no-go rung ~0.36 points, attributed from the
+code (`record(at:)` and `displayRowCount(recordIndex:)` gained one indirection per
+record, on a stimulus whose every record is one display row) and **not** from a
+profile, which nobody has taken. `31/D5`'s second reopening condition has fired.
+The previous reading follows.
+
 **Re-measured 2026-08-04 as `31/F14` after `31/F13` attributed the regression and
 three of its four mechanisms were fixed. This section is STILL NOT satisfied, and
 the go/no-go rung now passes.** Same frozen instrument, same base `28c54e1`, no
@@ -490,6 +510,9 @@ Open conditions that the implementation, not the design, has to discharge:
 - [x] 9. perf(terminal): give the frame path back its two borrowing walks and its per-row hoists
 - [x] 10. perf(terminal): compare retained history as stored bytes instead of decoded cells
 - [x] 11. docs(research): re-run the frozen ladder once and record the verdict (`31/F14`) -- **acceptance still not met**
+- [x] 12. docs(research): amend `31/D2` Decision 1 to chunked backing and freeze the re-run's rule (`31/D5`)
+- [x] 13. perf(terminal): back the arena with chunks so a published frame copies one, not all of it
+- [x] 14. docs(research): re-run the frozen ladder once and record the verdict (`31/F15`) -- **acceptance still not met, on the go/no-go rung**
 
 ## Implementation notes
 
@@ -1066,6 +1089,57 @@ Open conditions that the implementation, not the design, has to discharge:
     store -- an origin object plus a generation bumped by every mutation -- which trades a
     measurable win for a silent-wrong-answer failure mode if one mutation ever forgets.
 
+- **Slices 12-14 are the "amend the arena, take M1, re-run" round the human
+  licensed after `31/F14`, appended for the same reason `4a`/`4b` and `8`-`11`
+  were**: `31/F13`, `31/F14`, `31/D5` and this plan's own gates all refer to the
+  earlier slices by number. The rule-then-measure separation is again a commit
+  boundary -- slice 12 freezes the decision and the re-run's rule and reads no
+  number, slice 13 changes code with tests and reads no verdict, slice 14 runs the
+  frozen ladder.
+- **`31/D5` weighed all three of `31/F14`'s named mechanisms and the two it
+  refused are recorded with their costs, not as preferences.** A
+  **shared-immutable region** removes the copy entirely and was refused because
+  the arena is a *ring*: eviction rewrites the head record's header in place,
+  `reopenTailRecord` reopens a record a snapshot may be folding, and the cursor
+  eventually wraps into the region a published value addresses -- so it needs a
+  generation counter every mutation must remember to bump (`31/DD52`'s refused
+  failure mode, with a torn frame as its symptom instead of a wrong comparison) or
+  a read lock the main thread's scroll takes against the PTY drain. A
+  **history-free publish** was refused because every history reader -- the
+  planner's two viewport traversals, the projection totals, `searchMatches`,
+  Select All, history export, and `retained-browse` itself -- reads history off the
+  published value *outside* the owner's fence, so a separate handle either races
+  the drain or re-materializes the copy, and it would change what a published frame
+  **is** (a self-contained value, which is what the Elm-architecture commitment and
+  the render layer's PTY-free testability rest on).
+- **What landed, in one shape.** The byte address space is unchanged -- one linear
+  ring over `[0, arenaCapacity)`, every offset global -- and only the backing is
+  split, into `ContiguousArray<ContiguousArray<UInt64>>` at 30 chunks of 512 KiB
+  under the production budget. A record never straddles a chunk, enforced by the
+  placement machinery that already existed: `contiguousRoomAtCursor` clamps to the
+  region end, and `wrapWriteCursorAtSeam(to:)` takes the boundary as a parameter so
+  `31/DD20`'s forced split and `31/DD14`'s pad fire at a chunk boundary on exactly
+  the terms they fire at the physical end. That containment is what lets the two
+  hot per-row walks (`forEachPaintedCell`, `forEachKind`) and the append loop hoist
+  one chunk and index it with the single subscript they used against the one
+  buffer, and it is what keeps equality's raw two-pointer cell compare legal.
+  Observable behavior is unchanged: no test's expectation moved, and the charge
+  model gained one term (`arenaBackingOverheadBytes`, ~1.2 KiB, on `31/DD37`'s
+  rule) rather than changing denomination.
+- **The pinning test asserts the mechanism, not a time.**
+  `publishedValueThenAdmitCopiesOneChunkNotTheWholeArena` copies the store's value
+  -- which is what publishing a frame does -- admits one row into the original, and
+  compares each chunk's storage identity across the two: the chunks the admission
+  did not write must still be the same buffers the copy holds. It was verified to
+  fail for the right reason before the change, by forcing the chunk size to the
+  whole capacity: 1 chunk, and one admission copies all 983,040 bytes.
+- **Two judgment calls, recorded as `31/DD53`-`31/DD54` in `31/D5`**, each taken
+  as the obvious simple option: the chunk size is derived from the capacity
+  (`nextPowerOfTwo(capacity / 32)` clamped to [64 KiB, 512 KiB], single chunk at or
+  under the floor, so small-budget tests keep today's placement exactly), and a row
+  that does not fit one chunk retains nothing, which extends `31/DD46`'s rule to
+  the chunk as the admissible unit.
+
 ## Follow Up
 
 - **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
@@ -1082,17 +1156,21 @@ Open conditions that the implementation, not the design, has to discharge:
   resize cost stopped being a function of history depth and a successor budget
   wants deriving against the live screen. Nothing currently bounds resize cost.
 - ~~**The cutover's regression is unattributed and nothing is profiling it.**~~
-  **Attributed 2026-08-04 as `31/F13`, and mostly fixed by slices 9 and 10. Two things are
-  left.** The named mechanism nobody took: the arena is copied whole on every published
-  frame -- `memcpy` at 12.1%-16.1% of whole-process CPU under
-  `applyOutput -> moveAndFillRows -> admit` -- because `TerminalPTYHost.drainedFrameState()`
-  publishes the `Terminal` value and makes a 15.75 MiB `ContiguousArray` non-unique. Taking
-  it reopens `31/D2` Decision 1's "one contiguous per-pane byte arena", so it is a human's,
-  and it is the first suspect for `scrollback-stream`'s residual +4.92%. The unexplained
-  rung: `terminal-feed` read +2.60% before the fixes and +2.68% after, and no measured
-  mechanism accounts for either -- the store's unshared write path is 0.96x-1.04x the
-  incumbent's per fed byte across three sessions, and that workload never publishes and
-  never draws.
+  **Attributed 2026-08-04 as `31/F13`, fixed by slices 9, 10 and 13, and re-measured as
+  `31/F15`. What is left is one rung and one unattributed 0.36 points.** M1 is **spent**:
+  the arena is no longer copied per published frame, and `scrollback-stream` went
+  +4.92% -> **-9.71% `faster`**, which settles that M1 was the residual.
+  `terminal-feed` cleared to +2.33% `inconclusive` and is **still unexplained** --
+  `31/D5` predicted before the run that this change could not move it, and `31/F15`
+  Observation 3 records the move rather than banking it. **The open item is now
+  `retained-browse`**: +1.03% -> **+1.39% `slower`**, 0.34 points past its threshold,
+  which `31/D5`'s second reopening condition names and which `31/F15` attributes from the
+  code -- `record(at:)` and `displayRowCount(recordIndex:)` gained one indirection per
+  record, on the one stimulus whose every record is exactly one display row -- rather than
+  from a profile. **No profile of the post-`31/D5` browse path exists**, and that is the
+  next instrument if a human wants the rung closed rather than accepted. The chunk size is
+  the one free variable `31/D5` names, and it is deliberately untuned against any
+  measurement. The original entry follows.
 - ~~**`LogicalLineStore.forEachFoldedCell` re-enumerates the whole record for every display
   row it folds**~~ **Fixed by slice 9**: the row's cell range is arithmetic whenever the
   record carries no wide cell, which is the `31/DD4` fast path `rowCount` and

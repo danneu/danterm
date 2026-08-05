@@ -65,6 +65,21 @@ Two acceptance dimensions, and a change lands only on both:
    frame, which is a change to `D2` Decision 1's "one contiguous arena" rather
    than to the wiring. **The store still does not land**, and the disposition is
    a human's.
+
+   **Re-measured 2026-08-04 by [F15](findings.md) after `D5` amended the arena to
+   chunked backing and took that last mechanism. The dimension still FAILS, and
+   it fails on a different rung.** Both admission falsifiers now clear:
+   `scrollback-stream` **+4.92% -> -9.71% `faster`**, its PTY drain past the
+   baseline's own at **9.2 MB/s against 8.4**, which is the first rung in this
+   campaign to reach `F3`'s ~-7% hypothesis rather than refute it; and
+   `terminal-feed` **+2.68% -> +2.33% `inconclusive`**, a move `D5` said in
+   advance it could not explain and which `F15` records as unexplained rather
+   than banking. **The go/no-go rung crosses the other way**: `retained-browse`
+   **+1.03% -> +1.39% `slower`** against an unchanged 1.05% threshold, which is
+   `D5`'s own second reopening condition firing verbatim -- the chunked read costs
+   more than the copy saved. So M1 is spent, five of six workloads read `faster`,
+   and the one rung this doc calls the go/no-go is `slower` by 0.34 points.
+   **The store still does not land**, and the disposition is a human's.
 2. **Net simplification.** The deletion list (history reflow mutation, the
    cell cap, the row cap, their derivations and tests, narrow-then-widen
    machinery, continuation bookkeeping in retained history) must exceed the
@@ -803,6 +818,25 @@ licenses a production storage change; landing is the paired ladder's.
   section and the frozen thresholds unchanged, and the entry states before the
   run that this change **cannot** move `terminal-feed`, which never publishes.
   Two deferred decisions added (`DD53`, `DD54`).
+- [x] `DONE` **`F15`, the ladder re-run after `D5`'s chunked backing** (the
+  acceptance dimension, third reading). Recorded in [F15](findings.md). One valid
+  `confirm` invocation against the same baseline, no threshold or pair count
+  touched: **`scrollback-stream` +4.92% -> -9.71% `faster`** with its drain at
+  **9.2 MB/s against the baseline's 8.4** (166.5 ms against 182.4 for the same
+  1.53 MB corpus) and its draw tail also falling, **`terminal-feed` +2.68% ->
+  +2.33% `inconclusive`**, and **`retained-browse` +1.03% -> +1.39% `slower`**
+  against an unchanged 1.05% threshold, on four paired values of which three
+  exceed it. `F13`'s M1 **was** the residual -- taking it moved
+  `scrollback-stream` by 14.6 points and reached `F3`'s ~-7% hypothesis, the
+  campaign's first rung to do so -- and the mechanism that took it costs the
+  go/no-go rung 0.36 points, which `F15` attributes from the code (the per-record
+  header read gained an indirection) rather than from a profile nobody has taken.
+  **`D5`'s second reopening condition fires verbatim and `M1` is spent.**
+  Residency is at parity: `vmmap` TOTAL DIRTY **88.3 MB against `F14`'s 87.5**,
+  with the arena's 15 MB simply moving from `MALLOC_LARGE` to `MALLOC_SMALL`, and
+  the store's settled live heap **14.673 MiB against a 15.000 MiB capacity**.
+  **Acceptance is still not met**, no second fix round was taken, and the
+  disposition is a human's.
 
 ## Rejected
 

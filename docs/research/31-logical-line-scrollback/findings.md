@@ -4132,3 +4132,169 @@ they measure different things.
   cost, or revert the cutover. `28/H7` remains reopened under `D3` Decision 1's
   frozen rule, and this entry weakens rather than strengthens the case for
   executing it: the go/no-go rung that rule is about now reads `inconclusive`.
+
+### F15 -- the ladder re-run after `D5`'s chunked backing: `scrollback-stream` turns +4.92% into **-9.71% faster** and `terminal-feed` clears, and the go/no-go rung crosses the other way at **+1.39% `slower`**
+
+- Status: complete, and **acceptance is still not met -- for the first time on a
+  different rung.** `D5`'s decision rule required all three named rungs
+  not-`slower`; two that were `slower` now are not, and the one that was not now
+  is. This entry records the verdict and stops there: `D5` froze "any rung still
+  `slower` means acceptance is not met, and no second fix round is taken", and
+  `agent-docs/terminal-performance.md` says to report rather than iterate.
+- **Read this first.** `F13`'s M1 was the residual, and taking it was worth more
+  than anyone predicted: `scrollback-stream` went **+4.92% -> -9.71%**, its PTY
+  drain from 7.8 MB/s past the baseline's 8.4 to **9.2 MB/s**, which is the first
+  rung in this campaign to reach `F3`'s ~-7% hypothesis rather than refute it.
+  `terminal-feed` went **+2.68% `slower` -> +2.33% `inconclusive`**, which `D5`
+  said in advance it could not explain and still cannot. What broke is
+  `retained-browse`: **+1.03% `inconclusive` -> +1.39% `slower`** against an
+  unchanged 1.05% threshold. That is `D5`'s **second reopening condition firing
+  verbatim** -- "the chunked read costs more than the copy saved" -- and it is why
+  this entry is a stop rather than a landing.
+- Date and investigator: 2026-08-04, Claude (agent).
+- Commit and worktree state: candidate is `1e4cb61` (tree `c1a5371bab25`), the
+  cutover plus `F13`'s three fixes plus `D5`'s chunked backing, with the two
+  untracked paths present throughout this doc's work captured by the harness and
+  absent from the app build (`TODO.md`,
+  `docs/scratch/2026-08-04-scroll-sample-breakdown.md`). Baseline is **`28c54e1`**
+  (tree `f7705cb0c767`), byte-identical to `F11`'s and `F14`'s, so the three runs
+  are the same comparison three times.
+- Commands, inputs, or reproduction:
+
+      just benchmark-confirm baseline=28c54e1
+      just terminal-memory-probe "--payload scrollback-plain --vmmap"
+      DANTERM_LOGICAL_LINE_PROBE=1 DANTERM_RESIDENCY_CASE=arena/plain/cycled \
+        swift test -c release --package-path lib/TerminalCore --filter residencyReading
+
+  One `confirm` invocation, the complete six-workload ladder at the frozen pair
+  counts, no block invalidated and no verdict withheld. No threshold, pair count
+  or statistic was touched between `F14` and this run. Conditions: AC power,
+  one-minute load **1.52 at invocation** (0.15 per processor across 10) and 2.95
+  before the first block, the second reading confounded by the run's own builds.
+- Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/c1a5371bab25-0000/run.json`
+  (disposable; every decision-bearing value is quoted below).
+
+#### Observation 1 -- the ladder, all three readings, against the same frozen thresholds
+
+| workload | frozen rule (`confirm`) | `F11` | `F14` | this run | verdict |
+| --- | --- | ---: | ---: | ---: | --- |
+| **`retained-browse`** (go/no-go) | 4 pairs, +/-1.05%, band 0.75% | +60.44% | +1.03% | **+1.39%** | **`slower`** |
+| **`terminal-feed`** (`H3` falsifier) | 2 pairs, +/-2.5% | +2.60% | +2.68% | **+2.33%** | **`inconclusive`** |
+| **`scrollback-stream`** (`H3` falsifier) | 4 pairs, +/-1.85% | +141.42% | +4.92% | **-9.71%** | **`faster`** |
+| `content-churn` | 4 pairs, +/-2.15%, band 0.75% | -2.12% | -0.57% | -2.86% | `faster` |
+| `style-churn` | 4 pairs, +/-2.0% | -3.09% | -2.97% | -2.12% | `faster` |
+| `incremental-mixed` | 6 pairs, +/-1.85% | -5.16% | -10.18% | -5.20% | `faster` |
+
+`scrollback-stream`'s split, which is where the size of the change is legible:
+drain **182.4 ms at 8.4 MB/s** (baseline) against **166.5 ms at 9.2 MB/s**
+(candidate) for the same 1.53 MB corpus, with the draw tail also falling
+(14.6 -> 12.5 ms). The candidate now drains the corpus **faster than the
+pre-cutover engine**, where `F11` measured it 6.2x slower and `F14` 1.08x slower.
+One outlier pair was flagged and retained in the estimate, as the rule specifies.
+
+`retained-browse`'s four paired symmetric percentages are **+0.582, +1.327,
++1.446, +1.502**, median +1.387; one pair (the first) was flagged as an outlier
+and retained. Three of four sit above the 1.05% threshold, so the verdict does
+not rest on the median's choice among scattered values.
+
+#### Observation 2 -- what the chunked backing bought and what it cost, named separately
+
+**Bought.** `F13` M1 measured `memcpy` at **12.10%** and **16.13%** of
+whole-process CPU under
+`applyOutput -> moveAndFillRows -> LogicalLineStore.admit -> ContiguousArray._makeMutableAndUnique`,
+because publishing the `Terminal` value made a single 15.75 MiB
+`ContiguousArray` non-unique. Under `D5` the production arena is 30 chunks of
+512 KiB, and one admission after a publish copies **one** of them; the store
+test `publishedValueThenAdmitCopiesOneChunkNotTheWholeArena` asserts that
+directly, by chunk storage identity rather than by timing. `scrollback-stream`'s
+**14.6-point swing** (+4.92% to -9.71%) is the ladder's reading of that, and it
+is the first evidence in this campaign that M1 was in fact the residual rather
+than merely the largest named suspect.
+
+**Cost.** Every arena read is now `chunks[offset >> shift][(offset & mask) >> 3]`
+where it was `arena[offset >> 3]`. The two hot per-row walks hoist the chunk once
+per display row, so a *cell* read is the same single subscript it was; what is
+not hoisted is the per-record work `retained-browse` does most of -- the header
+read behind `record(at:)` and `displayRowCount(recordIndex:)`, once per record,
+on a stimulus whose every record is exactly one display row. **+0.36 points is
+what that reads as**, and this entry does not claim more precision than that: no
+profile of the post-`D5` `retained-browse` has been taken, and the attribution
+above is from the code rather than from an instrument.
+
+#### Observation 3 -- `terminal-feed` moved, and `D5` said before the run that it should not
+
+`D5`'s frozen rule states: "this change **cannot** move `terminal-feed`. That
+workload measures `Terminal.feed` on a fresh terminal per execution, never
+publishes and never draws... The honest prior is therefore that `terminal-feed`
+reads `slower` again... If `terminal-feed` moves at all, that is unexplained and
+must be recorded as unexplained rather than credited to this change."
+
+It moved: **+2.68% -> +2.33%**, from `slower` to `inconclusive`, on the two
+paired values +2.401 and +2.250. **This is recorded as unexplained.** Three
+things that are true about it and none of which is an explanation: the rung is
+the ladder's least-resolved cell (two pairs, the widest threshold, and a 0.17-point
+move across the threshold); the write path did change shape, since `appendCells`
+now moves its target chunk into a local for the append loop, which is a different
+uniqueness-check pattern even when nothing is shared; and `F14`'s own +2.68% was
+already inside the range where a two-pair estimate cannot separate a real effect
+from its own noise. A rung that crosses a threshold by 0.17 points in the
+direction the change wanted is exactly the reading a campaign should refuse to
+bank, and this entry refuses to bank it.
+
+#### Observation 4 -- the residency re-read, which the backing change was expected to move and did not
+
+`just terminal-memory-probe "--payload scrollback-plain --vmmap"`, `DD49`'s named
+pane-level recipe, on the same recipe `F11` and `F14` used:
+
+| quantity | `28c54e1` (`F13`) | `F14` (`fa5fb74`) | this run (`1e4cb61`) |
+| --- | ---: | ---: | ---: |
+| footprint delta | 9.16 MB | 81.75 MB | **82.00 MB** |
+| live heap | 5.43 MB | 15.55 MB | **16.01 MB** |
+| row allocations | 10,001 | 66 | **66** |
+| `vmmap` TOTAL DIRTY | 15.0 MB | 87.5 MB | **88.3 MB** |
+| of which `MALLOC_SMALL (empty)` | 16 K | 56.9 MB | **56.8 MB** |
+| of which `MALLOC_LARGE` (the arena) | -- | 15.0 MB | **0 -- see below** |
+
+**The one thing that moved is which zone the arena lives in.** A 15 MiB single
+allocation was `MALLOC_LARGE`; thirty 512 KiB allocations are `MALLOC_SMALL`,
+which is why that row goes to zero and `MALLOC_SMALL` rises from 7.8 MB to
+23.3 MB for the same content. TOTAL DIRTY is **88.3 MB against `F14`'s 87.5 MB**,
+a 0.9% difference on a number whose 56.8 MB majority is `F13` Observation 4's
+unreturned transient pages, so the honest statement is **parity**. The store's
+own settled live-heap cost, read through `F8`'s `arena/plain/cycled` arm at this
+revision, is **14.673 MiB against a 15.000 MiB capacity** with the census
+reporting `charged/budget = 0.9375x` and `censusIdentity` holding, so the 30
+chunks cost what the one allocation cost. `F13`'s settled **0.92x** against the
+incumbent is quoted rather than re-measured, for `DD49`'s recorded reason: the
+incumbent store no longer exists in the tree, so no same-session control can be
+built at this revision.
+
+- Uncertainty:
+  - **One invocation, as the plan's Acceptance specifies.** `retained-browse` is
+    `slower` by **0.34 points** over its threshold, which is the same evidentiary
+    position `F14`'s two near-threshold rungs were in and deserves the same
+    caution: at this size a human may reasonably want a second invocation, and
+    the rule does not require one.
+  - **The `retained-browse` regression is attributed from the code, not from a
+    profile.** No profile of the post-`D5` browse path exists. That the per-record
+    header read gained an indirection is a fact about the diff; that it is *the*
+    +0.36 points is an inference.
+  - **`terminal-feed`'s move is unexplained**, per Observation 3, and is not
+    banked as a win.
+  - **`scrollback-stream`'s -9.71% is one reading of a rung that has now produced
+    +141.42%, +4.92% and -9.71% across three sessions.** The baseline arm has
+    reproduced itself within 0.3% throughout, which is what makes the candidate
+    arm's movement readable; the -9.71% itself has no second invocation.
+  - **The chunk size is not tuned against a measurement.** `DD53` derived it and
+    `D5` names it the one free variable; nothing here prices a different one.
+- Next action: none taken here. The disposition is a human's, and the options the
+  evidence supports are: accept one near-threshold `slower` rung as a recorded
+  cost (the ladder is otherwise `faster` on five of six, including both `H3`
+  falsifiers); spend one more round on `retained-browse`'s per-record read, which
+  is a bounded and named target rather than an unattributed residual; re-run the
+  ladder once more to see whether a 0.34-point overshoot reproduces; or revert the
+  cutover. `28/H7` remains reopened under `D3` Decision 1's frozen rule and this
+  entry weakens the case for executing it further: the rung that rule is about is
+  `slower` by 0.34 points against a store whose two admission falsifiers now read
+  `inconclusive` and `faster`.
