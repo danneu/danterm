@@ -7,6 +7,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,10 @@ from typing import Iterable, Mapping
 DEVELOPMENT_SLOTS = range(1, 9)
 POOL_EXHAUSTED_STATUS = 75
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+PASSTHROUGH_ENVIRONMENT_VARIABLES = (
+    "DANTERM_PTY_RECORDING_DIR",
+    "DANTERM_TERMINAL_BACKEND",
+)
 
 
 class PoolExhaustedError(Exception):
@@ -73,6 +78,15 @@ def exclusive_file_lock(path: Path):
         yield
     finally:
         os.close(descriptor)
+
+
+def checkout_build_lock_path(slot_root: Path, repository_root: Path) -> Path:
+    """Keeps each checkout's build lock outside build products that cleaning removes."""
+
+    checkout_digest = hashlib.sha256(
+        str(repository_root.resolve()).encode("utf-8")
+    ).hexdigest()
+    return slot_root / "locks" / f"build-{checkout_digest}.lock"
 
 
 def resolve_slot_identity(
@@ -186,10 +200,10 @@ def launch_services_environment(
     user: str,
     shell: str,
     temporary_directory: str,
+    passed_environment_names: Iterable[str] = (),
 ) -> dict[str, str]:
     """Constructs app launch state without forwarding unmanaged agent variables."""
 
-    del inherited
     environment = dict(gui_environment)
     environment.update({
         "HOME": str(home),
@@ -199,6 +213,9 @@ def launch_services_environment(
         "TMPDIR": temporary_directory,
     })
     environment.setdefault("PATH", DEFAULT_PATH)
+    for name in passed_environment_names:
+        if name in inherited:
+            environment[name] = inherited[name]
     return environment
 
 
@@ -221,6 +238,14 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         "--foreground",
         action="store_true",
         help="activate the fresh instance and allow its one-time notification prompt",
+    )
+    parser.add_argument(
+        "--pass-env",
+        action="append",
+        choices=PASSTHROUGH_ENVIRONMENT_VARIABLES,
+        default=[],
+        metavar="NAME",
+        help="forward one allowlisted DanTerm launch variable; may be repeated",
     )
     return parser.parse_args(arguments)
 
@@ -249,9 +274,10 @@ def main(arguments: list[str]) -> int:
         user=account.pw_name,
         shell=account.pw_shell or "/bin/zsh",
         temporary_directory=temporary_directory(),
+        passed_environment_names=options.pass_env,
     )
 
-    build_lock_path = repository_root / ".build" / "dev-slot-build.lock"
+    build_lock_path = checkout_build_lock_path(slot_root, repository_root)
     with exclusive_file_lock(build_lock_path):
         subprocess.run(build_arguments, check=True, stdout=sys.stderr)
 

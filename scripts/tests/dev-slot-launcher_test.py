@@ -57,14 +57,18 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
 
             self.assertEqual(raised.exception.exit_status, 75)
 
-    def test_build_lock_prevents_overlap_in_one_checkout(self) -> None:
+    def test_build_lock_survives_build_directory_removal(self) -> None:
         # Intent: launchers sharing one checkout cannot overlap canonical bundle assembly.
-        # Why it exists: SwiftPM serializes compilation, but the dev bundle's remove-copy-sign
-        #   sequence is outside SwiftPM and would otherwise race before either slot clone exists.
-        # Scenario: two agents in one checkout launch different slots at the same time.
+        # Why it exists: a lock inside .build guards an unlinked inode after `just clean`,
+        #   allowing a second launcher to enter the remove-copy-sign sequence concurrently.
+        # Scenario: one agent cleans a checkout while another launcher holds its build lock.
         with tempfile.TemporaryDirectory() as directory:
-            lock_path = Path(directory) / "build.lock"
-            ready = Path(directory) / "ready"
+            root = Path(directory)
+            repository_root = root / "checkout"
+            build_directory = repository_root / ".build"
+            build_directory.mkdir(parents=True)
+            lock_path = launcher.checkout_build_lock_path(root / "slot-cache", repository_root)
+            ready = root / "ready"
             child = os.fork()
             if child == 0:
                 with launcher.exclusive_file_lock(lock_path):
@@ -76,6 +80,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 while not ready.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(ready.exists())
+                build_directory.rmdir()
                 contender = os.open(lock_path, os.O_RDWR)
                 try:
                     with self.assertRaises(BlockingIOError):
@@ -177,6 +182,21 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         self.assertEqual(identity["bundleId"], "example")
         self.assertEqual(run.call_args.kwargs["env"], app_environment)
 
+    def test_pass_env_accepts_only_named_launch_controls(self) -> None:
+        options = launcher.parse_arguments([
+            "--pass-env",
+            "DANTERM_TERMINAL_BACKEND",
+            "--pass-env",
+            "DANTERM_PTY_RECORDING_DIR",
+        ])
+
+        self.assertEqual(
+            options.pass_env,
+            ["DANTERM_TERMINAL_BACKEND", "DANTERM_PTY_RECORDING_DIR"],
+        )
+        with self.assertRaises(SystemExit):
+            launcher.parse_arguments(["--pass-env", "CLAUDE_CODE_CHILD_SESSION"])
+
     def test_handle_fields_follow_one_identity(self) -> None:
         handle = launcher.launch_handle(self.identity(4), 12345)
 
@@ -215,6 +235,27 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         self.assertNotIn("DANTERM", environment)
         self.assertNotIn("DANTERM_SOCK", environment)
         self.assertNotIn("DANTERM_PANE", environment)
+
+    def test_launch_environment_preserves_only_explicitly_named_controls(self) -> None:
+        inherited = {
+            "DANTERM_TERMINAL_BACKEND": "swift",
+            "DANTERM_PTY_RECORDING_DIR": "/tmp/recordings",
+            "CLAUDE_CODE_CHILD_SESSION": "leak",
+        }
+
+        environment = launcher.launch_services_environment(
+            inherited,
+            {},
+            home=Path("/Users/test"),
+            user="test",
+            shell="/bin/zsh",
+            temporary_directory="/private/tmp/test/",
+            passed_environment_names=["DANTERM_TERMINAL_BACKEND"],
+        )
+
+        self.assertEqual(environment["DANTERM_TERMINAL_BACKEND"], "swift")
+        self.assertNotIn("DANTERM_PTY_RECORDING_DIR", environment)
+        self.assertNotIn("CLAUDE_CODE_CHILD_SESSION", environment)
 
 
 if __name__ == "__main__":
