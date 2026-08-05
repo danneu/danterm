@@ -70,7 +70,7 @@ struct LegacyComputingSupplementSpriteGeometryTests {
             .circlePieces([LegacySupplementCirclePiece(
                 xCells: 0, yCells: 0, widthCells: 1, heightCells: 1, corner: .topLeft
             )]),
-            .octants(255), .splitCircle(vertical: true),
+            .octants(255), .splitCircle(vertical: true), .splitCircle(vertical: false),
             .separatedSextants(63), .sixteenth(index: 31),
         ]
         for pattern in patterns {
@@ -85,6 +85,52 @@ struct LegacyComputingSupplementSpriteGeometryTests {
                     && $0.x + $0.width <= width && $0.y + $0.height <= height
             })
         }
+    }
+
+    @Test("The two split circles differ and each meets the edges its name describes")
+    func splitCircleHalves() {
+        // Intent: U+1CE00 (RIGHT HALF AND LEFT HALF WHITE CIRCLE) draws two circles
+        //   centered on the left and right cell edges, and U+1CE01 (LOWER HALF AND UPPER
+        //   HALF WHITE CIRCLE) draws them on the top and bottom edges, so the two
+        //   characters are visibly different shapes.
+        // Why it exists: `.splitCircle`'s `vertical` flag used to be threaded into a
+        //   parameter whose two branches returned the same value, so both characters
+        //   rasterized one full-cell ellipse -- geometry that matched neither name and
+        //   that no test could tell apart.
+        // Scenario: spec-first; the flag never had an effect, so nothing regressed.
+        let width = 12
+        let height = 16
+        struct InkPixel: Hashable { let x: Int, y: Int }
+        func pixels(vertical: Bool) -> Set<InkPixel> {
+            let rects = LegacyComputingSupplementSpriteGeometry.rects(
+                pattern: .splitCircle(vertical: vertical),
+                cellWidthPixels: width, cellHeightPixels: height, thicknessPixels: 1
+            )
+            return Set(rects.flatMap { rect in
+                (rect.y..<(rect.y + rect.height)).flatMap { y in
+                    (rect.x..<(rect.x + rect.width)).map { InkPixel(x: $0, y: y) }
+                }
+            })
+        }
+        let leftRight = pixels(vertical: true)
+        let upperLower = pixels(vertical: false)
+        #expect(leftRight != upperLower)
+
+        // Radius is min(width, height) / 2 = 6, so the left/right pair spans the full
+        // width and stops short of the top and bottom rows.
+        #expect(leftRight.contains { $0.x == 0 })
+        #expect(leftRight.contains { $0.x == width - 1 })
+        #expect(!leftRight.contains { $0.y == 0 || $0.y == height - 1 })
+        let midRowColumns = leftRight.filter { $0.y == height / 2 }.map(\.x)
+        #expect(!midRowColumns.isEmpty, "the two halves meet across the vertical mid-line")
+        #expect(midRowColumns.allSatisfy { abs($0 - width / 2) <= 1 })
+
+        // The upper/lower pair mirrors that: edge contact top and bottom, and a clear
+        // horizontal band where neither circle reaches the cell's vertical middle.
+        #expect(upperLower.contains { $0.y == 0 })
+        #expect(upperLower.contains { $0.y == height - 1 })
+        #expect(!upperLower.contains { $0.y == height / 2 - 1 || $0.y == height / 2 })
+        #expect(Set(upperLower.map(\.x)) == Set(0..<width))
     }
 
     @Test("Adjacent cells of one arc are windows on the same translated ellipse")

@@ -224,7 +224,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 5. splitVertical parameter is inert; U+1CE00 and U+1CE01 render identically
 
-**Status:** `deferred` -- parked for a human design decision
+**Status:** `done` -- verifier's adjustment taken: `.splitCircle` now emits two edge-centered circles of radius min(w,h)/2 (left/right vs top/bottom), so the two scalars differ; inert `splitVertical:` parameter and dead `LegacySupplementRegion` enum deleted
 
 `lib/TerminalCore/Sources/TerminalSpriteGeometry/LegacyComputingSupplementSpriteGeometry.swift:276` -- high confidence, medium effort, found by `core-rest`
 

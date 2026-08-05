@@ -44,6 +44,8 @@ struct LegacyComputingSupplementSpriteExecutionTests {
         for (index, circle) in circles.enumerated() {
             #expect(pattern(0x1CC30 + UInt32(index)) == .circlePieces([circle]))
         }
+        #expect(pattern(0x1CE00) == .splitCircle(vertical: true))
+        #expect(pattern(0x1CE01) == .splitCircle(vertical: false))
         #expect(pattern(0x1CE0B) == .circlePieces([
             piece(0,0,1,0.5,.topLeft), piece(0,0,1,0.5,.bottomLeft),
         ]))

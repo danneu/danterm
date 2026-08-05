@@ -1,11 +1,6 @@
 // Cell-local physical-pixel geometry for Symbols for Legacy Computing Supplement.
 import Foundation
 
-/// Identifies the elementary regions used by the supplement's block mosaics.
-public enum LegacySupplementRegion: Int, Equatable, Sendable {
-    case one, two, three, four, five, six, seven, eight
-}
-
 /// Selects one quarter of a translated ellipse outline.
 public enum LegacySupplementArcCorner: Equatable, Sendable {
     case topLeft, topRight, bottomLeft, bottomRight
@@ -67,12 +62,7 @@ public enum LegacyComputingSupplementSpriteGeometry {
         case let .octants(bits):
             return tiled(bits: bits, columns: 2, rows: 4, width: width, height: height)
         case let .splitCircle(vertical):
-            return ellipseOutline(
-                centerX: Double(width) / 2, centerY: Double(height) / 2,
-                radiusX: Double(width) / 2, radiusY: Double(height) / 2,
-                width: width, height: height, thickness: thickness,
-                splitVertical: vertical
-            )
+            return splitCircle(vertical: vertical, width: width, height: height, thickness: thickness)
         case let .separatedSextants(bits):
             return separated(bits: bits, columns: 2, rows: 3, width: width, height: height)
         case let .sixteenth(index):
@@ -188,6 +178,27 @@ public enum LegacyComputingSupplementSpriteGeometry {
         return [SpritePixelRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)]
     }
 
+    // U+1CE00 "RIGHT HALF AND LEFT HALF WHITE CIRCLE" and U+1CE01 "LOWER HALF AND UPPER
+    // HALF WHITE CIRCLE" are each two whole circles centered on opposite cell edges, so
+    // only the inward half of each survives `ellipseOutline`'s cell-bounded scan -- the
+    // same clipping trick `circlePiece` uses. Both circles get the isotropic radius
+    // min(width, height) / 2 the character names imply, which is why an anisotropic cell
+    // leaves a gap along its longer axis instead of stretching the halves to the corners.
+    private static func splitCircle(
+        vertical: Bool, width: Int, height: Int, thickness: Int
+    ) -> [SpritePixelRect] {
+        let radius = Double(min(width, height)) / 2
+        let centers: [(x: Double, y: Double)] = vertical
+            ? [(0, Double(height) / 2), (Double(width), Double(height) / 2)]
+            : [(Double(width) / 2, 0), (Double(width) / 2, Double(height))]
+        return centers.flatMap { center in
+            ellipseOutline(
+                centerX: center.x, centerY: center.y, radiusX: radius, radiusY: radius,
+                width: width, height: height, thickness: thickness
+            )
+        }
+    }
+
     private static func circlePiece(
         _ piece: LegacySupplementCirclePiece,
         width: Int,
@@ -228,7 +239,7 @@ public enum LegacyComputingSupplementSpriteGeometry {
 
     private static func ellipseOutline(
         centerX: Double, centerY: Double, radiusX: Double, radiusY: Double,
-        width: Int, height: Int, thickness: Int, splitVertical: Bool = false,
+        width: Int, height: Int, thickness: Int,
         corner: LegacySupplementArcCorner? = nil
     ) -> [SpritePixelRect] {
         guard radiusX > 0 && radiusY > 0 else { return [] }
@@ -270,10 +281,6 @@ public enum LegacyComputingSupplementSpriteGeometry {
                 }
             }
             result = [SpritePixelRect(x: nearest.x, y: nearest.y, width: 1, height: 1)]
-        }
-        if splitVertical {
-            // Both half outlines deliberately meet at the cell center.
-            return result
         }
         return result
     }
