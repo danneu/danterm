@@ -14,6 +14,10 @@ class PaneWrapperView: NSView {
     private let isZoomed: Bool
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
+    /// Destination for the context menu's copy actions (cwd, agent session id). Defaults to the
+    /// system pasteboard so a test can assign a scratch board and neither read nor destroy the
+    /// developer's real clipboard; mirrors `SwiftTerminalSessionView.selectionPasteboard`.
+    var menuPasteboard = NSPasteboard.general
 
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
@@ -506,14 +510,14 @@ class PaneWrapperView: NSView {
 
     @objc private func copyCwdAction() {
         guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(cwd, forType: .string)
+        menuPasteboard.clearContents()
+        menuPasteboard.setString(cwd, forType: .string)
     }
 
     @objc private func copyAgentSessionIdAction() {
         guard let sessionId = runtime?.model.pane(paneId)?.agentSession?.sessionId else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(sessionId, forType: .string)
+        menuPasteboard.clearContents()
+        menuPasteboard.setString(sessionId, forType: .string)
     }
 
     @objc private func zoomPaneAction() {

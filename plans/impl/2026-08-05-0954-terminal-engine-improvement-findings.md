@@ -120,7 +120,7 @@ to settle. Nothing here blocks the audit being closed.
   about waiting for the unlink is unchanged. Verified: 5 standalone runs of the file
   (22 tests each) green, plus the full 74-step gate.
 
-- [ ] **New defect: `PaneWrapperView`'s clipboard writes have no seam.**
+- [x] **New defect: `PaneWrapperView`'s clipboard writes have no seam.**
   `app/PaneWrapperView.swift:509-516` -- the copy-cwd and copy-session-id menu actions
   write `NSPasteboard.general` directly. Finding 11 gave the pane's own copy/paste an
   injectable `selectionPasteboard` (`app/SwiftTerminalSessionView.swift:54`) precisely
@@ -131,6 +131,11 @@ to settle. Nothing here blocks the audit being closed.
   The libghostty-backed paths (`app/TerminalView.swift:341`, `app/GhosttyApp.swift:222`
   and `:250`) also write `NSPasteboard.general` and were left alone deliberately: that
   code is on its way out with libghostty.
+  **Resolved 2026-08-05:** gave `PaneWrapperView` a `menuPasteboard` property defaulting to
+  `NSPasteboard.general`, and routed both `copyCwdAction` and `copyAgentSessionIdAction`
+  through it -- the same shape as `SwiftTerminalSessionView.selectionPasteboard`, which its
+  doc comment cites. The libghostty-backed writes stay untouched. Verified: `just build`
+  compiles the app target clean, plus the full 74-step gate.
 
 - [ ] **47 (docs obligation) -- record what `PO5` still covers.**
   Finding 47 deleted two wall-clock tests that guarded a `PackedRetainedRow` read path
