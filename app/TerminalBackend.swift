@@ -101,6 +101,8 @@ protocol TerminalSession: AnyObject {
     func readFullHistoryText() -> String?
     /// Reads persistent primary history without changing pane-read active-screen semantics.
     func readPrimaryHistoryText() -> String?
+    /// Reads only the primary-history tail a truncation at this budget can keep.
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String?
     /// Copies the pane tape now and returns work that can encode it away from the main actor.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)?
     /// Fences the chosen stream origin and defers its protocol adaptation off the main actor.
@@ -143,6 +145,12 @@ extension TerminalBackend {
 }
 
 extension TerminalSession {
+    /// A backend with no bounded history read answers with the whole projection, which is a
+    /// valid tail of itself: the caller truncates either way, and only pays more to do it.
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
+        readPrimaryHistoryText()
+    }
+
     /// Backends without the dev-only recorder advertise the unsupported state explicitly.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
     /// Keeps non-recording backends outside the follow implementation and unsupported by default.

@@ -2282,6 +2282,94 @@ public struct Terminal: Equatable, Sendable {
         return projectedHistoryText(from: history.allPaintedDisplayRows() + primaryRows)
     }
 
+    /// Projects the tail of `primaryHistoryText` -- enough of it that a truncation keeping only
+    /// a suffix at this budget lands where it would have on the whole projection.
+    ///
+    /// The result is always a suffix of `primaryHistoryText`, and is the whole of it unless
+    /// retained history holds more: past that, at least `maxLines` hard line breaks *or* more
+    /// than `maxChars` characters survive the leading and trailing whitespace a truncation
+    /// trims. Either condition alone fixes where a suffix-keeping cut falls, so the caller's
+    /// budget decides what is kept and this engine learns nothing about why.
+    ///
+    /// Exists because the recovery checkpoint reads every pane's history on each window and
+    /// then discards all but its own tail. Projecting the whole retained scrollback to keep a
+    /// few hundred KB of it made a checkpoint cost the scrollback *capacity* rather than the
+    /// budget it stores, which is tens of seconds per pane at a full 16 MiB history.
+    public func primaryHistoryTailText(maxLines: Int, maxChars: Int) -> String {
+        let primaryRows = inactivePrimaryScreen?.rows ?? rows
+        let totalRows = historyRowCount + primaryRows.count
+        // A display row carries at most one hard break, so the budget's line count is the floor
+        // on rows worth reading. Past it: one row for the last content row, which projects no
+        // trailing newline of its own, and the live screen's height, because the rows below the
+        // cursor are usually blank and a projection stops at the last one with content. Together
+        // those are the systematic shortfall, and covering them here is what keeps the ordinary
+        // case to a single pass. Clamped to the stream so an unbounded budget cannot overflow.
+        var rowBudget = min(max(maxLines, 0), totalRows) + primaryRows.count + 1
+        while true {
+            let start = max(0, totalRows - rowBudget)
+            let text = projectedHistoryText(
+                from: primaryProjectionRows(from: start, primary: primaryRows)
+            )
+            if start == 0 || tailCoversBudget(text, maxLines: maxLines, maxChars: maxChars) {
+                return text
+            }
+            // Doubling rather than a computed start row: soft wrap, blank rows past the last
+            // content, and the leading trim all shrink what a row contributes, and none of them
+            // is known before projecting. Retrying costs at most twice the text finally read.
+            rowBudget *= 2
+        }
+    }
+
+    /// Whether `text` already holds everything a suffix-keeping truncation at this budget could
+    /// keep, so reaching further back cannot move where that truncation cuts.
+    ///
+    /// Both bounds are measured after dropping leading and trailing whitespace, because that is
+    /// what such a truncation trims before it counts. `Character.isWhitespace` is a superset of
+    /// the trims in practice, so over-dropping here only undercounts: a `true` is never wrong,
+    /// and a needless `false` costs one more pass.
+    private func tailCoversBudget(_ text: String, maxLines: Int, maxChars: Int) -> Bool {
+        guard let first = text.firstIndex(where: { $0.isWhitespace == false }),
+              let last = text.lastIndex(where: { $0.isWhitespace == false })
+        else { return false }
+        var lineBreaks = 0
+        var characters = 0
+        for character in text[first...last] {
+            characters += 1
+            if character == "\n" { lineBreaks += 1 }
+        }
+        // A non-positive line budget means "no line cut at all" -- a truncation counting breaks
+        // from the end can never reach a zeroth one -- so it keeps every line and only the
+        // character bound can settle where it cuts.
+        if maxLines >= 1, lineBreaks >= maxLines { return true }
+        // Strictly greater, and `+ 1` for the trailing newline a truncation appends before it
+        // measures: at exactly `maxChars` the caller keeps the text whole rather than cutting,
+        // and a tail stopping there would be that whole text instead of the same cut.
+        return characters + 1 > maxChars
+    }
+
+    /// The primary-screen projection stream from display row `start` to its end, without
+    /// materializing the rows before it. `primaryHistoryText` is this with `start` at zero.
+    private func primaryProjectionRows(
+        from start: Int,
+        primary primaryRows: [GridRow]
+    ) -> [GridRow] {
+        guard start > 0 else { return history.allPaintedDisplayRows() + primaryRows }
+        guard start < historyRowCount else {
+            return Array(primaryRows[min(start - historyRowCount, primaryRows.count)...])
+        }
+        var stream: [GridRow] = []
+        stream.reserveCapacity(historyRowCount - start + primaryRows.count)
+        // One `locate` for the start row and `advance` for the rest, which is the traversal
+        // rule retained-history readers follow (`31/D3` Decision 1 rule 2).
+        var cursor = history.locate(displayRow: start)
+        while let at = cursor {
+            stream.append(history.paintedRow(at: at))
+            cursor = history.advance(at)
+        }
+        stream.append(contentsOf: primaryRows)
+        return stream
+    }
+
     /// Returns the current half-open selection endpoints in stream coordinates.
     public var selectionRange: TerminalTextRange? {
         selection.flatMap(publicRange)

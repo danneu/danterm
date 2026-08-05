@@ -217,9 +217,19 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
 
 // MARK: - Scrollback Truncation
 
+/// How much scrollback a checkpoint keeps per pane. Named rather than left as literal defaults
+/// because the read that feeds `truncateScrollback` is now bounded by the same numbers -- the
+/// two have to agree, or the reader hands over less than the truncation would have kept.
+let scrollbackRetentionMaxLines = 4000
+let scrollbackRetentionMaxChars = 400_000
+
 /// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.
 /// Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
-func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 400_000) -> String? {
+func truncateScrollback(
+  _ text: String,
+  maxLines: Int = scrollbackRetentionMaxLines,
+  maxChars: Int = scrollbackRetentionMaxChars
+) -> String? {
   // Strip trailing whitespace
   let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !trimmed.isEmpty else { return nil }

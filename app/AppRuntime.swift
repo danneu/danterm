@@ -1262,7 +1262,13 @@ class AppRuntime {
     private func scrollbackByPaneId() -> [PaneId: String] {
         var result: [PaneId: String] = [:]
         for (paneId, session) in surfaces {
-            guard let rawText = session.readPrimaryHistoryText(),
+            // Read only what the truncation below can keep. Retained history is sized by the
+            // pane's whole scrollback budget, so projecting all of it to store this tail made
+            // every checkpoint cost the capacity instead of what it writes.
+            guard let rawText = session.readPrimaryHistoryTail(
+                      maxLines: scrollbackRetentionMaxLines,
+                      maxChars: scrollbackRetentionMaxChars
+                  ),
                   let scrollback = truncateScrollback(rawText) else {
                 continue
             }

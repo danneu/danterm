@@ -580,6 +580,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return controller.readPrimaryHistoryText()
     }
 
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
+        controller.synchronizeState()
+        return controller.readPrimaryHistoryTail(maxLines: maxLines, maxChars: maxChars)
+    }
+
     #if !DANTERM_UI_TEST
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? {
         guard let snapshot = controller.flightRecordingSnapshot() else { return nil }

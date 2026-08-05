@@ -93,6 +93,7 @@ let package = Package(
             dependencies: [
                 "DanTerm",
                 "DanTermProtocol",
+                .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "app-tests",
