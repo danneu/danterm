@@ -13,9 +13,13 @@ public func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> 
 }
 
 /// Counts the disjoint vertical runs a renderer must represent for exact row damage.
+///
+/// `row - 1` cannot overflow: `TerminalDamage` filters negative indexes on the way in and
+/// `rows` is `private(set)`, so `Int.min` is unreachable here (pinned by
+/// `TerminalDamageTests#negativeRowsCannotEnterDamage`).
 public func terminalDamageMaximalContiguousSpanCount(_ rows: Set<Int>) -> Int {
     rows.reduce(into: 0) { count, row in
-        if row == Int.min || rows.contains(row - 1) == false {
+        if rows.contains(row - 1) == false {
             count += 1
         }
     }

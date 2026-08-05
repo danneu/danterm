@@ -203,4 +203,25 @@ struct TerminalDamageTests {
         #expect(oneChunk.drainDamage() == TerminalDamage(rows: [0, 2]))
         #expect(byteChunks.drainDamage() == TerminalDamage(rows: [0, 2]))
     }
+
+    @Test("row damage never carries a negative index, however it is built")
+    func negativeRowsCannotEnterDamage() {
+        // Intent: no `TerminalDamage` a consumer can construct or accumulate holds a
+        //   negative row index.
+        // Why it exists: `rows` is `private(set)`, so this filter plus `formUnion` are
+        //   the only two ways rows enter -- and downstream consumers rely on it rather
+        //   than re-checking. `terminalDamageMaximalContiguousSpanCount` used to guard
+        //   `row == Int.min` before computing `row - 1`; that guard was deleted on the
+        //   strength of this invariant, so if this test ever fails, the span helpers
+        //   trap on overflow rather than merely miscounting.
+        // Scenario: spec-first; no incident. The negative index is not a value any
+        //   engine path produces, which is exactly why the invariant needs pinning
+        //   rather than assuming.
+        #expect(TerminalDamage(rows: [-1, 0, 3]).rows == [0, 3])
+        #expect(TerminalDamage(rows: [Int.min]).rows.isEmpty)
+
+        var accumulated = TerminalDamage(rows: [2])
+        accumulated.formUnion(TerminalDamage(rows: [-5, 7]))
+        #expect(accumulated.rows == [2, 7])
+    }
 }
