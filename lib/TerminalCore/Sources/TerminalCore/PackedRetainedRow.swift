@@ -587,29 +587,7 @@ extension Terminal {
         /// pricing model predicts from public content, which is what `PO4` holds it against.
         var payloadByteCount: Int { storage.count }
 
-        /// Scalars held outside the blob, so the budget can charge the spill allocations
-        /// without decoding the row.
-        var spillScalarCount: Int { spills.reduce(0) { $0 + $1.count } }
-
         var spillCount: Int { spills.count }
-    }
-}
-
-// Little-endian appends, spelled out so the blob layout is readable at its call sites and
-// so nothing here depends on `withUnsafeBytes` over a type whose layout Swift does not
-// guarantee.
-extension Array where Element == UInt8 {
-    fileprivate mutating func appendUInt16(_ value: Int) {
-        precondition(value >= 0 && value <= Int(UInt16.max))
-        append(UInt8(truncatingIfNeeded: value))
-        append(UInt8(truncatingIfNeeded: value >> 8))
-    }
-
-    fileprivate mutating func appendUInt32(_ value: UInt32) {
-        append(UInt8(truncatingIfNeeded: value))
-        append(UInt8(truncatingIfNeeded: value >> 8))
-        append(UInt8(truncatingIfNeeded: value >> 16))
-        append(UInt8(truncatingIfNeeded: value >> 24))
     }
 }
 

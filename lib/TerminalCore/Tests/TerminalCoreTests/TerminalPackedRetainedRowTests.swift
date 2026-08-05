@@ -1,12 +1,17 @@
 // Proof obligations for doc 28's packed retained row (`C6`).
 //
-// Four of the plan's five Phase 1 obligations live here. `PO2` is the canonical-extent
-// claim -- packing must not change what a retained row stores, only how. `PO3` is the
-// observability contract, and it is the one with teeth: a packed row reconstructs every
-// field a `GridCell` carried, across each axis the encoding treats separately, and it does
-// so through all three paths a retained row takes (admission, width reflow, height
-// transfer back into the live grid). `PO5` is `I5`, the read contract the whole
-// representation was chosen for.
+// `PO2` is the canonical-extent claim -- packing must not change what a retained row
+// stores, only how. `PO3` is the observability contract, and it is the one with teeth: a
+// packed row reconstructs every field a `GridCell` carried, across each axis the encoding
+// treats separately, and it does so through all three paths a retained row takes
+// (admission, width reflow, height transfer back into the live grid).
+//
+// `PO5` -- `I5`, the read cost this representation was chosen for -- is deliberately *not*
+// here any more. Retained history is doc 31's `LogicalLineStore`, which reimplements its own
+// readers and shares only the C1 cell word with this type, so the two wall-clock ratio tests
+// that stood for `PO5` were timing a path no frame takes. If that property needs a guard
+// again, it belongs against `LogicalLineStore.locate(displayRow:)` and
+// `forEachPaintedCell(at:_:)`, which is what the frame path really reads.
 //
 // Why the encoder is tested directly and not only through the terminal: the terminal
 // cannot be driven into every cell shape the encoder must handle -- a wide multi-scalar
@@ -17,7 +22,7 @@ import Testing
 
 @testable import TerminalCore
 
-/// Pins the packed retained representation's extent, round-trip, and read cost.
+/// Pins the packed retained representation's extent and round-trip.
 struct TerminalPackedRetainedRowTests {
     // MARK: - Fixtures
 
@@ -411,76 +416,5 @@ struct TerminalPackedRetainedRowTests {
         let decoded = try #require(terminal.retainedRowForTesting(at: 0))
         #expect(Terminal.PackedRetainedRow.pack(decoded).unpacked() == decoded)
         #expect(decoded.cells.contains { $0.contentIdentity != nil })
-    }
-
-    // MARK: - PO5, the read contract
-
-    @Test("A random cell read is flat in the row's stored width")
-    func randomReadIsFlatInStoredWidth() {
-        // Intent: reading one column costs the same whether the row stores 16 cells or
-        //   2,048 -- the scalar column is indexed, not scanned.
-        // Why it exists: this is `I5`, and `I5` is the entire reason `C6` was chosen over
-        //   the UTF-8 text form, which is cheaper to write and would make this read
-        //   O(row width). A regression here does not fail any behavioral test; it just
-        //   makes browsing slow, which is the guard `D3` named as most likely to fire.
-        // Scenario: spec-first.
-        func read(width: Int, iterations: Int) -> Double {
-            let row = Terminal.GridRow(cells: (0..<width).map {
-                cell("a", identity: Terminal.ContentIdentity($0 + 1))
-            })
-            let packed = Terminal.PackedRetainedRow.pack(row)
-            var sink = 0
-            let start = ContinuousClock.now
-            for iteration in 0..<iterations {
-                sink += packed.cell(at: (iteration &* 7919) % width).scalars.count
-            }
-            let elapsed = ContinuousClock.now - start
-            #expect(sink > 0)
-            return Double(elapsed.components.attoseconds) / Double(iterations)
-        }
-
-        // Warm both shapes before timing either, so the first one measured does not pay
-        // for lazy allocation the second one inherits.
-        _ = read(width: 16, iterations: 5_000)
-        _ = read(width: 2_048, iterations: 5_000)
-
-        let narrow = read(width: 16, iterations: 200_000)
-        let wide = read(width: 2_048, iterations: 200_000)
-        // A 128x width increase against a generous 4x cost ceiling. Scanning would be ~128x;
-        // the margin is wide on purpose, because this asserts an asymptote and must not
-        // become a flaky wall-clock threshold in the `just test` gate.
-        #expect(wide < narrow * 4, "narrow \(narrow)as, wide \(wide)as")
-    }
-
-    @Test("A full-row read of a many-style-run row stays linear rather than going quadratic")
-    func fullRowReadStaysLinear() {
-        // Intent: unpacking a row whose every cell starts a new style run costs the same
-        //   order as unpacking a row with one run.
-        // Why it exists: `I5`'s second half. The obvious implementation of a full-row read
-        //   is `for column in 0..<width { cell(at: column) }`, which is
-        //   O(cells * log runs) -- and the obvious *fix* to a table lookup is a linear
-        //   rescan per cell, which is O(cells * runs). Neither shows up as a wrong answer.
-        // Scenario: spec-first.
-        func unpack(styles: (Int) -> Terminal.StyleId, width: Int, iterations: Int) -> Double {
-            let row = Terminal.GridRow(cells: (0..<width).map {
-                cell("a", styleId: styles($0), identity: Terminal.ContentIdentity($0 + 1))
-            })
-            let packed = Terminal.PackedRetainedRow.pack(row)
-            var sink = 0
-            let start = ContinuousClock.now
-            for _ in 0..<iterations { sink += packed.unpacked().cells.count }
-            let elapsed = ContinuousClock.now - start
-            #expect(sink > 0)
-            return Double(elapsed.components.attoseconds) / Double(iterations)
-        }
-
-        _ = unpack(styles: { _ in 0 }, width: 1_024, iterations: 20)
-        _ = unpack(styles: { Terminal.StyleId($0) }, width: 1_024, iterations: 20)
-
-        let uniform = unpack(styles: { _ in 0 }, width: 1_024, iterations: 400)
-        let fragmented = unpack(styles: { Terminal.StyleId($0) }, width: 1_024, iterations: 400)
-        // 1,024 runs against one. A per-cell rescan would be ~500x on average; 8x leaves
-        // room for the run table's own cache traffic, which is real and linear.
-        #expect(fragmented < uniform * 8, "uniform \(uniform)as, fragmented \(fragmented)as")
     }
 }

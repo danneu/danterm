@@ -253,7 +253,6 @@ struct TerminalLogicalLineStoreTests {
         for blankHistory in [false, true] {
             var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 24)
             let capacity = store.census.capacityBytes
-            var peakInUse = 0
 
             for line in 0..<4_000 {
                 if blankHistory {
@@ -264,15 +263,15 @@ struct TerminalLogicalLineStoreTests {
                 }
                 #expect(store.census.chargedBytes <= capacity)
                 #expect(store.census.capacityBytes == capacity)
-                peakInUse = max(peakInUse, store.census.arenaBytesInUse)
             }
 
             #expect(store.recordCount > 0)
-            let saturated = store.census.arenaBytesInUse
+            // The exact post-condition, not a bound: `removeAll` routes through
+            // `resetToEmptyArena`, so a store that released all but one byte is a leak.
+            #expect(store.census.arenaBytesInUse > 0)
             store.removeAll()
-            #expect(store.census.arenaBytesInUse < saturated)
+            #expect(store.census.arenaBytesInUse == 0)
             #expect(store.census.capacityBytes == capacity)
-            #expect(peakInUse <= capacity)
         }
     }
 
@@ -1019,6 +1018,114 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.independentDisplayRowRecount() == total - 2)
         #expect(Self.foldedScalars(store) == Array(before.dropLast(2)))
         #expect(handedBack.map { $0.cells.map(\.scalars.first) } == Array(before.suffix(2)))
+    }
+
+    @Test("Truncating away a record that is alone in its index block leaves every row addressable")
+    func truncatingAcrossABlockBoundaryKeepsEveryRowAddressable() {
+        // Intent: after a tail truncation retires the last index block, the block totals still
+        //   sum to the grand total, so every remaining display row can still be located.
+        // Why it exists: `removeLastDisplayRow` used to move the totals *after* dropping the
+        //   record, so `retireEmptyTailBlocks` popped the block and the decrement then landed
+        //   on the block before it -- one row subtracted twice from the index and once from the
+        //   grand total. `31/I9` says the derived index agrees with the arena; the divergence
+        //   does not self-heal, because later blocks seed their `rowStart` from the running sum.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
+        // One display row per record, so the record that is alone in the second index block is
+        // also the only row `truncateTail` has to take to retire it.
+        for line in 0..<(Terminal.LogicalLineStore.blockSize + 1) {
+            store.admit(Self.shortRow(width: 8, count: 3, seed: line))
+        }
+        #expect(store.recordCount == Terminal.LogicalLineStore.blockSize + 1)
+
+        _ = store.truncateTail(displayRows: 1)
+
+        #expect(store.grandDisplayRowTotal == Terminal.LogicalLineStore.blockSize)
+        #expect(store.independentDisplayRowRecount() == store.grandDisplayRowTotal)
+        for index in 0..<store.grandDisplayRowTotal {
+            #expect(store.displayRow(at: index) != nil, "row \(index) lost its index entry")
+        }
+    }
+
+    @Test("Truncating into a forced-split record keeps its hyperlink and identity tables readable")
+    func truncatingIntoAForcedSplitRecordKeepsItsSideTablesReadable() {
+        // Intent: when truncation eats a forced split's continuation and then cuts into the
+        //   split record itself, the cells that survive still read back their hyperlink ids and
+        //   content identities.
+        // Why it exists: a closed record's side tables are addressed off
+        //   `offset + headerAndCells(cellCount)`, and `cutTail` rewrites `cellCount`.
+        //   `reopenTailRecord` refuses a forced-split tail (it must -- its other caller resumes
+        //   printing at a seam), so truncation used to shrink `cellCount` underneath tables that
+        //   stayed where `flushOpenTables` put them, moving every later read into the cell words.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
+        for chunk in 0..<3 {
+            var row = Terminal.GridRow(cells: (0..<8).map { column in
+                Self.narrow(
+                    Unicode.Scalar(UInt32(97 + (chunk * 8 + column) % 26))!,
+                    hyperlinkId: 7,
+                    contentIdentity: Terminal.ContentIdentity(1_000 + chunk * 8 + column)
+                )
+            })
+            row.isSoftWrapped = true
+            store.admit(row)
+        }
+        store.forceSplitOpenRecord()
+        // The continuation: two display rows, so truncating three eats it whole and then takes
+        // one row out of the split record.
+        store.admit(Self.filledRow(width: 8, seed: 40, softWrapped: true))
+        store.admit(Self.shortRow(width: 8, count: 4, seed: 50))
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        #expect(store.grandDisplayRowTotal == 5)
+
+        _ = store.truncateTail(displayRows: 3)
+
+        #expect(store.recordCount == 1)
+        let cells = store.recordCells(at: 0)!
+        #expect(cells.count == 16)
+        #expect(cells.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(
+            cells.map(\.contentIdentity)
+                == (0..<16).map { Terminal.ContentIdentity(1_000 + $0) }
+        )
+    }
+
+    @Test("Tail truncation folds every handed-back row before cutting any of them")
+    func truncatingTheTailHandsBackTheDerivedSpacers() {
+        // Intent: a handed-back display row that ends in a derived `.spacerHead` still carries
+        //   that cell, with the following wide head's style.
+        // Why it exists: `truncateTail`'s fold-before-cut order is load-bearing -- a display
+        //   row's trailing spacer is re-derived from the wide head that *follows* it (`31/I1`),
+        //   so cutting one row at a time while folding drops exactly that column on a height
+        //   grow. Every other `truncateTail` test feeds narrow ASCII, where no row can carry a
+        //   derived spacer, so reversing the two loops stayed green.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 10)
+        var cells: [Terminal.GridCell] = []
+        for _ in 0..<5 {
+            cells.append(
+                Terminal.GridCell(
+                    scalars: TerminalScalars(Unicode.Scalar(0x754C)!),
+                    kind: .wideHead,
+                    styleId: 9
+                )
+            )
+            cells.append(Terminal.GridCell(scalars: .empty, kind: .wideTail, styleId: 9))
+        }
+        store.admit(Terminal.GridRow(cells: cells))
+        _ = store.setWidth(3)
+        // Five 2-cell clusters at width 3: four rows of one cluster plus a spacer, then a last
+        // row that holds the fifth cluster and defers nothing.
+        #expect(store.grandDisplayRowTotal == 5)
+
+        let handedBack = store.truncateTail(displayRows: 2)
+
+        #expect(handedBack.count == 2)
+        // The earlier of the two precedes a wide head that the later one starts with, so its
+        // last column is a spacer the fold has to synthesize before the cut removes that head.
+        #expect(handedBack[0].cell(at: 2).kind == .spacerHead)
+        #expect(handedBack[0].cell(at: 2).styleId == 9)
+        #expect(handedBack[1].cell(at: 0).kind == .wideHead)
+        #expect(store.grandDisplayRowTotal == 3)
+        #expect(store.independentDisplayRowRecount() == 3)
     }
 
     @Test("A width change pulls the open tail's partial display row back into the live refold")

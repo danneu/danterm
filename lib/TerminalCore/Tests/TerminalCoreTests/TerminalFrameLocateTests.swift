@@ -49,6 +49,13 @@ struct TerminalFrameLocateTests {
         let shallow = try locatesForOneFrame(lines: 60)
         let deep = try locatesForOneFrame(lines: 6_000)
 
+        // Calibration first: both frames scroll to the top of a history deeper than the
+        // viewport, so a working read path must spend at least one locate. Without this the
+        // whole test passes at `shallow == deep == 0` -- the state a disconnected counter or a
+        // read path that stopped consulting the index produces -- which is exactly the
+        // "instrument that cannot say *not measured*" `agent-docs/measurement-discipline.md`
+        // rules out.
+        #expect(shallow >= 1)
         // One per traversal, and a frame makes two: the geometry pass and the cell pass. Both
         // then advance a cursor row by row, which is the contract `31/D3` Decision 1 rule 2
         // states and the thing a per-row binary search would break.

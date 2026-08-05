@@ -487,7 +487,10 @@ struct TerminalLogicalLineFoldTests {
         //   styled blank to the open record, and under the default style appends nothing.
         // Why it exists: `31/D3` Decision 3 measured today's engine storing exactly one styled
         //   cell at that column, and nothing at all when the style is default -- so the fold
-        //   reproduces today's output only if the repair is asymmetric in the same way.
+        //   reproduces today's output only if the repair is asymmetric in the same way. The
+        //   returned Bool is part of that contract: `Terminal.clearPreviousSpacer` branches on
+        //   it to invalidate exactly the display row whose paint changed, so a repair that
+        //   stored a cell and reported `false` would leave that row stale on screen.
         for (styleId, expectedCells) in [(Terminal.StyleId(5), 3), (Terminal.defaultStyleId, 2)] {
             var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
             var wrapped = Terminal.GridRow(cells: [
@@ -498,8 +501,9 @@ struct TerminalLogicalLineFoldTests {
             wrapped.isSoftWrapped = true
             store.admit(wrapped)
 
-            store.repairClearedSpacer(styleId: styleId)
+            let repaired = store.repairClearedSpacer(styleId: styleId)
 
+            #expect(repaired == (expectedCells == 3))
             #expect(store.recordSummary(at: 0)!.cellCount == expectedCells)
             #expect(store.grandDisplayRowTotal == 1)
             if expectedCells == 3 {
@@ -508,6 +512,32 @@ struct TerminalLogicalLineFoldTests {
                 #expect(row.cell(at: 2).styleId == styleId)
             }
         }
+    }
+
+    @Test("An open tail whose last display row is already full is left alone by the spacer repair")
+    func clearedSpacerRepairSkipsAFullLastDisplayRow() {
+        // Intent: `repairClearedSpacer` stores nothing and reports `false` when the open tail's
+        //   last display row already occupies the full width.
+        // Why it exists: the `lastRowColumns == width - 1` guard is what makes the repair a
+        //   no-op for a row that never deferred a wide cluster. Without it the repair would
+        //   append a styled blank onto a full row, pushing the record into an extra display row
+        //   that today's engine does not show -- and nothing else in the suite exercises the
+        //   guard, so the sole existing repair test only ever reaches the short-row case.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        var wrapped = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
+            Terminal.GridCell(scalars: TerminalScalars("b" as Unicode.Scalar), kind: .narrow),
+            Terminal.GridCell(scalars: TerminalScalars("c" as Unicode.Scalar), kind: .narrow),
+        ])
+        wrapped.isSoftWrapped = true
+        store.admit(wrapped)
+        #expect(store.recordSummary(at: 0)!.cellCount == 3)
+
+        let repaired = store.repairClearedSpacer(styleId: 5)
+
+        #expect(repaired == false)
+        #expect(store.recordSummary(at: 0)!.cellCount == 3)
+        #expect(store.grandDisplayRowTotal == 1)
     }
 
     @Test("The borrowing walks emit exactly the painted row's columns, on every content class")

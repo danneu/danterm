@@ -308,17 +308,15 @@ extension Terminal {
         /// -- `O(width)`, or `O(cells in that row)` on the wide path -- and the complexity that
         /// bound rests on is the reading `31/D4` froze its decision rule against.
         ///
-        /// The `hasWideCells` fast path is the same one `rowCount` takes and for the same reason
-        /// (`31/DD4`): without a wide cell no boundary test can fail, so the answer is arithmetic
-        /// and the walk is `O(1)` rather than `O(width)` -- which matters because eviction asks
         /// The *first* row is the one case `enumerateRows`' walk collapses to arithmetic: its
         /// column and its cell index advance together from zero, so the only boundary test that
         /// can fire is the one at the last column. One display row per trim step therefore costs
         /// one probe rather than a walk over the row -- which matters because eviction asks this
         /// once per dropped display row, and `31/D4` gate 7 measures exactly that step.
         ///
-        /// `hasWideCells` skips even the probe for a record that cannot contain a wide head
-        /// (`31/DD4`); it defaults to taking it, which is correct for every record.
+        /// `hasWideCells` skips even the probe for a record that cannot contain a wide head --
+        /// the same fast path, and the same reason, as `rowCount`'s (`31/DD4`); it defaults to
+        /// taking it, which is correct for every record.
         static func firstRowCellEnd(
             cellCount: Int,
             width: Int,

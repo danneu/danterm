@@ -105,6 +105,32 @@ struct TerminalScrollbackBudgetTests {
         }
     }
 
+    @Test("a pane whose budget cannot hold one full-width row retains nothing and keeps running")
+    func aBudgetBelowOneFullWidthRowRetainsNothing() throws {
+        // Intent: a pane configured with a scrollback budget too small for a single display row
+        //   of its own width retains no history, stays inside its charge, and keeps displaying
+        //   correctly instead of trapping.
+        // Why it exists: `LogicalLineStore.admit`'s opening guard states the contract in words
+        //   -- "such a pane has no history, and the degenerate configuration stays reachable
+        //   instead of being a crash" -- and nothing exercised it. Every other budget in the
+        //   suite comes from `historyBudget`, whose binary search calls the store itself and so
+        //   can only ever return a budget where the guard cannot fire.
+        var terminal = try #require(Terminal(columns: 80, rows: 2, scrollbackBudgetBytes: 1024))
+        // Full-width rows only: an 80-cell row's worst case exceeds the arena this budget
+        // reserves, while a shorter one would still be admitted and break the retains-nothing
+        // claim. Soft wrapping at 80 columns is what makes every scrolled-off row full width.
+        for line in 0..<40 {
+            terminal.feed(Array(String(repeating: "\(line % 10)", count: 240).utf8))
+        }
+
+        #expect(terminal.scrollbackRowCount == 0)
+        let census = terminal.scrollbackCensus
+        #expect(census.chargedBytes <= census.capacityBytes)
+        #expect(terminal.screenText == String(repeating: "9", count: 80) + "\n"
+            + String(repeating: "9", count: 80))
+        expectValidGrid(terminal)
+    }
+
     @Test("a logical line's arena charge uses pinned header, cell, and table literals")
     func costModelUsesPinnedLiterals() throws {
         // Intent: freeze what a retained logical line costs across every structural cell shape.
@@ -405,58 +431,53 @@ struct TerminalScrollbackBudgetTests {
     func cursorAndControlStateAreImmune() throws {
         // Intent: isolate eviction from cursor, saved state, modes, wrap, and cluster behavior.
         // Why it exists: later input must observe only the enclosing operation's state changes.
-        // Scenario: each eviction path is compared immediately with its no-eviction twin.
+        // Scenario: three evicting panes -- a feed, a height shrink and a width narrow -- each
+        //   compared immediately with its no-eviction twin.
         //
         // The twin is a separately constructed terminal at the production budget rather than a
         // copy with its bound raised: the arena reserves its capacity once, at construction, so
         // "the same terminal with an unlimited budget" is not a value that exists (`31/I2`).
-        let paths: [(Terminal, Terminal) throws -> (Terminal, Terminal)] = [
-            { bounded, unbounded in
-                var bounded = bounded
-                var unbounded = unbounded
-                bounded.feed(Array("C\r\n".utf8))
-                unbounded.feed(Array("C\r\n".utf8))
-                return (bounded, unbounded)
-            },
-            { bounded, unbounded in
-                var bounded = bounded
-                var unbounded = unbounded
-                bounded.resize(columns: 2, rows: 1)
-                unbounded.resize(columns: 2, rows: 1)
-                return (bounded, unbounded)
-            },
-            { bounded, unbounded in
-                var bounded = bounded
-                var unbounded = unbounded
-                bounded.resize(columns: 2, rows: 1)
-                unbounded.resize(columns: 2, rows: 1)
-                return (bounded, unbounded)
-            },
+        // Two distinct operations across three cases: the resize one drives both the height
+        // shrink (2x4) and the width narrow (4x1), which is the axis the `setup` entry carries.
+        // Paired with its setup in one array so the two can never fall out of step.
+        let feedC: (Terminal, Terminal) -> (Terminal, Terminal) = { bounded, unbounded in
+            var bounded = bounded
+            var unbounded = unbounded
+            bounded.feed(Array("C\r\n".utf8))
+            unbounded.feed(Array("C\r\n".utf8))
+            return (bounded, unbounded)
+        }
+        let resizeToOneRow: (Terminal, Terminal) -> (Terminal, Terminal) = { bounded, unbounded in
+            var bounded = bounded
+            var unbounded = unbounded
+            bounded.resize(columns: 2, rows: 1)
+            unbounded.resize(columns: 2, rows: 1)
+            return (bounded, unbounded)
+        }
+
+        let cases: [(
+            columns: Int,
+            rows: Int,
+            bytes: String,
+            budget: Int,
+            operation: (Terminal, Terminal) -> (Terminal, Terminal)
+        )] = [
+            (2, 1, "A\r\n", historyBudget(lines: 1, cells: 2), feedC),
+            (2, 4, "A\r\nB\r\nC\r\nDE", historyBudget(lines: 2, cells: 2), resizeToOneRow),
+            (4, 1, "ABCDEFGHI", historyBudget(lines: 2, cells: 4), resizeToOneRow),
         ]
 
-        let setup: [(columns: Int, rows: Int, bytes: String, budget: Int)] = [
-            (2, 1, "A\r\n", historyBudget(lines: 1, cells: 2)),
-            (
-                2, 4, "A\r\nB\r\nC\r\nDE",
-                historyBudget(lines: 2, cells: 2)
-            ),
-            (
-                4, 1, "ABCDEFGHI",
-                historyBudget(lines: 2, cells: 4)
-            ),
-        ]
-
-        for index in paths.indices {
+        for testCase in cases {
             var bounded = try #require(Terminal(
-                columns: setup[index].columns,
-                rows: setup[index].rows,
-                scrollbackBudgetBytes: setup[index].budget
+                columns: testCase.columns,
+                rows: testCase.rows,
+                scrollbackBudgetBytes: testCase.budget
             ))
             let prefix = "\u{1B}[4h\u{1B}7"
-            bounded.feed(Array((prefix + setup[index].bytes).utf8))
+            bounded.feed(Array((prefix + testCase.bytes).utf8))
             let unbounded = bounded.withUnlimitedScrollbackForTesting()
 
-            var pair = try paths[index](bounded, unbounded)
+            var pair = testCase.operation(bounded, unbounded)
             #expect(pair.0.geometry == pair.1.geometry)
             #expect(pair.0.screenText == pair.1.screenText)
             #expect(pair.0.currentStyle == pair.1.currentStyle)

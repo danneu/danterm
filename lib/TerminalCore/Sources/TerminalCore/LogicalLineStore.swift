@@ -672,8 +672,32 @@ extension Terminal {
         mutating func reopenTailRecord() {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
-            var record = self.record(at: offset)
+            let record = self.record(at: offset)
+            // A forced split was made for a *physical* reason -- a region boundary -- and the pad
+            // `wrapWriteCursorAtSeam` wrote after it is already charged. Rewinding the write
+            // cursor to before that pad would make the next wrap re-pad and double-charge, so
+            // resuming a print never reopens one. Truncation, which is a rewind by construction,
+            // goes through `reopenTailRecordForTruncation` instead.
             guard record.isOpen == false, record.isForcedSplit == false else { return }
+            reopenClosedTail(record, at: offset)
+        }
+
+        /// Reopens the tail for a tail truncation, forced splits included.
+        ///
+        /// Truncation has already dropped whatever followed the split, so the record's line now
+        /// continues into the live grid rather than into another record. Reopening it is not
+        /// optional: a closed record's side tables are addressed off
+        /// `offset + headerAndCells(cellCount)`, and `cutTail` rewrites `cellCount` -- leaving a
+        /// closed record cut would move every later table read into the cell words.
+        private mutating func reopenTailRecordForTruncation() {
+            let offset = offsets[offsets.count - 1]
+            let record = self.record(at: offset)
+            guard record.isOpen == false else { return }
+            reopenClosedTail(record, at: offset)
+        }
+
+        private mutating func reopenClosedTail(_ closed: LogicalLineRecord, at offset: Int) {
+            var record = closed
             loadOpenScratch(from: record, at: offset)
             if record.hasTrailingFill {
                 record.hasTrailingFill = false
@@ -681,6 +705,10 @@ extension Terminal {
             }
             let closedLength = record.byteLength
             record.isOpen = true
+            // An open record continues into the live grid, which is what the split bit meant
+            // while its follower existed; keeping both set would leave a reopened record marked
+            // as continuing into a record that is no longer there.
+            record.isForcedSplit = false
             record.hyperlinkCount = 0
             record.identityEntryCount = 0
             record.identityPerCell = false
@@ -703,15 +731,8 @@ extension Terminal {
             guard styleId != Terminal.defaultStyleId else { return false }
             guard let record = openTailRecord() else { return false }
             let offset = offsets[offsets.count - 1]
-            var lastRowColumns = 0
-            LogicalLineFold.enumerateRows(
-                cellCount: record.cellCount,
-                width: width,
-                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-            ) { _, start, end, _ in
-                lastRowColumns = end - start
-            }
-            guard lastRowColumns == width - 1 else { return false }
+            let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
+            guard last.end - last.start == width - 1 else { return false }
             appendCell(Terminal.GridCell(scalars: .empty, kind: .padding, styleId: styleId))
             return true
         }
@@ -838,7 +859,6 @@ extension Terminal {
             headTrimmedCells = 0
 
             if offsets.count == 0 {
-                bytesInUse -= record.byteLength
                 resetToEmptyArena()
                 return
             }
@@ -912,34 +932,51 @@ extension Terminal {
         }
 
         private mutating func removeLastDisplayRow() {
-            let index = offsets.count - 1
-            let offset = offsets[index]
+            let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
-            var lastStart = 0
-            var lastEnd = record.cellCount
-            var rows = 0
-            LogicalLineFold.enumerateRows(
-                cellCount: record.cellCount,
-                width: width,
-                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-            ) { rowIndex, start, end, _ in
-                lastStart = start
-                lastEnd = end
-                rows = rowIndex + 1
-            }
-            if rows == 1 {
-                dropTailRecord(record, at: offset)
-            } else {
-                if record.isOpen == false {
-                    reopenTailRecord()
-                }
-                cutTail(to: lastStart, from: lastEnd, at: offset)
-            }
+            let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
 
+            // The totals move first, for the reason `evictOneDisplayRow` gives at the other end:
+            // `dropTailRecord` may retire the tail block once its last record is gone, and the
+            // row being removed belongs to the block as it stands now. Decrementing afterwards
+            // lands on the block *before* the retired one, subtracting the row twice from the
+            // index and once from the grand total.
             grandDisplayRowTotal -= 1
             if blocks.count > 0 {
                 blocks[blocks.count - 1].rowCount -= 1
             }
+
+            if last.rowCount == 1 {
+                dropTailRecord(record, at: offset)
+            } else {
+                reopenTailRecordForTruncation()
+                cutTail(to: last.start, from: last.end, at: offset)
+            }
+        }
+
+        /// The cell range and row count of a record's last display row at the current width.
+        ///
+        /// One derivation for the three callers that need it -- the spacer repair, tail
+        /// truncation and the width-change pull-back -- so the fold's last-row semantics have a
+        /// single place to change. `enumerateRows` always fires at least once (`31/DD15`'s
+        /// one-row floor), so the seeded defaults never survive.
+        private func lastRowRange(
+            ofRecordAt offset: Int,
+            cellCount: Int
+        ) -> (start: Int, end: Int, rowCount: Int) {
+            var start = 0
+            var end = cellCount
+            var rowCount = 0
+            LogicalLineFold.enumerateRows(
+                cellCount: cellCount,
+                width: width,
+                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
+            ) { rowIndex, rowStart, rowEnd, _ in
+                start = rowStart
+                end = rowEnd
+                rowCount = rowIndex + 1
+            }
+            return (start, end, rowCount)
         }
 
         private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
@@ -1031,24 +1068,15 @@ extension Terminal {
         private mutating func pullBackOpenTailRemainder() -> [Terminal.GridCell] {
             guard let record = openTailRecord(), record.cellCount > 0 else { return [] }
             let offset = offsets[offsets.count - 1]
-            var lastStart = 0
-            var lastEnd = record.cellCount
-            LogicalLineFold.enumerateRows(
-                cellCount: record.cellCount,
-                width: width,
-                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-            ) { _, start, end, _ in
-                lastStart = start
-                lastEnd = end
-            }
-            guard lastEnd - lastStart < width else { return [] }
+            let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
+            guard last.end - last.start < width else { return [] }
 
             let index = offsets.count - 1
-            let suffix = (lastStart..<lastEnd).map { cell(recordIndex: index, cellOffset: $0) }
-            if lastStart == 0 {
+            let suffix = (last.start..<last.end).map { cell(recordIndex: index, cellOffset: $0) }
+            if last.start == 0 {
                 dropTailRecord(record, at: offset)
             } else {
-                cutTail(to: lastStart, from: lastEnd, at: offset)
+                cutTail(to: last.start, from: last.end, at: offset)
             }
             return suffix
         }
@@ -1218,8 +1246,8 @@ extension Terminal {
         }
 
         /// One logical line's stored cells, in order. Width-free by construction, which is what
-        /// makes `scrollbackRowContentIdentityShape`'s contract literally true once it is
-        /// re-denominated to the record (`31/D3` Decision 6).
+        /// makes `scrollbackRecordContentIdentityShape`'s contract literally true
+        /// (`31/D3` Decision 6).
         ///
         /// Content only: a trailing fill is never among these cells, so a caller that copies a
         /// logical line copies what the program printed and not what the erase painted.
@@ -2264,6 +2292,14 @@ extension Terminal {
                     bytesInUse -= LogicalLineRecord.Header.byteCount
                     writeCursor = offset
                     clearOpenScratch()
+                    // Every other mutator keeps `head == offsets[0]`; discarding the store's only
+                    // record here would leave `head` naming an offset no record occupies, and an
+                    // empty arena has nothing to wrap around and needs no pad. Resetting restores
+                    // the invariant and skips the pad in one step.
+                    if offsets.count == 0 {
+                        resetToEmptyArena()
+                        return
+                    }
                     retireEmptyTailBlocks()
                 }
             }
