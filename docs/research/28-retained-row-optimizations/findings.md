@@ -1,6 +1,13 @@
 # Findings -- append-only evidence chain
 
-Next free ID: **F24**. Phase 2's open resize-*profile* task has now been renumbered
+Next free ID: **F24**. **That claim is now vacant: the resize-*profile* task it was
+reserved for is OBSOLETE as of 2026-08-05**, superseded by
+[doc 31](../31-logical-line-scrollback/README.md) -- `9ad7cc5` deleted reflow of
+history and the cell cap the profile was the prerequisite for, so the question
+cannot be run as written and `D11`'s exit amendment (1.58 ms median, 2.75 ms max,
+at greater depth) is the measurement that replaced it. `F24` stays the next free
+ID for whatever this doc records next. The paragraph the ID was reserved under
+follows, unchanged. Phase 2's open resize-*profile* task has now been renumbered
 eleven times (`F11`, `F12`, `F13`, `F15`, `F17`, `F18`, `F19`, `F20`, `F21`, `F22`, `F23`)
 without being
 written, because IDs go in the order findings are recorded and each time something more

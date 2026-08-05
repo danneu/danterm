@@ -1308,6 +1308,15 @@ Open conditions that the implementation, not the design, has to discharge:
 
 ## Follow Up
 
+- **`31/DD53`'s chunk size is an ACCEPTED DEFAULT as of 2026-08-05**, and the
+  open-question phrasing is closed. `nextPowerOfTwo(capacity / 32)` clamped to
+  [64 KiB, 512 KiB] -- 512 KiB and 30 chunks at the production budget -- is
+  untuned against any measurement, and that is the *decided* state rather than an
+  outstanding item. It is revisited on exactly one condition: **a profile that
+  names chunk-boundary cost or copy-on-write copy cost as a term.** `31/F17`
+  profiled the browse frame and named neither; the whole `LogicalLineStore`
+  subtree is 1.94% of it. Earlier entries in this file that read "still untuned"
+  are historical narrative and are left as written.
 - **The `retained-browse` ~1% residual is ACCEPTED with no fix, 2026-08-05.**
   `31/F17` attributed it to closure-dispatch depth in the viewport traversal --
   **+8,206 ns of a ~340,025 ns frame**, about **3 us** -- and named two routes
@@ -1322,19 +1331,22 @@ Open conditions that the implementation, not the design, has to discharge:
   `retained-browse` regression on a calibrated reading makes the traversal's
   closure depth the first suspect**, and `31/F17`'s bucket table is the
   before-picture to diff against.
-- **Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
-  README entry still states the old one.** It asks where inside reflow's dominant
-  per-cell term the time goes, and names itself "the prerequisite for `D8`'s cell
-  cap ever rising" -- but slice 5 deleted reflow of history and the cell cap both.
-  What survives is the live screen's refold, which slice 6's after arm prices at
-  1.46 ms (widening) and 2.65 ms (narrowing) on a 179x66 pane. Either restate the
-  task against the live refold or close it; it is currently a live ledger item
-  nobody can run as written. `docs/research/28-retained-row-optimizations/README.md`
-  Outcome item 1 and the Phase 2 ledger row are the two places that say it.
-- **`28/D8`'s ~150 ms resize budget is unowned.** `D11`'s amendment deliberately
-  does not supersede it (exit 1 said a keep-the-caps successor would), because
-  resize cost stopped being a function of history depth and a successor budget
-  wants deriving against the live screen. Nothing currently bounds resize cost.
+- ~~**Doc 28's Phase 2 resize *profile* (`F24`) is now a different question, and its
+  README entry still states the old one.**~~ **CLOSED 2026-08-05 in doc 28: marked
+  OBSOLETE, superseded by doc 31.** The question cannot be run as written -- slice
+  5 deleted reflow of history and the cell cap the profile was the prerequisite
+  for -- and profiling the surviving live-screen refold (1.46 ms widening,
+  2.65 ms narrowing) is a new question with a new subject, assigned to whoever
+  reopens resize work. Marked at `docs/research/28-retained-row-optimizations/`
+  in all three places that stated it: `README.md` Outcome item 1, the Phase 2
+  ledger row, and `findings.md`'s `F24` reservation.
+- ~~**`28/D8`'s ~150 ms resize budget is unowned.**~~ **CLOSED 2026-08-05 in doc
+  28: RETIRED, superseded by measurement.** `D11`'s exit amendment measured the
+  same recipe at 1.58 ms median and 2.75 ms max, which is 0.011x the budget where
+  the arm it replaced was 3.84x. **No successor budget is set, deliberately**:
+  resize is now a live-screen question and is not even symmetric between
+  directions, so a bound wants deriving against that rather than inheriting.
+  Nothing bounds resize cost, and nothing now pretends to.
 - ~~**The cutover's regression is unattributed and nothing is profiling it.**~~
   **Attributed 2026-08-04 as `31/F13`, fixed by slices 9, 10, 13 and 16, and
   re-measured four times. CLOSED as of `31/F16`: every acceptance rung is
@@ -1387,8 +1399,10 @@ Open conditions that the implementation, not the design, has to discharge:
   second reject trigger is unreadable by construction now that today's store is gone from
   the tree. If the cutover is held, that gate wants a same-session instrument that does not
   depend on the incumbent existing.
-- **`28/D8`'s ~150 ms resize budget is still unowned and `28/F24` still states a question
-  nobody can run.** Both were surfaced by slice 6 and neither is this plan's; they are
+- ~~**`28/D8`'s ~150 ms resize budget is still unowned and `28/F24` still states a question
+  nobody can run.**~~ **Both closed in doc 28 on 2026-08-05** -- the budget retired, the
+  profile marked obsolete -- as the two bullets at the top of this section record. The
+  original entry follows. Both were surfaced by slice 6 and neither is this plan's; they are
   repeated here because slice 7 is the plan's last commit and they would otherwise leave
   with it. `docs/research/28-retained-row-optimizations/README.md` Outcome item 1 and its
   Phase 2 ledger row are the two places to edit.

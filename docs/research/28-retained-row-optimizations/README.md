@@ -523,7 +523,8 @@ implementation without that funding decision.
   and they cost more only because they are twice as long, since the current cell
   pays for styling whether or not it uses it. `F11` also prices six candidate
   representations against those exact rows through the engine's own charge model.
-- [ ] `RESEARCH` Probe saturated-history resize cost at HEAD (H1): where does
+- [x] `REJECTED` (obsolete 2026-08-05 -- the subject was deleted, not the question
+  answered) Probe saturated-history resize cost at HEAD (H1): where does
   a full-width change on 5,000+ retained rows spend its time, and is it within
   a frame budget? `F7` has the distribution and the committed probe; this task
   is the profile and the frame-budget reading `F7` deliberately withheld. Now
@@ -536,6 +537,15 @@ implementation without that funding decision.
   *profile* -- where inside the **per-cell** term the time goes, since that is the
   dominant one and the one whose reduction would let `D8`'s cell cap rise. Unpack,
   repack, or the allocation traffic between them is still unmeasured.
+  **OBSOLETE 2026-08-05, superseded by
+  [doc 31](../31-logical-line-scrollback/README.md).** `9ad7cc5` deleted reflow of
+  history and both caps, so the per-cell term this task was to profile and the
+  cell cap it was the prerequisite for are both gone. The replacement number is a
+  measurement, not a profile: `D11`'s exit amendment reads the same committed
+  `saturated-wide-resize-v1` recipe at **1.58 ms** median and **2.75 ms** max
+  against the trial's 576.19 ms, at greater depth. Profiling the surviving
+  live-screen refold is a new question with a new subject and belongs to whoever
+  reopens resize work.
 
 ### Phase 3 -- direction gates
 
@@ -735,7 +745,9 @@ implementation without that funding decision.
   promoted out of `plans/wip/` at closure, and shipped as C1 across
   `987927a`..`f364cd9`. The doc does **not** close with it: `H5`'s gate is
   undecided, `H7`'s reference read has not been done, and Phase 2 still owes the
-  resize *profile* (`F24`). See `## Outcome` for the liveness reading.
+  resize *profile* (`F24`). See `## Outcome` for the liveness reading. **Of those
+  three, only `H5`'s gate is still open**: `H7` was superseded 2026-08-04 and the
+  `F24` profile is obsolete as of 2026-08-05, both by doc 31's store.
 - [x] `DONE` (trial closed 2026-08-04 on exit 4) Size the history-depth defaults
   against a stated line-count target. `F23` measured what today's bounds retain
   at 179 columns (1,830 rows of full-width content, 7,281 of program output,
@@ -928,14 +940,25 @@ C6 is rejected on measurement (`D9`), and C3/C4 on pricing plus read shape
 (`D5`/`D6`). `D8`'s dual caps and `F17`'s streaming readers are the two shipped
 byproducts that outlive the representation contest.
 
-**Live, and why each is work rather than a parked lead.** Items 1-3 are
-unanswered questions with named next steps, so this doc stays in `## Live`. Item
-4 is kept in place and **marked closed** rather than deleted, because it is the
-one item that ended by having its subject removed and that is worth reading:
+**Live, and why each is work rather than a parked lead.** **Item 3 is the only
+one still open**, and it is what keeps this doc in `## Live`. Items 1, 2 and 4 are
+kept in place and **marked closed** rather than deleted, because all three ended
+the same way and that is the thing worth reading: their subject was removed by
+doc 31's store rather than their question answered.
 
-1. **Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
+1. ~~**Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
    reflow's dominant per-cell term the time goes. Renumbered eleven times and
-   still owed; it is the prerequisite for `D8`'s cell cap ever rising.
+   still owed; it is the prerequisite for `D8`'s cell cap ever rising.~~
+   **OBSOLETE 2026-08-05, superseded by
+   [doc 31](../31-logical-line-scrollback/README.md).** The question cannot be run
+   as written: `9ad7cc5` deleted reflow of history and the cell cap the profile was
+   the prerequisite for, so neither the term nor the bound it was to inform exists.
+   What replaced it is a measurement rather than a profile -- `D11`'s exit
+   amendment reads the same committed recipe at **1.58 ms** (max 2.75 ms) against
+   the trial's 576.19 ms, at greater depth, and prices the surviving live-screen
+   refold at 1.46 ms widening and 2.65 ms narrowing on a 179x66 pane. A profile of
+   *that* is a new question against a new subject, and it belongs to whoever
+   reopens resize work; it is not this task restated.
 2. **`H7`, viewport-adjacent reflow** -- superseded 2026-08-04 by
    [doc 31](../31-logical-line-scrollback/README.md) (logical-line storage,
    read-time wrapping), which removes what `H7` would have deferred. What `F23`
@@ -969,9 +992,12 @@ one item that ended by having its subject removed and that is worth reading:
    trial's own depth, the width change went **576.19 ms at 9,860 retained rows ->
    1.58 ms at 10,735**, so the subjective question the trial existed to answer no
    longer has a subject. Both caps are deleted with no analogue; the 16 MiB
-   budget survives on a new derivation. What the amendment deliberately leaves
-   open is `D8`'s ~150 ms *budget*, which now wants deriving against the live
-   screen rather than inheriting -- that is a fresh question, not this trial's.
+   budget survives on a new derivation. What the amendment deliberately left
+   open was `D8`'s ~150 ms *budget*, which now wants deriving against the live
+   screen rather than inheriting -- a fresh question, not this trial's.
+   **Settled 2026-08-05: `D8`'s budget is RETIRED**, superseded by the measurement
+   (1.58 ms is 0.011x it) with no successor set. Any future resize budget belongs
+   to whoever reopens resize work, derived against the live screen.
 
 **Parked with stated conditions, not live.** `H4` (re-price before running --
 `D5`'s 36% was computed against a ~1-byte cell), `H6` (waits on session restore

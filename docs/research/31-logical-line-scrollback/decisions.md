@@ -3221,6 +3221,17 @@ stands: rule 3 above applies to the re-run unchanged.
   change adds seam tests at a budget that spans several chunks rather than
   relying on the existing ones. A human's to revisit if a later reading wants
   either end moved.
+
+  **Settled 2026-08-05 as an ACCEPTED DEFAULT, and the open-question phrasing is
+  closed.** The derivation and its clamp are the shipped values, **untuned against
+  any measurement**, and that is the decided state rather than an outstanding
+  item. The reopening condition is narrow and is the whole of it: **revisit only
+  if a profile names chunk-boundary cost or copy-on-write copy cost as a term**.
+  Absent that, no number here is owed to anyone -- `F17` profiled the browse frame
+  and named neither (`LogicalLineStore`'s whole subtree is 1.94% of the frame),
+  which is the evidence that lets this close as a default rather than stay open as
+  a question. Nothing about the derivation changes; what changes is that "still
+  untuned" stops being read as work outstanding.
 - **DD54 -- a row that does not fit one chunk retains nothing, which extends
   `DD46` rather than adding a rule.** `DD46` already says a budget too small to
   hold one display row retains nothing rather than trapping; the admissible unit

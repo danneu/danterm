@@ -946,6 +946,33 @@ and this restores it.
   materially below 0.352 us, which `F16`'s profile is the prerequisite for and
   which would let the same budget buy a larger cell cap.
 
+#### Amendment 2026-08-05 -- the ~150 ms resize budget is RETIRED, superseded by measurement
+
+`D11`'s exit amendment deliberately declined to supersede this budget, on the
+ground that resize cost had stopped being a function of history depth and a
+successor wants deriving against the live screen. That left the budget **unowned**
+-- named by nothing, bounding nothing, and still quotable as if it were live. It
+is retired here rather than left in that state.
+
+- **Superseded by measurement, not by a replacement budget.** Both caps this entry
+  derived are deleted with no analogue (`D11`'s exit amendment), and the quantity
+  the budget bounded -- reflow of retained history -- does not exist. The same
+  committed `saturated-wide-resize-v1` recipe at the trial's own depth reads
+  **1.58 ms median, 1.46/2.75 ms min/max at 10,735 retained rows**, which is
+  **0.011x** this budget where the arm it replaced was 3.84x. A budget two orders
+  of magnitude above what the thing costs bounds nothing.
+- **No successor budget is set here, and that is deliberate.** Resize is now a
+  live-screen question -- the after arm's cost is a function of the refold, and it
+  is not even symmetric (2.65 ms narrowing against 1.46 ms widening). Deriving a
+  bound against that is real work with a different subject, and inventing one from
+  this entry's cost model would be deriving what a measurement could settle.
+  **Any future resize budget belongs to whoever reopens resize work**, and it
+  should be derived against the live screen rather than inherited from here.
+- **What stays true and quotable from this entry**: the two-bound reasoning, the
+  three-regime trade table, and the row-cap-alone rejection are the historical
+  record of why depth was capped when reflow of history existed. None of it
+  licenses a number today.
+
 ### D9 -- C6 is rejected on the measured verdict set and replaced by C1; the caps had already taken away the objective C6 was chosen for
 
 - Status: **decided as a representation pivot, on a human decision made with the
@@ -1456,7 +1483,10 @@ history, which is why depth stopped setting the price.
    of history depth, so the quantity `D8` bounded no longer exists in the form it
    bounded; a resize budget is now a live-screen question and wants to be derived
    against that, not inherited. Left open rather than resolved by side effect --
-   the same error this amendment exists to correct.
+   the same error this amendment exists to correct. **Done 2026-08-05 at `D8`
+   itself**: the budget is retired there, superseded by the measurement in this
+   amendment, with no successor set and the successor explicitly assigned to
+   whoever reopens resize work.
 2. **It does not claim `D10`'s banked memory came back.** The 16 MiB budget
    survives unchanged, so a deep pane still costs what `D11` accepted. What
    changed is what a *resize* costs, and nothing else in this entry's trade

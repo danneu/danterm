@@ -1428,12 +1428,22 @@ is that the change it licensed is not a regression. What is open:
   incumbent's `Array ==` on buffer identity (0.91 ms against 0.069 ms on a
   saturated pane), and closing it needs a value identity on the store -- an origin
   object plus a generation every mutation bumps -- which the entry declined for
-  its silent-wrong-answer failure mode. **`DD53`'s chunk size is still untuned**
-  against any measurement, and `D5` still names it the one free variable.
-- **Doc 28's `F24`/`D8` follow-ups are unowned**: `F24` asks where reflow's
+  its silent-wrong-answer failure mode. ~~**`DD53`'s chunk size is still untuned**
+  against any measurement, and `D5` still names it the one free variable.~~
+  **`DD53`'s chunk size is an ACCEPTED DEFAULT as of 2026-08-05**: untuned, and
+  that is the decided state, not an open item. It is revisited **only** if a
+  profile names chunk-boundary or copy-on-write copy cost as a term -- `F17`
+  profiled the browse frame and named neither.
+- ~~**Doc 28's `F24`/`D8` follow-ups are unowned**: `F24` asks where reflow's
   per-cell term goes and reflow of history no longer exists, and `28/D8`'s
   ~150 ms resize budget was deliberately not superseded, so nothing currently
-  bounds resize cost.
+  bounds resize cost.~~ **Both settled in doc 28 on 2026-08-05.** `28/F24`'s
+  profile is marked **obsolete** (its subject was deleted, not its question
+  answered), and `28/D8`'s budget is **retired**, superseded by the measurement
+  rather than replaced -- 1.58 ms is 0.011x it. **No successor budget is set, on
+  purpose**: resize is now a live-screen question and the budget belongs to
+  whoever reopens resize work. So nothing bounds resize cost and nothing pretends
+  to.
 - ~~**`F12`'s fold walk** is a named, measured, reproducible target with a
   committed probe, independent of how the ladder question resolves.~~ **Fixed
   2026-08-04 alongside `F13`'s mechanisms**: the fold resolves a display row's
