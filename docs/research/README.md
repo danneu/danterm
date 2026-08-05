@@ -27,7 +27,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance measurement gates `L6`/`L5`; the shipped span clip moved the bracket again |
 | 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | `F16` answered the last item; owes an `## Outcome` before it can close |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
-| 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
+| 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize -- not the storm debris, which is the shell's | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
 
 ## Closed
 

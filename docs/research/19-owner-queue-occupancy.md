@@ -10,9 +10,12 @@ back on `D4`'s first branch (`F16`): settled resizes are clean, the stacked prom
 need the storm, and the debris is the shell's own redraw race -- it reproduces in
 Terminal.app and iTerm2 too. Every ledger item is now closed. The session's
 incidental discovery, rows that stop being painted after a settled resize, is a
-repaint defect rather than a reflow one and moved to
-[doc 32](32-post-resize-repaint-loss/README.md). What this file still owes is an
-`## Outcome` section before its row can move to `## Closed`.**
+repaint defect rather than a reflow one; it -- **and not the debris** -- moved to
+[doc 32](32-post-resize-repaint-loss/README.md), which fixed it in `44b875cd`.
+The debris remains attributed to the shell and owned by no doc; `F16` records
+under "what nobody owns" the one question that attribution left open. What this
+file still owes is an `## Outcome` section before its row can move to
+`## Closed`.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -726,7 +729,14 @@ same fragment debris in Terminal.app and iTerm2, in zsh and in fish, and all thr
 terminals are clean under bash (`32/F2`). `F15` left two candidate explanations
 for the stacking -- our reflow's cursor placement, or the shell losing its own
 redraw race -- and this is the second. DanTerm renders faithfully what the shell
-emits under a SIGWINCH burst.
+emits under a SIGWINCH burst. `32/F9` later confirmed this at the grid rather
+than the screen: `danterm pane read` returns the fragments, so they are terminal
+state the shell wrote, not pixels we misplaced.
+
+**The debris did not move to doc 32.** Its *evidence* is recorded there, because
+the same session produced both, and the citations above point at it. But doc 32
+excludes the debris from its scope by its own boundary and fixed only the repaint
+defect. Nothing owns fixing the debris -- see "what nobody owns" below.
 
 **The lag half is separately settled.** `F15` priced a reflow step at ~53.7-64 ms
 and derived 4x-8x owner-queue utilization from it. `28/D11`'s amendment records the
@@ -738,15 +748,29 @@ longer lags the window during a drag, which the session confirmed by hand.
 live prompt stop being painted -- DanTerm-only, present with the shell integration
 disabled, and provably not a data loss: selecting the rows, scrolling them, or
 pushing content into scrollback brings them back unchanged. That is a repaint
-defect, not a reflow one, and it is nothing this doc predicted. It is out of scope
-here and owns its own doc: **[32-post-resize-repaint-loss](32-post-resize-repaint-loss/README.md)**.
+defect, not a reflow one, and it is nothing this doc predicted. **This, and only
+this**, is what moved out of this doc; it owns
+**[32-post-resize-repaint-loss](32-post-resize-repaint-loss/README.md)**, which
+attributed it to `d3780961` and fixed it in `44b875cd`.
+
+**What nobody owns.** Whether DanTerm can reduce the debris despite the race
+being the shell's. "Not our defect" was treated as closing the question, and it
+does not: DanTerm chooses how often the child is told a new size during a drag,
+which is an input to how badly the shell races. The obvious lever is already
+pulled -- `C4`'s latest-wins coalescing means a drag tells the child
+proportionally fewer sizes than columns crossed -- and the debris survives it.
+So a further mitigation would first have to establish *why* it survives: whether
+the surviving rate is still above what zsh's redraw can absorb, or whether the
+debris does not track rate at all. Nobody has measured that. It needs its own doc
+if it is ever pursued, and it does not block this one from closing.
 
 **Uncertainty.** The reproduction is a hand-driven mouse drag, and the fragment
 pattern differs from `F15`'s screenshot -- whole stacked prompts there, mid-row
 fragments here. Same class, possibly not the identical failure; not pursued,
 because the three-terminal control makes it the shell's either way.
 
-**Next action.** None owed by this doc.
+**Next action.** None owed by this doc. The debris mitigation named above is an
+unowned question, not an item of this doc's ledger.
 
 ## Decisions
 

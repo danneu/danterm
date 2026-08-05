@@ -159,9 +159,11 @@ been directly excluded, and because it predicts a different fix.
       wait for it -- the test injects the ordering directly by controlling which
       frame follows the resize. Live-resize modelling would only be needed for a
       test that reproduces via timing rather than construction.
-- [ ] Record how tight the timing window is -- whether the injected write has
+- [x] ~~Record how tight the timing window is -- whether the injected write has
       to land within a specific frame, which tells the fix how much slack it
-      has.
+      has.~~ **Dropped, not done.** It existed to tell the fix how much slack to
+      leave; `D1` needs none, because it forces the repaint at the size change
+      rather than racing the write.
 - [ ] Prefer the **fast-drag flicker** as the regression signal over the
       settled-widen recipe (`F8`). It is deterministic and high-frequency rather
       than stochastic, so an automated detector built on it can pass the
@@ -236,7 +238,15 @@ remains the reliable stimulus, and Phase 2 exists to remove even that dependence
 
 ## Outcome
 
-**Fixed**, pending one open verification.
+**Fixed** -- meaning the repaint loss, which is all this doc ever owned.
+
+**What "fixed" does not cover.** The resize-storm prompt debris is untouched and
+was never in scope (`F2`, and the Purpose section's inherited boundary). It is
+the shell's own redraw race, confirmed at the grid rather than the screen by
+`F9`: `danterm pane read` returns the fragments, so they are terminal state zsh
+wrote. If you arrived here from doc 19 expecting the debris to be handled, it is
+not, by any doc -- `19/F16`'s "what nobody owns" states the one question that
+attribution left open, and pursuing it would need a new doc.
 
 The defect was attributed to `d3780961` (`F6`, `F8`), `H3` was rejected on
 measured pixels (`F5`), and `H1` and `H2` were confirmed as the two halves of
@@ -245,10 +255,11 @@ correct independently of `H1`'s ordering -- the one claim still inferred from
 source rather than measured. The Phase 2 test fails without the change and
 passes with it; `F9` confirms the fast-drag flicker is gone in the real app.
 
-Still open: re-measuring doc 29's sparse-clip performance win (its behaviour is
-covered by three passing regression tests, but the number has not been re-run),
-and the `H1` frame instrumentation, which is now optional since no shipped
-behaviour depends on the answer.
+Still open: the cost `D1` itself adds, one full repaint per resize frame. No
+instrument measures it -- the benchmark harness covers feed workloads, not
+geometry changes -- so the only evidence is that hand-dragging showed no
+smoothness complaint. Doc 29's own win is not at risk: it is steady-state sparse
+damage, and `#setFrameSize` is not on that path.
 
-Out of scope and unchanged: the resize-storm prompt debris (`F2`, `F9`). It is
-in the grid, the shell wrote it, and three terminals render it alike.
+Also open, and optional: the `H1` frame instrumentation. `D1` was chosen so that
+no shipped behaviour depends on the answer.
