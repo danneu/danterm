@@ -40,45 +40,73 @@ def git(*args, cwd=None, capture_output=False):
 
 
 class FetchReferencesTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.origin_directory = tempfile.TemporaryDirectory()
+        cls.origin = Path(cls.origin_directory.name) / "origin"
+        try:
+            cls.origin.mkdir()
+            git("init", "-q", cwd=cls.origin)
+            git("config", "user.email", "test@example.invalid", cwd=cls.origin)
+            git("config", "user.name", "Test User", cwd=cls.origin)
+            git("config", "uploadpack.allowFilter", "true", cwd=cls.origin)
+            git("config", "uploadpack.allowAnySHA1InWant", "true", cwd=cls.origin)
+
+            cls.write("cone-a/inside.txt", "pinned\n")
+            cls.write("cone-b/other.txt", "other cone\n")
+            cls.write("outside-dir/outside.txt", "outside\n")
+            cls.write("deep/path/file.txt", "deep\n")
+            git("add", ".", cwd=cls.origin)
+            git("commit", "-q", "-m", "pinned", cwd=cls.origin)
+            cls.pinned_sha = cls.rev_parse("HEAD")
+
+            cls.write("cone-a/inside.txt", "newer\n")
+            git("add", ".", cwd=cls.origin)
+            git("commit", "-q", "-m", "newer", cwd=cls.origin)
+            cls.newer_sha = cls.rev_parse("HEAD")
+            git("tag", "release-points-elsewhere", cwd=cls.origin)
+        except BaseException:
+            cls.origin_directory.cleanup()
+            raise
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            if cls.rev_parse("HEAD") != cls.newer_sha:
+                raise AssertionError("a test changed the shared origin's HEAD")
+            status = git(
+                "status",
+                "--porcelain",
+                cwd=cls.origin,
+                capture_output=True,
+            )
+            if status.stdout:
+                raise AssertionError("a test changed the shared origin's worktree")
+        finally:
+            cls.origin_directory.cleanup()
+            super().tearDownClass()
+
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
-        self.origin = self.root / "origin"
         self.references = self.root / "references"
-        self.origin.mkdir()
-        git("init", "-q", cwd=self.origin)
-        git("config", "user.email", "test@example.invalid", cwd=self.origin)
-        git("config", "user.name", "Test User", cwd=self.origin)
-        git("config", "uploadpack.allowFilter", "true", cwd=self.origin)
-        git("config", "uploadpack.allowAnySHA1InWant", "true", cwd=self.origin)
-
-        self.write("cone-a/inside.txt", "pinned\n")
-        self.write("cone-b/other.txt", "other cone\n")
-        self.write("outside-dir/outside.txt", "outside\n")
-        self.write("deep/path/file.txt", "deep\n")
-        git("add", ".", cwd=self.origin)
-        git("commit", "-q", "-m", "pinned", cwd=self.origin)
-        self.pinned_sha = self.rev_parse("HEAD")
-
-        self.write("cone-a/inside.txt", "newer\n")
-        git("add", ".", cwd=self.origin)
-        git("commit", "-q", "-m", "newer", cwd=self.origin)
-        self.newer_sha = self.rev_parse("HEAD")
-        git("tag", "release-points-elsewhere", cwd=self.origin)
 
     def tearDown(self):
         self.temporary_directory.cleanup()
 
-    def write(self, relative_path, content):
-        path = self.origin / relative_path
+    @classmethod
+    def write(cls, relative_path, content):
+        path = cls.origin / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
 
-    def rev_parse(self, revision, cwd=None):
+    @classmethod
+    def rev_parse(cls, revision, cwd=None):
         result = git(
             "rev-parse",
             f"{revision}^{{commit}}",
-            cwd=cwd or self.origin,
+            cwd=cwd or cls.origin,
             capture_output=True,
         )
         return result.stdout.strip()
