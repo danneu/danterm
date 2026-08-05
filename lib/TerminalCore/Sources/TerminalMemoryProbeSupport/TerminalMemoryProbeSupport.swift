@@ -125,15 +125,28 @@ public enum MemoryProbeMatrix {
     /// evicts, which is the state the product actually runs in.
     public static let scrollbackLineCount = 10_000
 
-    public static func payloads(columns: Int, lineCount: Int = scrollbackLineCount) -> [MemoryProbePayload] {
-        [
-            MemoryProbePayload(name: "empty", bytes: []),
-            MemoryProbePayload(name: "full-screen", bytes: fullScreen(columns: columns)),
-            MemoryProbePayload(name: "scrollback-plain", bytes: plain(lineCount: lineCount)),
-            MemoryProbePayload(name: "scrollback-unicode", bytes: unicode(lineCount: lineCount)),
-            MemoryProbePayload(name: "scrollback-styled", bytes: styled(lineCount: lineCount)),
-            MemoryProbePayload(name: "scrollback-mixed", bytes: mixed(lineCount: lineCount)),
+    /// - Parameter named: build only the payload with this name, or all of them when nil.
+    ///   Selection happens on the name, *before* any byte array is materialized, because
+    ///   `--payload NAME` promises an attributable footprint delta and cannot keep that promise in
+    ///   a process where the other five payloads' buffers were allocated and freed first. How much
+    ///   allocator reuse that would actually cause is unmeasured; the point is that the mode's one
+    ///   job is to have no such confound to argue about.
+    public static func payloads(
+        columns: Int,
+        lineCount: Int = scrollbackLineCount,
+        named: String? = nil
+    ) -> [MemoryProbePayload] {
+        let builders: [(name: String, bytes: () -> [UInt8])] = [
+            ("empty", { [] }),
+            ("full-screen", { fullScreen(columns: columns) }),
+            ("scrollback-plain", { plain(lineCount: lineCount) }),
+            ("scrollback-unicode", { unicode(lineCount: lineCount) }),
+            ("scrollback-styled", { styled(lineCount: lineCount) }),
+            ("scrollback-mixed", { mixed(lineCount: lineCount) }),
         ]
+        return builders
+            .filter { named == nil || $0.name == named }
+            .map { MemoryProbePayload(name: $0.name, bytes: $0.bytes()) }
     }
 
     /// Fills every column of many rows, so no cell is left at its default. Distinct from the
@@ -270,7 +283,8 @@ public func measure(
     let heapBefore = mallocHeapSnapshot()
     let before = processPhysicalFootprintBytes()
     // The public initializer, so the probe always measures the production budget. The
-    // budget-taking initializer is internal on purpose -- that the public one pins 10 MiB is an
+    // budget-taking initializer is internal on purpose -- that the public one pins
+    // `Terminal.productionScrollbackBudgetBytes` is an
     // invariant with its own test, and a measurement tool is not a reason to weaken it. Depth is
     // varied with `lineCount` instead.
     guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
@@ -307,12 +321,13 @@ public func measure(
     )
 }
 
-/// Runs the whole matrix at one geometry.
-/// Runs the matrix, or one named payload of it.
+/// Runs the matrix, or one named payload of it, at one geometry.
 ///
 /// `only` exists because footprint deltas are only attributable in a single-payload process: the
 /// allocator reuses pages a previous payload freed, so every delta after the first understates its
-/// payload. Census fields are exact and unaffected either way.
+/// payload. Census fields are exact and unaffected either way. It is threaded down into
+/// `MemoryProbeMatrix.payloads(columns:lineCount:named:)` rather than filtering that call's result,
+/// so the payloads not being measured are never built either.
 public func runMatrix(
     columns: Int,
     rows: Int,
@@ -322,8 +337,7 @@ public func runMatrix(
     whileResident: ((TerminalMemoryCensus) -> Void)? = nil
 ) -> MemoryProbeReport {
     let reports = MemoryProbeMatrix
-        .payloads(columns: columns, lineCount: lineCount)
-        .filter { only == nil || $0.name == only }
+        .payloads(columns: columns, lineCount: lineCount, named: only)
         .compactMap {
             measure(
                 payload: $0,

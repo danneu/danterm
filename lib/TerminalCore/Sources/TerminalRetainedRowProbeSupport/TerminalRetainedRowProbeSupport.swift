@@ -66,32 +66,6 @@ public func allocatedBytes(forRequest request: Int) -> Int {
     request <= 0 ? 0 : malloc_good_size(request)
 }
 
-/// The packed retained row's entry widths, restated here rather than plumbed out of the
-/// engine.
-///
-/// Same rationale as `arrayStorageHeaderBytes` above, and the same discipline: a probe that
-/// asked the engine what its rows cost could not catch the engine getting it wrong. These are
-/// doc 28's `C1` charges -- the ones `28/F18` priced the pivot against -- so
-/// `packedPayloadMatchesModel` below is a comparison between the design's arithmetic and the
-/// implementation's bytes, not a value against itself.
-public enum PackedRowModel {
-    /// flags(1) + storedCells(2) + two table cardinalities(2 each).
-    ///
-    /// `C6`'s was 13, for six counts. That a representation swap shrinks this constant is the
-    /// visible half of the pivot; the invisible half is that `C1`'s payload is 8 bytes per
-    /// stored cell instead of roughly one.
-    public static let headerBytes = 7
-
-    /// The whole cell: scalar (or spill index), kind, and a full-width interned `StyleId`.
-    /// `C6` needed a stride tier, a style-run table, a kind-exception table and a spill
-    /// directory to say the same thing, and `28/F17` measured what decoding that cost.
-    public static let cellBytes = 8
-
-    public static let hyperlinkEntryBytes = 4
-    public static let identityRunEntryBytes = 8
-    public static let identityCellBytes = 4
-}
-
 /// What one retained row's cell array costs, from its stored cell count.
 public func rowAllocation(storedCells: Int, cellStrideBytes: Int) -> (request: Int, allocated: Int) {
     let request = arrayStorageHeaderBytes + storedCells * cellStrideBytes
@@ -515,10 +489,11 @@ public func readRetainedRowShape(
     // plus what history's packed blobs hold. Reconstructing both halves is what turns the
     // derivation from an assumption into a check.
     //
-    // Retained rows no longer contribute cell-stride bytes at all (doc 28's `C6`), so the
-    // scrollback half of this check is now an *extent* claim -- the derived stored cells are
-    // the ones the engine really stores -- while the byte claim moved to
-    // `packedPayloadMatchesModel`, which prices that extent through `C6`'s own arithmetic.
+    // Retained rows no longer contribute cell-stride bytes at all (doc 28's `C1` shipped the
+    // packed arena), so the scrollback half of this check is an *extent* claim, not a byte
+    // one: `derivationMatchesCensus` below holds the derived stored-cell total against the
+    // census's own, and the bytes come from `retainedArenaBytesInUse` rather than being
+    // re-priced here.
     let derivedRetainedCells = storedCellCounts.reduce(0, +)
     let derivedStorageBytes = census.screenRowCount * columns * census.cellStrideBytes
         + census.retainedArenaBytesInUse

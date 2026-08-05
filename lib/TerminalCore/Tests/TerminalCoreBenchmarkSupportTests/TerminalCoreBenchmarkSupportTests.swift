@@ -58,8 +58,46 @@ struct TerminalCoreBenchmarkSupportTests {
         #expect(try decodeBenchmarkChunks(framed) == [Array("abc".utf8), Array("de".utf8)])
     }
 
-    @Test("sustained feed recreates the measured terminal boundary each cycle")
-    func sustainedFeedRecreatesTerminalEachCycle() {
+    @Test("a length prefix with fewer than eight bytes left is a named framing error")
+    func truncatedLengthPrefixIsNamed() {
+        // Intent: stdin that ends mid-length-prefix throws `.truncatedLength`.
+        // Why it exists: this is the deserialization boundary two shipped executables
+        //   `try` on stdin (TerminalCoreBenchmark, TerminalRetainedRowProbe), and the
+        //   guard is what stands between a half-written fixture and an index-out-of-range
+        //   trap. Nothing exercised either framing error before, so both crash defenses
+        //   were load-bearing and unproven.
+        #expect(throws: CoreBenchmarkError.truncatedLength) {
+            _ = try decodeBenchmarkChunks(Data([0, 0, 0, 1]))
+        }
+    }
+
+    @Test("a chunk length longer than the remaining bytes is a named framing error")
+    func truncatedChunkIsNamed() {
+        // Intent: a well-formed prefix declaring more payload than the data holds throws
+        //   `.truncatedChunk` rather than trapping on the slice.
+        // Why it exists: same boundary as `truncatedLengthPrefixIsNamed`, and this is the
+        //   half a truncated write actually produces -- the length lands, the payload
+        //   does not.
+        var framed = Data()
+        var length = UInt64(99).bigEndian
+        framed.append(Data(bytes: &length, count: MemoryLayout<UInt64>.size))
+        framed.append(Data([0x61, 0x62]))
+
+        #expect(throws: CoreBenchmarkError.truncatedChunk) {
+            _ = try decodeBenchmarkChunks(framed)
+        }
+    }
+
+    @Test("a bounded sustained feed re-enters its feed boundary once per cycle")
+    func sustainedFeedReentersItsBoundaryEachCycle() {
+        // Intent: `runSustainedFeed(maximumCycles:)` invokes the supplied boundary
+        //   closure exactly once per cycle and stops at the bound.
+        // Why it exists: the title previously claimed the measured *terminal* is
+        //   recreated each cycle, which this body cannot check -- `runSustainedFeed`
+        //   never touches a `Terminal`. That claim belongs to `measureFeedBatch` and is
+        //   pinned by `feedBatchCreatesFreshTerminalPerExecution`. What is verifiable
+        //   here is that the caller's boundary (in production, one `measureFeedBatch`
+        //   call) is entered once per cycle, which is what `batches == 3` asserts.
         var batches = 0
 
         let completed = runSustainedFeed(maximumCycles: 3) {

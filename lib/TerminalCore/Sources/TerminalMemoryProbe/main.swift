@@ -81,9 +81,11 @@ let residentHook: ((TerminalMemoryCensus) -> Void)? = wantsVmmap ? { _ in captur
 
 let report: MemoryProbeReport
 if let selectedPayload {
-    let matched = MemoryProbeMatrix
-        .payloads(columns: columns, lineCount: lineCount)
-        .filter { $0.name == selectedPayload }
+    // Validated by name at `lineCount: 1`, so this check never materializes the ~2 MB of payload
+    // bytes the full matrix would build and throw away -- the process that measures a single
+    // payload's footprint delta should not have allocated the other five first. The known-name list
+    // is built only on the failure path, where nothing is about to be measured.
+    let matched = MemoryProbeMatrix.payloads(columns: columns, lineCount: 1, named: selectedPayload)
     guard matched.isEmpty == false else {
         let known = MemoryProbeMatrix.payloads(columns: columns, lineCount: 1).map(\.name)
         FileHandle.standardError.write(

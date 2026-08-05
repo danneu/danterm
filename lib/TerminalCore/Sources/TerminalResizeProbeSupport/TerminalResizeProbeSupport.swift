@@ -313,6 +313,17 @@ public func measureSaturatedResize(
     recipe: ResizeProbeRecipe = .standard,
     now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
 ) -> ResizeProbeReport {
+    // A backstop, not the user-facing check: `Terminal.resize` early-returns for
+    // `columns < 2` and for a width equal to the current one, so a degenerate
+    // alternation would time two clock reads `sampleCount` times and emit a full,
+    // plausible distribution of near-zero nanoseconds -- a measurement of nothing
+    // wearing a measured label, which is what `ResizeProbeDistribution`'s empty
+    // case exists to keep out of the report. The CLI rejects this as a usage error
+    // first; anything reaching here constructed the recipe in code.
+    precondition(
+        recipe.alternateColumns >= 2 && recipe.alternateColumns != recipe.columns,
+        "resize recipe alternates to a width Terminal.resize ignores: \(recipe.alternateColumns)"
+    )
     var terminal = makeSaturatedTerminal(recipe: recipe)
     let widths = [recipe.alternateColumns, recipe.columns]
 

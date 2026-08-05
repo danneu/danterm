@@ -126,9 +126,11 @@ struct TerminalWiredHistoryAttributionProbe {
         return (elapsed, Int64(footprintAfter) - Int64(footprintBefore), terminal.scrollbackRowCount)
     }
 
-    @Test("drain: what a sustained feed costs, with and without a published value copy")
+    @Test(
+        "drain: what a sustained feed costs, with and without a published value copy",
+        .enabled(if: probeIsEnabled)
+    )
     func drainAttribution() {
-        guard Self.probeIsEnabled else { return }
         let bytes = Self.streamBytes()
 
         var lines: [String] = []
@@ -158,9 +160,11 @@ struct TerminalWiredHistoryAttributionProbe {
 
     // MARK: Browse
 
-    @Test("browse: what one frame's two viewport traversals cost over retained history")
+    @Test(
+        "browse: what one frame's two viewport traversals cost over retained history",
+        .enabled(if: probeIsEnabled)
+    )
     func browseAttribution() {
-        guard Self.probeIsEnabled else { return }
         var terminal = Terminal(columns: Self.columns, rows: Self.rows)!
         let bytes = Self.browseBytes()
         var offset = 0
@@ -201,9 +205,11 @@ struct TerminalWiredHistoryAttributionProbe {
 
     // MARK: Equality
 
-    @Test("equality: what one whole-terminal comparison of a saturated pane costs")
+    @Test(
+        "equality: what one whole-terminal comparison of a saturated pane costs",
+        .enabled(if: probeIsEnabled)
+    )
     func equalityAttribution() {
-        guard Self.probeIsEnabled else { return }
         var terminal = Terminal(columns: Self.columns, rows: Self.rows)!
         let bytes = Self.streamBytes()
         var offset = 0

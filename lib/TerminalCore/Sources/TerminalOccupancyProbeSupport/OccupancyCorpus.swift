@@ -32,7 +32,8 @@ public func feedOccupancyCorpus(into terminal: inout Terminal, from: Int, count:
     terminal.feed(Array(payload.utf8))
 }
 
-/// Builds a terminal whose scrollback has been driven to the production 10 MiB budget.
+/// Builds a terminal whose scrollback has been driven to the production budget
+/// (`Terminal.productionScrollbackBudgetBytes`).
 ///
 /// Uses `Terminal`'s public initializer on purpose, so the budget is the one the app ships
 /// rather than a test-sized one: the whole point of this probe is the depth a real pane

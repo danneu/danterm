@@ -66,6 +66,23 @@ while arguments.isEmpty == false {
     arguments.removeFirst(2)
 }
 
+// `Terminal.resize` ignores a width below 2 and a width equal to the current one,
+// so `--alternate-columns 1` or `--alternate-columns <recipe columns>` would time
+// `sampleCount` no-op resizes and print a full distribution of near-zero
+// nanoseconds with nothing marking it unmeasured. Rejected here as the usage error
+// every other bad flag produces, rather than left to the support target's
+// precondition, which would trap the CLI with a SIGTRAP instead.
+guard recipe.alternateColumns >= 2, recipe.alternateColumns != recipe.columns else {
+    FileHandle.standardError.write(Data("""
+        --alternate-columns must be at least 2 and differ from the recipe's \
+        \(recipe.columns) columns; resizing to \(recipe.alternateColumns) is a no-op and \
+        would measure nothing.
+
+        """.utf8))
+    FileHandle.standardError.write(Data(usage.utf8))
+    exit(2)
+}
+
 let report = measureSaturatedResize(recipe: recipe)
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys, .prettyPrinted]

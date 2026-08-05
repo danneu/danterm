@@ -48,15 +48,24 @@ struct OccupancyCorpusTests {
         #expect(occupancyCorpusLine(42) != occupancyCorpusLine(43))
     }
 
-    @Test("a saturated terminal reaches history depth and retains matches")
+    @Test("a saturated terminal evicts against the budget and still retains matches")
     func saturationReachesDepth() {
-        // Intent: the corpus actually fills scrollback and leaves searchable matches.
+        // Intent: the corpus fed at the probe binary's own geometry and depth really
+        //   saturates -- eviction has run, so fewer rows are retained than were fed --
+        //   and matches survive in what is left.
         // Why it exists: the probe's headline numbers are all "at a saturated history".
         //   If the feed were too short, every case would report the shallow-history cost
-        //   under a saturated label -- a wrong number that still looks reasonable.
-        var terminal = makeOccupancyTerminal(columns: 80, rows: 24, lines: 4_000)
+        //   under a saturated label -- a wrong number that still looks reasonable. The
+        //   earlier form of this test built 4,000 lines at 80x24 and asserted only
+        //   `scrollbackRowCount > 0`, which any feed past one screen satisfies: it
+        //   charged ~3.4 MB against a ~15.7 MB arena, so nothing could have evicted and
+        //   the test proved the opposite of what its preamble claimed. Both the geometry
+        //   and the depth now match `TerminalOccupancyProbe`'s shipped defaults, and the
+        //   ceiling is asserted the way the resize probe's recipes assert theirs.
+        var terminal = makeOccupancyTerminal(columns: 179, rows: 66, lines: 30_000)
 
         #expect(terminal.scrollbackRowCount > 0)
+        #expect(terminal.scrollbackRowCount < 30_000)
         let found = terminal.beginSearch("NEEDLE_")
         #expect(found)
     }

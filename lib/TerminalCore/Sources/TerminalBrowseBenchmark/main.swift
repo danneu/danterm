@@ -1,4 +1,4 @@
-// Release-mode JSON entry point for the retained-history browsing candidate workload.
+// Release-mode JSON entry point for the retained-history browsing workload.
 //
 // One process, one block: the collector launches this per scheduled block and
 // pairs the normalized per-frame number it prints. Kept to a thin argument

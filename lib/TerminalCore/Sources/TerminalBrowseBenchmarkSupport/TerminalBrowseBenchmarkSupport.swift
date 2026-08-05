@@ -1,8 +1,9 @@
-// Headless frame planning over *retained* history, which no calibrated workload reaches.
+// Headless frame planning over *retained* history -- the `retained-browse` workload, the only
+// calibrated workload that reaches it.
 //
-// The five routine workloads all plan from a live grid: `scrollback-stream`
+// The other five workloads all plan from a live grid: `scrollback-stream`
 // follows the bottom, and the three serialized-draw workloads start from the
-// current screen. Nothing on the ladder scrolls back and plans a frame whose
+// current screen. Nothing else on the ladder scrolls back and plans a frame whose
 // rows come out of scrollback storage -- so the one measurement that most
 // motivated compact retained rows (`15/F18`, -5.79% on browsing frame planning)
 // rested on a temporary probe that was deleted right after it was read, and
@@ -10,10 +11,11 @@
 //
 // Belongs here: the browsing stimulus (geometry, payload, where the viewport is
 // parked), the warm/measure loop, and the checksum that proves both arms planned
-// the same cells. Does not belong here: any decision rule -- this is a
-// *candidate* workload, so it collects descriptively and a human moves a
-// screened threshold into the frozen table, per `20`'s precedent and `23/D4`'s
-// worked example.
+// the same cells. Does not belong here: any decision rule. This harness collects
+// descriptively; `retained-browse`'s screened threshold was moved into the frozen
+// table by hand (per `20`'s precedent and `23/D4`'s worked example) and now lives in
+// `scripts/terminal-benchmark-validation.py#DECISION_RULES`, in both `quick` and
+// `confirm`.
 //
 // Deliberately depends on `TerminalCore` and `TerminalRenderPlanning` only. No
 // AppKit, no CoreGraphics, no window: planning is pure, and keeping the harness

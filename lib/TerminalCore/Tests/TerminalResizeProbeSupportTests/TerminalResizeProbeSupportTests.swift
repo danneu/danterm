@@ -27,24 +27,43 @@ struct TerminalResizeProbeSupportTests {
         #expect(terminal.scrollbackRowCount < recipe.lineCount)
     }
 
-    @Test("The saturating recipe fills the budget: feeding more lines buys no more rows")
-    func saturatingRecipeReachesTheBudgetCeiling() {
-        // Intent: `.saturating`'s line count is enough that retained depth is
-        //   decided by the byte budget rather than by how many lines were fed --
-        //   feeding a further screenful adds no retained row.
-        // Why it exists: `.standard`'s 10,000 lines saturated the pre-packing
-        //   representation (6,756 rows) but stopped saturating once retained rows
-        //   were packed, which made a resize sample cover 1.47x depth rather than
-        //   the ~14x the budget now admits. A recipe that quietly stops saturating
-        //   still prints a distribution, and nobody reading it can tell -- so the
-        //   ceiling is asserted by the observable it actually claims.
-        let recipe = ResizeProbeRecipe.saturating
+    @Test(
+        "A saturating recipe fills the budget: feeding more lines buys no more rows",
+        arguments: [
+            ResizeProbeRecipe.saturating,
+            ResizeProbeRecipe.sparseSaturating,
+            ResizeProbeRecipe.wideSaturating,
+        ]
+    )
+    func saturatingRecipesReachTheBudgetCeiling(recipe: ResizeProbeRecipe) {
+        // Intent: each saturating recipe's line count is enough that retained depth
+        //   is decided by the byte budget rather than by how many lines were fed --
+        //   feeding a further 200 lines adds no retained row.
+        // Why it exists: a recipe that quietly stops saturating still prints a full
+        //   distribution, and nobody reading the report can tell it now describes
+        //   resizing a shallow history. Each recipe carries its own version of that
+        //   hazard:
+        //   - `.saturating`: `.standard`'s 10,000 lines saturated the pre-packing
+        //     representation (6,756 rows) but stopped saturating once retained rows
+        //     were packed, which made a resize sample cover 1.47x depth rather than
+        //     the ~14x the budget now admits. That regression is what this recipe
+        //     exists to have caught.
+        //   - `.sparseSaturating`: sparse rows are the cheapest content in the
+        //     corpus, so this recipe needs the most lines of the three to reach the
+        //     ceiling, and it is the one most likely to stop saturating when a
+        //     future representation makes a row cheaper again.
+        //   - `.wideSaturating`: wide rows are the most expensive content, so this
+        //     recipe needs the fewest lines -- and is the one most likely to be left
+        //     saturating by line count if its budget-reaching depth is misjudged.
+        // `.standard` is deliberately absent: it is the non-saturating v1 recipe,
+        // covered by `probeTerminalIsBudgetSaturated` instead.
         var terminal = makeSaturatedTerminal(recipe: recipe)
         let atCeiling = terminal.scrollbackRowCount
 
-        // The recipe's own payload, for the reason spelled out in
-        // `sparseRecipeReachesTheBudgetCeiling`: a denser overfeed evicts more than it
-        // admits under a content-denominated bound, and the count falls.
+        // Overfed with the recipe's *own* payload, not a longer marker line. A
+        // denser overfeed evicts more cheap rows than it admits under a
+        // content-denominated bound and the count falls, which reads as a failure
+        // while actually confirming saturation.
         for line in recipe.lineCount..<(recipe.lineCount + 200) {
             terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
         }
@@ -83,39 +102,6 @@ struct TerminalResizeProbeSupportTests {
         #expect(sparse.allSatisfy { $0 > 0 })
     }
 
-    @Test("The sparse recipe fills the budget: feeding more lines buys no more rows")
-    func sparseRecipeReachesTheBudgetCeiling() {
-        // Intent: `.sparseSaturating`'s line count is enough that retained depth is
-        //   decided by the byte budget rather than by how many lines were fed.
-        // Why it exists: same hazard `saturatingRecipeReachesTheBudgetCeiling`
-        //   guards, and sharper here -- sparse rows are the cheapest content in the
-        //   corpus, so this recipe needs the most lines of any of the three to reach
-        //   the ceiling, and it is the one most likely to stop saturating when a
-        //   future representation makes a row cheaper again.
-        let recipe = ResizeProbeRecipe.sparseSaturating
-        var terminal = makeSaturatedTerminal(recipe: recipe)
-        let atCeiling = terminal.scrollbackRowCount
-
-        // Overfed with the recipe's *own* payload, not a longer marker line. A
-        // denser overfeed evicts more cheap rows than it admits and the count
-        // falls, which reads as a failure while actually confirming saturation.
-        for line in recipe.lineCount..<(recipe.lineCount + 200) {
-            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
-        }
-
-        #expect(atCeiling > 0)
-        #expect(atCeiling < recipe.lineCount)
-        // A band rather than an equality or a one-sided bound since doc 31: the bound is charged
-        // bytes, and where the equilibrium settles inside a row is phase-dependent -- a trimmed
-        // head frees a display row without freeing a whole line's charge, and the ring's
-        // chunk-seam pads (`31/DD14`) move with the write cursor -- so an overfeed at the ceiling
-        // lands a few rows either side of where the fill left it. What the recipe claims -- that
-        // feeding 200 more lines buys no more depth -- is the direction, not the exact figure,
-        // and a couple of rows against 200 fed is that claim holding, in either direction.
-        #expect(terminal.scrollbackRowCount < atCeiling + 100)
-        #expect(terminal.scrollbackRowCount > atCeiling - 100)
-    }
-
     @Test("The wide payload fills the standard recipe's width exactly")
     func widePayloadFillsTheStandardWidth() {
         // Intent: `.wide` emits a line exactly as long as the recipe's 179 columns.
@@ -127,34 +113,6 @@ struct TerminalResizeProbeSupportTests {
         #expect(ResizeProbePayload.wide.line(0).count == 179)
         #expect(ResizeProbePayload.wide.line(7).count == 179)
         #expect(ResizeProbeRecipe.wideSaturating.columns == 179)
-    }
-
-    @Test("The wide recipe fills the budget: feeding more lines buys no more rows")
-    func wideRecipeReachesTheBudgetCeiling() {
-        // Intent: `.wideSaturating`'s line count reaches the byte budget.
-        // Why it exists: the same premise the other two ceiling tests pin. Wide rows
-        //   are the most expensive content in the corpus, so this recipe needs the
-        //   fewest lines -- and is the one most likely to be left saturating by line
-        //   count if its budget-reaching depth is ever misjudged.
-        let recipe = ResizeProbeRecipe.wideSaturating
-        var terminal = makeSaturatedTerminal(recipe: recipe)
-        let atCeiling = terminal.scrollbackRowCount
-
-        for line in recipe.lineCount..<(recipe.lineCount + 200) {
-            terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
-        }
-
-        #expect(atCeiling > 0)
-        #expect(atCeiling < recipe.lineCount)
-        // A band rather than an equality or a one-sided bound since doc 31: the bound is charged
-        // bytes, and where the equilibrium settles inside a row is phase-dependent -- a trimmed
-        // head frees a display row without freeing a whole line's charge, and the ring's
-        // chunk-seam pads (`31/DD14`) move with the write cursor -- so an overfeed at the ceiling
-        // lands a few rows either side of where the fill left it. What the recipe claims -- that
-        // feeding 200 more lines buys no more depth -- is the direction, not the exact figure,
-        // and a couple of rows against 200 fed is that claim holding, in either direction.
-        #expect(terminal.scrollbackRowCount < atCeiling + 100)
-        #expect(terminal.scrollbackRowCount > atCeiling - 100)
     }
 
     @Test("A recipe's identity names its version, so v2's numbers cannot be read as v1's")
@@ -208,6 +166,28 @@ struct TerminalResizeProbeSupportTests {
         }
 
         #expect(widths == [100, 179, 100, 179])
+    }
+
+    @Test(
+        "Every shipped recipe alternates to a width Terminal.resize acts on",
+        arguments: [
+            ResizeProbeRecipe.standard,
+            ResizeProbeRecipe.saturating,
+            ResizeProbeRecipe.sparseSaturating,
+            ResizeProbeRecipe.wideSaturating,
+        ]
+    )
+    func shippedRecipesAlternateToAnEffectiveWidth(recipe: ResizeProbeRecipe) {
+        // Intent: each frozen recipe's alternate width is at least 2 and differs
+        //   from its own width, so every timed sample resizes something.
+        // Why it exists: `Terminal.resize` early-returns for a width below 2 and for
+        //   a width equal to the current one. A recipe that alternated to such a
+        //   width would still collect `sampleCount` samples and still print a full
+        //   distribution -- of two clock reads. `probeAlternatesWidths` guards the
+        //   alternation logic; this guards the constants it alternates between,
+        //   which is the half that a future recipe edit can break.
+        #expect(recipe.alternateColumns >= 2)
+        #expect(recipe.alternateColumns != recipe.columns)
     }
 
     @Test("The report carries the recipe that produced it")

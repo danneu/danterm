@@ -43,6 +43,26 @@ struct TerminalMemoryProbeSupportTests {
         ])
     }
 
+    @Test("selecting a payload by name yields exactly that payload, byte-for-byte")
+    func namedSelectionYieldsOnlyThatPayload() {
+        // Intent: `payloads(columns:lineCount:named:)` selects by name before materializing bytes,
+        //   and the payload it returns is identical to the one the full matrix would have held.
+        // Why it exists: `--payload NAME` is the probe's only attributable-footprint mode, and it
+        //   is attributable only if the other five payloads' byte arrays were never allocated in
+        //   the measured process. Selection has to happen at the builder, not by filtering a fully
+        //   built matrix, and this pins that the shortcut still agrees with the long way round.
+        let selected = MemoryProbeMatrix.payloads(columns: 40, lineCount: 10, named: "scrollback-styled")
+        let fromFullMatrix = MemoryProbeMatrix.payloads(columns: 40, lineCount: 10)
+            .first { $0.name == "scrollback-styled" }
+        #expect(selected.map(\.name) == ["scrollback-styled"])
+        #expect(selected.first?.bytes == fromFullMatrix?.bytes)
+    }
+
+    @Test("an unknown payload name selects nothing")
+    func unknownNameSelectsNothing() {
+        #expect(MemoryProbeMatrix.payloads(columns: 40, lineCount: 10, named: "nope").isEmpty)
+    }
+
     @Test("the empty payload measures a bare screen and nothing else")
     func emptyPayloadIsBare() throws {
         let census = try census(payload(named: "empty"))
