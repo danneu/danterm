@@ -76,7 +76,7 @@ before this audit is closed out.
   actions stay untestable in isolation. Same shape as finding 11, different file.
   The libghostty-backed paths in `TerminalView.swift` / `GhosttyApp.swift` were left
   alone deliberately.
-- [ ] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
+- [x] **26** -- promoting the duplicated `measureDurationStable`/`scaledBatchCount` into
   TerminalCoreBenchmarkSupport needs `lib/TerminalCore/Package.swift` to add it as a
   dependency of `TerminalDrawBenchmarkSupport` first. Carry both preconditions into the
   promoted function and update TerminalCoreBenchmarkSupport's file header, which would
@@ -480,7 +480,7 @@ Dead code, duplicated logic, and needless indirection. All were checked call-sit
 
 ### 26. Duration-floor calibration is duplicated across two benchmark support targets
 
-**Status:** `blocked` -- promoting measureDurationStable needs a new dependency edge in lib/TerminalCore/Package.swift, outside the batch's ownership (see Orchestrator follow-ups)
+**Status:** `done` -- promoted to one public measureDurationStable in TerminalCoreBenchmarkSupport; both preconditions carried over and the dependency edge added
 
 `lib/TerminalCore/Sources/TerminalDrawBenchmarkSupport/TerminalDrawBenchmarkSupport.swift:349` -- high confidence, small effort, found by `app-harness`
 
