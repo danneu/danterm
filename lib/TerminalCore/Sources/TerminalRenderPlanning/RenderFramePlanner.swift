@@ -19,7 +19,10 @@ public func clipFramePlan(
     to damage: TerminalDamage
 ) -> RenderFramePlan {
     guard damage.isFull == false else { return plan }
-    let rows = damage.rows.filter { plan.rows > $0 }
+    // `damage.rows` is queried as-is: every row a run or the cursor can carry is inside
+    // `0..<plan.rows` by construction (`FramePlanner.plan` is the only producer), so
+    // pre-filtering the set could only drop rows nothing below asks about.
+    let rows = damage.rows
     return RenderFramePlan(
         columns: plan.columns,
         rows: plan.rows,
@@ -174,7 +177,7 @@ struct FramePlanner {
         // addressed once and carried forward, which is the contract `31/I7` states and the
         // mechanism `31/D3` Decision 1 rule 2 requires of a frame.
         let cells = inspectedCells(
-            rows: 0..<rowCount,
+            rowCount: rowCount,
             replanning: { reusable == nil || damage.rows.contains($0) },
             geometry: geometry,
             cursorSpan: cursorSpan
@@ -297,8 +300,11 @@ struct FramePlanner {
     /// display-row-to-record locate, and paying one per visible row is exactly the per-frame cost
     /// `31/I7` exists to forbid. Rows the caller reuses are stepped over rather than inspected,
     /// so a damage-clipped frame still pays only for what it redraws; they come back empty.
+    /// `rowCount` rather than a row range: `result` is indexed by absolute viewport row, so
+    /// only a range based at 0 was ever correct, and which rows are inspected is decided by
+    /// `replanning`, not by the range.
     private func inspectedCells(
-        rows: Range<Int>,
+        rowCount: Int,
         replanning: (Int) -> Bool,
         geometry: TerminalGeometry,
         cursorSpan: CursorSpan?
@@ -313,8 +319,8 @@ struct FramePlanner {
         // two overlay spans -- and `31/F13` measured the result at 60% of the browsing
         // regression. `forEachViewportRow` hands the row out first precisely so all three can be
         // `let`s of this closure's own frame again, which is what the per-row spelling had.
-        var result = [[PlannedCell]](repeating: [], count: rows.count)
-        terminal.forEachViewportRow(rows: rows, where: replanning) { row, visit in
+        var result = [[PlannedCell]](repeating: [], count: rowCount)
+        terminal.forEachViewportRow(rows: 0..<rowCount, where: replanning) { row, visit in
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
             let selected = selectedColumns(row: row, columns: geometry.columns)
@@ -335,35 +341,27 @@ struct FramePlanner {
                 ))
             }
 
-            // Columns the terminal row does not cover keep the empty/default content the
-            // previous `terminal.cell(...) -> nil` path produced for them.
-            while cells.count < kinds.count {
-                cells.append(plannedCell(
-                    row: row,
-                    column: cells.count,
-                    kind: kinds[cells.count].kind,
-                    scalars: .empty,
-                    semanticStyle: TerminalStyle(),
-                    hovered: hovered,
-                    selected: selected,
-                    cursorSpan: cursorSpan
-                ))
-            }
             result[row] = cells
         }
 
-        // A row the traversal never handed out -- one whose stream row does not resolve -- still
-        // owes its padding, and it is the only row this second pass can reach.
-        for row in rows where replanning(row) && result[row].count < geometry.rows[row].cells.count {
+        // The single padding site for columns the terminal row does not cover: they keep the
+        // empty/default content the previous `terminal.cell(...) -> nil` path produced. Today
+        // it is reached only by a row the traversal never handed out (one whose stream row does
+        // not resolve), because `forEachViewportRow` pads every row it does visit out to the
+        // column count -- but it deliberately covers a short visited row too, so the padding
+        // rule stays in one place instead of being duplicated inside the traversal closure.
+        for row in 0..<rowCount where replanning(row)
+            && result[row].count < geometry.rows[row].cells.count
+        {
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
             let selected = selectedColumns(row: row, columns: geometry.columns)
-            var cells = result[row]
-            while cells.count < kinds.count {
-                cells.append(plannedCell(
+            while result[row].count < kinds.count {
+                let column = result[row].count
+                result[row].append(plannedCell(
                     row: row,
-                    column: cells.count,
-                    kind: kinds[cells.count].kind,
+                    column: column,
+                    kind: kinds[column].kind,
                     scalars: .empty,
                     semanticStyle: TerminalStyle(),
                     hovered: hovered,
@@ -371,7 +369,6 @@ struct FramePlanner {
                     cursorSpan: cursorSpan
                 ))
             }
-            result[row] = cells
         }
         return result
     }
@@ -387,42 +384,20 @@ struct FramePlanner {
         cursorSpan: CursorSpan?
     ) -> PlannedCell {
         var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
+        // Order is the policy: hover's underline color is the pre-selection foreground, and a
+        // block cursor overrides whatever the first two steps left behind.
         if style.underline == .none, hovered?.contains(column) == true {
-            style = ResolvedCellStyle(
-                foreground: style.foreground,
-                background: style.background,
-                bold: style.bold,
-                italic: style.italic,
-                underline: .single,
-                underlineColor: style.foreground,
-                hidden: style.hidden,
-                strikethrough: style.strikethrough
-            )
+            style.underline = .single
+            style.underlineColor = style.foreground
         }
         if selected?.contains(column) == true {
-            style = ResolvedCellStyle(
-                foreground: presentation.theme.selectionForeground,
-                background: style.background,
-                bold: style.bold,
-                italic: style.italic,
-                underline: style.underline,
-                underlineColor: style.underlineColor,
-                hidden: style.hidden,
-                strikethrough: style.strikethrough
-            )
+            style.foreground = presentation.theme.selectionForeground
         }
         if presentation.cursorShape == .block,
            cursorSpan?.contains(row: row, column: column) == true {
-            style = ResolvedCellStyle(
-                foreground: presentation.theme.cursorText,
-                background: presentation.theme.cursor,
-                bold: style.bold,
-                italic: style.italic,
-                underline: style.underline,
-                underlineColor: presentation.theme.cursorText,
-                hidden: style.hidden,
-                strikethrough: style.strikethrough
-            )
+            style.foreground = presentation.theme.cursorText
+            style.background = presentation.theme.cursor
+            style.underlineColor = presentation.theme.cursorText
         }
         return PlannedCell(kind: kind, scalars: scalars, style: style)
     }

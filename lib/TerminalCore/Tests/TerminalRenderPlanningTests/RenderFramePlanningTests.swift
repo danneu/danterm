@@ -266,7 +266,7 @@ struct RenderFramePlanningTests {
         assertCanonical(plan)
     }
 
-    @Test("Cursor visibility controls span, snapping, pending wrap, and style overrides")
+    @Test("Cursor visibility controls span, pending wrap, and wide-cell style overrides")
     func cursorPlanning() throws {
         let narrow = try plannedCursor(after: "A\u{1B}[1;1H", columns: 3)
         #expect(narrow.cursor == RenderCursor(
@@ -277,24 +277,8 @@ struct RenderFramePlanningTests {
             color: RenderTheme.dark.cursor
         ))
 
-        let wideHead = try plannedCursor(after: "\u{754C}\u{1B}[1;1H", columns: 3)
-        #expect(wideHead.cursor == RenderCursor(
-            row: 0,
-            column: 0,
-            columnWidth: 2,
-            shape: .block,
-            color: RenderTheme.dark.cursor
-        ))
-
-        let wideTail = try plannedCursor(after: "\u{754C}\u{1B}[1;2H", columns: 3)
-        #expect(wideTail.cursor == RenderCursor(
-            row: 0,
-            column: 0,
-            columnWidth: 2,
-            shape: .block,
-            color: RenderTheme.dark.cursor
-        ))
-
+        // Wide-head and wide-tail snapping lives in `cursorShapeWideCellSnapping`, which
+        // runs these same two inputs for every cursor shape.
         var pendingTerminal = try #require(Terminal(columns: 2, rows: 1))
         feed("AB", to: &pendingTerminal)
         #expect(pendingTerminal.geometry.cursor?.isPendingWrap == true)
@@ -328,39 +312,19 @@ struct RenderFramePlanningTests {
         #expect(wideDecoration.color == RenderTheme.dark.cursorText)
     }
 
-    @Test("Cursor overrides every visible layer but preserves hidden suppression")
-    func cursorLayerOverridesAndInvisibility() throws {
-        var terminal = try #require(Terminal(columns: 3, rows: 1))
-        feed("\u{1B}[31;44;4mA\u{1B}[1;1H", to: &terminal)
+    @Test("A hidden cell under a block cursor plans the cursor background but no text")
+    func hiddenCellUnderBlockCursor() throws {
+        // Intent: SGR 8 suppresses the text and decoration runs of the cell the block
+        //   cursor covers, while the cursor's own background fill still lands.
+        // Why it exists: the block-cursor override rewrites foreground, background, and
+        //   underline color, so it is the step most likely to resurrect a hidden cell's
+        //   glyph; the visible-cursor and invisible-cursor layer values are pinned by
+        //   `cursorShapes`, which asserts them for every shape.
         let presentation = RenderPresentation(
             theme: .dark,
             isCursorVisible: true,
             cursorShape: .block
         )
-        let visible = planFrame(for: terminal, presentation: presentation)
-
-        let visibleBackground = try #require(visible.backgroundRuns.first)
-        let visibleText = try #require(visible.textRuns.first)
-        let visibleDecoration = try #require(visible.decorationRuns.first)
-        #expect(visibleBackground.color == RenderTheme.dark.cursor)
-        #expect(visibleText.foreground == RenderTheme.dark.cursorText)
-        #expect(visibleDecoration.color == RenderTheme.dark.cursorText)
-
-        let invisible = planFrame(
-            for: terminal,
-            presentation: RenderPresentation(
-                theme: .dark,
-                isCursorVisible: false,
-                cursorShape: .block
-            )
-        )
-        #expect(invisible.cursor == nil)
-        let invisibleBackground = try #require(invisible.backgroundRuns.first)
-        let invisibleText = try #require(invisible.textRuns.first)
-        let invisibleDecoration = try #require(invisible.decorationRuns.first)
-        #expect(invisibleBackground.color == RenderTheme.dark.ansiColors[4])
-        #expect(invisibleText.foreground == RenderTheme.dark.ansiColors[1])
-        #expect(invisibleDecoration.color == RenderTheme.dark.ansiColors[1])
 
         var hiddenTerminal = try #require(Terminal(columns: 3, rows: 1))
         feed("\u{1B}[8;4;9mA\u{1B}[1;1H", to: &hiddenTerminal)

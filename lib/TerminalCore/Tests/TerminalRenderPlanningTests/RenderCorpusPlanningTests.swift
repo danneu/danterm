@@ -121,11 +121,16 @@ struct RenderCorpusPlanningTests {
                 cursorShape: terminal.presentation.cursorShape
             )
             let completePlan = planFrame(for: terminal, presentation: presentation)
+            // Canonical form over the whole corpus, not just libvterm checkpoints: the
+            // danterm fixtures carry no checkpoint events, so without this every plan they
+            // produce was only ever compared against itself and would pass while emitting
+            // mergeable, out-of-order, or out-of-bounds runs.
             let damageDescription = damage.isFull
                 ? "full"
                 : String(describing: damage.rows.sorted())
             let context = "Fixture: \(fixtureName), event: \(eventIndex), "
                 + "damage: \(damageDescription)"
+            assertCanonical(completePlan, "\(context)")
 
             let clippedPlan = clipFramePlan(completePlan, to: damage)
             retainedPlan = overlay(clippedPlan, damage: damage, on: retainedPlan)

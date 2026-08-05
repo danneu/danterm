@@ -4,15 +4,19 @@ import TerminalCore
 
 /// Holds fully resolved cell presentation immediately before layer-specific
 /// filtering and canonical run construction.
+///
+/// Stored `var`s so the hover, selection, and block-cursor overrides in
+/// `plannedCell` can each set the one or three fields they own instead of
+/// restating all eight in a fresh literal and risking a mis-threaded field.
 struct ResolvedCellStyle: Equatable, Sendable {
-    let foreground: RenderColor
-    let background: RenderColor
-    let bold: Bool
-    let italic: Bool
-    let underline: TerminalUnderlineStyle
-    let underlineColor: RenderColor
-    let hidden: Bool
-    let strikethrough: Bool
+    var foreground: RenderColor
+    var background: RenderColor
+    var bold: Bool
+    var italic: Bool
+    var underline: TerminalUnderlineStyle
+    var underlineColor: RenderColor
+    var hidden: Bool
+    var strikethrough: Bool
 }
 
 /// Applies palette lookup, reverse, and dim in their pinned order while

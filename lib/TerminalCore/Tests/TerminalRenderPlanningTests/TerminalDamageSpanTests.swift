@@ -37,6 +37,25 @@ struct TerminalDamageSpanTests {
         #expect(terminalDamageRowsWithGlyphHalo([], rowCount: 4).isEmpty)
     }
 
+    @Test("The halo clamps out-of-grid rows and an empty grid rather than expanding them")
+    func glyphHaloClampsRowsOutsideTheGrid() {
+        // Intent: rows outside `0..<rowCount`, and any row at all when the grid has no
+        //   rows, contribute nothing to the expanded set.
+        // Why it exists: this is the documented contract of a `public` helper that takes a
+        //   raw `Set<Int>` rather than a `TerminalDamage`, so nothing upstream of an
+        //   arbitrary caller enforces in-range rows. Both guards were previously unpinned,
+        //   which is what lets a "simplification" delete them silently -- and an out-of-grid
+        //   row reaching the drawing clip invalidates a row no plan can describe.
+        #expect(terminalDamageRowsWithGlyphHalo([-1, 4, 9], rowCount: 4).isEmpty)
+        #expect(terminalDamageRowsWithGlyphHalo([0], rowCount: 0).isEmpty)
+        #expect(terminalDamageRowsWithGlyphHalo([-1, 2, 7], rowCount: 4) == [1, 2, 3])
+    }
+
+    @Test("Empty damage coalesces into no spans at all")
+    func emptyDamageHasNoSpans() {
+        #expect(terminalDamageMaximalContiguousSpans([]).isEmpty)
+    }
+
     @Test("Two distant interior rows derive the six-row, two-span drawing topology")
     func fewSpanDrawingTopologyAt179x66() {
         // Intent: two engine-damaged rows further apart than the halo reach drawing as

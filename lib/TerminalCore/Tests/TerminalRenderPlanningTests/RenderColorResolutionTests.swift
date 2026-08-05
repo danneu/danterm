@@ -75,10 +75,11 @@ struct RenderColorResolutionTests {
         )
     }
 
-    @Test("Search highlight derivation is deterministic and never weaker than the baked color")
+    @Test("Search highlight derivation picks the candidate furthest from both backgrounds")
     func searchHighlightDerivation() throws {
         // Intent: derived search colors are stable, distinct from both competing
-        //   backgrounds, and at least as separated as the previous baked highlight.
+        //   backgrounds, and are the max-separation candidate rather than any candidate
+        //   that merely differs from them.
         // Why it exists: every bundled theme must get a usable search channel even
         //   when one of its backgrounds equals a derivation candidate.
         // Scenario: a theme deliberately uses the old baked search color as its
@@ -93,18 +94,13 @@ struct RenderColorResolutionTests {
             defaultBackground: defaultBackground,
             selectionBackground: selectionBackground
         )
-        let baked = RenderColor(red: 175, green: 128, blue: 20)
-
         #expect(first.searchMatchBackground == second.searchMatchBackground)
         #expect(first.searchMatchBackground != defaultBackground)
         #expect(first.searchMatchBackground != selectionBackground)
-        #expect(
-            separationScore(
-                first.searchMatchBackground,
-                from: defaultBackground,
-                and: selectionBackground
-            ) >= separationScore(baked, from: defaultBackground, and: selectionBackground)
-        )
+        // Both other candidates sit exactly on one of the two backgrounds here, so they
+        // score 0 and only this one can win. A derivation that stopped maximizing
+        // separation -- e.g. picked the first candidate that merely differs -- fails here.
+        #expect(first.searchMatchBackground == RenderColor(red: 80, green: 127, blue: 235))
     }
 
     @Test("Default and ANSI colors resolve through the baked theme")
@@ -203,20 +199,5 @@ struct RenderColorResolutionTests {
             cursor: .init(red: 16, green: 17, blue: 18),
             cursorText: .init(red: 19, green: 20, blue: 21)
         )
-    }
-
-    private func separationScore(
-        _ candidate: RenderColor,
-        from first: RenderColor,
-        and second: RenderColor
-    ) -> Int {
-        min(squaredDistance(candidate, first), squaredDistance(candidate, second))
-    }
-
-    private func squaredDistance(_ first: RenderColor, _ second: RenderColor) -> Int {
-        let red = Int(first.red) - Int(second.red)
-        let green = Int(first.green) - Int(second.green)
-        let blue = Int(first.blue) - Int(second.blue)
-        return red * red + green * green + blue * blue
     }
 }
