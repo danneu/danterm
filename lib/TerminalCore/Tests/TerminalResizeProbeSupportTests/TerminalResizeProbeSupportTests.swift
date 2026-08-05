@@ -1,8 +1,10 @@
 // Behavioral tests for the saturated-history resize probe.
 //
-// These pin the two properties that make the probe worth committing: it really
-// resizes a budget-saturated history (otherwise it measures a cheap operation on
-// a shallow one), and it reports a distribution rather than a point estimate
+// These pin the two properties that make the probe worth committing: each recipe
+// still covers the depth regime it claims -- the `v2` recipes budget-saturated,
+// `v1` deliberately line-bounded below the budget, so a reader is never handed a
+// cheap operation on a shallow history under a saturated label -- and it reports
+// a distribution rather than a point estimate
 // (which is what `28/D1` pitch 2 required of the frozen recipe). No duration is
 // asserted anywhere -- the probe is descriptive by decision, and a unit test
 // that asserted a time would invent the frame-budget verdict `D1` withheld.
@@ -18,19 +20,45 @@ struct TerminalResizeProbeSupportTests {
         let linesFed: Int
     }
 
-    @Test("The probe terminal is saturated against the budget, not merely deep")
-    func probeTerminalIsBudgetSaturated() {
-        // Intent: after setup, the retained history has been evicted down to the
-        //   budget -- fewer rows survive than were fed.
-        // Why it exists: this is the whole premise of the probe. If the payload
-        //   ever shrank below the budget, every sample would still be collected
-        //   and the distribution would still print, but it would describe
-        //   resizing a small history and nobody reading the report could tell.
+    @Test("The v1 recipe retains every line it feeds and stays below the budget")
+    func standardRecipeIsLineBoundedNotBudgetBounded() {
+        // Intent: `.standard` evicts nothing -- its retained depth is decided by
+        //   `lineCount`, and its whole run's charge sits well under the budget the
+        //   arena admits.
+        // Why it exists: `.standard` is the frozen v1 recipe the probe binary still
+        //   ships as its default, and every other test in this file reads it as "the
+        //   non-saturating one" -- `saturatingRecipesReachTheBudgetCeiling` names it
+        //   as such to justify its own absence from that argument list. That premise
+        //   was never actually asserted: the assertion this replaced claimed
+        //   saturation and tested `scrollbackRowCount < lineCount`, which the
+        //   viewport's own rows satisfy whether or not a single line is ever evicted.
+        //   If the payload or the geometry drifted until v1 did saturate, `v1` and
+        //   `v2` would stop being two different regimes and `28/F7`'s recorded
+        //   distribution would quietly change meaning.
         let recipe = ResizeProbeRecipe.standard
-        let terminal = makeSaturatedTerminal(recipe: recipe)
+        // A prefix, not the whole recipe: per-line charge is deterministic for a
+        // fixed-width payload, so the budget question is arithmetic once the charge
+        // is measured, and measuring it costs a fifth of feeding all 10,000 lines.
+        let prefixLineCount = 2_048
+        var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)!
+        terminal.feed(recipeBytes(for: recipe, in: 0..<prefixLineCount))
 
-        #expect(terminal.scrollbackRowCount > 0)
-        #expect(terminal.scrollbackRowCount < recipe.lineCount)
+        // Exact, not a lower bound: everything fed is retained except the rows still
+        // in the viewport, which is the statement "nothing was evicted" -- and it
+        // also pins that a payload line is one retained row, so a payload or width
+        // that started soft-wrapping would fail here rather than silently halve the
+        // cells the recipe retains per row.
+        #expect(terminal.scrollbackRowCount == prefixLineCount - (recipe.rows - 1))
+
+        let census = terminal.memoryCensus
+        #expect(census.hasRetainedStorageOverdraft == false)
+        let chargePerLine = Double(census.retainedChargedBytes) / Double(prefixLineCount)
+        let projectedCharge = chargePerLine * Double(recipe.lineCount)
+        // 1.25x because per-line charge creeps upward with depth as the index and
+        // side tables amortize (~373 B/line at this prefix, ~388 B/line at 10,000),
+        // so the prefix slightly understates the full run. The real headroom is ~4x;
+        // this fails long before a recipe edit could make v1 saturate by accident.
+        #expect(projectedCharge * 1.25 < Double(census.retainedArenaCapacityBytes))
     }
 
     @Test(
@@ -61,7 +89,7 @@ struct TerminalResizeProbeSupportTests {
         //     recipe needs the fewest lines -- and is the one most likely to be left
         //     saturating by line count if its budget-reaching depth is misjudged.
         // `.standard` is deliberately absent: it is the non-saturating v1 recipe,
-        // covered by `probeTerminalIsBudgetSaturated` instead.
+        // covered by `standardRecipeIsLineBoundedNotBudgetBounded` instead.
         let evidence = try #require(saturationEvidence(for: recipe))
         #expect(evidence.linesFed > 0)
         #expect(evidence.linesFed <= recipe.lineCount)
