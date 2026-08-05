@@ -181,4 +181,56 @@ struct TerminalScrollbackTests {
         #expect(terminal.primaryHistoryText == terminal.fullHistoryText)
         #expect(terminal.primaryHistoryText == "ABCDE\nFG")
     }
+
+    @Test("projecting history text scales with its length rather than its square")
+    func primaryHistoryTextStaysLinear() throws {
+        // Intent: projecting N characters of retained history costs O(N), so a history
+        //   eight times longer costs about eight times as much and not sixty.
+        // Why it exists: the projection walk emits one unit per *cell*, and the obvious
+        //   accumulator -- `result.unicodeScalars.append(contentsOf:)` -- routes through a
+        //   stdlib overload that reads `self = (String(self._guts) + other).unicodeScalars`.
+        //   That `+` sees the accumulator referenced twice and copies the whole string on
+        //   every cell, which is quadratic and produces an identical answer, so no
+        //   correctness test can see it.
+        // Scenario: quitting with one long-lived pane hung the app for ~30s -- the quit
+        //   checkpoint reads `primaryHistoryText` per pane on the main thread, and a
+        //   budget-full 16 MB scrollback took 38s to project.
+        func projectionCost(lines: Int) throws -> (seconds: Double, characters: Int) {
+            var terminal = try #require(Terminal(columns: 200, rows: 50))
+            let line = Array((String(repeating: "abcdefghij", count: 19) + " end\r\n").utf8)
+            for _ in 0..<lines { terminal.feed(line) }
+            let start = ContinuousClock.now
+            let text = terminal.primaryHistoryText
+            let elapsed = (ContinuousClock.now - start).components
+            // `attoseconds` carries only the sub-second remainder, so a multi-second
+            // measurement -- exactly the regression case -- reads as a fraction without this.
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            return (seconds, text.unicodeScalars.count)
+        }
+
+        _ = try projectionCost(lines: 200)  // warm up caches and any one-time growth
+        let small = try projectionCost(lines: 400)
+        let large = try projectionCost(lines: 6_400)
+
+        // Cost per character, not total: under O(N) it is flat regardless of history length,
+        // and under O(N^2) it rises with it. That ratio is what separates the two, and it
+        // needs no absolute time budget, so a slower machine moves both terms together.
+        let smallPerCharacter = small.seconds / Double(small.characters)
+        let largePerCharacter = large.seconds / Double(large.characters)
+        #expect(
+            Double(large.characters) / Double(small.characters) > 8,
+            "large history should dwarf the small one: \(small.characters) -> \(large.characters)"
+        )
+        // Measured here (debug, the configuration tests run in): 1.04x with the linear
+        // accumulator, 5.5x with the quadratic one. 2.5x sits between with ~2.4x of margin
+        // on the passing side and ~2.2x on the failing side. Release separates them further
+        // still (0.69x vs 9.7x) because optimization strips the per-cell walk's own overhead.
+        #expect(
+            largePerCharacter < smallPerCharacter * 2.5,
+            """
+            per character: \(smallPerCharacter)s at \(small.characters) chars, \
+            \(largePerCharacter)s at \(large.characters) chars
+            """
+        )
+    }
 }

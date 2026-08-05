@@ -3012,7 +3012,15 @@ public struct Terminal: Equatable, Sendable {
     private func projectedHistoryText(from stream: [GridRow]) -> String {
         var result = ""
         forEachProjectionUnit(from: stream, absoluteBase: 0) { unit in
-            result.unicodeScalars.append(contentsOf: unit.scalars)
+            // Scalar at a time, not `append(contentsOf:)`. The generic-sequence overload
+            // routes through `String.+` -- visible in the hang's stack as
+            // `append(contentsOf:) -> String.+ -> prepareForAppendInPlace -> memmove` -- which
+            // leaves the accumulator non-uniquely referenced, so it copies the whole string
+            // instead of appending in place. This body runs once per projected *cell*, so that
+            // copy made a full-budget history quadratic: 38s to project a 16 MB scrollback,
+            // versus 0.15s here. Appending a single scalar has no such overload and stays
+            // in place.
+            for scalar in unit.scalars { result.unicodeScalars.append(scalar) }
         }
         return result
     }
@@ -3299,7 +3307,9 @@ public struct Terminal: Equatable, Sendable {
             absoluteBase: evictedRowCount
         ) { unit in
             if unit.start >= range.start && unit.end <= range.end {
-                result.unicodeScalars.append(contentsOf: unit.scalars)
+                // Scalar at a time -- see `projectedHistoryText(from:)`; the same quadratic
+                // `append(contentsOf:)` path would make copying a large selection hang.
+                for scalar in unit.scalars { result.unicodeScalars.append(scalar) }
             }
         }
         return result
