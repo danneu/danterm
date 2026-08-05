@@ -2274,11 +2274,17 @@ public struct Terminal: Equatable, Sendable {
     /// Rebases history onto an arena at the production budget rather than raising a bound in
     /// place: the arena reserves its whole capacity at construction and is never grown
     /// (`31/I2`), so "this terminal with an unlimited budget" is not a value that exists.
-    func withUnlimitedScrollbackForTesting() -> Self {
+    ///
+    /// `budgetBytes` exists because the arena is zero-filled at its full capacity on every
+    /// construction, so a caller that builds one twin per action pays the whole budget as a
+    /// memset each time. "Unlimited" only ever means "cannot evict for what this oracle feeds
+    /// it", so such a caller may name a smaller budget -- and owes a fixture-specific argument
+    /// that eviction is unreachable, since a twin that evicts is a silently wrong oracle.
+    func withUnlimitedScrollbackForTesting(
+        budgetBytes: Int = Terminal.productionScrollbackBudgetBytes
+    ) -> Self {
         var copy = self
-        copy.history = history.rebased(
-            toBudgetBytes: Terminal.productionScrollbackBudgetBytes
-        )
+        copy.history = history.rebased(toBudgetBytes: budgetBytes)
         copy.historyEvictionsObserved = copy.history.evictedRowCount
         return copy
     }

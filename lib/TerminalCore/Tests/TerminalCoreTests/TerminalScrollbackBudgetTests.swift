@@ -513,6 +513,15 @@ struct TerminalScrollbackBudgetTests {
         // Scenario: random input, single-axis resizes, and ED 3 replay whole and bytewise.
         let tokens = ["a", "b", " ", "\u{754C}", "\u{1F642}", "\r\n", "\n", "\u{1B}[3J"]
         let budget = historyBudget(lines: 2, cells: 5)
+        // The twin is rebuilt per action, and an arena zero-fills its whole capacity at
+        // construction, so the twin's budget is paid ~3,000 times as a memset. It only has to be
+        // unbounded relative to one action: it starts from a history the bounded terminal already
+        // held (<= `budget`, a few hundred bytes) and takes on at most one action's spill --
+        // fewer than 8 rows of at most 7 columns at this grid. The measured peak across all
+        // 3,072 twins is 200 arena bytes against the 61,440 this budget reserves, and the
+        // headroom assertion below fails the run long before a twin could evict and turn the
+        // oracle silently wrong.
+        let twinBudget = 1 << 16
         for seed in UInt64(1)...32 {
             var generator = SeededByteGenerator(state: seed)
             var bounded = try #require(Terminal(
@@ -540,9 +549,18 @@ struct TerminalScrollbackBudgetTests {
                     action = .feed(Array(tokens[Int(generator.nextWord() % UInt64(tokens.count))].utf8))
                 }
                 actions.append(action)
-                var unbounded = bounded.withUnlimitedScrollbackForTesting()
+                var unbounded = bounded.withUnlimitedScrollbackForTesting(budgetBytes: twinBudget)
                 apply(action, to: &bounded, bytewise: false)
                 apply(action, to: &unbounded, bytewise: false)
+
+                // The suffix oracle below is only a suffix if the twin never evicted. Assert the
+                // twin stayed a sixteenth clear of its arena rather than that it happened not to
+                // evict: usage is what a too-small `twinBudget` erodes first, so this fails while
+                // the margin is still 16x instead of at the moment the oracle breaks.
+                let twinCensus = unbounded.memoryCensus
+                #expect(
+                    twinCensus.retainedArenaBytesInUse * 16 <= twinCensus.retainedArenaCapacityBytes
+                )
 
                 let retained = Array(bounded.primaryHistoryText.unicodeScalars)
                 let whole = Array(unbounded.primaryHistoryText.unicodeScalars)

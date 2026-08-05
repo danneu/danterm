@@ -41,7 +41,7 @@ Rules for each commit:
 
 | # | Fix | Test filter | Expected | Measured (before -> after) |
 |---|---|---|---|---|
-| 1 | [ ] Bound the twin's rebase budget in `withUnlimitedScrollbackForTesting` (item "1.") | `--filter seededTwinOracleAndChunkInvariance` | 50-200x | |
+| 1 | [x] Bound the twin's rebase budget in `withUnlimitedScrollbackForTesting` (item "1.") | `--filter seededTwinOracleAndChunkInvariance` | 50-200x | 9.6s -> 0.7s |
 | 2 | [ ] Seed the hyperlink id cursor near the `UInt16` wrap (item "2.") | `--filter linksSurviveIdSpaceExhaustion` | ~280x | |
 | 3 | [ ] Cover the never-reached `targets.count > HyperlinkId.max` refusal branch (item "2." bonus finding) | `--filter TerminalHyperlinkTests` | correctness | |
 | 4 | [ ] Fix the vacuous `scrollbackRowCount < recipe.lineCount` assertion, or delete the test (item "probeTerminalIsBudgetSaturated") | `--filter probeTerminalIsBudgetSaturated` | gone | |
