@@ -1,4 +1,5 @@
-// Proves CSI line, display, and character erasure through public byte ingestion.
+// Proves CSI line, display, and character erasure through public byte ingestion, plus DECALN
+// where it shares the display erases' history-seam handling.
 import Testing
 
 @testable import TerminalCore
@@ -334,6 +335,82 @@ struct CSIEraseTests {
 
         #expect(terminal.scrollbackRowCount == terminal.independentScrollbackRowRecount)
         expectValidGrid(terminal)
+    }
+
+    @Test("an erase that blanks the whole of live row 0 ends history's open logical line")
+    func wholeRowZeroErasesSeverTheScrollbackWrapClaim() throws {
+        // Intent: exactly the erases that blank the whole of live row 0 -- ED 2, ED 1 with the
+        //   cursor below row 0, ED 0 from home, DECALN -- close history's open tail record; the
+        //   erases that leave any of row 0's cells standing, and EL 2, leave it open.
+        // Why it exists: the open bit is history's claim that the last retained row continues
+        //   into live row 0. Once that row is blanked in full, the cells the claim names are
+        //   gone, so keeping it asserts a continuation that no longer exists. The converse cases
+        //   are the hazard in the other direction: with columns 0..<cursor.column of row 0 still
+        //   standing, those cells genuinely continue the retained line, and severing would split
+        //   one real logical line in two.
+        // Scenario: a wrapped line straddles the history/live seam -- its head is in scrollback,
+        //   its remainder on live row 0 -- and an application issues each erase in turn.
+        let severing = ["\u{1B}[2J", "\u{1B}[2;1H\u{1B}[1J", "\u{1B}[H\u{1B}[J", "\u{1B}#8"]
+        for sequence in severing {
+            var terminal = try makeSeamTerminal()
+            #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true)
+            terminal.feed(Array(sequence.utf8))
+            #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == false, "\(sequence)")
+            expectValidGrid(terminal)
+        }
+
+        // ED 1 with the cursor on row 0 blanks only columns 0...cursor.column; ED 0 with the
+        // cursor past column 0 blanks only columns cursor.column..<columnCount; EL 2 is a
+        // rewrite-in-place idiom and is not an erase-family wrap-flag trigger at all today.
+        let preserving = ["\u{1B}[1;4H\u{1B}[1J", "\u{1B}[1;4H\u{1B}[J", "\u{1B}[H\u{1B}[2K"]
+        for sequence in preserving {
+            var terminal = try makeSeamTerminal()
+            terminal.feed(Array(sequence.utf8))
+            #expect(terminal.scrollbackRow(at: 2)?.isSoftWrapped == true, "\(sequence)")
+            expectValidGrid(terminal)
+        }
+    }
+
+    @Test("output printed after ED 2 starts a new history line rather than joining the cleared one")
+    func eraseDisplayCompleteStopsHistoryJoiningAcrossTheClear() throws {
+        var terminal = try makeSeamTerminal()
+
+        terminal.feed(Array("\u{1B}[2J\u{1B}[H".utf8))
+        terminal.feed(Array("NEW\r\nX\r\nY".utf8))
+
+        let lines = terminal.primaryHistoryText.split(separator: "\n", omittingEmptySubsequences: false)
+        #expect(lines.contains("NEW"))
+        #expect(terminal.primaryHistoryText.contains("wrappingNEW") == false)
+    }
+
+    @Test("a width change after ED 2 does not pull pre-clear text back onto the cleared screen")
+    func eraseDisplayCompleteSurvivesTheOpenTailPullBack() throws {
+        // Intent: after ED 2 clears the screen, widening the pane leaves the screen clear.
+        // Why it exists: a width change re-establishes the open tail record's display-row
+        //   boundary by handing its trailing partial row back to the live refold (`31/D3`
+        //   Decision 4). That pull-back keys off the record's open bit alone, so an erase that
+        //   left the bit set could resurrect the text it had just cleared -- history cells
+        //   moving back onto the visible screen, which no reference terminal can even express.
+        // Scenario: a wrapped line straddles the history/live seam, the user clears the screen,
+        //   and then drags the window wider.
+        var terminal = try makeSeamTerminal()
+
+        terminal.feed(Array("\u{1B}[2J".utf8))
+        terminal.resize(columns: 10, rows: 2)
+
+        #expect(terminal.viewportText.contains("wrapping") == false)
+        expectValidGrid(terminal)
+    }
+
+    /// Builds a terminal whose last retained row is the head of a wrapped line whose remainder
+    /// is still live on row 0 -- i.e. history holds an open tail record claiming live row 0.
+    private func makeSeamTerminal() throws -> Terminal {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        // "wrapping line" overflows the 8-column width, so its head enters scrollback
+        // soft-wrapped while " line" stays on live row 0.
+        terminal.feed(Array("first\r\nsecond\r\nwrapping line\r\nfourth".utf8))
+        #expect(terminal.scrollbackRowCount == 3)
+        return terminal
     }
 
     struct EraseLineFixture: Sendable {

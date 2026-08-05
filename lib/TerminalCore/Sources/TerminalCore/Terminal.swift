@@ -5498,6 +5498,11 @@ public struct Terminal: Equatable, Sendable {
     private mutating func eraseDisplay(mode: UInt16) {
         switch mode {
         case 0:
+            // Only from home does mode 0 blank the whole of row 0; past column 0 the cells to
+            // the cursor's left survive and genuinely continue history's line.
+            if cursor.row == 0, cursor.column == 0 {
+                severHistoryWrapClaimForRowZeroErase()
+            }
             eraseLine(mode: 0)
             if cursor.row + 1 < rowCount {
                 for row in (cursor.row + 1)..<rowCount {
@@ -5506,12 +5511,14 @@ public struct Terminal: Equatable, Sendable {
             }
         case 1:
             if cursor.row > 0 {
+                severHistoryWrapClaimForRowZeroErase()
                 for row in 0..<cursor.row {
                     eraseEntireRow(row)
                 }
             }
             eraseLine(mode: 1)
         case 2:
+            severHistoryWrapClaimForRowZeroErase()
             for row in rows.indices {
                 eraseEntireRow(row)
             }
@@ -5530,6 +5537,21 @@ public struct Terminal: Equatable, Sendable {
         eraseCells(row: cursor.row, columns: cursor.column..<upper)
         rows[cursor.row].isSoftWrapped = false
         clearPendingMotionState()
+    }
+
+    /// Ends history's open logical line before an erase blanks the whole of live row 0.
+    ///
+    /// The open tail record's bit is history's claim that its last retained row continues into
+    /// live row 0; the erase clears only live rows' own outgoing flags, so nothing else can
+    /// close it. Left open across such an erase it asserts a continuation whose cells are gone,
+    /// and both readers act on it: `admit` appends the next scrolled-off row into the pre-clear
+    /// record, and a later width change pulls the record's partial row back onto the cleared
+    /// screen (`31/D2` operation 2, amended 2026-08-05). Call only for erases that blank *all*
+    /// of row 0 -- a surviving prefix is a real continuation, and severing would split one
+    /// logical line in two. The funnel is a no-op on the alternate screen.
+    private mutating func severHistoryWrapClaimForRowZeroErase() {
+        let styleId = backgroundEraseStyleId()
+        severWrapClaim(before: 0, replacementStyleId: styleId)
     }
 
     private mutating func eraseEntireRow(_ row: Int) {
@@ -5606,6 +5628,8 @@ public struct Terminal: Equatable, Sendable {
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
         guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
         invalidateInspection(inViewportRows: rows.indices)
+        // DECALN replaces every row, row 0 included, so history's claim on it must end first.
+        severHistoryWrapClaimForRowZeroErase()
         let styleId = currentStyleId()
         for row in rows.indices {
             rows[row] = GridRow(cells: (0..<columnCount).map { _ in

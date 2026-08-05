@@ -320,7 +320,7 @@ Real problems, but apply the verifier's adjustment.
 
 ### 13. Erase paths never close history's open tail record
 
-**Status:** `deferred` -- parked for a human design decision
+**Status:** `done` -- erases that blank the whole of live row 0 (ED 2, ED 1 below row 0, ED 0 from home, DECALN) now sever the open tail record through the existing `severWrapClaim(before: 0,)` funnel; the partial-row cases (ED 1 on row 0, ED 0 past column 0) and EL 2 are pinned as non-triggers. Deliberately diverges from kitty/xterm/ghostty, which leave the incoming claim -- costless for them because none has the width-change pull-back that makes the stale bit observable as resurrected text here. Recorded as an amendment to operation 2's trigger list in `docs/research/31-logical-line-scrollback/decisions.md`, not a sixth arena operation
 
 `lib/TerminalCore/Sources/TerminalCore/Terminal.swift:5492` -- medium confidence, small effort, found by `core-parser`
 

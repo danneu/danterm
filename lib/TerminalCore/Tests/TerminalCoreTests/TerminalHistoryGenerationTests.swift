@@ -40,13 +40,16 @@ struct TerminalHistoryGenerationTests {
         try expectGenerationAdvances(&printing) { $0.feed(Array("X".utf8)) }
 
         // Funnel 2: scrollback wrap-claim rewrite via `invalidateInspection(inScrollbackRow:)`.
-        // `ESC[2J` severs the soft-wrap claim on the last scrollback row before erasing the
-        // viewport, so the scrollback tail's `isSoftWrapped` flag -- part of the recovered
-        // text's line structure -- changes.
+        // `ESC[2J` blanks the whole of live row 0, so it severs the last scrollback row's
+        // soft-wrap claim before erasing the viewport (`31/D2` operation 2). Both halves of the
+        // recovered text's line structure change: the remainder of the wrapped line goes with
+        // the viewport, and the retained head stops claiming a continuation.
         var wrapClaim = try makeScrolledBackTerminal(trailingWrappedLine: true)
         #expect(wrapClaim.primaryHistoryText.contains("wrapping line"))
+        #expect(wrapClaim.scrollbackRow(at: wrapClaim.scrollbackRowCount - 1)?.isSoftWrapped == true)
         try expectGenerationAdvances(&wrapClaim) { $0.feed(Array("\u{1B}[2J".utf8)) }
         #expect(wrapClaim.primaryHistoryText.contains("wrapping line") == false)
+        #expect(wrapClaim.scrollbackRow(at: wrapClaim.scrollbackRowCount - 1)?.isSoftWrapped == false)
 
         // Funnel 3: linefeed-driven scrollback append, which damages the scroll region
         // directly and passes `invalidatesInspection: false`.

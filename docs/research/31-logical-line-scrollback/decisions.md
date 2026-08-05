@@ -1367,6 +1367,43 @@ second trigger: a **width change** re-establishes the open tail record's
 display-row boundary at the new width by pulling its partial row back into the
 live refold (`D3` Decision 4), using this same cut-and-rewind mechanism.
 
+**Amended 2026-08-05 by finding 13 of
+[`plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md`](../../../plans/impl/2026-08-05-0954-terminal-engine-improvement-findings.md)
+in operation 2's trigger list, and the arena still gains no sixth operation.**
+The close half of operation 2 was triggered only by a hard newline; it is now
+also triggered by **an erase that blanks the whole of live row 0 on the primary
+screen** -- `ED 2`, `ED 1` with the cursor below row 0, `ED 0` from home, and
+`DECALN`. The open bit is history's claim that its last retained row continues
+into live row 0, and an erase clears only live rows' own outgoing flags, so
+before this nothing closed the record: the claim survived an erase that had
+deleted every cell it named. Both readers acted on the stale bit -- operation 1
+appended the next scrolled-off row into the pre-clear record, so post-clear
+output was glued onto the pre-clear logical line in `primaryHistoryText` and in
+logical-line selection expansion; and operation 4's width-change trigger, added
+directly above, pulled the record's partial display row back onto the screen the
+erase had just cleared.
+
+The boundary is "the whole of row 0", and the excluded cases are the reason it
+is stated that way. `ED 1` with the cursor on row 0 blanks only columns
+`0...cursor.column`, and `ED 0` past column 0 blanks only
+`cursor.column..<columnCount`: in both, the surviving cells of row 0 genuinely
+continue the retained line, and severing would split one real logical line in
+two. `EL 2` at row 0 was considered and is deliberately **not** a trigger: the
+`EL` modes 1 and 2 touch no wrap flag at all today -- a separable behavior family
+from the display erases -- and `EL 2`'s common use is rewrite-in-place, where the
+line does continue. The reopen half is unaffected and stays symmetric: a wrapped
+print resuming at the seam still reopens the record through
+`restoreWrapClaimBeforeCursor`, so an erase-severed record can legitimately be
+reopened later. `ED 3` is operation 5 and needs none of this.
+
+This is a DanTerm choice rather than a compatibility fix, and it diverges
+knowingly: kitty (`references/kitty/kitty/screen.c#screen_erase_in_display`) and
+xterm (`references/xterm/screen.c#ClearBufRows`) both clear only the erased
+rows' own wrap flags and leave the incoming claim standing. That is costless for
+them because neither has operation 4's pull-back -- no reference terminal can
+move history cells back onto the visible screen -- so only under this store is
+the stale bit observable as resurrected text.
+
 Operations 3, 4 and 5 are the only ones that shrink the arena, and 4 is the only
 one that shrinks it from the back. Operation 4 does not touch
 `evictedRowCount` and moves no anchor: the rows keep their absolute stream
