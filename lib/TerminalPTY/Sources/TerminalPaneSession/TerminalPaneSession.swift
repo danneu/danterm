@@ -299,6 +299,27 @@ public final class TerminalPaneSessionController {
 
     #endif
 
+    /// The one host-construction recipe behind every convenience initializer, so a new host
+    /// parameter is threaded once rather than through three near-identical bodies.
+    private static func makeHost(
+        configuration: TerminalPaneLaunchConfiguration,
+        bootstrapExecutable: String,
+        machineHostname: String?,
+        theme: RenderTheme,
+        captureTransitions: Bool,
+        recordsFlightTape: Bool
+    ) throws -> TerminalPTYHost {
+        try TerminalPTYHost(
+            initialDimensions: configuration.initialDimensions,
+            bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname,
+            programVersion: configuration.terminalProgramVersion,
+            defaultColors: theme.defaultColors,
+            captureTransitions: captureTransitions,
+            recordsFlightTape: recordsFlightTape
+        )
+    }
+
     /// Creates and starts the sole PTY host owned by this pane controller.
     public convenience init(
         configuration: TerminalPaneLaunchConfiguration,
@@ -308,16 +329,15 @@ public final class TerminalPaneSessionController {
         theme: RenderTheme = .dark,
         recordsFlightTape: Bool = false
     ) throws {
-        let host = try TerminalPTYHost(
-            initialDimensions: configuration.initialDimensions,
-            bootstrapExecutable: bootstrapExecutable,
-            machineHostname: machineHostname,
-            programVersion: configuration.terminalProgramVersion,
-            defaultColors: theme.defaultColors,
-            recordsFlightTape: recordsFlightTape
-        )
         self.init(
-            host: host,
+            host: try Self.makeHost(
+                configuration: configuration,
+                bootstrapExecutable: bootstrapExecutable,
+                machineHostname: machineHostname,
+                theme: theme,
+                captureTransitions: false,
+                recordsFlightTape: recordsFlightTape
+            ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
             theme: theme
@@ -335,17 +355,15 @@ public final class TerminalPaneSessionController {
         captureTransitions: Bool,
         recordsFlightTape: Bool = false
     ) throws {
-        let host = try TerminalPTYHost(
-            initialDimensions: configuration.initialDimensions,
-            bootstrapExecutable: bootstrapExecutable,
-            machineHostname: machineHostname,
-            programVersion: configuration.terminalProgramVersion,
-            defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions,
-            recordsFlightTape: recordsFlightTape
-        )
         self.init(
-            host: host,
+            host: try Self.makeHost(
+                configuration: configuration,
+                bootstrapExecutable: bootstrapExecutable,
+                machineHostname: machineHostname,
+                theme: theme,
+                captureTransitions: captureTransitions,
+                recordsFlightTape: recordsFlightTape
+            ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
             theme: theme
@@ -361,17 +379,15 @@ public final class TerminalPaneSessionController {
         captureTransitions: Bool,
         recordsFlightTape: Bool = false
     ) throws {
-        let host = try TerminalPTYHost(
-            initialDimensions: configuration.initialDimensions,
-            bootstrapExecutable: bootstrapExecutable,
-            machineHostname: machineHostname,
-            programVersion: configuration.terminalProgramVersion,
-            defaultColors: theme.defaultColors,
-            captureTransitions: captureTransitions,
-            recordsFlightTape: recordsFlightTape
-        )
         self.init(
-            host: host,
+            host: try Self.makeHost(
+                configuration: configuration,
+                bootstrapExecutable: bootstrapExecutable,
+                machineHostname: machineHostname,
+                theme: theme,
+                captureTransitions: captureTransitions,
+                recordsFlightTape: recordsFlightTape
+            ),
             launchInput: configuration.launchInput,
             isVisible: isVisible,
             theme: theme
@@ -571,15 +587,27 @@ public final class TerminalPaneSessionController {
 
     /// Fences accepted owner work and freezes the recovery projection before app exit capture.
     public func fenceForApplicationExit() {
-        guard isTornDown == false else { return }
+        guard stopDeliveryAndCacheFinalTerminal() else { return }
+        emitPrimaryHistoryMutationIfNeeded()
+        isTornDown = true
+    }
+
+    /// The order-sensitive prefix both pane-ending entry points share: stop delivery, take the
+    /// one close fence, cache the terminal it hands back. Returns false when the pane has
+    /// already ended so the caller's distinct tail is skipped with it.
+    ///
+    /// `isTornDown` deliberately stays with the callers rather than moving in here.
+    /// `fenceForApplicationExit` has to emit its primary-history mutation before setting the
+    /// flag, because that callback re-enters the controller through a path gated on it.
+    private func stopDeliveryAndCacheFinalTerminal() -> Bool {
+        guard isTornDown == false else { return false }
         deliveryBoundary.stop()
         let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
         guard case .closeSnapshot(let terminal) = fence else {
             preconditionFailure("close fence returned the wrong payload")
         }
         cachedTerminal = terminal
-        emitPrimaryHistoryMutationIfNeeded()
-        isTornDown = true
+        return true
     }
 
     /// Returns the latest cached viewport without crossing the host actor boundary.
@@ -795,13 +823,7 @@ public final class TerminalPaneSessionController {
 
     /// Ends callbacks immediately and lets the host queue finish bounded teardown.
     public func tearDown() {
-        guard isTornDown == false else { return }
-        deliveryBoundary.stop()
-        let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
-        guard case .closeSnapshot(let terminal) = fence else {
-            preconditionFailure("close fence returned the wrong payload")
-        }
-        cachedTerminal = terminal
+        guard stopDeliveryAndCacheFinalTerminal() else { return }
         isTornDown = true
         onFrame = nil
         onClipboardWrite = nil

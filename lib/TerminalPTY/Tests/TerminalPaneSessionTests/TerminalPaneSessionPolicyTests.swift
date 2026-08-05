@@ -78,7 +78,6 @@ struct TerminalPaneSessionPolicyTests {
 
         #expect(configuration.initialDimensions == .init(columns: 80, rows: 24))
         #expect(configuration.terminalProgramVersion == "1.2.3")
-        #expect(input.initialDimensions == configuration.initialDimensions)
         #expect(input.requestedWorkingDirectory == "/requested")
         #expect(input.inheritedEnvironment == [.init(name: "BASE", value: "base")])
         #expect(input.advertisedEnvironment == [

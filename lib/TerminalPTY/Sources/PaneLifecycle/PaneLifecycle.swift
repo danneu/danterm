@@ -255,7 +255,6 @@ public struct PaneLifecycleReducer: Sendable {
             return [.reapLeader]
         case .sessionDrained where !next.sessionDrained:
             next.sessionDrained = true
-            storage = .tearingDown(next)
             if next.leaderStatus != nil {
                 return finishTeardown(next)
             }

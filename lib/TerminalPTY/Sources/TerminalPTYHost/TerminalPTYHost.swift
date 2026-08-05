@@ -670,7 +670,14 @@ public actor TerminalPTYHost {
         guard leaderReaped == false, let leaderPID else { return }
         _ = kill(leaderPID, SIGKILL)
         var status: Int32 = 0
-        if waitpid(leaderPID, &status, 0) == leaderPID {
+        // Retry on EINTR like every other blocking syscall here: an interrupted wait is not a
+        // reap decision, and treating it as one would clear `leaderPID` and publish quiescence
+        // over a child this process has not collected. ECHILD still falls through, so no spin.
+        var reaped = waitpid(leaderPID, &status, 0)
+        while reaped < 0 && errno == EINTR {
+            reaped = waitpid(leaderPID, &status, 0)
+        }
+        if reaped == leaderPID {
             leaderReaped = true
         }
     }
@@ -702,16 +709,11 @@ public actor TerminalPTYHost {
             case .frameState:
                 return .frameState(owner.drainedFrameState())
             case .consumptionState:
-                let transitions: [TerminalPTYAppliedTransition]?
-                if case .some(.exited) = owner.reportedResult, owner.captureTransitions {
-                    transitions = owner.appliedTransitions
-                } else {
-                    transitions = nil
-                }
+                let consumption = owner.drainedConsumptionState()
                 return .consumptionState(
-                    frameState: owner.drainedFrameState(),
-                    result: owner.reportedResult,
-                    transitions: transitions
+                    frameState: consumption.frameState,
+                    result: consumption.result,
+                    transitions: consumption.transitions
                 )
             case .diagnosticState:
                 return .diagnosticState(
@@ -779,19 +781,26 @@ public actor TerminalPTYHost {
         result: PaneLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
-        fence(countsAsProduction: false) { owner in
-            let transitions: [TerminalPTYAppliedTransition]?
-            if case .some(.exited) = owner.reportedResult, owner.captureTransitions {
-                transitions = owner.appliedTransitions
-            } else {
-                transitions = nil
-            }
-            return (
-                owner.drainedFrameState(),
-                owner.reportedResult,
-                transitions
-            )
-        }.value
+        fence(countsAsProduction: false) { owner in owner.drainedConsumptionState() }.value
+    }
+
+    /// The one owner-isolated build of the consumption payload, shared by the production fence
+    /// and its test counterpart so `countsAsProduction:` stays the only difference between the
+    /// two paths. Transitions are selected before the drain, which is the ordering the
+    /// hand-over contract above depends on; keeping one copy is what stops the two from
+    /// drifting apart.
+    private func drainedConsumptionState() -> (
+        frameState: TerminalPTYFrameState,
+        result: PaneLifecycleResult?,
+        transitions: [TerminalPTYAppliedTransition]?
+    ) {
+        let transitions: [TerminalPTYAppliedTransition]?
+        if case .some(.exited) = reportedResult, captureTransitions {
+            transitions = appliedTransitions
+        } else {
+            transitions = nil
+        }
+        return (drainedFrameState(), reportedResult, transitions)
     }
 
     /// Captures a test-only diagnostic boundary before failure cleanup can discard evidence.
@@ -1119,7 +1128,10 @@ public actor TerminalPTYHost {
         case .scrollByRows(let rows): terminal.scroll(byRows: rows)
         case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
         case .scrollToBottom: terminal.scrollToBottom()
-        case .feed, .input, .paste, .focus, .mouse, .resize: return
+        case .feed, .input, .paste, .focus, .mouse, .resize:
+            preconditionFailure(
+                "applyViewportNavigation takes only .scrollByRows, .scrollToTopRow, .scrollToBottom"
+            )
         }
         if terminal != previousTerminal {
             markUpdatePending()
@@ -1163,7 +1175,9 @@ public actor TerminalPTYHost {
         case .drainOutput:
             drainCommittedOutput()
         case .closeMaster:
-            closeMaster()
+            preconditionFailure(
+                "closeMaster is handled by execute(_ commands:) so its tail can be deferred"
+            )
         case .reapLeader:
             reapLeader()
         case .signalSession(let stage):

@@ -99,7 +99,6 @@ private enum TerminalWorkflowRunner {
         )
         let controller = try TerminalPaneSessionController(
             configuration: .init(
-                initialDimensions: dimensions,
                 launchInput: input,
                 terminalProgramVersion: "workflow-test"
             ),

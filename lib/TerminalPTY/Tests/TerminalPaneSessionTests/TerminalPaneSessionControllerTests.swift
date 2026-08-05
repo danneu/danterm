@@ -189,7 +189,10 @@ struct TerminalPaneSessionControllerTests {
         verifyMutation({ $0.resize(columns: 2, rows: 1) }, terminal: &terminal)
     }
 
-    @Test("zsh, bash, and fish integrations deliver typed events through a real PTY")
+    @Test(
+        "zsh, bash, and fish integrations deliver typed events through a real PTY",
+        .timeLimit(.minutes(1))
+    )
     func shellIntegrationsDeliverTypedEvents() async throws {
         let integrationDirectory = shellIntegrationDirectory()
         let command = "printf 'hola 世界; $HOME'"
@@ -203,15 +206,15 @@ struct TerminalPaneSessionControllerTests {
             if shell.hasSuffix("/fish") {
                 invocation = "DANTERM=1 "
                     + "\(shellQuote(shell)) --no-config -c "
-                    + shellQuote("sleep 1; source \(asset); "
+                    + shellQuote("source \(asset); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
-                        + "danterm_emit_command_end; sleep 1; exit")
+                        + "danterm_emit_command_end; exit")
             } else {
                 invocation = "DANTERM=1 "
                     + "\(shellQuote(shell)) -f -c "
-                    + shellQuote("sleep 1; source \(shellQuote(asset)); "
+                    + shellQuote("source \(shellQuote(asset)); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
-                        + "danterm_emit_command_end; sleep 1; exit")
+                        + "danterm_emit_command_end; exit")
             }
             let host = try makeHost()
             let controller = TerminalPaneSessionController(
@@ -794,47 +797,20 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("synchronized output unions suppressed damage into its published frame", .timeLimit(.minutes(1)))
-    func synchronizedOutputAccumulatesDamage() async throws {
-        // Intent: damage from every DEC 2026-suppressed state reaches the first
-        //   frame published after synchronization ends.
-        // Why it exists: draining on each owner read can otherwise discard damage
-        //   before the pane session is permitted to publish a frame.
-        // Scenario: a TUI renders two synchronized updates and then commits the batch.
-        let host = try makeHost()
-        let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) sync \"$0\"")
-        )
-        var frames: [TerminalPaneFrame] = []
-        controller.onFrame = { frames.append($0) }
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        controller.synchronizeState()
-
-        controller.sendText("first\n")
-        #expect(await host.waitForOutput(containing: Array("__SYNC_A__".utf8)))
-        controller.synchronizeState()
-        controller.sendText("second\n")
-        #expect(await host.waitForOutput(containing: Array("__SYNC_B__".utf8)))
-        controller.synchronizeState()
-        let countDuringSynchronization = frames.count
-
-        controller.sendText("commit\n")
-        #expect(await host.waitForOutput(containing: Array("__SYNC_DONE__".utf8)))
-        controller.synchronizeState()
-
-        #expect(frames.count == countDuringSynchronization + 1)
-        #expect(frames.last?.damage != TerminalDamage.none)
-        controller.tearDown()
-        await host.close()
-    }
-
-    @Test("cursor visibility and synchronized updates gate complete frame planning", .timeLimit(.minutes(1)))
+    @Test(
+        "synchronized updates gate cursor projection, planning, and accumulated damage",
+        .timeLimit(.minutes(1))
+    )
     func presentationProjectionAndSynchronizedGating() async throws {
         // Intent: the controller projects cursor visibility, suppresses intermediate
-        //   synchronized frames, and plans the complete state once synchronization ends.
+        //   synchronized frames, and publishes the complete state -- plan and damage --
+        //   once synchronization ends.
         // Why it exists: hardcoded cursor visibility and planning every 2026 update
         //   violate both terminal presentation semantics and the idle-work contract.
+        //   The damage half guards a separate risk: draining on each owner read can
+        //   discard damage accumulated while the pane session was not permitted to
+        //   publish, so the committed frame would carry the right plan and nothing
+        //   telling a consumer to repaint it.
         // Scenario: a visible TUI hides its cursor, batches two updates, then commits them.
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
@@ -844,7 +820,11 @@ struct TerminalPaneSessionControllerTests {
             )
         )
         var plans: [RenderFramePlan] = []
-        controller.onFrame = { plans.append($0.plan) }
+        var damages: [TerminalDamage] = []
+        controller.onFrame = { frame in
+            plans.append(frame.plan)
+            damages.append(frame.damage)
+        }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
         let baselinePlanCount = plans.count
@@ -878,6 +858,7 @@ struct TerminalPaneSessionControllerTests {
             )
         )
         #expect(try #require(plans.last) == expectedPlan)
+        #expect(damages.last != TerminalDamage.none)
 
         controller.tearDown()
         await host.close()
@@ -1181,7 +1162,6 @@ struct TerminalPaneSessionControllerTests {
         )
         let controller = try TerminalPaneSessionController(
             configuration: .init(
-                initialDimensions: launchInput.initialDimensions,
                 launchInput: launchInput,
                 terminalProgramVersion: "dev"
             ),
@@ -1248,7 +1228,6 @@ struct TerminalPaneSessionControllerTests {
         let launchInput = makeLaunchInput(command: "printf '__DIAGNOSTIC__\\n'; cat")
         let controller = try TerminalPaneSessionController(
             configuration: .init(
-                initialDimensions: launchInput.initialDimensions,
                 launchInput: launchInput,
                 terminalProgramVersion: "dev"
             ),
@@ -1705,7 +1684,6 @@ struct TerminalPaneSessionControllerTests {
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; read ignored; exit"
         let controller = try TerminalPaneSessionController(
             configuration: .init(
-                initialDimensions: .init(columns: 80, rows: 24),
                 launchInput: makeLaunchInput(command: command),
                 terminalProgramVersion: "dev"
             ),
@@ -1824,18 +1802,6 @@ struct TerminalPaneSessionControllerTests {
     }
 }
 
-/// Shell that prints a `__MARKER__` the launch command itself never spells.
-///
-/// The command line is echoed to the tty before the child runs it, so a command
-/// containing its own marker satisfies `waitForOutput(containing:)` immediately: the
-/// wait then means "the shell read this line", not "the child reached this point", and
-/// the test proceeds against a pane that has produced nothing. Assembling the marker at
-/// runtime is what makes the wait mean what it reads as. `stty -echo` does not help --
-/// the line is echoed as it is read, before any command in it runs.
-private func printMarker(_ body: String, newline: Bool = true) -> String {
-    "m=\(body); printf '__%s__\(newline ? "\\n" : "")' \"$m\""
-}
-
 private func makeHost(
     captureTransitions: Bool = true
 ) throws -> TerminalPTYHost {
@@ -1892,32 +1858,6 @@ private func findExecutable(named name: String) throws -> String {
     return try #require(path.split(separator: ":").lazy
         .map { URL(fileURLWithPath: String($0)).appending(path: name).path }
         .first(where: FileManager.default.isExecutableFile(atPath:)))
-}
-
-private func shellQuote(_ value: String) -> String {
-    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-}
-
-private func builtExecutable(named name: String) throws -> String {
-    let packageDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    let buildDirectory = packageDirectory.appending(path: ".build", directoryHint: .isDirectory)
-    let candidates = try FileManager.default.subpathsOfDirectory(atPath: buildDirectory.path)
-        .filter { $0.hasSuffix("/debug/\(name)") }
-        .map { buildDirectory.appending(path: $0).path }
-        .filter(FileManager.default.isExecutableFile(atPath:))
-        .sorted()
-    return try #require(candidates.first)
-}
-
-private func bootstrapExecutable() throws -> String {
-    try builtExecutable(named: "PTYSessionBootstrap")
-}
-
-private func probeExecutable() throws -> String {
-    try builtExecutable(named: "PTYProbe")
 }
 
 private func waitForQuiescence(_ handle: TerminalPaneTerminationHandle) async {

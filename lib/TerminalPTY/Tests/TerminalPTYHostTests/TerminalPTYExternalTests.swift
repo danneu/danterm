@@ -84,7 +84,7 @@ struct TerminalPTYExternalTests {
 private func externalHost(captureTransitions: Bool) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
-        bootstrapExecutable: externalBuiltExecutable(named: "PTYSessionBootstrap"),
+        bootstrapExecutable: builtExecutable(named: "PTYSessionBootstrap"),
         captureTransitions: captureTransitions
     )
 }
@@ -106,24 +106,6 @@ private func externalLaunchInput(command: String) -> LaunchPolicyInput {
         launchCommand: command,
         initialDimensions: .init(columns: 80, rows: 24)
     )
-}
-
-private func externalBuiltExecutable(named name: String) throws -> String {
-    let packageDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    let buildDirectory = packageDirectory.appending(path: ".build", directoryHint: .isDirectory)
-    let candidates = try FileManager.default.subpathsOfDirectory(atPath: buildDirectory.path)
-        .filter { $0.hasSuffix("/debug/\(name)") }
-        .map { buildDirectory.appending(path: $0).path }
-        .filter(FileManager.default.isExecutableFile(atPath:))
-        .sorted()
-    return try #require(candidates.first)
-}
-
-private func shellQuote(_ value: String) -> String {
-    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 private func processStatus(executable: String, arguments: [String]) throws -> Int32 {

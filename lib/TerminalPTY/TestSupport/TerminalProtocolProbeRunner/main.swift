@@ -55,7 +55,6 @@ private enum TerminalProtocolProbeRunner {
         )
         let controller = try TerminalPaneSessionController(
             configuration: .init(
-                initialDimensions: dimensions,
                 launchInput: launchInput,
                 terminalProgramVersion: "protocol-probe"
             ),

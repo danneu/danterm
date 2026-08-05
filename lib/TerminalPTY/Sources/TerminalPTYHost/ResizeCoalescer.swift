@@ -29,6 +29,12 @@ final class ResizeCoalescer: Sendable {
     private struct State {
         var run: UInt64 = 0
         var submissionsInRun: UInt64 = 0
+        /// Final submission counts of the runs already closed and not yet fully answered,
+        /// oldest first, so `sealedCounts[i]` is the count of run `sealedBaseRun + i`.
+        /// Closing bumps `run`, so without this a whole backlog from the closed run would
+        /// report "not superseded" and each member would apply its own winsize + reflow.
+        var sealedCounts: [UInt64] = []
+        var sealedBaseRun: UInt64 = 0
     }
 
     private let state = Mutex(State())
@@ -44,6 +50,11 @@ final class ResizeCoalescer: Sendable {
     /// Closes the open run so no later resize can supersede one already submitted.
     func closeRun() {
         state.withLock { state in
+            // An empty run is never queried, so sealing it would only grow the array.
+            if state.submissionsInRun > 0 {
+                if state.sealedCounts.isEmpty { state.sealedBaseRun = state.run }
+                state.sealedCounts.append(state.submissionsInRun)
+            }
             state.run += 1
             state.submissionsInRun = 0
         }
@@ -51,9 +62,25 @@ final class ResizeCoalescer: Sendable {
 
     /// Answers on the owner queue, immediately before the winsize/reflow pair would begin.
     /// A pair that has begun is never superseded, which is what makes the skip atomic.
+    ///
+    /// The owner queue reaches submissions in FIFO run order, so answering also retires
+    /// every sealed run older than the one asked about. A query that arrives out of that
+    /// order simply misses its sealed count and reports "not superseded", which costs an
+    /// extra reflow rather than skipping one that had to apply.
     func isSuperseded(_ submission: ResizeSubmission) -> Bool {
         state.withLock { state in
-            state.run == submission.run && state.submissionsInRun > submission.index
+            if submission.run == state.run { return state.submissionsInRun > submission.index }
+            if submission.run > state.sealedBaseRun {
+                let retired = Int(min(
+                    submission.run - state.sealedBaseRun,
+                    UInt64(state.sealedCounts.count)
+                ))
+                state.sealedCounts.removeFirst(retired)
+                state.sealedBaseRun += UInt64(retired)
+            }
+            guard state.sealedBaseRun == submission.run, let sealed = state.sealedCounts.first
+            else { return false }
+            return sealed > submission.index
         }
     }
 }

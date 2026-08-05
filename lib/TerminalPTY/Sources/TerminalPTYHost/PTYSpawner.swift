@@ -85,7 +85,7 @@ enum PTYSpawner {
         )
         let actionResult = posix_spawn_file_actions_addinherit_np(&actions, statusPipe[1])
         guard actionResult == 0 else {
-            return .failure(classifySpawnFailure(actionResult))
+            return .failure(.systemError(actionResult))
         }
         let attributeResult = configureAttributes(&attributes)
         guard attributeResult == 0 else {
@@ -120,7 +120,7 @@ enum PTYSpawner {
             }
         }
         guard spawnResult == 0 else {
-            return .failure(classifySpawnFailure(spawnResult))
+            return .failure(.systemError(spawnResult))
         }
         Darwin.close(statusPipe[1])
         statusPipe[1] = -1
@@ -190,10 +190,6 @@ enum PTYSpawner {
                 | POSIX_SPAWN_SETSIGMASK
         )
         return posix_spawnattr_setflags(&attributes, flags)
-    }
-
-    private static func classifySpawnFailure(_ code: Int32) -> SpawnFailure {
-        .systemError(code)
     }
 
     /// Blocks until the bootstrap writes a complete failure payload or closes its

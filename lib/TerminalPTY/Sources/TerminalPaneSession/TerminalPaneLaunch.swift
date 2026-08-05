@@ -62,22 +62,23 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
     }
 }
 
-/// Keeps the duplicated host/launch geometry visibly identical at construction.
+/// Carries the host/launch geometry once, so the two consumers cannot disagree about it.
 public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
-    /// Geometry used to construct the terminal and PTY owner.
-    public let initialDimensions: TerminalDimensions
-    /// Launch policy input carrying the same initial geometry.
+    /// Launch policy input, the single source of the pane's initial geometry.
     public let launchInput: LaunchPolicyInput
     /// Program version shared by the child environment and terminal query replies.
     public let terminalProgramVersion: String
 
+    /// Geometry used to construct the terminal and PTY owner. Derived rather than stored:
+    /// `TerminalPTYHost.start` rejects a launch whose input geometry differs from the host's,
+    /// so a second copy could only ever be a launch failure waiting to happen.
+    public var initialDimensions: TerminalDimensions { launchInput.initialDimensions }
+
     /// Creates the coupled boundary consumed by the session controller.
     public init(
-        initialDimensions: TerminalDimensions,
         launchInput: LaunchPolicyInput,
         terminalProgramVersion: String
     ) {
-        self.initialDimensions = initialDimensions
         self.launchInput = launchInput
         self.terminalProgramVersion = terminalProgramVersion
     }
@@ -90,7 +91,6 @@ public func assembleTerminalPaneLaunch(
 ) -> TerminalPaneLaunchConfiguration {
     let dimensions = terminalPaneInitialDimensions
     return TerminalPaneLaunchConfiguration(
-        initialDimensions: dimensions,
         launchInput: LaunchPolicyInput(
             accountShell: facts.accountShell,
             executablePaths: facts.executablePaths,

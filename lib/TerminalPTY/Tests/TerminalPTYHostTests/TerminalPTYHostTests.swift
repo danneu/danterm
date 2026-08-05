@@ -1335,9 +1335,10 @@ struct TerminalPTYHostTests {
         #expect((await host.resourceSnapshot()).isReleased)
 
         // Let the delayed worker submit its token-gated callback so a failure does
-        // not leave this test's child running into the next test.
-        try await Task.sleep(for: .seconds(2))
-        #expect(directChildProcessIDs().contains(launched) == false)
+        // not leave this test's child running into the next test. Polled rather than
+        // slept: this is a positive wait, and a fixed deadline only has to lose one
+        // race against the parallel gate's load to fail a pane that converged.
+        #expect(await waitForDirectChildExit(launched))
     }
 
     @Test("user-authored command input reaches the interactive login shell exactly once", .timeLimit(.minutes(1)))
@@ -2038,18 +2039,6 @@ private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
     return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
 }
 
-/// Shell that prints a `__MARKER__` the launch command itself never spells.
-///
-/// The command line is echoed to the tty before the child runs it, so a command
-/// containing its own marker satisfies `waitForOutput(containing:)` immediately: the
-/// wait then means "the shell read this line", not "the child reached this point", and
-/// the test proceeds against a pane that has produced nothing. Assembling the marker at
-/// runtime is what makes the wait mean what it reads as. `stty -echo` does not help --
-/// the line is echoed as it is read, before any command in it runs.
-private func printMarker(_ body: String, newline: Bool = true) -> String {
-    "m=\(body); printf '__%s__\(newline ? "\\n" : "")' \"$m\""
-}
-
 private func makeHost(
     captureTransitions: Bool = true,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
@@ -2163,28 +2152,6 @@ private func makeLaunchInput(command: String) -> LaunchPolicyInput {
     )
 }
 
-private func builtExecutable(named name: String) throws -> String {
-    let packageDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    let buildDirectory = packageDirectory.appending(path: ".build", directoryHint: .isDirectory)
-    let candidates = try FileManager.default.subpathsOfDirectory(atPath: buildDirectory.path)
-        .filter { $0.hasSuffix("/debug/\(name)") }
-        .map { buildDirectory.appending(path: $0).path }
-        .filter(FileManager.default.isExecutableFile(atPath:))
-        .sorted()
-    return try #require(candidates.first)
-}
-
-private func bootstrapExecutable() throws -> String {
-    try builtExecutable(named: "PTYSessionBootstrap")
-}
-
-private func probeExecutable() throws -> String {
-    try builtExecutable(named: "PTYProbe")
-}
-
 private func taggedInt(_ tag: String, in output: String) throws -> Int {
     let value = output.split(whereSeparator: \.isNewline).lazy.compactMap { line -> Int? in
         guard line.hasPrefix("\(tag)=") else { return nil }
@@ -2235,6 +2202,23 @@ private func waitForProcessExit(
         try? await Task.sleep(for: .milliseconds(20))
     }
     return processExists(processID) == false
+}
+
+/// Waits for `processID` to stop being a direct child of this process.
+///
+/// `waitForProcessExit` cannot answer this one: `kill(pid, 0)` still succeeds for a zombie,
+/// while `directChildProcessIDs()` filters on `pbi_ppid` and so reports the reparenting that
+/// the discard path actually performs. Same bounded-poll shape, different predicate.
+private func waitForDirectChildExit(
+    _ processID: pid_t,
+    within limit: Duration = .seconds(10)
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: limit)
+    while directChildProcessIDs().contains(processID), clock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return directChildProcessIDs().contains(processID) == false
 }
 
 private func openFileDescriptorCount() throws -> Int {
