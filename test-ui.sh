@@ -2,6 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROTO_BUILD="$(mktemp -d)"
+UI_TEST_BINARY="$PROTO_BUILD/danterm-ui-tests"
 trap 'rm -rf "$PROTO_BUILD"' EXIT
 
 echo "Compiling DanTermProtocol..."
@@ -15,7 +16,7 @@ xcrun swiftc \
 echo "Compiling UI tests..."
 (
     cd "$PROTO_BUILD"
-    xcrun swiftc -D DANTERM_UI_TEST -o /tmp/danterm-ui-tests \
+    xcrun swiftc -D DANTERM_UI_TEST -o "$UI_TEST_BINARY" \
         -parse-as-library \
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
@@ -100,4 +101,4 @@ echo "Compiling UI tests..."
         -framework Cocoa
 )
 echo "Running UI tests..."
-/tmp/danterm-ui-tests
+"$UI_TEST_BINARY"

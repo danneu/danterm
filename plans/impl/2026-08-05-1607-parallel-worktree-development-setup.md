@@ -162,5 +162,5 @@ then run the UI harness in both checkouts concurrently.
 
 - [x] 1. feat(cli): add explicit control-socket targeting
 - [x] 2. fix(dev): preserve allowlisted slot environment and durable build locking
-- [ ] 3. test(ui): isolate harness artifacts by checkout
+- [x] 3. test(ui): isolate harness artifacts by checkout
 - [ ] 4. feat(dev): provision worktree prerequisites and document the isolated workflow
