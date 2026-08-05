@@ -2772,7 +2772,11 @@ public struct Terminal: Equatable, Sendable {
                   scalarUnits[start...end - 1].contains(targetUnit)
             else { continue }
             var uri = String()
-            uri.unicodeScalars.append(contentsOf: scalars[start..<end])
+            // One append into a fresh string, over a slice already bounded by
+            // `maximumHyperlinkTargetBytes` -- so the copy the generic overload makes is a
+            // single copy of a URL, not one per scalar of a walk. The marker is what
+            // `scripts/terminal-scalar-append-lint.sh` allows this site by.
+            uri.unicodeScalars.append(contentsOf: scalars[start..<end])  // scalar-append: bounded-single-append
             guard uri.utf8.count <= Self.maximumHyperlinkTargetBytes,
                   isActivatableHTTPLink(uri)
             else { continue }

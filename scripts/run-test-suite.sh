@@ -56,6 +56,7 @@ STEPS=(
     './scripts/tests/terminal-fence-accounting-lint_test.sh'
     './scripts/tests/terminal-exit-concurrency-lint_test.sh'
     './scripts/tests/checkpoint-off-main-lint_test.sh'
+    './scripts/tests/terminal-scalar-append-lint_test.sh'
     './scripts/tests/terminal-benchmark-draw-path-lint_test.sh'
     './scripts/tests/build-lib-stale-guard_test.sh'
     './scripts/tests/terminal-benchmark-commands_test.sh'
@@ -89,6 +90,7 @@ STEPS=(
     './scripts/core-purity-lint.sh --forbid-imports lib/TerminalPTY/Sources/PaneLifecycle'
     './scripts/terminal-exit-concurrency-lint.sh'
     './scripts/checkpoint-off-main-lint.sh'
+    './scripts/terminal-scalar-append-lint.sh'
     './scripts/terminal-benchmark-draw-path-lint.sh'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport'
 )

@@ -223,7 +223,7 @@ independently measurable" changes, and each leaves the tree green.
   the caller's budget, and have the checkpoint use it (PO2, PO3).
 - [x] 2. D3 -- move the enriched checkpoint pipeline off the main thread, with the
   pure capture-to-bytes stage outside `app/` (PO4, PO5, PO6, PO7).
-- [ ] 3. D4 -- lint guard rejecting the generic-sequence
+- [x] 3. D4 -- lint guard rejecting the generic-sequence
   `unicodeScalars.append(contentsOf:)` overload inside `TerminalCore`.
 
 ## Implementation notes
@@ -358,3 +358,38 @@ bytes and pass every test above while freezing the UI exactly as before.
 `app/AppRuntime.swift`. To leave the runtime with no exemption to carve out, the
 one place it legitimately asked the truncation a question now calls
 `hasCheckpointableScrollback`, which asks it by name.
+
+**D4 -- the gate covers the whole `TerminalCore` package, which costs nothing.**
+"Within `TerminalCore`" could mean the module the hang was in or the package that
+contains it; the guard takes the package (`lib/TerminalCore/Sources`) because
+scoping wider adds exactly one match -- the hyperlink site the Non-goals already
+names -- and no other. Every remaining `append(contentsOf:)` in the package
+appends into an array, where the amortized-growth overload is the right one and
+the string overload's copy does not exist.
+
+**D4 -- one allowlisted site, marked at the site rather than listed in the
+script.** `Terminal.swift`'s hyperlink URI append carries a trailing
+`// scalar-append: bounded-single-append`, the shape `core-purity-lint` already
+uses for its ambient seams. A path or line list in the script would go stale on
+the next edit to that function and says nothing where a reader is standing; the
+marker travels with the code and states the claim -- one append, fresh string,
+slice already bounded by `maximumHyperlinkTargetBytes` -- at the only place it can
+be checked. The marker is matched exactly, so an ordinary trailing comment does
+not silence the gate; the self-test pins that direction too.
+
+**D4 -- the gate fails when it cannot find its target.** The sibling lints wrap
+`rg` in an `if`, which folds "no match" (exit 1) together with "bad path" (exit 2),
+so a renamed source tree would leave the step printing "passed" over nothing. This
+one checks each target exists and distinguishes the two exit codes, with a
+self-test case for the missing-target direction. Its neighbours have the same
+hole; fixing them is outside this plan.
+
+**D4 -- what the gate deliberately does not catch.** Accumulating through a bound
+`String.UnicodeScalarView` (`var v = String.UnicodeScalarView(); v.append(contentsOf:)`)
+is the same overload under a different spelling, and no line-oriented pattern can
+tell it from an array append. That shape is live in the package --
+`TerminalRenderExecution.drawTextCell` uses it, correctly, for one cell -- so a
+pattern broad enough to catch it would either flag that site or flag every array
+append in the tree. The plan anticipated this: the guard is for the concrete
+mechanism, and `primaryHistoryTextStaysLinear` is what actually holds I1, by
+measuring per-character cost instead of reading code.
