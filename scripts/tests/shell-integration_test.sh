@@ -74,33 +74,64 @@ done
 for shell in zsh fish; do
     command -v "$shell" >/dev/null 2>&1 || continue
     SHELL_UNDER_TEST="$shell" INTEGRATION_DIR="$integration_dir" expect <<'EXPECT' || fail "$shell did not seed restore command safely"
-set timeout 10
+set timeout 15
 set shell $env(SHELL_UNDER_TEST)
 set integration $env(INTEGRATION_DIR)
 set marker DANTERM_PREFILL_EXECUTED
 set command "printf DANTERM_PREFILL_%s EXECUTED"
+
+proc fail_expect {label reason} {
+    puts stderr "shell-integration test failed: $::shell $label: $reason"
+    exit 1
+}
+
+proc expect_exact {label pattern} {
+    expect {
+        -exact $pattern { return }
+        timeout { fail_expect $label "timed out waiting for '$pattern'" }
+        eof { fail_expect $label "shell exited while waiting for '$pattern'" }
+    }
+}
+
+proc expect_exact_without_marker {label pattern marker} {
+    expect {
+        -exact $marker { fail_expect $label "command executed before Enter" }
+        -exact $pattern { return }
+        timeout { fail_expect $label "timed out waiting for '$pattern'" }
+        eof { fail_expect $label "shell exited while waiting for '$pattern'" }
+    }
+}
+
+proc expect_shell_eof {label} {
+    expect {
+        eof { return }
+        timeout { fail_expect $label "timed out waiting for shell exit" }
+    }
+}
+
 if {$shell eq "zsh"} {
     spawn env DANTERM_RESTORE_COMMAND=$command "PROMPT=DANTERM_PROMPT> " zsh -f
-    expect "DANTERM_PROMPT> "
+    expect_exact "first prompt" "DANTERM_PROMPT> "
     send -- "source $integration/danterm.zsh\r"
 } else {
-    spawn env DANTERM_RESTORE_COMMAND=$command fish_greeting= fish --no-config
-    expect -re {> $}
-    send -- "function fish_prompt; printf 'DANTERM_PROMPT> '; end\r"
-    expect "DANTERM_PROMPT> "
+    spawn env DANTERM_RESTORE_COMMAND=$command fish_features=no-query-term fish_greeting= fish --no-config --init-command "function fish_prompt; printf 'DANTERM_PROMPT> '; end"
+    expect {
+        -glob "*fish could not read response to Primary Device Attribute query*" {
+            fail_expect "first prompt" "terminal query timed out"
+        }
+        -exact "DANTERM_PROMPT> " {}
+        timeout { fail_expect "first prompt" "timed out waiting for deterministic prompt" }
+        eof { fail_expect "first prompt" "shell exited before deterministic prompt" }
+    }
     send -- "source $integration/danterm.fish\r"
 }
-expect $command
-set timeout 1
-expect {
-    $marker { exit 35 }
-    timeout {}
-}
-set timeout 10
+expect_exact "restore command prefill" $command
+send -- "\014"
+expect_exact_without_marker "restore command redraw" $command $marker
 send -- "\r"
-expect $marker
+expect_exact "restore command execution" $marker
 send -- "exit\r"
-expect eof
+expect_shell_eof "shell exit"
 EXPECT
 done
 
