@@ -102,7 +102,7 @@ to settle. Nothing here blocks the audit being closed.
   comment block records the two observed gate failures. Verified: 6 consecutive isolated
   runs green, plus the full 74-step gate.
 
-- [ ] **Gate flake B -- the agent-notifications live test.**
+- [x] **Gate flake B -- the agent-notifications live test.**
   `scripts/tests/agent-notifications-live_test.py::test_auth_symlink_cleanup_does_not_remove_auth_target`
   failed once in the gate with `OSError: [Errno 22] Invalid argument` from `os.stat` on
   a symlink under `/var/folders/.../auth.json`, inside a `drive_pty` readiness predicate
@@ -113,6 +113,12 @@ to settle. Nothing here blocks the audit being closed.
   considering as a common cause rather than treating each flake in isolation.
   **The decision:** whether to harden the predicate (treat `OSError` as "not yet gone")
   or leave it as accepted noise.
+  **Resolved 2026-08-05:** hardened the predicate. The readiness lambda now calls a local
+  `link_gone()` helper that catches `OSError` from the existence check and returns False,
+  so a stat that lands mid-unlink just means "not settled yet, poll again" instead of
+  raising. The comment naming the TOCTOU race sits on the helper; the existing comment
+  about waiting for the unlink is unchanged. Verified: 5 standalone runs of the file
+  (22 tests each) green, plus the full 74-step gate.
 
 - [ ] **New defect: `PaneWrapperView`'s clipboard writes have no seam.**
   `app/PaneWrapperView.swift:509-516` -- the copy-cwd and copy-session-id menu actions

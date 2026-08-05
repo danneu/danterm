@@ -213,6 +213,16 @@ class HarnessTests(unittest.TestCase):
             target.write_text("{}")
             link = root / "auth.json"
             link.symlink_to(target)
+            def link_gone():
+                # TOCTOU: this predicate stats the symlink while the child is unlinking
+                # it, so the stat can land mid-unlink and raise (observed once in the
+                # gate: OSError EINVAL). An error means the state is not settled yet, so
+                # report "still there" and let the next poll decide.
+                try:
+                    return not link.exists()
+                except OSError:
+                    return False
+
             output, _ = live.drive_pty(
                 [str(SCRIPT), "--fake-child", "codex", "--fake-auth", str(link)],
                 os.environ.copy(), root, root / "pty.raw",
@@ -221,7 +231,7 @@ class HarnessTests(unittest.TestCase):
                 # that stops at the sequence lets drive_pty's SIGTERM land in between and
                 # kill the child before it cleans up -- which reads as a cleanup bug.
                 lambda data: (bool(live.terminal_sequences(data, "codex"))
-                              and not link.exists()), 2)
+                              and link_gone()), 2)
             self.assertTrue(live.terminal_sequences(output, "codex"))
             self.assertFalse(link.exists())
             self.assertTrue(target.exists())
