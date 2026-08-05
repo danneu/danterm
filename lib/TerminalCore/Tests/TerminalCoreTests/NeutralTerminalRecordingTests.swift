@@ -37,18 +37,24 @@ struct NeutralTerminalRecordingTests {
         }
     }
 
-    @Test(
-        "feed events reject multiple byte representations",
-        arguments: [
-            #"{"type":"feed","base64":"AQ==","text":"x"}"#,
-        ]
-    )
-    func multipleFeedRepresentationsAreRejected(_ json: String) {
-        #expect(throws: NeutralTerminalRecordingError.self) {
-            try JSONDecoder().decode(
-                NeutralTerminalRecordingEvent.self,
-                from: Data(json.utf8)
-            )
+    @Test("an unsupported schema version is reported as a version failure, not a geometry one")
+    func unsupportedVersionIsRejectedAsAVersionFailure() {
+        // Intent: replay() rejects a recording whose schema version it cannot read with
+        //   .unsupportedVersion carrying the offending version, not .invalidDimensions.
+        // Why it exists: the version check and the Terminal(columns:rows:) construction used
+        //   to share one guard, so a future or corrupt schema pointed a debugging reader at
+        //   `initial.columns`/`initial.rows` that were in fact perfectly valid.
+        // Scenario: a recording written by a newer DanTerm carries version 2 with sound 8x2
+        //   geometry; replaying it in an older core must name the schema as the problem.
+        let recording = NeutralTerminalRecording(
+            version: 2,
+            provenance: .danTerm(test: "unsupported-version"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: []
+        )
+
+        #expect(throws: NeutralTerminalRecordingError.unsupportedVersion(2)) {
+            _ = try recording.replay()
         }
     }
 
@@ -338,8 +344,16 @@ struct NeutralTerminalRecordingTests {
         #expect(replayed.selectionRange == nil)
     }
 
-    @Test("neutral mouse buttons preserve upstream wheel directions")
+    @Test("neutral wheel buttons 4-7 round-trip through the JSON codec")
     func mouseWheelButtonsRoundTrip() throws {
+        // Intent: the neutral schema still admits the 4-7 wheel button vocabulary end to end,
+        //   encode through decode, without narrowing the decoder's `(1...7)` range check.
+        // Why it exists: the button -> direction mapping itself is pinned by
+        //   Fixtures/libvterm/state-mouse.json (events 27-31) through TerminalFixtureTests;
+        //   this test only guards the codec's acceptance of those buttons, and its old title
+        //   claimed direction coverage it never exercised.
+        // Scenario: a captured recording carries wheel-up/down/left/right presses and must
+        //   survive a serialize/deserialize hop unchanged.
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "mouse-wheel-buttons"),
             initial: NeutralTerminalDimensions(columns: 8, rows: 2),

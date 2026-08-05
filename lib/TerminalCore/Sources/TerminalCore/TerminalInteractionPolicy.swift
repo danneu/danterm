@@ -195,14 +195,6 @@ public struct TerminalWheelDecision: Equatable, Sendable {
     public let localRowDelta: Int
 }
 
-private enum PointerOwnership: Equatable, Sendable {
-    case report
-    case selection
-    case paneMenu
-    case link
-    case ignored
-}
-
 private enum SelectionGranularity: Equatable, Sendable {
     case character
     case terminalToken
@@ -238,7 +230,7 @@ private struct WheelRemainder: Equatable, Sendable {
 /// Owns explicit gesture latches and fractional history shared by live and replay policy.
 public struct TerminalInteractionState: Equatable, Sendable {
     fileprivate var mouseTracker = TerminalMouseTracker()
-    fileprivate var pointerOwners: [PointerOwnership?] = [nil, nil, nil]
+    fileprivate var pointerOwners: [TerminalPointerConsumption?] = [nil, nil, nil]
     fileprivate var selectionDrag: SelectionDrag?
     fileprivate var activeWheelRoute: TerminalWheelRoute?
     fileprivate var localWheel = WheelRemainder()
@@ -280,7 +272,7 @@ public func decideTerminalPointer(
         )
         if let existingOwner = state.pointerOwners[button.rawValue] {
             return pointerDecision(
-                pointerConsumption(for: existingOwner),
+                existingOwner,
                 bytes: existingOwner == .report ? reportBytes : []
             )
         }
@@ -493,11 +485,13 @@ public func decideTerminalMouseWheelReport(
     )
 }
 
+/// Picks the arm that claims a fresh press. Never returns `.link`: the Cmd-click link path
+/// latches its own owner and returns before `decideTerminalPointer` consults this.
 private func pointerOwner(
     button: TerminalMouseButton,
     modifiers: TerminalKeyModifiers,
     tracking: TerminalMouseTrackingMode
-) -> PointerOwnership {
+) -> TerminalPointerConsumption {
     let usesLocalArm = modifiers.contains(.shift) || tracking == .off
     guard usesLocalArm else { return .report }
     switch button {
@@ -508,7 +502,7 @@ private func pointerOwner(
 }
 
 private func pointerDownDecision(
-    owner: PointerOwnership,
+    owner: TerminalPointerConsumption,
     button: TerminalMouseButton,
     column: Int,
     row: Int,
@@ -522,6 +516,7 @@ private func pointerDownDecision(
         return pointerDecision(.report, bytes: reportBytes)
     case .paneMenu:
         return pointerDecision(.paneMenu)
+    // Unreachable via `pointerOwner`, which never mints `.link`; kept for exhaustiveness.
     case .link:
         return pointerDecision(.link)
     case .ignored:
@@ -649,16 +644,6 @@ private func wheelMetadata(
         return .alternateScreen(
             applicationCursorKeys: terminal.inputModes.applicationCursorKeys
         )
-    }
-}
-
-private func pointerConsumption(for owner: PointerOwnership) -> TerminalPointerConsumption {
-    switch owner {
-    case .report: .report
-    case .selection: .selection
-    case .paneMenu: .paneMenu
-    case .link: .link
-    case .ignored: .ignored
     }
 }
 

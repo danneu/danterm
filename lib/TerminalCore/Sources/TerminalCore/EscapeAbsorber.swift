@@ -102,18 +102,14 @@ struct EscapeAbsorber: Equatable, Sendable {
             clearCollection()
             state = .ground
             return .execute(byte)
+        // Both OSC states returned above, so this switch never sees one: 0x9C inside an OSC
+        // payload is UTF-8 continuation data (U+201C is E2 80 9C), not a terminator, and
+        // only BEL or `ESC \` closes an OSC.
         case 0x9C:
-            if state == .oscString || state == .oscEscape {
-                return dispatchOSC()
-            }
             clearCollection()
             state = .ground
             return nil
         case 0x1B:
-            if state == .oscString {
-                state = .oscEscape
-                return nil
-            }
             clearCollection()
             state = .escape
             return nil
@@ -360,7 +356,6 @@ struct EscapeAbsorber: Equatable, Sendable {
         defer { clearCollection() }
         guard parameters.count < Self.parameterCapacity else { return nil }
         if hasParameterDigits || parameters.isEmpty == false {
-            guard parameters.count < Self.parameterCapacity else { return nil }
             parameters.append(parameterAccumulator)
             colonSeparators.append(false)
         }

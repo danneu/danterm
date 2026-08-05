@@ -73,8 +73,10 @@ private func appendCanonicalDecomposition(of value: UInt32, to result: inout [UI
 
 /// Applies the stable canonical-ordering rule within each starter-delimited combining run.
 private func canonicallyOrder(_ values: inout [UInt32]) {
-    var classes = values.map(canonicalCombiningClass)
+    // Guard first: most graphemes decompose to a single scalar, and building `classes` for
+    // them costs an allocation plus a binary search whose result is discarded.
     guard values.count > 1 else { return }
+    var classes = values.map(canonicalCombiningClass)
     for index in 1..<values.count where classes[index] != 0 {
         let value = values[index]
         let combiningClass = classes[index]

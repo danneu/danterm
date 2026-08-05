@@ -10,6 +10,9 @@ public enum NeutralTerminalRecordingError: Error, Equatable, Sendable {
     case invalidEvent(String)
     case invalidProvenance(String)
     case unsupportedEvent(String)
+    /// Carries the schema revision this build cannot read, so a future or corrupt `version`
+    /// is never mistaken for a geometry failure.
+    case unsupportedVersion(Int)
 }
 
 /// Source-aware evidence metadata lets imported fixtures and DanTerm captures share one schema.
@@ -613,14 +616,15 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
         defaultColors: TerminalDefaultColors = .baked,
         inspect: (_ eventIndex: Int, _ terminal: Terminal) throws -> Void = { _, _ in }
     ) throws -> Terminal {
-        guard version == 1,
-              let initialTerminal = Terminal(
-                  columns: initial.columns,
-                  rows: initial.rows,
-                  machineHostname: machineHostname,
-                  defaultColors: defaultColors
-              )
-        else {
+        guard version == 1 else {
+            throw NeutralTerminalRecordingError.unsupportedVersion(version)
+        }
+        guard let initialTerminal = Terminal(
+            columns: initial.columns,
+            rows: initial.rows,
+            machineHostname: machineHostname,
+            defaultColors: defaultColors
+        ) else {
             throw NeutralTerminalRecordingError.invalidDimensions
         }
         try provenance.validate()
