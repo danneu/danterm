@@ -60,7 +60,7 @@ Rules for each commit:
 | 7 | [x] Migrate the `retainedBytesPerStoredCell` band into `censusReportsRetentionHealth` and delete `historyRespectsItsBudgetInRealBytes` | `--filter TerminalScrollbackBudgetTests` then `--filter censusReportsRetentionHealth` | 10-20x or gone | suite 14.77s -> 1.79s; census test 0.77s -> 0.44s (band added; the drop is warm-run noise, not a saving) |
 | 8 | [x] `officialNormalizationCorpusMatches`: mismatch accumulator + one terminal `#expect`, UTF-8-view parsing (corpus stays exhaustive) | `--filter officialNormalizationCorpusMatches` | 5-15x | 0.732s -> 0.521s (1.4x; the 5-15x estimate was wrong -- a *passing* `#expect` costs ~0.3us, so all 100,170 of them were ~0.03s of the 0.73s. The real cost was parsing, and the residue is the 100,170 decompositions themselves, which are the coverage) |
 | 9 | [x] `replayFixtures`: parameterize per fixture (`@Test(arguments: try fixtureURLs())`) | `--filter replayFixtures` | ~cores | 14.33s -> 5.71s (2.5x, not ~cores: one long-pole fixture sets the floor. `--no-parallel` on the new code is 14.36s, confirming identical work) |
-| 10 | [ ] `replayFixtures`: assert chunk-invariance by checkpoint-snapshot-vector equality instead of re-running every expectation block | `--filter replayFixtures` | ~10x, stronger | |
+| 10 | [x] `replayFixtures`: assert chunk-invariance by checkpoint-snapshot-vector equality instead of re-running every expectation block | `--filter replayFixtures` | ~10x, stronger | 5.72s -> 5.78s (stronger, not faster -- no speedup was available. See the corrected cost model under item "3."; a whole-`Terminal` snapshot vector over all ~3,700 split replays measured *slower*, so the vector is recorded on the authored and bytewise runs only) |
 | 11 | [ ] `saturatingRecipesReachTheBudgetCeiling`: charge arithmetic for two recipes, keep `.wideSaturating` on the observed-eviction path | `--filter saturatingRecipesReachTheBudgetCeiling` | 15-20x | |
 | 12 | [ ] `blankHistoryAtTheIndexRingDoublingPointKeepsRetaining`: early stop one ring-block past a stable record count (rescaled budgets deliberately deferred) | `--filter blankHistoryAtTheIndexRingDoublingPoint` | 5-7x | |
 | 13 | [ ] `tailReadCostTracksTheBudgetNotTheCapacity`: build each terminal once and sample the non-mutating read 3x; 6,400 -> 3,200; `rows: 50 -> 4` | `--filter tailReadCostTracksTheBudgetNotTheCapacity` | ~5x | |
@@ -219,6 +219,34 @@ Two changes, both coverage-preserving:
   that re-converges) while collapsing ~53,900 assertion blocks to ~3,800
   array compares.
 
+**Correction, measured while implementing row #10.** The "~53,900 executed
+blocks dominate" premise is wrong, and so is the ~10x. Timed serially and warm,
+per fixture, over the split loop only: the replays cost ~10.1s, the expectation
+blocks ~3.1s, and the 3,724 whole-`Terminal` `==` compares ~0.7s. So the
+*entire* expectation-block cost is 23%, capping this row at ~1.3x serially.
+Worse, 2.99s of that 3.1s is one fixture -- `libvterm/state-movecursor`, which
+is also the long pole that sets the parallel wall clock (316 splits x 33
+checkpoints). Its expectations are `cursor` only, and `terminal.geometry`
+materializes all 25 presented rows to answer it: ~0.29ms per block.
+
+A checkpoint snapshot vector cannot beat that, because a whole-`Terminal` copy
+plus `==` measured ~0.42ms -- *more* than the block it would replace. Prototyped
+over all split replays it was uniformly slower: state-movecursor 4.72s -> 6.08s,
+state-mouse 0.98s -> 5.55s. There is no cheaper complete snapshot either; any
+vector strong enough not to weaken coverage has to materialize at least as much
+state as the assertion does.
+
+What shipped instead: keep every existing assertion, and record the checkpoint
+vector on the authored and bytewise runs only -- one extra pair per fixture,
+~0.06s across the corpus. That buys the strength the finding was after (the
+bytewise run is the maximally perturbed chunking, so it is where a re-converging
+divergence is likeliest to show) without the regression. Verified by
+neutralization: injecting `CSI ? 1004 h` at the first bytewise feed and
+`CSI ? 1004 l` at the last leaves every pre-existing assertion green -- the
+fixture never names input modes and the final states re-converge -- while the
+checkpoint vector reports `diverged at the checkpoint after event 1: input
+modes ... focusReporting: true vs authored ... false`.
+
 Boundary-chosen offsets (escape/UTF-8-interior positions + seeded sample)
 would only buy ~2x more on this corpus and carry real risk of losing a
 pending-wrap/grapheme boundary; do last or not at all.
@@ -326,7 +354,7 @@ with item 6.
 |---|---|---|
 | `seededTwinOracleAndChunkInvariance` | shrink the twin's rebase budget | 50-200x |
 | `linksSurviveIdSpaceExhaustion` | seed the id cursor near the wrap | ~280x |
-| `replayFixtures` | parameterize + snapshot equality | ~10x, stronger |
+| `replayFixtures` | parameterize (2.5x); checkpoint-vector equality on the bytewise run is stronger, not faster | 2.5x |
 | `saturatingRecipesReachTheBudgetCeiling` | charge arithmetic + one anchored eviction (or demote 2 of 3 recipes) | 15-20x |
 | `officialNormalizationCorpusMatches` | mismatch accumulator, UTF-8 parsing | 5-15x |
 | `tailReadCostTracksTheBudgetNotTheCapacity` | build once, sample the read | ~5x |

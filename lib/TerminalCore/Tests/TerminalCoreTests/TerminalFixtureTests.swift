@@ -488,22 +488,74 @@ struct TerminalFixtureTests {
         let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
         try validateProvenance(recording.provenance)
 
-        let authored = try run(recording, expectations: fixture.events, strategy: .authored)
-        if recording.provenance.source != "alacritty" {
-            let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
-            #expect(bytewise == authored)
+        // Alacritty recordings are replayed at authored chunking only, so there is no second run
+        // for their checkpoint vector to be compared against.
+        let rechunks = recording.provenance.source != "alacritty"
+        let authored = try run(
+            recording,
+            expectations: fixture.events,
+            strategy: .authored,
+            recordingCheckpoints: rechunks
+        )
+        if rechunks {
+            let bytewise = try run(
+                recording,
+                expectations: fixture.events,
+                strategy: .bytewise,
+                recordingCheckpoints: true
+            )
+            expectCheckpoints(bytewise.checkpoints, matchAuthored: authored.checkpoints)
+            #expect(bytewise.terminal == authored.terminal)
         }
 
         for strategy in splitStrategies(for: recording) {
-            #expect(try run(recording, expectations: fixture.events, strategy: strategy) == authored)
+            #expect(
+                try run(recording, expectations: fixture.events, strategy: strategy).terminal
+                    == authored.terminal
+            )
         }
     }
 
+    /// Requires a rechunked replay to have passed through the same state as the authored one at
+    /// every checkpoint, reporting the first checkpoint that differs and what differs there.
+    ///
+    /// Spelled out rather than `#expect(a == b)` because Swift Testing renders a failed array
+    /// equality by describing both operands, and describing two vectors of whole `Terminal`s
+    /// emits hundreds of megabytes of arena bytes -- a failure nobody can read.
+    private func expectCheckpoints(
+        _ actual: [ReplayCheckpoint],
+        matchAuthored expected: [ReplayCheckpoint]
+    ) {
+        guard actual.count == expected.count else {
+            Issue.record(
+                "Rechunked replay reached \(actual.count) checkpoints, authored reached \(expected.count)"
+            )
+            return
+        }
+        for (rechunked, authored) in zip(actual, expected) where rechunked != authored {
+            Issue.record(
+                """
+                Rechunked replay diverged at the checkpoint after event \(authored.eventIndex): \
+                \(rechunked.divergence(from: authored))
+                """
+            )
+            return
+        }
+    }
+
+    /// Replays `fixture` under one chunking strategy, optionally recording the
+    /// checkpoint-by-checkpoint state vector the bytewise run is compared against.
+    ///
+    /// `recordingCheckpoints` is off by default because retaining and later comparing a whole
+    /// `Terminal` per checkpoint measured ~0.4ms in a debug build -- more than the fixture's own
+    /// expectation block costs -- so paying it on all ~3,700 split replays would slow the suite
+    /// rather than speed it. The two runs that do pay it are one per fixture each.
     private func run(
         _ fixture: NeutralTerminalRecording,
         expectations: [FixtureEvent],
-        strategy: ChunkStrategy
-    ) throws -> Terminal {
+        strategy: ChunkStrategy,
+        recordingCheckpoints: Bool = false
+    ) throws -> ReplayOutcome {
         var terminal = try #require(Terminal(
             columns: fixture.initial.columns,
             rows: fixture.initial.rows
@@ -513,6 +565,7 @@ struct TerminalFixtureTests {
         var inputBytes: [UInt8] = []
         var clipboardWrites: [String] = []
         var semanticEvents: [TerminalSemanticEvent] = []
+        var checkpoints: [ReplayCheckpoint] = []
 
         func feed(_ bytes: [UInt8]) {
             terminal.feed(bytes)
@@ -564,6 +617,16 @@ struct TerminalFixtureTests {
                 case .toBottom: terminal.scrollToBottom()
                 }
             case .checkpoint:
+                if recordingCheckpoints {
+                    checkpoints.append(ReplayCheckpoint(
+                        eventIndex: eventIndex,
+                        terminal: terminal,
+                        replyBytes: replyBytes,
+                        inputBytes: inputBytes,
+                        clipboardWrites: clipboardWrites,
+                        semanticEvents: semanticEvents
+                    ))
+                }
                 try assert(
                     expectations[eventIndex].expectation,
                     against: terminal,
@@ -578,7 +641,7 @@ struct TerminalFixtureTests {
                 semanticEvents.removeAll(keepingCapacity: true)
             }
         }
-        return terminal
+        return ReplayOutcome(terminal: terminal, checkpoints: checkpoints)
     }
 
     private func assert(
@@ -1094,6 +1157,81 @@ struct TerminalFixtureTests {
             "Cursor goes missing",
         ],
     ]
+}
+
+/// Everything one replay of a fixture can be judged on: the terminal it ended in, and -- when the
+/// run was asked to record them -- the state it passed through at each authored checkpoint.
+private struct ReplayOutcome {
+    let terminal: Terminal
+    let checkpoints: [ReplayCheckpoint]
+}
+
+/// The complete observable state of a replay at one authored checkpoint.
+///
+/// `Terminal` is the whole engine value, so its `Equatable` already covers every public
+/// inspection view (grid cells and their kinds, styles and hyperlinks, soft wraps, cursor and
+/// pending wrap, retained history content, alternate-screen selection, modes, saved cursor) --
+/// there is no cell a fixture expectation could name that two equal `Terminal`s disagree on. The
+/// four buffers alongside it are the side channels the terminal emits rather than stores, drained
+/// since the previous checkpoint, and are the only replay-visible state `Terminal` itself omits.
+///
+/// Comparing a vector of these positionally is what makes a divergence that *re-converges*
+/// visible: a final-state comparison cannot see one, and re-running the fixture's expectations
+/// only sees the aspects that fixture happens to name.
+private struct ReplayCheckpoint: Equatable {
+    let eventIndex: Int
+    let terminal: Terminal
+    let replyBytes: [UInt8]
+    let inputBytes: [UInt8]
+    let clipboardWrites: [String]
+    let semanticEvents: [TerminalSemanticEvent]
+
+    /// Names what differs from `other`, preferring the side channels (small and printable) and
+    /// falling back to the public terminal projections a reader can act on. The list is a
+    /// diagnostic, not the comparison: two checkpoints can be unequal with every line here equal,
+    /// which is reported as such rather than silently as "no difference".
+    func divergence(from other: Self) -> String {
+        if replyBytes != other.replyBytes {
+            return "reply bytes \(replyBytes) vs authored \(other.replyBytes)"
+        }
+        if inputBytes != other.inputBytes {
+            return "input bytes \(inputBytes) vs authored \(other.inputBytes)"
+        }
+        if clipboardWrites != other.clipboardWrites {
+            return "clipboard writes \(clipboardWrites) vs authored \(other.clipboardWrites)"
+        }
+        if semanticEvents != other.semanticEvents {
+            return "semantic events \(semanticEvents) vs authored \(other.semanticEvents)"
+        }
+        var differences: [String] = []
+        if terminal.geometry.cursor != other.terminal.geometry.cursor {
+            differences.append("cursor \(String(describing: terminal.geometry.cursor)) vs authored \(String(describing: other.terminal.geometry.cursor))")
+        }
+        if terminal.screenText != other.terminal.screenText {
+            differences.append("viewport text differs")
+        }
+        if terminal.fullHistoryText != other.terminal.fullHistoryText {
+            differences.append("history text differs")
+        }
+        if terminal.scrollbackRowCount != other.terminal.scrollbackRowCount {
+            differences.append("scrollback rows \(terminal.scrollbackRowCount) vs authored \(other.terminal.scrollbackRowCount)")
+        }
+        if terminal.isAlternateScreenActive != other.terminal.isAlternateScreenActive {
+            differences.append("alternate screen \(terminal.isAlternateScreenActive) vs authored \(other.terminal.isAlternateScreenActive)")
+        }
+        if terminal.inputModes != other.terminal.inputModes {
+            differences.append("input modes \(terminal.inputModes) vs authored \(other.terminal.inputModes)")
+        }
+        if terminal.currentStyle != other.terminal.currentStyle {
+            differences.append("current style \(terminal.currentStyle) vs authored \(other.terminal.currentStyle)")
+        }
+        if terminal.presentation != other.terminal.presentation {
+            differences.append("cursor presentation \(terminal.presentation) vs authored \(other.terminal.presentation)")
+        }
+        return differences.isEmpty
+            ? "terminal state differs outside the projections named here"
+            : differences.joined(separator: "; ")
+    }
 }
 
 private enum ChunkStrategy {
