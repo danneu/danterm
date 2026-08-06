@@ -11,8 +11,12 @@ repository_root="$1"
 app_path="$2"
 resources="$app_path/Contents/Resources"
 
+# -L because `just provision-worktree` links lib/ghostty-themes into a worktree rather
+# than copying it. Without it `find` refuses to descend a symlink named on its command
+# line, so `-mindepth 1` matches nothing and a populated directory reads as empty --
+# while the `-d` test right before it follows the link and disagrees.
 directory_has_entries() {
-    [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+    [[ -d "$1" ]] && [[ -n "$(find -L "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
 }
 
 python3 "$repository_root/scripts/pack-theme-catalog.py" \
@@ -34,4 +38,8 @@ if ! directory_has_entries "$legacy_source"; then
 fi
 
 mkdir -p "$resources/ghostty"
-cp -R "$legacy_source" "$resources/ghostty/themes"
+# -H resolves a symlinked $legacy_source (the worktree shape) so the bundle receives the
+# themes themselves. Plain -R would copy the link, leaving the app pointing at an
+# absolute path outside itself that works only on the machine that built it. It stops at
+# the argument: anything linked *inside* the theme tree is still copied as found.
+cp -RH "$legacy_source" "$resources/ghostty/themes"
