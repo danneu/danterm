@@ -127,10 +127,16 @@ struct PaneTapeFollowTests {
         let paneId = UUID()
         let firstConnection = UUID()
         let secondConnection = UUID()
+        let remainingSubscriptionId = UUID()
         var subscriptions = PaneTapeFollowSubscriptions()
         subscriptions.add(id: UUID(), connectionId: firstConnection, paneId: paneId, cursor: .beginning)
         subscriptions.add(id: UUID(), connectionId: secondConnection, paneId: paneId, cursor: .beginning)
-        subscriptions.add(id: UUID(), connectionId: firstConnection, paneId: UUID(), cursor: .beginning)
+        subscriptions.add(
+            id: remainingSubscriptionId,
+            connectionId: firstConnection,
+            paneId: UUID(),
+            cursor: .beginning
+        )
 
         let ends = subscriptions.paneClosed(paneId)
         #expect(ends.count == 2)
@@ -140,7 +146,7 @@ struct PaneTapeFollowTests {
         ]) })
         #expect(subscriptions.paneClosed(paneId).isEmpty)
 
-        subscriptions.connectionClosed(firstConnection)
+        #expect(subscriptions.connectionClosed(firstConnection) == [remainingSubscriptionId])
         #expect(subscriptions.count == 0)
         #expect(subscriptions.beginFetches().isEmpty)
     }

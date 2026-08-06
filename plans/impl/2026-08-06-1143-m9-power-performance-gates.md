@@ -348,7 +348,7 @@ the evidence that closes each gate.
 
 - [x] 1. Suspend terminal frame planning across system sleep and wake
 - [x] 2. Forward workspace lifecycle and window occlusion through AppKit
-- [ ] 3. Make application-runtime shutdown terminal and observable
+- [x] 3. Make application-runtime shutdown terminal and observable
 - [ ] 4. Freeze and apply the sparse-topology CPU benchmark gate
 - [ ] 5. Prove keyboard responsiveness and close the milestone evidence
 
@@ -360,3 +360,6 @@ the evidence that closes each gate.
 - The AppKit integration proof compiles the production lifecycle extensions
   against harness-substituted delegate, runtime, and session owners, exercising
   real notification and occlusion forwarding without opening live PTYs or IPC.
+- Runtime scheduling uses one main-actor token census across six owner
+  categories. Shutdown enters its terminal state before invoking cancellation,
+  so queued one-shot and repeating callbacks fail closed through the same gate.

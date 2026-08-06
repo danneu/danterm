@@ -165,6 +165,7 @@ class AppRuntime {
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
+    private var switcherEventMonitorToken: AppRuntimeSchedulingToken?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     // Session persistence uses two tiers of checkpoints:
@@ -173,20 +174,30 @@ class AppRuntime {
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
     private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
+    private var checkpointDebouncerToken: AppRuntimeSchedulingToken?
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
+    private var enrichedCheckpointTimerToken: AppRuntimeSchedulingToken?
     private var recoveryPolicy = RecoveryCheckpointPolicy(
         window: UInt64(600 * NSEC_PER_SEC)
     )
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
+    private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
     private static let checkpointWriter = CheckpointWriter()
     private var searchDebouncers: [PaneId: Debouncer] = [:]
+    private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
+    private var ipcConnectionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
     private var paneTapeFollowConnections: [UUID: IpcConnection] = [:]
+    private var paneTapeFollowSubscriptionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
     private var paneTapeFollowTimer: DispatchSourceTimer?
+    private var paneTapeFollowTimerToken: AppRuntimeSchedulingToken?
     private var ipcServer: IpcServer?
+    private var ipcServerToken: AppRuntimeSchedulingToken?
+    private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
+    let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private static let checkpointDebounceInterval: TimeInterval = 2.0
     // Coalescing window for the reconcile pass, sized for its noisiest driver: a
     // shell that rewrites its OSC 0/2 title on every prompt. 75ms still reads as
@@ -231,8 +242,17 @@ class AppRuntime {
         installSwitcherEventMonitor()
 
         do {
-            self.ipcServer = try IpcServer(socketPath: controlSocketPath(), runtime: self)
-            Task { await self.ipcServer?.start() }
+            let server = try IpcServer(socketPath: controlSocketPath(), runtime: self)
+            self.ipcServer = server
+            self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
+                server.stop()
+            }
+            let startToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
+            Task { [weak self, weak server] in
+                guard let self, let startToken else { return }
+                guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
+                await server?.start()
+            }
         } catch {
             self.ipcServer = nil
             print("Failed to start DanTerm IPC server: \(error)")
@@ -240,18 +260,18 @@ class AppRuntime {
     }
 
     deinit {
-        if let monitor = switcherEventMonitor {
-            NSEvent.removeMonitor(monitor)
+        // AppDelegate creates, owns, and releases the runtime on the main actor; deinit is
+        // nonisolated in this language mode, so encode that owner guarantee for the fallback.
+        MainActor.assumeIsolated {
+            schedulingLifecycle.shutdown()
         }
-        paneTapeFollowTimer?.cancel()
     }
 
     // MARK: - Ephemeral Mode Event Monitor
 
     private func installSwitcherEventMonitor() {
-        switcherEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
+        guard schedulingLifecycle.snapshot.state == .active else { return }
+        let eventHandler: (NSEvent) -> NSEvent? = { [weak self] event in
             guard let self = self else { return event }
 
             let mods = self.normalizedSwitcherModifiers(from: event)
@@ -335,6 +355,14 @@ class AppRuntime {
             case .commit:      self.send(.mruCycleCommitted);                   return nil
             }
         }
+        guard let monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown],
+            handler: eventHandler
+        ) else { return }
+        switcherEventMonitor = monitor
+        switcherEventMonitorToken = schedulingLifecycle.arm(.eventMonitor) {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     private func normalizedSwitcherModifiers(from event: NSEvent) -> SwitcherModifiers {
@@ -360,6 +388,7 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         let commands = update(&model, msg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
@@ -445,10 +474,27 @@ class AppRuntime {
     /// Deferred one main-loop turn because AppKit can skip the automatic
     /// backing-properties callback on a screen change.
     func refreshSessionsForScreenChange() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            for session in self.sessions.values {
+        guard let callback = captureDeferredCallback({ runtime in
+            for session in runtime.sessions.values {
                 session.refreshBackingProperties()
+            }
+        }) else { return }
+        DispatchQueue.main.async {
+            callback()
+        }
+    }
+
+    /// Captures one main-actor callback that becomes inert when runtime shutdown wins the race.
+    private func captureDeferredCallback(
+        _ action: @escaping (AppRuntime) -> Void
+    ) -> (() -> Void)? {
+        guard let token = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            return nil
+        }
+        return { [weak self] in
+            guard let self else { return }
+            self.schedulingLifecycle.run(token) {
+                action(self)
             }
         }
     }
@@ -465,13 +511,37 @@ class AppRuntime {
         ipcServer?.socketPath
     }
 
+    /// Exposes the shutdown state and live owner census without leaking scheduling handles.
+    var schedulingSnapshot: AppRuntimeSchedulingSnapshot {
+        schedulingLifecycle.snapshot
+    }
+
     func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
+        guard schedulingLifecycle.snapshot.state == .active else {
+            connection.close()
+            return
+        }
         ipcConnections[reqId] = connection
+        ipcConnectionTokens[reqId] = schedulingLifecycle.arm(.subscription) {
+            connection.close()
+        }
     }
 
     /// Drops all streams owned by a closed socket before another polling fence can start.
     func ipcConnectionClosed(_ connectionId: UUID) {
-        paneTapeFollowSubscriptions.connectionClosed(connectionId)
+        guard schedulingLifecycle.snapshot.state == .active else { return }
+        let requestIds = ipcConnections.compactMap { reqId, connection in
+            connection.id == connectionId ? reqId : nil
+        }
+        for reqId in requestIds {
+            ipcConnections.removeValue(forKey: reqId)
+            schedulingLifecycle.cancel(ipcConnectionTokens.removeValue(forKey: reqId))
+        }
+        for subscriptionId in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
+            schedulingLifecycle.cancel(
+                paneTapeFollowSubscriptionTokens.removeValue(forKey: subscriptionId)
+            )
+        }
         paneTapeFollowConnections.removeValue(forKey: connectionId)
         stopPaneTapeFollowTimerIfIdle()
     }
@@ -483,6 +553,10 @@ class AppRuntime {
         connection: IpcConnection,
         session: any TerminalSession
     ) {
+        guard schedulingLifecycle.snapshot.state == .active else {
+            connection.close()
+            return
+        }
         guard let prepareStart = session.paneTapeFollowStart(fromNow: fromNow) else {
             connection.writeError(
                 reqId: reqId,
@@ -492,18 +566,25 @@ class AppRuntime {
             return
         }
         let subscriptionId = UUID()
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            connection.close()
+            return
+        }
         DispatchQueue.global(qos: .utility).async {
             do {
                 let start = try prepareStart()
                 connection.writeSuccess(reqId: reqId, result: start.record) { succeeded in
                     DispatchQueue.main.async { [weak self] in
-                        self?.finishPaneTapeFollowStart(
-                            succeeded: succeeded,
-                            subscriptionId: subscriptionId,
-                            paneId: paneId,
-                            connection: connection,
-                            start: start
-                        )
+                        guard let self else { return }
+                        self.schedulingLifecycle.run(callbackToken) {
+                            self.finishPaneTapeFollowStart(
+                                succeeded: succeeded,
+                                subscriptionId: subscriptionId,
+                                paneId: paneId,
+                                connection: connection,
+                                start: start
+                            )
+                        }
                     }
                 }
             } catch {
@@ -512,6 +593,10 @@ class AppRuntime {
                     code: -32603,
                     message: "failed to encode pane tape"
                 )
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken, action: {})
+                }
             }
         }
     }
@@ -523,6 +608,7 @@ class AppRuntime {
         connection: IpcConnection,
         start: PaneTapeFollowStart
     ) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         guard succeeded else { return }
         guard sessions[paneId] != nil else {
             writePaneTapeFollowNotification(
@@ -540,19 +626,33 @@ class AppRuntime {
             paneId: paneId.rawValue,
             cursor: start.cursor
         )
+        paneTapeFollowSubscriptionTokens[subscriptionId] = schedulingLifecycle.arm(
+            .subscription,
+            cancel: { connection.close() }
+        )
         ensurePaneTapeFollowTimer()
     }
 
     private func ensurePaneTapeFollowTimer() {
-        guard paneTapeFollowTimer == nil else { return }
+        guard paneTapeFollowTimer == nil,
+              schedulingLifecycle.snapshot.state == .active
+        else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(
             deadline: .now(),
             repeating: Self.paneTapeFollowInterval,
             leeway: .milliseconds(10)
         )
+        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+            timer.cancel()
+            return
+        }
+        paneTapeFollowTimerToken = token
         timer.setEventHandler { [weak self] in
-            self?.pollPaneTapeFollowers()
+            guard let self else { return }
+            self.schedulingLifecycle.runRepeating(token) {
+                self.pollPaneTapeFollowers()
+            }
         }
         paneTapeFollowTimer = timer
         timer.resume()
@@ -560,16 +660,21 @@ class AppRuntime {
 
     private func stopPaneTapeFollowTimerIfIdle() {
         guard paneTapeFollowSubscriptions.count == 0 else { return }
-        paneTapeFollowTimer?.cancel()
+        schedulingLifecycle.cancel(paneTapeFollowTimerToken)
+        paneTapeFollowTimerToken = nil
         paneTapeFollowTimer = nil
     }
 
     private func pollPaneTapeFollowers() {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         for fetch in paneTapeFollowSubscriptions.beginFetches() {
             guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
                 paneTapeFollowSubscriptions.completeDelivery(
                     subscriptionId: fetch.subscriptionId,
                     succeeded: false
+                )
+                schedulingLifecycle.cancel(
+                    paneTapeFollowSubscriptionTokens.removeValue(forKey: fetch.subscriptionId)
                 )
                 continue
             }
@@ -583,30 +688,48 @@ class AppRuntime {
                     subscriptionId: fetch.subscriptionId,
                     succeeded: false
                 )
+                schedulingLifecycle.cancel(
+                    paneTapeFollowSubscriptionTokens.removeValue(forKey: fetch.subscriptionId)
+                )
                 paneTapeFollowConnections.removeValue(forKey: connection.id)
                 connection.close()
                 continue
             }
+            guard let callbackToken = schedulingLifecycle.arm(
+                .deferredCallback,
+                cancel: {}
+            ) else { continue }
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 do {
                     let snapshot = try prepareBatch()
                     let batch = makePaneTapeFollowBatch(from: snapshot)
                     DispatchQueue.main.async { [weak self] in
-                        self?.deliverPaneTapeFollowBatch(
-                            subscriptionId: fetch.subscriptionId,
-                            connection: connection,
-                            batch: batch
-                        )
+                        guard let self else { return }
+                        self.schedulingLifecycle.run(callbackToken) {
+                            self.deliverPaneTapeFollowBatch(
+                                subscriptionId: fetch.subscriptionId,
+                                connection: connection,
+                                batch: batch
+                            )
+                        }
                     }
                 } catch {
                     DispatchQueue.main.async { [weak self] in
-                        self?.paneTapeFollowSubscriptions.completeDelivery(
-                            subscriptionId: fetch.subscriptionId,
-                            succeeded: false
-                        )
-                        self?.paneTapeFollowConnections.removeValue(forKey: connection.id)
-                        self?.stopPaneTapeFollowTimerIfIdle()
-                        connection.close()
+                        guard let self else { return }
+                        self.schedulingLifecycle.run(callbackToken) {
+                            self.paneTapeFollowSubscriptions.completeDelivery(
+                                subscriptionId: fetch.subscriptionId,
+                                succeeded: false
+                            )
+                            self.schedulingLifecycle.cancel(
+                                self.paneTapeFollowSubscriptionTokens.removeValue(
+                                    forKey: fetch.subscriptionId
+                                )
+                            )
+                            self.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                            self.stopPaneTapeFollowTimerIfIdle()
+                            connection.close()
+                        }
                     }
                 }
             }
@@ -619,6 +742,7 @@ class AppRuntime {
         connection: IpcConnection,
         batch: PaneTapeFollowBatch
     ) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         guard let accepted = paneTapeFollowSubscriptions.finishFetch(
             subscriptionId: subscriptionId,
             batch: batch
@@ -630,6 +754,9 @@ class AppRuntime {
             )
             return
         }
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            return
+        }
 
         writePaneTapeFollowRecords(
             accepted.records,
@@ -637,20 +764,33 @@ class AppRuntime {
             subscriptionId: subscriptionId
         ) { [weak self] succeeded in
             DispatchQueue.main.async { [weak self] in
-                self?.paneTapeFollowSubscriptions.completeDelivery(
-                    subscriptionId: subscriptionId,
-                    succeeded: succeeded
-                )
-                if succeeded == false {
-                    self?.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    self.paneTapeFollowSubscriptions.completeDelivery(
+                        subscriptionId: subscriptionId,
+                        succeeded: succeeded
+                    )
+                    if succeeded == false {
+                        self.schedulingLifecycle.cancel(
+                            self.paneTapeFollowSubscriptionTokens.removeValue(
+                                forKey: subscriptionId
+                            )
+                        )
+                        self.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                    }
+                    self.stopPaneTapeFollowTimerIfIdle()
                 }
-                self?.stopPaneTapeFollowTimerIfIdle()
             }
         }
     }
 
     private func endPaneTapeFollowers(for paneId: PaneId) {
         for end in paneTapeFollowSubscriptions.paneClosed(paneId.rawValue) {
+            if let token = paneTapeFollowSubscriptionTokens.removeValue(
+                forKey: end.subscriptionId
+            ) {
+                schedulingLifecycle.run(token, action: {})
+            }
             guard let connection = paneTapeFollowConnections.removeValue(
                 forKey: end.connectionId
             ) else { continue }
@@ -683,8 +823,51 @@ class AppRuntime {
     }
 
     func stopIpcServer() {
-        ipcServer?.stop()
+        schedulingLifecycle.cancel(ipcServerToken)
+        ipcServerToken = nil
         ipcServer = nil
+    }
+
+    /// Transfers one pending IPC request out of the shutdown census before replying.
+    private func takeIpcConnection(for reqId: UUID) -> IpcConnection? {
+        guard let connection = ipcConnections.removeValue(forKey: reqId) else { return nil }
+        if let token = ipcConnectionTokens.removeValue(forKey: reqId) {
+            schedulingLifecycle.run(token, action: {})
+        }
+        return connection
+    }
+
+    /// Permanently cancels runtime-owned scheduling without duplicating native PTY teardown.
+    func shutdown() {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
+
+        checkpointPending = false
+        paneTapeFollowSubscriptions.removeAll()
+        paneTapeFollowConnections.removeAll()
+        paneTapeFollowSubscriptionTokens.removeAll()
+        ipcConnections.removeAll()
+        ipcConnectionTokens.removeAll()
+        for session in sessions.values {
+            session.onEvent = nil
+            session.onPrimaryHistoryMutation = nil
+        }
+        sessionSubscriptionTokens.removeAll()
+
+        schedulingLifecycle.shutdown()
+
+        switcherEventMonitor = nil
+        switcherEventMonitorToken = nil
+        checkpointDebouncerToken = nil
+        enrichedCheckpointTimer = nil
+        enrichedCheckpointTimerToken = nil
+        coalescedReconcileTimer = nil
+        coalescedReconcileTimerToken = nil
+        searchDebouncers.removeAll()
+        searchDebouncerTokens.removeAll()
+        paneTapeFollowTimer = nil
+        paneTapeFollowTimerToken = nil
+        ipcServer = nil
+        ipcServerToken = nil
     }
 
     // MARK: - Command Performer
@@ -783,15 +966,15 @@ class AppRuntime {
             }
 
         case .ipcReply(let reqId, let result):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeSuccess(reqId: reqId, result: result)
 
         case .ipcError(let reqId, let code, let message):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
@@ -805,7 +988,7 @@ class AppRuntime {
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
 
         case .dumpPaneTape(let reqId, let paneId):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
@@ -834,7 +1017,7 @@ class AppRuntime {
             }
 
         case .followPaneTape(let reqId, let paneId, let fromNow):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
                 connection.writeError(
                     reqId: reqId,
@@ -896,12 +1079,19 @@ class AppRuntime {
 
         case .terminate:
             cancelCoalescedReconcile()
-            paneTapeFollowTimer?.cancel()
+            schedulingLifecycle.cancel(paneTapeFollowTimerToken)
+            paneTapeFollowTimerToken = nil
             paneTapeFollowTimer = nil
             paneTapeFollowSubscriptions.removeAll()
             paneTapeFollowConnections.removeAll()
-            checkpointDebouncer.cancel()
-            enrichedCheckpointTimer?.cancel()
+            for token in paneTapeFollowSubscriptionTokens.values {
+                schedulingLifecycle.cancel(token)
+            }
+            paneTapeFollowSubscriptionTokens.removeAll()
+            schedulingLifecycle.cancel(checkpointDebouncerToken)
+            checkpointDebouncerToken = nil
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
             enrichedCheckpointTimer = nil
             for paneId in replayFiles.keys {
                 cleanupReplayFile(for: paneId)
@@ -936,7 +1126,7 @@ class AppRuntime {
             }
 
             if delay == 0 {
-                searchDebouncers[paneId]?.cancel()
+                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
                 sendNeedle()
             } else {
                 let debouncer = searchDebouncers[paneId] ?? {
@@ -944,14 +1134,23 @@ class AppRuntime {
                     searchDebouncers[paneId] = debouncer
                     return debouncer
                 }()
-                debouncer.schedule(after: delay, perform: sendNeedle)
+                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
+                debouncer.schedule(after: delay) { [weak self] in
+                    guard let self,
+                          let token = self.searchDebouncerTokens.removeValue(forKey: paneId)
+                    else { return }
+                    self.schedulingLifecycle.run(token, action: sendNeedle)
+                }
+                searchDebouncerTokens[paneId] = schedulingLifecycle.arm(.debouncer) {
+                    debouncer.cancel()
+                }
             }
 
         case .sendSearchNavigate(let paneId, let direction):
             sessions[paneId]?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
-            searchDebouncers[paneId]?.cancel()
+            schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
             searchDebouncers.removeValue(forKey: paneId)
             sessions[paneId]?.endSearch()
 
@@ -1062,9 +1261,10 @@ class AppRuntime {
     func tearDownSession(_ paneId: PaneId) {
         endPaneTapeFollowers(for: paneId)
         cleanupReplayFile(for: paneId)
-        searchDebouncers[paneId]?.cancel()
+        schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
         searchDebouncers.removeValue(forKey: paneId)
         if let session = sessions.removeValue(forKey: paneId) {
+            cancelSessionSubscriptions(session)
             session.tearDown()
         }
     }
@@ -1083,12 +1283,22 @@ class AppRuntime {
     /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
     /// into a single disk write.
     private func scheduleDebouncedCheckpoint() {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         checkpointPending = true
+        schedulingLifecycle.cancel(checkpointDebouncerToken)
+        checkpointDebouncerToken = nil
         checkpointDebouncer.schedule(
             after: Self.checkpointDebounceInterval,
             leeway: .milliseconds(200)
         ) { [weak self] in
-            self?.performLightCheckpoint(async: true)
+            guard let self, let token = self.checkpointDebouncerToken else { return }
+            self.checkpointDebouncerToken = nil
+            self.schedulingLifecycle.run(token) {
+                self.performLightCheckpoint(async: true)
+            }
+        }
+        checkpointDebouncerToken = schedulingLifecycle.arm(.debouncer) { [checkpointDebouncer] in
+            checkpointDebouncer.cancel()
         }
     }
 
@@ -1097,13 +1307,24 @@ class AppRuntime {
     /// frequency. The timer reads the latest model when it fires. This is
     /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
-        guard coalescedReconcileTimer == nil else { return }
+        guard coalescedReconcileTimer == nil,
+              schedulingLifecycle.snapshot.state == .active
+        else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Self.reconcileCoalesceInterval)
+        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+            timer.cancel()
+            return
+        }
+        coalescedReconcileTimerToken = token
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            self.coalescedReconcileTimer = nil
-            self.reconcile()
+            self.coalescedReconcileTimer?.cancel()
+            self.schedulingLifecycle.run(token) {
+                self.coalescedReconcileTimer = nil
+                self.coalescedReconcileTimerToken = nil
+                self.reconcile()
+            }
         }
         timer.resume()
         coalescedReconcileTimer = timer
@@ -1111,14 +1332,17 @@ class AppRuntime {
 
     /// Cancel any deferred sweep because an inline reconcile will cover the latest model.
     private func cancelCoalescedReconcile() {
-        coalescedReconcileTimer?.cancel()
+        schedulingLifecycle.cancel(coalescedReconcileTimerToken)
+        coalescedReconcileTimerToken = nil
         coalescedReconcileTimer = nil
     }
 
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
     /// so we don't lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
-        checkpointDebouncer.cancel()
+        guard schedulingLifecycle.snapshot.state == .active else { return }
+        schedulingLifecycle.cancel(checkpointDebouncerToken)
+        checkpointDebouncerToken = nil
         if checkpointPending {
             performLightCheckpoint(async: false)
         } else {
@@ -1128,7 +1352,9 @@ class AppRuntime {
 
     /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
     func prepareRecoveryForApplicationExit() {
-        enrichedCheckpointTimer?.cancel()
+        guard schedulingLifecycle.snapshot.state == .active else { return }
+        schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+        enrichedCheckpointTimerToken = nil
         enrichedCheckpointTimer = nil
         for session in sessions.values {
             session.fenceForApplicationExit()
@@ -1138,39 +1364,58 @@ class AppRuntime {
     }
 
     private func notePrimaryHistoryMutation() {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         applyRecoveryAction(recoveryPolicy.mutation(at: DispatchTime.now().uptimeNanoseconds))
     }
 
     private func applyRecoveryAction(_ action: RecoveryCheckpointAction) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         switch action {
         case .none:
             break
         case .schedule(let deadline):
-            enrichedCheckpointTimer?.cancel()
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
             let timer = DispatchSource.makeTimerSource(queue: .main)
             timer.schedule(deadline: DispatchTime(uptimeNanoseconds: deadline))
+            guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+                timer.cancel()
+                return
+            }
+            enrichedCheckpointTimerToken = token
             timer.setEventHandler { [weak self] in
                 guard let self else { return }
-                self.enrichedCheckpointTimer = nil
-                self.applyRecoveryAction(
-                    self.recoveryPolicy.deadlineReached(at: deadline)
-                )
+                self.enrichedCheckpointTimer?.cancel()
+                self.schedulingLifecycle.run(token) {
+                    self.enrichedCheckpointTimer = nil
+                    self.enrichedCheckpointTimerToken = nil
+                    self.applyRecoveryAction(
+                        self.recoveryPolicy.deadlineReached(at: deadline)
+                    )
+                }
             }
             timer.resume()
             enrichedCheckpointTimer = timer
         case .write(let revision):
+            guard let callbackToken = schedulingLifecycle.arm(
+                .deferredCallback,
+                cancel: {}
+            ) else { return }
             performEnrichedCheckpoint(async: true) { [weak self] succeeded in
                 guard let self else { return }
-                self.applyRecoveryAction(
-                    self.recoveryPolicy.writeCompleted(
-                        revision: revision,
-                        succeeded: succeeded,
-                        at: DispatchTime.now().uptimeNanoseconds
+                self.schedulingLifecycle.run(callbackToken) {
+                    self.applyRecoveryAction(
+                        self.recoveryPolicy.writeCompleted(
+                            revision: revision,
+                            succeeded: succeeded,
+                            at: DispatchTime.now().uptimeNanoseconds
+                        )
                     )
-                )
+                }
             }
         case .cancel:
-            enrichedCheckpointTimer?.cancel()
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
             enrichedCheckpointTimer = nil
         }
     }
@@ -1228,6 +1473,7 @@ class AppRuntime {
         async: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         let capture = captureEnrichedCheckpoint()
         Self.checkpointWriter.write(
             to: enrichedCheckpointURL(),
@@ -1241,14 +1487,22 @@ class AppRuntime {
 
     /// Present a file picker, validate the chosen state file, and replace the current session.
     func importStateFromPanel() {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard let window else { return }
+        guard let callbackToken = schedulingLifecycle.arm(
+            .deferredCallback,
+            cancel: { panel.cancel(nil) }
+        ) else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .OK, let url = panel.url else { return }
-            self.importState(from: url)
+            guard let self else { return }
+            self.schedulingLifecycle.run(callbackToken) {
+                guard response == .OK, let url = panel.url else { return }
+                self.importState(from: url)
+            }
         }
     }
 
@@ -1514,6 +1768,7 @@ class AppRuntime {
             endPaneTapeFollowers(for: paneId)
             cleanupReplayFile(for: paneId)
             if let session = sessions.removeValue(forKey: paneId) {
+                cancelSessionSubscriptions(session)
                 session.tearDown()
             }
         }
@@ -1553,6 +1808,7 @@ class AppRuntime {
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
         for session in staged.sessions.values {
+            cancelSessionSubscriptions(session)
             session.tearDown()
         }
         for url in staged.replayFiles.values {
@@ -1591,11 +1847,23 @@ class AppRuntime {
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
+        if let token = schedulingLifecycle.arm(.subscription, cancel: {
+            session.onEvent = nil
+            session.onPrimaryHistoryMutation = nil
+        }) {
+            sessionSubscriptionTokens[ObjectIdentifier(session)] = token
+        }
         session.setRenderingAvailable(renderingAvailable)
         if hasCheckpointableScrollback(initialRecoveryCandidate) {
             notePrimaryHistoryMutation()
         }
         return session
+    }
+
+    /// Disconnects the two callbacks that let a terminal session schedule runtime work.
+    private func cancelSessionSubscriptions(_ session: any TerminalSession) {
+        let key = ObjectIdentifier(session)
+        schedulingLifecycle.cancel(sessionSubscriptionTokens.removeValue(forKey: key))
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -1618,6 +1886,7 @@ class AppRuntime {
         confirmTitle: String,
         onResponse: @escaping (Bool) -> Void
     ) {
+        guard schedulingLifecycle.snapshot.state == .active else { return }
         let alert = NSAlert()
         alert.messageText = messageText
         alert.informativeText = informativeText
@@ -1625,8 +1894,15 @@ class AppRuntime {
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         if let window = window {
-            alert.beginSheetModal(for: window) { response in
-                onResponse(response == .alertFirstButtonReturn)
+            guard let callbackToken = schedulingLifecycle.arm(
+                .deferredCallback,
+                cancel: { window.endSheet(alert.window, returnCode: .abort) }
+            ) else { return }
+            alert.beginSheetModal(for: window) { [weak self] response in
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    onResponse(response == .alertFirstButtonReturn)
+                }
             }
         } else {
             onResponse(alert.runModal() == .alertFirstButtonReturn)

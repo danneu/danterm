@@ -4,6 +4,7 @@ import Cocoa
 import DanTermProtocol
 
 final class AppRuntime {
+    var schedulingSnapshot = AppRuntimeSchedulingSnapshot(state: .active, ownerCounts: [:])
     var model: AppModel
     var viewLocalState = ViewLocalState()
     var sessions: [PaneId: any TerminalSession] = [:]

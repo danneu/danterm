@@ -775,6 +775,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         tearDownWorkspaceLifecycleObserver()
         runtime?.stopIpcServer()
         runtime?.prepareRecoveryForApplicationExit()
+        runtime?.shutdown()
         terminalBackend?.terminateForApplicationExit()
         deleteSessionLockFile()
     }

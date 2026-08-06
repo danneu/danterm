@@ -195,8 +195,12 @@ struct PaneTapeFollowSubscriptions {
     }
 
     /// Ensures a disconnected socket can never trigger another owner-queue fence.
-    mutating func connectionClosed(_ connectionId: UUID) {
+    mutating func connectionClosed(_ connectionId: UUID) -> [UUID] {
+        let removed = subscriptions.compactMap { id, subscription in
+            subscription.connectionId == connectionId ? id : nil
+        }
         subscriptions = subscriptions.filter { $0.value.connectionId != connectionId }
+        return removed
     }
 
     /// Drops process-ending streams without manufacturing an end record the app cannot flush.
