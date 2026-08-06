@@ -126,6 +126,14 @@ the structural lift is the fix and a cache is the fallback -- and the
 smell is strongest exactly where workarounds have piled up enough to make
 the easy path look settled.
 
+Backwards compatibility is not a constraint on the ideal solution. DanTerm has
+one user, who upgrades by replacing the app, so "it would break existing X" is
+never a reason to reject the ideal: break formats, names, and flags freely
+instead of writing shims or migrations. Exception is external compatibility
+(control sequences, shell output, terminfo). If you think a specific break
+matters anyway, raise it with the user and let them confirm or reject the
+concern -- don't quietly design around it.
+
 ## Code Style
 
 Comments explain intent -- purpose, invariants, ownership, call-site coupling --
@@ -146,6 +154,13 @@ would lose nothing a reader could not recover from the code, don't write it.
 - **AppKit delegate methods.** Name the protocol being satisfied, so the method
   doesn't read as a custom addition: `// NSSplitViewDelegate: called on divider
   double-click.`
+
+### Prose
+
+Plain, simple English in active voice -- in comments, docs, plans, commit
+messages, and replies alike. The reader should parse every sentence correctly on
+the first pass, with nothing to decode: no garden paths, no compressed
+headline-style grammar, no clever compression.
 
 ### Object lifetime (no use-after-free)
 
