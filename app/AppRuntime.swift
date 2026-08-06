@@ -902,10 +902,11 @@ class AppRuntime {
             } catch {
                 presentConfigError(error)
             }
-            // The save leg of I4. prefSave already committed `config` to the model
-            // but could not know whether its family is installed; the resolution
-            // follows here so live panes repaint without a reload or restart. Sent
-            // even when the write failed, because the running settings still apply.
+            // Complete the save path's coherent config application. prefSave already
+            // committed `config` to the model but could not know whether its family is
+            // installed; the resolution follows here so live panes repaint without a
+            // reload or restart. Sent even when the write failed, because the running
+            // settings still apply.
             send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
         case .scheduleCheckpoint:
@@ -1345,12 +1346,12 @@ class AppRuntime {
         }
     }
 
-    /// Resolve-and-apply (I4): resolve the config's requested font family against
-    /// the installed families, then hand config and verdict to the core together
-    /// so `model.config` and `model.resolvedFontFamily` cannot drift apart. Launch
-    /// assigns the same pair by hand for want of a running Elm loop, and the save
-    /// path sends the resolution alone because prefSave already committed the
-    /// config; all three go through `resolveConfiguredFontFamily`.
+    /// Resolves the config's requested font family against the installed families,
+    /// then hands config and verdict to the core together so every config-apply path
+    /// produces coherent config, resolution, warning, and pane state. Launch assigns
+    /// the same pair by hand for want of a running Elm loop, and the save path sends
+    /// the resolution alone because prefSave already committed the config; launch,
+    /// reload, and save all go through `resolveConfiguredFontFamily`.
     private func applyDanTermConfig(_ config: DanTermConfig) {
         send(.configLoaded(config, resolvedFontFamily: resolveConfiguredFontFamily(config)))
     }
@@ -1362,8 +1363,8 @@ class AppRuntime {
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
         send(.preferencesOpened(
-            // Snapshotted per open (AR1): the core may not query CoreText, and a
-            // font installed while the panel sits open is not worth a watcher.
+            // Snapshot on each open: the syntax-only core may not query CoreText,
+            // and a font installed while the panel sits open is not worth a watcher.
             installedFontFamilies: installedFontFamilyNames()
         ))
         preferencesPanel?.makeKeyAndOrderFront(nil)

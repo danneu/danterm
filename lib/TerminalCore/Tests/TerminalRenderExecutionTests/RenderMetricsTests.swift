@@ -68,9 +68,9 @@ struct RenderMetricsTests {
     func namedFamilyStillDerivesStyledFaces() throws {
         // Intent: choosing a family sets only the base face; the styled faces are
         //   still derived from it by trait.
-        // Why it exists: I3 -- the schema deliberately has no per-style families, so
-        //   the render layer must keep synthesizing bold and italic off whatever base
-        //   family it was handed rather than treating the configured name as final.
+        // Why it exists: only the availability probe's canonical family may reach
+        //   rendering, and the schema deliberately has no per-style families, so the
+        //   render layer must derive bold and italic from that verified base family.
         // Scenario: spec-first -- terminal output mixes styles under a custom family.
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: "Menlo"))
         let fonts = metrics.fonts

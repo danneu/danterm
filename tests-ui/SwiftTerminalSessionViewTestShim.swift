@@ -125,8 +125,9 @@ struct TerminalDimensions: Equatable {
 struct TerminalRenderMetrics: Equatable {
     /// A family that would pass an availability probe yet yields no usable cell
     /// geometry -- the real metrics refuse a face with no nominal `M` glyph, or one
-    /// whose cell box cannot be pixel-quantized. Naming the case here keeps the I5
-    /// fallback harness off any particular font being installed on the test machine.
+    /// whose cell box cannot be pixel-quantized. Naming the case here proves an
+    /// unusable face falls back instead of leaving a terminal blank or frozen without
+    /// depending on any particular font being installed on the test machine.
     static let unusableFamily = "DanTermTestUnusableFace"
 
     /// A family with double-width cells, so a live family change is observable in the

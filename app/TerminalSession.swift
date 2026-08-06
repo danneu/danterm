@@ -66,7 +66,8 @@ struct TerminalSessionRequest {
     let environment: [(String, String)]
     let themeName: String?
     let fontSize: Double
-    /// The verified-installed family, or nil for the system monospace font (I3).
+    /// The verified-installed family, or nil for the system monospace font; the raw
+    /// requested name never reaches rendering.
     let fontFamily: String?
 }
 

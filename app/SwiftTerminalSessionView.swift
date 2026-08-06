@@ -877,7 +877,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     /// Metrics for the configured family, falling back to the system monospace font
-    /// when that family yields none (I5).
+    /// so an unusable face never leaves a terminal blank or frozen.
     ///
     /// Passing the availability probe does not guarantee usable grid geometry -- a
     /// face can be installed and still lack the nominal `M` glyph the cell box is

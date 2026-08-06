@@ -1,9 +1,9 @@
 // Pins the pure half of the Preferences font-family picker: the installed-family
 // catalog the impure caller injects when the panel opens, the choices/text/dirty
 // values projected from it, and the "not installed" warning that clears the
-// moment the user edits the field. The core still never asks CoreText anything
-// (I1) -- the catalog arrives with `preferencesOpened` and the resolution verdict
-// with `configLoaded` -- so every test here injects both. The AppKit wiring these
+// moment the user edits the field. The core validates syntax only and never asks
+// CoreText anything -- the catalog arrives with `preferencesOpened` and the
+// resolution verdict with `configLoaded` -- so every test here injects both. The AppKit wiring these
 // values drive lives in the UI harness (PreferencesPanelTests).
 import Foundation
 import Testing
@@ -28,7 +28,7 @@ import Testing
         // Intent: the choices the panel shows come from the catalog the runtime
         //   injected, in the order it supplied, behind the system-default entry.
         // Why it exists: pins that the core neither sorts nor sources the list --
-        //   it may not query CoreText (I1) -- while still owning the one entry
+        //   its syntax-only contract forbids querying CoreText -- while still owning the one entry
         //   that is not a font: the system-monospace default.
         // Scenario: spec-first; the user opens Preferences on a machine with a
         //   handful of families installed.

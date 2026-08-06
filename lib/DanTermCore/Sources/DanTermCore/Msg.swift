@@ -123,9 +123,9 @@ enum Msg {
 
     // Preferences panel
     // The installed-family catalog is injected for the same reason the font
-    // resolution is: which families exist is a CoreText question the core may not
-    // ask (I1). It rides in on open so the picker's choices are a snapshot taken
-    // when the panel appeared, not a live query.
+    // resolution is: the syntax-only core may not ask CoreText which families exist.
+    // It rides in on open so the picker's choices are a snapshot taken when the panel
+    // appeared, not a live query.
     case preferencesOpened(installedFontFamilies: [String] = [])
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)

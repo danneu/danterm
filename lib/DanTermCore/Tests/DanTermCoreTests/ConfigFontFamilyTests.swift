@@ -2,8 +2,8 @@
 // injected `resolvedFontFamily` verdict that rides along with every config
 // application, its propagation into the per-pane config key, and the
 // preferences draft/save leg that lets the user change the family. The core
-// never asks CoreText whether a family exists (I1) -- it is handed the answer,
-// exactly like ids and time -- so every test here injects the verdict rather
+// validates the family as syntax only and never asks CoreText whether it exists --
+// it is handed the answer, exactly like ids and time -- so every test here injects the verdict rather
 // than probing the machine. The CoreText probe itself is proved in
 // DanTermSupport's FontAvailabilityTests; the AppKit picker and the "not
 // installed" warning arrive with the preferences panel.
@@ -32,8 +32,8 @@ import Testing
         // Intent: a family the caller could not resolve still lands in
         //   model.config, but nothing reaches the render layer.
         // Why it exists: pins the soft-failure contract -- a typo'd family must
-        //   not be silently promoted into a rendered face (I3), and the app must
-        //   still launch normally on it.
+        //   never reach rendering without a verified, canonical resolution, and the
+        //   app must still launch normally on it.
         // Scenario: spec-first; the user typed "Fira Codee" into config.json.
         var model = makeModel()
         var config = DanTermConfig.default
@@ -49,8 +49,8 @@ import Testing
     func configLoadedWithoutFamilyClearsPreviousResolution() {
         // Intent: removing font.family and reloading returns the model to the
         //   system-monospace state.
-        // Why it exists: guards the pair against drift -- a stale resolution
-        //   would keep panes on the old face after the key was deleted (I4).
+        // Why it exists: guards the coherent config/resolution pair against drift --
+        //   a stale resolution would keep panes on the old face after the key was deleted.
         // Scenario: spec-first; the user deletes font.family and reloads config.
         var model = makeModel()
         var config = DanTermConfig.default
@@ -69,8 +69,8 @@ import Testing
     func desiredPaneConfigCarriesResolvedFamily() {
         // Intent: live panes are keyed on the resolved family so reconcile
         //   re-pushes when it changes, and only a verified family reaches them.
-        // Why it exists: pins I3 at the projection boundary -- the render layer
-        //   must never see the raw requested string.
+        // Why it exists: pins the projection boundary -- only the verified,
+        //   canonical family may reach rendering, never the raw requested string.
         // Scenario: spec-first; config asks for "menlo", the probe canonicalizes
         //   it to "Menlo".
         var model = makeModel()
@@ -160,7 +160,7 @@ import Testing
         #expect(model.preferencesDraft?.fontFamily == "Courier")
     }
 
-    // MARK: - Save (I4)
+    // MARK: - Save and coherent config application
 
     @Test("prefSave writes the drafted family into the one config transaction")
     func prefSaveWritesFontFamily() {
@@ -183,7 +183,7 @@ import Testing
         // Intent: saving a family that is not installed is not an error -- it is
         //   written to disk like any other value.
         // Why it exists: pins the "it is the user's file" rule; they may be about
-        //   to install the font, and the core cannot tell either way (I1).
+        //   to install the font, and the syntax-only core never queries CoreText.
         // Scenario: spec-first; the user types a font they have not installed yet.
         var model = makeModel()
         _ = update(&model, .preferencesOpened())
@@ -218,9 +218,9 @@ import Testing
     func saveThenResolveRepaintsLivePanes() throws {
         // Intent: a Preferences save reaches live panes without a reload step in
         //   between -- Save, then the resolution, and the pane key has moved.
-        // Why it exists: pins I4's save leg. prefSave alone cannot know whether
-        //   the family exists, so the runtime resolves what it was told to write
-        //   and feeds the verdict straight back; this is that round trip.
+        // Why it exists: pins that Preferences save resolves and applies the family
+        //   coherently. prefSave alone cannot know whether the family exists, so the
+        //   runtime feeds the verdict straight back and repaints panes without a reload.
         // Scenario: spec-first; the user picks Menlo in Preferences and hits Save.
         var model = makeModel()
         _ = createTab(&model)

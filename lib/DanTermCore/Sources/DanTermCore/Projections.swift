@@ -306,8 +306,8 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
 struct PaneConfigKey: Equatable {
   let theme: String
   let fontSize: Double
-  /// The verified-installed family, or nil for the system monospace font. Never
-  /// the raw name from config: only a resolved family may reach rendering (I3).
+  /// The verified-installed family, or nil for the system monospace font. The raw
+  /// name from config never reaches rendering; only a canonical resolved family may.
   let fontFamily: String?
 
   init(

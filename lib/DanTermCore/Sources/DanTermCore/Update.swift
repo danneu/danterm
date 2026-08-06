@@ -550,8 +550,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .configLoaded(let newConfig, let resolvedFontFamily):
         let oldConfig = model.config
         model.config = newConfig
-        // Written as a pair with the config it was resolved from; nothing else
-        // assigns either one, so panes can never render a stale family (I4).
+        // Written as a pair with the config it was resolved from so config, resolution,
+        // warning, and pane projection stay coherent and panes never render a stale family.
         model.resolvedFontFamily = resolvedFontFamily
         // Reset draft to match new config if panel is open.
         if model.preferencesDraft != nil {
@@ -663,7 +663,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // validation question anyway: an unavailable name is still written, since
         // it is the user's file and they may be about to install the font. The
         // runtime resolves what it writes and feeds the verdict back through
-        // fontFamilyResolved, which is what repaints live panes (I4).
+        // fontFamilyResolved, completing a coherent apply and repainting live panes
+        // without a manual reload.
         newConfig.fontFamily = resolveFontFamilyDraft(draft.fontFamily)
         model.config = newConfig
         // Normalize draft to resolved values post-save.

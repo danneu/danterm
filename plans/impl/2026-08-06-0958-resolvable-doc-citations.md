@@ -302,7 +302,7 @@ help path and read the operator-facing heredoc.
 - [x] 4. `docs(scripts): qualify research citations in the benchmark tooling` -- `scripts/`, `scripts/tests/`, `justfile`. Message notes the `saturate-scrollback.sh` operator-visible text.
 - [x] 5. `docs(guides): qualify research citations in the agent and design docs` -- `agent-docs/`, `docs/design/`, `docs/scratch/`, `integrations/`; includes Phase 2's glob and comma-form fixes.
 - [x] 6. `docs(terminal): resolve the doc-focused probe files' bare ids` -- Phase 4. Mixed mechanical and judgment work; message names the plan-owned ids restated and the deferred ones left alone.
-- [ ] 7. `docs(config): restate the font-family plan's invariants inline` -- `app/`, `lib/DanTermCore/`, `tests-ui/`, `RenderMetricsTests.swift`.
+- [x] 7. `docs(config): restate the font-family plan's invariants inline` -- `app/`, `lib/DanTermCore/`, `tests-ui/`, `RenderMetricsTests.swift`.
 - [ ] 8. `docs(recovery): restate the checkpoint plan's invariants inline` -- checkpoint tests in `lib/DanTermSupport/`, `lib/DanTermCore/`, `app-tests/`.
 - [ ] 9. `docs(scripts): restate the btop diagnostic plan's invariants inline` -- `terminal_btop_*`, `terminal-benchmark{,-profile}.sh`, plus the mis-attributed `29/I*`/`29/PO*`. Message names the mis-attribution.
 - [ ] 10. `docs(scripts): restate the paired-benchmark plan's invariants inline` -- `terminal_benchmark_{compare,snapshot}_test.py`, `terminal_draw_acceptance_test.py`, plus the two bare `D1` -> `research/7/D1`.

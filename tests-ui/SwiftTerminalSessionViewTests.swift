@@ -99,9 +99,9 @@ func swiftTerminalSessionViewTests() {
         // Intent: a family that passes availability but cannot yield grid metrics still
         //   leaves the pane with valid metrics and grid dimensions, both at creation and
         //   on a live change away from a working family.
-        // Why it exists: I5 -- synchronizeGeometry used to bail outright on nil metrics,
-        //   which would leave a newly created pane with no geometry at all and freeze an
-        //   existing pane on the grid it already had, with no way back short of a restart.
+        // Why it exists: an unusable configured face must fall back to system monospace;
+        //   synchronizeGeometry used to bail outright on nil metrics, leaving a new pane
+        //   blank and freezing an existing pane on its old grid until restart.
         // Scenario: spec-first -- an installed but degenerate face named in config.
         let created = TerminalPaneSessionController()
         let createdPane = SwiftTerminalSessionView(
