@@ -116,7 +116,7 @@ jobs:
 
       - name: Verify tracked theme freshness
         run: |
-          python3 ./scripts/import-ghostty-themes.py
+          python3 ./scripts/import-themes.py
           test -z "$(git status --porcelain --untracked-files=all -- themes)"
 
   build:

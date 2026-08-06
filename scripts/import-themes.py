@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Import a pinned iTerm2-Color-Schemes archive into DanTerm's JSON schema.
 
-This is DanTerm's only Ghostty-format theme parser. Explicit updates download
-and verify the pinned archive; runtime and build paths consume committed JSON.
+DanTerm tracks the upstream collection's `ghostty-themes.tgz` variant purely
+because its `key = value` syntax is the easiest of the published formats to
+parse; nothing here depends on Ghostty. The archive's own file and directory
+names are quoted verbatim below so the pinned download keeps resolving.
+
+Explicit updates download and verify the pinned archive; runtime and build
+paths consume the committed JSON this produces.
 """
 
 from __future__ import annotations
@@ -118,7 +123,7 @@ def download_archive(url: str = ARCHIVE_URL) -> bytes:
 
 
 def archive_sources(content: bytes) -> dict[str, str]:
-    """Reads only flat regular files from the release's Ghostty archive directory."""
+    """Reads only flat regular files from the archive's single upstream directory."""
     sources: dict[str, str] = {}
     try:
         with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:

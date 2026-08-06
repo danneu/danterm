@@ -74,7 +74,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'
     'python3 ./scripts/tests/terminal_benchmark_compare_test.py'
-    'python3 ./scripts/tests/import_ghostty_themes_test.py'
+    'python3 ./scripts/tests/import_themes_test.py'
     './scripts/terminal-fence-accounting-lint.sh'
     'python3 ./scripts/tests/terminal_profile_report_test.py'
     'python3 ./scripts/tests/terminal_headless_draw_compare_test.py'

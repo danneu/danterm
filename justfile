@@ -19,7 +19,7 @@ fetch-references *args:
 
 # Refresh tracked JSON themes from DanTerm's pinned iTerm2-Color-Schemes release.
 update-themes:
-    python3 ./scripts/import-ghostty-themes.py
+    python3 ./scripts/import-themes.py
 
 # Compile Icon Composer .icon files into Assets.car
 build-icons:

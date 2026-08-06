@@ -10,7 +10,7 @@ iTerm2-Color-Schemes release:
 - SHA-256: `7329d0e2e958ee8404e516a6550bd07334edc611334a73f84d50477daa459f0c`
 
 Do not edit an individual theme by hand. After updating the release and digest
-pins in `scripts/import-ghostty-themes.py`, run `just update-themes` and review
+pins in `scripts/import-themes.py`, run `just update-themes` and review
 the resulting color-level diff. Builds consume these committed files; they do
 not download or regenerate them.
 

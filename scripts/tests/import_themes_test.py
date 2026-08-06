@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Behavioral tests for the pinned iTerm2-Color-Schemes theme importer.
 
-The importer is DanTerm's only Ghostty-syntax reader, so these tests pin the
-archive verification boundary, complete-value rejection, and atomic output.
+The importer is the only thing standing between an upstream archive and the
+tracked theme catalog, so these tests pin the archive verification boundary,
+complete-value rejection, and atomic output.
 """
 
 import hashlib
@@ -17,8 +18,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "import-ghostty-themes.py"
-SPEC = importlib.util.spec_from_file_location("import_ghostty_themes", SCRIPT)
+SCRIPT = ROOT / "scripts" / "import-themes.py"
+SPEC = importlib.util.spec_from_file_location("import_themes", SCRIPT)
 IMPORTER = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = IMPORTER
 SPEC.loader.exec_module(IMPORTER)

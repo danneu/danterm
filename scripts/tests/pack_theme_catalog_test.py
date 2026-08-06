@@ -171,7 +171,7 @@ class AssemblerContractTests(unittest.TestCase):
             with self.subTest(assembler=assembler.name):
                 source = assembler.read_text(encoding="utf-8")
                 self.assertEqual(source.count("bundle-theme-resources.sh"), 1)
-                self.assertNotIn("import-ghostty-themes.py", source)
+                self.assertNotIn("import-themes.py", source)
                 self.assertNotIn("cp -R \"$REPO_ROOT/lib/ghostty-themes\"", source)
                 self.assertNotIn("cp -R \"$THEMES_SRC\"", source)
 
@@ -180,7 +180,7 @@ class AssemblerContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("python3 ./scripts/import-ghostty-themes.py", workflow)
+        self.assertIn("python3 ./scripts/import-themes.py", workflow)
         self.assertIn(
             "git status --porcelain --untracked-files=all -- themes", workflow
         )

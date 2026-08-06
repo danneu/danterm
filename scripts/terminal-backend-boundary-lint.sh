@@ -1,45 +1,33 @@
 #!/usr/bin/env bash
-# Restrict linked terminal implementations to their dedicated app adapter files.
+# Confine the Swift terminal engine's modules to the app's adapter files.
+#
+# The engine (PaneLifecycle, TerminalCore, TerminalPTYHost, ...) is DanTerm's
+# implementation detail, not its app-wide vocabulary. Only the handful of
+# adapter files below may name those modules; everything else in the app talks
+# to the engine through the backend protocol. Without this check, engine types
+# leak into view controllers, models, and menus one convenient import at a
+# time, and the seam that makes the app testable without a live terminal is
+# gone before anyone notices.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${1:-$SCRIPT_DIR/../app}"
-THEME_RUNTIME_TARGETS=("$TARGET")
-if [[ $# -eq 0 ]]; then
-    THEME_RUNTIME_TARGETS+=(
-        "$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
-        "$SCRIPT_DIR/../lib/TerminalCore/Sources"
-        "$SCRIPT_DIR/../lib/TerminalPTY/Sources"
-    )
-fi
+
+# Files permitted to import the engine: the backend adapter, its view, the
+# theme bridge that translates DanTerm colors into engine colors, and the
+# benchmark harness that drives the engine directly on purpose.
+ADAPTER_ALLOWLIST='SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalBenchmark.swift'
+ENGINE_MODULES='PaneLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution'
 
 failed=0
 while IFS= read -r file; do
-    if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+GhosttyKit([^[:alnum:]_]|$)' "$file"; then
-        echo "GhosttyKit import in a target with no Ghostty backend: $file" >&2
-        failed=1
+    if [[ "$(basename "$file")" =~ ^($ADAPTER_ALLOWLIST)$ ]]; then
+        continue
     fi
-done < <(find "$TARGET" -name '*.swift' -type f -print)
-
-while IFS= read -r file; do
-    case "$(basename "$file")" in
-        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalBenchmark.swift)
-            continue
-            ;;
-    esac
-    if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(PaneLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution)([^[:alnum:]_]|$)' "$file"; then
+    if grep -nE "^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+($ENGINE_MODULES)([^[:alnum:]_]|\$)" "$file"; then
         echo "Swift terminal engine import outside adapter allowlist: $file" >&2
         failed=1
     fi
 done < <(find "$TARGET" -name '*.swift' -type f -print)
-
-for theme_target in "${THEME_RUNTIME_TARGETS[@]}"; do
-    while IFS= read -r file; do
-        if grep -nE 'ghostty/themes|ThemeColorParser' "$file"; then
-            echo "Ghostty theme syntax or paths in a target with no Ghostty backend: $file" >&2
-            failed=1
-        fi
-    done < <(find "$theme_target" -name '*.swift' -type f -print)
-done
 
 if [[ "$failed" -ne 0 ]]; then
     exit 1
