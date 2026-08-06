@@ -22,7 +22,7 @@ func linkPreviewFrame(side: LinkPreviewSide, fittingSize: NSSize, containerWidth
 }
 
 /// Terminal-owned chrome for hovered link destinations, deliberately non-interactive
-/// so pointer events continue through to the terminal surface.
+/// so pointer events continue through to the terminal view.
 class LinkPreviewView: NSView {
     private static let padding: CGFloat = 5
     private static let cornerRadius: CGFloat = 9

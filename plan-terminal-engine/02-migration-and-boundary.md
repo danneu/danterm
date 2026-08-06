@@ -20,7 +20,7 @@ a promised user-facing feature.
 
 The boundary covers the capabilities DanTerm consumes:
 
-- surface creation, closure, geometry, focus, and visibility
+- session creation, closure, geometry, focus, and visibility
 - text, key, paste, and mouse input
 - selection, search, scrollback, and text capture
 - theme and font application

@@ -11,10 +11,10 @@ import Foundation
 import DanTermProtocol
 
 enum Command {
-    // Surface
-    case createSurface(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
-    // Surface *destruction* is a projection (reconcileSurfaceExistence tears down surfaces
-    // for panes gone from model.allPaneIds), so there is no destroySurface command.
+    // Session
+    case createSession(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
+    // Session *destruction* is a projection (reconcileSessionExistence tears down sessions
+    // for panes gone from model.allPaneIds), so there is no destroy-session command.
     // Paste path (ghostty_surface_text). Strips control bytes and applies
     // bracketed-paste mode if active. Used by direct IPC callers that send
     // the top-level `text` field.
@@ -29,7 +29,7 @@ enum Command {
     case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods)
 
     // Focus
-    case focusSurface(paneId: PaneId, focused: Bool)
+    case focusSession(paneId: PaneId, focused: Bool)
     case makeFirstResponder(paneId: PaneId)
 
     // View
@@ -90,18 +90,18 @@ extension Command {
     /// the reconciler creates. Exactly `makeFirstResponder` and `focusSearchField`:
     /// `reconcileContainers` mounts a pane's `TerminalView` during reconcile (Stage 8),
     /// and `reconcilePaneChrome` builds the search field, so neither exists until after
-    /// reconcile. `focusSurface` stays pre-reconcile: it acts on an already-existing
-    /// surface, and deferring it is actively wrong -- a foreground createTab create-failure
-    /// re-enters send() and re-focuses the fallback, which a deferred focusSurface(old,false)
+    /// reconcile. `focusSession` stays pre-reconcile: it acts on an already-existing
+    /// session, and deferring it is actively wrong -- a foreground createTab create-failure
+    /// re-enters send() and re-focuses the fallback, which a deferred focusSession(old,false)
     /// would then defocus. (makeFirstResponder/focusSearchField safely no-op in that failure
-    /// path: their pane was removed, so surfaces[id] is nil.) Exhaustive with no `default`
+    /// path: their pane was removed, so sessions[id] is nil.) Exhaustive with no `default`
     /// so a new case cannot be added without classifying it.
     var isPostReconcile: Bool {
         switch self {
         case .makeFirstResponder, .focusSearchField:
             return true
-        case .createSurface, .sendText, .sendInputText, .sendInputKey,
-             .focusSurface, .exportState, .ipcReply, .ipcError,
+        case .createSession, .sendText, .sendInputText, .sendInputKey,
+             .focusSession, .exportState, .ipcReply, .ipcError,
              .readPaneText, .dumpPaneTape, .followPaneTape, .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,

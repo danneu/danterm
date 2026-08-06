@@ -52,11 +52,11 @@ func resolveTerminalBackend(_ value: String?) throws -> TerminalBackendKind {
 func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
     switch event {
     case .titleChanged(let title):
-        return .surfaceTitle(paneId: paneId, title: title)
+        return .sessionTitle(paneId: paneId, title: title)
     case .cwdChanged(let cwd):
-        return .surfaceCwd(paneId: paneId, cwd: cwd)
+        return .sessionCwd(paneId: paneId, cwd: cwd)
     case .bell:
-        return .surfaceBell(paneId: paneId)
+        return .sessionBell(paneId: paneId)
     case .commandStarted(let command):
         return .commandStarted(paneId: paneId, command: command)
     case .commandEnded:
@@ -71,7 +71,7 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
     case .desktopNotification(let title, let body):
         return .desktopNotification(paneId: paneId, title: title, body: body)
     case .progress(let state):
-        return .surfaceProgress(paneId: paneId, state: state)
+        return .sessionProgress(paneId: paneId, state: state)
     case .searchStarted(let needle):
         return .searchStarted(paneId: paneId, needle: needle)
     case .searchTotal(let total):
@@ -81,7 +81,7 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
     case .becameFirstResponder:
         return .paneBecameFirstResponder(paneId: paneId)
     case .closeRequested:
-        return .surfaceClosed(paneId: paneId)
+        return .sessionClosed(paneId: paneId)
     }
 }
 

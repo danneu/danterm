@@ -1,7 +1,7 @@
 // Swift Testing migration of the legacy `tests/UpdateMruTests.swift` harness
 // suite. Pins MRU tab switcher behavior: the per-Msg mruOrder invariants
 // (createTab inserts at the front, selectTab hoists when not cycling and
-// freezes while cycling, closeTab + surfaceCreationFailed + deleteGroup
+// freezes while cycling, closeTab + sessionCreationFailed + deleteGroup
 // reconcile), the bypass-path coverage via movePaneToNewTab, and the four
 // cycle handlers (mruCycleStepped / Committed / Canceled / OneShot) plus
 // the restore-time reconciliation defer. The two `guard let ... else { throw }`
@@ -129,9 +129,9 @@ import Testing
         #expect(model.mruOrder.contains(newTabId), "new tab id appears in mruOrder")
     }
 
-    @Test("surfaceCreationFailed prunes the failed tab from mruOrder")
-    func surfaceCreationFailedPrunesFailedTabFromMruOrder() {
-        // Intent: surfaceCreationFailed removes the failed tab from
+    @Test("sessionCreationFailed prunes the failed tab from mruOrder")
+    func sessionCreationFailedPrunesFailedTabFromMruOrder() {
+        // Intent: sessionCreationFailed removes the failed tab from
         //   mruOrder.
         // Why it exists: pins the failure-path MRU prune.
         // Scenario: spec-first failure prune.
@@ -140,7 +140,7 @@ import Testing
         let failedTabId = ids[1]
         let failedPaneId = model.groups[0].tabs.first { $0.id == failedTabId }!.focusedPaneId
 
-        _ = update(&model, .surfaceCreationFailed(paneId: failedPaneId))
+        _ = update(&model, .sessionCreationFailed(paneId: failedPaneId))
         #expect(!model.mruOrder.contains(failedTabId), "failed-tab id pruned")
     }
 

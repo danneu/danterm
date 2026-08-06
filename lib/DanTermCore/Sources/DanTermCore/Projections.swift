@@ -814,13 +814,13 @@ func chromeInvalidation(ops: [ContainerOp], newShapes: [TabId: ContainerShape]) 
   return result
 }
 
-/// Surfaces to tear down: live surfaces whose pane no longer exists in the model.
-/// With tree-owns-panes, "desired surfaces" is exactly `model.allPaneIds`, so a pure
-/// set difference selects the dead ones. `reconcileSurfaceExistence` runs this over
-/// `Set(surfaces.keys)` and tears down each selected pane. Surface *creation* stays a
+/// Sessions to tear down: live sessions whose pane no longer exists in the model.
+/// With tree-owns-panes, "desired sessions" is exactly `model.allPaneIds`, so a pure
+/// set difference selects the dead ones. `reconcileSessionExistence` runs this over
+/// `Set(sessions.keys)` and tears down each selected pane. Session *creation* stays a
 /// command (it forks a PTY), so the reconciler only ever destroys.
-func surfacesToTearDown(liveSurfaceIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
-  liveSurfaceIds.subtracting(Set(model.allPaneIds))
+func sessionsToTearDown(liveSessionIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
+  liveSessionIds.subtracting(Set(model.allPaneIds))
 }
 
 // MARK: - MRU Switcher + Quit Confirmation Projections

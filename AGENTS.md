@@ -60,7 +60,7 @@ User/Ghostty action
     → Msg
     → update(&model, msg, env:) -> [Command]   (pure)
     → AppRuntime.perform(command)               (side effects)
-    → view rebuild / surface creation / etc.
+    → view rebuild / session creation / etc.
 ```
 
 Three layers, split across two symlinked modules plus the runtime:

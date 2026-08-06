@@ -27,7 +27,7 @@ import Testing
         //   calls return false (coalesced, no duplicate schedule).
         // Why it exists: pins the coalescing contract so a wakeup burst never
         //   schedules N duplicate ticks against the runqueue.
-        // Scenario: spec-first burst check -- a Ghostty surface fires multiple
+        // Scenario: spec-first burst check -- a Ghostty session fires multiple
         //   wakeups before the runtime drains the first one.
         let coalescer = TickCoalescer()
 
@@ -83,7 +83,7 @@ import Testing
         // Why it exists: pins the thread-safety claim of the atomic
         //   compare-and-swap slot -- a multi-thread race must not double-
         //   schedule the runqueue tick.
-        // Scenario: spec-first concurrency check -- many Ghostty surfaces (or
+        // Scenario: spec-first concurrency check -- many Ghostty sessions (or
         //   threads) report wakeups simultaneously; the runtime must see a
         //   single scheduled tick.
         let coalescer = TickCoalescer()

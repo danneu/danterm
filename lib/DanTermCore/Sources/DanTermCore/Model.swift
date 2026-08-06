@@ -448,7 +448,7 @@ func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> App
 /// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
     // Panes, groups, tabs, and splits share one UUID namespace. A leaf pane id
-    // colliding with any other domain's id is rejected -- surfaces / searchState /
+    // colliding with any other domain's id is rejected -- sessions / searchState /
     // lastNotificationTime / updatePane are all id-keyed, so a dup would
     // reintroduce exactly the drift this refactor removes.
     var allIds = Set<UUID>()
@@ -573,9 +573,9 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
     )
 }
 
-/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for surface
+/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for session
 /// creation. `home` is the tilde-expansion base; it defaults to the real ambient
-/// home (nil), so the app's surface-creation caller and the restore builder both
+/// home (nil), so the app's session-creation caller and the restore builder both
 /// expand against the live home unless a test pins one.
 func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: String?, command: String?) {
     let h = home ?? CoreEnv.live.homeDirectory()

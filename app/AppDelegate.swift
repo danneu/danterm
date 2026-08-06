@@ -198,7 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         benchmarkGeometryController = TerminalBenchmarkGeometryController(
             window: window,
             environment: ProcessInfo.processInfo.environment,
-            session: { [weak benchmarkRuntime] in benchmarkRuntime?.surfaces.values.first }
+            session: { [weak benchmarkRuntime] in benchmarkRuntime?.sessions.values.first }
         )
         benchmarkGeometryController?.start()
         benchmarkStateRecorder = TerminalBenchmarkStateRecorder(
@@ -775,14 +775,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         #if DANTERM_TERMINAL_BENCHMARK
         benchmarkStateRecorder?.windowDidChangeOcclusionState()
         #endif
-        runtime?.syncSurfaceVisibility()
+        runtime?.syncPaneVisibility()
     }
 
     // NSWindowDelegate: window screen changes alter the display link each
-    // surface should sync against.
+    // session should sync against.
     func windowDidChangeScreen(_ notification: Notification) {
         guard notification.object is NSWindow else { return }
-        runtime?.syncSurfaceDisplayID()
+        runtime?.syncSessionDisplayID()
     }
 
     // MARK: - App Lifecycle

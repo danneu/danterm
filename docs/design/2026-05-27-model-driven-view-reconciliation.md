@@ -9,7 +9,7 @@ DanTerm uses Elm architecture: user/Ghostty actions become `Msg` values,
 `update(&model, msg)` is the pure model transition and returns `[Command]`, and
 `AppRuntime.perform(command)` runs side effects. The view reconciler is the next
 stage in that pipeline: after update and pre-reconcile commands, `reconcile()`
-derives AppKit and Ghostty/surface state from the current model.
+derives AppKit and session state from the current model.
 
 The reconciler migration moved view-sync work out of `update()` and
 `AppRuntime.send()` into ordered `reconcile*` passes. The intended pass shape,
@@ -20,14 +20,14 @@ from the template at the top of `app/Reconcile.swift`, is:
 - `ReconcilerCaches` stores each pass's last applied projection so the next pass
   applies only the delta;
 - `Reconcile.swift` contains thin impure executors that apply the computed delta
-  to AppKit views, Ghostty/surface state, and runtime-owned view handles;
+  to AppKit views, session state, and runtime-owned view handles;
 - the matching `Command` case and `perform` arm disappear in the same change, so
   missed view-sync emissions become compile errors.
 
 ## Architectural Goal
 
 DanTerm uses retained-mode, model-driven view reconciliation. AppKit views,
-Ghostty surfaces, panels, and runtime handles are long-lived host objects. After
+Terminal sessions, panels, and runtime handles are long-lived host objects. After
 each model transition, `reconcile()` derives small desired projections from
 `AppModel`, diffs them against `ReconcilerCaches`, and patches the existing
 hosts.
@@ -52,7 +52,7 @@ New reconcile passes should follow the migration template:
 - delete the matching `Command` case, `perform` arm, and emission sites in the
   same change.
 
-Commands are for true side effects and transient imperative actions: PTY/surface
+Commands are for true side effects and transient imperative actions: PTY/session
 creation, IPC replies, notifications, checkpoint/config writes, focus requests,
 export, and popover presentation. Everything the view merely shows should be a
 projection of the model. Some commands run after reconcile when they target
@@ -78,7 +78,7 @@ The view reconciler is a read-only projection of `AppModel`. Pure projections
 and diff helpers derive desired state from `AppModel` and `ViewLocalState`.
 Thin reconcile executors may also read runtime-owned host/view state needed for
 host presence, visibility, anchors, and open-state. Reconcile passes may write
-AppKit views, Ghostty/surface state, runtime-owned view handles, and
+AppKit views, session state, runtime-owned view handles, and
 `ReconcilerCaches`. They must not write `AppModel`.
 
 For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
@@ -94,11 +94,11 @@ Reconcile pass ordering is part of the contract. Passes that destroy or recreate
 hosts must run before passes that render into those hosts, and they must
 invalidate affected host-local caches.
 
-Surface teardown runs before container reconciliation. Container reconciliation
+Session teardown runs before container reconciliation. Container reconciliation
 runs before pane chrome because container rebuilds recreate pane wrapper hosts.
 Mount-time focus runs after pane chrome when it may target a search field the
 chrome pass creates. Occlusion remains last because it reads the final
-visible/mounted surface state.
+visible/mounted session state.
 
 Post-reconcile commands target views that reconcile creates.
 `Command.isPostReconcile` must stay an exhaustive switch with no `default`, so
@@ -107,13 +107,13 @@ adding a command requires an explicit phase decision.
 ## Scheduling And External Invalidation
 
 Reconcile scheduling may coalesce only changes whose delayed application is
-semantically safe. Today that means high-frequency cosmetic surface metadata,
+semantically safe. Today that means high-frequency cosmetic session metadata,
 background-pane alert badges from bell/desktop-notification events, and
 shell-integration command events. These feed only sidebar/window/focus-border/
 toolbar badge chrome, the pane toolbar, and per-pane theme config; they never
 change `ContainerShape`. Structural/container-affecting messages reconcile
 inline. Any future coalescing of structural messages must first add a behavioral
-popover/surface sync test that proves model state, AppKit teardown, and
+popover/session sync test that proves model state, AppKit teardown, and
 post-reconcile commands stay aligned.
 
 If external state changes what a projection should apply while the model value
@@ -190,7 +190,7 @@ The cost of this architecture is occasional extra model helpers, generation
 counters, host-lifetime invalidation, or `ViewLocalState` plumbing. The payoff is
 stronger directionality: `update()` owns domain/model transitions, `Command` owns
 true external effects, and `reconcile()` owns rendering the current model into
-AppKit and surface state.
+AppKit and session state.
 
 ## References
 

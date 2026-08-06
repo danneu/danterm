@@ -250,18 +250,18 @@ import Testing
         #expect(right.id == source, "moved pane lands at the new right position")
     }
 
-    @Test("surfaceCreationFailed in a split tab removes the tab and cleans up siblings")
-    func surfaceCreationFailedInSplitRemovesTabAndCleansSiblings() {
-        // Intent: surfaceCreationFailed for a pane in a SPLIT tab removes the
+    @Test("sessionCreationFailed in a split tab removes the tab and cleans up siblings")
+    func sessionCreationFailedInSplitRemovesTabAndCleansSiblings() {
+        // Intent: sessionCreationFailed for a pane in a SPLIT tab removes the
         //   whole tab, drops every sibling pane from pane()/allPaneIds, and
-        //   prunes id-keyed side tables; reconcileSurfaceExistence's pure
+        //   prunes id-keyed side tables; reconcileSessionExistence's pure
         //   teardown set selects exactly the sibling panes that vanished.
-        // Why it exists: Stage 8 moved surface teardown into the reconciler,
+        // Why it exists: Stage 8 moved session teardown into the reconciler,
         //   so this asserts the structural model change PLUS the pure
-        //   teardown-selection diff (surfacesToTearDown) instead of the old
-        //   per-sibling .destroySurface command path.
+        //   teardown-selection diff (sessionsToTearDown) instead of the old
+        //   per-sibling teardown command path.
         // Scenario: spec-first failure-cascade check -- pane A in a 2-pane
-        //   tab fails to create its surface; both A and B vanish, a second
+        //   tab fails to create its session; both A and B vanish, a second
         //   tab survives, and the teardown set names exactly {A, B}.
         var model = makeModel()
         createTab(&model)
@@ -277,11 +277,11 @@ import Testing
         model.lastNotificationTime[paneA] = [.bell: Date()]
         model.lastNotificationTime[paneB] = [.bell: Date()]
 
-        // Surfaces live before the failure = every pane currently in the model.
-        let liveSurfaceIds = Set(model.allPaneIds)
-        #expect(liveSurfaceIds.isSuperset(of: [paneA, paneB]), "both split panes were live")
+        // Sessions live before the failure = every pane currently in the model.
+        let liveSessionIds = Set(model.allPaneIds)
+        #expect(liveSessionIds.isSuperset(of: [paneA, paneB]), "both split panes were live")
 
-        update(&model, .surfaceCreationFailed(paneId: paneA))
+        update(&model, .sessionCreationFailed(paneId: paneA))
 
         // Whole tab removed: both panes gone.
         #expect(model.pane(paneA) == nil, "failed pane should be gone")
@@ -296,35 +296,35 @@ import Testing
         #expect(model.lastNotificationTime[paneA] == nil, "lastNotificationTime should be pruned for paneA")
         #expect(model.lastNotificationTime[paneB] == nil, "lastNotificationTime should be pruned for paneB")
 
-        // reconcileSurfaceExistence tears down exactly the two siblings (now absent from
+        // reconcileSessionExistence tears down exactly the two siblings (now absent from
         // allPaneIds); the surviving second-tab pane is never selected.
-        let teardown = surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model)
+        let teardown = sessionsToTearDown(liveSessionIds: liveSessionIds, model: model)
         #expect(teardown == Set([paneA, paneB]), "every sibling pane is selected for teardown")
         #expect(teardown.isDisjoint(with: Set(model.allPaneIds)), "surviving panes are never torn down")
     }
 
-    @Test("surfaceCreationFailed for an unknown pane is a no-op")
-    func surfaceCreationFailedForUnknownPaneIsNoop() {
-        // Intent: surfaceCreationFailed with an id owned by no tree (which is
+    @Test("sessionCreationFailed for an unknown pane is a no-op")
+    func sessionCreationFailedForUnknownPaneIsNoop() {
+        // Intent: sessionCreationFailed with an id owned by no tree (which is
         //   structurally impossible under tree-owns-panes, but still defended
         //   against) emits no commands and leaves structure-only state unchanged.
         // Why it exists: pins the safe-no-op guard for a stray async failure
         //   callback after the pane and its side tables were already cleaned up.
-        // Scenario: spec-first defensive-noop -- a surface-failed Msg arrives
+        // Scenario: spec-first defensive-noop -- a session-failed Msg arrives
         //   for an unknown pane id; the model and commands are byte-equal to
         //   before.
         var model = makeModel()
         createTab(&model)
         let before = model
 
-        let commands = update(&model, .surfaceCreationFailed(paneId: PaneId()))
+        let commands = update(&model, .sessionCreationFailed(paneId: PaneId()))
 
         #expect(commands.isEmpty, "unknown pane should emit no commands")
         expectNoDifference(model, before)
     }
 
-    @Test("surfaceCreationFailed for a pane in no tree cleans side tables")
-    func surfaceCreationFailedForPaneInNoTreeCleansSideTables() {
+    @Test("sessionCreationFailed for a pane in no tree cleans side tables")
+    func sessionCreationFailedForPaneInNoTreeCleansSideTables() {
         // Intent: the defensive no-tree branch still prunes per-pane side
         //   tables for the failed pane id.
         // Why it exists: pins the cleanup behavior that a structure-only
@@ -342,7 +342,7 @@ import Testing
         model.searchState[paneId] = SearchModel(needle: "test")
         model.lastNotificationTime[paneId] = [.bell: Date()]
 
-        let commands = update(&model, .surfaceCreationFailed(paneId: paneId))
+        let commands = update(&model, .sessionCreationFailed(paneId: paneId))
 
         #expect(commands.isEmpty, "no-tree cleanup should emit no commands")
         #expect(!model.alerts.contains { $0.paneId == paneId }, "stale alerts should be removed")

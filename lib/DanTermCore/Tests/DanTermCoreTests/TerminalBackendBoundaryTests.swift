@@ -16,19 +16,19 @@ struct TerminalBackendBoundaryTests {
         let paneId = PaneId(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
 
         assertSessionMessage(.titleChanged("vim"), paneId: paneId) {
-            if case .surfaceTitle(let id, let title) = $0 { return id == paneId && title == "vim" }
+            if case .sessionTitle(let id, let title) = $0 { return id == paneId && title == "vim" }
             return false
         }
         assertSessionMessage(.cwdChanged("/tmp"), paneId: paneId) {
-            if case .surfaceCwd(let id, let cwd) = $0 { return id == paneId && cwd == "/tmp" }
+            if case .sessionCwd(let id, let cwd) = $0 { return id == paneId && cwd == "/tmp" }
             return false
         }
         assertSessionMessage(.cwdChanged(nil), paneId: paneId) {
-            if case .surfaceCwd(let id, let cwd) = $0 { return id == paneId && cwd == nil }
+            if case .sessionCwd(let id, let cwd) = $0 { return id == paneId && cwd == nil }
             return false
         }
         assertSessionMessage(.bell, paneId: paneId) {
-            if case .surfaceBell(let id) = $0 { return id == paneId }
+            if case .sessionBell(let id) = $0 { return id == paneId }
             return false
         }
         assertSessionMessage(.commandStarted("echo ok"), paneId: paneId) {
@@ -58,7 +58,7 @@ struct TerminalBackendBoundaryTests {
             return false
         }
         assertSessionMessage(.progress(.pause(percent: 42)), paneId: paneId) {
-            if case .surfaceProgress(let id, let state) = $0 {
+            if case .sessionProgress(let id, let state) = $0 {
                 return id == paneId && state == .pause(percent: 42)
             }
             return false
@@ -80,7 +80,7 @@ struct TerminalBackendBoundaryTests {
             return false
         }
         assertSessionMessage(.closeRequested, paneId: paneId) {
-            if case .surfaceClosed(let id) = $0 { return id == paneId }
+            if case .sessionClosed(let id) = $0 { return id == paneId }
             return false
         }
     }

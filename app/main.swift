@@ -56,7 +56,7 @@ if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZA
 #endif
 
 // Restore variables are reserved for per-pane injection. Ghostty can only add
-// surface overrides, so inherited values must be removed process-wide first.
+// per-session overrides, so inherited values must be removed process-wide first.
 for name in reservedRestoreEnvironmentVariableNames {
     unsetenv(name)
 }

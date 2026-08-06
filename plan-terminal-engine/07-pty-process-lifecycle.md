@@ -49,8 +49,8 @@ the PTY master and ordinary terminal hangup applies, but no in-process
 escalation can run.
 
 When the shell exits on its own, the PTY layer reports its status once and the
-existing `surfaceClosed` pane lifecycle decides the resulting pane, tab, and
-last-window behavior. The terminal surface does not remain as a new
+existing `sessionClosed` pane lifecycle decides the resulting pane, tab, and
+last-window behavior. The terminal session does not remain as a new
 process-exited holding state.
 
 ## Invariants

@@ -21,7 +21,7 @@ external-guidance survey; every claim in it carries the URL it came from.
     `#terminalDamageRowsWithGlyphHalo`).
   - `setDisplayID` is an intentional no-op for the Swift backend
     (`app/SwiftTerminalSessionView.swift#setDisplayID`); the per-surface
-    CVDisplayLink machinery (`app/AppRuntime.swift#syncSurfaceDisplayID`)
+    CVDisplayLink machinery (`app/AppRuntime.swift#syncSessionDisplayID`)
     exists for the libghostty backend only.
   - Cursor-blink state (DECSET 12) is modeled in
     `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` but nothing in the
@@ -44,8 +44,8 @@ external-guidance survey; every claim in it carries the URL it came from.
   - Per-pane visibility is computed in the pure core: visible iff the window
     is non-occluded AND the pane's tab is selected AND the pane is not hidden
     behind a zoomed sibling
-    (`lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift#effectiveSurfaceVisibility`).
-  - `app/AppRuntime.swift#syncSurfaceVisibility` pushes changes to sessions,
+    (`lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift#effectivePaneVisibility`).
+  - `app/AppRuntime.swift#syncPaneVisibility` pushes changes to sessions,
     re-triggered by `app/AppDelegate.swift#windowDidChangeOcclusionState` --
     the exact API Apple recommends for visibility response (F6).
   - In the controller, `setVisible(false)` gates *planning only*

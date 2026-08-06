@@ -289,8 +289,8 @@ private struct SectionRow {
         let liveBefore = Set(model.allPaneIds)
         update(&model, .requestClosePane(paneId: paneId))
         #expect(model.pane(paneId) == nil, "pane should be removed")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([paneId]),
-            "closed pane's surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set([paneId]),
+            "closed pane's session is torn down")
     }
 
     @Test("requestClosePane with no todos proceeds to closePane")
@@ -308,8 +308,8 @@ private struct SectionRow {
         let liveBefore = Set(model.allPaneIds)
         update(&model, .requestClosePane(paneId: paneId))
         #expect(model.pane(paneId) == nil, "pane should be removed")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([paneId]),
-            "closed pane's surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set([paneId]),
+            "closed pane's session is torn down")
     }
 
     // MARK: - closePane + popover cleanup

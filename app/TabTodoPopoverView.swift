@@ -502,7 +502,7 @@ class TabTodoPopoverViewController: TodoPopoverControllerBase {
             // Side-effect on click: focus the pane and dismiss the popover so
             // the user lands in the terminal. Return false so the row doesn't
             // visually select.
-            runtime?.focusPaneSurface(paneId)
+            runtime?.focusPaneSession(paneId)
             view.window?.close()
             return false
         case .tabSectionHeader:

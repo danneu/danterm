@@ -1,8 +1,8 @@
 // Swift Testing migration of the legacy `tests/UpdateGhosttyTests.swift`
-// harness suite. Pins the surface-event Msg paths: surfaceBell + OSC
+// harness suite. Pins the session-event Msg paths: sessionBell + OSC
 // desktopNotification routing (focused-pane suppression vs background-pane
-// alert + sendNotification, with per-kind throttling), surfaceCreationFailed
-// cleanup (single + split tab, terminate vs fallback), surface metadata
+// alert + sendNotification, with per-kind throttling), sessionCreationFailed
+// cleanup (single + split tab, terminate vs fallback), session metadata
 // updates (title/cwd/progress), alert and command-event coalescing policy
 // against post-reconcile forcing. The few tests already carrying Intent /
 // Why / Scenario preambles in the legacy file keep them verbatim; the rest
@@ -26,7 +26,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .surfaceBell(paneId: paneId))
+        let commands = update(&model, .sessionBell(paneId: paneId))
         #expect(model.alerts.count == 0, "no alert for bell on focused pane")
         #expect(commands.count == 0, "no commands for bell on focused pane")
     }
@@ -45,7 +45,7 @@ import Testing
 
         createTab(&model)
 
-        let commands = update(&model, .surfaceBell(paneId: firstTabPaneId))
+        let commands = update(&model, .sessionBell(paneId: firstTabPaneId))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .bell)
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
@@ -71,7 +71,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .surfaceBell(paneId: paneId))
+        let commands = update(&model, .sessionBell(paneId: paneId))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .bell)
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
@@ -82,35 +82,35 @@ import Testing
         }, "should emit sendNotification for inactive focused-pane bell")
     }
 
-    @Test("testSurfaceCreationFailedCleansUp")
-    func testSurfaceCreationFailedCleansUp() {
-        // Intent: surfaceCreationFailed on the only pane removes the pane +
-        //   its tab, emits terminate (no tabs left), and the surface-
-        //   existence net tears down the failed pane's surface.
+    @Test("testSessionCreationFailedCleansUp")
+    func testSessionCreationFailedCleansUp() {
+        // Intent: sessionCreationFailed on the only pane removes the pane +
+        //   its tab, emits terminate (no tabs left), and the session-
+        //   existence net tears down the failed pane's session.
         // Why it exists: pins the bottom-out terminate path.
         // Scenario: spec-first terminate -- last tab's pane fails to be
         //   created; app must terminate.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let liveSurfaceIds = Set(model.allPaneIds)
+        let liveSessionIds = Set(model.allPaneIds)
 
-        let commands = update(&model, .surfaceCreationFailed(paneId: paneId))
+        let commands = update(&model, .sessionCreationFailed(paneId: paneId))
         #expect(model.pane(paneId) == nil, "pane should be removed")
         #expect(model.groups[0].tabs.count == 0, "tab should be removed")
         #expect(hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
         }, "should terminate when no tabs left")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model) == Set([paneId]),
-            "failed pane surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveSessionIds, model: model) == Set([paneId]),
+            "failed pane session is torn down")
     }
 
-    @Test("surfaceCreationFailed removes split tab siblings")
-    func surfaceCreationFailedRemovesSplitTabSiblings() {
+    @Test("sessionCreationFailed removes split tab siblings")
+    func sessionCreationFailedRemovesSplitTabSiblings() {
         // Intent: a failure on one pane of a split tab removes BOTH panes
         //   (the tab as a whole), selects a fallback tab, and tears down
-        //   both pane surfaces.
+        //   both pane sessions.
         // Why it exists: pins the whole-tab teardown branch (not just the
         //   single failed leaf) so a failed launch doesn't strand its
         //   sibling.
@@ -124,16 +124,16 @@ import Testing
         createTab(&model)
         let fallbackTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: tabId))
-        let liveSurfaceIds = Set(model.allPaneIds)
+        let liveSessionIds = Set(model.allPaneIds)
 
-        let commands = update(&model, .surfaceCreationFailed(paneId: paneA))
+        let commands = update(&model, .sessionCreationFailed(paneId: paneA))
 
         #expect(model.selectedTabId == fallbackTabId, "selection should move to fallback tab")
         #expect(model.pane(paneA) == nil, "failed pane should be removed")
         #expect(model.pane(paneB) == nil, "sibling pane should be removed")
         #expect(!model.groups[0].tabs.contains { $0.id == tabId }, "failed tab should be removed")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model) == Set([paneA, paneB]),
-            "both sibling pane surfaces are torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveSessionIds, model: model) == Set([paneA, paneB]),
+            "both sibling pane sessions are torn down")
         #expect(!hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
@@ -153,10 +153,10 @@ import Testing
 
         createTab(&model)
 
-        update(&model, .surfaceBell(paneId: firstTabPaneId))
+        update(&model, .sessionBell(paneId: firstTabPaneId))
         #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "should set lastNotificationTime for bell")
 
-        let effects2 = update(&model, .surfaceBell(paneId: firstTabPaneId))
+        let effects2 = update(&model, .sessionBell(paneId: firstTabPaneId))
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false
@@ -177,13 +177,13 @@ import Testing
         //   incident to cite, and none should be invented.
         let paneId = PaneId()
         let coalescedMessages: [Msg] = [
-            .surfaceTitle(paneId: paneId, title: "vim"),
-            .surfaceCwd(paneId: paneId, cwd: "/tmp"),
-            .surfaceProgress(paneId: paneId, state: .set(percent: 50)),
+            .sessionTitle(paneId: paneId, title: "vim"),
+            .sessionCwd(paneId: paneId, cwd: "/tmp"),
+            .sessionProgress(paneId: paneId, state: .set(percent: 50)),
             .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
             .searchTotalReported(paneId: paneId, total: 42),
             .searchSelectionReported(paneId: paneId, selected: 3),
-            .surfaceBell(paneId: paneId),
+            .sessionBell(paneId: paneId),
             .desktopNotification(paneId: paneId, title: "build", body: "done"),
             .commandStarted(paneId: paneId, command: "make test"),
             .commandEnded(paneId: paneId)
@@ -248,13 +248,13 @@ import Testing
         }
 
         let scenarios: [(Msg, AppModel)] = [
-            (.surfaceTitle(paneId: focusedPane, title: "vim"), focusedModel),
-            (.surfaceCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
-            (.surfaceProgress(paneId: focusedPane, state: .set(percent: 50)), focusedModel),
-            (.surfaceTitle(paneId: unfocusedPane, title: "htop"), unfocusedModel),
-            (.surfaceCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
-            (.surfaceProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel),
-            (.surfaceBell(paneId: unfocusedPane), unfocusedModel),
+            (.sessionTitle(paneId: focusedPane, title: "vim"), focusedModel),
+            (.sessionCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
+            (.sessionProgress(paneId: focusedPane, state: .set(percent: 50)), focusedModel),
+            (.sessionTitle(paneId: unfocusedPane, title: "htop"), unfocusedModel),
+            (.sessionCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
+            (.sessionProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel),
+            (.sessionBell(paneId: unfocusedPane), unfocusedModel),
             (.desktopNotification(paneId: unfocusedPane, title: "build", body: "done"), unfocusedModel),
             (.commandStarted(paneId: unfocusedPane, command: "make"), unfocusedModel),
             (.commandEnded(paneId: unfocusedPane), agentCommandEndedModel)
@@ -268,9 +268,9 @@ import Testing
         }
     }
 
-    @Test("testSurfaceTitleFocusedPane")
-    func testSurfaceTitleFocusedPane() {
-        // Intent: surfaceTitle on the focused pane updates both the pane's
+    @Test("testSessionTitleFocusedPane")
+    func testSessionTitleFocusedPane() {
+        // Intent: sessionTitle on the focused pane updates both the pane's
         //   title and the tab's title (chrome sync).
         // Why it exists: pins the focused-pane chrome sync.
         // Scenario: spec-first focused title.
@@ -278,14 +278,14 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
         #expect(model.pane(paneId)?.title == "vim")
         #expect(model.groups[0].tabs[0].title == "vim")
     }
 
-    @Test("testSurfaceTitleUnfocusedPane")
-    func testSurfaceTitleUnfocusedPane() {
-        // Intent: surfaceTitle on an unfocused pane updates the pane's
+    @Test("testSessionTitleUnfocusedPane")
+    func testSessionTitleUnfocusedPane() {
+        // Intent: sessionTitle on an unfocused pane updates the pane's
         //   title only (no tab chrome change); emits exactly one
         //   scheduleCheckpoint.
         // Why it exists: pins the per-pane scope of the title update.
@@ -296,16 +296,16 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
 
-        let commands = update(&model, .surfaceTitle(paneId: paneA, title: "htop"))
+        let commands = update(&model, .sessionTitle(paneId: paneA, title: "htop"))
         #expect(model.pane(paneA)?.title == "htop", "pane title should update")
         #expect(model.groups[0].tabs[0].title == "Terminal", "tab title should not change")
         #expect(commands.count == 1, "only scheduleCheckpoint for unfocused pane title")
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
-    @Test("testSurfacePwdFocusedPane")
-    func testSurfacePwdFocusedPane() {
-        // Intent: surfaceCwd on the focused pane updates the pane's cwd
+    @Test("testSessionPwdFocusedPane")
+    func testSessionPwdFocusedPane() {
+        // Intent: sessionCwd on the focused pane updates the pane's cwd
         //   and the tab's subtitle (abbreviated from $HOME).
         // Why it exists: pins the chrome-sync for cwd on the selected
         //   tab.
@@ -314,15 +314,15 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
+        update(&model, .sessionCwd(paneId: paneId, cwd: "/home/dan/projects"))
         #expect(model.pane(paneId)?.cwd == "/home/dan/projects")
         #expect(model.groups[0].tabs[0].subtitle == abbreviateHome("/home/dan/projects"),
             "focused-pane cwd syncs the selected tab's subtitle (the window-chrome input)")
     }
 
-    @Test("testSurfacePwdUnfocusedPane")
-    func testSurfacePwdUnfocusedPane() {
-        // Intent: surfaceCwd on an unfocused pane only updates the pane's
+    @Test("testSessionPwdUnfocusedPane")
+    func testSessionPwdUnfocusedPane() {
+        // Intent: sessionCwd on an unfocused pane only updates the pane's
         //   cwd; emits exactly one scheduleCheckpoint.
         // Why it exists: pins the per-pane scope for cwd updates.
         // Scenario: spec-first unfocused cwd.
@@ -332,14 +332,14 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
 
-        let commands = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
+        let commands = update(&model, .sessionCwd(paneId: paneA, cwd: "/tmp"))
         #expect(model.pane(paneA)?.cwd == "/tmp", "pane cwd should update")
         #expect(commands.count == 1, "only scheduleCheckpoint for unfocused pane cwd")
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
-    @Test("testSurfaceTitleBackgroundTab")
-    func testSurfaceTitleBackgroundTab() {
+    @Test("testSessionTitleBackgroundTab")
+    func testSessionTitleBackgroundTab() {
         // Intent: a background tab's pane title still updates that tab's
         //   title; the selected tab is unaffected.
         // Why it exists: pins the "every tab tracks its pane chrome" rule
@@ -353,13 +353,13 @@ import Testing
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        update(&model, .surfaceTitle(paneId: paneA, title: "vim"))
+        update(&model, .sessionTitle(paneId: paneA, title: "vim"))
         #expect(model.pane(paneA)?.title == "vim", "pane title should update")
         #expect(model.groups[0].tabs[0].title == "vim", "background tab title should update")
     }
 
-    @Test("testSurfacePwdBackgroundTab")
-    func testSurfacePwdBackgroundTab() {
+    @Test("testSessionPwdBackgroundTab")
+    func testSessionPwdBackgroundTab() {
         // Intent: a background tab's pane cwd still updates that tab's
         //   subtitle.
         // Why it exists: pins the same per-tab rule for cwd.
@@ -372,7 +372,7 @@ import Testing
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
+        update(&model, .sessionCwd(paneId: paneA, cwd: "/tmp"))
         #expect(model.pane(paneA)?.cwd == "/tmp", "pane cwd should update")
         #expect(model.groups[0].tabs[0].subtitle == ("~" == abbreviateHome("/tmp") ? "~" : "/tmp"), "background tab subtitle should update")
     }
@@ -396,14 +396,14 @@ import Testing
         let accepted = String(repeating: "a", count: 64 * 1024)
         let rejected = accepted + "b"
 
-        #expect(update(&model, .surfaceTitle(paneId: paneId, title: rejected)).isEmpty)
+        #expect(update(&model, .sessionTitle(paneId: paneId, title: rejected)).isEmpty)
         #expect(model.pane(paneId)?.title != rejected)
-        #expect(update(&model, .surfaceTitle(paneId: paneId, title: accepted)).count == 1)
+        #expect(update(&model, .sessionTitle(paneId: paneId, title: accepted)).count == 1)
         #expect(model.pane(paneId)?.title == accepted)
 
-        #expect(update(&model, .surfaceCwd(paneId: paneId, cwd: rejected)).isEmpty)
+        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: rejected)).isEmpty)
         #expect(model.pane(paneId)?.cwd != rejected)
-        #expect(update(&model, .surfaceCwd(paneId: paneId, cwd: accepted)).count == 1)
+        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: accepted)).count == 1)
         #expect(model.pane(paneId)?.cwd == accepted)
 
         #expect(update(&model, .commandStarted(paneId: paneId, command: rejected)).isEmpty)
@@ -530,7 +530,7 @@ import Testing
 
         createTab(&model)
 
-        update(&model, .surfaceBell(paneId: firstTabPaneId))
+        update(&model, .sessionBell(paneId: firstTabPaneId))
         #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "bell should set lastNotificationTime")
 
         let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
@@ -549,9 +549,9 @@ import Testing
 
     // MARK: - Progress
 
-    @Test("testSurfaceProgressSetStoresState")
-    func testSurfaceProgressSetStoresState() {
-        // Intent: surfaceProgress(.set) stores the percent on the pane;
+    @Test("testSessionProgressSetStoresState")
+    func testSessionProgressSetStoresState() {
+        // Intent: sessionProgress(.set) stores the percent on the pane;
         //   emits no commands.
         // Why it exists: pins the no-side-effect progress write.
         // Scenario: spec-first progress set.
@@ -559,29 +559,29 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 50)))
+        let commands = update(&model, .sessionProgress(paneId: paneId, state: .set(percent: 50)))
         #expect(model.pane(paneId)?.progress == .set(percent: 50))
         #expect(commands.count == 0, "no commands from progress update")
     }
 
-    @Test("testSurfaceProgressNilClearsState")
-    func testSurfaceProgressNilClearsState() {
-        // Intent: surfaceProgress(.nil) clears the pane's progress.
+    @Test("testSessionProgressNilClearsState")
+    func testSessionProgressNilClearsState() {
+        // Intent: sessionProgress(.nil) clears the pane's progress.
         // Why it exists: pins the explicit-clear branch.
         // Scenario: spec-first progress clear.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 75)))
+        update(&model, .sessionProgress(paneId: paneId, state: .set(percent: 75)))
         #expect(model.pane(paneId)?.progress == .set(percent: 75))
 
-        update(&model, .surfaceProgress(paneId: paneId, state: nil))
+        update(&model, .sessionProgress(paneId: paneId, state: nil))
         #expect(model.pane(paneId)?.progress == nil, "progress should be cleared")
     }
 
-    @Test("testSurfaceProgressUnknownPaneIsNoop")
-    func testSurfaceProgressUnknownPaneIsNoop() {
+    @Test("testSessionProgressUnknownPaneIsNoop")
+    func testSessionProgressUnknownPaneIsNoop() {
         // Intent: progress for an unknown pane id emits no commands.
         // Why it exists: pins fail-closed on stale pane ids.
         // Scenario: spec-first stale-pane progress.
@@ -589,7 +589,7 @@ import Testing
         createTab(&model)
         let unknownPaneId = PaneId()
 
-        let commands = update(&model, .surfaceProgress(paneId: unknownPaneId, state: .set(percent: 50)))
+        let commands = update(&model, .sessionProgress(paneId: unknownPaneId, state: .set(percent: 50)))
         #expect(commands.count == 0, "no commands for unknown pane")
     }
 
@@ -602,8 +602,8 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .surfaceProgress(paneId: paneId, state: .indeterminate))
-        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionProgress(paneId: paneId, state: .indeterminate))
+        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
 
         #expect(model.pane(paneId)?.progress == .indeterminate, "progress should survive title update")
         #expect(model.pane(paneId)?.title == "vim")
@@ -618,24 +618,24 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .surfaceProgress(paneId: paneId, state: .error(percent: 80)))
-        update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
+        update(&model, .sessionProgress(paneId: paneId, state: .error(percent: 80)))
+        update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp"))
 
         #expect(model.pane(paneId)?.progress == .error(percent: 80), "progress should survive cwd update")
         #expect(model.pane(paneId)?.cwd == "/tmp")
     }
 
-    @Test("testSurfaceClosed")
-    func testSurfaceClosed() {
-        // Intent: surfaceClosed on the last pane flips pendingConfirmation
+    @Test("testSessionClosed")
+    func testSessionClosed() {
+        // Intent: sessionClosed on the last pane flips pendingConfirmation
         //   to .terminate and leaves the model intact.
-        // Why it exists: pins the surface-closed -> quit-confirm path.
-        // Scenario: spec-first surface-closed terminate.
+        // Why it exists: pins the session-closed -> quit-confirm path.
+        // Scenario: spec-first session-closed terminate.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .surfaceClosed(paneId: paneId))
+        let commands = update(&model, .sessionClosed(paneId: paneId))
         #expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")

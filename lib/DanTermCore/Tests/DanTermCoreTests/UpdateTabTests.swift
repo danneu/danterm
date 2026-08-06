@@ -18,10 +18,10 @@ import Testing
     @Test("testCreateTabAddsToDefaultGroup")
     func testCreateTabAddsToDefaultGroup() {
         // Intent: createTab adds a tab to the default group, picks a single
-        //   pane id, selects it, and emits exactly the createSurface command
+        //   pane id, selects it, and emits exactly the createSession command
         //   for that pane.
         // Why it exists: pins the happy path the foreground tab UI relies on
-        //   end to end (model selection + downstream surface creation).
+        //   end to end (model selection + downstream session creation).
         // Scenario: spec-first first-tab check.
         var model = makeModel()
         let commands = createTab(&model)
@@ -30,15 +30,15 @@ import Testing
         #expect(model.allPaneIds.count == 1)
         #expect(model.selectedTabId == model.groups[0].tabs[0].id)
         #expect(hasEffect(commands) {
-            if case .createSurface = $0 { return true }
+            if case .createSession = $0 { return true }
             return false
-        }, "should emit createSurface")
+        }, "should emit createSession")
     }
 
     @Test("testCreateTabBackgroundDoesNotChangeSelection")
     func testCreateTabBackgroundDoesNotChangeSelection() {
         // Intent: a background createTab grows the tab list and emits a
-        //   createSurface for the new pane while leaving selection and the
+        //   createSession for the new pane while leaving selection and the
         //   prior pane's focus alone.
         // Why it exists: pins the background-tab invariant against
         //   accidental selection-steal regressions.
@@ -57,43 +57,43 @@ import Testing
         #expect(model.selectedTabId == selectedTabId, "background tab should not steal selection")
         #expect(newPaneIds.count == 1, "background tab should create one pane")
         #expect(hasEffect(commands) {
-            if case .createSurface(let paneId, _, _, _, _) = $0 {
+            if case .createSession(let paneId, _, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
-        }, "should emit createSurface for new pane")
+        }, "should emit createSession for new pane")
         #expect(!hasEffect(commands) {
-            if case .focusSurface(let paneId, false) = $0, paneId == selectedPaneId { return true }
+            if case .focusSession(let paneId, false) = $0, paneId == selectedPaneId { return true }
             return false
         }, "should not defocus selected pane")
     }
 
     @Test("testCreateTabInheritsWorkingDirectory")
     func testCreateTabInheritsWorkingDirectory() {
-        // Intent: a new tab's surface inherits the cwd from the currently
+        // Intent: a new tab's session inherits the cwd from the currently
         //   focused pane.
         // Why it exists: pins the cwd-propagation rule that keeps new tabs
         //   anchored to the user's current directory.
         // Scenario: spec-first cwd inherit -- first pane has cwd "/tmp/test";
-        //   second createTab's surface command carries the same cwd.
+        //   second createTab's session command carries the same cwd.
         var model = makeModel()
         createTab(&model)
         let firstPaneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(firstPaneId) { $0.cwd = "/tmp/test" }
         let commands = createTab(&model)
         let createEffect = commands.first(where: {
-            if case .createSurface = $0 { return true }
+            if case .createSession = $0 { return true }
             return false
         })
-        #expect(createEffect != nil, "should have createSurface command")
-        if case .createSurface(_, let cwd, _, _, _) = createEffect! {
+        #expect(createEffect != nil, "should have createSession command")
+        if case .createSession(_, let cwd, _, _, _) = createEffect! {
             #expect(cwd == "/tmp/test", "cwd should inherit")
         }
     }
 
     @Test("testSelectTabDefocusesOldPanes")
     func testSelectTabDefocusesOldPanes() {
-        // Intent: selectTab emits a focusSurface(_:false) for the
+        // Intent: selectTab emits a focusSession(_:false) for the
         //   previously-selected tab's pane.
         // Why it exists: pins the defocus side effect the runtime relies on
         //   to keep the prior pane's caret from racing the new selection.
@@ -109,7 +109,7 @@ import Testing
 
         let secondPaneId = model.groups[0].tabs[1].focusedPaneId
         #expect(hasEffect(commands) {
-            if case .focusSurface(let pid, false) = $0, pid == secondPaneId { return true }
+            if case .focusSession(let pid, false) = $0, pid == secondPaneId { return true }
             return false
         }, "should defocus second tab's pane")
         #expect(model.selectedTabId == firstTabId)
@@ -148,7 +148,7 @@ import Testing
 
         update(&model, .selectTab(id: tabAId))
 
-        update(&model, .surfaceBell(paneId: tabBPaneId))
+        update(&model, .sessionBell(paneId: tabBPaneId))
         #expect(model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "should have unread alert on background pane")
 
         update(&model, .selectTab(id: tabBId))
@@ -709,8 +709,8 @@ import Testing
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(model.groups[0].tabs.count == 1, "tab should be removed")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([firstPaneId]),
-            "closed tab's pane surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set([firstPaneId]),
+            "closed tab's pane session is torn down")
         #expect(!hasEffect(commands) {
             if case .showCloseTabConfirmation = $0 { return true }
             return false
@@ -815,12 +815,12 @@ import Testing
     @Test("testConfirmCloseTabClearsPendingAndDispatches")
     func testConfirmCloseTabClearsPendingAndDispatches() {
         // Intent: confirmCloseTab clears pendingConfirmation, removes the
-        //   tab, and the surface-existence reconciler tears down every
+        //   tab, and the session-existence reconciler tears down every
         //   pane in the closed tab.
         // Why it exists: pins the confirm-side commitment (mirror of the
         //   request-side gate).
         // Scenario: spec-first confirm-multi -- two-pane first tab; confirm
-        //   closes and tears down both surfaces.
+        //   closes and tears down both sessions.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -835,7 +835,7 @@ import Testing
 
         #expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
         #expect(!model.groups[0].tabs.contains { $0.id == firstTabId }, "tab should be removed")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set(paneIds),
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set(paneIds),
             "each pane in the closed tab is torn down")
     }
 
@@ -860,8 +860,8 @@ import Testing
         for paneId in paneIds {
             #expect(model.pane(paneId) != nil, "pane should still exist")
         }
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
-            "no surface is torn down before the quit confirmation")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).isEmpty,
+            "no session is torn down before the quit confirmation")
         #expect(model.groups[0].tabs.contains { $0.id == tabId }, "tab should still exist")
         #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
@@ -931,7 +931,7 @@ import Testing
         #expect(confirmation.tabCount == 3)
         #expect(model.groups.flatMap(\.tabs).map(\.id) == tabIdsBefore, "tabs should remain until confirm")
         #expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).isEmpty,
             "request should not tear down panes")
     }
 
@@ -987,7 +987,7 @@ import Testing
 
     @Test("testRequestCloseTabsSingleIdDelegatesToRequestCloseTab")
     func testRequestCloseTabsSingleIdDelegatesToRequestCloseTab() {
-        // Intent: a single-id batch produces the same model + surface
+        // Intent: a single-id batch produces the same model + session
         //   teardown + checkpoint emissions as a direct
         //   requestCloseTab.
         // Why it exists: pins the dispatcher's single-id delegation
@@ -1005,8 +1005,8 @@ import Testing
         let batchEffects = update(&batch, .requestCloseTabs(ids: [firstTabId]))
 
         #expect(batch == direct, "single-id batch should match direct request model mutation")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: batch) ==
-                        surfacesToTearDown(liveSurfaceIds: liveBefore, model: direct))
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: batch) ==
+                        sessionsToTearDown(liveSessionIds: liveBefore, model: direct))
         #expect(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
                         effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
@@ -1046,7 +1046,7 @@ import Testing
 
         #expect(!model.groups[0].tabs.contains { $0.id == liveTabId }, "live tab should be closed")
         #expect(model.groups[0].tabs.count == 1, "stale id should be ignored")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).contains(liveTabPaneId),
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).contains(liveTabPaneId),
             "delegated close tears down the live tab pane")
     }
 
@@ -1099,7 +1099,7 @@ import Testing
     @Test("testConfirmCloseTabsRemovesEveryRequestedTabAndClearsPending")
     func testConfirmCloseTabsRemovesEveryRequestedTabAndClearsPending() {
         // Intent: confirmCloseTabs removes every requested tab, clears
-        //   pendingConfirmation, and the surface-existence reconciler
+        //   pendingConfirmation, and the session-existence reconciler
         //   tears down every pane in the closed tabs.
         // Why it exists: pins the batch confirm commit.
         // Scenario: spec-first commit -- close first + second of three
@@ -1121,7 +1121,7 @@ import Testing
 
         #expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
         #expect(Set(model.groups.flatMap(\.tabs).map(\.id)) == Set([thirdTabId]))
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == expectedDestroyed)
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == expectedDestroyed)
         for paneId in expectedDestroyed {
             #expect(model.pane(paneId) == nil, "closed tab pane should be removed")
         }
@@ -1255,9 +1255,9 @@ import Testing
     @Test("testCloseTabNonSelected")
     func testCloseTabNonSelected() {
         // Intent: closing a non-selected tab does not change selection;
-        //   the closed tab's pane surface is torn down.
+        //   the closed tab's pane session is torn down.
         // Why it exists: pins the selection invariant for background-tab
-        //   closes alongside the surface-existence net.
+        //   closes alongside the session-existence net.
         // Scenario: spec-first close-non-selected.
         var model = makeModel()
         createTab(&model)
@@ -1271,8 +1271,8 @@ import Testing
         update(&model, .closeTab(id: firstTabId))
         #expect(model.selectedTabId == secondTabId, "selection should remain on second tab")
         #expect(model.groups[0].tabs.count == 1)
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([firstPaneId]),
-            "closed non-selected tab's pane surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set([firstPaneId]),
+            "closed non-selected tab's pane session is torn down")
     }
 
     // MARK: - Close Tab Selects Previous

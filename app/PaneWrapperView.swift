@@ -1,6 +1,6 @@
 // Pane container view that owns the toolbar, drag handling, search overlay, the
 // terminal view, and the single pane context-menu builder (makePaneMenu) behind
-// the surface right-click, the "..." toolbar button, and the drag-handle menu.
+// the terminal right-click, the "..." toolbar button, and the drag-handle menu.
 import Cocoa
 
 class PaneWrapperView: NSView {
@@ -415,9 +415,9 @@ class PaneWrapperView: NSView {
     }
 
     /// Builds the pane context menu fresh so dynamic item state reflects the current
-    /// model. Single builder for all three entry points -- the surface right-click
+    /// model. Single builder for all three entry points -- the terminal right-click
     /// (terminal-host right-click), the "..." toolbar button, and the drag-handle
-    /// right-click -- so their compositions can't drift apart. Only the surface entry
+    /// right-click -- so their compositions can't drift apart. Only the terminal entry
     /// point passes `includeClipboard: true` to prepend the Copy/Paste section.
     func makePaneMenu(includeClipboard: Bool = false) -> NSMenu {
         let menu = NSMenu()
@@ -435,7 +435,7 @@ class PaneWrapperView: NSView {
 
         if includeClipboard {
             // Copy/Paste forward through the backend-neutral session. Copy is
-            // disabled rather than hidden so the surface menu's shape is
+            // disabled rather than hidden so the terminal menu's shape is
             // stable with and without a selection.
             let copy = wrapperItem("Copy", #selector(copySelectionAction(_:)))
             copy.isEnabled = terminalSession.hasSelection

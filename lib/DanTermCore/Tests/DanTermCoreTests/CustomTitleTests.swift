@@ -1,7 +1,7 @@
 // Swift Testing migration of the legacy `tests/CustomTitleTests.swift`
 // harness suite. Pins the tab custom title behavior end to end:
 // displayTitle precedence (custom > pane), renameTab (set / clear /
-// trim / empty-clear / non-selected scope), surfaceTitle + pane-focus
+// trim / empty-clear / non-selected scope), sessionTitle + pane-focus
 // non-override, windowChrome + close-confirm using displayTitle,
 // snapshot round-trip (preserve customTitle, derive title/subtitle
 // from pane on import including legacy fields), the
@@ -121,13 +121,13 @@ import Testing
             "selected tab B's display title is unchanged by renaming background tab A")
     }
 
-    // MARK: - surfaceTitle does not override custom title
+    // MARK: - sessionTitle does not override custom title
 
-    @Test("testSurfaceTitleDoesNotOverrideCustom")
-    func testSurfaceTitleDoesNotOverrideCustom() {
-        // Intent: surfaceTitle updates the underlying pane title but
+    @Test("testSessionTitleDoesNotOverrideCustom")
+    func testSessionTitleDoesNotOverrideCustom() {
+        // Intent: sessionTitle updates the underlying pane title but
         //   customTitle (and displayTitle) survives.
-        // Why it exists: pins the survive-on-surface-title rule.
+        // Why it exists: pins the survive-on-session-title rule.
         // Scenario: spec-first survive.
         var model = makeModel()
         createTab(&model)
@@ -135,7 +135,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .renameTab(id: tabId, name: "My App"))
 
-        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
         #expect(model.groups[0].tabs[0].customTitle == "My App", "customTitle should persist")
         #expect(model.groups[0].tabs[0].displayTitle == "My App", "displayTitle should use customTitle")
     }
@@ -174,7 +174,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .renameTab(id: tabId, name: "Custom"))
 
-        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
         let chrome = desiredWindowChrome(in: model)
         #expect(chrome.contentTitle == "Custom", "content title uses the custom display title")
         #expect(chrome.windowTitle.contains("Custom"),

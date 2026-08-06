@@ -10,7 +10,7 @@ final class AppRuntime {
     var todoPopover: NSPopover?
     var tabTodoPopover: NSPopover?
     var onSend: ((Msg) -> Void)?
-    var focusedPaneSurfaces: [PaneId] = []
+    var focusedPaneSessions: [PaneId] = []
     var themeBrowserToggles = 0
 
     init(model: AppModel = AppModel(groups: [])) {
@@ -29,8 +29,8 @@ final class AppRuntime {
     func endPaneDrag() {}
     func currentPaneDrop() -> (source: PaneId, target: PaneId, intent: PaneDropIntent)? { nil }
 
-    func focusPaneSurface(_ paneId: PaneId) {
-        focusedPaneSurfaces.append(paneId)
+    func focusPaneSession(_ paneId: PaneId) {
+        focusedPaneSessions.append(paneId)
     }
 
     /// ThemeBrowserView close-button hook. Production toggles the panel in and

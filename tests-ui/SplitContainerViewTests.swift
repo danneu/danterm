@@ -112,7 +112,7 @@ func splitContainerViewTests() {
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = SplitContainerView(
             rootNode: root,
-            surfaceLookup: { id in id == paneId ? terminal : nil },
+            sessionLookup: { id in id == paneId ? terminal : nil },
             runtime: nil,
             isZoomed: false,
             hasSplits: false,
@@ -140,7 +140,7 @@ private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRu
     )
     return SplitContainerView(
         rootNode: root,
-        surfaceLookup: { _ in nil },
+        sessionLookup: { _ in nil },
         runtime: runtime,
         isZoomed: false,
         hasSplits: true,
@@ -164,7 +164,7 @@ private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: Split
     )
     return SplitContainerView(
         rootNode: root,
-        surfaceLookup: { _ in nil },
+        sessionLookup: { _ in nil },
         runtime: nil,
         isZoomed: false,
         hasSplits: true,

@@ -428,7 +428,7 @@ on success.
   user request; you would be typing into your own input stream.
 - Prefer `tab new --group <group-id> --cmd` and
   `pane split --pane <pane-id> --cmd` over the
-  split-then-`pane input` pattern. `--cmd` seeds the command at surface
+  split-then-`pane input` pattern. `--cmd` seeds the command at session
   creation time and avoids racing the shell prompt.
 - To launch Claude with an initial prompt, keep its stdout attached to the
   terminal. For serious agent work (implementing a plan, verifying an issue,

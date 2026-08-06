@@ -158,3 +158,13 @@ its `docs/design/index.md` entry. `AGENTS.md` describes the data flow as
 - Whether PO2 becomes a lint step alongside `scripts/core-purity-lint.sh` or
   stays review-enforced.
 - Exact spellings beyond the Msg and Command cases fixed above.
+
+## Implementation notes
+
+- PO2 remains review-enforced. The permitted graphics, ordinary-English, and
+  Ghostty adapter meanings are semantic categories; encoding them as a path or
+  token allowlist would either reject valid prose or silently bless future
+  terminal-instance uses.
+- Backing-scale state uses `BackingGeometry` / `backingGeometry`, while the
+  Ghostty adapter keeps `SurfaceBridge`, `createSurface()`, and
+  `ghostty_surface_t` because those names describe the wrapped backend API.

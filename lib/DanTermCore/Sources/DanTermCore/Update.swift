@@ -8,7 +8,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // selectedTabId reaches this point. `defer` fires after the matched case
     // returns, and `inout model` makes the reconciled state visible to
     // callers. Without this, MRU updates would have to be sprinkled into
-    // every handler that touches tabs (movePaneToTab, surfaceCreationFailed,
+    // every handler that touches tabs (movePaneToTab, sessionCreationFailed,
     // deleteGroup, restore/import paths, etc.).
     let strandedPopoverPrev = todoPopoverStrandKey(model)
     defer {
@@ -83,7 +83,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         var commands: [Command] = []
         if !background, let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -91,7 +91,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.selectedTabId = tabId
         }
 
-        commands.append(.createSurface(
+        commands.append(.createSession(
             paneId: paneId,
             cwd: cwd,
             command: launch?.cmd,
@@ -189,7 +189,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         }
 
         var commands: [Command] = [
-            .createSurface(
+            .createSession(
                 paneId: newPaneId,
                 cwd: cwd,
                 command: launch?.cmd,
@@ -202,7 +202,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .closePane(let paneId):
-        // Resolve the pane's own tab (mirrors .splitPane): .surfaceClosed routes
+        // Resolve the pane's own tab (mirrors .splitPane): .sessionClosed routes
         // background-tab shell exits here, and a stale context menu may fire after
         // the selection changed -- both must act on the tab that owns the pane.
         // A pane in no tab (already closed) is a pure no-op.
@@ -216,8 +216,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             return emitTerminateConfirmation(&model)
         }
 
-        // Surface teardown is reconcileSurfaceExistence's now (paneId leaves the tree
-        // below, so the next reconcile tears its surface down); keep side-table cleanup.
+        // Session teardown is reconcileSessionExistence's now (paneId leaves the tree
+        // below, so the next reconcile tears its session down); keep side-table cleanup.
         var commands: [Command] = []
         clearPaneSideTables(paneId, in: &model)
         if model.todoPopover == .pane(paneId) {
@@ -340,7 +340,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         var commands: [Command] = []
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
         model.selectedTabId = targetTabId
@@ -366,7 +366,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Defocus old tab's panes
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -485,7 +485,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .paneBecameFirstResponder(let paneId):
         guard let tab = selectedTab(in: model) else { return [] }
         // Only adopt a pane that actually lives in the selected tab. A stray
-        // becomeFirstResponder from a hidden/background surface must not
+        // becomeFirstResponder from a hidden/background session must not
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
         guard allPaneIds(tab.rootNode).contains(paneId) else { return [] }
         let oldFocusedId = tab.focusedPaneId
@@ -708,25 +708,25 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Ghostty Callbacks
 
-    case .surfaceTitle(let paneId, let title):
+    case .sessionTitle(let paneId, let title):
         guard title.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.title = title }
         // Tab/window chrome derives from the focused pane title just set above.
         // Persist so restored tabs show the correct name.
         return [.scheduleCheckpoint]
 
-    case .surfaceCwd(let paneId, let cwd):
+    case .sessionCwd(let paneId, let cwd):
         guard cwd?.fitsTerminalMetadataValueLimit != false else { return [] }
         model.updatePane(paneId) { $0.cwd = cwd }
         // Tab/window chrome derives from the focused pane cwd just set above.
         // Persist so restored panes open in the right dir.
         return [.scheduleCheckpoint]
 
-    case .surfaceProgress(let paneId, let state):
+    case .sessionProgress(let paneId, let state):
         model.updatePane(paneId) { $0.progress = state }
         return []
 
-    case .surfaceBell(let paneId):
+    case .sessionBell(let paneId):
         // No alert for the focused pane while the app is active; when inactive,
         // the focused pane is unseen and should follow the normal alert path.
         if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
@@ -783,7 +783,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        // Tab/group bell badges ride reconcileSidebar (see surfaceBell).
+        // Tab/group bell badges ride reconcileSidebar (see sessionBell).
         var commands: [Command] = []
 
         commands.append(contentsOf: throttledNotification(
@@ -792,11 +792,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         ))
         return commands
 
-    case .surfaceClosed(let paneId):
+    case .sessionClosed(let paneId):
         return update(&model, .closePane(paneId: paneId), env: env)
 
-    case .surfaceCreationFailed(let paneId):
-        // Surface creation failure removes the whole containing tab, so every
+    case .sessionCreationFailed(let paneId):
+        // Session creation failure removes the whole containing tab, so every
         // sibling pane must be cleaned up as if the tab had been closed.
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
@@ -805,7 +805,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 let groupId = model.groups[gi].id
                 var commands: [Command] = []
                 for pid in allPaneIds(tab.rootNode) {
-                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
                 }
@@ -819,7 +819,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 if !model.hasAnyTab {
                     return commands + [.terminate]
                 }
-                // Persist tab removal after a failed surface so it doesn't reappear.
+                // Persist tab removal after a failed session so it doesn't reappear.
                 commands.append(.scheduleCheckpoint)
                 return commands
             }
@@ -985,11 +985,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }
             model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
-            // Close all tabs' surfaces
+            // Close all tabs' sessions.
             var commands: [Command] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
-                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
                 }
@@ -2251,7 +2251,7 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     var commands: [Command] = []
     if let oldTabId = model.selectedTabId {
         for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-            commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+            commands.append(.focusSession(paneId: oldPaneId, focused: false))
         }
     }
     model.selectedTabId = id
@@ -2295,7 +2295,7 @@ private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [
 private func mruCycleCommit(_ model: inout AppModel) -> [Command] {
     guard let cycle = model.mruCycle else { return [] }
 
-    // Tabs may have been removed mid-cycle (closeTab, surfaceCreationFailed,
+    // Tabs may have been removed mid-cycle (closeTab, sessionCreationFailed,
     // last-pane closePane, automation). Filter frozenOrder against live tabs
     // and remap the cursor before reading the chosen id.
     guard let resolved = resolveLiveCycle(cycle, in: model) else {
@@ -2461,7 +2461,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
 
     var commands: [Command] = []
     for pid in paneIds {
-        // Surface teardown is reconcileSurfaceExistence's (these panes leave the tree
+        // Session teardown is reconcileSessionExistence's (these panes leave the tree
         // below); keep side-table cleanup + per-pane popover dismiss here.
         clearPaneSideTables(pid, in: &model)
         if model.todoPopover == .pane(pid) {

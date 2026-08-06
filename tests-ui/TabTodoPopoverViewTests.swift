@@ -334,8 +334,8 @@ func tabTodoPopoverViewTests() {
         try uiExpect(fx.vc.tableView(fx.table, shouldSelectRow: tabItem), "item row should select")
         try uiExpect(!fx.vc.tableView(fx.table, shouldSelectRow: placeholder), "placeholder should not select")
         try uiExpect(!fx.vc.tableView(fx.table, shouldSelectRow: paneHeader), "pane header should not select")
-        try uiExpect(fx.runtime.focusedPaneSurfaces == [fx.paneIds[1]],
-                     "pane header should focus its pane, got \(fx.runtime.focusedPaneSurfaces)")
+        try uiExpect(fx.runtime.focusedPaneSessions == [fx.paneIds[1]],
+                     "pane header should focus its pane, got \(fx.runtime.focusedPaneSessions)")
     }
 
     uiTest("pasteboardWriterForRow emits tab and pane drag payloads") {

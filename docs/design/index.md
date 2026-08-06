@@ -41,3 +41,4 @@ Default statuses are:
 - [2026-07-29: Cross-Module Dispatch on Hot Value Types](2026-07-29-cross-module-value-dispatch.md)
 - [2026-07-31: Nix-Managed Config Location](2026-07-31-nix-managed-config-location.md)
 - [2026-08-01: OSC 133 Prompt Anchoring](2026-08-01-osc-133-prompt-anchoring.md)
+- [2026-08-05: Pane and Session Lexicon](2026-08-05-pane-session-lexicon.md)

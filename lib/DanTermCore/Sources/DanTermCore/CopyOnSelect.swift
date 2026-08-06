@@ -3,7 +3,7 @@
 // unit-testable without AppKit or GhosttyKit.
 
 /// Whether copy-on-select is effectively enabled for a raw `copy-on-select`
-/// config value. Mirrors libghostty's per-surface `.false` gate: nil and
+/// config value. Mirrors libghostty's effective `.false` gate: nil and
 /// unknown values stay enabled, and `clipboard` counts as enabled.
 func isCopyOnSelectEnabled(setting: String?) -> Bool {
     (setting ?? "true") != "false"

@@ -8,7 +8,7 @@ import Cocoa
 
 class SplitContainerView: NSView {
     let rootNode: SplitNodeModel
-    let surfaceLookup: (PaneId) -> (any TerminalSession)?
+    let sessionLookup: (PaneId) -> (any TerminalSession)?
     let isZoomed: Bool
     let hasSplits: Bool
     weak var runtime: AppRuntime?
@@ -17,9 +17,9 @@ class SplitContainerView: NSView {
     /// can address each split by id without re-searching the AppKit hierarchy.
     private var splitViews: [SplitId: PaneSplitView] = [:]
 
-    init(rootNode: SplitNodeModel, surfaceLookup: @escaping (PaneId) -> (any TerminalSession)?, runtime: AppRuntime?, isZoomed: Bool, hasSplits: Bool, frame: NSRect) {
+    init(rootNode: SplitNodeModel, sessionLookup: @escaping (PaneId) -> (any TerminalSession)?, runtime: AppRuntime?, isZoomed: Bool, hasSplits: Bool, frame: NSRect) {
         self.rootNode = rootNode
-        self.surfaceLookup = surfaceLookup
+        self.sessionLookup = sessionLookup
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
@@ -76,7 +76,7 @@ class SplitContainerView: NSView {
         switch node {
         case .leaf(let pane):
             let paneId = pane.id
-            if let terminalSession = surfaceLookup(paneId) {
+            if let terminalSession = sessionLookup(paneId) {
                 terminalSession.hostView.frame = .zero
                 let wrapper = PaneWrapperView(paneId: paneId, terminalView: terminalSession, isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)
                 return wrapper

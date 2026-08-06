@@ -3,7 +3,7 @@
 // markAllAlertsRead, activateAlert (selection + focus + popover dismiss,
 // stale-pane fail-closed, zoom clear), the alert-history cap, focus-mode
 // auto-clear vs manual mode, throttle isolation per pane per kind, alert +
-// throttle cleanup on closePane / closeTab / surfaceCreationFailed,
+// throttle cleanup on closePane / closeTab / sessionCreationFailed,
 // goToMostRecentAlertPane (cross-tab/intra-tab navigation, repeated-press
 // walks, current-tab ack, stale skip, zoom clear), filteredAlerts /
 // alertsEmptyText helpers, setShowAllAlerts, and the manual-mode preservation
@@ -234,7 +234,7 @@ import Testing
         // Intent: model.alerts is capped at 100 items; the oldest gets
         //   dropped when a new alert is inserted.
         // Why it exists: pins the bounded history.
-        // Scenario: spec-first cap -- insert 100, then surfaceBell adds
+        // Scenario: spec-first cap -- insert 100, then sessionBell adds
         //   one more; total stays at 100 with the new alert at the front.
         var model = makeModel()
         createTab(&model)
@@ -252,7 +252,7 @@ import Testing
 
         model.lastNotificationTime[paneId] = [.bell: Date.distantPast]
 
-        update(&model, .surfaceBell(paneId: paneId))
+        update(&model, .sessionBell(paneId: paneId))
         #expect(model.alerts.count == 100, "alerts should be capped at 100")
         #expect(model.alerts[0].body == (model.pane(paneId)?.title ?? ""), "newest alert should be first")
     }
@@ -392,9 +392,9 @@ import Testing
         #expect(model.lastNotificationTime[paneB] == nil, "closing tab should clean up paneB throttle data")
     }
 
-    @Test("testSurfaceCreationFailedRemovesAlerts")
-    func testSurfaceCreationFailedRemovesAlerts() {
-        // Intent: surfaceCreationFailed removes the failed pane's alerts,
+    @Test("testSessionCreationFailedRemovesAlerts")
+    func testSessionCreationFailedRemovesAlerts() {
+        // Intent: sessionCreationFailed removes the failed pane's alerts,
         //   search state, and throttle bookkeeping.
         // Why it exists: pins the full failure-path cleanup symmetry.
         // Scenario: spec-first failure cleanup.
@@ -411,10 +411,10 @@ import Testing
         model.searchState[paneA] = SearchModel(needle: "test")
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
-        update(&model, .surfaceCreationFailed(paneId: paneA))
-        #expect(model.alerts.isEmpty, "surfaceCreationFailed should remove pane's alerts")
-        #expect(model.searchState[paneA] == nil, "surfaceCreationFailed should clean up search state")
-        #expect(model.lastNotificationTime[paneA] == nil, "surfaceCreationFailed should clean up throttle data")
+        update(&model, .sessionCreationFailed(paneId: paneA))
+        #expect(model.alerts.isEmpty, "sessionCreationFailed should remove pane's alerts")
+        #expect(model.searchState[paneA] == nil, "sessionCreationFailed should clean up search state")
+        #expect(model.lastNotificationTime[paneA] == nil, "sessionCreationFailed should clean up throttle data")
     }
 
     @Test("testThrottleIsPerPanePerKind")
@@ -429,7 +429,7 @@ import Testing
 
         createTab(&model)
 
-        let effects1 = update(&model, .surfaceBell(paneId: paneId))
+        let effects1 = update(&model, .sessionBell(paneId: paneId))
         #expect(hasEffect(effects1) {
             if case .sendNotification = $0 { return true }
             return false
@@ -441,7 +441,7 @@ import Testing
             return false
         }, "desktop notification should not be throttled by bell")
 
-        let effects3 = update(&model, .surfaceBell(paneId: paneId))
+        let effects3 = update(&model, .sessionBell(paneId: paneId))
         #expect(!hasEffect(effects3) {
             if case .sendNotification = $0 { return true }
             return false

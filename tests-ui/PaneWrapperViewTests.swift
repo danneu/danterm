@@ -8,12 +8,12 @@ func paneWrapperViewTests() {
     print("PaneWrapperView")
 
     uiTest("includeClipboard menu has full composition, all enabled") {
-        // Intent: the surface right-click menu (includeClipboard: true) is the
+        // Intent: the terminal right-click menu (includeClipboard: true) is the
         //   toolbar menu plus a Copy/Paste clipboard section on top, with every
         //   item enabled when the pane has a selection, cwd, agent session, and
         //   splits.
         // Why it exists: pins the unified-menu contract -- one builder serves
-        //   all three entry points and only the surface entry point gets
+        //   all three entry points and only the terminal entry point gets
         //   clipboard items. Spec-first.
         let fx = makePaneMenuFixture()
         fx.terminal.hasSelection = true
@@ -35,8 +35,8 @@ func paneWrapperViewTests() {
         //   and the menu's shape (item count) is identical to the with-selection
         //   menu.
         // Why it exists: pins the user decision that Copy is disabled rather
-        //   than hidden, so the surface menu's shape is stable. The old inline
-        //   surface menu hid Copy entirely. Spec-first.
+        //   than hidden, so the terminal menu's shape is stable. The old inline
+        //   terminal menu hid Copy entirely. Spec-first.
         let fx = makePaneMenuFixture()
         fx.terminal.hasSelection = true
         let withSelectionCount = fx.wrapper.makePaneMenu(includeClipboard: true).items.count
@@ -109,7 +109,7 @@ func paneWrapperViewTests() {
         // Intent: a pane with no cwd gets a disabled Copy cwd item; a pane with
         //   no agent session gets no Copy Agent Session ID item at all.
         // Why it exists: pins the two model-driven item states on the unified
-        //   menu's surface entry point (previously toolbar-menu-only behavior).
+        //   menu's terminal entry point (previously toolbar-menu-only behavior).
         //   Spec-first.
         let fx = makePaneMenuFixture(cwd: nil, agentSession: nil)
 
@@ -125,7 +125,7 @@ func paneWrapperViewTests() {
         // Intent: a single-pane unzoomed wrapper shows a disabled "Zoom Pane";
         //   a zoomed wrapper shows an enabled "Unzoom Pane".
         // Why it exists: pins the zoom affordance states on the unified menu
-        //   so the surface right-click matches the toolbar menu. Spec-first.
+        //   so the terminal right-click matches the toolbar menu. Spec-first.
         let single = makePaneMenuFixture(isZoomed: false, hasSplits: false)
         let zoomItem = try onlyItem(single.wrapper.makePaneMenu(includeClipboard: true), titled: "Zoom Pane")
         try uiExpect(!zoomItem.isEnabled, "Zoom Pane should be disabled with no splits and not zoomed")
@@ -139,7 +139,7 @@ func paneWrapperViewTests() {
         // Intent: after PaneWrapperView.init, terminalView.paneWrapper === the
         //   wrapper.
         // Why it exists: TerminalView.menu(for:) reaches its menu through this
-        //   back-pointer; this pins the seam the surface right-click relies on.
+        //   back-pointer; this pins the seam the terminal right-click relies on.
         //   Spec-first.
         let fx = makePaneMenuFixture()
         try uiExpect(fx.terminal.paneWrapper === fx.wrapper, "terminalView.paneWrapper should point at the wrapper")

@@ -27,7 +27,7 @@ func terminalBackendBoundaryTests() {
     uiTest("callback gate drops both channels after teardown") {
         // Intent: terminal product events and view-local scrollbar state stop at
         //   the same teardown boundary.
-        // Why it exists: a C callback racing final surface teardown must never
+        // Why it exists: a C callback racing final session teardown must never
         //   message the model or a shorter-lived AppKit scroll wrapper.
         // Scenario: spec-first lifecycle race -- teardown wins, then late callbacks arrive.
         let gate = TerminalSessionCallbackGate()

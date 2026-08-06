@@ -111,8 +111,8 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
     func captureIgnoresReadsWithoutALeaf() throws {
         // Intent: a read for a pane the snapshot has no leaf for contributes nothing.
         // Why it exists: the capture's two halves are taken from separate live structures --
-        //   the model and the live surface table -- and nothing forces them to agree. The graft
-        //   is keyed by leaf, so a stale surface is dropped rather than resurrected; this pins
+        //   the model and the live session table -- and nothing forces them to agree. The graft
+        //   is keyed by leaf, so a stale session is dropped rather than resurrected; this pins
         //   that direction of the mismatch, the one that could otherwise write a pane the model
         //   no longer knows about.
         // Scenario: spec-first. A read is supplied for a pane id that is in no tab.

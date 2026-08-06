@@ -61,9 +61,9 @@ import Testing
         #expect(model.pane(paneId)?.title == titleBefore)
     }
 
-    @Test("surfaceTitle does not affect lastCommand")
-    func surfaceTitleDoesNotAffectLastCommand() {
-        // Intent: a subsequent .surfaceTitle does NOT clear or change
+    @Test("sessionTitle does not affect lastCommand")
+    func sessionTitleDoesNotAffectLastCommand() {
+        // Intent: a subsequent .sessionTitle does NOT clear or change
         //   lastCommand (only .commandStarted/.commandEnded do).
         // Why it exists: pins the inverse of the previous test --
         //   ordinary title updates do not regress the command field.
@@ -74,7 +74,7 @@ import Testing
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        update(&model, .sessionTitle(paneId: paneId, title: "new title"))
         #expect(model.pane(paneId)?.lastCommand == "vim")
     }
 

@@ -11,7 +11,7 @@
 // switch / no-op), containerOpsStrandVisible classification, ContainerShape
 // equality (ratio + leaf metadata carveouts; structural change /
 // zoom-toggle / direction / moved-leaf detected), chromeInvalidation, and
-// surfacesToTearDown. The model-apply helpers (sbTab / sbGroup / sbProj /
+// sessionsToTearDown. The model-apply helpers (sbTab / sbGroup / sbProj /
 // applySidebarRowOps / cShape / cSplitShape / splitNode / applyContainerOps
 // / checkRowOps / checkContainerOps) move to file-private scope alongside
 // the suite.
@@ -138,10 +138,10 @@ import Testing
             "focusSearchField is post-reconcile")
         #expect(Command.makeFirstResponder(paneId: pane).isPostReconcile,
             "makeFirstResponder is post-reconcile (Stage 8)")
-        #expect(!Command.focusSurface(paneId: pane, focused: true).isPostReconcile,
-            "focusSurface is pre-reconcile")
-        #expect(!Command.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
-            "createSurface is pre-reconcile")
+        #expect(!Command.focusSession(paneId: pane, focused: true).isPostReconcile,
+            "focusSession is pre-reconcile")
+        #expect(!Command.createSession(paneId: pane, cwd: nil, command: nil).isPostReconcile,
+            "createSession is pre-reconcile")
         #expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")
         #expect(!Command.scheduleCheckpoint.isPostReconcile,
@@ -710,23 +710,23 @@ import Testing
             "a visibility-only switch invalidates no chrome (wrappers survive)")
     }
 
-    // MARK: - surfacesToTearDown (migrated surfaceCreationFailed net)
+    // MARK: - sessionsToTearDown (migrated sessionCreationFailed net)
 
-    @Test("surfacesToTearDown selects exactly the panes gone from the model")
-    func surfacesToTearDownSelectsOnlyGonePanes() {
-        // Intent: surfacesToTearDown returns only live surfaces whose
+    @Test("sessionsToTearDown selects exactly the panes gone from the model")
+    func sessionsToTearDownSelectsOnlyGonePanes() {
+        // Intent: sessionsToTearDown returns only live sessions whose
         //   pane is no longer in the model.
         // Why it exists: pins the teardown net the reconciler uses to
-        //   destroy orphaned surfaces.
+        //   destroy orphaned sessions.
         // Scenario: spec-first teardown net.
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let live = Set(model.allPaneIds)
         let dead1 = PaneId(), dead2 = PaneId()
-        let teardown = surfacesToTearDown(liveSurfaceIds: live.union([dead1, dead2]), model: model)
+        let teardown = sessionsToTearDown(liveSessionIds: live.union([dead1, dead2]), model: model)
         #expect(teardown == Set([dead1, dead2]),
-            "only the surfaces whose pane left the model are selected")
+            "only the sessions whose pane left the model are selected")
         #expect(teardown.isDisjoint(with: live),
             "surviving panes are never selected for teardown")
     }

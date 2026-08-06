@@ -94,13 +94,13 @@ enum Msg {
     case exportState
 
     // Ghostty callbacks
-    case surfaceTitle(paneId: PaneId, title: String)
-    case surfaceCwd(paneId: PaneId, cwd: String?)
-    case surfaceBell(paneId: PaneId)
+    case sessionTitle(paneId: PaneId, title: String)
+    case sessionCwd(paneId: PaneId, cwd: String?)
+    case sessionBell(paneId: PaneId)
     case desktopNotification(paneId: PaneId, title: String, body: String)
-    case surfaceProgress(paneId: PaneId, state: ProgressState?)
-    case surfaceClosed(paneId: PaneId)
-    case surfaceCreationFailed(paneId: PaneId)
+    case sessionProgress(paneId: PaneId, state: ProgressState?)
+    case sessionClosed(paneId: PaneId)
+    case sessionCreationFailed(paneId: PaneId)
 
     // Alerts
     case markAlertRead(alertId: AlertId)
@@ -224,7 +224,7 @@ extension Msg {
         // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
         // real but throttleable diff (tab title/subtitle, progress, the search
         // overlay's live "N/M" match count).
-        case .surfaceTitle, .surfaceCwd, .surfaceProgress,
+        case .sessionTitle, .sessionCwd, .sessionProgress,
              .searchTotalReported, .searchSelectionReported:
             return true
         // Window/divider live-resize fires this every tick, but ContainerShape
@@ -238,7 +238,7 @@ extension Msg {
         // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
-        case .surfaceBell, .desktopNotification:
+        case .sessionBell, .desktopNotification:
             return true
         // Shell-integration command events, one per prompt in a command loop.
         // commandStarted only sets pane.lastCommand, which no projection reads --

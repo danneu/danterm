@@ -138,7 +138,7 @@ func updatePaneInNode(_ node: SplitNodeModel, id: PaneId, _ body: (inout PaneMod
 }
 
 /// Compute the model-derived renderer visibility for every pane in every tab.
-func effectiveSurfaceVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
+func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
   var result: [PaneId: Bool] = [:]
   let selectedTabId = model.selectedTabId
 

@@ -1,7 +1,7 @@
 // Swift Testing migration of the legacy `tests/SnapshotTests.swift` harness
 // suite. Pins the AppInitFile / snapshot wire format: decode/validate, version
 // gating (v2 only), pane-id and tab-id uniqueness checks, normalized
-// selectedTabId, optional-id minting, surface launch resolution, scrollback
+// selectedTabId, optional-id minting, session launch resolution, scrollback
 // backward-compat, tab color round-trip, preferences-draft dropping, and the
 // todo round-trips on both panes and tabs. The do/catch-and-assert-error
 // pattern (try once + assert error kind) preserves both call sites in the
@@ -509,8 +509,8 @@ import DanTermProtocol
         #expect(model.selectedTabId == TabId(rawValue: UUID(uuidString: "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")!))
     }
 
-    @Test("launch.cwd wins over cwd for surface creation")
-    func launchCwdWinsOverCwdForSurfaceCreation() {
+    @Test("launch.cwd wins over cwd for session creation")
+    func launchCwdWinsOverCwdForSessionCreation() {
         // Intent: when both pane.cwd and launch.cwd are present,
         //   resolveLaunch prefers launch.cwd (with tilde expansion).
         // Why it exists: pins the precedence rule so a hand-authored
@@ -875,9 +875,9 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp/project"))
+        update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp/project"))
 
-        let commands = update(&model, .surfaceCwd(paneId: paneId, cwd: nil))
+        let commands = update(&model, .sessionCwd(paneId: paneId, cwd: nil))
         let snapshot = toSnapshot(model, home: "/Users/testhome")
         let restored = try #require(validateAndBuild(snapshot))
         let paneSnapshot = try #require(allPaneSnapshots(snapshot).first)

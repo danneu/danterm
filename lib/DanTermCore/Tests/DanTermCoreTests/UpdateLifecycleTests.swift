@@ -108,7 +108,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.isAppActive = false
-        update(&model, .surfaceBell(paneId: paneId))
+        update(&model, .sessionBell(paneId: paneId))
 
         update(&model, .appBecameActive)
 
@@ -131,7 +131,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.isAppActive = false
-        update(&model, .surfaceBell(paneId: paneId))
+        update(&model, .sessionBell(paneId: paneId))
 
         update(&model, .appBecameActive)
 
@@ -157,8 +157,8 @@ import Testing
         let focusedPaneId = model.groups[0].tabs[1].focusedPaneId
         model.isAppActive = false
 
-        update(&model, .surfaceBell(paneId: backgroundPaneId))
-        update(&model, .surfaceBell(paneId: focusedPaneId))
+        update(&model, .sessionBell(paneId: backgroundPaneId))
+        update(&model, .sessionBell(paneId: focusedPaneId))
         update(&model, .appBecameActive)
 
         let backgroundAlert = model.alerts.first { $0.paneId == backgroundPaneId }

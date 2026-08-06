@@ -89,30 +89,30 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
             "closePane should emit scheduleCheckpoint")
     }
 
-    @Test("surfaceTitle emits scheduleCheckpoint")
-    func surfaceTitleEmitsScheduleCheckpoint() {
-        // Intent: surfaceTitle emits scheduleCheckpoint.
-        // Why it exists: pins surface metadata persistence.
-        // Scenario: spec-first surfaceTitle emit.
+    @Test("sessionTitle emits scheduleCheckpoint")
+    func sessionTitleEmitsScheduleCheckpoint() {
+        // Intent: sessionTitle emits scheduleCheckpoint.
+        // Why it exists: pins session metadata persistence.
+        // Scenario: spec-first sessionTitle emit.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let commands = update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        let commands = update(&model, .sessionTitle(paneId: paneId, title: "new title"))
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
-            "surfaceTitle should emit scheduleCheckpoint")
+            "sessionTitle should emit scheduleCheckpoint")
     }
 
-    @Test("surfaceCwd emits scheduleCheckpoint")
-    func surfaceCwdEmitsScheduleCheckpoint() {
-        // Intent: surfaceCwd emits scheduleCheckpoint.
+    @Test("sessionCwd emits scheduleCheckpoint")
+    func sessionCwdEmitsScheduleCheckpoint() {
+        // Intent: sessionCwd emits scheduleCheckpoint.
         // Why it exists: pins cwd-update persistence.
-        // Scenario: spec-first surfaceCwd emit.
+        // Scenario: spec-first sessionCwd emit.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let commands = update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
+        let commands = update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp"))
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
-            "surfaceCwd should emit scheduleCheckpoint")
+            "sessionCwd should emit scheduleCheckpoint")
     }
 
     @Test("commandStarted emits scheduleCheckpoint")
@@ -261,19 +261,19 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
             "appResignedActive should not emit scheduleCheckpoint")
     }
 
-    @Test("surfaceBell does not emit scheduleCheckpoint")
-    func surfaceBellDoesNotEmitScheduleCheckpoint() {
-        // Intent: surfaceBell (which creates alerts but no structural
+    @Test("sessionBell does not emit scheduleCheckpoint")
+    func sessionBellDoesNotEmitScheduleCheckpoint() {
+        // Intent: sessionBell (which creates alerts but no structural
         //   model change) does NOT emit scheduleCheckpoint.
         // Why it exists: pins the alerts-are-transient rule.
-        // Scenario: spec-first surfaceBell no-emit.
+        // Scenario: spec-first sessionBell no-emit.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let commands = update(&model, .surfaceBell(paneId: paneId))
+        let commands = update(&model, .sessionBell(paneId: paneId))
         #expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
-            "surfaceBell should not emit scheduleCheckpoint")
+            "sessionBell should not emit scheduleCheckpoint")
     }
 
     @Test("cancelTerminate does not emit scheduleCheckpoint")

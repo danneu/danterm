@@ -1196,7 +1196,7 @@ import DanTermProtocol
             let reply = try requireIpcReply(commands)
             let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
             #expect(hasEffect(commands) {
-                if case .createSurface(let effectPaneId, let cwd, _, _, _) = $0 {
+                if case .createSession(let effectPaneId, let cwd, _, _, _) = $0 {
                     return effectPaneId == paneId && cwd == "/caller"
                 }
                 return false
@@ -1207,7 +1207,7 @@ import DanTermProtocol
     @Test("tab.new with launch seeds shell input and custom tab title")
     func tabNewWithLaunchSeedsShellInputAndCustomTitle() throws {
         // Intent: tab.new with a launch object seeds shell input, sets
-        //   custom title, and emits createSurface with the documented
+        //   custom title, and emits createSession with the documented
         //   shape (command + waitAfterCommand=true).
         // Why it exists: pins the launch wiring.
         // Scenario: spec-first launch shell input.
@@ -1237,7 +1237,7 @@ import DanTermProtocol
         #expect(tabById(tabId, in: model)?.displayTitle == "clock")
         #expect(model.pane(paneId)?.title == "clock")
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
+            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
                 return effectPaneId == paneId
                     && cwd == "/tmp"
                     && command == "date"
@@ -1245,7 +1245,7 @@ import DanTermProtocol
                     && waitAfterCommand
             }
             return false
-        }, "expected createSurface with shell input command")
+        }, "expected createSession with shell input command")
     }
 
     @Test("tab.new with explicit group id forwards launch to created tab")
@@ -1272,7 +1272,7 @@ import DanTermProtocol
         let paneId = group?.tabs.last?.focusedPaneId
         #expect(paneId != nil, "target group should have a new tab")
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, _, let command, let launchCommand, _) = $0 {
+            if case .createSession(let effectPaneId, _, let command, let launchCommand, _) = $0 {
                 return effectPaneId == paneId && command == "make test" && launchCommand == nil
             }
             return false
@@ -1457,14 +1457,14 @@ import DanTermProtocol
         #expect(model.pane(newPaneId)?.title == "cargo")
         #expect(tabById(tabId, in: model)?.customTitle == nil)
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
+            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
                 return effectPaneId == newPaneId
                     && cwd == "/tmp"
                     && command == "cargo --version"
                     && launchCommand == nil
             }
             return false
-        }, "expected split createSurface to seed shell input")
+        }, "expected split createSession to seed shell input")
     }
 
     @Test("pane.split background on selected tab preserves focused pane")
@@ -1558,7 +1558,7 @@ import DanTermProtocol
     @Test("malformed launch returns invalid params without mutation commands")
     func malformedLaunchReturnsInvalidParamsWithoutMutation() throws {
         // Intent: a malformed launch param fails both tab.new and
-        //   pane.split paths before any mutation; no createSurface
+        //   pane.split paths before any mutation; no createSession
         //   command leaks.
         // Why it exists: pins fail-closed for malformed launch.
         // Scenario: spec-first malformed launch.
@@ -1579,9 +1579,9 @@ import DanTermProtocol
             #expect(try requireIpcError(tabEffects).code == -32602)
             #expect(Set(model.allPaneIds) == paneIdsBefore)
             #expect(!hasEffect(tabEffects) {
-                if case .createSurface = $0 { return true }
+                if case .createSession = $0 { return true }
                 return false
-            }, "malformed tab.new launch should not create a surface")
+            }, "malformed tab.new launch should not create a session")
 
             let splitEffects = sendIpc(
                 &model,
@@ -1595,9 +1595,9 @@ import DanTermProtocol
             #expect(try requireIpcError(splitEffects).code == -32602)
             #expect(Set(model.allPaneIds) == paneIdsBefore)
             #expect(!hasEffect(splitEffects) {
-                if case .createSurface = $0 { return true }
+                if case .createSession = $0 { return true }
                 return false
-            }, "malformed pane.split launch should not create a surface")
+            }, "malformed pane.split launch should not create a session")
         }
     }
 

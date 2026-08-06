@@ -78,7 +78,7 @@ DanTermCore (pure)        DanTermSupport (portable effects)   <- siblings; neith
   type). It performs real IO but needs no AppKit/GhosttyKit, so it gets the same
   fast unit tests the core enjoys.
 - **`app/`** -- the runtime: `AppRuntime` (the `Command` interpreter), `IpcServer`
-  (accept loop), checkpoint scheduling/writing, notifications, Ghostty surface
+  (accept loop), checkpoint scheduling/writing, notifications, terminal session
   creation, all AppKit, plus the trivial file-IO wrappers (`loadFromDisk`,
   `parse(themeFileAt:)`, `DanTermConfigPaths.configFilePath()`).
 - **`DanTermProtocol`** -- unchanged role (CLI parser + IPC envelope), and it

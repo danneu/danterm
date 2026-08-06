@@ -137,7 +137,7 @@ private func writePaneTapeFollowRecords(
 class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
-        let surfaces: [PaneId: any TerminalSession]
+        let sessions: [PaneId: any TerminalSession]
         let replayFiles: [PaneId: URL]
     }
 
@@ -150,10 +150,10 @@ class AppRuntime {
     // read only by reconcileSidebar's rename guard.
     var viewLocalState = ViewLocalState()
     let terminalBackend: any TerminalBackend
-    var surfaces: [PaneId: any TerminalSession] = [:]
-    // Last libghostty occlusion value pushed for each live surface.
-    // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
-    private var surfaceVisibility: [PaneId: Bool] = [:]
+    var sessions: [PaneId: any TerminalSession] = [:]
+    // Last libghostty occlusion value pushed for each live session.
+    // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
+    private var paneVisibility: [PaneId: Bool] = [:]
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
@@ -240,7 +240,7 @@ class AppRuntime {
             recordTerminalCharacterizationEvent(event)
             #endif
             if case .configChanged(_, let scrollbarEnabled) = event {
-                for session in self.surfaces.values {
+                for session in self.sessions.values {
                     session.setScrollbarEnabled(scrollbarEnabled)
                 }
             }
@@ -469,31 +469,31 @@ class AppRuntime {
     }
 
     /// Push effective model visibility to live terminal sessions, skipping unchanged panes.
-    func syncSurfaceVisibility() {
+    func syncPaneVisibility() {
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
-        let desired = effectiveSurfaceVisibility(in: model, windowVisible: windowVisible)
+        let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
 
-        for (paneId, session) in surfaces {
+        for (paneId, session) in sessions {
             let visible = desired[paneId] ?? true
-            if surfaceVisibility[paneId] != visible {
+            if paneVisibility[paneId] != visible {
                 #if DANTERM_TERMINAL_CHARACTERIZATION
                 recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
                 #endif
                 session.setVisible(visible)
-                surfaceVisibility[paneId] = visible
+                paneVisibility[paneId] = visible
             }
         }
 
-        surfaceVisibility = surfaceVisibility.filter { paneId, _ in
-            surfaces[paneId] != nil
+        paneVisibility = paneVisibility.filter { paneId, _ in
+            sessions[paneId] != nil
         }
     }
 
-    /// Push the active monitor's display id to every live surface so libghostty's
-    /// per-surface CVDisplayLink re-syncs to that monitor's refresh rate.
-    func syncSurfaceDisplayID() {
+    /// Push the active monitor's display id to every live session so libghostty's
+    /// per-session CVDisplayLink re-syncs to that monitor's refresh rate.
+    func syncSessionDisplayID() {
         guard let displayID = window?.screen?.displayID else { return }
-        for session in surfaces.values {
+        for session in sessions.values {
             session.setDisplayID(displayID)
         }
 
@@ -501,7 +501,7 @@ class AppRuntime {
         // next main-loop turn because AppKit can skip the automatic callback.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            for session in self.surfaces.values {
+            for session in self.sessions.values {
                 session.refreshBackingProperties()
             }
         }
@@ -510,8 +510,8 @@ class AppRuntime {
     /// Make the pane first responder; AppKit focus is the reparent/display-link
     /// recovery path for terminal activation.
     /// See docs/design/2026-05-27-terminal-focus-display-link.md.
-    func focusPaneSurface(_ paneId: PaneId) {
-        guard let session = surfaces[paneId] else { return }
+    func focusPaneSession(_ paneId: PaneId) {
+        guard let session = sessions[paneId] else { return }
         window?.makeFirstResponder(session.hostView)
     }
 
@@ -578,7 +578,7 @@ class AppRuntime {
         start: PaneTapeFollowStart
     ) {
         guard succeeded else { return }
-        guard surfaces[paneId] != nil else {
+        guard sessions[paneId] != nil else {
             writePaneTapeFollowNotification(
                 connection: connection,
                 subscriptionId: subscriptionId,
@@ -628,7 +628,7 @@ class AppRuntime {
                 continue
             }
             let paneId = PaneId(rawValue: fetch.paneId)
-            guard let session = surfaces[paneId] else {
+            guard let session = sessions[paneId] else {
                 endPaneTapeFollowers(for: paneId)
                 continue
             }
@@ -745,7 +745,7 @@ class AppRuntime {
 
     private func perform(_ command: Command) {
         switch command {
-        case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
+        case .createSession(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
@@ -763,25 +763,25 @@ class AppRuntime {
                 fontSize: model.config.resolvedFontSize,
                 fontFamily: model.resolvedFontFamily
             ) else {
-                send(.surfaceCreationFailed(paneId: paneId))
+                send(.sessionCreationFailed(paneId: paneId))
                 break
             }
-            surfaces[paneId] = session
+            sessions[paneId] = session
 
         case .sendText(let paneId, let text):
-            surfaces[paneId]?.sendText(text)
+            sessions[paneId]?.sendText(text)
 
         case .sendInputText(let paneId, let text):
-            surfaces[paneId]?.sendInputText(text)
+            sessions[paneId]?.sendInputText(text)
 
         case .sendInputKey(let paneId, let key, let mods):
-            surfaces[paneId]?.sendInputKey(key, modifiers: mods)
+            sessions[paneId]?.sendInputKey(key, modifiers: mods)
 
-        case .focusSurface(let paneId, let focused):
-            surfaces[paneId]?.setFocused(focused)
+        case .focusSession(let paneId, let focused):
+            sessions[paneId]?.setFocused(focused)
 
         case .makeFirstResponder(let paneId):
-            if let session = surfaces[paneId] {
+            if let session = sessions[paneId] {
                 window?.makeFirstResponder(session.hostView)
             }
 
@@ -846,7 +846,7 @@ class AppRuntime {
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
-            guard let session = surfaces[paneId] else {
+            guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
@@ -860,7 +860,7 @@ class AppRuntime {
 
         case .dumpPaneTape(let reqId, let paneId):
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
-            guard let session = surfaces[paneId] else {
+            guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
@@ -889,7 +889,7 @@ class AppRuntime {
 
         case .followPaneTape(let reqId, let paneId, let fromNow):
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
-            guard let session = surfaces[paneId] else {
+            guard let session = sessions[paneId] else {
                 connection.writeError(
                     reqId: reqId,
                     code: -32603,
@@ -976,7 +976,7 @@ class AppRuntime {
         // Search commands
 
         case .sendStartSearch(let paneId):
-            surfaces[paneId]?.startSearch()
+            sessions[paneId]?.startSearch()
 
         case .focusSearchField(let paneId):
             if let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField {
@@ -988,7 +988,7 @@ class AppRuntime {
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
             let sendNeedle = { [weak self] in
                 guard let self else { return }
-                self.surfaces[paneId]?.setSearchNeedle(needle)
+                self.sessions[paneId]?.setSearchNeedle(needle)
             }
 
             if delay == 0 {
@@ -1004,12 +1004,12 @@ class AppRuntime {
             }
 
         case .sendSearchNavigate(let paneId, let direction):
-            surfaces[paneId]?.navigateSearch(direction)
+            sessions[paneId]?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
             searchDebouncers[paneId]?.cancel()
             searchDebouncers.removeValue(forKey: paneId)
-            surfaces[paneId]?.endSearch()
+            sessions[paneId]?.endSearch()
 
         // TODO popover
 
@@ -1049,7 +1049,7 @@ class AppRuntime {
                 confirmTitle: "Close Pane"
             ) { [weak self] isConfirm in
                 guard isConfirm else { return }
-                self?.surfaces[paneId]?.requestClose()
+                self?.sessions[paneId]?.requestClose()
             }
         }
     }
@@ -1111,16 +1111,16 @@ class AppRuntime {
         }
     }
 
-    /// Tear down all runtime resources for one pane's surface. The body of the old
-    /// `.destroySurface` perform arm, now owned by `reconcileSurfaceExistence` (which
+    /// Tear down all runtime resources for one pane's session. The former command
+    /// executor body is now owned by `reconcileSessionExistence` (which
     /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
     /// cross-file reconcile extension can reach it.
-    func tearDownSurface(_ paneId: PaneId) {
+    func tearDownSession(_ paneId: PaneId) {
         endPaneTapeFollowers(for: paneId)
         cleanupReplayFile(for: paneId)
         searchDebouncers[paneId]?.cancel()
         searchDebouncers.removeValue(forKey: paneId)
-        if let session = surfaces.removeValue(forKey: paneId) {
+        if let session = sessions.removeValue(forKey: paneId) {
             session.tearDown()
         }
     }
@@ -1204,7 +1204,7 @@ class AppRuntime {
     func prepareRecoveryForApplicationExit() {
         enrichedCheckpointTimer?.cancel()
         enrichedCheckpointTimer = nil
-        for session in surfaces.values {
+        for session in sessions.values {
             session.fenceForApplicationExit()
         }
         _ = recoveryPolicy.terminate()
@@ -1271,7 +1271,7 @@ class AppRuntime {
         keeping retention: ScrollbackRetention
     ) -> [PaneId: CheckpointScrollbackRead] {
         var reads: [PaneId: CheckpointScrollbackRead] = [:]
-        for (paneId, session) in surfaces {
+        for (paneId, session) in sessions {
             if let deferred = session.primaryHistoryTailReader() {
                 reads[paneId] = deferred
             } else if let text = session.readPrimaryHistoryTail(
@@ -1336,7 +1336,7 @@ class AppRuntime {
                 let staged = try stageValidatedRestore(loaded)
                 commitRestoreSession(staged)
             } catch {
-                showImportError(message: "Import failed while creating terminal surfaces.")
+                showImportError(message: "Import failed while creating terminal sessions.")
             }
         } catch let error as AppInitFileLoadError {
             showImportError(message: importErrorMessage(for: error))
@@ -1472,9 +1472,9 @@ class AppRuntime {
             existing.removeFromSuperview()
             themeBrowserView = nil
             reconcileThemeBrowser()
-            // Restore focus to the focused pane's surface
+            // Restore focus to the focused pane's session.
             if let tab = selectedTab(in: model),
-               let session = surfaces[tab.focusedPaneId] {
+               let session = sessions[tab.focusedPaneId] {
                 window?.makeFirstResponder(session.hostView)
             }
             return
@@ -1516,14 +1516,14 @@ class AppRuntime {
             let staged = try stageValidatedRestore(loaded)
             commitRestoreSession(staged)
         } catch {
-            print("[init] Snapshot surface creation failed, falling back to default startup")
+            print("[init] Snapshot session creation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
         }
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
     private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
-        var stagedSurfaces: [PaneId: any TerminalSession] = [:]
+        var stagedSessions: [PaneId: any TerminalSession] = [:]
         var stagedReplayFiles: [PaneId: URL] = [:]
 
         do {
@@ -1557,22 +1557,22 @@ class AppRuntime {
                             fontSize: loaded.model.config.resolvedFontSize,
                             fontFamily: loaded.model.resolvedFontFamily
                         ) else {
-                            throw RestoreBuildError.surfaceCreationFailed
+                            throw RestoreBuildError.sessionCreationFailed
                         }
-                        stagedSurfaces[paneId] = session
+                        stagedSessions[paneId] = session
                     }
                 }
             }
 
             return StagedRestoreSession(
                 model: loaded.model,
-                surfaces: stagedSurfaces,
+                sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             )
         } catch {
             discardRestoreSession(StagedRestoreSession(
                 model: loaded.model,
-                surfaces: stagedSurfaces,
+                sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             ))
             throw error
@@ -1596,14 +1596,14 @@ class AppRuntime {
             removeTabContainer(tabId)
         }
 
-        for paneId in Array(surfaces.keys) {
+        for paneId in Array(sessions.keys) {
             endPaneTapeFollowers(for: paneId)
             cleanupReplayFile(for: paneId)
-            if let session = surfaces.removeValue(forKey: paneId) {
+            if let session = sessions.removeValue(forKey: paneId) {
                 session.tearDown()
             }
         }
-        surfaceVisibility.removeAll()
+        paneVisibility.removeAll()
         // The switcher panel persists across sessions; hide it before resetting
         // caches.switcher so nil continues to mean the panel is already hidden.
         switcherPanel?.orderOut(nil)
@@ -1619,7 +1619,7 @@ class AppRuntime {
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
         tearDownCurrentSession()
         model = staged.model
-        surfaces = staged.surfaces
+        sessions = staged.sessions
         replayFiles = staged.replayFiles
         cancelCoalescedReconcile()
 
@@ -1631,14 +1631,14 @@ class AppRuntime {
         // tearDownCurrentSession reset the caches). reconcileContainers builds every
         // tab's container eagerly from the nil containerShape cache -- selected visible,
         // the rest mounted+hidden -- and the chrome/sidebar/window passes build from
-        // scratch. reconcileSurfaceExistence is a no-op (staged surfaces match allPaneIds).
+        // scratch. reconcileSessionExistence is a no-op (staged sessions match allPaneIds).
         reconcile()
 
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for session in staged.surfaces.values {
+        for session in staged.sessions.values {
             session.tearDown()
         }
         for url in staged.replayFiles.values {
@@ -1730,7 +1730,7 @@ class AppRuntime {
     // Resolve via the existing PaneId -> TerminalSession index. `internal` (not `private`)
     // so reconcilePaneChrome in Reconcile.swift can reach the live wrapper.
     func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
-        surfaces[paneId]?.paneWrapper
+        sessions[paneId]?.paneWrapper
     }
 
     // MARK: - View Building
@@ -1746,14 +1746,14 @@ class AppRuntime {
             displayNode = tab.rootNode
         }
 
-        // Defocus all surfaces before rebuilding
+        // Defocus all sessions before rebuilding
         for paneId in allPaneIds(tab.rootNode) {
-            surfaces[paneId]?.setFocused(false)
+            sessions[paneId]?.setFocused(false)
         }
 
         let container = SplitContainerView(
             rootNode: displayNode,
-            surfaceLookup: { [weak self] paneId in self?.surfaces[paneId] },
+            sessionLookup: { [weak self] paneId in self?.sessions[paneId] },
             runtime: self,
             isZoomed: tab.isZoomed,
             hasSplits: { if case .leaf = tab.rootNode { return false } else { return true } }(),
@@ -1800,10 +1800,10 @@ class AppRuntime {
               tabContainers[tabId] != nil else { return }
         let browserFocus = themeBrowserView?.captureFocusTarget()
         let focusedId = tab.focusedPaneId
-        // Focus the focused pane's surface -- unless the theme browser owns focus or the
+        // Focus the focused pane's session -- unless the theme browser owns focus or the
         // pane has an active search (whose field is focused just below instead).
         if browserFocus == nil, model.searchState[focusedId] == nil,
-           let focusedSession = surfaces[focusedId] {
+           let focusedSession = sessions[focusedId] {
             window?.makeFirstResponder(focusedSession.hostView)
         }
         // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
@@ -1915,5 +1915,5 @@ func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastT
 }
 
 private enum RestoreBuildError: Error {
-    case surfaceCreationFailed
+    case sessionCreationFailed
 }

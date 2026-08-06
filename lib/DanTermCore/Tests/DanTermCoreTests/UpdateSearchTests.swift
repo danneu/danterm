@@ -4,7 +4,7 @@
 // (stale match-status reset), searchNavigate, endSearch teardown, the
 // searchTotalReported / searchSelectionReported handlers (model-only, no
 // commands), and cleanup of searchState across closePane / closeTab /
-// surfaceCreationFailed / deleteGroup.
+// sessionCreationFailed / deleteGroup.
 import Foundation
 import Testing
 
@@ -271,9 +271,9 @@ import Testing
         #expect(model.searchState[paneId] == nil, "search state should be cleaned up on tab close")
     }
 
-    @Test("surfaceCreationFailed cleans up search state")
-    func surfaceCreationFailedCleansUpSearchState() {
-        // Intent: surfaceCreationFailed clears the failed pane's
+    @Test("sessionCreationFailed cleans up search state")
+    func sessionCreationFailedCleansUpSearchState() {
+        // Intent: sessionCreationFailed clears the failed pane's
         //   searchState.
         // Why it exists: pins the failure-path teardown.
         // Scenario: spec-first failure cleanup.
@@ -281,8 +281,8 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.searchState[paneId] = SearchModel(needle: "test")
-        update(&model, .surfaceCreationFailed(paneId: paneId))
-        #expect(model.searchState[paneId] == nil, "search state should be cleaned up on surface failure")
+        update(&model, .sessionCreationFailed(paneId: paneId))
+        #expect(model.searchState[paneId] == nil, "search state should be cleaned up on session failure")
     }
 
     @Test("deleteGroup cleans up search state")

@@ -544,7 +544,7 @@ func swiftTerminalSessionViewTests() {
     }
 
     uiTest("automatic menus stay suppressed and owner menu requests arrive after right up") {
-        // Intent: only the serialized owner can authorize a terminal-surface context menu.
+        // Intent: only the serialized owner can authorize a terminal-view context menu.
         // Why it exists: AppKit's automatic down-time lookup races child mouse-capture modes.
         // Scenario: an uncaptured right-click opens after up, then a captured click does not reopen.
         let controller = TerminalPaneSessionController()

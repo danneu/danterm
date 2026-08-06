@@ -20,7 +20,7 @@ transition. This makes the tempting fixes misleading:
 - `ghostty_surface_refresh` queues render work, but Ghostty skips ordinary
   draw-frame work while `hasVsync()` reports that the display link is running.
 - Visibility is a separate lifecycle input. DanTerm sends effective visibility
-  through `syncSurfaceVisibility` via `ghostty_surface_set_occlusion`, and
+  through `syncPaneVisibility` via `ghostty_surface_set_occlusion`, and
   Ghostty's renderer starts the display link from `setVisible` only when the
   surface is visible and already focused.
 
@@ -54,8 +54,8 @@ already focused.
 
 ## References
 
-- `app/AppRuntime.swift`: `focusPaneSurface`, `syncSurfaceVisibility`,
-  `syncSurfaceDisplayID`
+- `app/AppRuntime.swift`: `focusPaneSession`, `syncPaneVisibility`,
+  `syncSessionDisplayID`
 - `app/TerminalView.swift`: `becomeFirstResponder`, `resignFirstResponder`
 - `.ghostty-src/src/apprt/embedded.zig`: `ghostty_surface_set_focus`,
   `ghostty_surface_set_display_id`, `ghostty_surface_refresh`

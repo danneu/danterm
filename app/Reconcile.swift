@@ -1,4 +1,4 @@
-// View reconciler: derives AppKit/surface state from the model after every send()
+// View reconciler: derives AppKit/session state from the model after every send()
 // (and after a restore commit). Stage 3 stands up the scaffolding -- reconcile(),
 // ReconcilerCaches, and the first keyed pass reconcileFocusBorders -- that stages
 // 4-8 extend. Pure projections live in Projections.swift (AppKit-free, unit
@@ -19,10 +19,10 @@ import Cocoa
 /// `AppRuntime.tearDownCurrentSession` so a post-restore reconcile is a clean
 /// build, not a stale diff.
 struct ReconcilerCaches {
-    // focusBorders rides the persisted terminal session in `surfaces`, which survives
+    // focusBorders rides the persisted terminal session in `sessions`, which survives
     // container rebuilds, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
-    // paneConfig also rides the persisted terminal session in `surfaces`, so the
+    // paneConfig also rides the persisted terminal session in `sessions`, so the
     // cache needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
     // paneToolbar / searchOverlay are the *host-recreated* caches: their host is the
@@ -72,15 +72,15 @@ struct ReconcilerCaches {
 }
 
 extension AppRuntime {
-    /// Reconcile derived AppKit/surface state from the model. Runs after the
+    /// Reconcile derived AppKit/session state from the model. Runs after the
     /// pre-reconcile command phase in send() and at the end of a restore commit.
     /// Ordered existence -> pane config -> containers -> content/chrome -> occlusion:
-    /// surface teardown first (so a removed pane's surface is gone before config
-    /// or container work), pane config once surviving surfaces are known, containers
+    /// session teardown first (so a removed pane's session is gone before config
+    /// or container work), pane config once surviving sessions are known, containers
     /// before chrome (they invalidate the chrome caches the chrome pass then reads),
-    /// and occlusion last (it reads `surfaces`).
+    /// and occlusion last (it reads `sessions`).
     func reconcile() {
-        reconcileSurfaceExistence()         // destroy surfaces for panes gone from model.allPaneIds
+        reconcileSessionExistence()         // destroy sessions for panes gone from model.allPaneIds
         reconcilePaneConfig()
         let mountFocusTab = reconcileContainers()  // eager: selected visible, rest mounted+hidden
         let alertTally = unreadAlertTally(for: model)
@@ -99,18 +99,18 @@ extension AppRuntime {
         reconcilePaneTodoPopover()
         reconcileTabTodoPopover()
         reconcileThemeBrowser()
-        syncSurfaceVisibility()  // existing occlusion pass; stays last
+        syncPaneVisibility()  // existing occlusion pass; stays last
     }
 
-    /// FIRST pass: tear down surfaces whose pane left the model. Runs before
-    /// reconcileContainers so a removed pane's surface is gone before its container is
-    /// rebuilt/removed (matching the old destroySurface-before-rebuild ordering).
-    /// Selection is the pure `surfacesToTearDown` (= live surfaces - model.allPaneIds);
-    /// the executor body is the old `.destroySurface` teardown. Surface *creation* stays
+    /// FIRST pass: tear down sessions whose pane left the model. Runs before
+    /// reconcileContainers so a removed pane's session is gone before its container is
+    /// rebuilt/removed (matching the prior teardown-before-rebuild ordering).
+    /// Selection is the pure `sessionsToTearDown` (= live sessions - model.allPaneIds);
+    /// the executor body is the former teardown command. Session *creation* stays
     /// a command, so the reconciler only ever destroys.
-    func reconcileSurfaceExistence() {
-        for paneId in surfacesToTearDown(liveSurfaceIds: Set(surfaces.keys), model: model) {
-            tearDownSurface(paneId)
+    func reconcileSessionExistence() {
+        for paneId in sessionsToTearDown(liveSessionIds: Set(sessions.keys), model: model) {
+            tearDownSession(paneId)
         }
     }
 
@@ -130,7 +130,7 @@ extension AppRuntime {
         // PaneWrapperViews (toolbar + search overlay are wrapper subviews), so clear those
         // panes' chrome caches BEFORE reconcilePaneChrome (the next pass) runs -- its
         // value-unchanged diff then re-pushes chrome onto the fresh wrapper. focusBorders
-        // is NOT invalidated: its terminal host persists in `surfaces`.
+        // is NOT invalidated: its terminal host persists in `sessions`.
         for paneId in chromeInvalidation(ops: ops, newShapes: new) {
             caches.paneToolbar.removeValue(forKey: paneId)
             caches.searchOverlay.removeValue(forKey: paneId)
@@ -184,7 +184,7 @@ extension AppRuntime {
     /// down elsewhere, so a key leaving the projection only prunes the cache.
     func reconcileFocusBorders(tally: UnreadAlertTally) {
         applyDiff(desiredFocusBorders(in: model, tally: tally), &caches.focusBorders, apply: { paneId, state in
-            surfaces[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
+            sessions[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
         })
     }
 
@@ -192,11 +192,11 @@ extension AppRuntime {
     /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
-            surfaces[paneId]?.applyTheme(key.theme)
-            surfaces[paneId]?.setFontSize(key.fontSize)
-            surfaces[paneId]?.setFontFamily(key.fontFamily)
+            sessions[paneId]?.applyTheme(key.theme)
+            sessions[paneId]?.setFontSize(key.fontSize)
+            sessions[paneId]?.setFontFamily(key.fontFamily)
         }, remove: { paneId in
-            surfaces[paneId]?.clearTheme()
+            sessions[paneId]?.clearTheme()
         })
     }
 

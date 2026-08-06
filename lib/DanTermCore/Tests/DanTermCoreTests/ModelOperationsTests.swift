@@ -74,10 +74,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(ids.contains(c))
     }
 
-    // MARK: - effectiveSurfaceVisibility
+    // MARK: - effectivePaneVisibility
 
-    @Test("effectiveSurfaceVisibility marks every reachable pane hidden when window is hidden")
-    func effectiveSurfaceVisibilityHidesAllWhenWindowHidden() {
+    @Test("effectivePaneVisibility marks every reachable pane hidden when window is hidden")
+    func effectivePaneVisibilityHidesAllWhenWindowHidden() {
         // Intent: with windowVisible: false, every pane in every tab is hidden.
         // Why it exists: pins the window-hidden short-circuit so a refactor
         //   cannot accidentally leak per-tab visibility decisions when the
@@ -99,13 +99,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(PaneModel(id: c)))
         let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: false)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: false)
 
         #expect(visibility == [a: false, b: false, c: false])
     }
 
-    @Test("effectiveSurfaceVisibility marks a selected single-pane tab visible")
-    func effectiveSurfaceVisibilityVisibleSinglePane() {
+    @Test("effectivePaneVisibility marks a selected single-pane tab visible")
+    func effectivePaneVisibilityVisibleSinglePane() {
         // Intent: a selected single-pane tab reports its pane visible.
         // Why it exists: pins the happy path of the visibility projection.
         // Scenario: spec-first single-pane check -- one tab, one pane, window
@@ -115,16 +115,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId)))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [paneId: true])
     }
 
-    @Test("effectiveSurfaceVisibility hides panes in non-selected tabs")
-    func effectiveSurfaceVisibilityHidesNonSelectedTabs() {
+    @Test("effectivePaneVisibility hides panes in non-selected tabs")
+    func effectivePaneVisibilityHidesNonSelectedTabs() {
         // Intent: panes in a non-selected tab are hidden even when the window
         //   is visible.
-        // Why it exists: pins per-tab scoping so background-tab surfaces stay
+        // Why it exists: pins per-tab scoping so background-tab sessions stay
         //   hidden until selected.
         // Scenario: spec-first scoping check -- two tabs (selected split,
         //   background single-pane); the background pane reports hidden.
@@ -147,16 +147,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [selectedA: true, selectedB: true, background: false])
     }
 
-    @Test("effectiveSurfaceVisibility hides zoomed sibling panes")
-    func effectiveSurfaceVisibilityHidesZoomedSiblings() {
+    @Test("effectivePaneVisibility hides zoomed sibling panes")
+    func effectivePaneVisibilityHidesZoomedSiblings() {
         // Intent: when a tab is zoomed, only the focused pane is visible; its
         //   siblings hide.
-        // Why it exists: pins the zoom contract that drives surface render
+        // Why it exists: pins the zoom contract that drives session rendering
         //   suspension on hidden siblings.
         // Scenario: spec-first zoom check -- a split tab with isZoomed=true
         //   reports the focused pane visible and the sibling hidden.
@@ -175,13 +175,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [focused: true, sibling: false])
     }
 
-    @Test("effectiveSurfaceVisibility keeps a zoomed single-pane tab visible")
-    func effectiveSurfaceVisibilityZoomedSinglePaneVisible() {
+    @Test("effectivePaneVisibility keeps a zoomed single-pane tab visible")
+    func effectivePaneVisibilityZoomedSinglePaneVisible() {
         // Intent: zoom on a single-pane tab keeps the pane visible (no
         //   siblings to hide).
         // Why it exists: pins the zoom corner case that hits the same code
@@ -198,13 +198,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [paneId: true])
     }
 
-    @Test("effectiveSurfaceVisibility hides every pane when there is no selected tab")
-    func effectiveSurfaceVisibilityNoSelectedHidesAll() {
+    @Test("effectivePaneVisibility hides every pane when there is no selected tab")
+    func effectivePaneVisibilityNoSelectedHidesAll() {
         // Intent: with selectedTabId nil, every pane is hidden even on a
         //   visible window.
         // Why it exists: pins the "no selection" guard against accidental
@@ -225,13 +225,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: nil)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [a: false, b: false])
     }
 
-    @Test("effectiveSurfaceVisibility marks every selected nested split leaf visible")
-    func effectiveSurfaceVisibilityNestedSplitAllVisible() {
+    @Test("effectivePaneVisibility marks every selected nested split leaf visible")
+    func effectivePaneVisibilityNestedSplitAllVisible() {
         // Intent: every leaf in the selected tab's nested split tree is
         //   visible (when not zoomed).
         // Why it exists: pins the visibility walker's coverage of nested
@@ -257,7 +257,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [a: true, b: true, c: true])
     }

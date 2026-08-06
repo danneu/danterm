@@ -102,7 +102,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 
 /// Build the PaneSnapshot embedded in a leaf, reading the leaf's PaneModel
 /// directly. Always emits `scrollback: nil`; scrollback is grafted separately
-/// (graftScrollback) from a live-surface read so this stays pure.
+/// (graftScrollback) from a live-session read so this stays pure.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
   let launch: PaneLaunchSnapshot?
@@ -150,7 +150,7 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
 }
 
 /// Embed scrollback text into a snapshot's tree leaves, keyed by pane id. Pure:
-/// the live-surface read is the separate impure `scrollbackByPaneId()` step in
+/// the live-session read is the separate impure `scrollbackByPaneId()` step in
 /// AppRuntime. Used by both `.exportState` and the enriched checkpoint.
 func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneId: String]) -> AppModelSnapshot {
   AppModelSnapshot(

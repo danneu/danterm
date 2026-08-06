@@ -237,10 +237,10 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
     // Single source of truth for pushing content scale plus backing-pixel size
     // to Ghostty. Degenerate sizes are skipped because 0x0 corrupts terminal
     // state and divide-by-zero scale can clobber Retina rendering.
-    private func syncSurfaceGeometry(logicalSize: NSSize) {
+    private func syncBackingGeometry(logicalSize: NSSize) {
         guard let surface else { return }
         let backingSize = convertToBacking(logicalSize)
-        guard let geometry = surfaceGeometry(logicalSize: logicalSize, backingSize: backingSize) else { return }
+        guard let geometry = backingGeometry(logicalSize: logicalSize, backingSize: backingSize) else { return }
 
         ghostty_surface_set_content_scale(surface, geometry.xScale, geometry.yScale)
         ghostty_surface_set_size(surface, geometry.pixelWidth, geometry.pixelHeight)
@@ -255,7 +255,7 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
             ghostty_surface_set_display_id(surface, screen.displayID)
         }
 
-        syncSurfaceGeometry(logicalSize: frame.size)
+        syncBackingGeometry(logicalSize: frame.size)
     }
 
     // NSView: resync layer scale and Ghostty geometry after backing-store changes.
@@ -273,13 +273,13 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
             CATransaction.commit()
         }
 
-        syncSurfaceGeometry(logicalSize: frame.size)
+        syncBackingGeometry(logicalSize: frame.size)
     }
 
     // NSView: push new layout geometry to Ghostty after AppKit changes the frame.
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        syncSurfaceGeometry(logicalSize: newSize)
+        syncBackingGeometry(logicalSize: newSize)
         linkPreview?.layoutPill(in: bounds)
     }
 

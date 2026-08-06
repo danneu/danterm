@@ -62,14 +62,14 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
             synchronizeScrollView()
         }
 
-        // Listen for clip view bounds changes to keep surface pinned to visible rect
+        // Listen for clip view bounds changes to keep the session view pinned to visible rect
         scrollView.contentView.postsBoundsChangedNotifications = true
         observers.append(NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
             queue: .main
         ) { [weak self] _ in
-            self?.synchronizeSurfaceView()
+            self?.synchronizeSessionView()
         })
 
         // Live scroll tracking
@@ -123,7 +123,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         terminalSession.hostView.frame.size = scrollView.bounds.size
         documentView.frame.size.width = scrollView.bounds.width
         synchronizeScrollView()
-        synchronizeSurfaceView()
+        synchronizeSessionView()
     }
 
     // MARK: - Scroll Delegate
@@ -165,7 +165,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
     }
 
     /// Pins the terminal host origin to the visible rect so it fills the viewport.
-    private func synchronizeSurfaceView() {
+    private func synchronizeSessionView() {
         let visibleRect = scrollView.contentView.documentVisibleRect
         terminalSession.hostView.frame.origin = visibleRect.origin
     }

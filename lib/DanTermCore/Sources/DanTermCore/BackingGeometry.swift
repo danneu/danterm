@@ -3,7 +3,7 @@
 import Foundation
 
 /// Geometry to push to a Ghostty surface: per-axis content scale plus backing pixels.
-struct SurfaceGeometry: Equatable {
+struct BackingGeometry: Equatable {
     let xScale: Double
     let yScale: Double
     let pixelWidth: UInt32
@@ -11,13 +11,13 @@ struct SurfaceGeometry: Equatable {
 }
 
 /// Derive Ghostty surface geometry from a logical point size and its backing-pixel size.
-func surfaceGeometry(logicalSize: CGSize, backingSize: CGSize) -> SurfaceGeometry? {
+func backingGeometry(logicalSize: CGSize, backingSize: CGSize) -> BackingGeometry? {
     guard logicalSize.width > 0, logicalSize.height > 0,
           backingSize.width > 0, backingSize.height > 0 else {
         return nil
     }
 
-    return SurfaceGeometry(
+    return BackingGeometry(
         xScale: Double(backingSize.width / logicalSize.width),
         yScale: Double(backingSize.height / logicalSize.height),
         pixelWidth: UInt32(backingSize.width),

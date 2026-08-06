@@ -1,5 +1,5 @@
 // Tests for the pure copy-on-select config decision used by the app's
-// per-surface mouse-up clipboard reassertion gate.
+// per-session mouse-up clipboard reassertion gate.
 import Testing
 
 @testable import DanTermCore
@@ -12,7 +12,7 @@ import Testing
         // Why it exists: pins the normal macOS copy-on-select path so the app
         //   does not accidentally suppress the default-enabled behavior.
         // Scenario: spec-first config read -- libghostty returns the enum tag
-        //   name "true" for a surface's effective config.
+        //   name "true" for a session's effective config.
         #expect(isCopyOnSelectEnabled(setting: "true") == true)
     }
 
@@ -23,7 +23,7 @@ import Testing
         // Why it exists: pins libghostty's non-false enabled enum case so the
         //   gate does not treat only literal "true" as enabled.
         // Scenario: spec-first config read -- libghostty returns the enum tag
-        //   name "clipboard" for a surface's effective config.
+        //   name "clipboard" for a session's effective config.
         #expect(isCopyOnSelectEnabled(setting: "clipboard") == true)
     }
 
@@ -33,7 +33,7 @@ import Testing
         //   clipboard reassertion.
         // Why it exists: pins that user intent to disable copy-on-select is
         //   honored even though the reassertion is DanTerm-owned.
-        // Scenario: spec-first config read -- a surface's effective config
+        // Scenario: spec-first config read -- a session's effective config
         //   resolves `copy-on-select = false`.
         #expect(isCopyOnSelectEnabled(setting: "false") == false)
     }
@@ -44,7 +44,7 @@ import Testing
         // Why it exists: pins the macOS default so a failed C config read does
         //   not silently turn copy-on-select off.
         // Scenario: spec-first fallback -- the impure config reader cannot
-        //   retrieve `copy-on-select` for a surface.
+        //   retrieve `copy-on-select` for a session.
         #expect(isCopyOnSelectEnabled(setting: nil) == true)
     }
 }
