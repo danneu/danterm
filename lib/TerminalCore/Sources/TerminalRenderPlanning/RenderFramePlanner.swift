@@ -66,13 +66,19 @@ struct PlannedFrame {
 private struct PlannedCell {
     let kind: TerminalCellKind
     let scalars: TerminalScalars
-    let style: ResolvedCellStyle
+    var style: ResolvedCellStyle
 }
 
-/// Keeps optional overlay semantics beside, rather than inside, the hot cell payload.
+/// Keeps an overlay's semantic identity and resolved fill together before coalescing.
+private struct PlannedOverlay {
+    let state: RenderOverlayState
+    let color: RenderColor
+}
+
+/// Keeps optional overlays beside, rather than inside, the hot cell payload.
 private struct InspectedRows {
     var cells: [[PlannedCell]]
-    var overlayStates: [[RenderOverlayState?]]?
+    var overlays: [[PlannedOverlay?]]?
 }
 
 /// Records the cursor's normalized grid span once so both layer overrides and
@@ -192,7 +198,7 @@ struct FramePlanner {
             activeSearchMatchRange: terminal.activeSearchMatchRange
         )
         var overlays: [[RenderOverlayRun]]? =
-            if cells.overlayStates != nil || reusable?.overlays != nil { [] } else { nil }
+            if cells.overlays != nil || reusable?.overlays != nil { [] } else { nil }
         overlays?.reserveCapacity(rowCount)
         for row in 0..<rowCount {
             if let reusable, damage.rows.contains(row) == false {
@@ -206,7 +212,7 @@ struct FramePlanner {
             if overlays != nil {
                 overlays?.append(overlayRuns(
                     row: row,
-                    states: cells.overlayStates?[row] ?? []
+                    overlays: cells.overlays?[row] ?? []
                 ))
             }
             text.append(textRuns(row: row, cells: cells.cells[row]))
@@ -291,9 +297,9 @@ struct FramePlanner {
         // `forEachViewportRow` hands the row out first precisely so all three can be `let`s of
         // this closure's own frame again, which is what the per-row spelling had.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
-        var overlayStates: [[RenderOverlayState?]]? =
+        var plannedOverlays: [[PlannedOverlay?]]? =
             if selectionRange != nil || activeSearchMatchRange != nil {
-                [[RenderOverlayState?]](repeating: [], count: rowCount)
+                [[PlannedOverlay?]](repeating: [], count: rowCount)
             } else {
                 nil
             }
@@ -308,15 +314,16 @@ struct FramePlanner {
             )
             var cells: [PlannedCell] = []
             cells.reserveCapacity(kinds.count)
-            var states: [RenderOverlayState?] = []
-            if overlayStates != nil {
+            var states: [PlannedOverlay?] = []
+            if plannedOverlays != nil {
                 states.reserveCapacity(kinds.count)
             }
 
-            if overlayStates != nil {
+            if plannedOverlays != nil {
                 visit { column, scalars, semanticStyle in
                     guard column < kinds.count else { return }
-                    cells.append(plannedCell(
+                    let state = overlayState(column: column, selected: selected, matched: matched)
+                    let planned = plannedCellAndOverlay(
                         row: row,
                         column: column,
                         kind: kinds[column].kind,
@@ -324,13 +331,11 @@ struct FramePlanner {
                         semanticStyle: semanticStyle,
                         hovered: hovered,
                         selected: selected,
-                        cursorSpan: cursorSpan
-                    ))
-                    states.append(overlayState(
-                        column: column,
-                        selected: selected,
-                        matched: matched
-                    ))
+                        cursorSpan: cursorSpan,
+                        overlayState: state
+                    )
+                    cells.append(planned.cell)
+                    states.append(planned.overlay)
                 }
             } else {
                 visit { column, scalars, semanticStyle in
@@ -349,7 +354,7 @@ struct FramePlanner {
             }
 
             result[row] = cells
-            overlayStates?[row] = states
+            plannedOverlays?[row] = states
         }
 
         // The single padding site for columns the terminal row does not cover: they keep the
@@ -371,26 +376,77 @@ struct FramePlanner {
             )
             while result[row].count < kinds.count {
                 let column = result[row].count
-                result[row].append(plannedCell(
-                    row: row,
-                    column: column,
-                    kind: kinds[column].kind,
-                    scalars: .empty,
-                    semanticStyle: TerminalStyle(),
-                    hovered: hovered,
-                    selected: selected,
-                    cursorSpan: cursorSpan
-                ))
-                if overlayStates != nil {
-                    overlayStates?[row].append(overlayState(
+                if plannedOverlays != nil {
+                    let state = overlayState(column: column, selected: selected, matched: matched)
+                    let planned = plannedCellAndOverlay(
+                        row: row,
                         column: column,
+                        kind: kinds[column].kind,
+                        scalars: .empty,
+                        semanticStyle: TerminalStyle(),
+                        hovered: hovered,
                         selected: selected,
-                        matched: matched
+                        cursorSpan: cursorSpan,
+                        overlayState: state
+                    )
+                    result[row].append(planned.cell)
+                    plannedOverlays?[row].append(planned.overlay)
+                } else {
+                    result[row].append(plannedCell(
+                        row: row,
+                        column: column,
+                        kind: kinds[column].kind,
+                        scalars: .empty,
+                        semanticStyle: TerminalStyle(),
+                        hovered: hovered,
+                        selected: selected,
+                        cursorSpan: cursorSpan
                     ))
                 }
             }
         }
-        return InspectedRows(cells: result, overlayStates: overlayStates)
+        return InspectedRows(cells: result, overlays: plannedOverlays)
+    }
+
+    private func plannedCellAndOverlay(
+        row: Int,
+        column: Int,
+        kind: TerminalCellKind,
+        scalars: TerminalScalars,
+        semanticStyle: TerminalStyle,
+        hovered: Range<Int>?,
+        selected: Range<Int>?,
+        cursorSpan: CursorSpan?,
+        overlayState: RenderOverlayState?
+    ) -> (cell: PlannedCell, overlay: PlannedOverlay?) {
+        var cell = plannedCell(
+            row: row,
+            column: column,
+            kind: kind,
+            scalars: scalars,
+            semanticStyle: semanticStyle,
+            hovered: hovered,
+            selected: selected,
+            cursorSpan: nil
+        )
+        let overlay = overlayState.map { state in
+            let resolved = resolveOverlayStyle(
+                state: state,
+                background: cell.style.background,
+                foreground: cell.style.foreground,
+                theme: presentation.theme
+            )
+            cell.style.foreground = resolved.foreground
+            return PlannedOverlay(state: state, color: resolved.fill)
+        }
+        if presentation.cursorShape == .block,
+           cursorSpan?.contains(row: row, column: column) == true
+        {
+            cell.style.foreground = presentation.theme.cursorText
+            cell.style.background = presentation.theme.cursor
+            cell.style.underlineColor = presentation.theme.cursorText
+        }
+        return (cell, overlay)
     }
 
     private func plannedCell(
@@ -468,15 +524,16 @@ struct FramePlanner {
 
     private func overlayRuns(
         row: Int,
-        states: [RenderOverlayState?]
+        overlays: [PlannedOverlay?]
     ) -> [RenderOverlayRun] {
         var result: [RenderOverlayRun] = []
         var startColumn: Int?
         var state: RenderOverlayState?
         var color: RenderColor?
 
-        for (column, cellState) in states.enumerated() {
-            let cellColor = cellState.map(overlayColor(for:))
+        for (column, overlay) in overlays.enumerated() {
+            let cellState = overlay?.state
+            let cellColor = overlay?.color
             if cellState != state || cellColor != color {
                 appendOverlayRun(
                     row: row,
@@ -493,22 +550,13 @@ struct FramePlanner {
         }
         appendOverlayRun(
             row: row,
-            endColumn: states.count,
+            endColumn: overlays.count,
             startColumn: &startColumn,
             state: &state,
             color: &color,
             to: &result
         )
         return result
-    }
-
-    private func overlayColor(for state: RenderOverlayState) -> RenderColor {
-        switch state {
-        case .selection:
-            presentation.theme.selectionBackground
-        case .activeSearchMatch, .selectionAndActiveSearchMatch:
-            presentation.theme.searchMatchBackground
-        }
     }
 
     private func appendOverlayRun(

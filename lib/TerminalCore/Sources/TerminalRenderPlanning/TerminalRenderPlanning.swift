@@ -119,9 +119,7 @@ public struct RenderTheme: Equatable, Sendable {
     /// Foreground forced onto selected text before cursor presentation is applied.
     public let selectionForeground: RenderColor
 
-    /// Background overlay for the active find match. Deliberately unlike
-    /// `selectionBackground`: the two can cover the same cells, and the whole point of
-    /// the match highlight is to be findable among selected text.
+    /// Hue seed adapted into the active find-match background for each cell.
     public let searchMatchBackground: RenderColor
 
     /// Filled-block cursor color applied before run coalescing.
@@ -158,7 +156,7 @@ public struct RenderTheme: Equatable, Sendable {
         cursorText: RenderColor(red: 0, green: 0, blue: 0)
     )
 
-    /// Creates a complete renderer theme and derives its theme-local search highlight.
+    /// Creates a complete renderer theme with stable overlay hue seeds.
     public init(
         ansiColors: RenderANSIColors,
         defaultForeground: RenderColor,
@@ -173,43 +171,9 @@ public struct RenderTheme: Equatable, Sendable {
         self.defaultBackground = defaultBackground
         self.selectionForeground = selectionForeground
         self.selectionBackground = selectionBackground
-        searchMatchBackground = Self.deriveSearchMatchBackground(
-            defaultBackground: defaultBackground,
-            selectionBackground: selectionBackground
-        )
+        searchMatchBackground = RenderColor(red: 175, green: 128, blue: 20)
         self.cursor = cursor
         self.cursorText = cursorText
-    }
-
-    /// Chooses the fixed candidate furthest from the two competing background channels.
-    private static func deriveSearchMatchBackground(
-        defaultBackground: RenderColor,
-        selectionBackground: RenderColor
-    ) -> RenderColor {
-        let candidates = [
-            RenderColor(red: 175, green: 128, blue: 20),
-            RenderColor(red: 80, green: 127, blue: 235),
-            RenderColor(red: 56, green: 88, blue: 140),
-        ]
-        return candidates.max { first, second in
-            separationScore(first, from: defaultBackground, and: selectionBackground)
-                < separationScore(second, from: defaultBackground, and: selectionBackground)
-        }!
-    }
-
-    private static func separationScore(
-        _ candidate: RenderColor,
-        from first: RenderColor,
-        and second: RenderColor
-    ) -> Int {
-        min(squaredDistance(candidate, first), squaredDistance(candidate, second))
-    }
-
-    private static func squaredDistance(_ first: RenderColor, _ second: RenderColor) -> Int {
-        let red = Int(first.red) - Int(second.red)
-        let green = Int(first.green) - Int(second.green)
-        let blue = Int(first.blue) - Int(second.blue)
-        return red * red + green * green + blue * blue
     }
 }
 

@@ -27,10 +27,11 @@ struct SelectionExecutionTests {
 
         let bitmap = try renderBitmap(plan: plan, metrics: metrics)
         let selectedPixels = bitmap.pixels(in: cellRect(row: 0, column: 0, metrics: metrics))
-        let selection = Pixel(RenderTheme.dark.selectionBackground)
+        let selection = Pixel(try #require(plan.overlayRuns.first?.color))
+        let foreground = Pixel(try #require(plan.textRuns.first?.foreground))
 
         #expect(selectedPixels.contains(selection))
-        #expect(selectedPixels.contains { $0 != selection })
+        #expect(selectedPixels.contains(foreground))
         #expect(selectedPixels.contains(Pixel(RenderTheme.dark.ansiColors[1])) == false)
     }
 
@@ -59,8 +60,12 @@ struct SelectionExecutionTests {
 
         let bitmap = try renderBitmap(plan: plan, metrics: metrics)
         let matched = bitmap.pixels(in: cellRect(row: 0, column: 0, metrics: metrics))
-        #expect(matched.contains(Pixel(theme.searchMatchBackground)))
-        #expect(matched.contains(Pixel(theme.selectionForeground)))
+        let combined = try #require(plan.overlayRuns.first {
+            $0.state == .selectionAndActiveSearchMatch
+        })
+        let combinedText = try #require(plan.textRuns.first { $0.startColumn == 0 })
+        #expect(matched.contains(Pixel(combined.color)))
+        #expect(matched.contains(Pixel(combinedText.foreground)))
 
         let cursor = bitmap.pixels(in: cellRect(row: 0, column: 1, metrics: metrics))
         #expect(cursor.contains(Pixel(theme.cursor)))

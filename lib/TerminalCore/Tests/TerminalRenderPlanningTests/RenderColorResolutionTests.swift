@@ -5,6 +5,68 @@ import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct RenderColorResolutionTests {
+    @Test("Perceived brightness maps every gray to its component")
+    func perceivedBrightnessGrayIdentity() {
+        for component in UInt8.min...UInt8.max {
+            let gray = RenderColor(red: component, green: component, blue: component)
+            #expect(perceivedBrightness(of: gray) == Int(component))
+        }
+    }
+
+    @Test("Minimum-separation resolution preserves qualifying seeds and pushes collisions")
+    func minimumSeparationResolution() {
+        let background = RenderColor(red: 100, green: 100, blue: 100)
+        let preserved = RenderColor(red: 180, green: 180, blue: 180)
+        let collision = RenderColor(red: 110, green: 110, blue: 110)
+
+        #expect(resolveBrightnessSeparatedColor(
+            seed: preserved,
+            avoiding: [background],
+            minimumSeparation: 40
+        ) == preserved)
+
+        let pushed = resolveBrightnessSeparatedColor(
+            seed: collision,
+            avoiding: [background],
+            minimumSeparation: 40
+        )
+        #expect(brightnessSeparation(pushed, background) >= 40)
+        #expect(pushed != collision)
+    }
+
+    @Test("Every overlay state separates its fill and text over a colliding background")
+    func overlayStyleSeparation() throws {
+        let collision = RenderColor(red: 80, green: 80, blue: 80)
+        let theme = try makeTheme(
+            defaultBackground: collision,
+            selectionBackground: collision,
+            selectionForeground: collision
+        )
+        let states: [RenderOverlayState] = [
+            .selection,
+            .activeSearchMatch,
+            .selectionAndActiveSearchMatch,
+        ]
+        let styles = states.map {
+            resolveOverlayStyle(
+                state: $0,
+                background: collision,
+                foreground: collision,
+                theme: theme
+            )
+        }
+        let fills = [collision] + styles.map(\.fill)
+
+        for first in fills.indices {
+            for second in fills.indices where second > first {
+                #expect(brightnessSeparation(fills[first], fills[second]) >= 40)
+            }
+        }
+        for style in styles {
+            #expect(brightnessSeparation(style.foreground, style.fill) >= 100)
+        }
+    }
+
     @Test("ANSI palettes accept exactly 16 entries")
     func ansiPaletteArity() throws {
         let colors: [RenderColor] = (0..<16).map { index in
@@ -75,32 +137,12 @@ struct RenderColorResolutionTests {
         )
     }
 
-    @Test("Search highlight derivation picks the candidate furthest from both backgrounds")
-    func searchHighlightDerivation() throws {
-        // Intent: derived search colors are stable, distinct from both competing
-        //   backgrounds, and are the max-separation candidate rather than any candidate
-        //   that merely differs from them.
-        // Why it exists: every bundled theme must get a usable search channel even
-        //   when one of its backgrounds equals a derivation candidate.
-        // Scenario: a theme deliberately uses the old baked search color as its
-        //   default and the baked selection color as its selection background.
-        let defaultBackground = RenderColor(red: 175, green: 128, blue: 20)
-        let selectionBackground = RenderColor(red: 56, green: 88, blue: 140)
-        let first = try makeTheme(
-            defaultBackground: defaultBackground,
-            selectionBackground: selectionBackground
-        )
-        let second = try makeTheme(
-            defaultBackground: defaultBackground,
-            selectionBackground: selectionBackground
-        )
+    @Test("Search highlight keeps a stable hue seed independent of theme backgrounds")
+    func searchHighlightSeed() throws {
+        let first = try makeTheme(defaultBackground: .init(red: 1, green: 2, blue: 3))
+        let second = try makeTheme(defaultBackground: .init(red: 200, green: 201, blue: 202))
+
         #expect(first.searchMatchBackground == second.searchMatchBackground)
-        #expect(first.searchMatchBackground != defaultBackground)
-        #expect(first.searchMatchBackground != selectionBackground)
-        // Both other candidates sit exactly on one of the two backgrounds here, so they
-        // score 0 and only this one can win. A derivation that stopped maximizing
-        // separation -- e.g. picked the first candidate that merely differs -- fails here.
-        #expect(first.searchMatchBackground == RenderColor(red: 80, green: 127, blue: 235))
     }
 
     @Test("Default and ANSI colors resolve through the baked theme")
@@ -188,13 +230,14 @@ struct RenderColorResolutionTests {
     private func makeTheme(
         ansiColors: [RenderColor] = Array(repeating: .init(red: 1, green: 2, blue: 3), count: 16),
         defaultBackground: RenderColor = .init(red: 4, green: 5, blue: 6),
-        selectionBackground: RenderColor = .init(red: 7, green: 8, blue: 9)
+        selectionBackground: RenderColor = .init(red: 7, green: 8, blue: 9),
+        selectionForeground: RenderColor = .init(red: 13, green: 14, blue: 15)
     ) throws -> RenderTheme {
         RenderTheme(
             ansiColors: try #require(RenderANSIColors(exactly: ansiColors)),
             defaultForeground: .init(red: 10, green: 11, blue: 12),
             defaultBackground: defaultBackground,
-            selectionForeground: .init(red: 13, green: 14, blue: 15),
+            selectionForeground: selectionForeground,
             selectionBackground: selectionBackground,
             cursor: .init(red: 16, green: 17, blue: 18),
             cursorText: .init(red: 19, green: 20, blue: 21)

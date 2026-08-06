@@ -6,6 +6,28 @@ import TerminalCore
 
 /// Pins selection highlights to half-open current-stream ranges without perturbing other layers.
 struct SelectionRenderPlanningTests {
+    @Test("Selection adapts fill and text when a cell background matches the theme seed")
+    func selectionAdaptsToResolvedCellBackground() throws {
+        let collision = RenderColor(red: 56, green: 88, blue: 140)
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+        terminal.feed(Array("\u{1B}[38;2;56;88;140;48;2;56;88;140mA".utf8))
+        terminal.setSelection(.init(
+            start: .init(row: 0, column: 0),
+            end: .init(row: 0, column: 1)
+        ))
+
+        let plan = planFrame(
+            for: terminal,
+            presentation: .init(theme: .dark, isCursorVisible: false, cursorShape: .block)
+        )
+        let overlay = try #require(plan.overlayRuns.first)
+        let text = try #require(plan.textRuns.first)
+
+        #expect(overlay.state == .selection)
+        #expect(brightnessSeparation(overlay.color, collision) >= 40)
+        #expect(brightnessSeparation(text.foreground, overlay.color) >= 100)
+    }
+
     @Test("single-row selections use half-open columns and recolor only selected text")
     func singleRowSelection() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 1))
@@ -23,6 +45,12 @@ struct SelectionRenderPlanningTests {
             end: TerminalTextPosition(row: 0, column: 4)
         ))
         let selected = planFrame(for: terminal, presentation: presentation)
+        let selectedStyle = resolveOverlayStyle(
+            state: .selection,
+            background: theme.ansiColors[1],
+            foreground: theme.selectionForeground,
+            theme: theme
+        )
 
         #expect(selected.overlayRuns == [
             RenderOverlayRun(
@@ -30,7 +58,7 @@ struct SelectionRenderPlanningTests {
                 startColumn: 1,
                 columnCount: 3,
                 state: .selection,
-                color: theme.selectionBackground
+                color: selectedStyle.fill
             ),
         ])
         #expect(selected.backgroundRuns == baseline.backgroundRuns)
@@ -39,7 +67,7 @@ struct SelectionRenderPlanningTests {
         #expect(selected.textRuns.map { $0.cells.count } == [1, 3, 1])
         #expect(selected.textRuns.map(\.foreground) == [
             theme.ansiColors[7],
-            theme.selectionForeground,
+            selectedStyle.foreground,
             theme.ansiColors[7],
         ])
         #expect(selected.cursor == baseline.cursor)
@@ -62,11 +90,17 @@ struct SelectionRenderPlanningTests {
             for: terminal,
             presentation: .init(theme: theme, isCursorVisible: true, cursorShape: .block)
         )
+        let combinedStyle = resolveOverlayStyle(
+            state: .selectionAndActiveSearchMatch,
+            background: theme.defaultBackground,
+            foreground: theme.selectionForeground,
+            theme: theme
+        )
 
         #expect(plan.overlayRuns.first?.state == .selectionAndActiveSearchMatch)
         #expect(plan.textRuns.map(\.startColumn) == [0, 1, 2])
         #expect(plan.textRuns.map(\.foreground) == [
-            theme.selectionForeground,
+            combinedStyle.foreground,
             theme.cursorText,
             theme.defaultForeground,
         ])

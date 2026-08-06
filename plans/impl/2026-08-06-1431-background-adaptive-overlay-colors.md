@@ -234,6 +234,15 @@ cursor's participation follow on top.
   distinguishable states. Repeat under a light theme and under a theme whose
   selection color is close to the block color.
 
+### Final benchmark pause
+
+- [ ] After implementation and tests are complete, pause before starting the PO10
+  benchmark. Tell the user that the benchmark is ready to run so they can put the
+  MacBook on AC power, leave it fully idle, and keep the benchmark window visible.
+  Wait for the user's explicit confirmation, then run the benchmark against the
+  pre-change revision and report the final measurements, verdicts, and any coverage
+  limitations to the user.
+
 ## Implementation discretion
 
 - Where resolved colors are memoized, and at what granularity.
@@ -244,7 +253,7 @@ cursor's participation follow on top.
 ## Commit progress
 
 - [x] 1. Merge selection and search into retained semantic overlay runs
-- [ ] 2. Resolve overlay fills and text against each cell background
+- [x] 2. Resolve overlay fills and text against each cell background
 - [ ] 3. Adapt every cursor shape and close the theme-wide contrast proof
 
 ## Implementation notes
@@ -255,3 +264,6 @@ cursor's participation follow on top.
   storage restored an equivalent -0.39% result against the pre-change revision.
 - No calibrated executor workload carries overlay runs, so this plumbing-only executor
   collapse has no meaningful draw benchmark in the current ladder.
+- Active matches retain the existing ochre candidate as their stable hue seed, while
+  the combined state uses the former blue candidate; brightness separation, rather
+  than either literal seed, now carries the semantic distinction.

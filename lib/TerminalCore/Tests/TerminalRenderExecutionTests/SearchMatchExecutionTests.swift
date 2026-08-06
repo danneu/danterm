@@ -1,27 +1,22 @@
-// Pixel proof that the search-match highlight outranks selection while glyphs stay above both.
+// Pixel proof that selection, search, and their overlap remain distinct below glyphs.
 import Testing
 
 import TerminalCore
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
-/// Locks the draw order of the two highlight channels where they overlap.
+/// Locks all three semantic highlight fills into the executor's overlay pass.
 struct SearchMatchExecutionTests {
-    @Test("an overlapping search match overrides the selection background")
-    func searchMatchDrawsOverSelection() throws {
-        // Intent: a cell covered by both highlights shows the search-match color, and
-        //   its glyph is still drawn on top.
-        // Why it exists: planning proves the two run arrays coexist, but coexistence
-        //   says nothing about draw order -- selection painted last would swallow the
-        //   match a user just navigated to, exactly when they need to see it.
+    @Test("selection search and overlap render as three distinct fills")
+    func semanticOverlayFillsRemainDistinct() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         var terminal = try #require(Terminal(columns: 3, rows: 1))
-        terminal.feed(Array("\u{1B}[37mAB".utf8))
+        terminal.feed(Array("\u{1B}[37mABC".utf8))
         terminal.setSelection(TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 2)
         ))
-        let found = terminal.beginSearch("A")
+        let found = terminal.beginSearch("BC")
         #expect(found)
 
         let plan = planFrame(
@@ -33,15 +28,27 @@ struct SearchMatchExecutionTests {
             )
         )
         let bitmap = try renderBitmap(plan: plan, metrics: metrics)
+        let combined = try #require(plan.overlayRuns.first { $0.state == .selectionAndActiveSearchMatch })
+        let selection = try #require(plan.overlayRuns.first { $0.state == .selection })
 
-        let overlapped = bitmap.pixels(in: cellRect(row: 0, column: 0, metrics: metrics))
-        let match = Pixel(RenderTheme.dark.searchMatchBackground)
-        #expect(overlapped.contains(match))
-        #expect(overlapped.contains(Pixel(RenderTheme.dark.selectionBackground)) == false)
-        #expect(overlapped.contains { $0 != match })
+        let match = try #require(plan.overlayRuns.first { $0.state == .activeSearchMatch })
 
-        let selectedOnly = bitmap.pixels(in: cellRect(row: 0, column: 1, metrics: metrics))
-        #expect(selectedOnly.contains(Pixel(RenderTheme.dark.selectionBackground)))
-        #expect(selectedOnly.contains(match) == false)
+        let overlapped = bitmap.pixels(in: cellRect(row: 0, column: 1, metrics: metrics))
+        #expect(overlapped.contains(Pixel(combined.color)))
+        #expect(overlapped.contains(Pixel(selection.color)) == false)
+        #expect(overlapped.contains { $0 != Pixel(combined.color) })
+
+        let selectedOnly = bitmap.pixels(in: cellRect(row: 0, column: 0, metrics: metrics))
+        #expect(selectedOnly.contains(Pixel(selection.color)))
+        #expect(selectedOnly.contains(Pixel(combined.color)) == false)
+        let matchedOnly = bitmap.pixels(in: cellRect(row: 0, column: 2, metrics: metrics))
+        #expect(matchedOnly.contains(Pixel(match.color)))
+        #expect(matchedOnly.contains(Pixel(combined.color)) == false)
+        #expect(combined.color != selection.color)
+        #expect(combined.color != match.color)
+        #expect(selection.color != match.color)
+        #expect(combined.color != plan.defaultBackground)
+        #expect(selection.color != plan.defaultBackground)
+        #expect(match.color != plan.defaultBackground)
     }
 }

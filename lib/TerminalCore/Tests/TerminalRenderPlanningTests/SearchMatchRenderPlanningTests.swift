@@ -24,13 +24,19 @@ struct SearchMatchRenderPlanningTests {
         let found = terminal.beginSearch("hit")
         #expect(found)
         let plan = planFrame(for: terminal, presentation: presentation)
+        let match = resolveOverlayStyle(
+            state: .activeSearchMatch,
+            background: presentation.theme.defaultBackground,
+            foreground: presentation.theme.defaultForeground,
+            theme: presentation.theme
+        )
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
                 row: 0,
                 startColumn: 2,
                 columnCount: 3,
                 state: .activeSearchMatch,
-                color: presentation.theme.searchMatchBackground
+                color: match.fill
             ),
         ])
         assertCanonical(plan)
@@ -69,27 +75,45 @@ struct SearchMatchRenderPlanningTests {
         #expect(found)
 
         let plan = planFrame(for: terminal, presentation: presentation)
+        let selection = resolveOverlayStyle(
+            state: .selection,
+            background: presentation.theme.defaultBackground,
+            foreground: presentation.theme.selectionForeground,
+            theme: presentation.theme
+        )
+        let combined = resolveOverlayStyle(
+            state: .selectionAndActiveSearchMatch,
+            background: presentation.theme.defaultBackground,
+            foreground: presentation.theme.selectionForeground,
+            theme: presentation.theme
+        )
+        let match = resolveOverlayStyle(
+            state: .activeSearchMatch,
+            background: presentation.theme.defaultBackground,
+            foreground: presentation.theme.defaultForeground,
+            theme: presentation.theme
+        )
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
                 row: 0,
                 startColumn: 0,
                 columnCount: 2,
                 state: .selection,
-                color: presentation.theme.selectionBackground
+                color: selection.fill
             ),
             RenderOverlayRun(
                 row: 0,
                 startColumn: 2,
                 columnCount: 2,
                 state: .selectionAndActiveSearchMatch,
-                color: presentation.theme.searchMatchBackground
+                color: combined.fill
             ),
             RenderOverlayRun(
                 row: 0,
                 startColumn: 4,
                 columnCount: 1,
                 state: .activeSearchMatch,
-                color: presentation.theme.searchMatchBackground
+                color: match.fill
             ),
         ])
 

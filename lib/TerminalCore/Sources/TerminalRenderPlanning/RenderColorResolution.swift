@@ -19,6 +19,144 @@ struct ResolvedCellStyle: Equatable, Sendable {
     var strikethrough: Bool
 }
 
+/// Carries the fill and glyph color selected for one semantic overlay state.
+struct ResolvedOverlayStyle: Equatable, Sendable {
+    let fill: RenderColor
+    let foreground: RenderColor
+}
+
+let overlayFillMinimumBrightnessSeparation = 40
+let overlayTextMinimumBrightnessSeparation = 100
+
+/// Maps an sRGB color to deterministic integer perceived brightness.
+func perceivedBrightness(of color: RenderColor) -> Int {
+    (77 * Int(color.red) + 151 * Int(color.green) + 28 * Int(color.blue)) >> 8
+}
+
+/// Measures absolute distance in the renderer's perceived-brightness metric.
+func brightnessSeparation(_ first: RenderColor, _ second: RenderColor) -> Int {
+    abs(perceivedBrightness(of: first) - perceivedBrightness(of: second))
+}
+
+/// Keeps a qualifying seed exact or moves it to the nearest brightness that
+/// clears every competing color, preferring the darker result on a tie.
+func resolveBrightnessSeparatedColor(
+    seed: RenderColor,
+    avoiding colors: [RenderColor],
+    minimumSeparation: Int
+) -> RenderColor {
+    precondition((0...255).contains(minimumSeparation))
+    guard colors.allSatisfy({ brightnessSeparation(seed, $0) >= minimumSeparation }) == false
+    else {
+        return seed
+    }
+
+    let seedBrightness = perceivedBrightness(of: seed)
+    var best: RenderColor?
+    var bestDistance = Int.max
+    var bestBrightness = Int.max
+    for targetBrightness in 0...255 {
+        let candidate = color(seed, movedTo: targetBrightness)
+        guard colors.allSatisfy({
+            brightnessSeparation(candidate, $0) >= minimumSeparation
+        }) else {
+            continue
+        }
+        let candidateBrightness = perceivedBrightness(of: candidate)
+        let distance = abs(candidateBrightness - seedBrightness)
+        if distance < bestDistance
+            || (distance == bestDistance && candidateBrightness < bestBrightness)
+        {
+            best = candidate
+            bestDistance = distance
+            bestBrightness = candidateBrightness
+        }
+    }
+
+    // The overlay ladder needs at most four points spaced by 40 in a 0...255
+    // domain, so its progressively built avoidance set always leaves a result.
+    return best!
+}
+
+/// Resolves one overlay against the cell background and every earlier semantic
+/// state so the fill ladder stays pairwise distinguishable.
+func resolveOverlayStyle(
+    state: RenderOverlayState,
+    background: RenderColor,
+    foreground: RenderColor,
+    theme: RenderTheme
+) -> ResolvedOverlayStyle {
+    let selection = resolveBrightnessSeparatedColor(
+        seed: theme.selectionBackground,
+        avoiding: [background],
+        minimumSeparation: overlayFillMinimumBrightnessSeparation
+    )
+    if state == .selection {
+        return resolvedOverlayStyle(fill: selection, foreground: foreground)
+    }
+    let match = resolveBrightnessSeparatedColor(
+        seed: theme.searchMatchBackground,
+        avoiding: [background, selection],
+        minimumSeparation: overlayFillMinimumBrightnessSeparation
+    )
+    if state == .activeSearchMatch {
+        return resolvedOverlayStyle(fill: match, foreground: foreground)
+    }
+    let combined = resolveBrightnessSeparatedColor(
+        seed: RenderColor(red: 80, green: 127, blue: 235),
+        avoiding: [background, selection, match],
+        minimumSeparation: overlayFillMinimumBrightnessSeparation
+    )
+    return resolvedOverlayStyle(fill: combined, foreground: foreground)
+}
+
+private func resolvedOverlayStyle(
+    fill: RenderColor,
+    foreground: RenderColor
+) -> ResolvedOverlayStyle {
+    return ResolvedOverlayStyle(
+        fill: fill,
+        foreground: resolveBrightnessSeparatedColor(
+            seed: foreground,
+            avoiding: [fill],
+            minimumSeparation: overlayTextMinimumBrightnessSeparation
+        )
+    )
+}
+
+/// Scales darker colors toward black and brighter colors toward white without
+/// floating point; component rounding stays within one stored code point.
+private func color(_ seed: RenderColor, movedTo targetBrightness: Int) -> RenderColor {
+    let sourceBrightness = perceivedBrightness(of: seed)
+    guard targetBrightness != sourceBrightness else { return seed }
+    if targetBrightness < sourceBrightness {
+        guard sourceBrightness > 0 else { return seed }
+        return RenderColor(
+            red: scaled(seed.red, numerator: targetBrightness, denominator: sourceBrightness),
+            green: scaled(seed.green, numerator: targetBrightness, denominator: sourceBrightness),
+            blue: scaled(seed.blue, numerator: targetBrightness, denominator: sourceBrightness)
+        )
+    }
+
+    let numerator = targetBrightness - sourceBrightness
+    let denominator = 255 - sourceBrightness
+    guard denominator > 0 else { return seed }
+    return RenderColor(
+        red: brightened(seed.red, numerator: numerator, denominator: denominator),
+        green: brightened(seed.green, numerator: numerator, denominator: denominator),
+        blue: brightened(seed.blue, numerator: numerator, denominator: denominator)
+    )
+}
+
+private func scaled(_ component: UInt8, numerator: Int, denominator: Int) -> UInt8 {
+    UInt8((Int(component) * numerator + denominator / 2) / denominator)
+}
+
+private func brightened(_ component: UInt8, numerator: Int, denominator: Int) -> UInt8 {
+    let distance = 255 - Int(component)
+    return UInt8(Int(component) + (distance * numerator + denominator / 2) / denominator)
+}
+
 /// Applies palette lookup, reverse, and dim in their pinned order while
 /// retaining the attributes later planning stages need to select work.
 func resolveCellStyle(_ style: TerminalStyle, theme: RenderTheme) -> ResolvedCellStyle {
