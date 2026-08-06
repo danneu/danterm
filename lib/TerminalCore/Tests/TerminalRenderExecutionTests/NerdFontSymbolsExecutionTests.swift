@@ -8,13 +8,25 @@ import TerminalCore
 @testable import TerminalRenderExecution
 
 struct NerdFontSymbolsExecutionTests {
+    @Test("The packaged symbols resource is loaded once per process")
+    func packagedResourceIsShared() throws {
+        // Intent: every caller resolves the same parsed packaged resource.
+        // Why it exists: loading from the resource URL per font set retained one
+        //   multi-megabyte font buffer per terminal pane.
+        // Scenario: two independent resolutions in one process compare by identity.
+        let first = try #require(NerdFontSymbolsResource.packaged)
+        let second = try #require(NerdFontSymbolsResource.packaged)
+
+        #expect(first === second)
+    }
+
     @Test("The packaged symbols face is loaded from its resource bytes at one-cell em size")
     func packagedFaceSourceAndSize() throws {
-        let resourceURL = try #require(NerdFontSymbolsResource.packagedURL())
+        let resource = try #require(NerdFontSymbolsResource.packaged)
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         let face = try #require(metrics.fonts.symbols)
 
-        #expect(metrics.fonts.symbolsResourceURL == resourceURL)
+        #expect(metrics.fonts.symbolsResourceURL == resource.sourceURL)
         #expect(CTFontGetSize(face.font) == metrics.cellSize.width)
         #expect(CTFontCopyPostScriptName(face.font) == "SymbolsNFM" as CFString)
     }
@@ -68,7 +80,7 @@ struct NerdFontSymbolsExecutionTests {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
         let metricsWithoutSymbols = try #require(TerminalRenderMetrics(
             displayScale: scale,
-            symbolsFontURL: nil
+            symbolsResource: nil
         ))
         let icon = try renderBitmap(
             plan: makePlan(input: "\u{F07B}X", columns: 3, rows: 1),
@@ -96,7 +108,7 @@ struct NerdFontSymbolsExecutionTests {
         let withSymbols = try #require(TerminalRenderMetrics(displayScale: 2))
         let withoutSymbols = try #require(TerminalRenderMetrics(
             displayScale: 2,
-            symbolsFontURL: nil
+            symbolsResource: nil
         ))
 
         for scalar in ["\u{E0B0}", "\u{F8FF}", "\u{F0219}"] {
@@ -139,9 +151,9 @@ struct NerdFontSymbolsExecutionTests {
         let missing = URL(fileURLWithPath: "/no/such/DanTerm-symbols-font.ttf")
         let unavailable = try #require(TerminalRenderMetrics(
             displayScale: 2,
-            symbolsFontURL: missing
+            symbolsResource: NerdFontSymbolsResource.load(at: missing)
         ))
-        let absent = try #require(TerminalRenderMetrics(displayScale: 2, symbolsFontURL: nil))
+        let absent = try #require(TerminalRenderMetrics(displayScale: 2, symbolsResource: nil))
         let plan = try makePlan(input: "\u{F07B}X", columns: 3, rows: 1)
 
         #expect(unavailable.fonts.symbols == nil)

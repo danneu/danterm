@@ -62,7 +62,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             displayScale: displayScale,
             fontSize: fontSize,
             fontFamily: fontFamily,
-            symbolsFontURL: NerdFontSymbolsResource.packagedURL()
+            symbolsResource: NerdFontSymbolsResource.packaged
         )
     }
 
@@ -71,7 +71,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         displayScale: CGFloat,
         fontSize: CGFloat = 13,
         fontFamily: String? = nil,
-        symbolsFontURL: URL?
+        symbolsResource: NerdFontSymbolsResource?
     ) {
         guard displayScale.isFinite, displayScale > 0,
               fontSize.isFinite, fontSize > 0
@@ -130,7 +130,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         self.fonts = TerminalFontSet(
             baseName: baseName,
             baseSize: fontSize,
-            symbolsFontURL: symbolsFontURL,
+            symbolsResource: symbolsResource,
             symbolsSize: self.cellSize.width
         )
         self.baseFontName = baseName
@@ -238,7 +238,7 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
         self.init(
             baseName: baseName,
             baseSize: baseSize,
-            symbolsFontURL: nil,
+            symbolsResource: nil,
             symbolsSize: baseSize
         )
     }
@@ -246,7 +246,7 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
     init(
         baseName: String,
         baseSize: CGFloat,
-        symbolsFontURL: URL?,
+        symbolsResource: NerdFontSymbolsResource?,
         symbolsSize: CGFloat
     ) {
         let regular = CTFontCreateWithName(baseName as CFString, baseSize, nil)
@@ -254,12 +254,10 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
         self.bold = TerminalFace(font: regular.styled(with: .boldTrait))
         self.italic = TerminalFace(font: regular.styled(with: .italicTrait))
         self.boldItalic = TerminalFace(font: regular.styled(with: [.boldTrait, .italicTrait]))
-        if let symbolsFont = NerdFontSymbolsResource.face(
-            at: symbolsFontURL,
-            pointSize: symbolsSize
-        ) {
+        if let symbolsResource {
+            let symbolsFont = symbolsResource.face(pointSize: symbolsSize)
             self.symbols = TerminalFace(font: symbolsFont)
-            self.symbolsResourceURL = symbolsFontURL
+            self.symbolsResourceURL = symbolsResource.sourceURL
         } else {
             self.symbols = nil
             self.symbolsResourceURL = nil

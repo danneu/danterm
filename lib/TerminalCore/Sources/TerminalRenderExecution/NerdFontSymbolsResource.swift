@@ -2,11 +2,29 @@
 import CoreText
 import Foundation
 
-/// Resolves and constructs the bundled symbols face from its bytes so an installed
-/// font with the same name can never mask a missing application resource.
-package enum NerdFontSymbolsResource {
+/// Owns one parsed symbols-font descriptor so every projected face shares the
+/// resource bytes rather than loading them again for each terminal pane.
+///
+/// `@unchecked` bridges CoreText's unannotated immutable descriptor into the
+/// module's `Sendable` render values. The descriptor and source URL never change
+/// after initialization, and CoreText font objects are safe for concurrent reads.
+package final class NerdFontSymbolsResource: @unchecked Sendable {
     package static let directoryName = "NerdFontsSymbolsOnly"
     package static let fontName = "SymbolsNerdFontMono-Regular"
+
+    /// The lazily initialized process-wide packaged resource, or nil when the
+    /// application resource is absent or unreadable.
+    package static let packaged = load(at: packagedURL())
+
+    /// The resource location retained for diagnostics and font-set equality.
+    package let sourceURL: URL
+
+    private let descriptor: CTFontDescriptor
+
+    private init(sourceURL: URL, descriptor: CTFontDescriptor) {
+        self.sourceURL = sourceURL
+        self.descriptor = descriptor
+    }
 
     /// Finds the app-assembled resource first and the SwiftPM resource bundle only
     /// where that generated accessor is guaranteed to exist.
@@ -33,15 +51,20 @@ package enum NerdFontSymbolsResource {
         )
     }
 
-    /// Builds a face from the resource's bytes without registering or resolving
-    /// the font by its process-global name.
-    package static func face(at url: URL?, pointSize: CGFloat) -> CTFont? {
+    /// Loads and parses one resource without registering or resolving the font by
+    /// its process-global name. This uncached seam preserves missing-file tests.
+    package static func load(at url: URL?) -> NerdFontSymbolsResource? {
         guard let url,
               let data = try? Data(contentsOf: url) as CFData,
               let descriptor = CTFontManagerCreateFontDescriptorFromData(data)
         else {
             return nil
         }
-        return CTFontCreateWithFontDescriptor(descriptor, pointSize, nil)
+        return NerdFontSymbolsResource(sourceURL: url, descriptor: descriptor)
+    }
+
+    /// Projects the parsed resource to one point size without decoding it again.
+    package func face(pointSize: CGFloat) -> CTFont {
+        CTFontCreateWithFontDescriptor(descriptor, pointSize, nil)
     }
 }
