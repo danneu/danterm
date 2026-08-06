@@ -49,6 +49,12 @@ done
 # The documented rc hook chooses a local app-owned directory first, falls back
 # to the packaged asset for a remote LC_DANTERM shell, and stays inert elsewhere.
 # Keep these snippets in lockstep with hm-module.nix and README.md.
+#
+# Every case below pins DANTERM rather than inheriting it: the assets branch on
+# it (a shell with DANTERM set is local, not remote), so an ambient value makes
+# this block assert something different when run from inside DanTerm than from a
+# Nix sandbox. That divergence is what shipped this block green locally and red
+# in CI.
 missing_integration="$integration_dir/missing"
 for shell in zsh bash fish; do
     case "$shell" in
@@ -56,7 +62,7 @@ for shell in zsh bash fish; do
             shell_args=()
             test "$shell" = zsh && shell_args=(-f)
             test "$shell" = bash && shell_args=(--noprofile --norc)
-            local_output="$(DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" "$shell" "${shell_args[@]}" -c '
+            local_output="$(env -u DANTERM DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" "$shell" "${shell_args[@]}" -c '
                 if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
                     asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'
                     if [[ -r $asset ]]; then source "$asset"; else printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; fi
@@ -65,14 +71,14 @@ for shell in zsh bash fish; do
                 fi
                 printf "%s" "${DANTERM_SHELL_INTEGRATION_DIR:-unset}"
             ' _ "$missing_integration" 2>&1)"
-            inert_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM "$shell" "${shell_args[@]}" -c '
+            inert_output="$(env -u DANTERM -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM "$shell" "${shell_args[@]}" -c '
                 if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'"; elif [[ -n ${LC_DANTERM:-} ]]; then source "$1/danterm.'"$shell"'"; fi
             ' _ "$missing_integration" 2>&1)"
-            broken_output="$(DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" "$shell" "${shell_args[@]}" -c '
+            broken_output="$(env -u DANTERM DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" "$shell" "${shell_args[@]}" -c '
                 asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'
                 if [[ -r $asset ]]; then source "$asset"; else printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; fi
             ' 2>&1)"
-            remote_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 "$shell" "${shell_args[@]}" -c '
+            remote_output="$(env -u DANTERM -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 "$shell" "${shell_args[@]}" -c '
                 if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
                     source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'"
                 elif [[ -n ${LC_DANTERM:-} ]]; then
@@ -82,7 +88,7 @@ for shell in zsh bash fish; do
             ' _ "$integration_dir")"
             ;;
         fish)
-            local_output="$(env DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" fish --no-config -c '
+            local_output="$(env -u DANTERM DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" fish --no-config -c '
                 if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
                     set asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
                     if test -r "$asset"; source "$asset"; else; printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; end
@@ -91,14 +97,14 @@ for shell in zsh bash fish; do
                 end
                 printf %s "$DANTERM_SHELL_INTEGRATION_DIR"
             ' "$missing_integration" 2>&1)"
-            inert_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM fish --no-config -c '
+            inert_output="$(env -u DANTERM -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM fish --no-config -c '
                 if set -q DANTERM_SHELL_INTEGRATION_DIR; source $DANTERM_SHELL_INTEGRATION_DIR/danterm.fish; else if set -q LC_DANTERM; source $argv[1]/danterm.fish; end
             ' "$missing_integration" 2>&1)"
-            broken_output="$(env DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" fish --no-config -c '
+            broken_output="$(env -u DANTERM DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" fish --no-config -c '
                 set asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
                 if test -r "$asset"; source "$asset"; else; printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; end
             ' 2>&1)"
-            remote_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 fish --no-config -c '
+            remote_output="$(env -u DANTERM -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 fish --no-config -c '
                 if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
                     source $DANTERM_SHELL_INTEGRATION_DIR/danterm.fish
                 else if set -q LC_DANTERM; and test -n "$LC_DANTERM"
@@ -111,7 +117,14 @@ for shell in zsh bash fish; do
     test "$local_output" = "$integration_dir" || fail "$shell hook changed or lost the advertised directory"
     test -z "$inert_output" || fail "$shell hook was not inert outside DanTerm"
     assert_contains "$broken_output" "DanTerm shell integration is unreadable: $missing_integration/danterm.$shell"
-    test "$remote_output" = loaded || fail "$shell remote fallback did not load packaged assets"
+    # Substring, not equality: a genuinely remote shell emits its `remote-host`
+    # identity at source time, so that OSC legitimately precedes the marker. The
+    # emission itself is asserted by the nested-ssh block at the end of the file;
+    # here the only claim is that the packaged asset got sourced.
+    case "$remote_output" in
+        *loaded*) ;;
+        *) fail "$shell remote fallback did not load packaged assets" ;;
+    esac
 done
 
 for shell in zsh bash fish; do
