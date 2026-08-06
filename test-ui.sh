@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
+#
+# The AppKit UI suite. This is a raw `swiftc` build, not a SwiftPM test target,
+# and the reason is substitution, not GhosttyKit (the original rationale, now
+# obsolete) and not the WindowServer requirement.
+#
+# The one thing this build does that a test target cannot: it compiles the
+# production view files into the SAME module as `tests-ui/*TestShim.swift`, so
+# the fake `AppRuntime` and the fake `TerminalPaneSessionController` REPLACE the
+# real ones -- no dependency injection in production code required. In a test
+# target the views are already compiled against `DanTerm.AppRuntime` and
+# `TerminalPaneSession.TerminalPaneSessionController`, and the real ones cannot
+# be built in a test (`AppRuntime.init` binds the live IPC socket; the
+# controller forks a PTY child). That is what `-D DANTERM_UI_TEST` is for in
+# `SwiftTerminalSessionView.swift` and `ThemeRenderBridge.swift`: it suppresses
+# the real engine imports so the fakes win. Adding a view here ("promotion")
+# is the price of that seam.
+#
+# Full finding, including what was measured and the way out:
+# docs/design/2026-08-06-ui-harness-whole-module-substitution.md
+#
+# Kept out of `just test` separately, because it needs a WindowServer connection.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROTO_BUILD="$(mktemp -d)"
