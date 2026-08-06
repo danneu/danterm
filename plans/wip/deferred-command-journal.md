@@ -2,20 +2,18 @@
 
 ## Status
 
-Deferred. Do not implement this direction as part of the live semantic-model
-work or use it to gate terminal-engine replacement. Revisit it only after
-[Live pane semantic model](16-semantic-model.md) has shipped, its ordered event
-stream has real-pane evidence, and a concrete historical consumer still
-justifies the added machinery.
+Deferred. Do not use this direction to gate terminal-engine replacement.
+Revisit it only after the ordered pane event stream has real-pane evidence and
+a concrete historical consumer still justifies the added machinery.
 
 ## Problem
 
-The live semantic model can say what is happening now, but it intentionally
-forgets completed commands. An agent debugging a pane, a future command
-timeline, or command-scoped navigation would otherwise need to scrape terminal
-text and guess at structure the engine once knew.
+Latest-value pane facts can say what is happening now, but intentionally forget
+completed commands. An agent debugging a pane, a future command timeline, or
+command-scoped navigation would otherwise need to scrape terminal text and
+guess at structure the engine once knew.
 
-Historical semantics are not a small extension of the live facets. A useful
+Historical semantics are not a small extension of latest-value state. A useful
 journal needs bounded records, content-honest references into mutable terminal
 history, independent eviction, structured queries, and a reliable command
 admission boundary for launch-and-await. Those mechanisms should be bought
@@ -63,7 +61,7 @@ protocol failure rather than hanging or binding by arrival order or text.
 Do not promote this candidate into an implementation plan until all of these
 are true:
 
-- A named consumer requires history rather than the live facets or an
+- A named consumer requires history rather than latest-value state or an
   immediate completion effect.
 - Real-pane evidence shows the versioned shell event stream is reliable across
   the supported local, remote, tmux, and nested-PTY paths.
@@ -79,7 +77,8 @@ are true:
 
 ## Candidate proof obligations
 
-- Authored, bytewise, and split replay produce identical records and facets.
+- Authored, bytewise, and split replay produce identical records and current
+  pane facts.
 - Unmatched and re-entrant command traces yield at most one complete record per
   reported command and no record from marks alone.
 - Width and height walks preserve retained span reads; eviction and every
@@ -94,8 +93,8 @@ are true:
 
 ## Non-goals while deferred
 
-- Adding journal state, spans, queries, or correlation fields to the live
-  semantic-model slices.
+- Adding journal state, spans, queries, or correlation fields to current
+  pane-state work.
 - Treating the candidate invariants above as replacement gates.
 - Persisting journals in recovery checkpoints.
 - Parsing command text into argv, classifying applications, or adding

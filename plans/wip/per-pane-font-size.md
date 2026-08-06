@@ -20,7 +20,8 @@ and resizes the PTY. The projection is the only reason the value is uniform.
 
 Store a **relative step count** on the pane -- an `Int` on `PaneModel`, default 0
 meaning "follow config" -- and have the projection compute the effective size as
-the configured size plus that offset, clamped.
+the configured size plus that offset. Both operands are already bounded when they
+reach the projection (I3), so the sum needs no clamp of its own.
 
 Relative rather than an absolute per-pane point size, because the stored value
 should record the intent the user expressed ("bigger"), not a re-derivation of it
@@ -77,6 +78,14 @@ keeping its key equivalent live, so the menu shows one row.
   not build the session at the global size and correct it on the first reconcile
   pass, which would show a size pop and send a spurious resize to a freshly forked
   shell.
+- **I9** -- A restored model carries structure, not appearance. `AppModel.config`
+  and `resolvedFontFamily` are ephemeral (loaded from disk at launch, never
+  snapshotted), so a model rebuilt from a snapshot has them at their defaults; the
+  live values are carried onto it before any session is created from it and before
+  it is committed. Without this a restored +2 pane under a configured size of 18
+  is built at 15 and the committed model reverts to 13, breaking I2 and I8. The
+  carry-over is a pure function of (restored model, live config, live resolved
+  family) so it can be asserted through `desiredPaneConfig`.
 
 ## Proof obligations
 
@@ -96,9 +105,11 @@ except where the stored bound is itself the contract (I4). Swift Testing idiom a
   range -- including one small enough to make the old projection-only clamp
   necessary -- resolves to the nearest endpoint.
 - **PO4** (I4) -- Many decrements followed by one increment project a larger size
-  than the floor. Separately: a snapshot carrying an out-of-range step count
-  (including `Int.max`) restores to the bound and is still adjustable in both
-  directions without trapping.
+  than the floor. Separately, a snapshot carrying an out-of-range step count
+  (including `Int.max`) restores to the bound rather than trapping, and then
+  behaves exactly like a pane adjusted to that bound: an inward adjustment changes
+  the projected size, reversing it returns to the bound, and a further outward
+  adjustment is the no-op PO7 requires.
 - **PO5** (I5) -- Round-trip preserves a non-default zoom; a snapshot JSON with no
   zoom key restores to the default; an unzoomed pane writes no zoom key.
 - **PO6** (I6) -- A split inherits the source pane's zoom; a new tab does not; a
@@ -108,9 +119,15 @@ except where the stored bound is itself the contract (I4). Swift Testing idiom a
 - **PO8** (I1, menu path) -- An adjustment with no explicit pane targets the
   focused pane of the selected tab; one naming a pane in a background tab targets
   that pane. Mirrors the `.toggleZoomPane` contract.
+- **PO9** (I9) -- A model rebuilt from a snapshot containing a +2 pane, carried
+  over a live config whose font size is not the default, projects the effective
+  size (configured + 2) for that pane and the configured size for an unzoomed one.
+  The same assertion covers the configured theme and resolved font family, which
+  this path drops today.
 
-I8 is runtime wiring with no pure seam; it is covered by inspection plus the manual
-check below.
+I8's remaining half -- that the runtime passes the effective size to session
+creation rather than the configured one -- is wiring with no pure seam; it is
+covered by inspection plus the manual check below.
 
 ## Non-goals
 
@@ -122,11 +139,7 @@ check below.
 
 ## Accepted risks
 
-- **AR1** -- The legacy Ghostty backend implements `setFontSize` as an empty no-op,
-  so under that backend the new menu items change the model and change nothing
-  visible. This is already true of the configured font size, and the branch is
-  replacing that backend; the items are not conditionally disabled.
-- **AR2** -- Moving Clear Color to Cmd-9 breaks that shortcut for anyone using it.
+- **AR1** -- Moving Clear Color to Cmd-9 breaks that shortcut for anyone using it.
   Accepted deliberately: Cmd-0 as "actual size" is the stronger convention.
 
 ## Rejected ideas
@@ -158,7 +171,10 @@ check below.
   inheritance beside the existing `theme` inheritance.
 - `lib/DanTermCore/Sources/DanTermCore/Persistence.swift` -- snapshot write.
 - `app/AppRuntime.swift` -- session creation and restore staging, which pass the
-  configured size today beside an already-effective theme (I8).
+  configured size today beside an already-effective theme (I8); `stageValidatedRestore`
+  and `commitRestoreSession`, where the live config is carried onto the restored
+  model (I9). Config is assigned to the model exactly once, at init, and the restore
+  commit replaces the model wholesale.
 - `app/AppDelegate.swift` -- View menu items, handlers, and the Clear Color rebind.
 
 Existing tests to reconcile: the golden-master model dump gains the new pane field,
@@ -175,8 +191,9 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
   no longer does. Verify Cmd-= (no shift) also increases and that the View menu
   shows a single "Increase Font Size" row -- the hidden-key-equivalent binding is
   the one part of this that is AppKit behavior rather than code-visible.
-- With a pane zoomed, quit and relaunch: the pane comes back zoomed, at the right
-  size immediately rather than resizing after appearing (I8).
+- With a non-default configured font size and a pane zoomed, quit and relaunch: the
+  pane comes back zoomed, at the right size immediately rather than resizing after
+  appearing (I8), and the configured size and theme survive the restore (I9).
 - Edit the configured font size in Preferences while a pane is zoomed and confirm
   the pane keeps its offset (I2, the load-bearing behavior).
 

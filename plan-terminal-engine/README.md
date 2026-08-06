@@ -47,8 +47,6 @@ contracts below remain the acceptance standard for every further change.
 | [Power and performance](13-power-performance.md)                     | Idle, visibility, sleep/wake, and responsiveness contracts                 | Initial decisions captured |
 | [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Milestones 1-8 and 10 done; 9 open |
 | [Open questions](15-open-questions.md)                               | Decisions intentionally left for the next planning rounds                  | Active                     |
-| [Live pane semantic model](16-semantic-model.md)                     | Latest-value integration, command, connection, and agent facets; no history | Initial direction captured |
-| [Deferred command journal](17-command-journal.md)                    | Candidate command history, output spans, queries, and fresh-pane launch-and-await | Deferred; not implemented |
 
 ## Decisions already fixed
 

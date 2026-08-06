@@ -15,7 +15,7 @@ Research started: 2026-07-31.
 ## Purpose
 
 This doc owns task R1 of
-[Live pane semantic model](../../../plan-terminal-engine/16-semantic-model.md):
+[Live pane semantic model](../../../plans/wip/live-pane-semantic-model.md):
 author the OSC 133 dialect DanTerm's own zsh, Bash, and fish integrations emit,
 and check every mark in it against the parser that already ships.
 
@@ -74,7 +74,7 @@ reflow or how the prompt block is treated on resize.
 
 ## Trigger and current evidence
 
-`plan-terminal-engine/16-semantic-model.md` R1 asks for the marks "DanTerm's
+`plans/wip/live-pane-semantic-model.md` R1 asks for the marks "DanTerm's
 scripts emit" -- and the answer, at commit `3b9707e`, is **none**. The three
 bundled integrations (`integrations/shell-integration/danterm.{zsh,bash,fish}`)
 emit only the private OSC 1337 envelope and OSC 7 cwd. No `133` byte sequence

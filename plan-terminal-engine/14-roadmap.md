@@ -423,10 +423,9 @@ mean.
     corrected to match the shipped behavior), and cross-normalization search --
     the last of which was a behavior fix rather than a test, since search
     neither normalized nor case-folded outside ASCII and now compares canonical
-    caseless graphemes. Doc 16 (semantic model) is excluded by its own
-    Non-goals, which disclaim gating this milestone. Sleep/wake is a real open
-    gap carried to the power-and-performance criterion below, which names it
-    explicitly. Of the low-yield remainder, three are not gaps and are accepted
+    caseless graphemes. Sleep/wake is a real open gap carried to the
+    power-and-performance criterion below, which names it explicitly. Of the
+    low-yield remainder, three are not gaps and are accepted
     on construction or standing-decision grounds (theme presentation-only,
     the retired terminfo two-fixture gate, admission-process discipline); four
     are waived as real but low-value and self-announcing in daily use
