@@ -328,7 +328,7 @@ the evidence that closes each gate.
 - [x] 4. Gate hot-path scheduling guards on a cheap active read
 - [x] 5. Make the owner census stateless so hot-path guards cannot regress
 - [x] 6. Record the refused sparse-topology CPU calibration
-- [ ] 7. Prove keyboard responsiveness and close the milestone evidence
+- [x] 7. Prove keyboard responsiveness and close the milestone evidence
 
 ## Implementation notes
 
@@ -349,3 +349,7 @@ the evidence that closes each gate.
   outcomes. The controlled low-load screen still selected no cell, so the
   workload remains descriptive and M9 claims no automated protection against
   the historical Core Animation regression.
+- Responsiveness is proved at two composable boundaries: the UI harness sends a
+  real `NSEvent` through the window first-responder chain while bounded frame
+  callbacks continue, and a deterministic real-PTY probe proves the resulting
+  input seam reaches a live output producer before final-state convergence.

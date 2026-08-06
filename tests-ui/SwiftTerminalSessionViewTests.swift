@@ -1019,6 +1019,37 @@ func swiftTerminalSessionViewTests() {
                      "F3 did not use Kitty encoding: \(String(describing: controller.inputBytes.last))")
     }
 
+    uiTest("keyboard input runs before a sustained frame stream completes") {
+        // Intent: the real AppKit key route reaches the pane controller before a
+        //   continuing stream of visible frame callbacks finishes.
+        // Why it exists: real-PTY convergence cannot detect a view or responder path
+        //   that becomes inert while the main actor is processing visible output.
+        // Scenario: one-at-a-time frame callbacks keep rearming while a queued K key
+        //   event crosses `keyDown`; the stream then drains to its final frame.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let producer = SustainedFrameProducer(controller: controller, frameCount: 200)
+        let keyEvent = try makeKeyEvent(keyCode: 40, modifiers: [], characters: "k")
+        var inputArrivedBeforeCompletion = false
+        try uiExpect(pane.window?.makeFirstResponder(pane) == true,
+                     "terminal pane did not become the AppKit first responder")
+
+        producer.start()
+        DispatchQueue.main.async {
+            pane.window?.sendEvent(keyEvent)
+            inputArrivedBeforeCompletion = producer.isComplete == false
+        }
+
+        let hangGuard = Date(timeIntervalSinceNow: 2)
+        while producer.isComplete == false, Date() < hangGuard {
+            RunLoop.main.run(mode: .default, before: hangGuard)
+        }
+
+        try uiExpect(producer.isComplete, "sustained frame stream did not converge")
+        try uiExpect(inputArrivedBeforeCompletion, "keyboard input waited for final output")
+        try uiExpect(controller.textInputs == ["k"], "AppKit key did not reach the pane controller")
+    }
+
     uiTest("numeric keypad keys retain their semantic identity") {
         // Intent: keypad text is encoded as a keypad key instead of ordinary committed text.
         // Why it exists: application-keypad mode changes bytes even though AppKit supplies a digit.
@@ -1346,6 +1377,36 @@ private func makeMountedPane(controller: TerminalPaneSessionController) -> Swift
 /// up the responder chain (child -> pane) instead of being invoked on the pane directly.
 private final class FirstResponderProbeView: NSView {
     override var acceptsFirstResponder: Bool { true }
+}
+
+/// Produces a bounded one-callback-at-a-time frame stream for AppKit input ordering tests.
+@MainActor
+private final class SustainedFrameProducer {
+    private let controller: TerminalPaneSessionController
+    private var remainingFrameCount: Int
+    private(set) var isComplete = false
+
+    init(controller: TerminalPaneSessionController, frameCount: Int) {
+        self.controller = controller
+        remainingFrameCount = frameCount
+    }
+
+    func start() {
+        scheduleNextFrame()
+    }
+
+    private func scheduleNextFrame() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            controller.emitFrameForTest()
+            remainingFrameCount -= 1
+            if remainingFrameCount == 0 {
+                isComplete = true
+            } else {
+                scheduleNextFrame()
+            }
+        }
+    }
 }
 
 @MainActor

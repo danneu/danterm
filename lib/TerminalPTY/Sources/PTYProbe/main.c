@@ -1,6 +1,7 @@
 // Controlled PTY child used only by integration tests to report kernel facts
 // directly and synchronize resize notification without timing assumptions.
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
@@ -408,6 +409,88 @@ static int run_color_query_probe(void) {
     return 0;
 }
 
+// Floods the pty from a child process until the parent receives one input byte.
+// The internal pipes make input-before-producer-exit an ordering fact rather than
+// an inference from how much output happened to fit inside a timeout.
+static int run_responsive_output_probe(void) {
+    int ready_pipe[2];
+    int stop_pipe[2];
+    if (pipe(ready_pipe) < 0 || pipe(stop_pipe) < 0) {
+        return 94;
+    }
+    if (disable_input_echo_and_canonical() < 0) {
+        return 95;
+    }
+
+    pid_t producer = fork();
+    if (producer < 0) {
+        return 96;
+    }
+    if (producer == 0) {
+        close(ready_pipe[0]);
+        close(stop_pipe[1]);
+        if (fcntl(stop_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
+            _exit(97);
+        }
+
+        for (unsigned long index = 0;; index++) {
+            char line[80];
+            int length = snprintf(
+                line,
+                sizeof(line),
+                "responsive-output-%06lu payload payload payload payload\n",
+                index
+            );
+            if (length < 0 || write_all(STDOUT_FILENO, (const uint8_t *)line, (size_t)length) < 0) {
+                _exit(98);
+            }
+            if (index == 99) {
+                uint8_t ready = 1;
+                if (write_all(ready_pipe[1], &ready, sizeof(ready)) < 0) {
+                    _exit(99);
+                }
+            }
+
+            uint8_t stop = 0;
+            ssize_t result = read(stop_pipe[0], &stop, sizeof(stop));
+            if (result == 1) {
+                _exit(0);
+            }
+            if (result < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                _exit(100);
+            }
+        }
+    }
+
+    close(ready_pipe[1]);
+    close(stop_pipe[0]);
+    uint8_t ready = 0;
+    while (read(ready_pipe[0], &ready, sizeof(ready)) < 0 && errno == EINTR) {
+    }
+    printf("__RESPONSIVE_READY__\n");
+    fflush(stdout);
+
+    uint8_t input = 0;
+    if (read_exact(&input, sizeof(input)) < 0) {
+        return 101;
+    }
+    int status = 0;
+    if (waitpid(producer, &status, WNOHANG) != 0) {
+        return 102;
+    }
+    uint8_t stop = 1;
+    if (write_all(stop_pipe[1], &stop, sizeof(stop)) < 0) {
+        return 103;
+    }
+    if (waitpid(producer, &status, 0) != producer || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return 104;
+    }
+    printf("__INPUT_BEFORE_PRODUCER_DONE__=%c\n", input);
+    printf("__RESPONSIVE_DONE__\n");
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         return 64;
@@ -456,6 +539,9 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "color-query") == 0) {
         return run_color_query_probe();
+    }
+    if (strcmp(argv[1], "responsive-output") == 0) {
+        return run_responsive_output_probe();
     }
     return 65;
 }

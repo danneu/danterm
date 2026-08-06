@@ -911,6 +911,36 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("keyboard input reaches a child before sustained output completes", .timeLimit(.minutes(1)))
+    func keyboardInputDuringSustainedOutputConverges() async throws {
+        // Intent: keyboard input reaches the PTY child while its output producer is
+        //   still active, then the pane publishes the producer's final state.
+        // Why it exists: output convergence alone does not prove that visible flood
+        //   processing leaves the child-input route live.
+        // Scenario: the controlled probe floods output until it receives one key,
+        //   records that the producer was still alive, then emits a final marker.
+        let host = try makeHost(captureTransitions: false)
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) responsive-output \"$0\""
+            )
+        )
+        var plans: [RenderFramePlan] = []
+        controller.onFrame = { plans.append($0.plan) }
+
+        #expect(await host.waitForOutput(containing: Array("__RESPONSIVE_READY__".utf8)))
+        controller.sendText("k")
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        controller.synchronizeState()
+
+        let finalPlan = try #require(plans.last)
+        #expect(finalPlan.projectedText.contains("__INPUT_BEFORE_PRODUCER_DONE__=k"))
+        #expect(finalPlan.projectedText.contains("__RESPONSIVE_DONE__"))
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("result-only and equal snapshots emit no render plan", .timeLimit(.minutes(1)))
     func resultOnlyEqualSnapshotSkipsPlanning() async throws {
         // Intent: lifecycle-only updates notify session exit without planning an

@@ -23,10 +23,9 @@ not inherit libghostty release timing, power behavior, configuration, or
 architecture.
 
 That outcome is reached rather than aspirational: DanTerm builds, runs, and
-tests without libghostty, GhosttyKit, an xcframework, or Zig. What is still open
-is quality work inside the engine DanTerm already ships -- Milestone 9's
-power-and-performance gate is deliberately unchecked, and the component
-contracts below remain the acceptance standard for every further change.
+tests without libghostty, GhosttyKit, an xcframework, or Zig. The replacement
+milestones are complete; the component contracts below remain the acceptance
+standard for every further change.
 
 ## Component plans
 
@@ -45,7 +44,7 @@ contracts below remain the acceptance standard for every further change.
 | [Configuration and themes](11-configuration-themes.md)               | Baked defaults and future DanTerm-owned formats                            | Initial decisions captured |
 | [Testing and conformance](12-testing-conformance.md)                 | Behavioral proof strategy and compatibility gates                          | Initial direction captured |
 | [Power and performance](13-power-performance.md)                     | Idle, visibility, sleep/wake, and responsiveness contracts                 | Initial decisions captured |
-| [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Milestones 1-8 and 10 done; 9 open |
+| [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Milestones 1-10 done       |
 | [Open questions](15-open-questions.md)                               | Decisions intentionally left for the next planning rounds                  | Active                     |
 
 ## Decisions already fixed
@@ -89,9 +88,9 @@ contracts below remain the acceptance standard for every further change.
 - The power contract requires quiescence when no visible behavior requires
   work.
 
-Passing the experiment gate proves that the architecture is worth extending;
-it does not prove replacement readiness. Replacement still requires the full
-component, compatibility, and quality gates in the roadmap.
+The experiment gate established that the architecture was worth extending. The
+roadmap now records the completed component, compatibility, and quality gates
+that established replacement readiness.
 
 ## Performance optimization index
 

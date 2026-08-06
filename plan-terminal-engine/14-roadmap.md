@@ -412,7 +412,7 @@ mean.
     recording boundary was not exercised; that leg inherits the waiver
     recorded on the recordings criterion above.
 
-- [ ] **9. Pass the replacement quality gates**
+- [x] **9. Pass the replacement quality gates**
   - [x] Every required component invariant has the behavioral proof required by
     [Testing and conformance](12-testing-conformance.md). Closed 2026-08-01 by
     an owner-adjudicated audit of every invariant and proof obligation in docs
@@ -427,19 +427,32 @@ mean.
     power-and-performance criterion below, which names it explicitly. Of the
     low-yield remainder, three are not gaps and are accepted
     on construction or standing-decision grounds (theme presentation-only,
-    the retired terminfo two-fixture gate, admission-process discipline); four
-    are waived as real but low-value and self-announcing in daily use
-    (transient power assertions, main-thread responsiveness under sustained
-    output, machine-checked contrast, one settings value across simultaneous
-    panes); one is waived with a named follow-up -- no test drives combined
+    the retired terminfo two-fixture gate, admission-process discipline);
+    transient power assertions, machine-checked contrast, and one settings value
+    across simultaneous panes are waived as real but low-value and
+    self-announcing in daily use. Main-thread responsiveness was reopened by the
+    power-and-performance criterion and now has an AppKit-plus-real-PTY gate.
+    One item is waived with a named follow-up -- no test drives combined
     adversarial pressure across parser, metadata, events, replies, scrollback,
     and damage at once, which is the assumption here most likely to be wrong
     and the first thing to revisit.
-  - [ ] [Power and performance](13-power-performance.md) passes idle, hidden-pane,
+  - [x] [Power and performance](13-power-performance.md) passes idle, hidden-pane,
     visible-output, recovery-freshness, sleep/wake, responsiveness, and teardown
-    gates.
-  - [ ] The Swift backend is suitable for sustained daily use without a required
-    fallback to Ghostty.
+    gates. Closed 2026-08-06 by the
+    [Milestone 9 power-and-performance evidence](../docs/evidence/2026-08-06-milestone-9-power-performance.md):
+    deterministic scheduling traces cover idle, hidden/reveal, bounded output,
+    recovery freshness, system sleep/wake, occlusion, and terminal runtime
+    shutdown; AppKit and real-PTY tests prove keyboard progress before sustained
+    output completes; the full local and UI gates pass. The sparse 17-span CPU
+    candidate remains descriptive because independent A/A series refused a
+    trustworthy frozen rule, so this closure makes no automated claim for the
+    historical Core Animation regression.
+  - [x] The Swift backend is suitable for sustained daily use without a required
+    fallback to Ghostty. Closed 2026-08-06 by the complete component proofs,
+    pinned external terminal gate, prior live-pane and real sleep/wake evidence,
+    and the power-and-performance closure above. Milestone 10 already removed
+    the fallback by construction, so no alternate backend is required or
+    available.
   - [x] The complete pinned evidence package from
     [External terminal test research](../docs/research/1-external-tests.md) is
     reproducible and gating; upstream updates cannot silently change expected
@@ -487,10 +500,11 @@ mean.
     pane smoke test) is the final task of
     `plans/impl/2026-08-06-libghostty-removal-and-post-removal-simplification.md`
     and is the confirmation to point at if this milestone is ever questioned.
-    Note that Milestone 9 is deliberately still open: its power-and-performance
-    gate has not been run. Removal proceeded ahead of it by owner decision, and
-    Milestone 9's "no required fallback to Ghostty" criterion is now closed by
-    construction rather than by evidence.
+    At the time of removal, Milestone 9's power-and-performance gate had not yet
+    run. Removal proceeded ahead of it by owner decision and closed the "no
+    required fallback to Ghostty" portion by construction. The remaining
+    Milestone 9 gate subsequently closed on 2026-08-06 with maintained
+    scheduling, responsiveness, teardown, and lifecycle evidence.
 
 ## Deferred post-milestone work
 
