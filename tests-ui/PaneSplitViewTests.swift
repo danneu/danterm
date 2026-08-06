@@ -24,7 +24,6 @@ struct UITestRunner {
         sidebarContextMenuTests()
         tabTodoPopoverViewTests()
         themeBrowserViewTests()
-        clipboardWriteTests()
         remoteThemePickerSheetTests()
         todoPopoverViewTests()
         alertsPopoverViewTests()

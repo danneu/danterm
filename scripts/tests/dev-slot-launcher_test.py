@@ -185,15 +185,10 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
     def test_pass_env_accepts_only_named_launch_controls(self) -> None:
         options = launcher.parse_arguments([
             "--pass-env",
-            "DANTERM_TERMINAL_BACKEND",
-            "--pass-env",
             "DANTERM_PTY_RECORDING_DIR",
         ])
 
-        self.assertEqual(
-            options.pass_env,
-            ["DANTERM_TERMINAL_BACKEND", "DANTERM_PTY_RECORDING_DIR"],
-        )
+        self.assertEqual(options.pass_env, ["DANTERM_PTY_RECORDING_DIR"])
         with self.assertRaises(SystemExit):
             launcher.parse_arguments(["--pass-env", "CLAUDE_CODE_CHILD_SESSION"])
 
@@ -238,8 +233,8 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
 
     def test_launch_environment_preserves_only_explicitly_named_controls(self) -> None:
         inherited = {
-            "DANTERM_TERMINAL_BACKEND": "swift",
             "DANTERM_PTY_RECORDING_DIR": "/tmp/recordings",
+            "DANTERM_SOCK": "/tmp/inherited.sock",
             "CLAUDE_CODE_CHILD_SESSION": "leak",
         }
 
@@ -250,11 +245,11 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             user="test",
             shell="/bin/zsh",
             temporary_directory="/private/tmp/test/",
-            passed_environment_names=["DANTERM_TERMINAL_BACKEND"],
+            passed_environment_names=["DANTERM_PTY_RECORDING_DIR"],
         )
 
-        self.assertEqual(environment["DANTERM_TERMINAL_BACKEND"], "swift")
-        self.assertNotIn("DANTERM_PTY_RECORDING_DIR", environment)
+        self.assertEqual(environment["DANTERM_PTY_RECORDING_DIR"], "/tmp/recordings")
+        self.assertNotIn("DANTERM_SOCK", environment)
         self.assertNotIn("CLAUDE_CODE_CHILD_SESSION", environment)
 
 

@@ -15,10 +15,6 @@ let package = Package(
         .package(path: "lib/TerminalPTY"),
     ],
     targets: [
-        .binaryTarget(
-            name: "GhosttyKit",
-            path: "lib/GhosttyKit.xcframework"
-        ),
         .target(
             name: "DanTermProtocol",
             path: "lib/DanTermProtocol/Sources/DanTermProtocol",
@@ -29,7 +25,6 @@ let package = Package(
         .executableTarget(
             name: "DanTerm",
             dependencies: [
-                "GhosttyKit",
                 "DanTermProtocol",
                 .product(name: "PaneLifecycle", package: "TerminalPTY"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
@@ -48,15 +43,9 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("Cocoa"),
-                .linkedFramework("Metal"),
-                .linkedFramework("MetalKit"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("CoreText"),
-                .linkedFramework("IOKit"),
-                .linkedFramework("IOSurface"),
-                .linkedFramework("Carbon"),
                 .linkedFramework("UniformTypeIdentifiers"),
-                .linkedLibrary("c++"),
             ]
         ),
         .executableTarget(

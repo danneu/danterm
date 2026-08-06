@@ -14,13 +14,8 @@ fi
 
 failed=0
 while IFS= read -r file; do
-    case "$(basename "$file")" in
-        TerminalView.swift|GhosttyApp.swift|GhosttyBindingAction.swift|GhosttyText.swift|main.swift)
-            continue
-            ;;
-    esac
     if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+GhosttyKit([^[:alnum:]_]|$)' "$file"; then
-        echo "GhosttyKit import outside terminal adapter allowlist: $file" >&2
+        echo "GhosttyKit import in a target with no Ghostty backend: $file" >&2
         failed=1
     fi
 done < <(find "$TARGET" -name '*.swift' -type f -print)
@@ -39,13 +34,8 @@ done < <(find "$TARGET" -name '*.swift' -type f -print)
 
 for theme_target in "${THEME_RUNTIME_TARGETS[@]}"; do
     while IFS= read -r file; do
-        case "$(basename "$file")" in
-            GhosttyApp.swift)
-                continue
-                ;;
-        esac
         if grep -nE 'ghostty/themes|ThemeColorParser' "$file"; then
-            echo "Ghostty theme syntax or paths outside the legacy adapter: $file" >&2
+            echo "Ghostty theme syntax or paths in a target with no Ghostty backend: $file" >&2
             failed=1
         fi
     done < <(find "$theme_target" -name '*.swift' -type f -print)

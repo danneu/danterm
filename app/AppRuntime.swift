@@ -1917,3 +1917,13 @@ func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastT
 private enum RestoreBuildError: Error {
     case sessionCreationFailed
 }
+
+/// Re-homed from the deleted Ghostty adapter: `syncSessionDisplayID` is its only
+/// consumer, and AppKit exposes the screen's `CGDirectDisplayID` only through the
+/// untyped device description.
+extension NSScreen {
+    var displayID: UInt32 {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return deviceDescription[key] as? UInt32 ?? 0
+    }
+}

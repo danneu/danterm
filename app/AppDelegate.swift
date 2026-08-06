@@ -29,22 +29,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     /// applicationShouldTerminate safety net (user already confirmed).
     var quitConfirmed = false
 
-    // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
+    // NSApplicationDelegate: finish bootstrapping the terminal backend, main
     // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let backendValue = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_BACKEND"]
-        let backendKind: TerminalBackendKind
-        do {
-            backendKind = try resolveTerminalBackend(backendValue)
-        } catch {
-            fatalError("Unsupported DANTERM_TERMINAL_BACKEND value: \(backendValue ?? "")")
-        }
-        switch backendKind {
-        case .ghostty:
-            terminalBackend = makeGhosttyBackend()
-        case .swift:
-            terminalBackend = makeSwiftTerminalBackend()
-        }
+        terminalBackend = makeSwiftTerminalBackend()
         guard terminalBackend.isReady else {
             print("Failed to create terminal backend")
             NSApp.terminate(nil)

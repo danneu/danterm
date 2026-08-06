@@ -1,9 +1,8 @@
-// Application entry point: initializes libghostty, resolves explicit init or
-// recovery state, then hands startup ownership to AppKit.
+// Application entry point: resolves explicit init or recovery state, then hands
+// startup ownership to AppKit.
 import Cocoa
 import Darwin
 import DanTermProtocol
-import GhosttyKit
 
 /// Keeps the launcher-owned slot lock in the app while preventing pane children
 /// from inheriting it and delaying slot reuse after the app process dies.
@@ -55,17 +54,10 @@ if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZA
 }
 #endif
 
-// Restore variables are reserved for per-pane injection. Ghostty can only add
+// Restore variables are reserved for per-pane injection. A session can only add
 // per-session overrides, so inherited values must be removed process-wide first.
 for name in reservedRestoreEnvironmentVariableNames {
     unsetenv(name)
-}
-
-// Initialize ghostty -- must happen before anything else.
-let rc = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
-guard rc == GHOSTTY_SUCCESS else {
-    print("ghostty_init failed with code \(rc)")
-    exit(1)
 }
 
 // Resolve explicit launch policy and parse restore-related CLI arguments.

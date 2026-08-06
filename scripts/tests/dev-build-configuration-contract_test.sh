@@ -14,14 +14,12 @@ fail() {
 
 BUILD_ROOT="$TEST_ROOT/build-root"
 FAKE_BIN="$TEST_ROOT/fake-bin"
-mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
-    "$BUILD_ROOT/lib/TerminalPTY" \
+mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/app" \
     "$BUILD_ROOT/icon/AppIcon-dev" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
     "$BUILD_ROOT/integrations/shell-integration/vendor" \
-    "$BUILD_ROOT/lib/ghostty-themes" \
     "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
     "$BUILD_ROOT/themes" \
@@ -30,7 +28,6 @@ ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
 cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
-: > "$BUILD_ROOT/lib/ghostty-themes/Fixture"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
@@ -200,7 +197,6 @@ export RUN_BUILD_LOG="$TEST_ROOT/run-build.log"
 cat > "$RUN_ROOT/dev-build.sh" <<'SHIM'
 #!/usr/bin/env bash
 printf 'argv=%s\n' "$*" > "$RUN_BUILD_LOG"
-printf 'backend=%s\n' "${DANTERM_TERMINAL_BACKEND-unset}" >> "$RUN_BUILD_LOG"
 SHIM
 chmod +x "$RUN_ROOT/dev-build.sh"
 cat > "$FAKE_BIN/open" <<'SHIM'
@@ -209,17 +205,15 @@ exit 0
 SHIM
 chmod +x "$FAKE_BIN/open"
 
-# Intent: the build-and-run wrapper passes configuration and backend selection through while
+# Intent: the build-and-run wrapper forwards its configuration flag through while
 # requesting that the build stop the installed app immediately before replacing its bundle.
-# Why it exists: the optimized recipe must exercise the requested terminal backend after launch,
-# and relaunch must not race an old process that still has the previous bundle open.
-# Scenario: a developer launches an optimized Swift-terminal build from one command.
-HOME="$TEST_ROOT/run-home" DANTERM_TERMINAL_BACKEND=swift \
+# Why it exists: relaunch must not race an old process that still has the previous
+# bundle open.
+# Scenario: a developer launches an optimized build from one command.
+HOME="$TEST_ROOT/run-home" \
     PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$RUN_ROOT/dev-build-run.sh" --release
 grep -qFx 'argv=--release --kill-running' "$RUN_BUILD_LOG" \
     || fail "dev-build-run.sh did not forward --release and append --kill-running"
-grep -qFx 'backend=swift' "$RUN_BUILD_LOG" \
-    || fail "dev-build-run.sh did not preserve DANTERM_TERMINAL_BACKEND"
 
 echo "dev build configuration contract tests passed"

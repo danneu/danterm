@@ -1,5 +1,6 @@
-// Backend-neutral terminal events and backend selection. These value-only contracts
-// let adapters report product behavior without importing AppKit or GhosttyKit.
+// Backend-neutral terminal events and their translation into product messages.
+// These value-only contracts let the terminal adapter report product behavior
+// without importing AppKit.
 
 /// Product-level events one pane session may emit to DanTerm's model loop.
 enum TerminalSessionEvent: Equatable {
@@ -24,28 +25,6 @@ enum TerminalBackendEvent: Equatable {
     case configReloaded
     case configChanged(prefs: GhosttyPrefs, scrollbarEnabled: Bool)
     case quitRequested
-}
-
-/// Development backends selectable for one DanTerm process.
-enum TerminalBackendKind: String, Equatable {
-    case ghostty
-    case swift
-}
-
-/// Explains an invalid development backend value instead of silently falling back.
-enum TerminalBackendSelectionError: Error, Equatable {
-    case unsupported(String)
-}
-
-/// Resolves the launch-only backend selection without reading ambient process state.
-/// Swift is the default as of the Milestone 9 daily-use flip (2026-07-31);
-/// Ghostty remains reachable by explicit opt-in until Milestone 10 removes it.
-func resolveTerminalBackend(_ value: String?) throws -> TerminalBackendKind {
-    guard let value, value.isEmpty == false else { return .swift }
-    guard let backend = TerminalBackendKind(rawValue: value) else {
-        throw TerminalBackendSelectionError.unsupported(value)
-    }
-    return backend
 }
 
 /// Translates the closed session-event vocabulary into the existing pane messages.

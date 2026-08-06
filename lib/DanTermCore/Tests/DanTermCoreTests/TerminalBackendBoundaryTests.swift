@@ -1,5 +1,5 @@
-// Pins the backend-neutral terminal event vocabulary, its exhaustive translation
-// into DanTerm messages, and development backend selection.
+// Pins the backend-neutral terminal event vocabulary and its exhaustive
+// translation into DanTerm messages.
 import Foundation
 import Testing
 
@@ -108,30 +108,6 @@ struct TerminalBackendBoundaryTests {
         if case .requestQuit = terminalMessage(for: TerminalBackendEvent.quitRequested) {
         } else {
             Issue.record("quitRequested translated to the wrong Msg")
-        }
-    }
-
-    @Test("backend selection defaults to Swift and accepts explicit Ghostty")
-    func defaultAndGhosttySelection() throws {
-        // Intent: an unset or empty DANTERM_TERMINAL_BACKEND selects the Swift
-        //   engine, while Ghostty remains reachable only by explicit opt-in.
-        // Why it exists: pins the Milestone 9 daily-use flip (2026-07-31); a
-        //   silent regression back to Ghostty-by-default would invalidate the
-        //   sustained-daily-use evidence the replacement gate requires.
-        #expect(try resolveTerminalBackend(nil) == .swift)
-        #expect(try resolveTerminalBackend("") == .swift)
-        #expect(try resolveTerminalBackend("ghostty") == .ghostty)
-    }
-
-    @Test("backend selection exposes Swift without silently falling back")
-    func swiftSelection() throws {
-        #expect(try resolveTerminalBackend("swift") == .swift)
-    }
-
-    @Test("backend selection rejects unknown values")
-    func unknownSelection() {
-        #expect(throws: TerminalBackendSelectionError.unsupported("other")) {
-            try resolveTerminalBackend("other")
         }
     }
 }
