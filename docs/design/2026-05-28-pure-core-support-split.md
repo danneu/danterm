@@ -3,6 +3,15 @@
 `Status`: Accepted
 `Date`: 2026-05-28
 
+> **2026-08-06: naming superseded by the libghostty removal.** The three-layer
+> split, the `CoreEnv` seams, and the worked example are unchanged and still
+> normative -- this is the document `AGENTS.md` routes layer-placement questions
+> to. Only the framework naming is stale: GhosttyKit is gone, so every "no
+> AppKit/GhosttyKit" below now reads as "no AppKit". `core-purity-lint.sh` kept
+> its Cocoa/AppKit/SwiftUI ban and lost the GhosttyKit one, which could no
+> longer fire once no target declared the module. The body is unedited on
+> purpose.
+
 ## Context
 
 DanTerm follows an Elm architecture: views dispatch `Msg`, the pure

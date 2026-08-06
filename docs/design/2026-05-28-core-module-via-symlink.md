@@ -4,6 +4,17 @@
 `Date`: 2026-05-28
 `Extended by`: [Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
 
+> **2026-08-06: partly superseded by the libghostty removal.** The symlink plus
+> nested-package architecture is unchanged and still normative. Two details are
+> not: GhosttyKit no longer exists, so where the body says core "compiles
+> without the app module or GhosttyKit", the isolation now rests on the app
+> module boundary alone -- and `lib/ghostty-themes`, cited as an example of a
+> gitignored build artifact under `lib/`, is gone with it. That artifact was the
+> only reason `.gitignore` ignored all of `lib/` and allowlisted each source
+> package back in; both were deleted, so a new package under `lib/` is tracked
+> by default rather than needing an allowlist entry. The body is unedited on
+> purpose.
+
 ## Context
 
 DanTerm's pure model/update layer (the 22 files that comprise `Model.swift` /
