@@ -102,6 +102,30 @@ All entity IDs are phantom-typed wrappers (`TabId = TypedId<TabTag>`, and the
 same for panes, groups, splits) so the compiler rejects passing one where
 another is expected.
 
+## Design bar
+
+Before you weigh any fix, work out the ideal one: the simplest structure
+in which the problem can't happen. Keep that option on the table in every
+proposal, plan, and review. The size of the refactor is not a reason to
+drop it: "smaller diff", "less churn", and "for now" describe effort, and
+effort doesn't decide anything here. If you recommend something other than
+the ideal, say what's wrong with the ideal itself -- a constraint it
+breaks, a behavior it loses, a risk it can't remove. "Something cheaper
+exists" is not an argument against it.
+
+The cheap fix is sometimes right, but that's the user's call, and they
+can only make it if the ideal is in front of them. So when you recommend
+the cheap fix, show the ideal next to it, say plainly that this is a
+trade-off, and write the ideal into the plan or commit so it doesn't
+disappear. An easy fix chosen over an ideal nobody named is a decision
+nobody made.
+
+A worked example of this bar is
+[agent-docs/perf-granularity-mismatch.md](agent-docs/perf-granularity-mismatch.md):
+the structural lift is the fix and a cache is the fallback -- and the
+smell is strongest exactly where workarounds have piled up enough to make
+the easy path look settled.
+
 ## Code Style
 
 Comments explain intent -- purpose, invariants, ownership, call-site coupling --
