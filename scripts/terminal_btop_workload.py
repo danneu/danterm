@@ -44,6 +44,11 @@ BOUNDED_MODES = ("sample", "trace")
 # diagnostic to the reproduced incident.
 MIN_DURATION_SECONDS = 1
 MAX_DURATION_SECONDS = 20
+# macOS's own `stty`, by absolute path. `-f <device>` is BSD syntax; GNU
+# coreutils spells that flag `-F` and rejects `-f`, so a host with coreutils
+# ahead of /bin on PATH could never read a live PTY. The canonical geometry is a
+# fact about the OS, not about the invoking shell's PATH.
+BSD_STTY = "/bin/stty"
 # The canonical live-PTY geometry, as `stty size` reports it: rows first.
 CANONICAL_ROWS = 66
 CANONICAL_COLUMNS = 179
@@ -224,11 +229,21 @@ def read_live_pty_size(tty, *, run_command=subprocess.run):
     Read from the device rather than from inside the pane: an in-pane `stty` run
     before btop starts reports the size at that moment, while readiness requires
     the geometry the uniquely owned profiled process is drawing at now.
+
+    A failed read is a rejection, not an error: readiness polls a device that may
+    not be there yet, and the caller's retry loop is what turns "not now" into
+    "not within the timeout".
     """
     device = tty if str(tty).startswith("/dev/") else f"/dev/{tty}"
     result = run_command(
-        ["stty", "-f", device, "size"], check=True, capture_output=True, text=True
+        [BSD_STTY, "-f", device, "size"], check=False, capture_output=True, text=True
     )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise WorkloadRejected(
+            f"could not read {device}'s size (`{BSD_STTY}` exited "
+            f"{result.returncode}): {detail}"
+        )
     return parse_stty_size(result.stdout)
 
 

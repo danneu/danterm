@@ -329,6 +329,56 @@ class OwnedProcessTests(unittest.TestCase):
             )
         self.assertIn("80x24", str(rejection.exception))
 
+    def test_the_pty_size_is_read_with_the_bsd_stty_and_not_the_one_on_path(self):
+        # Intent: the winsize read names an absolute BSD `stty`.
+        # Why it exists: `-f <device>` is BSD syntax, and GNU coreutils -- which a
+        #   developer may well have earlier on PATH -- spells the same flag `-F`
+        #   and rejects `-f` outright. Resolving the OS's own binary keeps the
+        #   canonical geometry a fact about macOS rather than about the invoking
+        #   shell's PATH.
+        seen = []
+
+        def run_command(argv, **_):
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="66 179\n", stderr="")
+
+        self.assertEqual(
+            WORKLOAD.read_live_pty_size("ttys004", run_command=run_command), (66, 179)
+        )
+        self.assertEqual(seen, [["/bin/stty", "-f", "/dev/ttys004", "size"]])
+
+    def test_an_stty_that_fails_is_a_rejection_carrying_its_reason(self):
+        # Intent: a nonzero `stty` becomes a WorkloadRejected quoting stderr, and
+        #   readiness keeps polling through it rather than dying.
+        # Why it exists: readiness polls a device that may not exist yet, so a
+        #   failed read is an ordinary not-ready-yet. Letting the subprocess error
+        #   escape ends the run in a traceback whose captured stderr -- the one
+        #   line saying what was actually wrong -- is never printed.
+        def refuses(argv, **_):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stty: /dev/ttys004: Device not configured\n")
+
+        with self.assertRaises(WORKLOAD.WorkloadRejected) as rejection:
+            WORKLOAD.read_live_pty_size("ttys004", run_command=refuses)
+        self.assertIn("Device not configured", str(rejection.exception))
+
+        sizes = iter([("", 1), ("66 179\n", 0)])
+
+        def recovers(argv, **_):
+            if argv[0] == "ps":
+                return subprocess.CompletedProcess(argv, 0, stdout=self.TABLE, stderr="")
+            stdout, code = next(sizes)
+            return subprocess.CompletedProcess(argv, code, stdout=stdout, stderr="not yet\n")
+
+        readiness = WORKLOAD.await_readiness(
+            executable="/opt/homebrew/bin/btop",
+            app_pid=200,
+            environment={"HOME": "/run/home"},
+            run_command=recovers,
+            monotonic=lambda: 0.0,
+            sleep=lambda _: None,
+        )
+        self.assertEqual(readiness["process"]["pid"], 202)
+
 
 class MachineStateTests(unittest.TestCase):
     def test_a_probe_that_cannot_run_contributes_no_samples(self):
