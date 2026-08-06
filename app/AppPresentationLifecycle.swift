@@ -59,7 +59,7 @@ final class WorkspaceLifecycleObserver {
 extension AppRuntime {
     /// Pushes system rendering availability to every live terminal session.
     func setRenderingAvailable(_ available: Bool) {
-        guard schedulingSnapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         guard renderingAvailable != available else { return }
         renderingAvailable = available
         for session in sessions.values {
@@ -69,7 +69,7 @@ extension AppRuntime {
 
     /// Pushes effective model and window visibility to live terminal sessions.
     func syncPaneVisibility() {
-        guard schedulingSnapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
 

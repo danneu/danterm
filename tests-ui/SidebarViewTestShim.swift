@@ -4,7 +4,9 @@ import Cocoa
 import DanTermProtocol
 
 final class AppRuntime {
-    var schedulingSnapshot = AppRuntimeSchedulingSnapshot(state: .active, ownerCounts: [:])
+    // The harness builds with strict concurrency; the shim is nonisolated but the
+    // UI tests always construct it on the main thread.
+    let schedulingLifecycle = MainActor.assumeIsolated { AppRuntimeSchedulingLifecycle() }
     var model: AppModel
     var viewLocalState = ViewLocalState()
     var sessions: [PaneId: any TerminalSession] = [:]

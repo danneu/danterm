@@ -42,6 +42,10 @@ final class AppRuntimeSchedulingLifecycle {
     private var state = AppRuntimeSchedulingSnapshot.State.active
     private var owners: [AppRuntimeSchedulingToken: Owner] = [:]
 
+    /// Cheap hot-path gate: `snapshot` walks the owner census, so per-delivery and
+    /// per-reconcile guards read this instead.
+    var isActive: Bool { state == .active }
+
     /// Returns a handle-free census suitable for termination assertions and diagnostics.
     var snapshot: AppRuntimeSchedulingSnapshot {
         AppRuntimeSchedulingSnapshot(

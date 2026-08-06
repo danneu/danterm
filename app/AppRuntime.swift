@@ -270,7 +270,7 @@ class AppRuntime {
     // MARK: - Ephemeral Mode Event Monitor
 
     private func installSwitcherEventMonitor() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let eventHandler: (NSEvent) -> NSEvent? = { [weak self] event in
             guard let self = self else { return event }
 
@@ -388,7 +388,7 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let commands = update(&model, msg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
@@ -517,7 +517,7 @@ class AppRuntime {
     }
 
     func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
-        guard schedulingLifecycle.snapshot.state == .active else {
+        guard schedulingLifecycle.isActive else {
             connection.close()
             return
         }
@@ -529,7 +529,7 @@ class AppRuntime {
 
     /// Drops all streams owned by a closed socket before another polling fence can start.
     func ipcConnectionClosed(_ connectionId: UUID) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let requestIds = ipcConnections.compactMap { reqId, connection in
             connection.id == connectionId ? reqId : nil
         }
@@ -553,7 +553,7 @@ class AppRuntime {
         connection: IpcConnection,
         session: any TerminalSession
     ) {
-        guard schedulingLifecycle.snapshot.state == .active else {
+        guard schedulingLifecycle.isActive else {
             connection.close()
             return
         }
@@ -608,7 +608,7 @@ class AppRuntime {
         connection: IpcConnection,
         start: PaneTapeFollowStart
     ) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
         guard sessions[paneId] != nil else {
             writePaneTapeFollowNotification(
@@ -635,7 +635,7 @@ class AppRuntime {
 
     private func ensurePaneTapeFollowTimer() {
         guard paneTapeFollowTimer == nil,
-              schedulingLifecycle.snapshot.state == .active
+              schedulingLifecycle.isActive
         else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(
@@ -666,7 +666,7 @@ class AppRuntime {
     }
 
     private func pollPaneTapeFollowers() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         for fetch in paneTapeFollowSubscriptions.beginFetches() {
             guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
                 paneTapeFollowSubscriptions.completeDelivery(
@@ -742,7 +742,7 @@ class AppRuntime {
         connection: IpcConnection,
         batch: PaneTapeFollowBatch
     ) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         guard let accepted = paneTapeFollowSubscriptions.finishFetch(
             subscriptionId: subscriptionId,
             batch: batch
@@ -839,7 +839,7 @@ class AppRuntime {
 
     /// Permanently cancels runtime-owned scheduling without duplicating native PTY teardown.
     func shutdown() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
 
         checkpointPending = false
         paneTapeFollowSubscriptions.removeAll()
@@ -1283,7 +1283,7 @@ class AppRuntime {
     /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
     /// into a single disk write.
     private func scheduleDebouncedCheckpoint() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         checkpointPending = true
         schedulingLifecycle.cancel(checkpointDebouncerToken)
         checkpointDebouncerToken = nil
@@ -1308,7 +1308,7 @@ class AppRuntime {
     /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
         guard coalescedReconcileTimer == nil,
-              schedulingLifecycle.snapshot.state == .active
+              schedulingLifecycle.isActive
         else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Self.reconcileCoalesceInterval)
@@ -1340,7 +1340,7 @@ class AppRuntime {
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
     /// so we don't lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         schedulingLifecycle.cancel(checkpointDebouncerToken)
         checkpointDebouncerToken = nil
         if checkpointPending {
@@ -1352,7 +1352,7 @@ class AppRuntime {
 
     /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
     func prepareRecoveryForApplicationExit() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
         enrichedCheckpointTimerToken = nil
         enrichedCheckpointTimer = nil
@@ -1364,12 +1364,12 @@ class AppRuntime {
     }
 
     private func notePrimaryHistoryMutation() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         applyRecoveryAction(recoveryPolicy.mutation(at: DispatchTime.now().uptimeNanoseconds))
     }
 
     private func applyRecoveryAction(_ action: RecoveryCheckpointAction) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         switch action {
         case .none:
             break
@@ -1473,7 +1473,7 @@ class AppRuntime {
         async: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let capture = captureEnrichedCheckpoint()
         Self.checkpointWriter.write(
             to: enrichedCheckpointURL(),
@@ -1487,7 +1487,7 @@ class AppRuntime {
 
     /// Present a file picker, validate the chosen state file, and replace the current session.
     func importStateFromPanel() {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -1886,7 +1886,7 @@ class AppRuntime {
         confirmTitle: String,
         onResponse: @escaping (Bool) -> Void
     ) {
-        guard schedulingLifecycle.snapshot.state == .active else { return }
+        guard schedulingLifecycle.isActive else { return }
         let alert = NSAlert()
         alert.messageText = messageText
         alert.informativeText = informativeText

@@ -26,6 +26,7 @@ struct AppRuntimeSchedulingLifecycleTests {
             }
         }
 
+        #expect(lifecycle.isActive)
         #expect(lifecycle.snapshot.state == .active)
         #expect(lifecycle.snapshot.ownerCounts == Dictionary(
             uniqueKeysWithValues: AppRuntimeSchedulingCategory.allCases.map { ($0, 1) }
@@ -34,6 +35,7 @@ struct AppRuntimeSchedulingLifecycleTests {
         lifecycle.shutdown()
         lifecycle.shutdown()
 
+        #expect(lifecycle.isActive == false)
         #expect(lifecycle.snapshot == .shutdown)
         #expect(cancellations == Dictionary(
             uniqueKeysWithValues: AppRuntimeSchedulingCategory.allCases.map { ($0, 1) }
