@@ -383,6 +383,7 @@ final class TerminalPaneSessionController {
     }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
     func setVisible(_ visible: Bool) {}
+    func setRenderingAvailable(_ available: Bool) {}
     func setTheme(_ theme: RenderTheme) {
         renderTheme = theme
         appliedThemes.append(theme)

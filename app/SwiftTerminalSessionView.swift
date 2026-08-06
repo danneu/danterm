@@ -566,6 +566,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         controller.setVisible(visible)
     }
 
+    func setRenderingAvailable(_ available: Bool) {
+        controller.setRenderingAvailable(available)
+    }
+
     func refreshBackingProperties() {
         synchronizeGeometry()
     }

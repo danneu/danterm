@@ -137,7 +137,10 @@ class AppRuntime {
     var sessions: [PaneId: any TerminalSession] = [:]
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
-    private var paneVisibility: [PaneId: Bool] = [:]
+    // Cross-file presentation lifecycle forwarding diffs effective visibility here.
+    var paneVisibility: [PaneId: Bool] = [:]
+    // Kept separate from pane visibility so an occluded wake remains deferred.
+    var renderingAvailable = true
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
@@ -436,27 +439,6 @@ class AppRuntime {
         popover.delegate = delegate
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: preferredEdge)
         return popover
-    }
-
-    /// Push effective model visibility to live terminal sessions, skipping unchanged panes.
-    func syncPaneVisibility() {
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
-        let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
-
-        for (paneId, session) in sessions {
-            let visible = desired[paneId] ?? true
-            if paneVisibility[paneId] != visible {
-                #if DANTERM_TERMINAL_CHARACTERIZATION
-                recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
-                #endif
-                session.setVisible(visible)
-                paneVisibility[paneId] = visible
-            }
-        }
-
-        paneVisibility = paneVisibility.filter { paneId, _ in
-            sessions[paneId] != nil
-        }
     }
 
     /// Re-reads every live session's backing scale after the window changes screens.
@@ -1609,6 +1591,7 @@ class AppRuntime {
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
+        session.setRenderingAvailable(renderingAvailable)
         if hasCheckpointableScrollback(initialRecoveryCandidate) {
             notePrimaryHistoryMutation()
         }

@@ -6,6 +6,10 @@ import DanTermProtocol
 final class AppRuntime {
     var model: AppModel
     var viewLocalState = ViewLocalState()
+    var sessions: [PaneId: any TerminalSession] = [:]
+    var paneVisibility: [PaneId: Bool] = [:]
+    var renderingAvailable = true
+    weak var window: NSWindow?
     var sentMessages: [Msg] = []
     var todoPopover: NSPopover?
     var tabTodoPopover: NSPopover?
@@ -43,6 +47,11 @@ final class AppRuntime {
     func reloadDanTermConfig() {}
 }
 
+final class AppDelegate {
+    var runtime: AppRuntime!
+    var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
+}
+
 class TerminalView: NSView, TerminalSession {
     weak var paneWrapper: PaneWrapperView?
     var hasSelection = false
@@ -52,6 +61,9 @@ class TerminalView: NSView, TerminalSession {
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
+    var renderingAvailability: [Bool] = []
+    var visibility: [Bool] = []
+    var revealCount = 0
 
     func copySelection() {
         performedActions.append("copySelection")
@@ -65,7 +77,15 @@ class TerminalView: NSView, TerminalSession {
     func sendInputText(_ text: String) {}
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
     func setFocused(_ focused: Bool) {}
-    func setVisible(_ visible: Bool) {}
+    func setVisible(_ visible: Bool) {
+        if visible, visibility.last == false {
+            revealCount += 1
+        }
+        visibility.append(visible)
+    }
+    func setRenderingAvailable(_ available: Bool) {
+        renderingAvailability.append(available)
+    }
     func refreshBackingProperties() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}

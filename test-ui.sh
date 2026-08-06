@@ -67,6 +67,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/TerminalSession.swift" \
+        "$SCRIPT_DIR/app/AppPresentationLifecycle.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/FontAvailability.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeFollow.swift" \
@@ -112,6 +113,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/RemoteThemePickerSheetTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TerminalBackendBoundaryTests.swift" \
+        "$SCRIPT_DIR/tests-ui/AppPresentationLifecycleTests.swift" \
         "$SCRIPT_DIR/tests-ui/DanTermConfigStoreTests.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \

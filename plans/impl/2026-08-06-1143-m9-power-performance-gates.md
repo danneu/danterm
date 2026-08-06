@@ -347,7 +347,7 @@ the evidence that closes each gate.
 ## Commit progress
 
 - [x] 1. Suspend terminal frame planning across system sleep and wake
-- [ ] 2. Forward workspace lifecycle and window occlusion through AppKit
+- [x] 2. Forward workspace lifecycle and window occlusion through AppKit
 - [ ] 3. Make application-runtime shutdown terminal and observable
 - [ ] 4. Freeze and apply the sparse-topology CPU benchmark gate
 - [ ] 5. Prove keyboard responsiveness and close the milestone evidence
@@ -357,3 +357,6 @@ the evidence that closes each gate.
 - Lifecycle wake uses the existing accounted frame-state fence before planning,
   so output already accepted by the PTY owner joins the single complete resume
   frame and its previously queued delivery becomes inert.
+- The AppKit integration proof compiles the production lifecycle extensions
+  against harness-substituted delegate, runtime, and session owners, exercising
+  real notification and occlusion forwarding without opening live PTYs or IPC.

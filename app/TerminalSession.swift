@@ -91,6 +91,7 @@ protocol TerminalSession: AnyObject {
     func sendInputKey(_ key: KeyName, modifiers: KeyMods)
     func setFocused(_ focused: Bool)
     func setVisible(_ visible: Bool)
+    func setRenderingAvailable(_ available: Bool)
     func refreshBackingProperties()
     func applyTheme(_ themeName: String)
     func clearTheme()

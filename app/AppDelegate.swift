@@ -16,6 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var contentArea: NSView!
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
+    // Owned for the application lifetime; its teardown disconnects NSWorkspace callbacks.
+    var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
     var initSnapshot: AppModelSnapshot?
     var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
@@ -23,7 +25,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
     #if DANTERM_TERMINAL_BENCHMARK
     private var benchmarkGeometryController: TerminalBenchmarkGeometryController?
-    private var benchmarkStateRecorder: TerminalBenchmarkStateRecorder?
+    // AppPresentationLifecycle forwards occlusion into benchmark validity recording.
+    var benchmarkStateRecorder: TerminalBenchmarkStateRecorder?
     #endif
     /// Set by the .terminate effect before calling NSApp.terminate to bypass the
     /// applicationShouldTerminate safety net (user already confirmed).
@@ -44,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             terminalBackend: terminalBackend,
             notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
         )
+        installWorkspaceLifecycleObserver()
 
         // Build menu bar
         buildMenu()
@@ -746,16 +750,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return false
     }
 
-    // NSWindowDelegate: window occlusion changes alter every pane's effective
-    // renderer visibility.
-    func windowDidChangeOcclusionState(_ notification: Notification) {
-        guard notification.object is NSWindow else { return }
-        #if DANTERM_TERMINAL_BENCHMARK
-        benchmarkStateRecorder?.windowDidChangeOcclusionState()
-        #endif
-        runtime?.syncPaneVisibility()
-    }
-
     // NSWindowDelegate: a window moved to another screen may have a different
     // backing scale, which every session's renderer has to pick up.
     func windowDidChangeScreen(_ notification: Notification) {
@@ -778,6 +772,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
     // delete the session lock so the next launch knows this was a clean exit.
     func applicationWillTerminate(_ notification: Notification) {
+        tearDownWorkspaceLifecycleObserver()
         runtime?.stopIpcServer()
         runtime?.prepareRecoveryForApplicationExit()
         terminalBackend?.terminateForApplicationExit()

@@ -113,7 +113,8 @@ grep -q 'machineStateSamples' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'setFrameTopLeftPoint' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'screenVisibleFrame.contains' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'drawDurationsNanoseconds' "$ROOT/app/TerminalBenchmark.swift"
-grep -q 'benchmarkStateRecorder?.windowDidChangeOcclusionState()' "$ROOT/app/AppDelegate.swift"
+grep -q 'benchmarkStateRecorder?.windowDidChangeOcclusionState()' \
+    "$ROOT/app/AppPresentationLifecycle.swift"
 grep -q 'NSApp.activate()' "$ROOT/app/AppDelegate.swift"
 python3 "$ROOT/scripts/tests/terminal_benchmark_state_test.py"
 if grep -q 'com.danneu.danterm-terminal-benchmark\.\$\$' "$HARNESS"; then
