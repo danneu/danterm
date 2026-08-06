@@ -46,7 +46,7 @@ read from the same condition: `select_candidate`
 the **A/A** condition and detection, inconclusive and wrong-direction from the
 **injected-effect** conditions. Reading `inconclusive` off `aa` produces a much
 larger number and manufactures failures that are not there -- it briefly indicted
-every frozen rule in the table (`20/F15`). Call `select_candidate` on the
+every frozen rule in the table (`research/20/F15`). Call `select_candidate` on the
 candidate; do not re-implement its arithmetic.
 
 ## Freezing a decision rule
@@ -56,7 +56,7 @@ candidate; do not re-implement its arithmetic.
   at 100,000 trials with disjoint fresh seeds and no parameter changed after
   screening. Freezing straight off a screen skips the confirmation the whole
   design rests on, and a cell that looks selected-and-verified may only be
-  selected (`20/F15`).
+  selected (`research/20/F15`).
 - **Verify a candidate cell on each series independently, not only pooled.** A
   cell can clear every gate on combined evidence and fail on two of the three
   series that fed it -- the defect that got `synchronized-frames`' confirm rule
@@ -73,7 +73,7 @@ candidate; do not re-implement its arithmetic.
   two points. An additive-noise model inferred from block lengths of 40 frames
   (n=5) and 95 frames survived one confirming measurement at 5x, then died when
   the intermediate 2x and 3x points were taken -- they were flat, and the model
-  had the direction backwards (`20/F12`, `20/F16`). When a model predicts a
+  had the direction backwards (`research/20/F12`, `research/20/F16`). When a model predicts a
   curve, measure the middle of the curve before acting on it.
 - **Prefer the continuous quantity to the thresholded one.** A pass/fail at a 60s
   time limit is one bit; the wall time underneath it shows a distribution

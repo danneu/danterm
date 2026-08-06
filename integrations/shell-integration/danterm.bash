@@ -59,7 +59,7 @@ danterm_emit_osc133() {
 # --- OSC 133 prompt marks ---------------------------------------------------
 #
 # Bash differs from zsh in both halves of the dialect, and both differences are
-# measured rather than inherited (docs/research/24-osc-133-dialect, D0/D2):
+# measured rather than inherited (`research/24/D0`, `research/24/D2`):
 #
 #   * `redraw=last`, not `redraw=1`. The mode is a promise about what the shell
 #     will repaint after a resize, and DanTerm blanks exactly that much. readline

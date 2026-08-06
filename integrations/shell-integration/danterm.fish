@@ -58,7 +58,7 @@ end
 # reflow. `1` means "I repaint the whole prompt", which is what fish does on
 # SIGWINCH. Re-declared on every prompt, not once at load: the mode is
 # per-pane terminal state that a nested shell can overwrite and that survives
-# that shell's exit. See docs/research/24-osc-133-dialect (D0, D3).
+# that shell's exit. See `research/24/D0` and `research/24/D3`.
 function danterm_emit_prompt_redraw
     test -n "$_danterm_enabled"; or return 0
     printf '\e]133;A;redraw=1\a'

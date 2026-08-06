@@ -70,7 +70,7 @@ danterm_emit_osc133() {
 # precmd would not. `%{...%}` keeps them out of zsh's prompt width accounting.
 # `redraw=1` is restated every prompt rather than once at load because the mode
 # is per-pane terminal state that a nested shell can overwrite and that outlives
-# that shell. See docs/research/24-osc-133-dialect (D0, D1).
+# that shell. See `research/24/D0` and `research/24/D1`.
 typeset -g _danterm_p_open=$'%{\e]133;A;redraw=1\a%}'
 typeset -g _danterm_p_cont=$'%{\e]133;A;k=s\a%}'
 typeset -g _danterm_p_close=$'%{\e]133;B\a%}'

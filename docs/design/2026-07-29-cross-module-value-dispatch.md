@@ -41,7 +41,7 @@ code, and neither time did anything in the source hint at it:
 The first was rediscovered from scratch. This note exists so the second is the
 last one that has to be.
 
-It has already been used prospectively once. When `14/D3` needed a row-scoped
+It has already been used prospectively once. When `research/14/D3` needed a row-scoped
 read on `Terminal` for the render planner, the obvious shape -- return a row
 view and let the planner index it -- would have put a per-cell accessor across
 this same boundary, and made it fast only by promoting the private `GridCell` to

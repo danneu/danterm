@@ -55,7 +55,7 @@ Pinned source:
 The earlier corpus survey called WezTerm a readable semantic case mine, then
 closed Milestone 6 after finding no unique behavior needed for that support
 matrix. That was a scope-level judgment, not a per-case disposition ledger.
-`docs/research/26-external-corpus-expansion/findings.md#F8` later counted the 56
+`research/26/F8` later counted the 56
 tests as 27 in `mod.rs`, 13 in `csi.rs`, 5 selection, 4 C0, 4 C1, and 3 image
 tests. This scratch performs the missing per-case audit.
 

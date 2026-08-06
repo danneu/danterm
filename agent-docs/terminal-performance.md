@@ -125,13 +125,13 @@ through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans on
 the rows `damage` marks and copies an undamaged row's runs forward from the
 retained frame. (`RenderFramePlanner`'s free-function `planFrame(for:presentation:)`
 does pass `damage: .full`, but it is not the pane path.) Measured at `4ecb032`
-(`17/F12`): `content-churn` ~540k ns to draw against 501k-510k to plan;
+(`research/17/F12`): `content-churn` ~540k ns to draw against 501k-510k to plan;
 `incremental-mixed` ~86k against ~66k.
 
 **No plan/draw ratio generalizes across workloads** -- it is a property of how
 much damage a workload generates, not of the code -- so do not carry one from a
 doc or a profile to a workload it was not measured on
-(`docs/research/14-live-scroll-workload-profile.md` `F1`).
+(`research/14/F1`).
 
 The plan estimate is normalized over the same 50 accepted draws, and only two
 cells carry a rule:
@@ -201,19 +201,19 @@ while synchronized output is active, so the app parses the whole replay and draw
 essentially nothing until the end. Its block is ~95% drain, and its draw tail is a
 **constant ~7 ms** rather than a share of the work -- shortening the stimulus
 inflates the tail's percentage without measuring one nanosecond more drawing
-(`20/F10`). Read it as "how fast can we absorb a real TUI's output", and reach for
+(`research/20/F10`). Read it as "how fast can we absorb a real TUI's output", and reach for
 `content-churn` or `style-churn` for anything about drawing.
 
-**It has no frozen rule.** `23/D4` demoted it to `CANDIDATE_WORKLOADS` and
+**It has no frozen rule.** `research/23/D4` demoted it to `CANDIDATE_WORKLOADS` and
 removed its quick and confirm rules after fresh post-rewrite evidence refused
-them (`23/F8`): the frozen `confirm 8p@2.15%` cell read 12-14% A/A false
+them (`research/23/F8`): the frozen `confirm 8p@2.15%` cell read 12-14% A/A false
 positives against a 1% gate and 74-78% detection against 90%, and two
 independent 48-pair screens each selected no cell. Its fixture, collector,
 direct harness command, block contract, and candidate-screen path all remain
 available for descriptive collection.
 
 **Do not try to buy a tighter rule by lengthening the replay.** It was tried
-(`20/F16`): at 1x/2x/3x the trimmed A/A pair SD is flat (1.30-1.72% / 1.65% /
+(`research/20/F16`): at 1x/2x/3x the trimmed A/A pair SD is flat (1.30-1.72% / 1.65% /
 1.62%), which is multiplicative noise. Lengthening also changes what the
 workload measures -- the main-thread fence regime shifts at 2x, where 9 stalls
 of ~16 ms become 1-2 of 126-266 ms.
@@ -221,20 +221,20 @@ of ~16 ms become 1-2 of 126-266 ms.
 Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
 <name> --revision <rev>`, which searches pair count alongside threshold -- a
 workload owns its blocks and so can buy more pairs, which is exactly what an
-auxiliary metric cannot do (`17/F15`). It writes a report and never a rule.
+auxiliary metric cannot do (`research/17/F15`). It writes a report and never a rule.
 
 ### The third reported quantity: whole-process CPU per accepted draw
 
 The draw verdict times elapsed work between two points on the **main thread**, so
 work on any other thread is invisible to it at any size. That is not a corner
-case: `docs/research/17-cpu-profile-sweep.md` `F6` found the largest single cost
+case: `research/17/F6` found the largest single cost
 in the app -- Core Animation recomputing every glyph's bounds while replaying the
 display list -- living entirely in that blind spot.
 
 So the three serialized-draw workloads also report
 `processCPUNanosecondsPerDraw`: CPU time summed over **every thread**, taken from
 `task_info(TASK_ABSOLUTETIME_INFO)` and charged to each accepted draw as the delta
-since the previously accepted one. Measured at `4ecb032` (`17/F12`):
+since the previously accepted one. Measured at `4ecb032` (`research/17/F12`):
 
 | workload | draw (main thread) | process CPU (all threads) | ratio |
 | --- | ---: | ---: | ---: |
@@ -247,7 +247,7 @@ the churn workloads, and about one twenty-third on `incremental-mixed`.** An
 `equivalent` draw verdict is a true statement about the draw bracket and a nearly
 empty one about total cost. Read this line before concluding a change was free.
 
-**And the churn workloads are frame-rate-capped, not CPU-bound.** `17/F16` traced
+**And the churn workloads are frame-rate-capped, not CPU-bound.** `research/17/F16` traced
 `full-screen-content-churn` at 179x66 and at 80x25 -- a 5.9x change in per-frame
 glyph work -- and the draw rate was 119.10/s and 119.32/s, pinned at the built-in
 120Hz panel's refresh in both. So a CPU reduction on these workloads is not a
@@ -270,20 +270,20 @@ Four things it is not, each of which invites a misreading:
 3. **It cannot be calibrated, so it never carries a verdict.** It is reported
    through `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no
    code path by which it can classify. That is settled, not pending: the A/A
-   screening pass ran (`17/F15`) and no threshold clears the accuracy gates on any
+   screening pass ran (`research/17/F15`) and no threshold clears the accuracy gates on any
    workload in either mode, because an auxiliary metric rides the deciding
    metric's blocks and so cannot buy the extra pairs that would close the gap.
 
-   **What you may still do with it** (`17/D6`): use a co-movement to *undermine* a
+   **What you may still do with it** (`research/17/D6`): use a co-movement to *undermine* a
    draw verdict -- if plan time and CPU shift by the same amount on a change with
-   no causal path to planning, that is arm-level drift, and `17/F14` caught a
+   no causal path to planning, that is arm-level drift, and `research/17/F14` caught a
    spurious `faster` exactly this way. Use a CPU move with no draw move as a reason
    to profile for off-main-thread work. Never use it to *confirm* a win, and never
    quote a difference as an effect: on `style-churn`, 5 of 24 pure-noise pairs sit
    at or below -3.02%.
 4. **It includes the instrument**, which on `incremental-mixed` is a large term --
    the observer's acknowledgment `open()` alone was 9.8% of that workload's on-CPU
-   total (`17/F2`).
+   total (`research/17/F2`).
 
 The line is absent whenever either arm lacks it, exactly like plan time, which is
 the normal case for any baseline predating this reading.
@@ -297,7 +297,7 @@ quantities ride the same blocks, so one collection can screen either, and the
 report and its artifact directory are named for the metric that was screened. It
 never edits the frozen rules: a human moves
 `DECISION_RULES[mode]["planWorkloads"]` after reading the report. A report that
-proposes nothing is a real answer -- see point 3 above and `17/F15`.
+proposes nothing is a real answer -- see point 3 above and `research/17/F15`.
 
 ### Run it under the stated conditions
 
@@ -358,7 +358,7 @@ and this table proposes no replacement.
    directional verdict on `scrollback-stream`, `style-churn` or
    `incremental-mixed` as a reason to look for a mechanism, never as the evidence
    itself. If no mechanism in the diff can reach the workload, it did not move --
-   `31/F17` Observation 5 caught the same shape from the other side.
+   `research/31/F17` Observation 5 caught the same shape from the other side.
 2. **`retained-browse` is the ladder's most repeatable cell and its margin is
    still mostly spent.** Run-to-run scatter is 0.06-0.28 points, the best here --
    but the *physical arm slot*, which `physical_candidate_arm` derives from the
@@ -367,11 +367,11 @@ and this table proposes no replacement.
    within 0.3 points; changing the tree can move the cell by 0.6 with no code
    change at all.
 3. **This is between-invocation noise, which is a wider quantity than the frozen
-   rules were screened against.** Those screens (`28/F5`, `28/F6`, doc 8) resample
+   rules were screened against.** Those screens (`research/28/F5`, `research/28/F6`, doc 8) resample
    a single 24-pair series, so they measure scatter *inside* one collection; this
    table adds two arm builds, two app launch cycles, the slot assignment, and the
    host's own drift. The larger number is expected, not contradictory. One host,
-   one session, and the host was lightly loaded rather than idle -- `31/F18` says
+   one session, and the host was lightly loaded rather than idle -- `research/31/F18` says
    how much and in which direction that cuts.
 
 ## When to measure
@@ -408,7 +408,7 @@ actually have.
 Two things that are not hypotheses, and have each cost real time here:
 
 - **A profile share is not a trigger.** The draw path already fits the 60Hz
-  frame budget (`docs/research/11-render-frame-budget.md` `F7`, `F8`), so "this
+  frame budget (`research/11/F7`, `research/11/F8`), so "this
   function is N% of the draw" does not by itself justify a render optimization.
   Name what a user would observe differently, or leave it.
 - **Date a number before you plan against it.** Every figure in this guide and
@@ -416,7 +416,7 @@ Two things that are not hypotheses, and have each cost real time here:
   that invalidates it does not come back to update the prose. This guide's
   plan/draw figures were once 1.7x-17.5x too high because damage scoping landed
   three days after they were written, and the stale claim kept a parked backlog
-  item alive (`docs/research/17-cpu-profile-sweep.md` `F5`). Check the commit a
+  item alive (`research/17/F5`). Check the commit a
   number names against what has landed since.
 
 ## Choose a profiler
@@ -592,7 +592,7 @@ detaches.
 **Use `measured.drawsPerSecond`; do not use `measured.draws` as the draw count
 during the trace.** Both snapshots necessarily sit outside the profiler's window
 and a profiler spends seconds attaching and saving, so the counted window
-overshoots: 20.1 s counted for a 12 s trace, 67% long (`17/F11`). The artifact
+overshoots: 20.1 s counted for a 12 s trace, 67% long (`research/17/F11`). The artifact
 separates `measured` from `estimated` and carries that warning in its own text.
 The rate is only a valid conversion because these workloads are sustained and
 steady-state; nothing here would notice if one started trending. Without it a
@@ -621,7 +621,7 @@ section. They answer different questions and neither substitutes for the other:
 reasons, both structural rather than bad luck: a memgraph is one sample of a
 quantity that sawtooths as buffers compact, and the GUI app's IOSurface
 compositing churned 50 MB over the same window -- more than twice the effect. It
-is a leak detector. Use it as one. (`docs/research/15-memory-footprint.md`, F6.)
+is a leak detector. Use it as one (`research/15/F6`).
 
 ### `just terminal-memory-probe` -- exact, headless, deterministic
 
@@ -658,7 +658,7 @@ And **the probe feeds in 4 KB chunks on purpose** -- do not "simplify" it to one
 call, so a single-shot 620 KB feed allocates ~37 MB of transient blocks that land
 in the footprint delta and look exactly like resident cost. That mistake put
 coverage at 0.35 when the true figure is 0.87, and it survived a
-competing-interpretations pass before `--chunk` caught it (doc 15's F7). The
+competing-interpretations pass before `--chunk` caught it (`research/15/F7`). The
 census is chunk-invariant and a test pins that, so chunking costs nothing.
 
 For the split between live bytes, bucket rounding, and allocator slack, use
@@ -681,7 +681,8 @@ research doc 12 were taken and why none of them can be re-run.
 
 ### Before you shrink `GridCell`
 
-Four rounds of this took the cell 72 -> 32 bytes (doc 15, `F10`/`F14`/`F15`).
+Four rounds of this took the cell 72 -> 32 bytes (`research/15/F10`,
+`research/15/F14`, `research/15/F15`).
 Three rules came out of it, and each cost a wrong measurement to learn.
 
 **A smaller cell is not a smaller row.** What the process pays is the malloc
