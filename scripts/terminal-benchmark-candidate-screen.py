@@ -7,7 +7,7 @@ A/A series that resolves that state, and reports the rule it implies.
 
 Distinct from `terminal-benchmark-plan-calibration.py` in the one way that
 matters. That screens an *auxiliary* metric, which rides the deciding metric's
-blocks and therefore cannot buy more pairs -- 17/F15 refused a rule on exactly
+blocks and therefore cannot buy more pairs -- research/17/F15 refused a rule on exactly
 that constraint. A candidate workload owns its blocks, so the pair count is a
 free variable and is searched here alongside the threshold. A rule that needs
 more pairs is a real proposal, priced in machine time rather than impossible.
@@ -175,15 +175,15 @@ def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
                monotonic=time.monotonic,
                sample_host_conditions=COMPARE.sample_host_conditions):
     """Collect one A/A series for a screenable workload and report its implied rule."""
-    # A screen is a measurement like any other, and 28/F5's screen 1 had to state
+    # A screen is a measurement like any other, and research/28/F5's screen 1 had to state
     # its host conditions in prose because nothing recorded them. The comparison
     # driver's preflight is reused verbatim here so a screen's conditions live in
     # its own artifact and a replicate can be compared against them: two readings,
-    # no threshold, "not measured" distinct from "measured idle" (28/D1 pitch 4).
+    # no threshold, "not measured" distinct from "measured idle" (research/28/D1 pitch 4).
     host_conditions = {"atInvocation": sample_host_conditions()}
     # Calibrated workloads are screenable too, and deliberately: re-screening one
     # is how a frozen rule gets revisited when the workload's inputs change
-    # (`20/D5` lengthens a replay to test whether its threshold can be bought
+    # (`research/20/D5` lengthens a replay to test whether its threshold can be bought
     # down). Admitting them costs no safety, because this script writes a report
     # and never a rule -- moving a threshold into `DECISION_RULES` stays a human
     # act. The guard remains only to reject names that belong to neither set.

@@ -55,7 +55,7 @@ grep -q 'resetBehavior' "$PROFILE"
 grep -q 'geometry' "$PROFILE"
 grep -q 'profile-command.txt' "$PROFILE"
 
-# Draw counters (research doc 17, T2). Loop mode never completes a block, so
+# Draw counters (`research/17/T2`). Loop mode never completes a block, so
 # these snapshots are the only frame count an attached profiler gets.
 grep -q 'DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="$ACTIVITY_PATH"' "$PROFILE"
 grep -q 'DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="${DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH:-}"' "$HARNESS"
@@ -188,7 +188,7 @@ awk '
     }
     END { exit(found ? 0 : 1) }
 ' "$ROOT/app/AppDelegate.swift"
-# Localized profiling (research doc 17, F17). The three churn workloads force a
+# Localized profiling (`research/17/F17`). The three churn workloads force a
 # republished full viewport every frame, which pins per-frame glyph counts at
 # maximum; `localized-draw-acceptance` is the opposite extreme -- one damaged row
 # against a dense screen -- and the two together bracket what live use costs.
@@ -221,7 +221,7 @@ grep -q 'terminal_btop_artifacts.py' "$PROFILE"
 
 # Provenance: `fixtureIdentity` must carry the geometry actually measured. The
 # harness takes DANTERM_TERMINAL_BENCHMARK_COLUMNS/_ROWS, so a hardcoded 179x66
-# in the identity is a lie the moment anyone varies geometry -- as doc 17's `F16`
+# in the identity is a lie the moment anyone varies geometry -- as `research/17/F16`
 # did, producing artifacts whose fixtureIdentity disagreed with their own
 # geometry field.
 if grep -q '179x66' "$PROFILE"; then

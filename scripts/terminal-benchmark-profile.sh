@@ -126,7 +126,7 @@ trap 'terminate_owned_pid "$HARNESS_PID"' EXIT INT TERM
 # The stimulus is generated from the live geometry
 # (`terminal-benchmark-producer.py`), so the identity has to name the geometry it
 # actually ran at. Hardcoding one made every varied-geometry artifact claim a
-# fixture it had not used -- see doc 17 `F16`, which varied it deliberately.
+# fixture it had not used -- see `research/17/F16`, which varied it deliberately.
 geometry_label="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-179}x${DANTERM_TERMINAL_BENCHMARK_ROWS:-66}"
 localized_updates=0
 case "$WORKLOAD" in

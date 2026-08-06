@@ -339,7 +339,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         #   timed region -- the workload chunks plus the completion marker, and
         #   not the start marker that precedes the clock.
         # Why it exists: research doc 20 turned this bracket into a reported
-        #   throughput rate (`20/D1`), and a rate is only as trustworthy as its
+        #   throughput rate (`research/20/D1`), and a rate is only as trustworthy as its
         #   denominator. Deriving that denominator by re-reading the corpus at
         #   report time would silently misreport any block whose arm ran a
         #   different corpus, so the count has to come from the writer itself and

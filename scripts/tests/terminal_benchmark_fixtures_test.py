@@ -92,7 +92,7 @@ class RecordingLoaderTests(unittest.TestCase):
     def test_a_replay_count_repeats_the_capture_without_disturbing_its_shape(self):
         # Intent: `replayCount: N` delivers the recording's bytes N times, and the
         #   repeated stream still begins and ends where one pass does.
-        # Why it exists: `20/F12` found this workload's block noise is additive --
+        # Why it exists: `research/20/F12` found this workload's block noise is additive --
         #   a roughly fixed per-run wobble over a growing denominator -- so a
         #   longer block is the lever on its threshold, and repeating the capture
         #   is the way to lengthen it without a second capture session. The
@@ -100,7 +100,7 @@ class RecordingLoaderTests(unittest.TestCase):
         #   stay bracket-balanced (else `planIfNeeded` suppresses every later draw
         #   and the harness hangs) and must end in the same final frame the
         #   completion assertion is written against.
-        # Scenario: spec-first; `20/D5` needs a length knob that a negative result
+        # Scenario: spec-first; `research/20/D5` needs a length knob that a negative result
         #   can be trusted to have exercised honestly.
         document = {
             "dimensions": {"columns": 179, "rows": 66},

@@ -3,7 +3,7 @@
 
 A screen is a measurement whose whole output is a proposed decision rule, so the
 conditions it was taken under decide whether a replicate may be compared against
-it. 28/F5's screen 1 had to state those conditions in prose because the script
+it. research/28/F5's screen 1 had to state those conditions in prose because the script
 recorded none. This file pins the wiring that fixed it: the comparison driver's
 preflight is sampled twice -- once at invocation, once immediately before the
 first block -- persisted in the screen report, and rendered for the operator.
@@ -50,7 +50,7 @@ class CandidateScreenHostConditionsTests(unittest.TestCase):
         # Intent: `run_screen` takes two host readings -- one when it is invoked,
         #   one after arm materialization and immediately before collection -- and
         #   persists both in the report under `hostConditions`.
-        # Why it exists: 28/F3 measured that load during a run is confounded by the
+        # Why it exists: research/28/F3 measured that load during a run is confounded by the
         #   run's own builds, so one reading taken at either end alone is
         #   uninterpretable. The pair is the annotation; a single sample is not.
         readings = iter([dict(READING, label="atInvocation"),
@@ -88,7 +88,7 @@ class CandidateScreenHostConditionsTests(unittest.TestCase):
     def test_render_report_shows_the_readings_without_a_verdict(self):
         # Intent: the operator-facing render states both readings and says no
         #   threshold is applied.
-        # Why it exists: 28/D1 pitch 4 admitted the preflight scoped to
+        # Why it exists: research/28/D1 pitch 4 admitted the preflight scoped to
         #   annotate-only. A render that read like a pass/fail would smuggle in
         #   the uncalibrated gate the decision refused.
         rendered = SCREEN.render_report({

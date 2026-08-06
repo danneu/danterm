@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One question: can the retained-row shape driver be trusted to report real shape?
 
-The driver is what doc 28's `F9` and `F10` quote, and it has three ways to be
+The driver is what `research/28/F9` and `research/28/F10` quote, and it has three ways to be
 quietly wrong. It could model malloc's size classes differently from the
 allocator the Swift probe asks (making every rounding number fiction); it could
 frame stimulus bytes in a way the probe misreads (measuring a truncated

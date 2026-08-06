@@ -29,12 +29,12 @@
 # `--stream` is the case still worth testing, and it is the reason the two modes are
 # separate. With no output arriving, a slow search only delays its own result. In a
 # pane that is *also* printing, the consume task's per-delivery drain fence runs on
-# the main thread (`19/F8`, `19/F11`), so the stall reaches the whole app -- other
-# panes, menus, window dragging -- rather than one pane. If both modes feel alike,
-# `19/F8` has the severity wrong and should be corrected.
+# the main thread (`research/19/F8`, `research/19/F11`), so the stall reaches the
+# whole app -- other panes, menus, window dragging -- rather than one pane. If both
+# modes feel alike, `research/19/F8` has the severity wrong and should be corrected.
 #
 # Note the history below. The held-Enter chop this script was written to reproduce is
-# fixed (`19/D3`, commit 257bfee): navigation no longer rescans history per press. A
+# fixed (`research/19/D3`, commit 257bfee): navigation no longer rescans history per press. A
 # streaming pane still pays one scan per press, which is what `--stream` now probes.
 set -eu
 
@@ -56,7 +56,7 @@ esac
 #
 # The needle is sparse (~1 line in 97) so a search has matches to step through
 # without every row matching, and line widths vary so the scan is not measuring one
-# pathological row shape. Both choices mirror the probe behind `19/F5`.
+# pathological row shape. Both choices mirror the probe behind `research/19/F5`.
 #
 #   gen fill   BASE COUNT   print COUNT lines numbered from BASE, as fast as possible
 #   gen stream BASE RATE    print from BASE forever, at RATE lines/sec
@@ -110,11 +110,12 @@ stream stopped.
 
 Two things to judge separately. Whether stepping through matches is noticeably
 worse here than on a quiet pane -- it should be, since arriving output drops the
-cached match list and each press rescans all of history (19/D3). And whether the
-hitch is app-wide or pane-local: doc 19 predicts the whole app, because the
-per-delivery drain fence is on the main thread (19/F8, 19/F11).
+cached match list and each press rescans all of history (research/19/D3). And
+whether the hitch is app-wide or pane-local: doc 19 predicts the whole app,
+because the per-delivery drain fence is on the main thread (research/19/F8,
+research/19/F11).
 
-If only this pane is affected either way, 19/F8 has the severity wrong.
+If only this pane is affected either way, research/19/F8 has the severity wrong.
 --------------------------------------------------------------------------------
 EOF
     gen stream "$lines" "$rate"
@@ -128,30 +129,34 @@ what doc 19 expects (docs/research/19-owner-queue-occupancy.md):
 
   Cmd-F, then type  NEEDLE_        every keystroke from the 3rd character on
                                    fires a full scan, ~50 ms each at this depth
-                                   (19/F7 for the missing debounce, 19/D3 for
-                                   the cost). Should feel responsive; it did
-                                   before the scan was halved.
+                                   (research/19/F7 for the missing debounce,
+                                   research/19/D3 for the cost). Should feel
+                                   responsive; it did before the scan was halved.
 
-  Enter / Shift-Enter, HELD DOWN   this was the choppy case (19/F9) and is the
-                                   one 19/D3 fixed: the match list is now cached
-                                   per needle, so a press is index arithmetic
-                                   rather than a rescan. Expect it to be smooth.
-                                   If it is not, 19/D3 is wrong about the
+  Enter / Shift-Enter, HELD DOWN   this was the choppy case (research/19/F9) and
+                                   is the one research/19/D3 fixed: the match list
+                                   is now cached per needle, so a press is index
+                                   arithmetic rather than a rescan. Expect it to
+                                   be smooth.
+                                   If it is not, research/19/D3 is wrong about the
                                    mechanism and that is worth knowing.
 
   re-run with --stream             the case that is NOT fixed. Arriving output
                                    invalidates the cached list, so every press
-                                   pays a full ~49 ms scan again, and 19/F8 says
-                                   the stall reaches the whole app rather than
-                                   this pane. This comparison is what decides
-                                   whether 19/C5 is worth building.
+                                   pays a full ~49 ms scan again, and
+                                   research/19/F8 says the stall reaches the
+                                   whole app rather than this pane. This
+                                   comparison is what decides whether
+                                   research/19/C5 is worth building.
 
-  Cmd-A                            ~10 ms; then Cmd-C fences behind it. Untouched
-                                   by any change so far (19/C3 would address it).
+  Cmd-A                            ~10 ms; then Cmd-C fences behind it.
+                                   Untouched by any change so far
+                                   (research/19/C3 would address it).
 
-  drag the window or a split       reflow is ~54 ms per width change (19/F5), and
+  drag the window or a split       reflow is ~54 ms per width change
+                                   (research/19/F5), and
                                    its *rate* during a drag was never measured
-                                   (19/H2).
+                                   (research/19/H2).
 
 If none of that is noticeable to you, that is a real result and the remaining
 candidates should be parked rather than acted on. Say so and they will be.

@@ -250,7 +250,7 @@ def run_workload(
     await_start_ack()
 
     # Counted here rather than derived from the corpus at report time: the rate
-    # this feeds (`20/D1`) is only as trustworthy as its denominator, and a
+    # this feeds (`research/20/D1`) is only as trustworthy as its denominator, and a
     # denominator recomputed later belongs to whatever corpus the reader loads
     # rather than to the corpus this block actually drained.
     written = 0

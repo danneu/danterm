@@ -251,7 +251,7 @@ class PairedDifferenceTests(unittest.TestCase):
         #   stay impossible until a screened threshold is frozen. Reading the
         #   wrong metric would be invisible: a block carries draw time and process
         #   CPU side by side, so the paired series would still look well-formed.
-        # Scenario: spec-first; 29/D3 begins each workload collectable and
+        # Scenario: spec-first; research/29/D3 begins each workload collectable and
         #   undecidable, and 29/PO3 refuses classification before a frozen rule.
         schedule = [
             {"measurementRole": role, "physicalArm": "a", "quartet": 0}
@@ -845,7 +845,7 @@ class FeedPrebuildContractTests(unittest.TestCase):
         #   "cache hit" silently compiles inside the timed phase and the
         #   60-second quick budget measures a build.
         # Scenario: the cache's prebuild list is compared against each headless
-        #   runner. Generalized from terminal-feed alone when 28/D1 pitch 1 added
+        #   runner. Generalized from terminal-feed alone when research/28/D1 pitch 1 added
         #   `retained-browse` as a second product out of the same package.
         build_source = inspect.getsource(COMPARE.SNAPSHOT.build_arm)
         headless_runners = {
@@ -1168,7 +1168,7 @@ class UncalibratedProcessCPUMetricTests(unittest.TestCase):
         #   estimate beside its draw verdict.
         # Why it exists: the draw metric times elapsed main-thread work between
         #   two points, so work on any other thread is invisible to it at any
-        #   size. Doc 17's F6 located the app's largest single cost -- Core
+        #   size. `research/17/F6` located the app's largest single cost -- Core
         #   Animation recomputing per-glyph bounds during display-list replay, at
         #   16.78% of one workload's on-CPU total -- inside that blind spot, where
         #   only a diagnostic-only profiler could see it. This metric is what lets
@@ -1305,9 +1305,9 @@ class UncalibratedProcessCPUMetricTests(unittest.TestCase):
 class ThroughputCompositionTests(unittest.TestCase):
     """The descriptive drain/draw-tail split, which reports absolute cost and never decides.
 
-    Research doc 20 (`20/F2`) found `producerWriteNanoseconds` recorded in every
-    `scrollback-stream` block since the harness was written and referenced by no
-    metric table: it is 95.7% of `finalDrawNanoseconds`, so the workload's verdict
+    Research doc 20 found `producerWriteNanoseconds` recorded in every `scrollback-stream`
+    block since the harness was written and referenced by no metric table (`research/20/F2`):
+    it is 95.7% of `finalDrawNanoseconds`, so the workload's verdict
     has always been ~96% a PTY drain measurement with a ~9.5 ms draw tail on the
     end. These tests pin the split that makes that composition visible.
     """
@@ -1348,7 +1348,7 @@ class ThroughputCompositionTests(unittest.TestCase):
         # Intent: a `scrollback-stream` result reports how its measured block
         #   decomposes into PTY drain and the draw tail that follows it.
         # Why it exists: the verdict is one number for two very different costs.
-        #   `20/F2` measured the drain at 95.7% of the block, which means a change
+        #   `research/20/F2` measured the drain at 95.7% of the block, which means a change
         #   touching only the draw path can move this workload by at most ~4% --
         #   so a flat verdict on a real drawing win is the expected reading, not a
         #   failure. Nothing reported that until now.
@@ -1380,8 +1380,8 @@ class ThroughputCompositionTests(unittest.TestCase):
         # Intent: adding the split leaves the frozen decision rule's output
         #   bit-identical.
         # Why it exists: this quantity is 95.7% the same number as the deciding
-        #   metric (`20/F2`), which is exactly why it must decide nothing --
-        #   `20/D1` rejected a second verdict on it as double-counting evidence.
+        #   metric (`research/20/F2`), which is exactly why it must decide nothing --
+        #   `research/20/D1` rejected a second verdict on it as double-counting evidence.
         #   If it could move a verdict it would silently redefine the frozen rule.
         # Scenario: spec-first -- two block series with identical final draws and
         #   wildly different drain shares must decide identically.
@@ -1438,7 +1438,7 @@ class ThroughputCompositionTests(unittest.TestCase):
     def test_the_rendered_split_names_its_denominator_and_carries_no_verdict(self):
         # Intent: the rendered lines state the corpus and geometry the rate is
         #   derived from, and say in words that they decide nothing.
-        # Why it exists: `17/D6` established that a bare number printed under a
+        # Why it exists: `research/17/D6` established that a bare number printed under a
         #   classified verdict reads as a second verdict. A rate is worse than a
         #   percentage here, because "10.5 MB/s" is meaningless without the corpus
         #   and geometry that produced it -- doc 20's investigation rules require
@@ -1480,7 +1480,7 @@ class ThroughputCompositionTests(unittest.TestCase):
 
 
 class HostIdlenessPreflightTests(unittest.TestCase):
-    """The pre-launch host reading that 28/D1 pitch 4 admitted, and its placement."""
+    """The pre-launch host reading that research/28/D1 pitch 4 admitted, and its placement."""
 
     def _processes(self):
         return [
@@ -1494,7 +1494,7 @@ class HostIdlenessPreflightTests(unittest.TestCase):
     def test_a_reading_names_the_load_and_the_external_processes_behind_it(self):
         # Intent: one sample reports the load average, the per-processor load, and
         #   the busiest processes that are not this comparison's own children.
-        # Why it exists: 28/F2 is the incident -- a confirm run taken at load
+        # Why it exists: research/28/F2 is the incident -- a confirm run taken at load
         #   4.73/5.89/8.92 with WindowServer at ~49% reported four `slower`
         #   verdicts with `invalidations: []`, and three did not survive
         #   re-measurement. The harness could not see the one stated condition it
@@ -1518,7 +1518,7 @@ class HostIdlenessPreflightTests(unittest.TestCase):
 
     def test_the_harness_own_process_tree_is_excluded_from_the_external_list(self):
         # Intent: the driver and its descendants never appear as external load.
-        # Why it exists: 28/F3 measured the confound directly -- load sampled
+        # Why it exists: research/28/F3 measured the confound directly -- load sampled
         #   during a run climbed 3.23 -> 9.68 because the benchmark's own builds
         #   and GUI app were most of it. A reading that counted the harness
         #   against itself would report every run as contaminated and be ignored,
@@ -1623,7 +1623,7 @@ class HostIdlenessPreflightTests(unittest.TestCase):
     def test_the_rendered_verdict_reports_the_reading_and_claims_no_threshold(self):
         # Intent: the operator sees the load and the busiest external process
         #   beside the verdicts, marked as an observation rather than a gate.
-        # Why it exists: 28/D1 admitted this scoped to annotate-and-record and
+        # Why it exists: research/28/D1 admitted this scoped to annotate-and-record and
         #   explicitly refused a refusal threshold, because no evidence exists yet
         #   for what load actually perturbs a verdict. Rendering it as a pass/fail
         #   would smuggle in the uncalibrated gate the decision declined.

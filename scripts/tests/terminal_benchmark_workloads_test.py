@@ -89,7 +89,7 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
         # Why it exists: two fresh post-rewrite screens selected no confirm cell,
         #   so retaining the old thresholds would knowingly label noise while
         #   deleting the workload would lose unique synchronized-output coverage.
-        # Scenario: 23/D4 demotes the refused workload until fresh independent
+        # Scenario: research/23/D4 demotes the refused workload until fresh independent
         #   screens and a held-out confirmation can graduate it again.
         self.assertIn("synchronized-frames", VALIDATION.CANDIDATE_WORKLOADS)
         self.assertNotIn("synchronized-frames", VALIDATION.WORKLOADS)
@@ -112,7 +112,7 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
         #   that classified them would be inventing a rule. The opposite failure
         #   is just as real: a workload nothing can collect cannot be screened at
         #   all, and screening is what the next step needs from this one.
-        # Scenario: spec-first; 29/D3 admits the pair as candidates first and
+        # Scenario: spec-first; research/29/D3 admits the pair as candidates first and
         #   grants verdict authority only after an A/A screen and a held-out
         #   confirmation.
         for workload in SPARSE_SPAN_WORKLOADS:
@@ -134,7 +134,7 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
         #   happens after that bracket closes and is invisible to it at any size.
         #   Routing either to the other's metric would measure a workload with an
         #   instrument that structurally cannot see its regression.
-        # Scenario: spec-first; 29/D2 gives each workload the metric that observes
+        # Scenario: spec-first; research/29/D2 gives each workload the metric that observes
         #   its own failure mode, and that routing is workload-local.
         self.assertEqual(
             COMPARE.BLOCK_METRICS["sparse-spans-few"], "drawNanosecondsPerDraw"

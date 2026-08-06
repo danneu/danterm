@@ -47,7 +47,7 @@ def iter_bytes(root, workload):
                 raise ValueError("Benchmark feed must contain only base64")
             chunks.append(base64.b64decode(event["base64"], validate=True))
         # A capture is repeated rather than re-captured to lengthen a block.
-        # `20/F12` measured this workload's noise as additive -- near-flat
+        # `research/20/F12` measured this workload's noise as additive -- near-flat
         # absolute SD across a 2.24x change in duration -- so the denominator is
         # the lever, and repetition moves it without a second capture session or
         # a change to what is being exercised. Valid only because each pass is

@@ -75,7 +75,7 @@ benchmark-confirm baseline:
 # Use this -- not `benchmark-memory` -- for any question of the form "did this change reduce
 # resident bytes". It builds a fresh Terminal per payload and reports exact MemoryLayout stride
 # arithmetic, so two runs are comparable; `benchmark-memory` samples GUI process footprint and
-# cannot resolve a representation change at all (docs/research/15, F6).
+# cannot resolve a representation change at all (`research/15/F6`).
 #
 #   just terminal-memory-probe                              # full matrix, 179x66
 #   just terminal-memory-probe "--json"                     # machine-readable
@@ -90,13 +90,13 @@ terminal-memory-probe flags="":
 # Use this -- not `benchmark-quick` -- for any question of the form "can the main thread's
 # drain fence end up waiting behind this". No calibrated workload searches, selects, or
 # resizes at all, so none of the frozen benchmark rules apply to these jobs and none can
-# (docs/research/19, D2). Reports wall-clock, not CPU: a job that blocks holds the queue
+# (`research/19/D2`). Reports wall-clock, not CPU: a job that blocks holds the queue
 # exactly as hard as one that burns CPU, so an on-CPU instrument would understate precisely
 # the jobs worth finding (19's inverted rule).
 #
 # Compares across revisions by hand -- run it, stash or check out the other revision, run it
 # again. There is no paired arm here and no threshold; at the 5x-50x effect sizes this file
-# deals in, that is enough (19/D2).
+# deals in, that is enough (research/19/D2).
 #
 #   just terminal-occupancy-probe                          # full case list, 179x66
 #   just terminal-occupancy-probe "--json"                 # machine-readable
@@ -108,15 +108,15 @@ terminal-occupancy-probe flags="":
 
 # Time width changes on a budget-saturated scrollback, and report the spread.
 #
-# A probe, not a benchmark: `28/D1` pitch 2 refused to admit this as a candidate workload
-# because `28/H1`'s question is absolute ("does a saturated resize fit in a frame budget,
+# A probe, not a benchmark: `research/28/D1` pitch 2 refused to admit this as a candidate workload
+# because `research/28/H1`'s question is absolute ("does a saturated resize fit in a frame budget,
 # and where does its time go"), not comparative, and doc 28's evidence floor forbids
 # wanting a pre-trim arm to pair against. So there is no threshold here, no verdict, and
 # no second arm -- it prints a distribution and a reader interprets it.
 #
-# It is committed rather than run-and-deleted on purpose. `15/F18`'s browsing probe was
+# It is committed rather than run-and-deleted on purpose. `research/15/F18`'s browsing probe was
 # deleted right after it was read, which cost doc 28 an entire re-implementation task
-# (`28/F5`) to get the same measurement back.
+# (`research/28/F5`) to get the same measurement back.
 #
 # Upgrading it to a paired candidate workload is a separate decision, and `D1` states its
 # gate: a change that is *expected* to move resize cost, which is what finally gives the
@@ -148,8 +148,9 @@ terminal-resize-probe flags="":
 # charge for them -- then price each candidate packing representation against those exact
 # rows.
 #
-# The instrument behind doc 28's `F9` (blank-row frequency, sizing `H2`'s ceiling),
-# `F10` (whether ragged rows' paper savings survive the allocator) and `F11` (what
+# The instrument behind `research/28/F9` (blank-row frequency, sizing
+# `research/28/H2`'s ceiling), `research/28/F10` (whether ragged rows' paper savings survive the
+# allocator) and `research/28/F11` (what
 # retained rows are made of, and what a packing scheme can therefore charge). A probe,
 # not a benchmark: one arm, no threshold, no verdict.
 #

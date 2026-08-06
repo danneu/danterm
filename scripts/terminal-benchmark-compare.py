@@ -62,7 +62,7 @@ BLOCK_METRICS = {
     "synchronized-frames": "finalDrawNanoseconds",
     # Two more candidates, and the only place a workload's deciding metric is
     # not draw time or replay time. Each names the quantity that can observe its
-    # own regression (29/D2): losing exact sparse clipping widens the
+    # own regression (research/29/D2): losing exact sparse clipping widens the
     # synchronous draw and is fully inside that bracket, while per-row rectangle
     # emission moves Core Animation's clip replay, which happens after the
     # bracket closes and is invisible to it at any size. The routing is
@@ -73,7 +73,7 @@ BLOCK_METRICS = {
     "sparse-spans-max": "processCPUNanosecondsPerDraw",
     # The browsing candidate, and the only deciding metric on the ladder that is
     # plan time rather than draw or replay time. That is the point rather than an
-    # exception: `15/F18` measured compact retained rows at -5.79% on frame
+    # exception: `research/15/F18` measured compact retained rows at -5.79% on frame
     # *planning* over history, and no draw bracket can observe that -- planning
     # runs on the PTY-output path, outside the bracket the four draw workloads
     # measure. Stays out of DECISION_RULES until a screen freezes a threshold.
@@ -94,18 +94,18 @@ AUXILIARY_BLOCK_METRICS = {
 # A second quantity reported beside the same blocks, and deliberately not in the
 # table above: whole-process CPU summed over every thread. It is here because the
 # draw metric measures elapsed time between two points on the main thread, so
-# work on any other thread is invisible to it at any size -- and doc 17's `F6`
+# work on any other thread is invisible to it at any size -- and `research/17/F6`
 # found the app's largest single cost, Core Animation recomputing per-glyph
 # bounds during display-list replay, living precisely there.
 #
 # Kept out of `AUXILIARY_BLOCK_METRICS` rather than added to it because that table
 # drives the `planWorkloads` rule lookup, and this metric has no rule to look up.
-# That is a measured outcome, not a gap: a 24-pair paired A/A screen (doc 17 `F15`)
+# That is a measured outcome, not a gap: a 24-pair paired A/A screen (`research/17/F15`)
 # found that on every workload, in both modes, the threshold quiet enough to clear a
 # 1% false-positive rate is already too wide to detect the mode's own effect size --
 # the two gates cross with no overlap. An auxiliary metric rides the deciding
 # metric's blocks and so cannot buy more pairs, which is the only knob that would
-# close the gap. It is therefore reported unclassified permanently, and doc 17 `D6`
+# close the gap. It is therefore reported unclassified permanently, and `research/17/D6`
 # names the uses that remain (undermining a suspect verdict, sizing an off-thread
 # cost) and the one that does not (confirming a win).
 UNCALIBRATED_BLOCK_METRICS = {
@@ -120,8 +120,8 @@ UNCALIBRATED_BLOCK_METRICS = {
 # nothing, so there is no rule for it to look up and nothing for a screen to
 # calibrate.
 #
-# It exists because research doc 20 (`20/F2`) found `producerWriteNanoseconds`
-# recorded in every `scrollback-stream` block since the harness was written,
+# It exists because research doc 20 found `producerWriteNanoseconds` recorded in every
+# `scrollback-stream` block since the harness was written (`research/20/F2`),
 # referenced by no metric table, and sitting at 95.7% of the deciding metric.
 # Two consequences follow, and neither was readable from the verdict alone: this
 # workload has always been ~96% a PTY throughput measurement, and a change that
@@ -311,7 +311,7 @@ def summarize_uncalibrated(workload, raw_blocks):
     Takes no `mode` and consults no rule table, so there is no code path by which
     this can produce a verdict. That is the point, and it is now settled rather
     than provisional: the A/A screening that would have calibrated this metric was
-    run and refused it a rule at every mode's pair count (doc 17 `F15`). Any
+    run and refused it a rule at every mode's pair count (`research/17/F15`). Any
     threshold applied to this number would be invented rather than measured, and
     the measurement says no honest one exists here.
     """
@@ -446,7 +446,7 @@ def sample_host_conditions(
 ):
     """Read what else the machine is doing, for the artifact to carry beside the verdict.
 
-    This exists because of one incident (28/F2): a confirm run taken on a loaded
+    This exists because of one incident (research/28/F2): a confirm run taken on a loaded
     host reported four `slower` verdicts with `invalidations: []`, and three of
     them did not survive re-measurement against the same trees. Host load is a
     stated condition of every frozen rule and the only one the harness could not
@@ -454,11 +454,11 @@ def sample_host_conditions(
 
     Two properties are deliberate. It reports "not measured" as a distinct state
     from "measured idle", because a dropped key reads as a clean machine to the
-    next person. And it excludes the driver's own descendants, because 28/F3
+    next person. And it excludes the driver's own descendants, because research/28/F3
     measured that the harness's builds and GUI app are most of the load during a
     run -- a reading that counted those would condemn every run and be ignored.
 
-    It sets no threshold and returns no verdict: 28/D1 admitted this scoped to
+    It sets no threshold and returns no verdict: research/28/D1 admitted this scoped to
     annotate-and-record precisely because nobody has calibrated what load
     actually perturbs a decision, and a wrong refusal gate is worse than none.
     """
@@ -530,7 +530,7 @@ def render_host_conditions(conditions):
             "before first block", conditions.get("beforeFirstBlock")
         )
     )
-    # Said here rather than left for the reader to infer, because 28/F3 found the
+    # Said here rather than left for the reader to infer, because research/28/F3 found the
     # confound by measuring it: the second reading follows this command's own
     # arm builds, so it is the harness's floor, not the operator's machine.
     lines.append(
@@ -734,7 +734,7 @@ def run_comparison(
     started = monotonic()
     # Taken before the snapshot rather than beside the blocks: this is the only
     # moment the machine is the operator's rather than this command's, and it is
-    # the reading 28/F2's contaminated run needed and did not have.
+    # the reading research/28/F2's contaminated run needed and did not have.
     host_conditions = {"atInvocation": sample_host_conditions()}
     baseline = resolve_baseline(repository_root, baseline_revision)
     candidate = snapshot_candidate(repository_root)

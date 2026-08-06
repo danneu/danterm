@@ -299,7 +299,7 @@ help path and read the operator-facing heredoc.
 - [x] 1. `docs(agents): standardize how DanTerm's own docs are cited` -- AGENTS.md section + `## Don't guess` cross-ref + docs/research/README.md bullet. No code.
 - [x] 2. `docs(terminal): qualify research citations in the terminal core` -- Phases 1-3 over `lib/TerminalCore/Sources/`.
 - [x] 3. `docs(terminal): qualify research citations in the terminal tests` -- Phases 1-3 over `lib/TerminalCore/Tests/`.
-- [ ] 4. `docs(scripts): qualify research citations in the benchmark tooling` -- `scripts/`, `scripts/tests/`, `justfile`. Message notes the `saturate-scrollback.sh` operator-visible text.
+- [x] 4. `docs(scripts): qualify research citations in the benchmark tooling` -- `scripts/`, `scripts/tests/`, `justfile`. Message notes the `saturate-scrollback.sh` operator-visible text.
 - [ ] 5. `docs(guides): qualify research citations in the agent and design docs` -- `agent-docs/`, `docs/design/`, `docs/scratch/`, `integrations/`; includes Phase 2's glob and comma-form fixes.
 - [ ] 6. `docs(terminal): resolve the doc-focused probe files' bare ids` -- Phase 4. Mixed mechanical and judgment work; message names the plan-owned ids restated and the deferred ones left alone.
 - [ ] 7. `docs(config): restate the font-family plan's invariants inline` -- `app/`, `lib/DanTermCore/`, `tests-ui/`, `RenderMetricsTests.swift`.

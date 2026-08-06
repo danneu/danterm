@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Drive the retained-row shape probe over the committed stimulus corpus.
 
-Doc 28's `F9` (blank-row frequency, sizing `H2`'s ceiling), `F10` (allocator
-behavior under ragged rows) and `F11` (what retained rows are made of, and what a
+`research/28/F9` (blank-row frequency, sizing `research/28/H2`'s ceiling),
+`research/28/F10` (allocator behavior under ragged rows), and `research/28/F11` (what retained rows are made of, and what a
 packing scheme can therefore charge) all need one thing the Swift probe
 deliberately does not own: real content. This driver supplies it from bytes that
 are already committed and already used for other purposes -- the five
@@ -511,14 +511,14 @@ def pack_narrow_cell(fact):
     implementation does not narrow it, because the bits were there for free and a
     style-table ceiling is risk for no gain. Structure is unchanged, so column reads stay
     O(1) -- and under this shape a column read is one load with nothing to decode, which
-    is what `28/F17` measured `C6` paying ~3.8 ns per cell to avoid needing.
+    is what `research/28/F17` measured `C6` paying ~3.8 ns per cell to avoid needing.
 
     Hyperlink storage is *not* in these 8 bytes and is charged separately, like every
     other candidate. `contentIdentity` was charged the same way until the engine started
     choosing its encoding per record at admission time; see `metadata_charge`.
 
     Like every candidate here it is charged no per-row header (`F13` Observation 2). C1's
-    is 7 bytes; `28/F18` adds it back when pricing the pivot, and a reader pricing a new
+    is 7 bytes; `research/28/F18` adds it back when pricing the pivot, and a reader pricing a new
     candidate against this table must do the same or the comparison tilts.
     """
     return fact["stored"] * 8

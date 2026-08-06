@@ -306,7 +306,7 @@ for hook_output in "$zsh_hooks" "$bash_hooks" "$fish_hooks"; do
 done
 # zsh and Bash emit OSC 133 `C` themselves, immediately after the private
 # envelope event so the mark sits adjacent to the command's own output. fish
-# emits its own `C` and DanTerm adds none (docs/research/24-osc-133-dialect D4).
+# emits its own `C` and DanTerm adds none (`research/24/D4`).
 assert_contains "$zsh_hooks" "$prefix""command-start;$encoded_command$terminator$osc133_c"
 assert_contains "$bash_hooks" "$prefix""command-start;$encoded_command$terminator$osc133_c"
 assert_not_contains "$fish_hooks" "$osc133_c"

@@ -97,7 +97,7 @@ BLOCK_CONTRACTS = {
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
     },
-    # Same bracket as scrollback-stream, different stimulus. 20/F10: drawing is
+    # Same bracket as scrollback-stream, different stimulus. research/20/F10: drawing is
     # suppressed for the whole replay, so this block is ~95% parse and damage
     # tracking and its draw tail is a constant ~7 ms rather than a share of the
     # work. Do not read it as a draw measurement.
@@ -109,7 +109,7 @@ BLOCK_CONTRACTS = {
     # The two topology-specific workloads, whose contract includes a shape as
     # well as a count: a block means nothing unless every accepted draw's
     # published engine damage carried exactly these rows and spans. `metric`
-    # differs between them by design (29/D2) -- losing exact sparse clipping
+    # differs between them by design (research/29/D2) -- losing exact sparse clipping
     # widens the synchronous draw, while per-row rectangle emission moves Core
     # Animation clip replay, which happens after that bracket closes.
     "sparse-spans-few": {
@@ -129,9 +129,9 @@ BLOCK_CONTRACTS = {
         "engineSpanCount": 17,
     },
     # The only workload that plans a frame whose rows come out of retained
-    # storage. `28/D1` pitch 1 admitted it because H1/H3/H4/H5 all make browsing
+    # storage. `research/28/D1` pitch 1 admitted it because H1/H3/H4/H5 all make browsing
     # claims and none could previously end in better than the descriptive
-    # anecdote `15/F18` was reduced to. Headless: it plans, never draws.
+    # anecdote `research/15/F18` was reduced to. Headless: it plans, never draws.
     "retained-browse": {
         "metric": "plan-nanoseconds-per-browsing-frame",
         "measuredUnit": "full-planFrame-over-retained-history",
@@ -167,7 +167,7 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 3.8,
             },
-            # Source: two independent A/A screens (28/F5, 28/F6), 24 pairs each,
+            # Source: two independent A/A screens (research/28/F5, research/28/F6), 24 pairs each,
             # 50,000 resampling trials per condition. Both proposed exactly this
             # cell, so the conservative envelope and the cheapest cell coincide
             # here. A/A false positives 0.0000 and detection 1.0000 in both.
@@ -233,9 +233,9 @@ DECISION_RULES = {
                 "pairCount": 6,
                 "directionalThresholdPercent": 1.85,
             },
-            # Source: the same two screens (28/F5, 28/F6). This is the
+            # Source: the same two screens (research/28/F5, research/28/F6). This is the
             # *conservative envelope* across them, not either one's proposal --
-            # 28/D2 froze it that way deliberately. Screen 1 proposed 2 pairs at
+            # research/28/D2 froze it that way deliberately. Screen 1 proposed 2 pairs at
             # 1.05% and screen 2 proposed 2 at 0.80%; the envelope takes the
             # looser threshold, and buys one pair-count step above the cheapest
             # cell for the reason the next paragraph gives. A/A false positives
@@ -244,7 +244,7 @@ DECISION_RULES = {
             # **Expect `inconclusive` here, and do not read it as a defect.** The
             # confirm band is 0.75% and this threshold is 1.05%, so any true
             # difference landing in that 0.30-point dead zone is unclassifiable
-            # by construction -- the same structural gap that made 28/F1's feed
+            # by construction -- the same structural gap that made research/28/F1's feed
             # verdict unobtainable. On screen 1's A/A series the rate was 41.4%
             # at 2 pairs and 28.4% at the 4 frozen here. Buying pairs narrows the
             # estimator's spread but never closes the gap, so no pair count
@@ -797,7 +797,7 @@ def make_retained_browse_runner(arm_roots, *, measured_count=2000):
 
     Headless like `terminal-feed` and unlike the four draw workloads: it plans
     frames and never draws one, so it needs no app, no window, and no
-    WindowServer. That is deliberate -- the quantity `15/F18` measured and this
+    WindowServer. That is deliberate -- the quantity `research/15/F18` measured and this
     workload resurrects is frame *planning* over retained history, and routing it
     through a real draw would bury it under compositing it does not care about.
     """
@@ -836,7 +836,7 @@ def make_retained_browse_runner(arm_roots, *, measured_count=2000):
 def collect_retained_browse(blocks, *, run_benchmark, sample_state):
     """Collect one browsing-plan series, invalidating on a divergent frame.
 
-    The checksum comparison is the part that matters and the part `15/F18` had to
+    The checksum comparison is the part that matters and the part `research/15/F18` had to
     assert by hand: two arms whose plans cover different cell counts did not plan
     the same frame, so a paired difference between them is not a speed
     measurement at all. That is an invalidation rather than a warning, because

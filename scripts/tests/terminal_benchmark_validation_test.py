@@ -1223,7 +1223,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   missing; for this one it is the deciding metric, so pairing would be
         #   reduced to arithmetic on an absent number.
         # Scenario: spec-first; 29/I4 invalidates a block whose primary-metric
-        #   coverage does not match its accepted draw set, and 29/D2 is what makes
+        #   coverage does not match its accepted draw set, and research/29/D2 is what makes
         #   whole-process CPU that metric here.
         short = self._sparse_span_artifact("sparse-spans-max")
         short["finalDraw"]["processCPUCount"] = 49
