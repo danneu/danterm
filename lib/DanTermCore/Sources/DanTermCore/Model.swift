@@ -175,6 +175,7 @@ struct PreferencesDraft: Equatable {
     var theme: String?       // nil = no `theme` key; use the catalog default
     var fontSize: String?    // nil = no `fontSize` key; use the built-in default
     var fontFamily: String?  // nil = use the system monospace font (remove key from config)
+    var copyOnSelect: Bool
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.

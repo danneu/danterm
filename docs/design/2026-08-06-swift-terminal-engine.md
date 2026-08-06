@@ -201,7 +201,7 @@ Status values:
 | G12 | **OSC 52 writes are allowed up to 1 MiB of decoded content; OSC 52 reads are denied.** This applies equally to local, tmux, and remote applications. | live |
 | G13 | OSC 8 hyperlinks and automatic `http://`/`https://` detection are supported. Both explicit and detected links are activatable only when the resolved URL uses `http` or `https`; other schemes remain inert text. Cmd-hover exposes link interaction and Cmd-click opens the resolved URL. | live |
 | G14 | File path and source-location navigation is deferred. Removing the previous backend narrowed this visibly: bare file paths are no longer Cmd-clickable. | deferred |
-| G15 | Copy-on-select is not part of the engine; explicit copy uses the current selection. | deferred |
+| G15 | Copy-on-select is configurable through `ui.copyOnSelect`, default on. The text is captured atomically with the completing pointer event, so later output cannot change it; consumed gestures and empty selections never copy. Explicit copy uses the current selection and is identical in both modes. | live |
 | G16 | Out of scope: a multiline-paste confirmation, and clipboard read permission prompts. | deferred |
 
 ### H. Renderer, presentation, and configuration

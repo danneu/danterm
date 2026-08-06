@@ -195,6 +195,7 @@ extension AppRuntime {
             sessions[paneId]?.applyTheme(key.theme)
             sessions[paneId]?.setFontSize(key.fontSize)
             sessions[paneId]?.setFontFamily(key.fontFamily)
+            sessions[paneId]?.setCopyOnSelect(key.copyOnSelect)
         }, remove: { paneId in
             sessions[paneId]?.clearTheme()
         })

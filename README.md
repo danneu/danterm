@@ -62,7 +62,7 @@ from the app menu to edit the file directly.
   "schemaVersion": 1,
   "font": { "size": 14 },
   "theme": { "default": "Dracula", "remote": "Purplepeter" },
-  "ui": { "alertClearMode": "focus" }
+  "ui": { "alertClearMode": "focus", "copyOnSelect": true }
 }
 ```
 
@@ -84,6 +84,7 @@ read-only store.
 | `theme.default`       | `Monokai Remastered`  | Theme applied to local panes                                                      |
 | `theme.remote`        | `Purplepeter`         | Theme applied to panes during SSH/remote sessions                                 |
 | `ui.alertClearMode`   | `focus`               | When to clear pane alerts: `focus` (on pane focus) or `manual` (explicit dismiss) |
+| `ui.copyOnSelect`     | `true`                | Copy the selection to the clipboard as soon as a mouse selection gesture ends     |
 
 Set `ui.alertClearMode` to `manual` to make alerts persist until you explicitly
 dismiss them. This is useful when you want alerts to act as a to-do list: focusing
@@ -649,9 +650,9 @@ But it's more complicated than I'd like since it includes a browser, and its pan
 
 Many TUI programs — tmux, vim, less, htop, fzf, btop, ranger, k9s — turn on "mouse reporting" so they can handle clicks, drags, and scrolls themselves. The downside: your terminal stops doing native click-drag selection, so highlighting text to copy with ⌘C suddenly doesn't work. Either nothing gets selected, or the program highlights text into its own internal buffer that ⌘C can't reach.
 
-DanTerm (like other modern terminals) reserves **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release, ⌘C, done.
+DanTerm (like other modern terminals) reserves **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release and the text is already on your clipboard, because `ui.copyOnSelect` is on by default; turn that off and you copy with ⌘C instead.
 
-Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection you can ⌘C.
+Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection, which the release copies for you.
 
 Same trick works inside vim with `set mouse=a`, inside less, inside htop, etc.
 

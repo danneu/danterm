@@ -666,6 +666,50 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.validateMenuItem(pasteItem), "Paste validation tracked the selection")
     }
 
+    uiTest("copy-on-select writes a relayed selection only while it is armed") {
+        // Intent: arming copy-on-select puts a completed selection's relayed text on the
+        //   pasteboard, and disarming stops the engine relaying anything at all.
+        // Why it exists: the option is a subscriber, not a branch -- if disarming only
+        //   suppressed the write, the engine would still pay to extract the text.
+        // Scenario: spec-first; the user unticks "Copy selection to clipboard" and drags.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-copy-on-select-test"))
+        pasteboard.clearContents()
+        pane.selectionPasteboard = pasteboard
+
+        pane.setCopyOnSelect(true)
+        controller.emitSelectionCopy("alpha")
+        try uiExpect(pasteboard.string(forType: .string) == "alpha",
+                     "an armed pane did not write the relayed selection")
+
+        pane.setCopyOnSelect(false)
+        try uiExpect(controller.onSelectionCopy == nil,
+                     "disarming left the engine a subscriber to extract text for")
+        controller.emitSelectionCopy("beta")
+        try uiExpect(pasteboard.string(forType: .string) == "alpha",
+                     "a disarmed pane still reached the pasteboard")
+    }
+
+    uiTest("Cmd-C copies the same in both copy-on-select modes") {
+        // Intent: arming or disarming copy-on-select leaves the explicit copy path alone.
+        // Why it exists: the option governs what a gesture does, never what Cmd-C does.
+        // Scenario: spec-first; the user copies by hand with the option on, then off.
+        let controller = TerminalPaneSessionController()
+        controller.selectedTextOnFence = "gamma"
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-copy-on-select-cmd-c-test"))
+        pane.selectionPasteboard = pasteboard
+
+        for armed in [true, false] {
+            pasteboard.clearContents()
+            pane.setCopyOnSelect(armed)
+            pane.copy(nil)
+            try uiExpect(pasteboard.string(forType: .string) == "gamma",
+                         "explicit copy changed with copy-on-select \(armed ? "on" : "off")")
+        }
+    }
+
     uiTest("Edit > Select All routes through the responder chain and validates as enabled") {
         // Intent: the nil-targeted `selectAll(_:)` action reaches the pane through AppKit's
         //   responder-chain lookup, produces a selection the pane reports, and leaves

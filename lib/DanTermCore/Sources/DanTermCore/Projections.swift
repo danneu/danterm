@@ -44,6 +44,7 @@ struct PreferencesPanelProjection: Equatable {
     var themeText: String
     var fontSizeText: String
     var fontFamilyText: String
+    var copyOnSelect: Bool
     /// Every family the picker offers, system monospace first. Sourced from the
     /// catalog injected on open, never from an ambient CoreText query.
     var fontFamilyChoices: [String]
@@ -54,6 +55,7 @@ struct PreferencesPanelProjection: Equatable {
     var fontSizeDirtyLabel: String?
     var fontFamilyDirtyLabel: String?
     var alertClearModeDirtyLabel: String?
+    var copyOnSelectDirtyLabel: String?
     var remoteThemeDirtyLabel: String?
     var saveEnabled: Bool
 }
@@ -72,6 +74,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     let fontSizeDirty = draft.fontSize != committedFontSizeText
     let fontFamilyDirty = resolveFontFamilyDraft(draft.fontFamily) != committed.fontFamily
     let alertDirty = draft.alertClearMode != committed.alertClearMode
+    let copyOnSelectDirty = draft.copyOnSelect != committed.copyOnSelect
     let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
 
     let alertDisplayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
@@ -90,6 +93,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         // the field under the user mid-edit. Absent means the sentinel choice, so
         // the picker always displays a selected entry.
         fontFamilyText: draft.fontFamily ?? systemMonospaceFontChoiceTitle,
+        copyOnSelect: draft.copyOnSelect,
         fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."
@@ -99,9 +103,11 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         fontFamilyDirtyLabel: fontFamilyDirty
             ? "Prev: \(committed.fontFamily ?? systemMonospaceFontChoiceTitle)" : nil,
         alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
+        copyOnSelectDirtyLabel: copyOnSelectDirty
+            ? "Prev: \(committed.copyOnSelect ? "On" : "Off")" : nil,
         remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
         saveEnabled: themeDirty || fontSizeDirty || fontFamilyDirty
-            || alertDirty || remoteThemeDirty
+            || alertDirty || copyOnSelectDirty || remoteThemeDirty
     )
 }
 
@@ -309,27 +315,33 @@ struct PaneConfigKey: Equatable {
   /// The verified-installed family, or nil for the system monospace font. The raw
   /// name from config never reaches rendering; only a canonical resolved family may.
   let fontFamily: String?
+  /// Whether the pane arms copy-on-select. Carried in the key so a reload retargets
+  /// already-mounted panes through the same diff as theme and font.
+  let copyOnSelect: Bool
 
   init(
     theme: String,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
-    fontFamily: String? = nil
+    fontFamily: String? = nil,
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect
   ) {
     self.theme = theme
     self.fontSize = fontSize
     self.fontFamily = fontFamily
+    self.copyOnSelect = copyOnSelect
   }
 }
 
-/// Projects the resolved theme, global font size, and resolved font family onto
-/// every live pane.
+/// Projects the resolved theme, global font size, resolved font family, and
+/// copy-on-select onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneConfigKey(
       theme: effectiveTheme(for: pane, config: model.config),
       fontSize: model.config.resolvedFontSize,
-      fontFamily: model.resolvedFontFamily
+      fontFamily: model.resolvedFontFamily,
+      copyOnSelect: model.config.copyOnSelect
     )
   }
   return result

@@ -71,8 +71,12 @@ to the application and does not scroll local history. Shift-wheel forces local
 history navigation and emits no mouse-report bytes. The native scrollbar is
 always local and never emits terminal mouse input.
 
-Copy-on-select is not part of the initial engine. Explicit copy uses the current
-selection.
+Copy-on-select is configurable through `ui.copyOnSelect` and defaults to on.
+When it is on, finishing a selection-owned pointer gesture copies the selection
+to the clipboard; the text is captured at the moment the gesture completes, so
+output arriving afterwards cannot change it. A gesture the application consumed
+never copies, and neither does a selection whose text is empty. Explicit copy
+uses the current selection and behaves the same in both modes.
 
 Local click granularity cycles through character, terminal token, and trimmed
 logical line. A terminal token is a maximal run of either separators or
@@ -147,7 +151,6 @@ source-location navigation are deferred.
 ## Non-goals
 
 - Initial Option-as-Alt configuration.
-- Copy-on-select.
 - File path, source location, or arbitrary custom-link handlers.
 - Clipboard read permission prompts in the initial engine.
 

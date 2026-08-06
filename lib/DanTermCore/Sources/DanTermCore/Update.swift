@@ -560,6 +560,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.preferencesDraft!.theme = newConfig.defaultTheme
             model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
             model.preferencesDraft!.fontFamily = newConfig.fontFamily
+            model.preferencesDraft!.copyOnSelect = newConfig.copyOnSelect
         }
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane
@@ -585,7 +586,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 remoteTheme: model.config.remoteTheme,
                 theme: model.config.defaultTheme,
                 fontSize: model.config.fontSize.map(configFontSizeText),
-                fontFamily: model.config.fontFamily
+                fontFamily: model.config.fontFamily,
+                copyOnSelect: model.config.copyOnSelect
             )
         }
         return []
@@ -630,6 +632,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.preferencesDraft!.fontFamily = text
         return []
 
+    case .prefSetCopyOnSelect(let enabled):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.copyOnSelect = enabled
+        return []
+
     case .prefResetTheme:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.theme = model.config.defaultTheme
@@ -645,12 +652,18 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.preferencesDraft!.fontFamily = model.config.fontFamily
         return []
 
+    case .prefResetCopyOnSelect:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.copyOnSelect = model.config.copyOnSelect
+        return []
+
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
         let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
         let oldConfig = model.config
         var newConfig = oldConfig
         newConfig.alertClearMode = draft.alertClearMode
+        newConfig.copyOnSelect = draft.copyOnSelect
         newConfig.remoteTheme = resolvedTheme
         newConfig.defaultTheme = draft.theme
         let parsedFontSize: Double? = draft.fontSize.flatMap { Double($0) }

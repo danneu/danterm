@@ -295,6 +295,7 @@ struct TerminalCellSize {
 final class TerminalPaneSessionController {
     var onFrame: ((TerminalPaneFrame) -> Void)?
     var onClipboardWrite: ((String) -> Void)?
+    var onSelectionCopy: ((String) -> Void)?
     var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
     var onSessionEnded: ((PaneLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
@@ -427,6 +428,13 @@ final class TerminalPaneSessionController {
 
     func emitClipboardWrite(_ text: String) {
         onClipboardWrite?(text)
+    }
+
+    /// Stands in for the engine relaying a completed selection's captured text. A nil
+    /// handler is the production gate itself, so calling this while copy-on-select is
+    /// off must leave the pasteboard alone rather than trap.
+    func emitSelectionCopy(_ text: String) {
+        onSelectionCopy?(text)
     }
 
     func emitSemanticEvents(_ events: [TerminalSemanticEvent]) {

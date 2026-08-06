@@ -97,6 +97,9 @@ protocol TerminalSession: AnyObject {
     func clearTheme()
     func setFontSize(_ size: Double)
     func setFontFamily(_ family: String?)
+    /// Arms or disarms copy-on-select. Enabling installs the completion subscriber the
+    /// engine gates text extraction on, so disabling costs the pointer path nothing.
+    func setCopyOnSelect(_ enabled: Bool)
     func startSearch()
     func setSearchNeedle(_ needle: String)
     func navigateSearch(_ direction: SearchDirection)

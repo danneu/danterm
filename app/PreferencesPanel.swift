@@ -17,6 +17,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
 
     // DanTerm settings
     private let alertClearModePopup = NSPopUpButton()
+    let copyOnSelectCheckbox = NSButton()
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
 
@@ -33,6 +34,9 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     private let alertClearModeDirtyRow = NSStackView()
     private let alertClearModePrevLabel = NSTextField(labelWithString: "")
     private let alertClearModeResetButton = NSButton()
+    let copyOnSelectDirtyRow = NSStackView()
+    private let copyOnSelectPrevLabel = NSTextField(labelWithString: "")
+    let copyOnSelectResetButton = NSButton()
     private let remoteThemeDirtyRow = NSStackView()
     private let remoteThemePrevLabel = NSTextField(labelWithString: "")
     private let remoteThemeResetButton = NSButton()
@@ -79,6 +83,9 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
             formRow("Alert Clear Mode", alertClearModePopup),
             dirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, alertClearModeResetButton,
                      action: #selector(resetAlertClearMode(_:))),
+            formRow("Selection", copyOnSelectCheckbox),
+            dirtyRow(copyOnSelectDirtyRow, copyOnSelectPrevLabel, copyOnSelectResetButton,
+                     action: #selector(resetCopyOnSelect(_:))),
             formRow("Remote Theme", makeHStack([remoteThemeField, browseButton])),
             dirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, remoteThemeResetButton,
                      action: #selector(resetRemoteTheme(_:))),
@@ -99,7 +106,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         // Add extra spacing before DanTerm section (Alert Clear Mode row).
         grid.row(at: 7).topPadding = 12
         // Add extra spacing before the "Config file" row.
-        grid.row(at: 11).topPadding = 8
+        grid.row(at: 13).topPadding = 8
 
         // Configure terminal appearance controls.
         themeField.delegate = self
@@ -144,6 +151,11 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         alertClearModePopup.addItems(withTitles: ["Focus", "Manual"])
         alertClearModePopup.target = self
         alertClearModePopup.action = #selector(alertClearModeChanged(_:))
+
+        copyOnSelectCheckbox.setButtonType(.switch)
+        copyOnSelectCheckbox.title = "Copy selection to clipboard"
+        copyOnSelectCheckbox.target = self
+        copyOnSelectCheckbox.action = #selector(copyOnSelectChanged(_:))
 
         remoteThemeField.delegate = self
         remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
@@ -261,6 +273,11 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
             alertClearModePopup.selectItem(at: alertIndex)
         }
 
+        let copyOnSelectState: NSControl.StateValue = projection.copyOnSelect ? .on : .off
+        if copyOnSelectCheckbox.state != copyOnSelectState {
+            copyOnSelectCheckbox.state = copyOnSelectState
+        }
+
         if remoteThemeField.stringValue != projection.remoteThemeText {
             remoteThemeField.stringValue = projection.remoteThemeText
         }
@@ -284,6 +301,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         applyDirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, label: projection.fontFamilyDirtyLabel)
         applyDirtyRow(fontSizeDirtyRow, fontSizePrevLabel, label: projection.fontSizeDirtyLabel)
         applyDirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, label: projection.alertClearModeDirtyLabel)
+        applyDirtyRow(copyOnSelectDirtyRow, copyOnSelectPrevLabel, label: projection.copyOnSelectDirtyLabel)
         applyDirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, label: projection.remoteThemeDirtyLabel)
 
         if saveButton.isEnabled != projection.saveEnabled {
@@ -332,6 +350,10 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         runtime?.send(.prefSetAlertClearMode(mode))
     }
 
+    @objc private func copyOnSelectChanged(_ sender: NSButton) {
+        runtime?.send(.prefSetCopyOnSelect(sender.state == .on))
+    }
+
     // NSTextFieldDelegate: update draft as the user types for live dirty tracking.
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
@@ -370,6 +392,10 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
 
     @objc private func resetAlertClearMode(_ sender: Any?) {
         runtime?.send(.prefResetAlertClearMode)
+    }
+
+    @objc private func resetCopyOnSelect(_ sender: Any?) {
+        runtime?.send(.prefResetCopyOnSelect)
     }
 
     @objc private func resetRemoteTheme(_ sender: Any?) {

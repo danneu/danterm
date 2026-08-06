@@ -13,6 +13,7 @@ struct DanTermConfigTests {
         #expect(config.fontFamily == nil)
         #expect(config.resolvedFontSize == 13)
         #expect(config.alertClearMode == .focus)
+        #expect(config.copyOnSelect)
     }
 
     @Test("font size text omits an unnecessary decimal point")

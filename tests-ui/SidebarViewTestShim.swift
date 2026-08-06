@@ -94,6 +94,7 @@ class TerminalView: NSView, TerminalSession {
     func clearTheme() {}
     func setFontSize(_ size: Double) {}
     func setFontFamily(_ family: String?) {}
+    func setCopyOnSelect(_ enabled: Bool) {}
     func startSearch() {}
     func setSearchNeedle(_ needle: String) {}
     func navigateSearch(_ direction: SearchDirection) {}

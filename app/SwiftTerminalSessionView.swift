@@ -594,6 +594,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         synchronizeGeometry()
     }
 
+    /// Installing the handler is the whole gate: with it absent the engine never extracts
+    /// a completed selection's text, so the option being off costs the pointer path nothing.
+    /// The text arrives already captured at the gesture's completion and is written as
+    /// handed -- re-reading the selection here would race output that landed since.
+    func setCopyOnSelect(_ enabled: Bool) {
+        controller.onSelectionCopy = enabled
+            ? { [weak self] text in self?.writeClipboard(text) }
+            : nil
+    }
+
     func startSearch() {
         // Synchronous on purpose: `.searchStarted` is what creates the pane's
         // searchState and mounts the overlay, so it cannot wait on an engine round-trip.

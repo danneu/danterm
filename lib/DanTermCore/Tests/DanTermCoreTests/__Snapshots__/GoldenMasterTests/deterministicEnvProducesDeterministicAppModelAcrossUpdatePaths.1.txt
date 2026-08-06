@@ -126,7 +126,8 @@ AppModel(
     remoteTheme: "Purplepeter",
     fontFamily: nil,
     fontSize: nil,
-    alertClearMode: .focus
+    alertClearMode: .focus,
+    copyOnSelect: true
   ),
   resolvedFontFamily: nil,
   preferencesDraft: nil,

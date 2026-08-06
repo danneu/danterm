@@ -17,6 +17,9 @@ struct DanTermConfig: Equatable {
     var fontSize: Double? = nil
     /// When alerts are cleared: on pane focus (.focus) or only via Cmd+./Cmd+Shift+. (.manual).
     var alertClearMode: AlertClearMode = .focus
+    /// Whether finishing a mouse selection copies it to the clipboard. Defaults on,
+    /// matching the behavior DanTerm had while it ran on libghostty.
+    var copyOnSelect: Bool = true
 
     static let `default` = DanTermConfig()
 

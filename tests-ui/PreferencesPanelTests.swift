@@ -120,6 +120,38 @@ func preferencesPanelTests() {
                      "hiding the warning must not leave the panel ambiguously laid out")
     }
 
+    uiTest("the copy-on-select checkbox shows the projected value and drafts a toggle") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        fx.panel.apply(makeProjection(copyOnSelect: true))
+        try uiExpect(fx.panel.copyOnSelectCheckbox.state == .on, "an armed option should tick the box")
+
+        fx.panel.copyOnSelectCheckbox.performClick(nil)
+
+        guard case .prefSetCopyOnSelect(let enabled) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected prefSetCopyOnSelect, got \(String(describing: fx.runtime.sentMessages.last))")
+        }
+        try uiExpect(enabled == false, "unticking should draft the option off")
+
+        fx.panel.apply(makeProjection(copyOnSelect: false))
+        try uiExpect(fx.panel.copyOnSelectCheckbox.state == .off, "a disarmed option should untick the box")
+    }
+
+    uiTest("the copy-on-select Reset button asks the model to restore the committed value") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(copyOnSelect: false, copyOnSelectDirtyLabel: "Prev: On"))
+
+        try uiExpect(fx.panel.copyOnSelectDirtyRow.isHidden == false,
+                     "dirty row should show for an edited option")
+        fx.panel.copyOnSelectResetButton.performClick(nil)
+
+        guard case .prefResetCopyOnSelect = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected prefResetCopyOnSelect, got \(String(describing: fx.runtime.sentMessages.last))")
+        }
+    }
+
     uiTest("the font-family Reset button asks the model to restore the committed family") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -151,7 +183,9 @@ private func makeProjection(
     text: String = systemMonospaceFontChoiceTitle,
     choices: [String] = [systemMonospaceFontChoiceTitle],
     warning: String? = nil,
-    dirtyLabel: String? = nil
+    dirtyLabel: String? = nil,
+    copyOnSelect: Bool = true,
+    copyOnSelectDirtyLabel: String? = nil
 ) -> PreferencesPanelProjection {
     PreferencesPanelProjection(
         selectedAlertClearMode: .focus,
@@ -159,12 +193,14 @@ private func makeProjection(
         themeText: "",
         fontSizeText: "",
         fontFamilyText: text,
+        copyOnSelect: copyOnSelect,
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
         themeDirtyLabel: nil,
         fontSizeDirtyLabel: nil,
         fontFamilyDirtyLabel: dirtyLabel,
         alertClearModeDirtyLabel: nil,
+        copyOnSelectDirtyLabel: copyOnSelectDirtyLabel,
         remoteThemeDirtyLabel: nil,
         saveEnabled: false
     )

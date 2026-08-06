@@ -69,6 +69,11 @@ struct DanTermConfigDocument: Equatable {
         setNestedValue(.string(mode.rawValue), parent: "ui", key: "alertClearMode")
     }
 
+    /// Sets copy-on-select while preserving unmodeled UI siblings.
+    mutating func setCopyOnSelect(_ enabled: Bool) {
+        setNestedValue(.bool(enabled), parent: "ui", key: "copyOnSelect")
+    }
+
     /// Applies the complete modeled settings set as one document transaction.
     mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)
@@ -76,6 +81,7 @@ struct DanTermConfigDocument: Equatable {
         setFontFamily(config.fontFamily)
         setFontSize(config.fontSize)
         setAlertClearMode(config.alertClearMode)
+        setCopyOnSelect(config.copyOnSelect)
     }
 
     /// Returns original bytes until a semantic edit occurs, then stable sorted JSON.
@@ -132,11 +138,15 @@ struct DanTermConfigDocument: Equatable {
                 config.fontSize = size
             }
         }
-        if case .object(let ui)? = rootObject["ui"],
-           case .string(let rawMode)? = ui["alertClearMode"],
-           let mode = AlertClearMode(rawValue: rawMode)
-        {
-            config.alertClearMode = mode
+        if case .object(let ui)? = rootObject["ui"] {
+            if case .string(let rawMode)? = ui["alertClearMode"],
+               let mode = AlertClearMode(rawValue: rawMode)
+            {
+                config.alertClearMode = mode
+            }
+            if case .bool(let copyOnSelect)? = ui["copyOnSelect"] {
+                config.copyOnSelect = copyOnSelect
+            }
         }
         return config
     }

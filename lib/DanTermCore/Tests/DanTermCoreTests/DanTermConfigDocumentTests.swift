@@ -12,7 +12,7 @@ struct DanTermConfigDocumentTests {
           "schemaVersion": 1,
           "font": { "family": "Menlo", "size": 15.5 },
           "theme": { "default": "Solarized Light", "remote": "Grape" },
-          "ui": { "alertClearMode": "manual" }
+          "ui": { "alertClearMode": "manual", "copyOnSelect": false }
         }
         """)))
 
@@ -21,6 +21,49 @@ struct DanTermConfigDocumentTests {
         #expect(document.config.fontFamily == "Menlo")
         #expect(document.config.fontSize == 15.5)
         #expect(document.config.alertClearMode == .manual)
+        #expect(document.config.copyOnSelect == false)
+    }
+
+    @Test("copy-on-select defaults to on when the key is absent")
+    func copyOnSelectDefaultsToOnWhenAbsent() throws {
+        let document = try #require(DanTermConfigDocument.decode(DanTermConfigDocument.seedData))
+
+        #expect(document.config.copyOnSelect)
+    }
+
+    @Test("a wrong-typed copy-on-select falls back without discarding valid fields", arguments: [
+        #"{"schemaVersion":1,"ui":{"copyOnSelect":"false","alertClearMode":"manual"}}"#,
+        #"{"schemaVersion":1,"ui":{"copyOnSelect":0,"alertClearMode":"manual"}}"#,
+    ])
+    func invalidCopyOnSelectDegradesPerField(_ source: String) throws {
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.copyOnSelect, "a non-boolean must degrade to the default")
+        #expect(document.config.alertClearMode == .manual)
+    }
+
+    @Test("a Save writes copy-on-select into a document that does not carry it")
+    func saveWritesCopyOnSelectIntoADocumentWithoutIt() throws {
+        // Intent: applying a config to a document lacking `ui.copyOnSelect` writes
+        //   the key, whatever its value, exactly like every other modeled key.
+        // Why it exists: special-casing the default out of the file would make an
+        //   off-then-on round trip drop the key instead of restoring it.
+        // Scenario: spec-first; the user unticks the box, saves, reticks it, saves.
+        var document = try #require(DanTermConfigDocument.decode(DanTermConfigDocument.seedData))
+        var config = DanTermConfig.default
+
+        config.copyOnSelect = false
+        document.apply(config)
+        let off = try #require(DanTermConfigDocument.decode(document.encoded()))
+        #expect(off.config.copyOnSelect == false)
+
+        config.copyOnSelect = true
+        document.apply(config)
+        let output = String(decoding: document.encoded(), as: UTF8.self)
+
+        #expect(output.contains(#""copyOnSelect": true"#))
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+        #expect(roundTrip.config.copyOnSelect)
     }
 
     @Test("only an exact integer schemaVersion 1 is writable", arguments: [
@@ -91,6 +134,7 @@ struct DanTermConfigDocumentTests {
         document.setFontFamily("Menlo")
         document.setFontSize(16)
         document.setAlertClearMode(.manual)
+        document.setCopyOnSelect(false)
         let output = String(decoding: document.encoded(), as: UTF8.self)
 
         #expect(output.contains("9007199254740993"))
@@ -105,12 +149,14 @@ struct DanTermConfigDocumentTests {
         #expect(roundTrip.config.fontFamily == "Menlo")
         #expect(roundTrip.config.fontSize == 16)
         #expect(roundTrip.config.alertClearMode == .manual)
+        #expect(roundTrip.config.copyOnSelect == false)
     }
 
     @Test("setting unchanged values returns the original bytes")
     func unchangedSaveIsByteIdentical() throws {
         let original = data("""
         { "theme": { "remote": "Grape" }, "schemaVersion": 1,
+          "ui": { "copyOnSelect": false },
           "font": { "family": "Menlo", "size": 13.0 } }
         """)
         var document = try #require(DanTermConfigDocument.decode(original))
@@ -118,6 +164,7 @@ struct DanTermConfigDocumentTests {
         document.setRemoteTheme("Grape")
         document.setFontFamily("Menlo")
         document.setFontSize(13)
+        document.setCopyOnSelect(false)
 
         #expect(document.encoded() == original)
     }

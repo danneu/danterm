@@ -185,4 +185,19 @@ or later work is entitled to delete this feature as a documented exclusion.
 ## Commit progress
 
 - [x] 1. feat(terminal): relay selection text captured at gesture completion
-- [ ] 2. feat(config): add ui.copyOnSelect and copy completed selections
+- [x] 2. feat(config): add ui.copyOnSelect and copy completed selections
+
+## Implementation notes
+
+- The plan named three documents. A fourth needed the same edit: register row
+  G15 in `docs/design/2026-08-06-swift-terminal-engine.md` recorded
+  copy-on-select as a deferred exclusion, which would have been a false contract
+  the moment this shipped. It now states the configurable, default-on behavior
+  and reads `live`.
+- Subscriber presence is realized as installation rather than a flag on the
+  owner (the plan left this to discretion): `setCopyOnSelect` assigns or clears
+  `TerminalPaneSessionController.onSelectionCopy`, so "off" is literally the
+  absence of a handler and no gate has to be consulted per pointer-up.
+- A pane arms copy-on-select only once `reconcilePaneConfig` has run for it, so
+  the pre-reconcile state is off rather than on. That matches how theme and font
+  reach a pane and fails safe: an unarmed pane cannot overwrite the clipboard.
