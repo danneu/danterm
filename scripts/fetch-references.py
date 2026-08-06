@@ -52,6 +52,14 @@ class Reference:
 
 REFERENCES = [
     Reference(
+        name="ghostty",
+        url="https://github.com/ghostty-org/ghostty.git",
+        pin="332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28",
+        sparse_cone=("src", "include", "macos"),
+        why="The engine DanTerm was built on before its own: terminal implementation, embedded runtime, C API header, and macOS app, pinned at the last version DanTerm shipped.",
+        release_tag="v1.3.1",
+    ),
+    Reference(
         name="libvterm",
         url="https://github.com/neovim/libvterm.git",
         pin="934bc2fbf21800ac3458a499df8820ca5fb45fd3",

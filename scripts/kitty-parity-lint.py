@@ -46,7 +46,7 @@ import sys
 # this same repository. Without skipping it, a lint run from the main checkout also reads
 # every in-progress worktree -- so a mistyped citation or a not-yet-recorded hash in someone
 # else's branch fails `just test` here, for a file that is not on this branch.
-SKIP_DIRS = {".git", ".claude", ".ghostty-src", "references", "GhosttyKit.xcframework"}
+SKIP_DIRS = {".git", ".claude", "references", "GhosttyKit.xcframework"}
 
 CITATION_RE = re.compile(r"//\s*Adapted from (kitty_tests/[\w./-]+)#([\w]+)\s*$")
 # A line that means to be a citation but does not parse as one. Without this, a

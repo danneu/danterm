@@ -8,11 +8,10 @@ or implementing that work.
 
 ## Boundaries
 
-Don't edit -- all three are regenerated, and manual edits get wiped or make the
+Don't edit -- both are regenerated, and manual edits get wiped or make the
 reference unreliable:
 
 - `lib/GhosttyKit.xcframework/` (rebuilt by `./build-lib.sh`)
-- `.ghostty-src/` (cloned libghostty reference)
 - `references/` (pinned external checkouts; materialize with `just fetch-references`)
 
 Don't run `just release patch|minor|major`, or any other release/publish
@@ -25,10 +24,10 @@ Use the `gh` CLI for GitHub API requests, not `curl`.
 
 ## Local source references
 
-Real source for the systems DanTerm imitates or runs on -- nine terminal
-emulators, `libvterm`, the three shells, Darwin, `swift-collections`, and
-`.ghostty-src/` -- is checked out at pinned revisions under the gitignored
-`references/`. Run `just fetch-references [name]` (`--list` for the inventory)
+Real source for the systems DanTerm imitates or runs on -- ten terminal
+emulators (`ghostty`, the engine DanTerm was built on, among them), `libvterm`,
+the three shells, Darwin, and `swift-collections` -- is checked out at pinned
+revisions under the gitignored `references/`. Run `just fetch-references [name]` (`--list` for the inventory)
 and grep locally instead of fetching over the web or reasoning from memory.
 Prefer `swift-collections` over hand-rolling a ring buffer, ordered set, bitset,
 or heap. Layout and entry points:

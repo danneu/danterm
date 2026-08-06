@@ -1,23 +1,10 @@
 # Reference sources
 
-External sources to consult when implementing against the libghostty C API
-or referencing other terminals' approaches.
+External sources to consult when referencing another terminal's approach, the
+engine DanTerm used to run on, or a platform library's real behavior.
 
-## Ghostty source
-
-The Ghostty source is cloned locally at `.ghostty-src/` (by `build-lib.sh`).
-When you need to reference the libghostty C API, read these files directly
-instead of making web requests:
-
-- `.ghostty-src/include/ghostty.h` -- full C API header (types, structs,
-  functions).
-- `.ghostty-src/macos/Sources/Ghostty/` -- Ghostty's own macOS Swift app
-  (reference implementation).
-- `.ghostty-src/src/apprt/embedded.zig` -- embedded runtime (implements the
-  C API).
-
-For any other external library, clone it locally first so you can read it
-directly. Never use web requests to read source code when a local clone is
+For any external library not listed here, clone it locally first so you can read
+it directly. Never use web requests to read source code when a local clone is
 available.
 
 ## Local reference checkouts
@@ -35,6 +22,7 @@ disagree, that disagreement is itself the finding.
 
 | Tree | Read it for |
 | --- | --- |
+| `ghostty` | The engine DanTerm ran on before its own, pinned at the last version it shipped (v1.3.1): `src/terminal/` for the grid, parser, and reflow the Swift engine replaced, `include/ghostty.h` and `src/apprt/embedded.zig` for the embedding API, `macos/Sources/Ghostty/` for its AppKit surface. |
 | `libvterm` | Parser, state, scrollback, resize/reflow for neutral fixtures. |
 | `alacritty` | Terminal recordings and replay-runner cases for neutral fixtures. |
 | `kitty` | The graphics/keyboard/shell-integration protocols kitty authored (`docs/`), the C parser and screen implementing them, and `kitty_tests/` where their edge cases are written down (`kitty_tests/screen.py#test_prompt_marking` for OSC 133 regions, `kitty_tests/shell_integration.py` for real shells in a PTY). |

@@ -6335,7 +6335,7 @@ public struct Terminal: Equatable, Sendable {
 
     // xterm/kitty/Ghostty retain a row scrolled off the top whenever the region is
     // anchored at row 0 and spans the full width, even with a bottom margin set
-    // (.ghostty-src/src/terminal/Terminal.zig:1466). Inline-viewport TUIs (codex's
+    // (references/ghostty/src/terminal/Terminal.zig#index). Inline-viewport TUIs (codex's
     // ratatui composer) depend on it: they pin a footer with `CSI 1;N r` and scroll
     // their transcript out the top expecting it to land in scrollback. We implement
     // no DECSLRM left/right margins, so full width is trivially true. Applies only

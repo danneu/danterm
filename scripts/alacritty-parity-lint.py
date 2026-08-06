@@ -70,7 +70,7 @@ import sys
 # this same repository. Without skipping it, a lint run from the main checkout also reads
 # every in-progress worktree -- so a mistyped citation or a not-yet-recorded hash in someone
 # else's branch fails `just test` here, for a file that is not on this branch.
-SKIP_DIRS = {".git", ".claude", ".ghostty-src", "references", "GhosttyKit.xcframework"}
+SKIP_DIRS = {".git", ".claude", "references", "GhosttyKit.xcframework"}
 
 UPSTREAM_SUBDIR = "alacritty_terminal/src"
 MANIFEST_RELPATH = Path("lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/alacritty-inline-manifest.json")

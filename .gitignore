@@ -8,9 +8,6 @@ lib/*
 !lib/TerminalCore/
 !lib/TerminalPTY/
 
-# Ghostty source cache
-.ghostty-src/
-
 # Dev build output
 build/
 .build/
