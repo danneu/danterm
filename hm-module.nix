@@ -62,21 +62,57 @@ in
     # One user-facing flag, three conditional wirings: a shell is configured if
     # and only if the user already enabled that shell through Home Manager, so
     # enabling this never writes config into a shell they do not use. The
-    # sourced path stays inside the package so `vendor/bash-preexec.sh` remains
-    # a sibling of `danterm.bash`.
+    # Local DanTerm shells follow the running app bundle they advertise. Remote
+    # LC_DANTERM shells have no bundle, so they fall back to this package, where
+    # `vendor/bash-preexec.sh` remains a sibling of `danterm.bash`.
     (mkIf cfg.shellIntegration.enable (
       let
         assets = "${cfg.shellIntegration.package}/share/danterm-shell-integration";
       in
       mkMerge [
         (mkIf config.programs.bash.enable {
-          programs.bash.initExtra = "source ${assets}/danterm.bash";
+          programs.bash.initExtra = ''
+            if [[ -n ''${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+              _danterm_asset="$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash"
+              if [[ -r $_danterm_asset ]]; then
+                source "$_danterm_asset"
+              else
+                printf 'DanTerm shell integration is unreadable: %s\n' "$_danterm_asset" >&2
+              fi
+              unset _danterm_asset
+            elif [[ -n ''${LC_DANTERM:-} ]]; then
+              source ${assets}/danterm.bash
+            fi
+          '';
         })
         (mkIf config.programs.zsh.enable {
-          programs.zsh.initContent = "source ${assets}/danterm.zsh";
+          programs.zsh.initContent = ''
+            if [[ -n ''${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+              _danterm_asset="$DANTERM_SHELL_INTEGRATION_DIR/danterm.zsh"
+              if [[ -r $_danterm_asset ]]; then
+                source "$_danterm_asset"
+              else
+                printf 'DanTerm shell integration is unreadable: %s\n' "$_danterm_asset" >&2
+              fi
+              unset _danterm_asset
+            elif [[ -n ''${LC_DANTERM:-} ]]; then
+              source ${assets}/danterm.zsh
+            fi
+          '';
         })
         (mkIf config.programs.fish.enable {
-          programs.fish.interactiveShellInit = "source ${assets}/danterm.fish";
+          programs.fish.interactiveShellInit = ''
+            if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
+              set -l _danterm_asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
+              if test -r "$_danterm_asset"
+                source "$_danterm_asset"
+              else
+                printf 'DanTerm shell integration is unreadable: %s\n' "$_danterm_asset" >&2
+              end
+            else if set -q LC_DANTERM; and test -n "$LC_DANTERM"
+              source ${assets}/danterm.fish
+            end
+          '';
         })
       ]
     ))

@@ -129,6 +129,7 @@ version returned by XTVERSION.
 | `COLORTERM` (`truecolor`) | danterm | public |
 | `TERM_PROGRAM` (`DanTerm`) | danterm | public |
 | `TERM_PROGRAM_VERSION` (`<bundle-version>`) | danterm | public |
+| `DANTERM_SHELL_INTEGRATION_DIR` (`<running-bundle>/Contents/Resources/shell-integration`) | danterm | public |
 | `DANTERM` (`1`) | pane | public |
 | `DANTERM_SOCK` (`<socket-path>`) | pane | public |
 | `DANTERM_PANE` (`<pane-id>`) | pane | public |
@@ -142,6 +143,11 @@ The exact field counts are three for `command-start`, two for `command-end` and
 canonical padded base64 and strict UTF-8. Shell integrations emit when either
 `DANTERM` or `LC_DANTERM` is present; ssh and mosh wrappers forward
 `LC_DANTERM=1`, and a shell with `LC_DANTERM` but no `DANTERM` is remote.
+`DANTERM_SHELL_INTEGRATION_DIR` is persistent discovery state: shell hooks read
+it but the integration does not consume or rewrite it, so nested and re-exec'd
+shells continue to find the running bundle's assets. Remote shells have no
+local app bundle and use their packaged or copied assets when `LC_DANTERM` is
+present instead.
 
 ## Queries and semantic protocols
 

@@ -18,6 +18,7 @@ func makeSwiftTerminalBackend() -> any TerminalBackend {
 /// Owns process-level Swift terminal launch and teardown policy outside the Elm runtime.
 @MainActor
 final class SwiftTerminalBackend: TerminalBackend {
+    private let bundle: Bundle
     private let bootstrapExecutable: String
     private let recordsFlightTape: Bool
     #if DANTERM_TERMINAL_CHARACTERIZATION
@@ -36,6 +37,7 @@ final class SwiftTerminalBackend: TerminalBackend {
     var recoveryScheduling: TerminalRecoveryScheduling { .eventDriven }
 
     init(bundle: Bundle = .main) {
+        self.bundle = bundle
         bootstrapExecutable = bundle.bundleURL
             .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
             .path
@@ -62,7 +64,10 @@ final class SwiftTerminalBackend: TerminalBackend {
         )
         let configuration = assembleTerminalPaneLaunch(
             request: launchRequest,
-            facts: Self.launchFacts(requestedWorkingDirectory: request.workingDirectory)
+            facts: Self.launchFacts(
+                bundle: bundle,
+                requestedWorkingDirectory: request.workingDirectory
+            )
         )
         let controller: TerminalPaneSessionController
         do {
@@ -139,7 +144,9 @@ final class SwiftTerminalBackend: TerminalBackend {
     }
     #endif
 
-    private static func launchFacts(
+    /// Resolves app-owned bundle facts and ambient account state at the child-launch seam.
+    static func launchFacts(
+        bundle: Bundle,
         requestedWorkingDirectory: String?
     ) -> TerminalPaneLaunchFacts {
         let environment = scrubbedTerminalProcessEnvironment(ProcessInfo.processInfo.environment)
@@ -164,14 +171,18 @@ final class SwiftTerminalBackend: TerminalBackend {
         let inheritedEnvironment = environment
             .sorted { $0.key < $1.key }
             .map(EnvironmentEntry.init(name:value:))
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let shellIntegrationDirectory = bundle.bundleURL
+            .appendingPathComponent("Contents/Resources/shell-integration", isDirectory: true)
+            .path
         return TerminalPaneLaunchFacts(
             accountShell: accountShell,
             executablePaths: executablePaths,
             homeDirectory: homeDirectory,
             accessibleDirectories: accessibleDirectories,
             inheritedEnvironment: inheritedEnvironment,
-            terminalProgramVersion: version
+            terminalProgramVersion: version,
+            shellIntegrationDirectory: shellIntegrationDirectory
         )
     }
 

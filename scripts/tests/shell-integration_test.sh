@@ -46,6 +46,74 @@ for asset in danterm.zsh danterm.bash danterm.fish vendor/bash-preexec.sh vendor
     test -f "$integration_dir/$asset" || fail "missing $asset"
 done
 
+# The documented rc hook chooses a local app-owned directory first, falls back
+# to the packaged asset for a remote LC_DANTERM shell, and stays inert elsewhere.
+# Keep these snippets in lockstep with hm-module.nix and README.md.
+missing_integration="$integration_dir/missing"
+for shell in zsh bash fish; do
+    case "$shell" in
+        zsh|bash)
+            shell_args=()
+            test "$shell" = zsh && shell_args=(-f)
+            test "$shell" = bash && shell_args=(--noprofile --norc)
+            local_output="$(DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" "$shell" "${shell_args[@]}" -c '
+                if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+                    asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'
+                    if [[ -r $asset ]]; then source "$asset"; else printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; fi
+                elif [[ -n ${LC_DANTERM:-} ]]; then
+                    source "$1/danterm.'"$shell"'"
+                fi
+                printf "%s" "${DANTERM_SHELL_INTEGRATION_DIR:-unset}"
+            ' _ "$missing_integration" 2>&1)"
+            inert_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM "$shell" "${shell_args[@]}" -c '
+                if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'"; elif [[ -n ${LC_DANTERM:-} ]]; then source "$1/danterm.'"$shell"'"; fi
+            ' _ "$missing_integration" 2>&1)"
+            broken_output="$(DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" "$shell" "${shell_args[@]}" -c '
+                asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'
+                if [[ -r $asset ]]; then source "$asset"; else printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; fi
+            ' 2>&1)"
+            remote_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 "$shell" "${shell_args[@]}" -c '
+                if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+                    source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.'"$shell"'"
+                elif [[ -n ${LC_DANTERM:-} ]]; then
+                    source "$1/danterm.'"$shell"'"
+                fi
+                printf loaded
+            ' _ "$integration_dir")"
+            ;;
+        fish)
+            local_output="$(env DANTERM_SHELL_INTEGRATION_DIR="$integration_dir" fish --no-config -c '
+                if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
+                    set asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
+                    if test -r "$asset"; source "$asset"; else; printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; end
+                else if set -q LC_DANTERM; and test -n "$LC_DANTERM"
+                    source $argv[1]/danterm.fish
+                end
+                printf %s "$DANTERM_SHELL_INTEGRATION_DIR"
+            ' "$missing_integration" 2>&1)"
+            inert_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR -u LC_DANTERM fish --no-config -c '
+                if set -q DANTERM_SHELL_INTEGRATION_DIR; source $DANTERM_SHELL_INTEGRATION_DIR/danterm.fish; else if set -q LC_DANTERM; source $argv[1]/danterm.fish; end
+            ' "$missing_integration" 2>&1)"
+            broken_output="$(env DANTERM_SHELL_INTEGRATION_DIR="$missing_integration" fish --no-config -c '
+                set asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
+                if test -r "$asset"; source "$asset"; else; printf "DanTerm shell integration is unreadable: %s\\n" "$asset" >&2; end
+            ' 2>&1)"
+            remote_output="$(env -u DANTERM_SHELL_INTEGRATION_DIR LC_DANTERM=1 fish --no-config -c '
+                if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
+                    source $DANTERM_SHELL_INTEGRATION_DIR/danterm.fish
+                else if set -q LC_DANTERM; and test -n "$LC_DANTERM"
+                    source $argv[1]/danterm.fish
+                end
+                printf loaded
+            ' "$integration_dir")"
+            ;;
+    esac
+    test "$local_output" = "$integration_dir" || fail "$shell hook changed or lost the advertised directory"
+    test -z "$inert_output" || fail "$shell hook was not inert outside DanTerm"
+    assert_contains "$broken_output" "DanTerm shell integration is unreadable: $missing_integration/danterm.$shell"
+    test "$remote_output" = loaded || fail "$shell remote fallback did not load packaged assets"
+done
+
 for shell in zsh bash fish; do
     restore_file="$(mktemp)"
     printf 'restored scrollback' > "$restore_file"

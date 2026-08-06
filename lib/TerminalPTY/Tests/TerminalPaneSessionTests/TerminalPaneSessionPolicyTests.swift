@@ -70,7 +70,8 @@ struct TerminalPaneSessionPolicyTests {
             homeDirectory: "/home",
             accessibleDirectories: ["/requested", "/home", "/"],
             inheritedEnvironment: [.init(name: "BASE", value: "base")],
-            terminalProgramVersion: "1.2.3"
+            terminalProgramVersion: "1.2.3",
+            shellIntegrationDirectory: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
         )
 
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
@@ -85,6 +86,10 @@ struct TerminalPaneSessionPolicyTests {
             .init(name: "COLORTERM", value: "truecolor"),
             .init(name: "TERM_PROGRAM", value: "DanTerm"),
             .init(name: "TERM_PROGRAM_VERSION", value: "1.2.3"),
+            .init(
+                name: "DANTERM_SHELL_INTEGRATION_DIR",
+                value: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
+            ),
         ])
         #expect(input.paneEnvironment == [.init(name: "PANE", value: "pane")])
         #expect(input.command == "restored")
@@ -113,11 +118,13 @@ struct TerminalPaneSessionPolicyTests {
                 .init(name: "COLORTERM", value: "hostile"),
                 .init(name: "TERM_PROGRAM", value: "hostile"),
                 .init(name: "TERM_PROGRAM_VERSION", value: "hostile"),
+                .init(name: "DANTERM_SHELL_INTEGRATION_DIR", value: "/hostile"),
                 .init(name: "DANTERM", value: "hostile"),
                 .init(name: "DANTERM_SOCK", value: "hostile"),
                 .init(name: "DANTERM_PANE", value: "hostile"),
             ],
-            terminalProgramVersion: "9.8.7"
+            terminalProgramVersion: "9.8.7",
+            shellIntegrationDirectory: "/owned/shell-integration"
         )
 
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
@@ -130,6 +137,7 @@ struct TerminalPaneSessionPolicyTests {
         #expect(environment["COLORTERM"] == "truecolor")
         #expect(environment["TERM_PROGRAM"] == "DanTerm")
         #expect(environment["TERM_PROGRAM_VERSION"] == configuration.terminalProgramVersion)
+        #expect(environment["DANTERM_SHELL_INTEGRATION_DIR"] == "/owned/shell-integration")
         #expect(environment["DANTERM"] == "1")
         #expect(environment["DANTERM_SOCK"] == "/owned/socket")
         #expect(environment["DANTERM_PANE"] == "owned-pane")

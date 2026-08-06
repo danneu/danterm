@@ -467,7 +467,17 @@ To wire it yourself instead, add `danterm.overlays.default` to your
 
 ```nix
 programs.bash.initExtra = ''
-  source ${pkgs.danterm-shell-integration}/share/danterm-shell-integration/danterm.bash
+  if [[ -n ''${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+    asset="$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash"
+    if [[ -r $asset ]]; then
+      source "$asset"
+    else
+      printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+    fi
+    unset asset
+  elif [[ -n ''${LC_DANTERM:-} ]]; then
+    source ${pkgs.danterm-shell-integration}/share/danterm-shell-integration/danterm.bash
+  fi
 '';
 ```
 
@@ -477,15 +487,52 @@ The package is `packages.<system>.shell-integration`, built for both
 ### Without Nix
 
 The app bundle carries the same tree under
-`Contents/Resources/shell-integration`. Use the matching line in `~/.zshrc`,
-`~/.bashrc`, or `~/.config/fish/config.fish` -- only the line for the shell
-loading that configuration file:
+`Contents/Resources/shell-integration`. DanTerm advertises that exact directory
+as `DANTERM_SHELL_INTEGRATION_DIR`; hooks use the running app's value, so an
+installed app, dev build, and dev slot each load their own assets. Add the
+matching block to `~/.zshrc`, `~/.bashrc`, or
+`~/.config/fish/config.fish` -- only the block for that shell:
 
-```sh
-source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.zsh
-source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.bash
-source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.fish
+```zsh
+if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+  asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.zsh
+  if [[ -r $asset ]]; then
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+  fi
+  unset asset
+fi
 ```
+
+```bash
+if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+  asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash
+  if [[ -r $asset ]]; then
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+  fi
+  unset asset
+fi
+```
+
+```fish
+if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
+  set -l asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
+  if test -r "$asset"
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+  end
+end
+```
+
+These blocks are inert outside a local DanTerm shell. If DanTerm advertises a
+directory but its matching asset is unreadable, they report the broken path
+instead of silently starting without prompt marks. Home Manager's generated
+hooks additionally use its packaged assets when `LC_DANTERM` marks a remote
+shell.
 
 ### On a remote host
 

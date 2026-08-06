@@ -293,8 +293,11 @@
             in
             pkgs.runCommand "danterm-home-manager-shell-integration-test" { } ''
               all=${allShells}/home-files
+              grep -qF 'DANTERM_SHELL_INTEGRATION_DIR' "$all/.bashrc"
               grep -qF 'source ${assets}/danterm.bash' "$all/.bashrc"
+              grep -qF 'DANTERM_SHELL_INTEGRATION_DIR' "$all/.zshrc"
               grep -qF 'source ${assets}/danterm.zsh' "$all/.zshrc"
+              grep -qF 'DANTERM_SHELL_INTEGRATION_DIR' "$all/.config/fish/config.fish"
               grep -qF 'source ${assets}/danterm.fish' "$all/.config/fish/config.fish"
 
               off=${zshDisabled}/home-files

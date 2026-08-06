@@ -43,6 +43,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
     public let inheritedEnvironment: [EnvironmentEntry]
     /// Bundle version advertised to child processes as DanTerm's version.
     public let terminalProgramVersion: String
+    /// Running bundle's asset directory advertised for nested-shell discovery.
+    public let shellIntegrationDirectory: String
 
     /// Captures ambient facts once so launch assembly remains deterministic.
     public init(
@@ -51,7 +53,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         homeDirectory: String?,
         accessibleDirectories: [String],
         inheritedEnvironment: [EnvironmentEntry],
-        terminalProgramVersion: String
+        terminalProgramVersion: String,
+        shellIntegrationDirectory: String
     ) {
         self.accountShell = accountShell
         self.executablePaths = executablePaths
@@ -59,6 +62,7 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         self.accessibleDirectories = accessibleDirectories
         self.inheritedEnvironment = inheritedEnvironment
         self.terminalProgramVersion = terminalProgramVersion
+        self.shellIntegrationDirectory = shellIntegrationDirectory
     }
 }
 
@@ -105,6 +109,10 @@ public func assembleTerminalPaneLaunch(
                 EnvironmentEntry(
                     name: "TERM_PROGRAM_VERSION",
                     value: facts.terminalProgramVersion
+                ),
+                EnvironmentEntry(
+                    name: "DANTERM_SHELL_INTEGRATION_DIR",
+                    value: facts.shellIntegrationDirectory
                 ),
             ],
             paneEnvironment: request.environment,
