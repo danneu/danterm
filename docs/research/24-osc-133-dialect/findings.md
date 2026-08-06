@@ -1197,4 +1197,34 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Next action: none. Accept the brief blank and revisit only if resize flicker
   becomes a recurring user complaint or a materially simpler design appears. Do
   not weaken `clearPromptForResizeIfNeeded` or the ADR's vacate-before-reflow
-  contract.
+  contract. F22 supersedes this instruction only for height-only resizes, which
+  perform no reflow.
+
+### F22 -- height-only resize vacating destroys content without protecting reflow
+
+- Status: implemented as a reflow-domain correction.
+- Date and investigator: 2026-08-05.
+- Live reproduction: a pane emitted `133;A;redraw=1`, four `KEEP-N` lines, and
+  `133;B`, then underwent a height-only shrink with its width held byte-identical.
+  All four lines disappeared from both the visible grid and a 500-line
+  scrollback read. The same pane without a resize retained every line after one
+  and five seconds.
+- Shell control: fish 4.7.1 on a real PTY repainted its whole prompt after a
+  height-only SIGWINCH, clearing as it went with
+  `CR CUU EL <line> ... ED`. In the app that path recovered, leaving flicker
+  rather than permanent loss. Bash likewise clears its visible line from
+  `references/bash/lib/readline/display.c#_rl_redisplay_after_sigwinch`.
+- Why the old rule was over-broad: F21 priced a brief blank for shells that
+  repaint, and justified vacating as protection against stale-width prompt rows
+  affecting reflow's logical lines and cursor mapping. A height-only resize
+  changes neither width nor folding, so it buys none of that protection while
+  still erasing authoritative cells and invalidating inspection state.
+- Compatibility: the terminal core already guarantees that height-only resize
+  changes no row cells or wrap flags, and `docs/terminal-capabilities.md`
+  describes redraw blanking as occurring "before a reflow." Restricting the two
+  existing vacate call sites to column-count changes restores both contracts.
+  Width-only and combined resizes retain the pre-reflow vacate, including its
+  placement before a combined shrink can move the prompt head into history.
+- Conclusion: this scopes rather than weakens F21. The vacate mechanism and
+  shell-declared `redraw=1` / `redraw=last` ownership remain unchanged inside
+  the width-change domain; only width-invariant resizes stop invoking it.

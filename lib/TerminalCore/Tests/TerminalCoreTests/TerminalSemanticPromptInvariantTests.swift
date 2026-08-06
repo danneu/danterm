@@ -126,20 +126,20 @@ struct TerminalSemanticPromptInvariantTests {
 
     @Test("resize blanking honors the declared redraw mode's scope")
     func redrawModeScopesResizeBlanking() throws {
-        // Intent: under redraw=0 a resize blanks nothing; under redraw=last it blanks
-        //   only the final prompt row and leaves rows above shell-owned.
+        // Intent: under redraw=0 a width change blanks nothing; under redraw=last it
+        //   blanks only the final prompt row and leaves rows above shell-owned.
         // Why it exists: I6 is a transition invariant over what one blanking pass was
         //   allowed to change; only a bracket around the resize can observe its scope.
         var disabled = try #require(Terminal(columns: 8, rows: 4))
         disabled.feed(Array("\u{1B}]133;A;redraw=0\u{7}$ keep".utf8))
-        disabled.resize(columns: 8, rows: 5)
+        disabled.resize(columns: 9, rows: 4)
         #expect(disabled.screenText.hasPrefix("$ keep"))
         #expect(disabled.semanticPromptRowsForTesting[0].stamp == .prompt)
         expectSemanticPromptInvariants(disabled, context: "redraw disabled")
 
         var last = try #require(Terminal(columns: 8, rows: 4))
         last.feed(Array("\u{1B}]133;A;redraw=last\u{7}TOP\r\nBOT".utf8))
-        last.resize(columns: 8, rows: 5)
+        last.resize(columns: 9, rows: 4)
         let stamps = last.semanticPromptRowsForTesting
         #expect(last.screenText.hasPrefix("TOP"))
         #expect(last.screenText.contains("BOT") == false)

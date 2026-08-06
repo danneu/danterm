@@ -88,6 +88,38 @@ struct TerminalResizeTests {
         }
     }
 
+    @Test("height walks conserve a live prompt block and its semantic invariants")
+    func promptedHeightWalkConservesFullHistory() throws {
+        var terminal = try #require(Terminal(columns: 9, rows: 4))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}one\r\ntwo\r\nthree\r\nfour\u{1B}]133;B\u{7}".utf8))
+        let expected = terminal.fullHistoryText
+
+        for height in [3, 2, 1, 2, 5, 3, 6, 4] {
+            terminal.resize(columns: 9, rows: height)
+            #expect(terminal.fullHistoryText == expected, "height \(height)")
+            expectSemanticPromptInvariants(terminal, context: "prompted height \(height)")
+            expectValidGrid(terminal)
+        }
+    }
+
+    @Test("a prompt crossing the history seam remains singular through later reflow")
+    func promptedSeamRoundTripDoesNotDuplicatePrompt() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}PROMPT-A\r\nPROMPT-B\r\nPROMPT-C\u{1B}]133;B\u{7}".utf8))
+
+        terminal.resize(columns: 8, rows: 1)
+        terminal.resize(columns: 8, rows: 3)
+        #expect(terminal.fullHistoryText.components(separatedBy: "PROMPT-A").count - 1 == 1)
+        #expect(terminal.semanticPromptRowsForTesting.filter { $0.stamp == .prompt }.count == 1)
+
+        terminal.resize(columns: 9, rows: 3)
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}PROMPT-NEW\u{1B}]133;B\u{7}".utf8))
+
+        #expect(terminal.fullHistoryText.components(separatedBy: "PROMPT-").count - 1 == 1)
+        expectSemanticPromptInvariants(terminal, context: "prompt seam round trip")
+        expectValidGrid(terminal)
+    }
+
     @Test("combined resize is exactly height then width")
     func combinedResizeUsesCanonicalOrder() throws {
         var combined = try #require(Terminal(columns: 6, rows: 3))

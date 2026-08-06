@@ -1899,7 +1899,9 @@ public struct Terminal: Equatable, Sendable {
             isPendingWrap = primary.isResizePendingWrap
             semanticContent = primary.semanticContent
             semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
-            clearPromptForResizeIfNeeded()
+            if columns != oldColumnCount {
+                clearPromptForResizeIfNeeded()
+            }
             resizePrimaryScreen(columns: columns, rows: rows)
             primary.rows = self.rows
             primary.resizeCursor = cursor
@@ -1919,7 +1921,9 @@ public struct Terminal: Equatable, Sendable {
             semanticContentClearsAtEndOfLine = liveSemanticContentClearsAtEndOfLine
             inactivePrimaryScreen = primary
         } else {
-            clearPromptForResizeIfNeeded()
+            if columns != oldColumnCount {
+                clearPromptForResizeIfNeeded()
+            }
             resizePrimaryScreen(columns: columns, rows: rows)
         }
 
@@ -1928,6 +1932,11 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = nil
     }
 
+    /// Vacates shell-owned prompt cells before reflow can reinterpret their old-width rows.
+    ///
+    /// The caller limits this to width changes and runs it before either resize leg. A combined
+    /// shrink can move the prompt head into history, after which this upward walk could no longer
+    /// find the ownership boundary needed to vacate the whole block.
     private mutating func clearPromptForResizeIfNeeded() {
         guard promptRedrawMode != .disabled, semanticContent != .output else { return }
         if promptRedrawMode == .last {
@@ -4360,7 +4369,8 @@ public struct Terminal: Equatable, Sendable {
     /// unchanged -- one pass to recount display rows, and one restatement of the held anchors.
     private mutating func resizeWidth(to newColumnCount: Int) {
         // Reflow redistributes logical lines across rows, so a row keeps its number and loses
-        // its text. Height-only resizes never reach here, and must not.
+        // its text. Height-only resizes reach neither this operation nor prompt vacating, and
+        // must not.
         renumberRows()
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row

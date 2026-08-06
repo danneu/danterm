@@ -5,6 +5,23 @@ import Testing
 
 /// Exercises every retained-content mutation family against intersecting and disjoint anchors.
 struct TerminalInspectionInvalidationTests {
+    @Test("prompt selection survives height transfer and clears before width reflow")
+    func promptSelectionUsesReflowDomain() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}> prompt\u{1B}]133;B\u{7}".utf8))
+        terminal.setSelection(
+            from: TerminalTextPosition(row: 0, column: 0),
+            to: TerminalTextPosition(row: 0, column: 7)
+        )
+        #expect(terminal.selectedText == "> prompt")
+
+        terminal.resize(columns: 8, rows: 4)
+        #expect(terminal.selectedText == "> prompt")
+
+        terminal.resize(columns: 9, rows: 4)
+        #expect(terminal.selectionRange == nil)
+    }
+
     @Test("cell mutations clear intersecting inspection and preserve disjoint rows")
     func cellMutationMatrix() throws {
         let cases: [(name: String, intersecting: String, disjoint: String)] = [

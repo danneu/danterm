@@ -5,6 +5,27 @@ import Testing
 
 /// Locks shell semantic-prompt state to the resize behavior that consumes it.
 struct TerminalOSC133Tests {
+    @Test("a height-only shrink preserves a prompt block across the history seam")
+    func heightOnlyShrinkPreservesPromptBlock() throws {
+        // Intent: a height-only resize preserves every prompt-block cell while rows move
+        //   across the history/live seam.
+        // Why it exists: resize vacating used to erase the block before any effective
+        //   resize, even though a height-only change performs no reflow.
+        // Scenario: the live-app 2026-08-05 KEEP-1 through KEEP-4 reproduction, with the
+        //   shrink chosen so half the block becomes history and half remains visible.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}KEEP-1\r\nKEEP-2\r\nKEEP-3\r\nKEEP-4\u{1B}]133;B\u{7}".utf8))
+
+        terminal.resize(columns: 8, rows: 2)
+
+        #expect(terminal.scrollbackRowCount == 2)
+        #expect(terminal.scrollbackRow(at: 0)?.cells.first?.scalars == ["K"])
+        #expect(terminal.scrollbackRow(at: 1)?.cells.first?.scalars == ["K"])
+        #expect(terminal.screenText.contains("KEEP-3"))
+        #expect(terminal.screenText.contains("KEEP-4"))
+        #expect(terminal.fullHistoryText == "KEEP-1\nKEEP-2\nKEEP-3\nKEEP-4")
+    }
+
     @Test("interleaved prompt repaints do not accumulate a resize staircase")
     func resizeSweepKeepsOnePrompt() throws {
         // Intent: prove repeated resize and shell repaint cycles converge to one prompt.
@@ -153,7 +174,25 @@ struct TerminalOSC133Tests {
         var heightOnly = try #require(Terminal(columns: 8, rows: 3))
         heightOnly.feed(Array("\u{1B}]133;A\u{7}> prompt\u{1B}]133;B\u{7}".utf8))
         heightOnly.resize(columns: 8, rows: 4)
-        #expect(heightOnly.fullHistoryText.contains("> prompt") == false)
+        #expect(heightOnly.fullHistoryText.contains("> prompt"))
+    }
+
+    @Test("prompt vacating stays ahead of both legs of a combined shrink")
+    func combinedShrinkVacatesBeforeHeightTransfer() throws {
+        // Intent: a width-changing resize vacates the whole prompt while its head is still
+        //   available to the upward ownership walk.
+        // Why it exists: gating vacating to width changes must not move it between the height
+        //   and width legs, where a shrink can strand the head in history.
+        // Scenario: a combined shrink displaces the prompt head before reflow would run.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}HEAD\r\nMIDDLE\r\nTAIL\u{1B}]133;B\u{7}".utf8))
+
+        terminal.resize(columns: 9, rows: 2)
+
+        #expect(terminal.fullHistoryText.contains("HEAD") == false)
+        #expect(terminal.fullHistoryText.contains("MIDDLE") == false)
+        #expect(terminal.fullHistoryText.contains("TAIL") == false)
+        expectSemanticPromptInvariants(terminal, context: "combined shrink")
     }
 
     @Test("a resize between a shell's repaint erase and its next mark spares the last command")

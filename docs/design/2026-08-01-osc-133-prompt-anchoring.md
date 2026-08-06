@@ -31,10 +31,11 @@ that every row-moving operation must maintain.
 A prompt row follows this lifecycle:
 
 1. An OSC 133 prompt mark stamps a live prompt head or continuation.
-2. Before resize, DanTerm **vacates** the rows the shell promised to repaint:
+2. Before reflow, DanTerm **vacates** the rows the shell promised to repaint:
    it blanks them in place, clears their soft-wrap claims, and records
    `.vacated` rather than discarding their identity. Blanking in place preserves
-   the space in which the shell is about to repaint.
+   the space in which the shell is about to repaint. Height-only resizes do not
+   reflow, so they do not vacate the block.
 3. The shell either repaints a vacated row, replacing its semantic state, or
    stamps a newer prompt head while the row is still vacated.
 4. At that newer head, DanTerm **reclaims** still-empty vacated rows and stale
@@ -77,12 +78,19 @@ remains in bounds.
 **I6 -- Redraw-mode scope.** Vacate and reclaim are bounded by the shell's
 declared promise. Full-block work runs only under `redraw=1`. Under
 `redraw=last`, DanTerm vacates only the final prompt row and never takes rows
-above it; disabled redraw takes none.
+above it; disabled redraw takes none. Both enabled modes vacate only in I7's
+reflow domain.
+
+**I7 -- Reflow domain.** Vacating is a precondition of reflow, not of resize. A
+resize that leaves the column count unchanged modifies no prompt-block cell and
+no prompt-block stamp. The vacate remains ahead of both resize legs: during a
+combined shrink, moving the head into history first would leave the live-grid
+upward walk unable to find the block's ownership boundary.
 
 I1, I2, and I4 are state properties and can be checked on a terminal snapshot,
 so a universal oracle can replay every recording and check them after every
-event. I3, I5, and I6 constrain mutations, and no external per-event trace can
-prove them in general: later parser actions in the same feed can hide an
+event. I3, I5, I6, and I7 constrain mutations, and no external per-event trace
+can prove them in general: later parser actions in the same feed can hide an
 invalid intermediate change, resize blanking is followed by reflow inside the
 same resize call, and a mutation that wrongly never fires leaves no delta to
 inspect. Their proof is instead targeted behavioral tests that bracket the
@@ -91,12 +99,27 @@ Observing the mutation from inside production code would close the remaining
 gap but is rejected for its cost: it would charge every release-build resize
 full-grid snapshots for a test-only need.
 
+The primary-screen resize plan's D1 decomposition claim is scoped to terminals
+without a live prompt block. With a prompt block, a combined shrink vacates
+before moving rows, while decomposing it into height-only then width-only calls
+can move the head into history before the second call can find it. This was
+already true of the vacate walk; I7 makes the relevant domain explicit.
+
 ### Scrollback boundary
 
 Prompt anchoring operates only on the live grid. A stale head or vacated blank
 that scrolls into history before reclaim remains there permanently. The window
 is one repaint burst wide, and rewriting retained history would violate the
 terminal's stronger promise that scrollback is stable user-visible output.
+
+A height-only shrink can now move an unvacated prompt row into history, where it
+remains as accepted stale-head debris. This changes which already-accepted
+debris variant can occur, not whether the boundary can retain one. The open
+tail's last partial row can later return across the seam with its prompt stamp;
+that pre-existing path may present stale-width prompt cells to a later reflow.
+Avoiding it in place would require discarding bytes already retained by the
+logical-line store, so it remains an accepted boundary risk rather than part of
+the height-only fix.
 
 ## Consequences
 
