@@ -42,7 +42,7 @@ struct TerminalScrollbackTests {
         //   the spacer through EL -- the column the spacer occupied is painted in the erase
         //   colour, and under the default erase style it is painted in the default colour.
         // Why it exists: `31/PO2`. History stores logical lines and never stores a spacer, so
-        //   the naive mapping loses a cell the engine really holds and paints: `31/D3`
+        //   the naive mapping loses a cell the engine really holds and paints: `research/31/D3`
         //   Decision 3 measured the four states against the real engine and made the repair a
         //   tail append, asymmetric on purpose -- today's canonical trimming drops a
         //   *default*-styled blank there, so storing nothing is what reproduces it.
@@ -64,7 +64,7 @@ struct TerminalScrollbackTests {
             painted.append(repaired.cells[3].style.background)
             expectValidGrid(terminal)
         }
-        // The whole of `31/D3` Decision 3: the erase colour survives into history, and the
+        // The whole of `research/31/D3` Decision 3: the erase colour survives into history, and the
         // default one is still the default rather than the erase colour left over.
         #expect(painted[0] != painted[1])
         #expect(painted[1] == TerminalStyle().background)

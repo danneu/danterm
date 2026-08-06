@@ -5,7 +5,7 @@
 // already on the ladder), and both arms plan the same cells (otherwise a paired
 // difference is comparing two different frames). Timing is not asserted -- this
 // is a candidate workload with no frozen rule, and asserting a duration in a
-// unit test would invent the threshold `28/D1` deliberately withheld.
+// unit test would invent the threshold `research/28/D1` deliberately withheld.
 import Testing
 import TerminalCore
 import TerminalRenderPlanning
@@ -18,7 +18,7 @@ struct TerminalBrowseBenchmarkSupportTests {
         // Intent: after setup, every visible row comes from scrollback storage
         //   rather than the live grid.
         // Why it exists: this is the entire reason the workload was admitted --
-        //   `28/D1` pitch 1 records that no calibrated workload displays retained
+        //   `research/28/D1` pitch 1 records that no calibrated workload displays retained
         //   history. If setup silently left the viewport following the bottom,
         //   the workload would still collect and still pair, and would quietly be
         //   a slower duplicate of the live-grid planning already measured.
@@ -39,7 +39,7 @@ struct TerminalBrowseBenchmarkSupportTests {
         // Intent: the plan produced over retained history is non-empty, and the
         //   coverage reduction returns a positive, repeatable number.
         // Why it exists: the checksum is the workload's only proof that two arms
-        //   planned the same frame -- `15/F18` carried that obligation and this
+        //   planned the same frame -- `research/15/F18` carried that obligation and this
         //   workload inherits it. A checksum that were always zero would compare
         //   equal across any change and silently validate nothing.
         let terminal = makeBrowsingTerminal()

@@ -1,9 +1,9 @@
 // Where the logical-line cutover's ladder regression actually went: the wiring between
 // `LogicalLineStore` and `Terminal`, priced against the same revision the ladder was paired to.
 //
-// `31/F11` recorded the paired ladder rejecting the cutover -- `retained-browse` +60.44%,
+// `research/31/F11` recorded the paired ladder rejecting the cutover -- `retained-browse` +60.44%,
 // `scrollback-stream` +141.42% -- and bounded where the cost is *not* (not the locate count, not
-// the projection arithmetic, not `admit`/`evictOneDisplayRow` as `31/F10` priced them). Every
+// the projection arithmetic, not `admit`/`evictOneDisplayRow` as `research/31/F10` priced them). Every
 // campaign probe drove `LogicalLineStore` directly and measured it fast; the ladder drives
 // `Terminal`. This file measures the two `Terminal`-level paths the ladder exercises, in the shape
 // the ladder exercises them, so the regression can be attributed to named mechanisms before
@@ -20,7 +20,7 @@
 // `feed`, `scroll(toTopRow:)`, `geometry`, `forEachViewportCell(row:_:)` and `scrollbackRowCount`.
 // Copy the file into a checkout of the baseline and run the same command there.
 //
-// Three readings, each answering one question `31/F11` left open:
+// Three readings, each answering one question `research/31/F11` left open:
 //
 //   * `drain` -- what a sustained feed costs per byte, and *how much of that cost is created by a
 //     consumer holding one value copy of the terminal*. `TerminalPTYHost.publish` puts the whole
@@ -36,7 +36,7 @@
 //     plural spelling that pays one fewer locate per row, so this arm reads the *decode* cost and
 //     slightly over-charges the cutover for addressing.
 //   * `footprint` -- the settled `phys_footprint` delta each `drain` arm leaves behind, which is
-//     what `31/DD49`'s 8.62x pane reading has to be explained by.
+//     what `research/31/DD49`'s 8.62x pane reading has to be explained by.
 //
 // Not part of the `just test` gate. Every measurement is skipped unless
 // `DANTERM_WIRED_ATTRIBUTION_PROBE` is set. Run it as:

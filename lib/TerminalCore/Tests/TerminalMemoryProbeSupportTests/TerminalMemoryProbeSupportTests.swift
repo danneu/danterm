@@ -3,7 +3,8 @@
 // This is the probe's most important test and the least obvious one. Every number the probe
 // produces is attributed to a payload by name, so a "styled" payload that emits no styles or a
 // "unicode" payload that never spills would not fail loudly -- it would produce plausible,
-// confidently wrong evidence, and doc 15's H2/H3/H4 would be sized against it. These tests assert
+// confidently wrong evidence, and `research/15/H2`, `research/15/H3`, and `research/15/H4` would
+// be sized against it. These tests assert
 // the payloads' observable effect on terminal state rather than their bytes, so the payload text
 // can be rewritten freely as long as it still exercises the axis it is named for.
 import Testing
@@ -74,8 +75,8 @@ struct TerminalMemoryProbeSupportTests {
 
     @Test("the styled payload produces many distinct styles")
     func styledPayloadIsStyled() throws {
-        // The fixture corpus doc 12's F3 censused had at most nine distinct styles, which is too
-        // few to size a dedup table against. This payload exists to be harder than that, so the
+        // The fixture corpus had at most nine distinct styles (`research/12/F3`), which is too few
+        // to size a dedup table against. This payload exists to be harder than that, so the
         // assertion is a floor well above nine rather than a mere "greater than one".
         let census = try census(payload(named: "scrollback-styled"))
         #expect(census.styledCellCount > 0)
@@ -137,7 +138,7 @@ struct TerminalMemoryProbeSupportTests {
     @Test("cell storage is exact stride arithmetic over physical row extents")
     func cellStorageIsExact() throws {
         // Why it exists: the probe's entire advantage over `just benchmark-memory` is that its
-        // bytes are exact rather than sampled or bucket-rounded (doc 15's F6). If this identity
+        // bytes are exact rather than sampled or bucket-rounded (`research/15/F6`). If this identity
         // ever stops holding, the probe has silently become an estimator.
         let census = try census(payload(named: "scrollback-plain"))
         let totalRows = census.screenRowCount + census.scrollbackRowCount
@@ -162,7 +163,7 @@ struct TerminalMemoryProbeSupportTests {
 
     @Test("a run deep enough to evict retains nothing it evicted")
     func evictingRunDoesNotRetain() throws {
-        // Why it exists: doc 15's F4 found eviction retaining rows it dropped. The probe must
+        // Why it exists: `research/15/F4` found eviction retaining rows it dropped. The probe must
         // report a leak rather than fold it into an otherwise plausible byte count, or it would
         // have measured that defect as a legitimate cost.
         //
@@ -228,7 +229,7 @@ struct TerminalMemoryProbeSupportTests {
     @Test("the matrix is deterministic across runs")
     func matrixIsDeterministic() throws {
         // Why it exists: this is the probe's reason to exist over `benchmark-memory`, whose
-        // sampling made two runs of the same code incomparable (doc 15's F6). Census fields must
+        // sampling made two runs of the same code incomparable (`research/15/F6`). Census fields must
         // be identical run to run; footprint is excluded because process pages legitimately vary.
         let first = runMatrix(columns: 40, rows: 8, lineCount: 300)
         let second = runMatrix(columns: 40, rows: 8, lineCount: 300)

@@ -670,7 +670,7 @@ struct TerminalInteractionPolicyTests {
     func contentIdentityWrapDropsArmedLink() throws {
         // Intent: output that exhausts the per-cell content-identity counter keeps printing, and
         //   any link armed before the wrap is dropped rather than carried across it.
-        // Why it exists: doc 15's `H4` narrowed `contentIdentity` to 32 bits to take `GridCell`
+        // Why it exists: `research/15/H4` narrowed `contentIdentity` to 32 bits to take `GridCell`
         //   from 56 bytes to 48, and the counter issues one identity per printed cell -- so 2^32
         //   is a few minutes of maximal output, not a theoretical bound. A counter that simply
         //   increments traps on overflow, and one that simply wraps starts reissuing identities

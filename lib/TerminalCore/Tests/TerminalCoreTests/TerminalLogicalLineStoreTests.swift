@@ -1,4 +1,4 @@
-// Behavioral proof suite for doc 31's logical-line record arena (`31/D2`, `31/D3`).
+// Behavioral proof suite for doc 31's logical-line record arena (`research/31/D2`, `research/31/D3`).
 //
 // What belongs here: the store's own contracts -- the charged-byte bound (`I2`/`PO3`), the
 // five mutating operations (`I5`), the derived index's agreement with the arena (`I9`), the
@@ -9,7 +9,7 @@
 //
 // Every assertion is against the store's public behavior -- what it retains, what it charges,
 // what it folds -- never against a byte offset or a header bit, so the record layout stays
-// implementation discretion (`31/D2` "Scoped out of this decision").
+// implementation discretion (`research/31/D2` "Scoped out of this decision").
 
 import Testing
 
@@ -103,10 +103,10 @@ struct TerminalLogicalLineStoreTests {
     func zeroCellRecordFoldsToOneDisplayRow() {
         // Intent: a blank logical line occupies exactly one display row however narrow the
         //   pane gets.
-        // Why it exists: `31/DD15` stores a blank line as a *zero-cell* record, dropping the
+        // Why it exists: `research/31/DD15` stores a blank line as a *zero-cell* record, dropping the
         //   one-cell canonical floor `PackedRetainedRow.pack` applies. Without `31/I9`'s
         //   `max(1, ...)` floor in the fold, a blank history would fold to nothing and
-        //   `31/D2` Decision 1's 1,048,576-records-to-rows reading would break.
+        //   `research/31/D2` Decision 1's 1,048,576-records-to-rows reading would break.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for _ in 0..<5 {
             store.admit(Self.shortRow(width: 8, count: 0, seed: 0))
@@ -219,7 +219,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: feeding a degenerate blank-line history until it settles at the depth where the
         //   index ring would have to double leaves the store retaining rows, with its charge
         //   inside capacity -- at the budgets where that doubling is the term that binds.
-        // Why it exists: `31/DD56`. A ring never shrinks, so a doubling taken while the charge
+        // Why it exists: `research/31/DD56`. A ring never shrinks, so a doubling taken while the charge
         //   was already near the capacity leaves metadata permanently over the bound, and
         //   eviction -- which drops records, not capacity -- can never get back under it: the
         //   pane retains nothing at all for the rest of its life. Whether that is reachable is a
@@ -311,8 +311,8 @@ struct TerminalLogicalLineStoreTests {
     func chargedBytesStayUnderTheBudget() {
         // Intent: however much is fed, arena-in-use plus index plus side tables stays within
         //   the configured budget, and capacity never grows.
-        // Why it exists: `31/I2` is the store's only bound, and `31/DD11`'s restatement of
-        //   `15/F4`'s leak proof is exactly "bytes-in-use falls when records are evicted, and
+        // Why it exists: `31/I2` is the store's only bound, and `research/31/DD11`'s restatement of
+        //   `research/15/F4`'s leak proof is exactly "bytes-in-use falls when records are evicted, and
         //   capacity does not grow" -- a charge that describes a model rather than an
         //   allocation was wrong by 2.2x once already.
         for blankHistory in [false, true] {
@@ -345,9 +345,9 @@ struct TerminalLogicalLineStoreTests {
         // Intent: the store reserves less than its budget for the arena, so the index and the
         //   side tables are resident inside the bound rather than on top of it, and the charge
         //   is tested against the arena's capacity rather than against the budget.
-        // Why it exists: `31/F8` Observation 4 measured a cycled arena pane at 1.118x today's
+        // Why it exists: `research/31/F8` Observation 4 measured a cycled arena pane at 1.118x today's
         //   resident bytes for the same fed input, because the reservation is dirty from
-        //   construction and the metadata sits on top of it. `31/D4`'s residency remedy is
+        //   construction and the metadata sits on top of it. `research/31/D4`'s residency remedy is
         //   exactly this reserve, and without a test the two numbers can silently become one
         //   again -- which is the state `31/I2`'s original "the arena's capacity *is* that
         //   budget" describes.
@@ -374,9 +374,9 @@ struct TerminalLogicalLineStoreTests {
         // Intent: what the spill table charges follows what its dictionary allocated, not what
         //   its live entries weigh, so evicting every spill-bearing record leaves the retained
         //   bucket storage inside the charge.
-        // Why it exists: `31/F8` Observation 4 found the census charging 1.931 MiB of side
+        // Why it exists: `research/31/F8` Observation 4 found the census charging 1.931 MiB of side
         //   tables on `scrollback-mixed` against 4.375 MiB of resident excess, and named the gap
-        //   as `spillsBySequence`'s own storage -- `15/F2`'s "a charge that describes a model
+        //   as `spillsBySequence`'s own storage -- `research/15/F2`'s "a charge that describes a model
         //   rather than an allocation" recurring inside `31/I2`. A charge that falls back to
         //   zero the moment the entries go is that same error stated in the other direction.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
@@ -479,9 +479,9 @@ struct TerminalLogicalLineStoreTests {
     func evictionIsDisplayRowGranularAtTheHead() {
         // Intent: evicting under a single logical line that spans many display rows advances
         //   the retained history by exactly one display row per step.
-        // Why it exists: `31/D2` Decision 2 took `31/DD2`'s recorded alternative precisely so
+        // Why it exists: `research/31/D2` Decision 2 took `research/31/DD2`'s recorded alternative precisely so
         //   that no anchor moves further per admitted row than it does today; a whole-record
-        //   step would drop the entire line at once, which `31/F6` `HR5` found user-visible in
+        //   step would drop the entire line at once, which `research/31/F6` `HR5` found user-visible in
         //   four anchors and the scrollbar.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<10 {
@@ -507,7 +507,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: after the head record's prefix is trimmed, its first display row reports a
         //   continuation and no prompt mark, and its remaining rows fold identically to the
         //   untrimmed record's tail.
-        // Why it exists: `31/D2` Decision 5 and `31/DD13` chose this to *reproduce today's
+        // Why it exists: `research/31/D2` Decision 5 and `research/31/DD13` chose this to *reproduce today's
         //   output* -- it is what `isHistoryHeadTruncated` described -- rather than the one
         //   bit cheaper alternative of folding the trimmed head as a fresh line start.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
@@ -553,7 +553,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: a single logical line longer than the record cap becomes two adjacent
         //   records, the first carrying the forced-split marker and reading as soft-wrapped,
         //   and the two together hold every cell in order.
-        // Why it exists: `31/I10` and `31/DD3` bound a record at 1/32 of the budget; `31/DD6`
+        // Why it exists: `31/I10` and `research/31/DD3` bound a record at 1/32 of the budget; `research/31/DD6`
         //   leaves no back-pointer, so a reader rejoining the pair has only adjacency and the
         //   marker to go on.
         let capacity = 1 << 16
@@ -585,7 +585,7 @@ struct TerminalLogicalLineStoreTests {
     func evictingASplitsFirstPieceStampsTheFollower() {
         // Intent: dropping the whole first record of a forced-split pair leaves the follower
         //   reading as a mid-line continuation with no semantic mark, not as a fresh line.
-        // Why it exists: `31/D2` Decision 2 step 2 was amended by the external design review
+        // Why it exists: `research/31/D2` Decision 2 step 2 was amended by the external design review
         //   for exactly this -- dropping a `forcedSplit` record without stamping diverges from
         //   today's `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`, which inherited
         //   condition 10 exists to prevent.
@@ -623,15 +623,15 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.displayRow(at: 2)!.semanticPrompt == .none)
     }
 
-    // MARK: - `31/DD25` as amended: the trailing fill as a record attribute
+    // MARK: - `research/31/DD25` as amended: the trailing fill as a record attribute
 
     @Test("The trailing fill is charged as a side-table slot and released when its record goes")
     func trailingFillIsChargedAndReleased() {
         // Intent: records carrying a trailing fill charge more side-table bytes than records
         //   without one, the charged total stays inside the budget while fills are admitted,
         //   and clearing history releases the slots.
-        // Why it exists: `31/D2` Decision 1 charges everything retained history allocates, and
-        //   `31/DD11` restates `15/F4`'s leak proof as "bytes-in-use falls when records are
+        // Why it exists: `research/31/D2` Decision 1 charges everything retained history allocates, and
+        //   `research/31/DD11` restates `research/15/F4`'s leak proof as "bytes-in-use falls when records are
         //   evicted". A per-record style slot is a new allocation inside that bound, so it is
         //   only admissible if it is charged and released like the spill table beside it.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 24)
@@ -660,7 +660,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: trimming display rows off the front of a logical line leaves the fill on the
         //   record, so the line's last display row is still painted to the margin.
         // Why it exists: the fill is keyed to the line's *end* while a trim eats its *start*,
-        //   and the two meet in the one record a trim rewrites (`31/D2` Decision 2 step 3). A
+        //   and the two meet in the one record a trim rewrites (`research/31/D2` Decision 2 step 3). A
         //   trim that dropped the fill would repaint a still-visible line in the default colour.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<4 {
@@ -688,7 +688,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: the fill describes the paint after the line ends, so the *last* piece
         //   is its only coherent owner -- a fill on the first piece would paint a margin in the
         //   middle of a line. Ownership falls out of admission order (the split closes the piece
-        //   before the closing row's cells are appended), and this pins it (`31/DD33`).
+        //   before the closing row's cells are appended), and this pins it (`research/31/DD33`).
         let capacity = 1 << 16
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
         let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
@@ -718,7 +718,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: resuming a closed logical line clears the fill it carried.
         // Why it exists: a fill is the paint after a line's *end*, and a reopened line has no
         //   end -- its last display row is about to be extended by the next admission, which
-        //   re-derives whatever tail finally closes it (`31/DD35`).
+        //   re-derives whatever tail finally closes it (`research/31/DD35`).
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.backgroundErasedRow(width: 8, count: 4, seed: 0, fillStyle: 15))
         #expect(store.recordSummary(at: 0)!.trailingFillStyle == 15)
@@ -762,7 +762,7 @@ struct TerminalLogicalLineStoreTests {
         //   interleaved, every reader returns exactly the expected retained suffix, cell for
         //   cell and in order.
         // Why it exists: `31/PO12` is the obligation the ring's wrap seam is built against --
-        //   `31/DD14`'s pad for a closed record and `31/DD20`'s forced split for the open
+        //   `research/31/DD14`'s pad for a closed record and `research/31/DD20`'s forced split for the open
         //   tail are both only correct if the retained suffix survives the seam untouched.
         let capacity = 1 << 15
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 12)
@@ -810,7 +810,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: an open record that reaches the arena's physical end is closed with the
         //   forced-split marker, the sub-row remainder is padded, and the continuation opens
         //   at offset 0 with no cell lost.
-        // Why it exists: `31/DD20` was added by the external design review because `31/DD14`'s
+        // Why it exists: `research/31/DD20` was added by the external design review because `research/31/DD14`'s
         //   pad needs a record's length at placement time, which is false of the open tail;
         //   `31/PO12` already tested this shape and had no decision behind it until then.
         let capacity = 1 << 14
@@ -842,7 +842,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: when the record that meets the physical end holds no cells yet, no
         //   forced-split marker is set -- the pad covers the remainder and the record is
         //   simply (re)opened at offset 0.
-        // Why it exists: `31/DD20` names this edge explicitly ("an empty open record needs no
+        // Why it exists: `research/31/DD20` names this edge explicitly ("an empty open record needs no
         //   split") so it is not discovered later as a spurious split marker on a fresh line.
         let capacity = 1 << 13
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 16)
@@ -893,8 +893,8 @@ struct TerminalLogicalLineStoreTests {
     func sideTablesSurviveEveryRecordOperation() {
         // Intent: a multi-scalar cluster, a hyperlink id and a content-identity run read back
         //   identically after the record is admitted, refolded at three widths and head-trimmed.
-        // Why it exists: `31/D1` condition 9 left the spill, hyperlink and semantic-mark
-        //   formats owed, and `31/D3` Decision 6 keyed identity by *cell offset in the logical
+        // Why it exists: `research/31/D1` condition 9 left the spill, hyperlink and semantic-mark
+        //   formats owed, and `research/31/D3` Decision 6 keyed identity by *cell offset in the logical
         //   line* rather than by column -- so a trim, which shifts the record's start, is
         //   exactly where a naive key would silently lose a value.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
@@ -947,7 +947,7 @@ struct TerminalLogicalLineStoreTests {
         //   as any one of a scalar, a style, a hyperlink id, a content identity or a
         //   multi-scalar spill payload differs -- including when the difference is in a table
         //   the arena holds beside the cells rather than in the cells themselves.
-        // Why it exists: `31/F13` measured `LogicalLineStore.==` decoding every retained cell
+        // Why it exists: `research/31/F13` measured `LogicalLineStore.==` decoding every retained cell
         //   into a fresh array per record, so it now compares stored bytes instead. That is
         //   sound only because a record's bytes are a function of its content (`31/I1`), and
         //   this is what holds the two readings together: the side tables are exactly the part
@@ -1008,7 +1008,7 @@ struct TerminalLogicalLineStoreTests {
     func fragmentedIdentityFallsBackPerCellWithoutLoss() {
         // Intent: alternating identified and unidentified cells -- the shape whose run table
         //   costs more than four bytes per stored cell -- reads back every value.
-        // Why it exists: `31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
+        // Why it exists: `research/31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
         //   and `28/I3` requires that neither encoding lose a value, because
         //   `activationIdentity` reads this out of history.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
@@ -1040,7 +1040,7 @@ struct TerminalLogicalLineStoreTests {
     func closeAndReopenTheTailRecord() {
         // Intent: closing the open tail ends the logical line without touching a cell, and
         //   reopening it resumes the same record.
-        // Why it exists: `31/D2` Decision 2's operation 2 is `severScrollbackWrapClaim` and
+        // Why it exists: `research/31/D2` Decision 2's operation 2 is `severScrollbackWrapClaim` and
         //   `restoreWrapClaimBeforeCursor` under the new store; both must stay header-only so
         //   the "middle immutable" premise and the charge both hold.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
@@ -1064,7 +1064,7 @@ struct TerminalLogicalLineStoreTests {
     func truncatingTheTailHandsRowsBack() {
         // Intent: a `resizeHeight` grow pulls the right display rows out of history, and the
         //   grand total, the recount and the charge all agree afterwards.
-        // Why it exists: `31/D2` operation 4 is the only operation that shrinks the arena from
+        // Why it exists: `research/31/D2` operation 4 is the only operation that shrinks the arena from
         //   the back, and `31/PO6` asks for exactly this consistency check.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<3 {
@@ -1198,7 +1198,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: widening while a logical line straddles the history/live seam hands the
         //   open tail's sub-row remainder back, so no short display row is left inside that
         //   line.
-        // Why it exists: `31/D3` Decision 4 and `31/DD16` -- today `reconstructLogicalLines`
+        // Why it exists: `research/31/D3` Decision 4 and `research/31/DD16` -- today `reconstructLogicalLines`
         //   repacks the retained tail with the live rows so no such row exists; under this
         //   store history does not refold, so it would.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 10)
@@ -1231,13 +1231,13 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordSummary(at: 0)!.cellCount == 30)
     }
 
-    // MARK: - Reader contract shape (`31/D3` Decision 1)
+    // MARK: - Reader contract shape (`research/31/D3` Decision 1)
 
     @Test("A forward cursor walks the retained display rows with one locate")
     func forwardCursorWalksWithOneLocate() {
         // Intent: `locate` converts one display row into a record address, and `advance`
         //   carries it forward without another conversion.
-        // Why it exists: `31/D3` Decision 1 rule 2 -- a planned frame performs at most one
+        // Why it exists: `research/31/D3` Decision 1 rule 2 -- a planned frame performs at most one
         //   display-row-to-record locate -- is a contract the API shape has to make natural,
         //   because nothing in the type system stops a per-row lookup (`31/AR5`).
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
@@ -1258,14 +1258,14 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.locate(displayRow: -1) == nil)
     }
 
-    // MARK: - Chunked backing (`31/D5`)
+    // MARK: - Chunked backing (`research/31/D5`)
 
     @Test("a published value and the next admission share every chunk but the one written")
     func publishedValueThenAdmitCopiesOneChunkNotTheWholeArena() {
         // Intent: after the store's value has been copied -- which is what publishing a frame
         //   does -- the next admission copies only the backing chunk it writes into, not the
         //   whole arena.
-        // Why it exists: this is `31/D5`'s whole mechanism, observably. `31/F13` M1 measured the
+        // Why it exists: this is `research/31/D5`'s whole mechanism, observably. `research/31/F13` M1 measured the
         //   single-allocation arena being copied whole on every published frame (`memcpy` at
         //   12.1%-16.1% of whole-process CPU under `admit`), and a timing assertion would not
         //   say *why*; chunk storage identity says exactly which backing was copied and which
@@ -1297,7 +1297,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: at a budget spanning several backing chunks, feeding many full cycles of the
         //   ring leaves every reader returning the retained suffix cell for cell, and the charge
         //   inside capacity throughout.
-        // Why it exists: `31/PO12` states this for the arena's one physical seam; `31/D5` adds a
+        // Why it exists: `31/PO12` states this for the arena's one physical seam; `research/31/D5` adds a
         //   seam per chunk boundary, which is where the open tail is force-split and a pad
         //   covers the remainder. This is that obligation at the new seam count.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
@@ -1345,7 +1345,7 @@ struct TerminalLogicalLineStoreTests {
     }
 
     /// Reads the store back as logical lines, rejoining forced-split and mid-line records by
-    /// adjacency exactly as `31/DD6` requires a reader to.
+    /// adjacency exactly as `research/31/DD6` requires a reader to.
     private static func readLogicalLines(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar]] {
         var lines: [[Unicode.Scalar]] = []
         for index in 0..<store.recordCount {

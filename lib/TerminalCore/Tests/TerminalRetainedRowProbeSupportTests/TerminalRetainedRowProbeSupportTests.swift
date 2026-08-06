@@ -3,8 +3,8 @@
 // These pin the properties that make the probe's numbers usable: the public-API derivation
 // of stored extents reconstructs the engine's own exact census (otherwise every byte the
 // probe reports is a guess dressed as a measurement), blank rows are counted as blank
-// rather than as one-cell rows (which is the whole of `28/F9`), and the composition axes
-// `28/F11` prices a packing scheme against count what they say they count. Nothing here
+// rather than as one-cell rows (which is the whole of `research/28/F9`), and the composition axes
+// `research/28/F11` prices a packing scheme against count what they say they count. Nothing here
 // asserts a blank frequency, a styled fraction, or a size class -- the corpus supplies the
 // first two and libmalloc the third, and a unit test that pinned any of them would be
 // inventing evidence.
@@ -46,7 +46,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   arena reports bytes in use for them.
         // Why it exists: doc 28's per-row payload model was retired with the representation it
         //   described -- history charges one header per logical line since doc 31, not per
-        //   display row (`31/D3` Decision 6), so a per-row model cannot equal the arena and a
+        //   display row (`research/31/D3` Decision 6), so a per-row model cannot equal the arena and a
         //   comparison against it would be false by construction rather than by defect. What
         //   survives is the extent claim `derivationMatchesCensus` makes, held over the same
         //   union of content axes.
@@ -118,7 +118,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   never smaller than the request.
         // Why it exists: `F10`'s question is precisely what the allocator does to ragged
         //   requests, so a modelled size-class table would answer the question with its own
-        //   assumption. Doc 15's `D4` made the same call for the budget charge.
+        //   assumption. `research/15/D4` made the same call for the budget charge.
         for storedCells in [1, 7, 30, 52, 179, 300] {
             let allocation = rowAllocation(storedCells: storedCells, cellStrideBytes: 32)
             #expect(allocation.request == 32 + storedCells * 32)

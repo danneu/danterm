@@ -2,16 +2,16 @@
 // depth, when a width change discards every cached total and rebuilds the index in one pass?
 //
 // Doc 31 stores nothing width-dependent, so a resize's only history-side work is recounting
-// display rows -- one cell count read and one divide per logical line. `31/H2` claims that is
-// milliseconds where reflow was `28/F15`'s `1.85 us x rows + 0.352 us x cells`. This file
-// measures it, at 10,000 and 100,000 logical lines, for both count-sources `31/D1` named:
+// display rows -- one cell count read and one divide per logical line. `research/31/H2` claims that is
+// milliseconds where reflow was `research/28/F15`'s `1.85 us x rows + 0.352 us x cells`. This file
+// measures it, at 10,000 and 100,000 logical lines, for both count-sources `research/31/D1` named:
 // `arena` (the count read from each record's header, which is what the candidate direction
 // sketches) and `counts` (a dense parallel array, which is what F1's prototype happened to do
 // and which costs 8 bytes per line of extra index state).
 //
 // Belongs here: the F2 harness, the synthetic-depth control, and the reporting. Does not belong
 // here: the arena itself (`TerminalLogicalLineReadProbe.swift` owns it), a threshold, or a
-// verdict -- `31/D1`'s Part B rule holds those, frozen at `497d181` before this file existed.
+// verdict -- `research/31/D1`'s Part B rule holds those, frozen at `497d181` before this file existed.
 //
 // Not part of the `just test` gate. Every measurement is skipped unless
 // `DANTERM_LOGICAL_LINE_PROBE` is set. Run it as:
@@ -19,7 +19,7 @@
 //     DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
 //       --filter TerminalLogicalLineIndexProbe
 //
-// Release matters: the bounds in `31/H2` are read against release-build measurements.
+// Release matters: the bounds in `research/31/H2` are read against release-build measurements.
 import Foundation
 import Testing
 
@@ -30,7 +30,7 @@ import Testing
 /// Where a counting pass reads each logical line's cell count from.
 ///
 /// The distinction is the entire cost: `arena` strides across the whole arena touching one
-/// header per line, `counts` scans `8 x lineCount` contiguous bytes. `31/D1` makes `arena`
+/// header per line, `counts` scans `8 x lineCount` contiguous bytes. `research/31/D1` makes `arena`
 /// primary because the candidate direction's index stores offsets and nothing else.
 enum CountSource: String, CaseIterable {
     case arena
@@ -72,7 +72,7 @@ func tiledCounts(_ counts: [Int], toLineCount lineCount: Int) -> [Int] {
 
 /// One timed counting pass: its wall time, the depth it ran at, and the total it produced.
 ///
-/// The total is carried out of the timed region on purpose -- it is what `31/D1` gate 1 checks
+/// The total is carried out of the timed region on purpose -- it is what `research/31/D1` gate 1 checks
 /// against an independent sum, and it is what stops the pass from being optimized away.
 struct PassRound {
     let nanoseconds: Double
@@ -134,10 +134,10 @@ func medianMilliseconds(_ rounds: [PassRound]) -> Double {
 
 // MARK: - The probe
 
-/// `31/F2`: prices the eager counting pass at both depths, both classes, both count-sources.
+/// `research/31/F2`: prices the eager counting pass at both depths, both classes, both count-sources.
 ///
 /// Reports distributions and gate outcomes; it does not print a verdict. The thresholds live in
-/// `31/D1`'s Part B rule and are applied once, by hand, to what this prints.
+/// `research/31/D1`'s Part B rule and are applied once, by hand, to what this prints.
 @Suite(.serialized)
 struct TerminalLogicalLineIndexProbe {
     static let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICAL_LINE_PROBE"] != nil

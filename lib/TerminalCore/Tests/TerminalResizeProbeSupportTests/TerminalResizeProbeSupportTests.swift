@@ -5,7 +5,7 @@
 // `v1` deliberately line-bounded below the budget, so a reader is never handed a
 // cheap operation on a shallow history under a saturated label -- and it reports
 // a distribution rather than a point estimate
-// (which is what `28/D1` pitch 2 required of the frozen recipe). No duration is
+// (which is what `research/28/D1` pitch 2 required of the frozen recipe). No duration is
 // asserted anywhere -- the probe is descriptive by decision, and a unit test
 // that asserted a time would invent the frame-budget verdict `D1` withheld.
 import Testing
@@ -33,7 +33,7 @@ struct TerminalResizeProbeSupportTests {
         //   saturation and tested `scrollbackRowCount < lineCount`, which the
         //   viewport's own rows satisfy whether or not a single line is ever evicted.
         //   If the payload or the geometry drifted until v1 did saturate, `v1` and
-        //   `v2` would stop being two different regimes and `28/F7`'s recorded
+        //   `v2` would stop being two different regimes and `research/28/F7`'s recorded
         //   distribution would quietly change meaning.
         let recipe = ResizeProbeRecipe.standard
         // A prefix, not the whole recipe: per-line charge is deterministic for a
@@ -191,7 +191,7 @@ struct TerminalResizeProbeSupportTests {
         // A band rather than an equality or a one-sided bound since doc 31: the bound is charged
         // bytes, and where the equilibrium settles inside a row is phase-dependent -- a trimmed
         // head frees a display row without freeing a whole line's charge, and the ring's
-        // chunk-seam pads (`31/DD14`) move with the write cursor -- so an overfeed at the ceiling
+        // chunk-seam pads (`research/31/DD14`) move with the write cursor -- so an overfeed at the ceiling
         // lands a few rows either side of where the fill left it. What the recipe claims -- that
         // feeding 200 more lines buys no more depth -- is the direction, not the exact figure,
         // and a couple of rows against 200 fed is that claim holding, in either direction.
@@ -366,8 +366,8 @@ struct TerminalResizeProbeSupportTests {
     func reportCarriesItsRecipe() {
         // Intent: geometry, budget, row count, and repeat count travel with the
         //   distribution.
-        // Why it exists: `28/D1` pitch 2 made this a condition of freezing the
-        //   recipe at all, because `15/F18`'s deleted probe left behind numbers
+        // Why it exists: `research/28/D1` pitch 2 made this a condition of freezing the
+        //   recipe at all, because `research/15/F18`'s deleted probe left behind numbers
         //   whose conditions had to be reconstructed from prose.
         let recipe = ResizeProbeRecipe(
             columns: 120, rows: 8, lineCount: 300,
@@ -394,7 +394,7 @@ struct TerminalResizeProbeSupportTests {
         //   raw sample survives in collection order.
         // Why it exists: an interpolated tail quantile over a few dozen samples
         //   reports a duration that never occurred, and a summary that discarded
-        //   its samples cannot be re-reduced later -- `20/F12` had to recover
+        //   its samples cannot be re-reduced later -- `research/20/F12` had to recover
         //   exactly such samples by hand from per-block artifacts.
         let distribution = ResizeProbeDistribution(
             samplesNanoseconds: [50, 10, 30, 20, 40]

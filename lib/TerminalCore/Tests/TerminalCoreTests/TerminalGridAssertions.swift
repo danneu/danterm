@@ -250,8 +250,8 @@ func historyLineCost(cells: Int) -> Int {
 
 /// The smallest byte budget that retains every logical line `lineCells` describes.
 ///
-/// Searched against a real store rather than derived, for the reason doc 15's `D4` made the old
-/// helper ask the engine too: what history charges is what the *allocator* gave, and under doc 31
+/// Searched against a real store rather than derived because the old helper had to ask the engine
+/// too (`research/15/D4`): what history charges is what the *allocator* gave, and under doc 31
 /// that spans the records, the index rings, the side tables and the room the write path reserves
 /// for a record's tables before it appends. No expression in a cell count reproduces that, and
 /// one written from a model would silently size every fixture wrong.

@@ -32,7 +32,7 @@ struct TerminalStyleTableTests {
         // Intent: a session that emits vastly more distinct styles than are ever live at once keeps
         //   showing every cell its own style, and the table does not grow with the number of styles
         //   seen.
-        // Why it exists: doc 15's `H3` moved the style out of the cell and behind an id, which
+        // Why it exists: `research/15/H3` moved the style out of the cell and behind an id, which
         //   creates two failures no presentation test can see. The table can grow without bound --
         //   trading 16 bytes per cell for an ever-growing side table is a net loss, and the whole
         //   hypothesis rests on it not happening. Or a sweep can drop an entry a live cell still

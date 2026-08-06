@@ -1,8 +1,8 @@
-// The F8 eviction probe for doc 31, plus the `AR6` residency reading `31/D4` sequences into the
+// The F8 eviction probe for doc 31, plus the `AR6` residency reading `research/31/D4` sequences into the
 // same slice: what does head-granular eviction on the arena cost against today's budget
 // enforcement, and what does an arena pane actually leave resident once its ring has cycled?
 //
-// `31/D4` -- frozen at `2ac87e1`, before this file existed and before any eviction or residency
+// `research/31/D4` -- frozen at `2ac87e1`, before this file existed and before any eviction or residency
 // number did -- states the arms, the two statistics, the five stimulus classes with their
 // calibration bands, the eight validity gates, the 1.09x reject / 1.00x confirm thresholds and the
 // verdicts. This file takes the measurement and prints gate outcomes; it contains no threshold and
@@ -67,10 +67,10 @@ import Testing
 
 // MARK: - Content classes
 
-/// The five stimulus classes `31/D4` froze, with every band cited to its source.
+/// The five stimulus classes `research/31/D4` froze, with every band cited to its source.
 ///
-/// `mix` and `full` are `28/F23`'s measured distribution and its full-width saturation bound;
-/// `stream` is `28/F20` Observation 5's `scrollback-stream` row shape and the class the 1.09x line
+/// `mix` and `full` are `research/28/F23`'s measured distribution and its full-width saturation bound;
+/// `stream` is `research/28/F20` Observation 5's `scrollback-stream` row shape and the class the 1.09x line
 /// is derived from; `wrapped` is new at `D4` (`DD21`) and is the only class in which a step trims
 /// *inside* a record, so it is the only class that exercises the persisted head cell offset at all;
 /// `wide` is `F3`'s CJK generator and is descriptive, because no ladder threshold derives from wide
@@ -82,7 +82,7 @@ enum EvictionContentClass: String, CaseIterable {
     case wrapped
     case wide
 
-    /// Whether `31/D4`'s thresholds are read against this class at all.
+    /// Whether `research/31/D4`'s thresholds are read against this class at all.
     var isVerdictBearing: Bool { self != .wide }
 
     /// Display rows the stimulus is built to, before it is cycled up to the budget.
@@ -176,7 +176,7 @@ func buildEvictionStimulus(
 
 /// Checksums one display row over every scalar, style id and kind, plus its soft-wrap flag.
 ///
-/// `31/D4` gate 1 compares the two arms over the display rows both retain, and the two stores
+/// `research/31/D4` gate 1 compares the two arms over the display rows both retain, and the two stores
 /// legitimately disagree about how much *default* trailing padding they keep -- today's `pack`
 /// trims to canonical extent, the arena measures a hard-ended row to its content end (`DD25`). So
 /// only cells that differ from the default contribute, keyed by column, which makes the check
@@ -205,7 +205,7 @@ func evictionProduct(_ terms: [Int]) -> UInt64 {
 }
 
 extension Terminal.LogicalLineStore {
-    /// The per-round product `31/D4` gate 4 cross-checks, folded so one value travels with an
+    /// The per-round product `research/31/D4` gate 4 cross-checks, folded so one value travels with an
     /// `ArmRound`. Lives here rather than in the store: it is a probe's accounting, not the
     /// store's, and nothing under `lib/TerminalCore/Sources/` is touched by this finding.
     var product: UInt64 {
@@ -221,10 +221,10 @@ extension Terminal.LogicalLineStore {
 ///
 /// `Terminal.ScrollbackBuffer`, `Terminal.scrollbackByteCost(of:)`,
 /// `Terminal.appendToScrollback`, `Terminal.enforceScrollbackBudget` and `Terminal.handleEviction`
-/// are all `private` to `Terminal`, so this reproduces them rather than calling them -- `31/D4`'s
+/// are all `private` to `Terminal`, so this reproduces them rather than calling them -- `research/31/D4`'s
 /// stated fidelity limit. What it does *not* substitute is the encoder: `PackedRetainedRow.pack`
 /// is the production one, and `removeFirst` keeps the slot-release write and `compactIfNeeded`
-/// that doc 15's `F4` put there.
+/// that `research/15/F4` put there.
 struct BudgetEnforcedRowStore {
     private var storage: [Terminal.PackedRetainedRow] = []
     private var storageStart = 0
@@ -379,10 +379,10 @@ struct BudgetEnforcedRowStore {
 /// and `LogicalLineFold`'s own boundary walk -- all three used directly rather than transcribed.
 struct GranularityArena {
     enum Granularity: String {
-        /// `31/D2` Decision 2's rule: fold one display row from the head, trim inside the record
+        /// `research/31/D2` Decision 2's rule: fold one display row from the head, trim inside the record
         /// when it holds more, drop it when it does not.
         case headRow
-        /// `31/DD2` as originally written: the whole head record leaves in one step.
+        /// `research/31/DD2` as originally written: the whole head record leaves in one step.
         case wholeRecord
     }
 
@@ -571,10 +571,10 @@ func vmmapSummaryLines() -> [String] {
 
 private func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
 
-/// `31/F8`: prices head-granular eviction against today's budget enforcement, and reads the four
+/// `research/31/F8`: prices head-granular eviction against today's budget enforcement, and reads the four
 /// residency states `AR6` asks for.
 ///
-/// Reports distributions and gate outcomes; it prints no verdict. The thresholds live in `31/D4`
+/// Reports distributions and gate outcomes; it prints no verdict. The thresholds live in `research/31/D4`
 /// and are applied once, by hand, to what this prints.
 @Suite(.serialized)
 struct TerminalLogicalLineEvictionProbe {
@@ -1186,7 +1186,7 @@ struct TerminalLogicalLineEvictionProbe {
 
     // MARK: The AR6 residency reading
 
-    /// One of the four pane states `31/D4` names, on one content class, for one store.
+    /// One of the four pane states `research/31/D4` names, on one content class, for one store.
     ///
     /// Selected by `DANTERM_RESIDENCY_CASE=<store>/<class>/<state>` and run **one process per
     /// reading**, because the probe's own note records that a footprint delta is attributable only

@@ -1,8 +1,8 @@
 // The F7 blank-record counting-pass probe for doc 31: what does the eager block-total recompute
-// cost at the record count `31/D2` Decision 1 actually admits?
+// cost at the record count `research/31/D2` Decision 1 actually admits?
 //
-// `31/D2` charges the block index 8 bytes per record, so a 16 MiB budget admits 1,048,576 blank
-// logical lines (8 arena bytes + 8 index bytes each) -- 10.5x the deepest depth `31/F2` measured.
+// `research/31/D2` charges the block index 8 bytes per record, so a 16 MiB budget admits 1,048,576 blank
+// logical lines (8 arena bytes + 8 index bytes each) -- 10.5x the deepest depth `research/31/F2` measured.
 // `D2`'s own open-question section extrapolated `F2`'s 100,000-line per-line rate to ~6.4 ms
 // against `F2`'s one-frame (16.67 ms) reject bound, and froze a decision rule that has to be read
 // against a measurement rather than that arithmetic. This file takes the measurement.
@@ -17,7 +17,7 @@
 // fidelity control, and a sentinel arm that restores the width-responsiveness gate 1 loses when
 // every record folds to one display row at every width), and the reporting. Does not belong here:
 // the arena (`TerminalLogicalLineReadProbe.swift` owns it), `F2`'s own arms
-// (`TerminalLogicalLineIndexProbe.swift`, unedited), a threshold, or a verdict -- `31/D2`'s open
+// (`TerminalLogicalLineIndexProbe.swift`, unedited), a threshold, or a verdict -- `research/31/D2`'s open
 // question holds the rule, frozen before this file existed.
 //
 // Not part of the `just test` gate. Every measurement is skipped unless
@@ -36,7 +36,7 @@ import Testing
 
 /// Blank retained history as a real `Terminal` produces it: `lineCount` empty rows scrolled off.
 ///
-/// The degenerate regime `31/D2` Decision 1 bounds. Every row is hard-ended, so every display row
+/// The degenerate regime `research/31/D2` Decision 1 bounds. Every row is hard-ended, so every display row
 /// is its own logical line and every record is as small as a record gets. Built through the engine
 /// rather than by hand so the control arena's geometry is the engine's own.
 ///
@@ -87,16 +87,16 @@ func blankCellCountsWithSentinels(_ count: Int, stride: Int, cells: Int) -> [Int
 
 // MARK: - The probe
 
-/// `31/F7`: prices `F2`'s eager counting pass at the blank-record count `31/D2` admits.
+/// `research/31/F7`: prices `F2`'s eager counting pass at the blank-record count `research/31/D2` admits.
 ///
-/// Reports distributions and gate outcomes; it prints no verdict. The rule is `31/D2`'s open
+/// Reports distributions and gate outcomes; it prints no verdict. The rule is `research/31/D2`'s open
 /// question -- at or above one 60 Hz frame a record-count safety bound ships -- and it is applied
 /// once, by hand, to what this prints.
 @Suite(.serialized)
 struct TerminalLogicalLineBlankIndexProbe {
     static let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICAL_LINE_PROBE"] != nil
 
-    /// `31/D2` Decision 1: 16,777,216 B / (8 arena + 8 index) B per blank record.
+    /// `research/31/D2` Decision 1: 16,777,216 B / (8 arena + 8 index) B per blank record.
     static let budgetRecords = 1_048_576
     /// The depth `F2`'s gate 2 control is taken at, and `F2`'s own shallow depth.
     static let controlRecords = 10_000
@@ -199,7 +199,7 @@ struct TerminalLogicalLineBlankIndexProbe {
 
     /// Descriptive: the pass's cost against blank-record count, with the middle of the curve.
     ///
-    /// `31/D2`'s open question extrapolated from `F2`'s two-point curve, and
+    /// `research/31/D2`'s open question extrapolated from `F2`'s two-point curve, and
     /// `agent-docs/measurement-discipline.md` is explicit that a model predicting a curve gets its
     /// middle measured before it is acted on. No threshold is read off this arm.
     @Test("F7 -- blank counting-pass cost against record count (descriptive)", .enabled(if: probeIsEnabled))

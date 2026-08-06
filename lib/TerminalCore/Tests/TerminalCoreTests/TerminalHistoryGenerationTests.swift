@@ -41,7 +41,7 @@ struct TerminalHistoryGenerationTests {
 
         // Funnel 2: scrollback wrap-claim rewrite via `invalidateInspection(inScrollbackRow:)`.
         // `ESC[2J` blanks the whole of live row 0, so it severs the last scrollback row's
-        // soft-wrap claim before erasing the viewport (`31/D2` operation 2). Both halves of the
+        // soft-wrap claim before erasing the viewport (`research/31/D2` operation 2). Both halves of the
         // recovered text's line structure change: the remainder of the wrapped line goes with
         // the viewport, and the retained head stops claiming a continuation.
         var wrapClaim = try makeScrolledBackTerminal(trailingWrappedLine: true)

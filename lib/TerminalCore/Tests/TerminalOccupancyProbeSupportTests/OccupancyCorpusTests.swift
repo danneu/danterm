@@ -31,7 +31,7 @@ struct OccupancyCorpusTests {
         // Intent: consecutive lines differ in length, cycling rather than staying flat.
         // Why it exists: a fixed-width corpus makes every row's projected-cell end
         //   identical, which is the one shape a scan is least likely to be
-        //   representative of. `19/F6` reads a flat per-cell constant; that reading is
+        //   representative of. `research/19/F6` reads a flat per-cell constant; that reading is
         //   only meaningful if the rows were not uniform to begin with.
         let widths = (0..<8).map { occupancyCorpusLine($0).count }
 
@@ -134,7 +134,7 @@ struct OccupancySummaryTests {
     @Test("a summary converts its mean into the sustainable rate a key repeat is judged against")
     func sustainableRate() {
         // Intent: mean milliseconds becomes operations per second.
-        // Why it exists: `19/F11`'s whole argument is a comparison between service rate
+        // Why it exists: `research/19/F11`'s whole argument is a comparison between service rate
         //   and macOS key-repeat arrival rate, so the probe reports the rate rather than
         //   leaving each reader to divide -- and a reciprocal is easy to invert by
         //   accident in a way no one notices in a table.
@@ -147,7 +147,7 @@ struct OccupancySummaryTests {
     func degenerateRate() {
         // Intent: a mean of zero yields nil, not a division by zero.
         // Why it exists: this is now the expected reading for cached navigation
-        //   (`19/D3`: 99.3 ms -> ~0.00 ms), so the degenerate case is the success case
+        //   (`research/19/D3`: 99.3 ms -> ~0.00 ms), so the degenerate case is the success case
         //   and must not print `inf`.
         let summary = OccupancySample(name: "case", milliseconds: [0.0, 0.0])
 

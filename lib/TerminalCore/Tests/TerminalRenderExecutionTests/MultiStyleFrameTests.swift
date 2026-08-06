@@ -5,7 +5,7 @@
 // to keep each cell's face, colour, and column straight across run boundaries.
 //
 // Written to guard a glyph-batching change that was then rejected on its measurement
-// (`docs/research/18-*.md` `F13`, `D5`), and kept because the guarantees are the
+// (`research/18/F13`, `research/18/D5`), and kept because the guarantees are the
 // executor's, not that change's: any future edit to how `drawTextRuns` groups or defers
 // submission has to keep these passing. Verified by mutation to catch a lost bold, italic,
 // or foreground colour, and a glyph positioned relative to its run instead of the frame.

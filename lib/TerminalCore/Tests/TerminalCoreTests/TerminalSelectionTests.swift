@@ -245,7 +245,7 @@ struct TerminalSelectionTests {
         reflow.resize(columns: 2, rows: 1)
 
         // The width change evicts nothing (`31/I3`), so the occurrence it used to lose to a
-        // reflow-triggered eviction survives -- restated, not dropped (`31/D3` Decision 2).
+        // reflow-triggered eviction survives -- restated, not dropped (`research/31/D3` Decision 2).
         #expect(reflow.selectedText == reflow.fullHistoryText)
         #expect(reflow.activeSearchMatchRange != nil)
     }

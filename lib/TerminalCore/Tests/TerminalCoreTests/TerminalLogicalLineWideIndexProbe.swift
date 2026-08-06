@@ -1,7 +1,7 @@
 // The F9 wide-content counting-pass probe for doc 31: what does the eager block-total recompute
 // cost when every record takes the wide-cell fallback instead of one divide?
 //
-// `31/D3` Decision 7 reframed that fallback from "an O(cells) scan" to `O(display rows)` -- the
+// `research/31/D3` Decision 7 reframed that fallback from "an O(cells) scan" to `O(display rows)` -- the
 // fold only has to know, at each display-row boundary, whether a 2-cell cluster straddles it, which
 // is one probe per display row and not one per cell -- and then declined to close inherited
 // condition 1 on arithmetic: the bracket clears one 60 Hz frame by ~3.2x on a per-probe constant
@@ -335,7 +335,7 @@ struct WideLogicalLineArena {
     /// Proves the fold reproduces the display rows the engine itself produced, record by record.
     ///
     /// What replaces `F2`'s content-class calibration for this stimulus (see the probe's gate 5):
-    /// `28/F23` measured an ASCII band, so there is no cell-count band a CJK stimulus can be held
+    /// `research/28/F23` measured an ASCII band, so there is no cell-count band a CJK stimulus can be held
     /// to -- but the engine did wrap this exact content at 179 columns, spacers and all, and the
     /// fold has to agree with it or nothing measured here is a fold of the retained content.
     func verifyFold(against stimulus: RetainedStimulus) -> String? {
@@ -415,11 +415,11 @@ func wideCountsFillingBudget(_ counts: [Int], budgetBytes: Int) -> [Int] {
 
 // MARK: - The probe
 
-/// `31/F9`: prices the wide-content counting pass at the depths and widths `D3` Decision 7 froze.
+/// `research/31/F9`: prices the wide-content counting pass at the depths and widths `D3` Decision 7 froze.
 ///
 /// Reports distributions and gate outcomes; it prints no verdict. The three-way rule -- confirm
 /// under 1.67 ms, narrow confirm under 16.67 ms, reject at or above one 60 Hz frame -- lives in
-/// `31/D3` Decision 7, frozen before this file existed, and is applied once by hand.
+/// `research/31/D3` Decision 7, frozen before this file existed, and is applied once by hand.
 @Suite(.serialized)
 struct TerminalLogicalLineWideIndexProbe {
     static let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICAL_LINE_PROBE"] != nil
@@ -455,7 +455,7 @@ struct TerminalLogicalLineWideIndexProbe {
         let spacers = stimulus.displayRows.reduce(0) { total, row in
             total + row.cells.filter { $0.kind == .spacerHead }.count
         }
-        // `F3`'s own band for this class, which is what `28/F23`'s ASCII cell-count band cannot be
+        // `F3`'s own band for this class, which is what `research/28/F23`'s ASCII cell-count band cannot be
         // for CJK: at least half the admitted rows carry a wide cell, and at least one spacer is
         // present -- the artifact the store refuses to hold and the fold has to put back.
         let wideRows = stimulus.displayRows.filter { row in row.cells.contains { $0.kind == .wideHead } }.count

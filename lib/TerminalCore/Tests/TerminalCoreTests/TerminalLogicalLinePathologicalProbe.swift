@@ -1,10 +1,10 @@
 // The pathological-input reading for doc 31's inherited condition 8: what does a real giant
 // single logical line actually do to the landed store?
 //
-// `31/DD3` derived the forced-split cap as "no record exceeds 1/32 of the byte budget" -- 65,536
-// cells at 16 MiB -- and `31/D2` ratified the rule rather than the number. The condition the
+// `research/31/DD3` derived the forced-split cap as "no record exceeds 1/32 of the byte budget" -- 65,536
+// cells at 16 MiB -- and `research/31/D2` ratified the rule rather than the number. The condition the
 // campaign carried forward is that the cap is **derived, not measured**: no pathological input had
-// been fed to a real engine to see what a session produces. `31/F4` named the shape from wezterm's
+// been fed to a real engine to see what a session produces. `research/31/F4` named the shape from wezterm's
 // own issue history ("1.5MB of json"). This file feeds it, through the real `Terminal` at the
 // production budget, and reports what happens.
 //
@@ -18,7 +18,7 @@
 //
 // Two stimuli, because the interesting question splits in two:
 //
-//   * `json` -- 1,500,000 bytes of minified JSON on one line, `31/F4`'s named shape. It is bigger
+//   * `json` -- 1,500,000 bytes of minified JSON on one line, `research/31/F4`'s named shape. It is bigger
 //     than the cap by ~23x and smaller than the arena, so it exercises the split rule with the
 //     rest of history still present.
 //   * `unbounded` -- one logical line of 24 MiB, larger than the whole arena. This is the case no
@@ -64,7 +64,7 @@ struct TerminalLogicalLinePathologicalProbe {
 
     // MARK: Stimuli
 
-    /// `31/F4`'s named shape: minified JSON, one line, no newline until the end.
+    /// `research/31/F4`'s named shape: minified JSON, one line, no newline until the end.
     ///
     /// Generated rather than captured so the probe is reproducible without a fixture, and shaped
     /// like real minified JSON (nested objects, quoted keys, numbers, no whitespace) so the cell
@@ -124,7 +124,7 @@ struct TerminalLogicalLinePathologicalProbe {
     }
 
     /// One planned frame's worth of reads over retained history: the geometry pass and the cell
-    /// pass, which is what `31/D3` Decision 1 rule 2 and `TerminalFrameLocateTests` call a
+    /// pass, which is what `research/31/D3` Decision 1 rule 2 and `TerminalFrameLocateTests` call a
     /// viewport traversal.
     static func browseFrames(_ terminal: inout Terminal, topRow: Int, frames: Int) -> UInt64 {
         terminal.scroll(toTopRow: topRow)

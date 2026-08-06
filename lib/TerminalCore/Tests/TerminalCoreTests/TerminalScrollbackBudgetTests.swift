@@ -3,10 +3,10 @@
 // Restated against doc 31's record store: history has **one** bound -- charged bytes against the
 // arena's capacity (`31/I2`) -- where it had three. The cell and row caps priced the two terms of
 // a width reflow of retained rows, and there is no reflow of retained rows left to price
-// (`31/D2` Decision 4), so this file's cap tests are gone rather than adapted. What replaces the
-// public `isHistoryHeadTruncated` flag is the invariant `31/D2` Decision 2 states in its place:
+// (`research/31/D2` Decision 4), so this file's cap tests are gone rather than adapted. What replaces the
+// public `isHistoryHeadTruncated` flag is the invariant `research/31/D2` Decision 2 states in its place:
 // the oldest retained record is a *suffix* of the logical line that produced it whenever its head
-// has been trimmed, and it reads as a mid-line continuation for as long as it survives (`31/DD10`).
+// has been trimmed, and it reads as a mid-line continuation for as long as it survives (`research/31/DD10`).
 import Testing
 
 @testable import TerminalCore
@@ -80,9 +80,10 @@ struct TerminalScrollbackBudgetTests {
     func budgetChargesReservedStorageNotJustCells() throws {
         // Intent: what history charges stays inside the capacity it was built at, and that
         //   capacity does not move however much is fed through it.
-        // Why it exists: doc 15's `F7`/`F12` incident restated for the arena (`31/DD11`). The old
+        // Why it exists: the `research/15/F7` and `research/15/F12` incident restated for the arena
+        //   (`research/31/DD11`). The old
         //   charge modelled per-row allocations and drifted from what malloc really reserved; the
-        //   arena is allocated once, below the budget by a fixed metadata reserve (`31/DD36`), so
+        //   arena is allocated once, below the budget by a fixed metadata reserve (`research/31/DD36`), so
         //   the bound holds by construction and the proof is that capacity never grows.
         // Scenario: a pane at ordinary widths streams enough history to force steady eviction.
         for columns in [80, 200] {
@@ -142,7 +143,7 @@ struct TerminalScrollbackBudgetTests {
         let charge = RecordCharge.self
         let fixtures: [(columns: Int, text: String, cells: Int, identityRuns: Int)] = [
             // A blank hard-ended line stores no cells at all: a record's cell count is a content
-            // property, and zero is representable (`31/DD15`).
+            // property, and zero is representable (`research/31/DD15`).
             (4, "", 0, 0),
             // Four ASCII cells printed straight through: one identity run covers the line.
             (4, "ABCD", 4, 1),
@@ -243,7 +244,7 @@ struct TerminalScrollbackBudgetTests {
         // Scenario: a user drags a pane narrow and back with a full history of full-width output.
         let wide = 179
         // Small enough to reach the ceiling in ~340 lines, large enough that the arena is still
-        // many chunks (records may not straddle one, `31/DD54`, so the seams force-split records
+        // many chunks (records may not straddle one, `research/31/DD54`, so the seams force-split records
         // exactly as they do at the production budget) -- asserted below rather than assumed.
         let budgetBytes = 1 << 19
         var terminal = try #require(Terminal(
@@ -300,8 +301,8 @@ struct TerminalScrollbackBudgetTests {
     func truncationTracksLastEvictedBoundary() throws {
         // Intent: when eviction cuts inside a logical line, what survives is a suffix that reads
         //   as a continuation; when it cuts at a line boundary, the new head is a line start.
-        // Why it exists: `31/DD10` deletes the public `isHistoryHeadTruncated` -- it had no
-        //   production consumer and `31/DD2` made it constant -- and `31/D2` Decision 2 states
+        // Why it exists: `research/31/DD10` deletes the public `isHistoryHeadTruncated` -- it had no
+        //   production consumer and `research/31/DD2` made it constant -- and `research/31/D2` Decision 2 states
         //   the fact it asserted as a property of what the fold emits at the top of history.
         //   This is that property, asserted where the flag used to be.
         // Scenario: soft, hard, and over-budget cluster cuts cross the seam.
@@ -625,10 +626,10 @@ struct TerminalScrollbackBudgetTests {
         // Intent: prove the public initializer alone wires the literal production budget, and
         //   that the arena's capacity is held below it by the metadata reserve.
         // Why it exists: a tiny injected budget cannot catch an omitted or incorrect public
-        //   default, and this literal is a deliberate ruling rather than a detail -- `28/D11`
-        //   raised it to cover two caps that doc 31 deletes, and `31/D2` Decision 1 re-derived
+        //   default, and this literal is a deliberate ruling rather than a detail -- `research/28/D11`
+        //   raised it to cover two caps that doc 31 deletes, and `research/31/D2` Decision 1 re-derived
         //   the same number on new grounds. The two caps it used to be pinned beside are gone
-        //   with the reflow of history they priced (`31/D2` Decision 4).
+        //   with the reflow of history they priced (`research/31/D2` Decision 4).
         // Scenario: sustained ordinary output at a narrow width.
         var terminal = try #require(Terminal(columns: 8, rows: 1))
 

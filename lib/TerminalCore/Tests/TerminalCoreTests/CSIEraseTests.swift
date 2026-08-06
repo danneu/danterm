@@ -393,7 +393,7 @@ struct CSIEraseTests {
     func eraseDisplayCompleteSurvivesTheOpenTailPullBack() throws {
         // Intent: after ED 2 clears the screen, widening the pane leaves the screen clear.
         // Why it exists: a width change re-establishes the open tail record's display-row
-        //   boundary by handing its trailing partial row back to the live refold (`31/D3`
+        //   boundary by handing its trailing partial row back to the live refold (`research/31/D3`
         //   Decision 4). That pull-back keys off the record's open bit alone, so an erase that
         //   left the bit set could resurrect the text it had just cleared -- history cells
         //   moving back onto the visible screen, which no reference terminal can even express.

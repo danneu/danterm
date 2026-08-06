@@ -1,5 +1,5 @@
 // Behavioral proof for the OSC 133 dialect that DanTerm's bundled shell integrations
-// emit (docs/research/24-osc-133-dialect). Everything here replays a live PTY
+// emit (`research/24/D0`). Everything here replays a live PTY
 // recording of a real shell rather than hand-written marks, so the dialect is pinned
 // to what `integrations/shell-integration/danterm.{zsh,bash,fish}` actually produce
 // in front of a real prompt framework. Two kinds of recording live here and they

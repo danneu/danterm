@@ -182,7 +182,7 @@ struct TerminalHyperlinkTests {
         // Intent: a session that emits more distinct OSC 8 targets than the identifier space can
         //   hold simultaneously still resolves later links, and never resolves one to an earlier
         //   target's URI.
-        // Why it exists: cell-held link ids are a narrow integer (doc 15's `D3`), so the id space
+        // Why it exists: cell-held link ids are a narrow integer (`research/15/D3`), so the id space
         //   is exhaustible in a way an unbounded counter's was not, and the counter must therefore
         //   wrap and recycle. This test covers the recycling half: an id handed out again while a
         //   live cell still points at it would show that cell another target's URI. The half where

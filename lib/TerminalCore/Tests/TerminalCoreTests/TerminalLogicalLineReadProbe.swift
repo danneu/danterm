@@ -3,14 +3,14 @@
 //
 // Two arms, one process, interleaved. **Baseline** is today's shape: one
 // `Terminal.PackedRetainedRow` per display row, addressed at an O(1) index, read through the
-// same `forEachKind` + `forEachContentCell` walks the browse path uses (`28/F17`).
+// same `forEachKind` + `forEachContentCell` walks the browse path uses (`research/28/F17`).
 // **Candidate** is doc 31's sketch: one contiguous byte arena of variable-length logical-line
 // records, plus a derived block index (per-line record offsets, blocked, one cached
 // display-row total per block) whose display-row lookup is a binary search then an in-block
 // scan. Both arms read the *same cells in the same order* and prove it with a checksum.
 //
 // Belongs here: the two stores, the two access patterns D1 froze (sequential browse, random
-// seek), the stimulus that reproduces `28/F23`'s content distribution, and the calibration
+// seek), the stimulus that reproduces `research/28/F23`'s content distribution, and the calibration
 // that decides whether a run may be quoted. Does not belong here: a threshold, a verdict, or
 // anything a production type has to change to accommodate. Nothing in `lib/TerminalCore`'s
 // sources is touched by this file, and the candidate store is local to it -- Phase 1
@@ -31,7 +31,7 @@
 //     DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
 //       --filter TerminalLogicalLineReadProbe
 //
-// Release matters: the thresholds in `31/D1` are derived from release-build measurements.
+// Release matters: the thresholds in `research/31/D1` are derived from release-build measurements.
 import Foundation
 import Testing
 
@@ -39,11 +39,11 @@ import Testing
 
 // MARK: - Stimulus
 
-/// The two content classes `31/D1` froze, kept as data so a report names the shape it measured.
+/// The two content classes `research/31/D1` froze, kept as data so a report names the shape it measured.
 ///
-/// `mix` must land inside `28/F23`'s measured band (display-row cell counts, median 119-154,
+/// `mix` must land inside `research/28/F23`'s measured band (display-row cell counts, median 119-154,
 /// p95 179) or the run is void for that class -- the band is a validity gate, not a target to
-/// approach. `full` is `28/F23`'s `bound/wide-full-width-saturation`: every display row full.
+/// approach. `full` is `research/28/F23`'s `bound/wide-full-width-saturation`: every display row full.
 enum LogicalLineContentClass: String, CaseIterable {
     case mix
     case full
@@ -82,7 +82,7 @@ func logicalLines(for contentClass: LogicalLineContentClass, count: Int) -> [Str
         let length: Int
         switch contentClass {
         case .mix:
-            // Two regimes, mirroring what `28/F23` found real sessions retain at 179
+            // Two regimes, mirroring what `research/28/F23` found real sessions retain at 179
             // columns: most lines wrap at least once (which is what puts p95 at the full
             // width), and a minority are short enough to leave a partial row.
             length = random.next(below: 100) < 55
@@ -121,7 +121,7 @@ struct RetainedStimulus {
     var displayRowCount: Int { displayRows.count }
     var lineCount: Int { lineStarts.count - 1 }
 
-    /// Display-row cell counts, the distribution `28/F23` measured and `31/D1` gates on.
+    /// Display-row cell counts, the distribution `research/28/F23` measured and `research/31/D1` gates on.
     func storedCellCounts() -> [Int] {
         displayRows.map { Terminal.PackedRetainedRow.pack($0).storedCellCount }
     }
@@ -200,7 +200,7 @@ struct DisplayRowStore {
 
     /// A read that borrows the row in place instead of copying it out of the array.
     ///
-    /// **Descriptive, and deliberately not the arm `31/D1`'s rule names.** `read` above
+    /// **Descriptive, and deliberately not the arm `research/31/D1`'s rule names.** `read` above
     /// reproduces what `ScrollbackBuffer`'s subscript does today -- it returns a
     /// `PackedRetainedRow` *by value*, and that struct owns two Swift arrays, so every row
     /// read retains and releases both. This variant is the control that separates "the
@@ -221,7 +221,7 @@ struct DisplayRowStore {
         }
     }
 
-    /// The two walks the browse path performs per visible retained row (`28/F17`).
+    /// The two walks the browse path performs per visible retained row (`research/28/F17`).
     @inline(__always)
     func read(displayRow: Int, into checksum: inout UInt64) {
         let row = rows[displayRow]
@@ -340,7 +340,7 @@ struct LogicalLineArena {
     /// are left zero prices it exactly -- and it is the only way to reach 100,000 lines of wide
     /// content, which is hundreds of megabytes and cannot come out of a real `Terminal` at this
     /// probe's cost. What must still be real is the *geometry*: record sizes, header offsets and
-    /// the total footprint, because those are what the pointer chase pays for. `31/D1`'s gate 2
+    /// the total footprint, because those are what the pointer chase pays for. `research/31/D1`'s gate 2
     /// is the control that holds this claim to account -- at 10,000 lines the synthetic arena
     /// and the real one are both measured, and must agree.
     ///
@@ -374,7 +374,7 @@ struct LogicalLineArena {
 
     /// The display-row total computed by a route the blocked prefix cannot share.
     ///
-    /// `31/D1` gate 1: a counting pass is exactly the loop shape an optimizer deletes, and a
+    /// `research/31/D1` gate 1: a counting pass is exactly the loop shape an optimizer deletes, and a
     /// deleted loop reports an excellent number. Every timed pass is checked against this.
     func independentDisplayRowTotal(width: Int) -> Int {
         var total = 0
@@ -385,7 +385,7 @@ struct LogicalLineArena {
     /// The eager recompute doc 31 settled on: discard every cached block total and rebuild it
     /// in one pass. F1 calls it once at construction; `F2` prices it at depth.
     ///
-    /// This is `31/D1`'s `counts` count-source: the per-line cell count comes from a dense
+    /// This is `research/31/D1`'s `counts` count-source: the per-line cell count comes from a dense
     /// parallel array. That is *not* what the candidate direction sketches -- the sketched index
     /// holds record offsets and the count lives in the record -- so F2's primary variant is
     /// `recomputeIndexFromArena` below and this one is the priced alternative.
@@ -407,7 +407,7 @@ struct LogicalLineArena {
 
     /// The same eager pass, reading each line's cell count out of its record header.
     ///
-    /// `31/D1`'s **primary** count-source, because it is what the candidate direction describes:
+    /// `research/31/D1`'s **primary** count-source, because it is what the candidate direction describes:
     /// the index stores offsets only. The loop is therefore a strided chase across the whole
     /// arena rather than a scan of a dense array, and the gap between this and `recomputeIndex`
     /// is the price of not carrying a parallel counts array.
@@ -681,10 +681,10 @@ private let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICA
 
 private func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
 
-/// Compares doc 31's candidate store against today's on the two access patterns `31/D1` froze.
+/// Compares doc 31's candidate store against today's on the two access patterns `research/31/D1` froze.
 /// A probe: it prints measurements and gate outcomes, and decides nothing.
 struct TerminalLogicalLineReadProbe {
-    @Test("F1 calibration: the stimulus reproduces 28/F23's content distribution", .enabled(if: probeIsEnabled))
+    @Test("F1 calibration: the stimulus reproduces research/28/F23's content distribution", .enabled(if: probeIsEnabled))
     func stimulusCalibration() throws {
         for contentClass in LogicalLineContentClass.allCases {
             let stimulus = buildStimulus(contentClass: contentClass, targetDisplayRows: 10_000)

@@ -288,7 +288,7 @@ struct TerminalPackedRetainedRowTests {
         }
         #expect(extents == [1, 3, 5, 12])
         // The census counts what history *stores*, and a blank logical line stores no cells at
-        // all (`31/DD15`): its single display row is the fold's floor, not a stored cell. So the
+        // all (`research/31/DD15`): its single display row is the fold's floor, not a stored cell. So the
         // stored total is the displayed extents less the blank row's one column.
         #expect(terminal.memoryCensus.retainedStoredCellCount == extents.reduce(0, +) - 1)
     }

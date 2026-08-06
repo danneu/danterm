@@ -34,7 +34,7 @@ struct TerminalDrawBenchmarkSupportTests {
         //   and must hand to CTFontGetGlyphsForCharacters and CTFontDrawGlyphs.
         //   Assert the property that entails the glyph path rather than the
         //   glyph calls themselves, which no seam exposes.
-        // Scenario: 13/F5 found the btop-shaped fixture routes every single cell
+        // Scenario: research/13/F5 found the btop-shaped fixture routes every single cell
         //   to a sprite family and reaches CTFontDrawGlyphs zero times, which
         //   left the benchmark blind to every glyph-path change.
         for grid in DrawBenchmarkGrid.standard {
@@ -95,7 +95,7 @@ struct TerminalDrawBenchmarkSupportTests {
         // Intent: a measurement carries the bitmap it drew into, the cell size
         //   it drew at, and how many runs and cells it drew -- enough for a
         //   reader to check its per-draw duration against a rect-fill floor.
-        // Why it exists: 11/F4. A research finding quoted per-draw durations
+        // Why it exists: research/11/F4. A research finding quoted per-draw durations
         //   from this benchmark that were 16x faster than a bare
         //   CGContextFillRects of the same cells -- physically impossible, and
         //   caused by a summarizing script dividing by the batch count twice.

@@ -8,16 +8,16 @@
 // transcript in the viewport answers "what does a pane of this width display" independently.
 //
 // What belongs here: comparisons between the logical-line store's fold and those live rows, plus
-// the spacer arithmetic (`31/F4` Observation 1) the fold re-derives rather than stores. What does
+// the spacer arithmetic (`research/31/F4` Observation 1) the fold re-derives rather than stores. What does
 // not: the arena's mutating operations and its charge, which are `TerminalLogicalLineStoreTests`.
 //
 // The comparison is deliberately content-level -- scalars, kinds, style ids, hyperlink ids,
 // content identity, soft-wrap and semantic prompt, read through `cell(at:)` over the pane's
-// full width -- because `31/DD15` drops the one-cell canonical floor, so the two stores
+// full width -- because `research/31/DD15` drops the one-cell canonical floor, so the two stores
 // legitimately disagree about how many trailing default cells a blank row *stores* while
 // agreeing about every column a reader can observe.
 //
-// **Which of the store's two walks is compared against what, since `31/DD25`'s amendment.** The
+// **Which of the store's two walks is compared against what, since `research/31/DD25`'s amendment.** The
 // **painted** walk is the one held to today's stored row column for column at the admitting
 // width -- including the background-erase paint past the content end, which today's store holds
 // as cells and this store holds as a per-record fill style. The **content** walk is held to
@@ -40,7 +40,7 @@ struct TerminalLogicalLineFoldTests {
         //   them back at the same width returns every column unchanged.
         // Why it exists: `31/I6` is the invariant the whole design rests on -- wrapping at
         //   read must emit the same cells, kinds, styles, spacer placement, continuation
-        //   stamping and soft-wrap marking a displayed row carries -- and `31/F5`'s
+        //   stamping and soft-wrap marking a displayed row carries -- and `research/31/F5`'s
         //   simplification argument is only collectable if it does.
         for content in RetainedContent.allCases {
             let retained = try liveDisplayRows(content.stimulus, columns: content.columns)
@@ -124,13 +124,13 @@ struct TerminalLogicalLineFoldTests {
         }
     }
 
-    // MARK: - `31/F4` Observation 1: the spacer arithmetic
+    // MARK: - `research/31/F4` Observation 1: the spacer arithmetic
 
     @Test("A line of wide clusters folds to more rows than ceil(cells / width) predicts")
     func wideClustersFoldPastTheNaiveCeiling() throws {
         // Intent: three 2-cell clusters at width 3 occupy three display rows, not the two
         //   `ceil(6 / 3)` predicts.
-        // Why it exists: `31/F4` Observation 1 is the one arithmetic correction the whole
+        // Why it exists: `research/31/F4` Observation 1 is the one arithmetic correction the whole
         //   design took -- `ceil((cells + spacers) / width)`, with `spacers` a function of
         //   *where* the wide cells sit -- and the real engine is the oracle it was measured
         //   against, so this test re-derives it rather than restating a table.
@@ -173,7 +173,7 @@ struct TerminalLogicalLineFoldTests {
     func rederivedSpacerInheritsTheWideHeadsAttributes() {
         // Intent: the `.spacerHead` the fold synthesizes at a wrap boundary carries the same
         //   style id, hyperlink id and content identity `Terminal.pack` gives it.
-        // Why it exists: `31/F4` case 1 refuses to *store* the spacer, so every attribute the
+        // Why it exists: `research/31/F4` case 1 refuses to *store* the spacer, so every attribute the
         //   renderer and `activationIdentity` read off it has to come back out of the wide
         //   head it precedes -- which is what `pack(line:columns:)` does today.
         // Admitted as one display row at width 4, then folded at 3, so the boundary the spacer
@@ -212,7 +212,7 @@ struct TerminalLogicalLineFoldTests {
         // Intent: admitting a display row whose last column is a `.spacerHead` stores the
         //   content cells only, and the spacer reappears at read.
         // Why it exists: `31/I1` -- a spacer's *position* is a function of the width, so
-        //   storing one would be width-dependent data in history, which is `31/D1`'s no-go
+        //   storing one would be width-dependent data in history, which is `research/31/D1`'s no-go
         //   trigger.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         var wrapped = Terminal.GridRow(cells: [
@@ -242,16 +242,16 @@ struct TerminalLogicalLineFoldTests {
         // Intent: when a logical line is cut by a forced split exactly where a `.spacerHead`
         //   was dropped, the earlier piece's last display row still reads with the spacer, and
         //   the spacer carries the wide head that now begins the follower record.
-        // Why it exists: `31/F8`'s re-run found this as a **gate 1 failure on `wide`** -- one
+        // Why it exists: `research/31/F8`'s re-run found this as a **gate 1 failure on `wide`** -- one
         //   retained display row in 14,486 read 178 cells where today's store holds 179 with a
-        //   trailing spacer. `31/F4` case 1 refuses to store a spacer and the fold re-derives it
+        //   trailing spacer. `research/31/F4` case 1 refuses to store a spacer and the fold re-derives it
         //   from the wide head it defers; a split moves that head into the *next* record, so
         //   without this the column is simply lost, permanently, inside retained history. It is
         //   not the acknowledged open-tail divergence, which is transient and ends at the live
-        //   seam; `31/DD6` says readers rejoin split records by adjacency, and this is a reader
+        //   seam; `research/31/DD6` says readers rejoin split records by adjacency, and this is a reader
         //   doing exactly that.
         // Scenario: the ring's write cursor reached the arena's physical end mid-line
-        //   (`31/DD20`) on CJK content, which is how the probe produced it.
+        //   (`research/31/DD20`) on CJK content, which is how the probe produced it.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         var wrapped = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("a" as Unicode.Scalar), kind: .narrow),
@@ -292,7 +292,7 @@ struct TerminalLogicalLineFoldTests {
         #expect(store.displayRow(at: 1)!.cell(at: 0).kind == .wideHead)
     }
 
-    // MARK: - `31/DD25` as amended: the trailing background-erase fill
+    // MARK: - `research/31/DD25` as amended: the trailing background-erase fill
 
     @Test("A hard-ended row's painted tail becomes a fill style, and repaints at every width")
     func hardEndedRowStoresItsBackgroundEraseTailAsAFillStyle() throws {
@@ -300,7 +300,7 @@ struct TerminalLogicalLineFoldTests {
         //   background-erase style stores the content cells plus one fill style, and the
         //   painted walk repaints from the content's end to the right margin at the admitting
         //   width, at a narrower one and at a wider one.
-        // Why it exists: `31/DD25` originally measured such a row to its content end and
+        // Why it exists: `research/31/DD25` originally measured such a row to its content end and
         //   dropped the paint, because storing it as *cells* would wrap a painted tail into
         //   whole blank display rows on a narrow. The amended design keeps both properties at
         //   once -- the paint is width-relative, so it is an attribute rather than cells -- and
@@ -355,7 +355,7 @@ struct TerminalLogicalLineFoldTests {
         //   content at all -- reads back as a full styled display row however wide the pane is.
         // Why it exists: this is the ED-with-background case, the one a per-cell encoding gets
         //   right only by storing a whole row of blanks. As a fill it is one style id on a
-        //   zero-cell record, and `31/DD15`'s one-display-row floor is what keeps the row
+        //   zero-cell record, and `research/31/DD15`'s one-display-row floor is what keeps the row
         //   itself from folding away.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 12)
         store.admit(
@@ -386,7 +386,7 @@ struct TerminalLogicalLineFoldTests {
         // Intent: a styled blank with content on both sides is stored as a cell, keeps its
         //   column relative to the content when the line re-wraps, and is not folded into the
         //   record's trailing fill.
-        // Why it exists: the amended `31/DD25` draws exactly one line -- a *trailing*
+        // Why it exists: the amended `research/31/DD25` draws exactly one line -- a *trailing*
         //   to-edge paint is width-relative and becomes an attribute, while an interior erase
         //   is positionally real content. Without this test the fill rule could quietly swallow
         //   any styled blank and lose a column a program deliberately painted mid-line.
@@ -479,13 +479,13 @@ struct TerminalLogicalLineFoldTests {
         #expect(painted.cell(at: 8).styleId == painted.cell(at: end).styleId)
     }
 
-    // MARK: - `31/D3` Decision 3: the background-erase blank
+    // MARK: - `research/31/D3` Decision 3: the background-erase blank
 
     @Test("A cleared spacer under a non-default erase style is materialized as one styled cell")
     func clearedSpacerMaterializesTheBackgroundEraseBlank() {
         // Intent: repairing a cleared spacer under a non-default erase style appends one
         //   styled blank to the open record, and under the default style appends nothing.
-        // Why it exists: `31/D3` Decision 3 measured today's engine storing exactly one styled
+        // Why it exists: `research/31/D3` Decision 3 measured today's engine storing exactly one styled
         //   cell at that column, and nothing at all when the style is default -- so the fold
         //   reproduces today's output only if the repair is asymmetric in the same way. The
         //   returned Bool is part of that contract: `Terminal.clearPreviousSpacer` branches on
@@ -549,7 +549,7 @@ struct TerminalLogicalLineFoldTests {
         //   fidelity proof in this suite reads it through the materializing one, so nothing
         //   else in the tree would notice the two disagreeing. They are three walks over one
         //   `foldedRow` shape precisely so a spacer, a forced-split seam or a trailing fill
-        //   cannot land in one and not the others (`31/F13`: the borrowing walks stopped
+        //   cannot land in one and not the others (`research/31/F13`: the borrowing walks stopped
         //   materializing a whole `GridCell` per column, which is what made them separate
         //   code).
         for content in RetainedContent.allCases {
@@ -694,9 +694,9 @@ struct TerminalLogicalLineFoldTests {
 
     /// Display rows the two stores must agree on cell for cell.
     ///
-    /// Excludes the final display row of an **open** record, and only that row. `31/D3`
+    /// Excludes the final display row of an **open** record, and only that row. `research/31/D3`
     /// Decision 3 states the reason in terms: admission drops the `.spacerHead` a wrap left in
-    /// the last column (`31/F4` case 1, and storing it would be width-dependent data in
+    /// the last column (`research/31/F4` case 1, and storing it would be width-dependent data in
     /// history), and the fold re-derives it from the wide head that follows -- which has not
     /// been admitted yet while the line is still being printed into the live grid. So for an
     /// open record "the only way a final display row can be short" is exactly that one column,

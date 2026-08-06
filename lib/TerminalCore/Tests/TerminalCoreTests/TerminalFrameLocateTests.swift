@@ -2,9 +2,9 @@
 //
 // The obligation `31/I7` states is that the frame path stays arithmetic -- projection totals, the
 // top row, the cursor stream row and every clamp bound are two-integer sums, and a viewport
-// traversal converts a display row to a record **once** and then advances a cursor. `31/HR1`
+// traversal converts a display row to a record **once** and then advances a cursor. `research/31/HR1`
 // priced the alternative: `scrollProjection` is read roughly 200 times per frame because it is
-// free today, and `31/F1` measured one index lookup at 0.82-1.09 us, so a mapping that quietly
+// free today, and `research/31/F1` measured one index lookup at 0.82-1.09 us, so a mapping that quietly
 // made those lookups would cost 164-218 us per frame on `retained-browse` -- the workload the
 // whole design is judged by.
 //
@@ -26,7 +26,7 @@ struct TerminalFrameLocateTests {
         //   cell walk -- each convert one display row to a record and then advance, and the
         //   number they spend does not move when history gets 100x deeper.
         // Why it exists: `31/PO7`. The depth-invariance half is the load-bearing one: a count
-        //   that grows with retained rows is the exact shape of `31/HR1`'s hazard, and it is
+        //   that grows with retained rows is the exact shape of `research/31/HR1`'s hazard, and it is
         //   invisible to every other test in the suite.
         // Scenario: a user scrolled back into a deep history, with the renderer drawing frames.
         func locatesForOneFrame(lines: Int) throws -> Int {
@@ -57,7 +57,7 @@ struct TerminalFrameLocateTests {
         // rules out.
         #expect(shallow >= 1)
         // One per traversal, and a frame makes two: the geometry pass and the cell pass. Both
-        // then advance a cursor row by row, which is the contract `31/D3` Decision 1 rule 2
+        // then advance a cursor row by row, which is the contract `research/31/D3` Decision 1 rule 2
         // states and the thing a per-row binary search would break.
         #expect(shallow <= 2)
         #expect(deep == shallow)
@@ -67,10 +67,10 @@ struct TerminalFrameLocateTests {
     func projectionArithmeticNeverTouchesTheIndex() throws {
         // Intent: `scrollProjection`, `projectionRowCount`'s public consumers, and the clamp
         //   bounds around them read maintained integers, not the index.
-        // Why it exists: `31/D3` Decision 1 rule 1 names these as the ~200 reads a frame makes
+        // Why it exists: `research/31/D3` Decision 1 rule 1 names these as the ~200 reads a frame makes
         //   and requires each to stay the two-integer arithmetic it is today. A single lookup
         //   smuggled into `scrollProjection` would be invisible until the ladder came back
-        //   `slower`, which is the failure mode `28/F17` already produced once.
+        //   `slower`, which is the failure mode `research/28/F17` already produced once.
         // Scenario: the render planner reading the projection three times per visible row.
         var terminal = try #require(Terminal(columns: 40, rows: 24))
         for index in 0..<2_000 {

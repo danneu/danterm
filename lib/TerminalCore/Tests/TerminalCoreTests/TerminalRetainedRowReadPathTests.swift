@@ -10,7 +10,7 @@
 // change that broke nothing observable.
 //
 // Its own file because it pins a *cross-reader* contract that no single reader's
-// test owns. `28/F17` cut the render walk and the geometry projection over from
+// test owns. `research/28/F17` cut the render walk and the geometry projection over from
 // materializing each retained row (`unpacked()`) to streaming it, and the risk
 // that carries is not "the packed row decodes wrong" -- `PO1`-`PO5` cover that --
 // but "one of three readers drifts from the other two on an exception". These

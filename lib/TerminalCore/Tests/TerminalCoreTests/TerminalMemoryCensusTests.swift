@@ -2,7 +2,8 @@
 //
 // The census exists so that questions like "how many bytes is the grid holding, and in what shape"
 // can be answered on demand instead of by widening `private` members for one measurement and
-// reverting them -- which is how doc 12's F1 and F3 were taken, and why neither can be re-run.
+// reverting them -- which is how `research/12/F1` and `research/12/F3` were taken, and why neither
+// can be re-run.
 // These tests pin the counts a caller reasons about, so the census can be trusted as evidence
 // without re-deriving it each time.
 import Testing
@@ -119,7 +120,7 @@ struct TerminalMemoryCensusTests {
         #expect(census.retainedStoredCellCount == 9 * 4)
         #expect(census.scrollbackRecordCount == 9)
         // Live rows only: history's cells all live in the one arena, so it owns no per-row
-        // allocation for the census to count (`31/DD11`).
+        // allocation for the census to count (`research/31/DD11`).
         #expect(census.rowStorageAllocationCount == 2)
     }
 
@@ -127,7 +128,7 @@ struct TerminalMemoryCensusTests {
     func hypothesisFieldCensus() throws {
         // Intent: styled cells, distinct styles, multi-scalar spills, hyperlink cells, and
         //   content-identity cells are all reported, since H2/H3/H4/H5 are sized on exactly these.
-        // Why it exists: doc 12's F3 measured all five with a throwaway probe that was reverted,
+        // Why it exists: `research/12/F3` measured all five with a throwaway probe that was reverted,
         //   so its numbers cannot be checked or refreshed. This makes them reproducible.
         var terminal = try #require(Terminal(columns: 20, rows: 3))
         terminal.feed(Array("plain".utf8))
@@ -150,7 +151,7 @@ struct TerminalMemoryCensusTests {
 
     @Test("history that has evicted rows charges no more than the arena it was built at")
     func censusReportsRetentionHealth() throws {
-        // Intent: the census surfaces the invariant doc 15's F4 found broken, restated for the
+        // Intent: the census surfaces the invariant `research/15/F4` found broken, restated for the
         //   record arena, so any future measurement carries its own proof that it is not
         //   measuring retained garbage -- and prices a retained cell while that is true.
         // Why it exists: F4's waste -- storage held for rows already evicted -- was invisible to
@@ -158,7 +159,7 @@ struct TerminalMemoryCensusTests {
         //   accounting and effect are separate observables, which is why this test reads resident
         //   bytes rather than the ledger. With one region there are no per-row allocations left to
         //   strand, so the proof becomes "bytes in use fall when records are evicted, and the
-        //   capacity never grows" (`31/DD11`). The `sawEviction` and eviction-depth expectations
+        //   capacity never grows" (`research/31/DD11`). The `sawEviction` and eviction-depth expectations
         //   guard the guard: a peak-charge bound that is never approached is satisfied both by a
         //   store that retains nothing and by one that retains everything it was fed, so the
         //   fixture's eviction depth has to be checked rather than assumed.
