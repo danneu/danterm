@@ -625,23 +625,31 @@ public struct Terminal: Equatable, Sendable {
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
     private var rowNumberingEpoch = RowNumberingEpoch()
-    // The four inspection fields below are read together, per printed character, by
-    // `invalidateInspection`, whose guard rejects whenever all four are nil -- the state of
-    // every run with no selection, search, hover, or armed link. Each observer keeps
-    // `hasInteractionState` exact so that guard is one Bool load instead of four optional
-    // loads. Maintaining it here rather than at the call sites is what makes it undriftable:
-    // `didSet` fires for in-place mutation (`selection.start.column = ...`) as well as for
-    // whole-value assignment, so no future write can bypass it.
-    private var selection: TextAnchorRange? { didSet { refreshHasInteractionState() } }
-    private var search: SearchState? { didSet { refreshHasInteractionState() } }
+    // The three content-derived inspection fields below are read together, per printed
+    // character, by `invalidateInspection`, whose guard rejects whenever all three are nil.
+    // Each observer keeps `hasContentInspectionState` exact so that guard is one Bool load
+    // instead of three optional loads. Selection is deliberately outside this cache because
+    // overwrites preserve it and therefore have no selection work to gate.
+    private var selection: TextAnchorRange? {
+        didSet {
+            if selection == nil { selectionRequiresNonemptyReflowResult = false }
+        }
+    }
+    // Coordinate distance alone cannot distinguish a deliberate empty selection over blank
+    // cells from a selection that originally covered content later erased by the child.
+    // Reflow needs that provenance to drop only the latter when both anchors collapse.
+    private var selectionRequiresNonemptyReflowResult = false
+    private var search: SearchState? { didSet { refreshHasContentInspectionState() } }
     private var searchMatchCache = SearchMatchCache()
     private var hoveredLinkState: InteractionLinkState? {
         didSet {
-            refreshHasInteractionState()
+            refreshHasContentInspectionState()
             hoveredLinkRevisionCounter.value &+= 1
         }
     }
-    private var armedLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
+    private var armedLinkState: InteractionLinkState? {
+        didSet { refreshHasContentInspectionState() }
+    }
 
     /// Counts writes to `hoveredLinkState` so `DamageActionSnapshot` can notice a hover
     /// change without copying the link's refcounted target -- the whole point of `research/17/F7`.
@@ -660,12 +668,12 @@ public struct Terminal: Equatable, Sendable {
     /// unchanged range. `TerminalHyperlinkInteractionTests` pins that case.
     private var hoveredLinkRevisionCounter = ObservationGeneration()
 
-    /// Caches `selection`/`search`/`hoveredLinkState`/`armedLinkState` being non-nil.
+    /// Caches `search`/`hoveredLinkState`/`armedLinkState` being non-nil.
     ///
-    /// Derived state, never assigned directly: the four observers above are its only writer.
-    /// `false` is correct at initialization because all four fields start nil and property
+    /// Derived state, never assigned directly: the three observers above are its only writer.
+    /// `false` is correct at initialization because all three fields start nil and property
     /// observers do not fire during initialization.
-    private var hasInteractionState = false
+    private var hasContentInspectionState = false
     private var viewportState = ViewportState.following
     private var damage: TerminalDamageAccumulator
     private var hyperlinkTargets: [HyperlinkId: TerminalHyperlink] = [:]
@@ -2612,6 +2620,7 @@ public struct Terminal: Equatable, Sendable {
             start: anchor(before: ordered.0),
             end: anchor(after: ordered.1)
         )
+        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
         recordDamage(since: before)
     }
 
@@ -2625,6 +2634,7 @@ public struct Terminal: Equatable, Sendable {
             start: normalizedSelectionBoundary(ordered.0, isEnd: false),
             end: normalizedSelectionBoundary(ordered.1, isEnd: true)
         )
+        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
         recordDamage(since: before)
     }
 
@@ -2642,6 +2652,7 @@ public struct Terminal: Equatable, Sendable {
             let anchor = TextAnchor(row: evictedRowCount, column: 0)
             selection = TextAnchorRange(start: anchor, end: anchor)
         }
+        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
         recordDamage(since: before)
     }
 
@@ -3805,9 +3816,8 @@ public struct Terminal: Equatable, Sendable {
         return .scalars(key)
     }
 
-    private mutating func refreshHasInteractionState() {
-        hasInteractionState = selection != nil
-            || search != nil
+    private mutating func refreshHasContentInspectionState() {
+        hasContentInspectionState = search != nil
             || hoveredLinkState != nil
             || armedLinkState != nil
     }
@@ -3827,7 +3837,7 @@ public struct Terminal: Equatable, Sendable {
         } else {
             recordFullDamage()
         }
-        guard hasInteractionState else { return }
+        guard hasContentInspectionState else { return }
         let lower = evictedRowCount + historyRowCount + range.lowerBound
         let upper = evictedRowCount + historyRowCount + range.upperBound - 1
         invalidateInspection(inAbsoluteRows: lower...upper)
@@ -3837,15 +3847,15 @@ public struct Terminal: Equatable, Sendable {
         if viewportState != .following {
             recordFullDamage()
         }
-        guard hasInteractionState else { return }
+        guard hasContentInspectionState else { return }
         let absoluteRow = evictedRowCount + row
         invalidateInspection(inAbsoluteRows: absoluteRow...absoluteRow)
     }
 
     private mutating func invalidateInspection(inAbsoluteRows rows: ClosedRange<Int>) {
-        if let selection, range(selection, intersects: rows) {
-            self.selection = nil
-        }
+        // Search and link state assert facts about cell content, so an overwrite retires
+        // them. A selection is the user's geometrically anchored region: it survives and
+        // `selectedText` reads whatever content now occupies that region.
         // Only the occurrence, never the needle: a search whose match was overwritten is
         // still an open search, and `reattachToNewestMatch` is what re-selects for it.
         // Dropping the whole search here would strand the user in a state only retyping
@@ -4672,7 +4682,10 @@ public struct Terminal: Equatable, Sendable {
 
         switch restate(.selectionStart, .selectionEnd) {
         case .untouched: break
-        case let .restated(range): selection = range
+        case let .restated(range):
+            selection = selectionRequiresNonemptyReflowResult && range.start == range.end
+                ? nil
+                : range
         case .dropped: selection = nil
         }
         switch restate(.searchStart, .searchEnd) {

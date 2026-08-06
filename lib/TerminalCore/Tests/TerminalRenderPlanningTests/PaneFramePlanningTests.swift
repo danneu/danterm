@@ -104,6 +104,38 @@ struct PaneFramePlanningTests {
         }
     }
 
+    @Test("Writes inside a live multi-row selection remain exact under frame reuse")
+    func selectedRowWritesMatchFromScratch() throws {
+        // Intent: damage-aware planning stays equivalent to a fresh traversal when output
+        //   changes only part of a multi-row selection.
+        // Why it exists: preserving a selection across overwrite leaves its selected styling
+        //   live while cell content changes, so insufficient row damage can reuse stale runs.
+        // Scenario: one pane follows the bottom and another browses history while the child
+        //   rewrites one live row covered by a selection spanning multiple rows.
+        var following = try #require(Terminal(columns: 8, rows: 3))
+        feed("aaaa\r\nbbbb\r\ncccc", to: &following)
+        following.setSelection(.init(
+            start: .init(row: 0, column: 1),
+            end: .init(row: 2, column: 3)
+        ))
+        try expectSelectedWriteMatchesFresh(
+            terminal: &following,
+            overwrite: "\u{1B}[2;1HZZ"
+        )
+
+        var browsing = try #require(Terminal(columns: 8, rows: 3))
+        feed("aaaa\r\nbbbb\r\ncccc\r\ndddd\r\neeee", to: &browsing)
+        browsing.scroll(toTopRow: 0)
+        browsing.setSelection(.init(
+            start: .init(row: 1, column: 1),
+            end: .init(row: 3, column: 3)
+        ))
+        try expectSelectedWriteMatchesFresh(
+            terminal: &browsing,
+            overwrite: "\u{1B}[2;1HYY"
+        )
+    }
+
     @Test("Reuse is refused when the grid dimensions differ from the retained frame")
     func reuseRefusedOnChangedDimensions() throws {
         // Intent: retained rows are discarded when the next frame's grid is a different
@@ -208,6 +240,26 @@ struct PaneFramePlanningTests {
 
     private var barCursor: RenderPresentation {
         RenderPresentation(theme: .dark, isCursorVisible: true, cursorShape: .bar)
+    }
+
+    private func expectSelectedWriteMatchesFresh(
+        terminal: inout Terminal,
+        overwrite: String
+    ) throws {
+        _ = terminal.drainDamage()
+        var planner = PaneFramePlanner()
+        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+
+        terminal.feed(Array(overwrite.utf8))
+        #expect(terminal.selectionRange != nil)
+        let damage = terminal.drainDamage()
+        let reused = planner.planFrame(
+            for: terminal,
+            presentation: blockCursor,
+            damage: damage
+        )
+
+        #expect(reused == planFrame(for: terminal, presentation: blockCursor))
     }
 }
 

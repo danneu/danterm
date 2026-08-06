@@ -1,11 +1,11 @@
-// Row-intersection invalidation proofs for selection and active search state.
+// Row-intersection invalidation proofs for content-derived inspection state and selection survival.
 import Testing
 
 @testable import TerminalCore
 
 /// Exercises every retained-content mutation family against intersecting and disjoint anchors.
 struct TerminalInspectionInvalidationTests {
-    @Test("prompt selection survives height transfer and clears before width reflow")
+    @Test("a vacated prompt selection never survives width reflow as a collapsed range")
     func promptSelectionUsesReflowDomain() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
         terminal.feed(Array("\u{1B}]133;A;redraw=1\u{7}> prompt\u{1B}]133;B\u{7}".utf8))
@@ -19,10 +19,12 @@ struct TerminalInspectionInvalidationTests {
         #expect(terminal.selectedText == "> prompt")
 
         terminal.resize(columns: 9, rows: 4)
-        #expect(terminal.selectionRange == nil)
+        if let range = terminal.selectionRange {
+            #expect(range.start != range.end)
+        }
     }
 
-    @Test("cell mutations clear intersecting inspection and preserve disjoint rows")
+    @Test("cell mutations preserve selection and clear intersecting search matches")
     func cellMutationMatrix() throws {
         let cases: [(name: String, intersecting: String, disjoint: String)] = [
             ("print", "\u{1B}[2;1HZ", "\u{1B}[4;1HZ"),
@@ -38,7 +40,7 @@ struct TerminalInspectionInvalidationTests {
         for mutation in cases {
             var intersecting = try makeSubject(selectedRow: 1)
             intersecting.feed(Array(mutation.intersecting.utf8))
-            #expect(intersecting.selectionRange == nil, "\(mutation.name) kept selection")
+            #expect(intersecting.selectionRange != nil, "\(mutation.name) cleared selection")
             #expect(intersecting.activeSearchMatchRange == nil, "\(mutation.name) kept search")
 
             var disjoint = try makeSubject(selectedRow: 1)
@@ -48,7 +50,7 @@ struct TerminalInspectionInvalidationTests {
         }
     }
 
-    @Test("row rotations clear intersecting inspection and preserve rows outside their region")
+    @Test("row rotations preserve selection and clear intersecting search matches")
     func rowMutationMatrix() throws {
         let sequences = [
             "\u{1B}[2;3r\u{1B}[2;1H\u{1B}[L",
@@ -61,7 +63,7 @@ struct TerminalInspectionInvalidationTests {
         for sequence in sequences {
             var intersecting = try makeSubject(selectedRow: 1)
             intersecting.feed(Array(sequence.utf8))
-            #expect(intersecting.selectionRange == nil)
+            #expect(intersecting.selectionRange != nil)
             #expect(intersecting.activeSearchMatchRange == nil)
 
             var disjoint = try makeSubject(selectedRow: 0)
@@ -76,7 +78,7 @@ struct TerminalInspectionInvalidationTests {
         for sequence in ["\u{1B}[2J", "\u{1B}#8"] {
             var viewport = try makeSubject(selectedRow: 1)
             viewport.feed(Array(sequence.utf8))
-            #expect(viewport.selectionRange == nil)
+            #expect(viewport.selectionRange != nil)
             #expect(viewport.activeSearchMatchRange == nil)
 
             var history = try makeHistorySubject()
@@ -97,7 +99,7 @@ struct TerminalInspectionInvalidationTests {
         let foundWrap = wrap.beginSearch("ABCD")
         #expect(foundWrap)
         wrap.feed(Array("\u{1B}[1;1H\u{1B}[L".utf8))
-        #expect(wrap.selectionRange == nil)
+        #expect(wrap.selectionRange != nil)
         #expect(wrap.activeSearchMatchRange == nil)
 
         var spacer = try #require(Terminal(columns: 3, rows: 1))
@@ -109,7 +111,7 @@ struct TerminalInspectionInvalidationTests {
         )
         spacer.moveCursor(row: 0, column: 0)
         spacer.feed(Array("A".utf8))
-        #expect(spacer.selectionRange == nil)
+        #expect(spacer.selectionRange != nil)
     }
 
     @Test("selection and search invalidate independently by row")
@@ -167,9 +169,25 @@ struct TerminalInspectionInvalidationTests {
             let bytes = suffix.hasPrefix("\u{00A9}") ? "\u{FE0F}" : suffix
             terminal.feed(Array(bytes.utf8))
 
-            #expect(terminal.selectionRange == nil)
+            #expect(terminal.selectionRange != nil)
             #expect(terminal.activeSearchMatchRange == nil)
         }
+    }
+
+    @Test("output received with only a selection live remains searchable")
+    func selectionOnlyOutputRemainsSearchable() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("old".utf8))
+        terminal.setSelection(
+            from: TerminalTextPosition(row: 0, column: 0),
+            to: TerminalTextPosition(row: 0, column: 2)
+        )
+
+        terminal.feed(Array("\u{1B}[1;1Hnew".utf8))
+
+        let found = terminal.beginSearch("new")
+        #expect(found)
+        #expect(terminal.activeSearchMatchRange != nil)
     }
 
     private func makeSubject(selectedRow: Int) throws -> Terminal {

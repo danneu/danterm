@@ -160,7 +160,7 @@ struct TerminalSelectionTests {
         #expect(interiorPadding.selectedText == "   ")
     }
 
-    @Test("ordinary output migration preserves selection while overwrite clears only intersections")
+    @Test("ordinary output migration and overwrite preserve a geometrically anchored selection")
     func mutationAttachmentAndInvalidation() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("AAAA\r\nBBBB".utf8))
@@ -182,7 +182,37 @@ struct TerminalSelectionTests {
             to: TerminalTextPosition(row: 0, column: 3)
         )
         overwritten.feed(Array("\u{1B}[1;1HZ".utf8))
-        #expect(overwritten.selectionRange == nil)
+        #expect(overwritten.selectionRange != nil)
+        #expect(
+            overwritten.selectedText == "ZAAA",
+            "an overwrite keeps the user's region selected and Copy reads its current text"
+        )
+    }
+
+    @Test("an erased selection stays present until width reflow drops its collapsed anchors")
+    func erasedSelectionDropsOnlyOnCollapsedReflow() throws {
+        // Intent: an overwrite may empty a settled selection, but a later width reflow must
+        //   not preserve that formerly non-empty selection as a zero-length range.
+        // Why it exists: once overwrite stops clearing selections, erase and prompt vacating
+        //   can leave both endpoints without a surviving content boundary; reflow maps both
+        //   to the content end, which would keep Copy enabled for an empty range.
+        // Scenario: a user selects text, the child erases its row, and then the pane narrows.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("selected".utf8))
+        terminal.setSelection(
+            from: TerminalTextPosition(row: 0, column: 0),
+            to: TerminalTextPosition(row: 0, column: 7)
+        )
+
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}[2K".utf8))
+        #expect(terminal.selectionRange != nil)
+        #expect(terminal.selectedText == "")
+
+        terminal.resize(columns: 6, rows: 2)
+
+        if let range = terminal.selectionRange {
+            #expect(range.start != range.end)
+        }
     }
 
     @Test("eviction clamps selection and clears a truncated active match")

@@ -1071,10 +1071,8 @@ struct TerminalInteractionPolicyTests {
     func rewritingAnchoredCellsKeepsTheDragExtending() throws {
         // Intent: output that overwrites the anchored text without moving any row keeps the
         //   drag alive, anchored at the same position and now covering the new text.
-        // Why it exists: records a deliberate divergence from what a settled selection does
-        //   -- `Terminal` clears that one on an in-place rewrite. The button is still held
-        //   and the user is actively re-selecting, so position wins over content; the policy
-        //   layer has no cell-rewrite signal anyway, and killing a live gesture is worse.
+        // Why it exists: the pinned drag anchor and settled selection now share the same
+        //   position-over-content rule; the policy layer must keep extending from that position.
         var terminal = try #require(Terminal(columns: 12, rows: 3))
         terminal.feed(Array("one two\r\nthree\r\nfour".utf8))
 
@@ -1092,6 +1090,47 @@ struct TerminalInteractionPolicyTests {
         #expect(moved.selectionMutation == .set(range(0, 0, 0, 7)))
         terminal.setSelection(range(0, 0, 0, 7))
         #expect(terminal.selectedText == "zzz two")
+    }
+
+    @Test("a held drag selection is present across interleaved repaints and pointer moves")
+    func heldDragSelectionNeverFlickersAcrossRepaints() throws {
+        // Intent: while the left button remains down, every observation between pointer
+        //   movement and child repaint sees a live selection.
+        // Why it exists: an end-state assertion misses the clear-and-restore alternation that
+        //   made selections flicker at a TUI's frame rate.
+        // Scenario: the user drags across a row while a TUI rewrites that same row twice.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("one two".utf8))
+        var state = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0), terminal: terminal, state: &state
+        )
+
+        let firstMove = decideTerminalPointer(
+            .move(column: 2, row: 0), terminal: terminal, state: &state
+        )
+        guard case let .set(firstRange)? = firstMove.selectionMutation else {
+            Issue.record("first pointer move did not set a selection")
+            return
+        }
+        terminal.setSelection(firstRange)
+        #expect(terminal.selectionRange != nil)
+
+        terminal.feed(Array("\u{1B}[1;1HTWO".utf8))
+        #expect(terminal.selectionRange != nil)
+
+        let secondMove = decideTerminalPointer(
+            .move(column: 6, row: 0), terminal: terminal, state: &state
+        )
+        guard case let .set(secondRange)? = secondMove.selectionMutation else {
+            Issue.record("second pointer move did not set a selection")
+            return
+        }
+        terminal.setSelection(secondRange)
+        #expect(terminal.selectionRange != nil)
+
+        terminal.feed(Array("\u{1B}[1;1Hone".utf8))
+        #expect(terminal.selectionRange != nil)
     }
 
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {

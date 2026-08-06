@@ -56,10 +56,12 @@ scrollbar represents the currently reflowed visual-row extent and viewport.
 
 Search navigation reveals its selected match without enabling bottom follow,
 and local scrolling does not clear a selection or search. Selection endpoints
-and search matches remain attached to retained logical content across appended
-output and reflow; content overwritten by terminal output or evicted from
-history invalidates the affected endpoint or match rather than retargeting it to
-unrelated text.
+remain geometrically anchored across appended output, overwrite, and reflow;
+overwriting selected rows leaves the region selected and Copy reads the content
+now under it. Search matches and link state remain content-derived, so overwrite
+invalidates them. Eviction and projection replacement still retire selection
+endpoints and content-derived inspection state that no longer address retained
+content.
 
 When application mouse reporting is active, an unmodified wheel event is sent
 to the application and does not scroll local history. Shift-wheel forces local

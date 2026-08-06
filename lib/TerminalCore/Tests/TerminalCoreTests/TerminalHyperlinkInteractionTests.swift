@@ -103,6 +103,30 @@ struct TerminalHyperlinkInteractionTests {
         #expect(terminal.armedLink == nil)
     }
 
+    @Test("overwrite preserves selection while dropping every content-derived inspection channel")
+    func overwriteSeparatesSelectionFromContentDerivedInspection() throws {
+        var terminal = try #require(Terminal(columns: 14, rows: 2))
+        terminal.feed(Array("https://a.co".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        terminal.setSelection(
+            from: TerminalTextPosition(row: 0, column: 0),
+            to: TerminalTextPosition(row: 0, column: 11)
+        )
+        let found = terminal.beginSearch("https://a.co")
+        #expect(found)
+        let hovered = terminal.setHoveredLink(link)
+        #expect(hovered)
+        let armed = terminal.setArmedLink(link)
+        #expect(armed)
+
+        terminal.feed(Array("\u{1B}[1;4HX".utf8))
+
+        #expect(terminal.selectionRange != nil)
+        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.hoveredLink == nil)
+        #expect(terminal.armedLink == nil)
+    }
+
     @Test("soft and hard reset clear hovered presentation")
     func resetClearsHover() throws {
         var terminal = try #require(Terminal(columns: 12, rows: 2))
