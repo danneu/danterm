@@ -1287,6 +1287,96 @@ struct TerminalInteractionPolicyTests {
         #expect(terminal.selectionRange != nil)
     }
 
+    @Test("only a selection-owned release reports a completed selection gesture")
+    func selectionGestureCompletionOwnership() throws {
+        // Intent: the release of every local selection gesture -- drag, double-click word,
+        //   triple-click line, and Shift-drag under mouse reporting -- reports completion,
+        //   while a release any other arm owned reports none.
+        // Why it exists: eligibility for copy-on-select is pointer ownership and nothing
+        //   else. If the flag leaked onto a consumed release, a click inside a
+        //   mouse-reporting application would overwrite the user's clipboard.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("alpha beta".utf8))
+
+        for clickCount in 1...3 {
+            var state = TerminalInteractionState()
+            _ = decideTerminalPointer(
+                .down(.left, column: 0, row: 0, clickCount: clickCount),
+                terminal: terminal,
+                state: &state
+            )
+            _ = decideTerminalPointer(
+                .move(column: 4, row: 0), terminal: terminal, state: &state
+            )
+            let release = decideTerminalPointer(
+                .up(.left, column: 4, row: 0), terminal: terminal, state: &state
+            )
+            #expect(release.consumption == .selection, "click count \(clickCount)")
+            #expect(release.completedSelectionGesture, "click count \(clickCount)")
+        }
+
+        var reporting = terminal
+        reporting.feed(Array("\u{1B}[?1000;1006h".utf8))
+
+        var shiftDrag = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, modifiers: [.shift]),
+            terminal: reporting,
+            state: &shiftDrag
+        )
+        let shiftRelease = decideTerminalPointer(
+            .up(.left, column: 4, row: 0, modifiers: [.shift]),
+            terminal: reporting,
+            state: &shiftDrag
+        )
+        #expect(shiftRelease.consumption == .selection)
+        #expect(shiftRelease.completedSelectionGesture)
+
+        var reported = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0), terminal: reporting, state: &reported
+        )
+        let reportedRelease = decideTerminalPointer(
+            .up(.left, column: 4, row: 0), terminal: reporting, state: &reported
+        )
+        #expect(reportedRelease.consumption == .report)
+        #expect(reportedRelease.completedSelectionGesture == false)
+
+        var menu = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.right, column: 0, row: 0), terminal: terminal, state: &menu
+        )
+        #expect(decideTerminalPointer(
+            .up(.right, column: 0, row: 0), terminal: terminal, state: &menu
+        ).completedSelectionGesture == false)
+
+        var linked = try #require(Terminal(columns: 24, rows: 2))
+        linked.feed(Array("\u{1B}]8;;https://a.co\u{7}link\u{1B}]8;;\u{7}".utf8))
+        var link = TerminalInteractionState()
+        let linkDown = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, modifiers: [.command]),
+            terminal: linked,
+            state: &link
+        )
+        #expect(linkDown.consumption == .link)
+        apply(linkDown.armMutation, to: &linked)
+        let linkRelease = decideTerminalPointer(
+            .up(.left, column: 1, row: 0, modifiers: [.command]),
+            terminal: linked,
+            state: &link
+        )
+        #expect(linkRelease.consumption == .link)
+        #expect(linkRelease.completedSelectionGesture == false)
+
+        var ignored = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.middle, column: 0, row: 0), terminal: terminal, state: &ignored
+        )
+        #expect(decideTerminalPointer(
+            .up(.middle, column: 0, row: 0), terminal: terminal, state: &ignored
+        ).completedSelectionGesture == false)
+    }
+
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
         switch mutation {
         case .clear:

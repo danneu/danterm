@@ -159,6 +159,10 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let openLink: TerminalHyperlink?
     /// Reserves or clears the exact originating run under the terminal metadata cap.
     public let armMutation: TerminalLinkArmMutation?
+    /// True only on the release that ends a selection-owned gesture. The policy reports the
+    /// fact and nothing more: it inspects neither configuration nor selected text, so the
+    /// owner alone decides whether that completion is worth materializing text for.
+    public let completedSelectionGesture: Bool
 }
 
 /// Marks normalized wheel lifecycle so direct scrolling and momentum share one route.
@@ -348,7 +352,8 @@ public func decideTerminalPointer(
                 paneMenuCell: nil,
                 hoverMutation: .clear,
                 openLink: link.hyperlink,
-                armMutation: .clear
+                armMutation: .clear,
+                completedSelectionGesture: false
             )
         }
         let reportBytes = encodeTerminalMouse(
@@ -362,7 +367,7 @@ public func decideTerminalPointer(
         case .report:
             return pointerDecision(.report, bytes: reportBytes)
         case .selection:
-            return pointerDecision(.selection)
+            return pointerDecision(.selection, completedSelectionGesture: true)
         case .paneMenu:
             return TerminalPointerDecision(
                 consumption: .paneMenu,
@@ -371,7 +376,8 @@ public func decideTerminalPointer(
                 paneMenuCell: .init(column: column, row: row),
                 hoverMutation: nil,
                 openLink: nil,
-                armMutation: nil
+                armMutation: nil,
+                completedSelectionGesture: false
             )
         case .link:
             return pointerDecision(.link)
@@ -593,7 +599,8 @@ private func pointerDecision(
     bytes: [UInt8] = [],
     selectionMutation: TerminalSelectionMutation? = nil,
     hoverMutation: TerminalHoverMutation? = nil,
-    armMutation: TerminalLinkArmMutation? = nil
+    armMutation: TerminalLinkArmMutation? = nil,
+    completedSelectionGesture: Bool = false
 ) -> TerminalPointerDecision {
     TerminalPointerDecision(
         consumption: consumption,
@@ -602,7 +609,8 @@ private func pointerDecision(
         paneMenuCell: nil,
         hoverMutation: hoverMutation,
         openLink: nil,
-        armMutation: armMutation
+        armMutation: armMutation,
+        completedSelectionGesture: completedSelectionGesture
     )
 }
 

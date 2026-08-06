@@ -271,6 +271,14 @@ public final class TerminalPaneSessionController {
     /// Receives a click-time-revalidated HTTP(S) target on the main actor.
     public var onOpenLink: ((TerminalHyperlink) -> Void)?
 
+    /// Receives the non-empty text a completed selection gesture held at its release.
+    ///
+    /// Presence is the copy-on-select gate: with no handler installed the owner is never
+    /// asked to extract selection text, so the option being off costs nothing on the pointer
+    /// path. The string arrives already captured, so the handler must write it as given
+    /// rather than read the selection again.
+    public var onSelectionCopy: ((String) -> Void)?
+
     /// Receives the owner's search status after every begin/navigate/clear, including the
     /// ones that mutate nothing -- the find overlay's counter is driven entirely from here.
     public var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
@@ -505,6 +513,17 @@ public final class TerminalPaneSessionController {
     public func sendPointer(_ event: TerminalPointerEvent) {
         guard isTornDown == false else { return }
         let deliveryBoundary = deliveryBoundary
+        // Resolved at submission rather than at delivery, so the owner is handed no
+        // extraction work at all while copy-on-select is off.
+        var onSelectionCompleted: (@Sendable (String) -> Void)?
+        if onSelectionCopy != nil {
+            onSelectionCompleted = { text in
+                deliveryBoundary.enqueue { [weak self] in
+                    guard let self, self.isTornDown == false else { return }
+                    self.onSelectionCopy?(text)
+                }
+            }
+        }
         host.sendPointer(
             event,
             onPaneMenu: { [weak self] cell in
@@ -518,7 +537,8 @@ public final class TerminalPaneSessionController {
                     guard let self, self.isTornDown == false else { return }
                     self.onOpenLink?(link)
                 }
-            }
+            },
+            onSelectionCompleted: onSelectionCompleted
         )
     }
 
@@ -849,6 +869,7 @@ public final class TerminalPaneSessionController {
         onPrimaryHistoryMutation = nil
         onPaneMenu = nil
         onOpenLink = nil
+        onSelectionCopy = nil
         onSearchStatus = nil
     }
 

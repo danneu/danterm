@@ -483,17 +483,23 @@ public actor TerminalPTYHost {
     }
 
     /// Enqueues pointer input and returns only owner-approved local actions.
+    ///
+    /// `onSelectionCompleted` is the whole copy-on-select gate: passing nil means the owner
+    /// never extracts the selection's text, so a caller that does not want the behavior does
+    /// not pay for the projection walk that materializing it costs.
     nonisolated public func sendPointer(
         _ event: TerminalPointerEvent,
         onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in },
-        onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in }
+        onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in },
+        onSelectionCompleted: (@Sendable (String) -> Void)? = nil
     ) {
         queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyPointer(
                     event,
                     onPaneMenu: onPaneMenu,
-                    onOpenLink: onOpenLink
+                    onOpenLink: onOpenLink,
+                    onSelectionCompleted: onSelectionCompleted
                 )
             }
         }
@@ -981,7 +987,8 @@ public actor TerminalPTYHost {
     private func applyPointer(
         _ event: TerminalPointerEvent,
         onPaneMenu: @Sendable (TerminalViewportCell) -> Void,
-        onOpenLink: @Sendable (TerminalHyperlink) -> Void
+        onOpenLink: @Sendable (TerminalHyperlink) -> Void,
+        onSelectionCompleted: (@Sendable (String) -> Void)?
     ) {
         guard teardownFinished == false else { return }
         if captureTransitions { appliedTransitions.append(.mouse(event)) }
@@ -997,6 +1004,17 @@ public actor TerminalPTYHost {
             terminal.setSelection(range)
         case nil:
             break
+        }
+        // Captured here, in the same owner step that applied the mutation, so output arriving
+        // after the gesture completed cannot change what the subscriber is handed. Emptiness is
+        // judged on the extracted string: a selection over blank cells is present and empty,
+        // and relaying it would clear a clipboard the user filled earlier.
+        if decision.completedSelectionGesture,
+           let onSelectionCompleted,
+           let text = terminal.selectedText,
+           text.isEmpty == false
+        {
+            onSelectionCompleted(text)
         }
         applyHoverMutation(decision.hoverMutation)
         applyArmMutation(decision.armMutation)

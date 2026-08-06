@@ -430,10 +430,12 @@ struct TerminalPaneSessionControllerTests {
         var paneMenuCount = 0
         var linkCount = 0
         var searchCount = 0
+        var selectionCopyCount = 0
         controller.onFrame = { _ in frameCount += 1 }
         controller.onPaneMenu = { _ in paneMenuCount += 1 }
         controller.onOpenLink = { _ in linkCount += 1 }
         controller.onSearchStatus = { _ in searchCount += 1 }
+        controller.onSelectionCopy = { _ in selectionCopyCount += 1 }
         #expect(host.waitForOutputSynchronously(
             containing: Array("__READY__".utf8),
             timeout: .seconds(10)
@@ -458,6 +460,8 @@ struct TerminalPaneSessionControllerTests {
         controller.sendPointer(.up(
             .left, column: column, row: viewportRow, modifiers: [.command]
         ))
+        controller.sendPointer(.down(.left, column: column, row: viewportRow, clickCount: 2))
+        controller.sendPointer(.up(.left, column: column, row: viewportRow))
         controller.beginSearch("link")
         _ = host.fencedSnapshot()
 
@@ -472,6 +476,141 @@ struct TerminalPaneSessionControllerTests {
         #expect(paneMenuCount == 0)
         #expect(linkCount == 0)
         #expect(searchCount == 0)
+        #expect(selectionCopyCount == 0)
+        await host.close()
+    }
+
+    @Test("a completed selection relays the text captured with its release", .timeLimit(.minutes(1)))
+    func selectionCompletionRelaysTextCapturedAtRelease() async throws {
+        // Intent: the subscriber receives the selection's text exactly as it stood when the
+        //   release was applied on the owner, exactly once, no matter what the child writes
+        //   before or after that moment.
+        // Why it exists: reading the selection on the main actor after the hop would race
+        //   output. Capturing on the owner in the same step as the selection mutation is
+        //   what makes the delivered string independent of every later write.
+        // Scenario: a word is double-clicked while the pane repaints that same row twice --
+        //   once before the release is applied, and again before main drains the delivery.
+        //   Select All follows, which selects but is not a pointer gesture.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        #expect(host.waitForOutputSynchronously(
+            containing: Array("__READY__".utf8),
+            timeout: .seconds(10)
+        ))
+        var copied: [String] = []
+        controller.onSelectionCopy = { copied.append($0) }
+
+        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        let lines = host.fencedSnapshot().viewportText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+        let beta = try #require(lines[row].range(of: "beta"))
+        let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
+
+        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
+        // Overwrites the selected columns before the release is applied, so the text the
+        // owner captures is "gamm" -- what the highlight covers at completion, not "beta".
+        host.deliverOutputForTesting(Array("\u{1B}[Halpha gamma".utf8))
+        controller.sendPointer(.up(.left, column: column, row: row))
+        // Applied after the release, so it can only corrupt a main-actor re-read.
+        host.deliverOutputForTesting(Array("\u{1B}[Halpha delta".utf8))
+        await drainMainQueue()
+
+        #expect(copied == ["gamm"])
+
+        controller.selectAll()
+        controller.synchronizeState()
+        await drainMainQueue()
+        #expect(controller.readSelectedText()?.isEmpty == false, "Select All did select")
+        #expect(copied == ["gamm"], "Select All is not a pointer gesture and never copies")
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("a selection-owned release delivers nothing without a subscriber", .timeLimit(.minutes(1)))
+    func selectionCompletionRequiresASubscriber() async throws {
+        // Intent: with no subscriber installed, a selection-owned release produces no
+        //   completion at all -- installing one afterwards receives nothing.
+        // Why it exists: subscriber presence is the copy-on-select gate, and it has to sit
+        //   upstream of extraction: capturing the text walks the retained projection on the
+        //   PTY host queue, which the option being off must not pay for.
+        // Scenario: a word is double-clicked with copy-on-select off, then a subscriber
+        //   arrives and the pane is fenced.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        #expect(host.waitForOutputSynchronously(
+            containing: Array("__READY__".utf8),
+            timeout: .seconds(10)
+        ))
+
+        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        let lines = host.fencedSnapshot().viewportText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+        let beta = try #require(lines[row].range(of: "beta"))
+        let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
+
+        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
+        controller.sendPointer(.up(.left, column: column, row: row))
+
+        var copied: [String] = []
+        controller.onSelectionCopy = { copied.append($0) }
+        controller.synchronizeState()
+        await drainMainQueue()
+
+        #expect(controller.readSelectedText() == "beta", "the selection itself still exists")
+        #expect(copied.isEmpty)
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("an absent or empty selection relays nothing", .timeLimit(.minutes(1)))
+    func selectionCompletionSkipsEmptyText() async throws {
+        // Intent: a release that leaves no selection, and one whose selection covers only
+        //   blank cells, both relay nothing.
+        // Why it exists: the subscriber writes the clipboard, and a bare click on empty
+        //   space must not wipe what the user copied earlier. Emptiness is judged where the
+        //   text is captured because it is a property of the extracted string: a present
+        //   selection over padding is non-nil and empty.
+        // Scenario: a bare click on text, then a double-click on the blank area past it.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        #expect(host.waitForOutputSynchronously(
+            containing: Array("__READY__".utf8),
+            timeout: .seconds(10)
+        ))
+        var copied: [String] = []
+        controller.onSelectionCopy = { copied.append($0) }
+
+        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[Halpha beta".utf8))
+        let lines = host.fencedSnapshot().viewportText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+
+        controller.sendPointer(.down(.left, column: 0, row: row))
+        controller.sendPointer(.up(.left, column: 0, row: row))
+        controller.synchronizeState()
+        #expect(controller.readSelectedText() == nil, "a bare click leaves no selection")
+
+        let blankRow = row + 1
+        controller.sendPointer(.down(.left, column: 0, row: blankRow, clickCount: 3))
+        controller.sendPointer(.up(.left, column: 0, row: blankRow))
+        controller.synchronizeState()
+        #expect(controller.readSelectedText() == "", "a padding selection is present and empty")
+
+        await drainMainQueue()
+        #expect(copied.isEmpty)
+        controller.tearDown()
         await host.close()
     }
 
@@ -1906,6 +2045,16 @@ struct TerminalPaneSessionControllerTests {
         }
         #expect(releasedController == nil)
         #expect(releasedHost == nil)
+    }
+}
+
+/// Returns once every main-queue block enqueued before the call has run, so a test can
+/// assert on what the controller's delivery boundary did or did not hand to the main actor.
+private func drainMainQueue() async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async {
+            continuation.resume()
+        }
     }
 }
 
