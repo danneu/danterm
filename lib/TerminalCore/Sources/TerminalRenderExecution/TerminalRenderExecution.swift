@@ -423,20 +423,8 @@ public func drawRenderFrame(
         ))
     }
 
-    context.setFillColor(plan.selectionBackground.cgColor(in: colorSpace))
-    for run in plan.selectionRuns {
-        context.fill(cellRect(
-            row: run.row,
-            startColumn: run.startColumn,
-            columnCount: run.columnCount,
-            metrics: metrics
-        ))
-    }
-
-    // After selection: where the two overlap, the match the user just navigated to is
-    // the one that has to be visible.
-    context.setFillColor(plan.searchMatchBackground.cgColor(in: colorSpace))
-    for run in plan.searchMatchRuns {
+    for run in plan.overlayRuns {
+        context.setFillColor(run.color.cgColor(in: colorSpace))
         context.fill(cellRect(
             row: run.row,
             startColumn: run.startColumn,

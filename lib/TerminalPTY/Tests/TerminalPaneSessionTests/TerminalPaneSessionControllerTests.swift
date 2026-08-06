@@ -1448,7 +1448,7 @@ struct TerminalPaneSessionControllerTests {
                         text \(published.textRuns == fresh.textRuns) \
                         decoration \(published.decorationRuns == fresh.decorationRuns) \
                         cursor \(published.cursor == fresh.cursor) \
-                        selection \(published.selectionRuns == fresh.selectionRuns)
+                        overlay \(published.overlayRuns == fresh.overlayRuns)
                         """
                 }
             }

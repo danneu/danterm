@@ -30,27 +30,25 @@ public func clipFramePlan(
         columns: plan.columns,
         rows: plan.rows,
         defaultBackground: plan.defaultBackground,
-        selectionBackground: plan.selectionBackground,
-        searchMatchBackground: plan.searchMatchBackground,
         backgroundRuns: plan.backgroundRuns.filter { rows.contains($0.row) },
-        selectionRuns: plan.selectionRuns.filter { rows.contains($0.row) },
-        searchMatchRuns: plan.searchMatchRuns.filter { rows.contains($0.row) },
+        overlayRuns: plan.overlayRuns.filter { rows.contains($0.row) },
         textRuns: plan.textRuns.filter { rows.contains($0.row) },
         decorationRuns: plan.decorationRuns.filter { rows.contains($0.row) },
         cursor: plan.cursor.flatMap { rows.contains($0.row) ? $0 : nil }
     )
 }
 
-/// Retains the three cell-derived layers split per viewport row so a later frame
+/// Retains the four cell-derived layers split per viewport row so a later frame
 /// can copy an undamaged row's runs instead of re-inspecting its cells.
 ///
 /// Row-major arrays rather than one flat plan: reuse is decided per row, and
 /// keeping the rows separate is what makes copying a row an array append instead
-/// of a filter over the whole frame. Only the cell-derived layers appear here --
-/// selection, search-match, and cursor are recomputed every frame.
+/// of a filter over the whole frame. The cursor is recomputed every frame because
+/// it remains a single frame-level record rather than a row-derived layer.
 struct RetainedFrameRows: Sendable {
     let columns: Int
     let background: [[RenderBackgroundRun]]
+    let overlays: [[RenderOverlayRun]]?
     let text: [[RenderTextRun]]
     let decorations: [[RenderDecorationRun]]
 
@@ -69,6 +67,12 @@ private struct PlannedCell {
     let kind: TerminalCellKind
     let scalars: TerminalScalars
     let style: ResolvedCellStyle
+}
+
+/// Keeps optional overlay semantics beside, rather than inside, the hot cell payload.
+private struct InspectedRows {
+    var cells: [[PlannedCell]]
+    var overlayStates: [[RenderOverlayState?]]?
 }
 
 /// Records the cursor's normalized grid span once so both layer overrides and
@@ -183,37 +187,38 @@ struct FramePlanner {
             rowCount: rowCount,
             replanning: { reusable == nil || damage.rows.contains($0) },
             geometry: geometry,
-            cursorSpan: cursorSpan
+            cursorSpan: cursorSpan,
+            selectionRange: terminal.selectionRange,
+            activeSearchMatchRange: terminal.activeSearchMatchRange
         )
+        var overlays: [[RenderOverlayRun]]? =
+            if cells.overlayStates != nil || reusable?.overlays != nil { [] } else { nil }
+        overlays?.reserveCapacity(rowCount)
         for row in 0..<rowCount {
             if let reusable, damage.rows.contains(row) == false {
                 background.append(reusable.background[row])
+                overlays?.append(reusable.overlays?[row] ?? [])
                 text.append(reusable.text[row])
                 decorations.append(reusable.decorations[row])
                 continue
             }
-            background.append(backgroundRuns(row: row, cells: cells[row]))
-            text.append(textRuns(row: row, cells: cells[row]))
-            decorations.append(decorationRuns(row: row, cells: cells[row]))
+            background.append(backgroundRuns(row: row, cells: cells.cells[row]))
+            if overlays != nil {
+                overlays?.append(overlayRuns(
+                    row: row,
+                    states: cells.overlayStates?[row] ?? []
+                ))
+            }
+            text.append(textRuns(row: row, cells: cells.cells[row]))
+            decorations.append(decorationRuns(row: row, cells: cells.cells[row]))
         }
 
         let plan = RenderFramePlan(
             columns: geometry.columns,
             rows: rowCount,
             defaultBackground: presentation.theme.defaultBackground,
-            selectionBackground: presentation.theme.selectionBackground,
-            searchMatchBackground: presentation.theme.searchMatchBackground,
             backgroundRuns: Array(background.joined()),
-            selectionRuns: highlightRuns(
-                for: terminal.selectionRange,
-                columns: geometry.columns,
-                rows: rowCount
-            ),
-            searchMatchRuns: highlightRuns(
-                for: terminal.activeSearchMatchRange,
-                columns: geometry.columns,
-                rows: rowCount
-            ),
+            overlayRuns: overlays.map { Array($0.joined()) } ?? [],
             textRuns: Array(text.joined()),
             decorationRuns: Array(decorations.joined()),
             cursor: cursorSpan.map {
@@ -231,50 +236,11 @@ struct FramePlanner {
             retained: RetainedFrameRows(
                 columns: geometry.columns,
                 background: background,
+                overlays: overlays,
                 text: text,
                 decorations: decorations
             )
         )
-    }
-
-    /// Clips one half-open stream range to the viewport as row-major overlay runs.
-    ///
-    /// Shared by the selection and search-match channels: both are stream-coordinate
-    /// bands over the same projection, and drawing them from one clip is what keeps a
-    /// match from landing a row off the selection covering the same text.
-    private func highlightRuns(
-        for range: TerminalTextRange?,
-        columns: Int,
-        rows: Int
-    ) -> [RenderSelectionRun] {
-        guard let selection = range,
-              selection.start != selection.end,
-              columns > 0,
-              rows > 0
-        else {
-            return []
-        }
-
-        let topRow = terminal.scrollProjection.topRow
-        let viewportRows = topRow..<(topRow + rows)
-        let firstRow = max(selection.start.row, viewportRows.lowerBound)
-        let lastRow = min(selection.end.row, viewportRows.upperBound - 1)
-        guard firstRow <= lastRow else { return [] }
-
-        var result: [RenderSelectionRun] = []
-        for streamRow in firstRow...lastRow {
-            let start = streamRow == selection.start.row ? selection.start.column : 0
-            let end = streamRow == selection.end.row ? selection.end.column : columns
-            let clampedStart = min(max(start, 0), columns)
-            let clampedEnd = min(max(end, 0), columns)
-            guard clampedStart < clampedEnd else { continue }
-            result.append(RenderSelectionRun(
-                row: streamRow - topRow,
-                startColumn: clampedStart,
-                columnCount: clampedEnd - clampedStart
-            ))
-        }
-        return result
     }
 
     private func normalizedCursor(in geometry: TerminalGeometry) -> CursorSpan? {
@@ -310,8 +276,10 @@ struct FramePlanner {
         rowCount: Int,
         replanning: (Int) -> Bool,
         geometry: TerminalGeometry,
-        cursorSpan: CursorSpan?
-    ) -> [[PlannedCell]] {
+        cursorSpan: CursorSpan?,
+        selectionRange: TerminalTextRange?,
+        activeSearchMatchRange: TerminalTextRange?
+    ) -> InspectedRows {
         // Every row-scoped lookup is hoisted deliberately, and staying hoisted is what the
         // row-scoped traversal is for. `terminal.cell(row:column:)` re-resolved the viewport row
         // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
@@ -323,28 +291,65 @@ struct FramePlanner {
         // `forEachViewportRow` hands the row out first precisely so all three can be `let`s of
         // this closure's own frame again, which is what the per-row spelling had.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
+        var overlayStates: [[RenderOverlayState?]]? =
+            if selectionRange != nil || activeSearchMatchRange != nil {
+                [[RenderOverlayState?]](repeating: [], count: rowCount)
+            } else {
+                nil
+            }
         terminal.forEachViewportRow(rows: 0..<rowCount, where: replanning) { row, visit in
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
-            let selected = selectedColumns(row: row, columns: geometry.columns)
+            let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
+            let matched = columns(
+                for: activeSearchMatchRange,
+                row: row,
+                columns: geometry.columns
+            )
             var cells: [PlannedCell] = []
             cells.reserveCapacity(kinds.count)
+            var states: [RenderOverlayState?] = []
+            if overlayStates != nil {
+                states.reserveCapacity(kinds.count)
+            }
 
-            visit { column, scalars, semanticStyle in
-                guard column < kinds.count else { return }
-                cells.append(plannedCell(
-                    row: row,
-                    column: column,
-                    kind: kinds[column].kind,
-                    scalars: scalars,
-                    semanticStyle: semanticStyle,
-                    hovered: hovered,
-                    selected: selected,
-                    cursorSpan: cursorSpan
-                ))
+            if overlayStates != nil {
+                visit { column, scalars, semanticStyle in
+                    guard column < kinds.count else { return }
+                    cells.append(plannedCell(
+                        row: row,
+                        column: column,
+                        kind: kinds[column].kind,
+                        scalars: scalars,
+                        semanticStyle: semanticStyle,
+                        hovered: hovered,
+                        selected: selected,
+                        cursorSpan: cursorSpan
+                    ))
+                    states.append(overlayState(
+                        column: column,
+                        selected: selected,
+                        matched: matched
+                    ))
+                }
+            } else {
+                visit { column, scalars, semanticStyle in
+                    guard column < kinds.count else { return }
+                    cells.append(plannedCell(
+                        row: row,
+                        column: column,
+                        kind: kinds[column].kind,
+                        scalars: scalars,
+                        semanticStyle: semanticStyle,
+                        hovered: hovered,
+                        selected: selected,
+                        cursorSpan: cursorSpan
+                    ))
+                }
             }
 
             result[row] = cells
+            overlayStates?[row] = states
         }
 
         // The single padding site for columns the terminal row does not cover: they keep the
@@ -358,7 +363,12 @@ struct FramePlanner {
         {
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
-            let selected = selectedColumns(row: row, columns: geometry.columns)
+            let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
+            let matched = columns(
+                for: activeSearchMatchRange,
+                row: row,
+                columns: geometry.columns
+            )
             while result[row].count < kinds.count {
                 let column = result[row].count
                 result[row].append(plannedCell(
@@ -371,9 +381,16 @@ struct FramePlanner {
                     selected: selected,
                     cursorSpan: cursorSpan
                 ))
+                if overlayStates != nil {
+                    overlayStates?[row].append(overlayState(
+                        column: column,
+                        selected: selected,
+                        matched: matched
+                    ))
+                }
             }
         }
-        return result
+        return InspectedRows(cells: result, overlayStates: overlayStates)
     }
 
     private func plannedCell(
@@ -405,6 +422,22 @@ struct FramePlanner {
         return PlannedCell(kind: kind, scalars: scalars, style: style)
     }
 
+    private func overlayState(
+        column: Int,
+        selected: Range<Int>?,
+        matched: Range<Int>?
+    ) -> RenderOverlayState? {
+        switch (
+            selected?.contains(column) == true,
+            matched?.contains(column) == true
+        ) {
+        case (true, true): .selectionAndActiveSearchMatch
+        case (true, false): .selection
+        case (false, true): .activeSearchMatch
+        case (false, false): nil
+        }
+    }
+
     /// The hovered-link span for one row, resolved once instead of per column.
     private func hoveredColumns(row: Int, columns: Int) -> Range<Int>? {
         guard let range = terminal.hoveredLink?.range else { return nil }
@@ -416,9 +449,13 @@ struct FramePlanner {
         return start..<end
     }
 
-    /// The local-selection span for one viewport row, resolved once per traversal.
-    private func selectedColumns(row: Int, columns: Int) -> Range<Int>? {
-        guard let selection = terminal.selectionRange else { return nil }
+    /// Projects one half-open stream range into a clipped viewport-row span.
+    private func columns(
+        for range: TerminalTextRange?,
+        row: Int,
+        columns: Int
+    ) -> Range<Int>? {
+        guard let selection = range, selection.start != selection.end else { return nil }
         let streamRow = terminal.scrollProjection.topRow + row
         guard selection.start.row...selection.end.row ~= streamRow else { return nil }
         let start = streamRow == selection.start.row ? selection.start.column : 0
@@ -427,6 +464,73 @@ struct FramePlanner {
         let clampedEnd = min(max(end, 0), columns)
         guard clampedStart < clampedEnd else { return nil }
         return clampedStart..<clampedEnd
+    }
+
+    private func overlayRuns(
+        row: Int,
+        states: [RenderOverlayState?]
+    ) -> [RenderOverlayRun] {
+        var result: [RenderOverlayRun] = []
+        var startColumn: Int?
+        var state: RenderOverlayState?
+        var color: RenderColor?
+
+        for (column, cellState) in states.enumerated() {
+            let cellColor = cellState.map(overlayColor(for:))
+            if cellState != state || cellColor != color {
+                appendOverlayRun(
+                    row: row,
+                    endColumn: column,
+                    startColumn: &startColumn,
+                    state: &state,
+                    color: &color,
+                    to: &result
+                )
+                startColumn = cellState == nil ? nil : column
+                state = cellState
+                color = cellColor
+            }
+        }
+        appendOverlayRun(
+            row: row,
+            endColumn: states.count,
+            startColumn: &startColumn,
+            state: &state,
+            color: &color,
+            to: &result
+        )
+        return result
+    }
+
+    private func overlayColor(for state: RenderOverlayState) -> RenderColor {
+        switch state {
+        case .selection:
+            presentation.theme.selectionBackground
+        case .activeSearchMatch, .selectionAndActiveSearchMatch:
+            presentation.theme.searchMatchBackground
+        }
+    }
+
+    private func appendOverlayRun(
+        row: Int,
+        endColumn: Int,
+        startColumn: inout Int?,
+        state: inout RenderOverlayState?,
+        color: inout RenderColor?,
+        to result: inout [RenderOverlayRun]
+    ) {
+        if let startColumn, let state, let color {
+            result.append(RenderOverlayRun(
+                row: row,
+                startColumn: startColumn,
+                columnCount: endColumn - startColumn,
+                state: state,
+                color: color
+            ))
+        }
+        startColumn = nil
+        state = nil
+        color = nil
     }
 
     private func backgroundRuns(row: Int, cells: [PlannedCell]) -> [RenderBackgroundRun] {

@@ -42,42 +42,32 @@ func assertCanonical(
         previousBackground = run
     }
 
-    var previousSelection: RenderSelectionRun?
-    for run in plan.selectionRuns {
+    var previousOverlay: RenderOverlayRun?
+    for run in plan.overlayRuns {
         #expect(run.row >= 0 && run.row < plan.rows, comment, sourceLocation: sourceLocation)
         #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
         #expect(run.columnCount > 0, comment, sourceLocation: sourceLocation)
         #expect(run.startColumn + run.columnCount <= plan.columns, comment, sourceLocation: sourceLocation)
-        if let previousSelection {
+        if let previousOverlay {
             #expect(
-                run.row > previousSelection.row
-                    || (run.row == previousSelection.row
-                        && run.startColumn >= previousSelection.startColumn
-                            + previousSelection.columnCount),
+                run.row > previousOverlay.row
+                    || (run.row == previousOverlay.row
+                        && run.startColumn >= previousOverlay.startColumn
+                            + previousOverlay.columnCount),
+                comment,
+                sourceLocation: sourceLocation
+            )
+            #expect(
+                run.row != previousOverlay.row
+                    || run.startColumn != previousOverlay.startColumn
+                        + previousOverlay.columnCount
+                    || run.state != previousOverlay.state
+                    || run.color != previousOverlay.color,
                 comment,
                 sourceLocation: sourceLocation
             )
         }
-        previousSelection = run
-    }
-
-    var previousMatch: RenderSelectionRun?
-    for run in plan.searchMatchRuns {
-        #expect(run.row >= 0 && run.row < plan.rows, comment, sourceLocation: sourceLocation)
-        #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
-        #expect(run.columnCount > 0, comment, sourceLocation: sourceLocation)
-        #expect(run.startColumn + run.columnCount <= plan.columns, comment, sourceLocation: sourceLocation)
-        if let previousMatch {
-            #expect(
-                run.row > previousMatch.row
-                    || (run.row == previousMatch.row
-                        && run.startColumn >= previousMatch.startColumn
-                            + previousMatch.columnCount),
-                comment,
-                sourceLocation: sourceLocation
-            )
-        }
-        previousMatch = run
+        previousOverlay = run
     }
 
     var previousText: RenderTextRun?

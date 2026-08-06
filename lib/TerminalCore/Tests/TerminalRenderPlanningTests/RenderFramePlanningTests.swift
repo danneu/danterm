@@ -78,7 +78,7 @@ struct RenderFramePlanningTests {
 
         #expect(first == second)
         #expect(first.backgroundRuns.allSatisfy { $0.row == 1 })
-        #expect(first.selectionRuns.allSatisfy { $0.row == 1 })
+        #expect(first.overlayRuns.allSatisfy { $0.row == 1 })
         #expect(first.textRuns.allSatisfy { $0.row == 1 })
         #expect(first.decorationRuns.allSatisfy { $0.row == 1 })
         #expect(first.cursor == nil)

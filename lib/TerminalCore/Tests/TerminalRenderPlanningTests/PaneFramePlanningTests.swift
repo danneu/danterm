@@ -104,6 +104,45 @@ struct PaneFramePlanningTests {
         }
     }
 
+    @Test("Search navigation through a selection remains exact under row reuse")
+    func searchNavigationThroughSelectionMatchesFromScratch() throws {
+        // Intent: moving the active match into and out of a selection produces the
+        //   same semantic overlay plan with retained rows as with a fresh traversal.
+        // Why it exists: overlay state now lives in retained row fragments, so search
+        //   damage must replace both the departing and arriving fragments without
+        //   leaving a stale selection-only or combined state behind.
+        // Scenario: two matches sit on different rows and a fixed selection covers
+        //   the older one; search navigation moves between match-only and overlap.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        feed("hit\r\nzzz\r\nhit", to: &terminal)
+        terminal.setSelection(.init(
+            start: .init(row: 0, column: 0),
+            end: .init(row: 0, column: 3)
+        ))
+        let found = terminal.beginSearch("hit")
+        try #require(found)
+        _ = terminal.drainDamage()
+
+        var planner = PaneFramePlanner()
+        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+
+        let moves: [(inout Terminal) -> Bool] = [
+            { $0.searchNext() },
+            { $0.searchPrevious() },
+        ]
+        for move in moves {
+            let moved = move(&terminal)
+            try #require(moved)
+            let damage = terminal.drainDamage()
+            let reused = planner.planFrame(
+                for: terminal,
+                presentation: blockCursor,
+                damage: damage
+            )
+            #expect(reused == planFrame(for: terminal, presentation: blockCursor))
+        }
+    }
+
     @Test("Writes inside a live multi-row selection remain exact under frame reuse")
     func selectedRowWritesMatchFromScratch() throws {
         // Intent: damage-aware planning stays equivalent to a fresh traversal when output
@@ -224,7 +263,7 @@ struct PaneFramePlanningTests {
         // The link's underline belongs to row 0 alone and the selection colour to row 2
         // alone, stated directly so the equality above cannot pass on two matching leaks.
         #expect(full.decorationRuns.allSatisfy { $0.row == 0 })
-        #expect(full.selectionRuns.allSatisfy { $0.row == 2 })
+        #expect(full.overlayRuns.allSatisfy { $0.row == 2 })
 
         terminal.feed(Array("\u{1B}[2;1H\u{1B}[42mZ".utf8))
         let damage = terminal.drainDamage()

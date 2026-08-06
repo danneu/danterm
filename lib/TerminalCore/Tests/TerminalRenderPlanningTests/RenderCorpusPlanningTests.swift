@@ -192,9 +192,7 @@ struct RenderCorpusPlanningTests {
         guard damage.isFull == false,
               retained.columns == clipped.columns,
               retained.rows == clipped.rows,
-              retained.defaultBackground == clipped.defaultBackground,
-              retained.selectionBackground == clipped.selectionBackground,
-              retained.searchMatchBackground == clipped.searchMatchBackground
+              retained.defaultBackground == clipped.defaultBackground
         else {
             return clipped
         }
@@ -208,13 +206,9 @@ struct RenderCorpusPlanningTests {
             let source: [RenderBackgroundRun] = rows.contains(row) ? clipped.backgroundRuns : retained.backgroundRuns
             return source.filter { (run: RenderBackgroundRun) -> Bool in run.row == row }
         }
-        let selectionRuns: [RenderSelectionRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderSelectionRun] in
-            let source: [RenderSelectionRun] = rows.contains(row) ? clipped.selectionRuns : retained.selectionRuns
-            return source.filter { (run: RenderSelectionRun) -> Bool in run.row == row }
-        }
-        let searchMatchRuns: [RenderSelectionRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderSelectionRun] in
-            let source: [RenderSelectionRun] = rows.contains(row) ? clipped.searchMatchRuns : retained.searchMatchRuns
-            return source.filter { (run: RenderSelectionRun) -> Bool in run.row == row }
+        let overlayRuns: [RenderOverlayRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderOverlayRun] in
+            let source: [RenderOverlayRun] = rows.contains(row) ? clipped.overlayRuns : retained.overlayRuns
+            return source.filter { (run: RenderOverlayRun) -> Bool in run.row == row }
         }
         let textRuns: [RenderTextRun] = (0..<retained.rows).flatMap { (row: Int) -> [RenderTextRun] in
             let source: [RenderTextRun] = rows.contains(row) ? clipped.textRuns : retained.textRuns
@@ -232,11 +226,8 @@ struct RenderCorpusPlanningTests {
             columns: retained.columns,
             rows: retained.rows,
             defaultBackground: retained.defaultBackground,
-            selectionBackground: retained.selectionBackground,
-            searchMatchBackground: retained.searchMatchBackground,
             backgroundRuns: backgroundRuns,
-            selectionRuns: selectionRuns,
-            searchMatchRuns: searchMatchRuns,
+            overlayRuns: overlayRuns,
             textRuns: textRuns,
             decorationRuns: decorationRuns,
             cursor: cursor

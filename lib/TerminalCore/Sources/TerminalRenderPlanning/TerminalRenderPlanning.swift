@@ -267,21 +267,11 @@ public struct RenderFramePlan: Equatable, Sendable {
     /// Concrete color used to clear the full viewport before drawing runs.
     public let defaultBackground: RenderColor
 
-    /// Concrete color used for every local-selection overlay span.
-    public let selectionBackground: RenderColor
-
-    /// Concrete color used for the active find match's overlay spans.
-    public let searchMatchBackground: RenderColor
-
     /// Non-default background spans in canonical row-major order.
     public let backgroundRuns: [RenderBackgroundRun]
 
-    /// Local-selection overlay spans in canonical row-major order.
-    public let selectionRuns: [RenderSelectionRun]
-
-    /// Active-find-match overlay spans in canonical row-major order. Drawn after
-    /// `selectionRuns`, so an overlap reads as the match.
-    public let searchMatchRuns: [RenderSelectionRun]
+    /// Selection and active-find overlays in canonical row-major order.
+    public let overlayRuns: [RenderOverlayRun]
 
     /// Glyph-bearing spans in canonical row-major order.
     public let textRuns: [RenderTextRun]
@@ -296,11 +286,8 @@ public struct RenderFramePlan: Equatable, Sendable {
         columns: Int,
         rows: Int,
         defaultBackground: RenderColor,
-        selectionBackground: RenderColor,
-        searchMatchBackground: RenderColor,
         backgroundRuns: [RenderBackgroundRun],
-        selectionRuns: [RenderSelectionRun],
-        searchMatchRuns: [RenderSelectionRun],
+        overlayRuns: [RenderOverlayRun],
         textRuns: [RenderTextRun],
         decorationRuns: [RenderDecorationRun],
         cursor: RenderCursor?
@@ -308,32 +295,55 @@ public struct RenderFramePlan: Equatable, Sendable {
         self.columns = columns
         self.rows = rows
         self.defaultBackground = defaultBackground
-        self.selectionBackground = selectionBackground
-        self.searchMatchBackground = searchMatchBackground
         self.backgroundRuns = backgroundRuns
-        self.selectionRuns = selectionRuns
-        self.searchMatchRuns = searchMatchRuns
+        self.overlayRuns = overlayRuns
         self.textRuns = textRuns
         self.decorationRuns = decorationRuns
         self.cursor = cursor
     }
 }
 
-/// Represents one viewport-row segment covered by the local selection overlay.
-public struct RenderSelectionRun: Equatable, Sendable {
+/// Identifies the semantic coverage represented by one overlay fragment.
+public enum RenderOverlayState: Equatable, Sendable {
+    /// Local selection without the active search match.
+    case selection
+
+    /// Active search match outside the local selection.
+    case activeSearchMatch
+
+    /// A cell covered by both the local selection and active search match.
+    case selectionAndActiveSearchMatch
+}
+
+/// Represents one maximal same-state, same-color overlay fragment.
+public struct RenderOverlayRun: Equatable, Sendable {
     /// Zero-based viewport row.
     public let row: Int
 
     /// Zero-based first column in the selected segment.
     public let startColumn: Int
 
-    /// Number of selected grid columns in the segment.
+    /// Number of overlaid grid columns in the fragment.
     public let columnCount: Int
 
-    init(row: Int, startColumn: Int, columnCount: Int) {
+    /// Selection and search coverage carried independently of paint policy.
+    public let state: RenderOverlayState
+
+    /// Concrete fill shared by every cell in the fragment.
+    public let color: RenderColor
+
+    init(
+        row: Int,
+        startColumn: Int,
+        columnCount: Int,
+        state: RenderOverlayState,
+        color: RenderColor
+    ) {
         self.row = row
         self.startColumn = startColumn
         self.columnCount = columnCount
+        self.state = state
+        self.color = color
     }
 }
 

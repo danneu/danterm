@@ -24,8 +24,14 @@ struct SelectionRenderPlanningTests {
         ))
         let selected = planFrame(for: terminal, presentation: presentation)
 
-        #expect(selected.selectionRuns == [
-            RenderSelectionRun(row: 0, startColumn: 1, columnCount: 3),
+        #expect(selected.overlayRuns == [
+            RenderOverlayRun(
+                row: 0,
+                startColumn: 1,
+                columnCount: 3,
+                state: .selection,
+                color: theme.selectionBackground
+            ),
         ])
         #expect(selected.backgroundRuns == baseline.backgroundRuns)
         #expect(selected.textRuns.count == 3)
@@ -57,9 +63,7 @@ struct SelectionRenderPlanningTests {
             presentation: .init(theme: theme, isCursorVisible: true, cursorShape: .block)
         )
 
-        #expect(plan.searchMatchRuns == [
-            RenderSelectionRun(row: 0, startColumn: 0, columnCount: 1),
-        ])
+        #expect(plan.overlayRuns.first?.state == .selectionAndActiveSearchMatch)
         #expect(plan.textRuns.map(\.startColumn) == [0, 1, 2])
         #expect(plan.textRuns.map(\.foreground) == [
             theme.selectionForeground,
@@ -132,11 +136,12 @@ struct SelectionRenderPlanningTests {
             )
         )
 
-        #expect(plan.selectionRuns == [
-            RenderSelectionRun(row: 0, startColumn: 2, columnCount: 3),
-            RenderSelectionRun(row: 1, startColumn: 0, columnCount: 5),
-            RenderSelectionRun(row: 2, startColumn: 0, columnCount: 3),
+        #expect(plan.overlayRuns.map { [$0.row, $0.startColumn, $0.columnCount] } == [
+            [0, 2, 3],
+            [1, 0, 5],
+            [2, 0, 3],
         ])
+        #expect(plan.overlayRuns.allSatisfy { $0.state == .selection })
         assertCanonical(plan)
     }
 
@@ -158,9 +163,9 @@ struct SelectionRenderPlanningTests {
             )
         )
         #expect(terminal.scrollProjection.topRow == 2)
-        #expect(following.selectionRuns == [
-            RenderSelectionRun(row: 0, startColumn: 0, columnCount: 5),
-            RenderSelectionRun(row: 1, startColumn: 0, columnCount: 3),
+        #expect(following.overlayRuns.map { [$0.row, $0.startColumn, $0.columnCount] } == [
+            [0, 0, 5],
+            [1, 0, 3],
         ])
 
         terminal.setSelection(TerminalTextRange(
@@ -175,7 +180,7 @@ struct SelectionRenderPlanningTests {
                 cursorShape: .block
             )
         )
-        #expect(fullyOutside.selectionRuns.isEmpty)
+        #expect(fullyOutside.overlayRuns.isEmpty)
     }
 
     @Test("absent and empty selections produce no overlay runs")
@@ -188,13 +193,13 @@ struct SelectionRenderPlanningTests {
             cursorShape: .block
         )
 
-        #expect(planFrame(for: terminal, presentation: presentation).selectionRuns.isEmpty)
+        #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
 
         terminal.setSelection(TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 2),
             end: TerminalTextPosition(row: 0, column: 2)
         ))
         #expect(terminal.selectionRange?.start == terminal.selectionRange?.end)
-        #expect(planFrame(for: terminal, presentation: presentation).selectionRuns.isEmpty)
+        #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
     }
 }

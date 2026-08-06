@@ -1,12 +1,12 @@
-// Active-search-match highlight planning proofs: viewport clipping, independence from
-// the selection layer, and survival through the damage-clipped plan the app actually draws.
+// Active-search-match overlay planning proofs: semantic overlap, viewport clipping,
+// and survival through the damage-clipped plan the app actually draws.
 import Testing
 
 import TerminalCore
 @testable import TerminalRenderPlanning
 
-/// Pins the second highlight channel to `activeSearchMatchRange` alone, keeping it
-/// independent of the selection overlay it shares run geometry with.
+/// Pins active matches and selections to one semantic overlay layer so their overlap
+/// survives planning instead of being erased by painter order.
 struct SearchMatchRenderPlanningTests {
     private let presentation = RenderPresentation(
         theme: .dark,
@@ -19,18 +19,24 @@ struct SearchMatchRenderPlanningTests {
         var terminal = try #require(Terminal(columns: 6, rows: 2))
         terminal.feed(Array("zzhitz".utf8))
 
-        #expect(planFrame(for: terminal, presentation: presentation).searchMatchRuns.isEmpty)
+        #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
 
         let found = terminal.beginSearch("hit")
         #expect(found)
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.searchMatchRuns == [
-            RenderSelectionRun(row: 0, startColumn: 2, columnCount: 3),
+        #expect(plan.overlayRuns == [
+            RenderOverlayRun(
+                row: 0,
+                startColumn: 2,
+                columnCount: 3,
+                state: .activeSearchMatch,
+                color: presentation.theme.searchMatchBackground
+            ),
         ])
         assertCanonical(plan)
 
         terminal.clearSearch()
-        #expect(planFrame(for: terminal, presentation: presentation).searchMatchRuns.isEmpty)
+        #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
     }
 
     @Test("a match scrolled out of the viewport plans no runs")
@@ -47,33 +53,49 @@ struct SearchMatchRenderPlanningTests {
         #expect(terminal.scrollProjection.topRow > 0)
 
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.searchMatchRuns.isEmpty)
+        #expect(plan.overlayRuns.isEmpty)
         assertCanonical(plan)
     }
 
-    @Test("search and selection highlights are planned independently")
+    @Test("search and selection split into three semantic overlay states")
     func selectionAndMatchCoexist() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 2))
         terminal.feed(Array("zzhitz".utf8))
         terminal.setSelection(TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
-            end: TerminalTextPosition(row: 0, column: 2)
+            end: TerminalTextPosition(row: 0, column: 4)
         ))
         let found = terminal.beginSearch("hit")
         #expect(found)
 
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.selectionRuns == [
-            RenderSelectionRun(row: 0, startColumn: 0, columnCount: 2),
-        ])
-        #expect(plan.searchMatchRuns == [
-            RenderSelectionRun(row: 0, startColumn: 2, columnCount: 3),
+        #expect(plan.overlayRuns == [
+            RenderOverlayRun(
+                row: 0,
+                startColumn: 0,
+                columnCount: 2,
+                state: .selection,
+                color: presentation.theme.selectionBackground
+            ),
+            RenderOverlayRun(
+                row: 0,
+                startColumn: 2,
+                columnCount: 2,
+                state: .selectionAndActiveSearchMatch,
+                color: presentation.theme.searchMatchBackground
+            ),
+            RenderOverlayRun(
+                row: 0,
+                startColumn: 4,
+                columnCount: 1,
+                state: .activeSearchMatch,
+                color: presentation.theme.searchMatchBackground
+            ),
         ])
 
         terminal.clearSelection()
         let matchOnly = planFrame(for: terminal, presentation: presentation)
-        #expect(matchOnly.selectionRuns.isEmpty)
-        #expect(matchOnly.searchMatchRuns.isEmpty == false)
+        #expect(matchOnly.overlayRuns.allSatisfy { $0.state == .activeSearchMatch })
         assertCanonical(matchOnly)
     }
 
@@ -89,7 +111,7 @@ struct SearchMatchRenderPlanningTests {
         terminal.feed(Array("\u{1B}[?1049h".utf8))
 
         _ = terminal.beginSearch("hit")
-        #expect(planFrame(for: terminal, presentation: presentation).searchMatchRuns.isEmpty)
+        #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
     }
 
     @Test("damage clipping keeps match runs on damaged rows and drops the rest")
@@ -105,12 +127,12 @@ struct SearchMatchRenderPlanningTests {
         #expect(found)
 
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.searchMatchRuns.map(\.row) == [1])
+        #expect(plan.overlayRuns.map(\.row) == [1])
 
         let damaged = TerminalDamage(rows: [1])
-        #expect(clipFramePlan(plan, to: damaged).searchMatchRuns == plan.searchMatchRuns)
+        #expect(clipFramePlan(plan, to: damaged).overlayRuns == plan.overlayRuns)
 
         let undamaged = TerminalDamage(rows: [0])
-        #expect(clipFramePlan(plan, to: undamaged).searchMatchRuns.isEmpty)
+        #expect(clipFramePlan(plan, to: undamaged).overlayRuns.isEmpty)
     }
 }
