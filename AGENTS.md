@@ -37,12 +37,21 @@ nearest enclosing named identifier when the point itself is unnamed. This form
 is for external trees under `references/`; see **Citing docs** for DanTerm's own
 documents.
 
-Two rules govern how much weight source carries:
+Rules for how much weight source carries, and how you turn a probe into a
+finding:
 
 - **Source picks the probe; it does not replace running one.** A shell's
   behavior is established by a real binary in a real PTY, and a terminal's by
   feeding bytes to `TerminalCore.Terminal`. Reading the code tells you which
   experiment to run.
+- **Reproduce from bytes, not from the GUI.** When an application misbehaves in
+  a pane, capture its byte stream and replay it into `TerminalCore` headlessly:
+  `danterm pane tape` for anything reproducible live, or a `pty.fork()` harness
+  when the stimulus is one the GUI cannot issue -- a synthetic `SIGWINCH`, a
+  specific `TIOCSWINSZ` geometry. Mark the byte offset of the stimulus so the
+  capture splits into before and after halves, then confirm the cause by
+  ablation: strip one sequence from the replay and show the symptom disappears.
+  A cause you have not ablated is a hypothesis.
 - **References are input, not authority.** On compatibility -- what a sequence
   does, what a shell emits -- match them; that's the requirement. On design --
   data model, where state lives, API shape -- they are only ideas: take the edge
