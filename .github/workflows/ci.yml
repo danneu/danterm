@@ -124,29 +124,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Load Ghostty version
-        id: ghostty-version
-        run: |
-          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
-          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
-          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Cache GhosttyKit
-        id: cache-ghosttykit
-        uses: actions/cache@v5
-        with:
-          path: |
-            lib/GhosttyKit.xcframework
-            lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-
-      - name: Build GhosttyKit
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: ./build-lib.sh all
-
       - name: Build app bundle
         run: ./build-app.sh
 
@@ -157,29 +134,6 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
-
-      - name: Load Ghostty version
-        id: ghostty-version
-        run: |
-          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
-          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
-          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Cache GhosttyKit
-        id: cache-ghosttykit
-        uses: actions/cache@v5
-        with:
-          path: |
-            lib/GhosttyKit.xcframework
-            lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-
-      - name: Build GhosttyKit
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: ./build-lib.sh all
 
       - name: Build app bundle (release validation)
         run: ./build-app.sh --version "0.0.0-test"
@@ -225,20 +179,3 @@ jobs:
           done
           test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
           echo "Release build validation passed"
-
-  validator-self-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Validator self-test
-        run: ./scripts/tests/load-ghostty-version_test.sh
-
-      - name: build-lib stale-source guard self-test
-        run: ./scripts/tests/build-lib-stale-guard_test.sh
-
-      - name: build-lib tip-tag fetch self-test
-        run: ./scripts/tests/build-lib-fetch_test.sh
-
-      - name: build-lib contract self-test
-        run: ./scripts/tests/build-lib-contract_test.sh

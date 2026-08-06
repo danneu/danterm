@@ -26,13 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Load Ghostty version
-        id: ghostty-version
-        run: |
-          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
-          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
-          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
-
       - uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Set version from tag
@@ -41,19 +34,6 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "DMG_NAME=DanTerm-${VERSION}.dmg" >> "$GITHUB_ENV"
           echo "ZIP_NAME=DanTerm-${VERSION}.zip" >> "$GITHUB_ENV"
-
-      - name: Cache GhosttyKit
-        id: cache-ghosttykit
-        uses: actions/cache@v5
-        with:
-          path: |
-            lib/GhosttyKit.xcframework
-            lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Build GhosttyKit
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: ./build-lib.sh all
 
       - name: Build app bundle
         run: ./build-app.sh --version "${{ env.VERSION }}"
@@ -211,10 +191,9 @@ jobs:
           SRI=$(nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
           echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
 
-      # Check out master to a separate path so the second checkout doesn't
-      # clobber the default workdir (which holds lib/GhosttyKit.xcframework
-      # and .zig-cache). actions/cache saves in post-job cleanup, so those
-      # paths must still exist when the job finishes.
+      # Check out master to a separate path: actions/checkout cleans the
+      # directory it writes into, and the default workdir still holds the
+      # signed, notarized build/ artifacts this job produced.
       - name: Checkout master for package.nix update
         uses: actions/checkout@v6
         with:
