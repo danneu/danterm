@@ -17,10 +17,7 @@ import Testing
     ) {
         _ = update(
             &model,
-            .preferencesOpened(
-                ghostty: GhosttyPrefs(theme: nil, fontSize: nil),
-                installedFontFamilies: installedFontFamilies
-            )
+            .preferencesOpened(installedFontFamilies: installedFontFamilies)
         )
     }
 

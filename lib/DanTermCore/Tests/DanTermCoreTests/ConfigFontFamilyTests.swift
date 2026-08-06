@@ -120,7 +120,7 @@ import Testing
         var model = makeModel()
         model.config.fontFamily = "Menlo"
 
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
 
         #expect(model.preferencesDraft?.fontFamily == "Menlo")
     }
@@ -128,7 +128,7 @@ import Testing
     @Test("prefSetFontFamily changes only the draft")
     func prefSetFontFamilyChangesOnlyTheDraft() {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
 
         _ = update(&model, .prefSetFontFamily("Menlo"))
 
@@ -139,7 +139,7 @@ import Testing
     @Test("a font-family edit alone enables Save")
     func fontFamilyEditAloneEnablesSave() throws {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled == false)
 
         _ = update(&model, .prefSetFontFamily("Menlo"))
@@ -147,15 +147,14 @@ import Testing
         #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled)
         #expect(isDraftDirty(
             try #require(model.preferencesDraft),
-            vs: model.config,
-            ghostty: model.committedGhosttyPrefs
+            vs: model.config
         ))
     }
 
     @Test("configLoaded while the panel is open resets the font-family draft")
     func configLoadedResetsFontFamilyDraft() {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("Menlo"))
 
         var config = DanTermConfig.default
@@ -170,7 +169,7 @@ import Testing
     @Test("prefSave writes the drafted family into the one config transaction")
     func prefSaveWritesFontFamily() {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("Menlo"))
 
         let commands = update(&model, .prefSave)
@@ -191,7 +190,7 @@ import Testing
         //   to install the font, and the core cannot tell either way (I1).
         // Scenario: spec-first; the user types a font they have not installed yet.
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("Fira Codee"))
 
         let commands = update(&model, .prefSave)
@@ -206,7 +205,7 @@ import Testing
     func prefSaveWithBlankFamilyRemovesTheKey() {
         var model = makeModel()
         model.config.fontFamily = "Menlo"
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("   "))
 
         let commands = update(&model, .prefSave)
@@ -230,7 +229,7 @@ import Testing
         var model = makeModel()
         _ = createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("menlo"))
 
         let commands = update(&model, .prefSave)
@@ -256,7 +255,7 @@ import Testing
         // Scenario: spec-first; the user saves a font family while the font-size
         //   field still holds unparseable text.
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetFontFamily("Menlo"))
         _ = update(&model, .prefSetFontSize("abc"))
         _ = update(&model, .prefSave)

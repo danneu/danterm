@@ -6,9 +6,9 @@ import Cocoa
 class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     weak var runtime: AppRuntime?
 
-    // Ghostty settings
-    private let ghosttyThemeField = NSTextField()
-    private let ghosttyBrowseButton = NSButton()
+    // Terminal appearance settings
+    private let themeField = NSTextField()
+    private let themeBrowseButton = NSButton()
     private let fontSizeField = NSTextField()
     // Font-family row. Not private: the UI harness reads these three to prove the
     // projection reaches the controls and that gestures dispatch the right Msg.
@@ -21,9 +21,9 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     private let browseButton = NSButton()
 
     // Dirty indicators (hidden when clean)
-    private let ghosttyThemeDirtyRow = NSStackView()
-    private let ghosttyThemePrevLabel = NSTextField(labelWithString: "")
-    private let ghosttyThemeResetButton = NSButton()
+    private let themeDirtyRow = NSStackView()
+    private let themePrevLabel = NSTextField(labelWithString: "")
+    private let themeResetButton = NSButton()
     private let fontSizeDirtyRow = NSStackView()
     private let fontSizePrevLabel = NSTextField(labelWithString: "")
     private let fontSizeResetButton = NSButton()
@@ -65,8 +65,8 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         // -- Form grid --
         let grid = NSGridView(views: [
             // Terminal appearance settings
-            formRow("Theme", makeHStack([ghosttyThemeField, ghosttyBrowseButton])),
-            dirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, ghosttyThemeResetButton,
+            formRow("Theme", makeHStack([themeField, themeBrowseButton])),
+            dirtyRow(themeDirtyRow, themePrevLabel, themeResetButton,
                      action: #selector(resetTheme(_:))),
             formRow("Font Family", fontFamilyCombo),
             dirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, fontFamilyResetButton,
@@ -102,16 +102,16 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         grid.row(at: 11).topPadding = 8
 
         // Configure terminal appearance controls.
-        ghosttyThemeField.delegate = self
-        ghosttyThemeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
-        ghosttyThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        themeField.delegate = self
+        themeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
+        themeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        ghosttyBrowseButton.title = "Browse…"
-        ghosttyBrowseButton.bezelStyle = .push
-        ghosttyBrowseButton.target = self
-        ghosttyBrowseButton.action = #selector(browseGhosttyTheme(_:))
-        ghosttyBrowseButton.setContentHuggingPriority(.required, for: .horizontal)
-        ghosttyBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        themeBrowseButton.title = "Browse…"
+        themeBrowseButton.bezelStyle = .push
+        themeBrowseButton.target = self
+        themeBrowseButton.action = #selector(browseTheme(_:))
+        themeBrowseButton.setContentHuggingPriority(.required, for: .horizontal)
+        themeBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         // Editable so the user can type a PostScript alias or a family they are
         // about to install; `completes` makes the installed list searchable by
@@ -264,8 +264,8 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         if remoteThemeField.stringValue != projection.remoteThemeText {
             remoteThemeField.stringValue = projection.remoteThemeText
         }
-        if ghosttyThemeField.stringValue != projection.ghosttyThemeText {
-            ghosttyThemeField.stringValue = projection.ghosttyThemeText
+        if themeField.stringValue != projection.themeText {
+            themeField.stringValue = projection.themeText
         }
         if fontSizeField.stringValue != projection.fontSizeText {
             fontSizeField.stringValue = projection.fontSizeText
@@ -280,7 +280,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
 
         applyWarning(projection.fontFamilyWarning)
 
-        applyDirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, label: projection.ghosttyThemeDirtyLabel)
+        applyDirtyRow(themeDirtyRow, themePrevLabel, label: projection.themeDirtyLabel)
         applyDirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, label: projection.fontFamilyDirtyLabel)
         applyDirtyRow(fontSizeDirtyRow, fontSizePrevLabel, label: projection.fontSizeDirtyLabel)
         applyDirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, label: projection.alertClearModeDirtyLabel)
@@ -337,7 +337,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         guard let field = obj.object as? NSTextField else { return }
         if field === remoteThemeField {
             runtime?.send(.prefSetRemoteTheme(field.stringValue))
-        } else if field === ghosttyThemeField {
+        } else if field === themeField {
             let text = field.stringValue
             runtime?.send(.prefSetTheme(text.isEmpty ? nil : text))
         } else if field === fontSizeField {
@@ -389,11 +389,11 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     }
 
     /// Present the theme picker sheet so the user can browse DanTerm's catalog.
-    @objc private func browseGhosttyTheme(_ sender: Any?) {
+    @objc private func browseTheme(_ sender: Any?) {
         let picker = RemoteThemePickerSheet()
-        picker.currentThemeName = ghosttyThemeField.stringValue.isEmpty
-            ? runtime?.model.committedGhosttyPrefs?.theme
-            : ghosttyThemeField.stringValue
+        picker.currentThemeName = themeField.stringValue.isEmpty
+            ? runtime?.model.config.defaultTheme
+            : themeField.stringValue
         picker.onSelect = { [weak self] themeName in
             self?.runtime?.send(.prefSetTheme(themeName))
         }
@@ -423,6 +423,6 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     }
 
     @objc private func reloadConfig(_ sender: Any?) {
-        runtime?.reloadAllConfig()
+        runtime?.reloadDanTermConfig()
     }
 }

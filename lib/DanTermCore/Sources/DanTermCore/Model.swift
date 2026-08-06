@@ -161,20 +161,19 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
-/// Ghostty config values relevant to the preferences panel.
-/// Populated by the runtime from ghosttyApp.readConfigString; nil = Ghostty default.
-struct GhosttyPrefs: Equatable {
-    var theme: String?
-    var fontSize: String?
-}
-
 /// Raw form state for the preferences panel. Stores what the user actually typed,
 /// not yet normalized. Normalization happens only on save.
+///
+/// `fontSize` is text rather than a number precisely because it is mid-edit
+/// state: a half-typed "1" must stay "1" until save, not be reinterpreted as a
+/// size. Comparing it against the committed `config.fontSize` therefore renders
+/// that number with `configFontSizeText` at the point of comparison -- the model
+/// never stores a second copy of it.
 struct PreferencesDraft: Equatable {
     var alertClearMode: AlertClearMode
     var remoteTheme: String  // raw text from the field; may have whitespace or be empty
-    var theme: String?       // nil = use Ghostty default (remove key from config)
-    var fontSize: String?    // nil = use Ghostty default (remove key from config)
+    var theme: String?       // nil = no `theme` key; use the catalog default
+    var fontSize: String?    // nil = no `fontSize` key; use the built-in default
     var fontFamily: String?  // nil = use the system monospace font (remove key from config)
 }
 
@@ -225,7 +224,6 @@ struct AppModel: Equatable {
     // core cannot enumerate them (a CoreText question, I1), and the catalog is
     // deliberately a snapshot per open rather than a live view (AR1).
     var installedFontFamilies: [String] = []
-    var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
     var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held

@@ -572,7 +572,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func reloadConfig(_ sender: Any?) {
-        runtime.reloadAllConfig()
+        runtime.reloadDanTermConfig()
     }
 
     @objc func installDantermInPath(_ sender: Any?) {

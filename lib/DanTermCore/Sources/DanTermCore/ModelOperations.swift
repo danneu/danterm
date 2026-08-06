@@ -707,11 +707,11 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
 }
 
 /// Whether the preferences draft has any changes compared to the committed config.
-func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: GhosttyPrefs?) -> Bool {
+func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig) -> Bool {
     draft.alertClearMode != config.alertClearMode
         || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
-        || draft.theme != ghostty?.theme
-        || draft.fontSize != ghostty?.fontSize
+        || draft.theme != config.defaultTheme
+        || draft.fontSize != config.fontSize.map(configFontSizeText)
         || resolveFontFamilyDraft(draft.fontFamily) != config.fontFamily
 }
 

@@ -131,7 +131,6 @@ AppModel(
   resolvedFontFamily: nil,
   preferencesDraft: nil,
   installedFontFamilies: [],
-  committedGhosttyPrefs: nil,
   todoPopover: nil,
   mruOrder: [
     [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),

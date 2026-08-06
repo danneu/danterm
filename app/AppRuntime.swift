@@ -1333,11 +1333,6 @@ class AppRuntime {
         dragCoordinator = nil
     }
 
-    /// Full config reload, re-reading the DanTerm config file and re-layering themed panes.
-    func reloadAllConfig() {
-        reloadDanTermConfig()
-    }
-
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
     func reloadDanTermConfig() {
         do {
@@ -1365,10 +1360,6 @@ class AppRuntime {
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
         send(.preferencesOpened(
-            ghostty: GhosttyPrefs(
-                theme: model.config.defaultTheme,
-                fontSize: model.config.fontSize.map(configFontSizeText)
-            ),
             // Snapshotted per open (AR1): the core may not query CoreText, and a
             // font installed while the panel sits open is not worth a watcher.
             installedFontFamilies: installedFontFamilyNames()

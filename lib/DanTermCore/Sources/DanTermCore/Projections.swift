@@ -41,7 +41,7 @@ let systemMonospaceFontChoiceTitle = "System Monospace (Default)"
 struct PreferencesPanelProjection: Equatable {
     var selectedAlertClearMode: AlertClearMode
     var remoteThemeText: String
-    var ghosttyThemeText: String
+    var themeText: String
     var fontSizeText: String
     var fontFamilyText: String
     /// Every family the picker offers, system monospace first. Sourced from the
@@ -50,7 +50,7 @@ struct PreferencesPanelProjection: Equatable {
     /// Inline, non-modal report that the committed family is not installed.
     /// Non-nil only while the field still holds the name it describes.
     var fontFamilyWarning: String?
-    var ghosttyThemeDirtyLabel: String?
+    var themeDirtyLabel: String?
     var fontSizeDirtyLabel: String?
     var fontFamilyDirtyLabel: String?
     var alertClearModeDirtyLabel: String?
@@ -64,9 +64,12 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     guard let draft = model.preferencesDraft else { return nil }
 
     let committed = model.config
-    let ghostty = model.committedGhosttyPrefs
-    let ghosttyThemeDirty = draft.theme != ghostty?.theme
-    let fontSizeDirty = draft.fontSize != ghostty?.fontSize
+    // The draft holds what the user typed, so the committed size is rendered to
+    // text to compare with it: "13" and 13.0 are the same setting, and normalizing
+    // the other direction would have to guess at half-typed input.
+    let committedFontSizeText = committed.fontSize.map(configFontSizeText)
+    let themeDirty = draft.theme != committed.defaultTheme
+    let fontSizeDirty = draft.fontSize != committedFontSizeText
     let fontFamilyDirty = resolveFontFamilyDraft(draft.fontFamily) != committed.fontFamily
     let alertDirty = draft.alertClearMode != committed.alertClearMode
     let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
@@ -81,7 +84,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     return PreferencesPanelProjection(
         selectedAlertClearMode: draft.alertClearMode,
         remoteThemeText: draft.remoteTheme,
-        ghosttyThemeText: draft.theme ?? "",
+        themeText: draft.theme ?? "",
         fontSizeText: draft.fontSize ?? "",
         // Raw draft text, like the other fields: normalizing here would rewrite
         // the field under the user mid-edit. Absent means the sentinel choice, so
@@ -91,13 +94,13 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."
         },
-        ghosttyThemeDirtyLabel: ghosttyThemeDirty ? "Prev: \(ghostty?.theme ?? "(default)")" : nil,
-        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(ghostty?.fontSize ?? "(default)")" : nil,
+        themeDirtyLabel: themeDirty ? "Prev: \(committed.defaultTheme ?? "(default)")" : nil,
+        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(committedFontSizeText ?? "(default)")" : nil,
         fontFamilyDirtyLabel: fontFamilyDirty
             ? "Prev: \(committed.fontFamily ?? systemMonospaceFontChoiceTitle)" : nil,
         alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
         remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
-        saveEnabled: ghosttyThemeDirty || fontSizeDirty || fontFamilyDirty
+        saveEnabled: themeDirty || fontSizeDirty || fontFamilyDirty
             || alertDirty || remoteThemeDirty
     )
 }

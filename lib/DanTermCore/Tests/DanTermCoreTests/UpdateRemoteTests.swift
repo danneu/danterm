@@ -392,7 +392,7 @@ import Testing
         //   suite's coverage of the pref-save surface).
         // Scenario: spec-first save alert mode.
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetAlertClearMode(.manual))
         let commands = update(&model, .prefSave)
         #expect(model.config.alertClearMode == .manual)
@@ -410,7 +410,7 @@ import Testing
         //   suite's pref-save surface.
         // Scenario: spec-first clean save.
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
+        _ = update(&model, .preferencesOpened())
         let commands = update(&model, .prefSave)
         #expect(commands.count == 0)
         #expect(!hasEffect(commands) {
@@ -430,7 +430,7 @@ import Testing
         //   coverage).
         // Scenario: spec-first save remote theme.
         var model = makeModel()
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Grape")
@@ -451,7 +451,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         _ = update(&model, .remoteSessionStarted(paneId: paneId))
 
-        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
+        _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
         #expect(model.pane(paneId)?.remoteThemeOverride == "Grape")

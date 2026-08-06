@@ -560,10 +560,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.preferencesDraft!.theme = newConfig.defaultTheme
             model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
             model.preferencesDraft!.fontFamily = newConfig.fontFamily
-            model.committedGhosttyPrefs = GhosttyPrefs(
-                theme: newConfig.defaultTheme,
-                fontSize: newConfig.fontSize.map(configFontSizeText)
-            )
         }
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane
@@ -580,24 +576,22 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Preferences Panel
 
-    case .preferencesOpened(let ghostty, let installedFontFamilies):
+    case .preferencesOpened(let installedFontFamilies):
         // Only create draft on closed → open transition; re-focus is a no-op.
         if model.preferencesDraft == nil {
             model.installedFontFamilies = installedFontFamilies
             model.preferencesDraft = PreferencesDraft(
                 alertClearMode: model.config.alertClearMode,
                 remoteTheme: model.config.remoteTheme,
-                theme: ghostty.theme,
-                fontSize: ghostty.fontSize,
+                theme: model.config.defaultTheme,
+                fontSize: model.config.fontSize.map(configFontSizeText),
                 fontFamily: model.config.fontFamily
             )
-            model.committedGhosttyPrefs = ghostty
         }
         return []
 
     case .preferencesClosed:
         model.preferencesDraft = nil
-        model.committedGhosttyPrefs = nil
         model.installedFontFamilies = []
         return []
 
@@ -638,12 +632,12 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .prefResetTheme:
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.theme = model.committedGhosttyPrefs?.theme
+        model.preferencesDraft!.theme = model.config.defaultTheme
         return []
 
     case .prefResetFontSize:
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontSize = model.committedGhosttyPrefs?.fontSize
+        model.preferencesDraft!.fontSize = model.config.fontSize.map(configFontSizeText)
         return []
 
     case .prefResetFontFamily:
@@ -681,10 +675,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
             }
         }
-        model.committedGhosttyPrefs = GhosttyPrefs(
-            theme: newConfig.defaultTheme,
-            fontSize: newConfig.fontSize.map(configFontSizeText)
-        )
         return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 
     // MARK: - Export

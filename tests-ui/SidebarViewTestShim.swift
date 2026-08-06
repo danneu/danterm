@@ -40,7 +40,7 @@ final class AppRuntime {
     // PreferencesPanel's "Config file" row. Both reach the filesystem in
     // production, so the harness keeps them inert.
     func openDanTermConfig() {}
-    func reloadAllConfig() {}
+    func reloadDanTermConfig() {}
 }
 
 class TerminalView: NSView, TerminalSession {

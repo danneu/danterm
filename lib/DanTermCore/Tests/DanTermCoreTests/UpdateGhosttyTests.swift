@@ -209,7 +209,7 @@ import Testing
         }
 
         let inlineMessages: [Msg] = [
-            .preferencesOpened(ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14")),
+            .preferencesOpened(),
             .preferencesClosed
         ]
         for msg in inlineMessages {

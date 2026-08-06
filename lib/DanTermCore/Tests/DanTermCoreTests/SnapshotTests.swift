@@ -700,27 +700,25 @@ import DanTermProtocol
 
     @Test("snapshot round-trip drops open preferences draft")
     func snapshotRoundTripDropsOpenPreferencesDraft() {
-        // Intent: an in-progress preferencesDraft and the committed
-        //   ghostty prefs are NOT serialized to the snapshot.
+        // Intent: an in-progress preferencesDraft is NOT serialized to the
+        //   snapshot.
         // Why it exists: pins the ephemerality of the preferences-open
         //   state so a quit-while-prefs-open does not restore a half-
         //   edited prefs draft.
         // Scenario: spec-first ephemerality check -- open prefs, change
-        //   a setting, snapshot+rebuild, draft + committed prefs are nil
-        //   on the rebuild.
+        //   a setting, snapshot+rebuild, the draft is nil on the rebuild.
         var model = makeModel()
         createTab(&model)
-        update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14")))
+        model.config.defaultTheme = "Dracula"
+        update(&model, .preferencesOpened())
         update(&model, .prefSetTheme("Solarized"))
         #expect(model.preferencesDraft != nil, "draft should exist before snapshot")
-        #expect(model.committedGhosttyPrefs != nil, "ghostty prefs should exist before snapshot")
 
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)
 
         #expect(rebuilt != nil, "should rebuild from snapshot")
         #expect(rebuilt!.preferencesDraft == nil, "draft should not be serialized")
-        #expect(rebuilt!.committedGhosttyPrefs == nil, "ghostty prefs should not be serialized")
     }
 
     @Test("validation rejects duplicate IDs across domains")

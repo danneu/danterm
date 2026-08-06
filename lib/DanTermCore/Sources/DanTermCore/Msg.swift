@@ -126,7 +126,7 @@ enum Msg {
     // resolution is: which families exist is a CoreText question the core may not
     // ask (I1). It rides in on open so the picker's choices are a snapshot taken
     // when the panel appeared, not a live query.
-    case preferencesOpened(ghostty: GhosttyPrefs, installedFontFamilies: [String] = [])
+    case preferencesOpened(installedFontFamilies: [String] = [])
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)
     case prefSetRemoteTheme(String)
