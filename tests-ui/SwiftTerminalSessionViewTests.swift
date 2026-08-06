@@ -1061,6 +1061,28 @@ func swiftTerminalSessionViewTests() {
                      "paste entry points diverged: \(controller.inputBytes)")
     }
 
+    uiTest("IPC text pastes while structured input text stays raw") {
+        // Intent: `Command.sendText` reaches the pane as a paste, and `Command.sendInputText`
+        //   reaches it as raw committed text.
+        // Why it exists: the two commands are only meaningfully different at this adapter, and
+        //   the IPC `text` field is documented as the paste path -- sanitized and bracketed --
+        //   while structured `input` text must arrive as if typed.
+        // Scenario: an IPC caller sends `{text: ...}` and then `{input: [...]}` containing the
+        //   same escape-bearing string into a pane with bracketed paste active.
+        let controller = TerminalPaneSessionController()
+        controller.inputModes.bracketedPaste = true
+        let pane = SwiftTerminalSessionView(controller: controller)
+        let payload = "one\u{1B}[201~\ntwo"
+
+        pane.sendText(payload)
+        pane.sendInputText(payload)
+
+        try uiExpect(controller.inputBytes == [Array("\u{1B}[200~one[201~\ntwo\u{1B}[201~".utf8)],
+                     "IPC text lost paste semantics: \(controller.inputBytes)")
+        try uiExpect(controller.textInputs == [payload],
+                     "structured input text gained paste semantics: \(controller.textInputs)")
+    }
+
     uiTest("runtime and responder focus signals are deduplicated") {
         // Intent: logical pane focus and first-responder callbacks share one transition funnel.
         // Why it exists: AppKit and reconcile commonly report the same transition back-to-back.

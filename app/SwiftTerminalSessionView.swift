@@ -540,10 +540,15 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         // Fixed terminal keys are encoded after interpretKeyEvents returns.
     }
 
+    // TerminalSessionView: `Command.sendText`, the IPC top-level `text` field. Contractually the
+    // paste path, so it goes through owner-side safe-paste policy (control stripping, bracket
+    // markers) exactly like the clipboard entry points.
     func sendText(_ text: String) {
-        controller.sendText(text)
+        controller.sendPaste(text)
     }
 
+    // TerminalSessionView: `Command.sendInputText`, structured `input` text. Deliberately raw --
+    // vim and htop must see the characters as if typed, so paste semantics must not apply.
     func sendInputText(_ text: String) {
         controller.sendText(text)
     }
