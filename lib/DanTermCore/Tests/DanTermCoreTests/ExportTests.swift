@@ -200,9 +200,9 @@ import Testing
     func truncateScrollbackTrailingWhitespaceOnlyLinesAreStripped() {
         // Intent: lines at the tail that contain only whitespace are
         //   removed before the trailing newline is added.
-        // Why it exists: pins the ghostty-padding behavior -- ghostty
-        //   pads the visible buffer with whitespace lines that should
-        //   not pollute the saved scrollback.
+        // Why it exists: a viewport read pads the visible buffer out to
+        //   its full row count with whitespace lines, which should not
+        //   pollute the saved scrollback.
         // Scenario: spec-first stripping -- "hello\nworld\n   \n   \n
         //   \n" becomes "hello\nworld\n".
         let result = truncateScrollback("hello\nworld\n   \n   \n   \n")!

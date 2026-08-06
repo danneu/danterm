@@ -4,7 +4,7 @@
 // reschedule-instead-of-recreate shape eliminates per-call timer-object churn
 // while preserving the trailing deadline by default; callers that tolerate
 // delayed delivery can pass a leeway window so the OS can coalesce wakeups. No
-// AppKit/GhosttyKit dependency so it can be compiled in both the app build and
+// AppKit dependency so it can be compiled in both the app build and
 // the unit test build.
 
 import Foundation

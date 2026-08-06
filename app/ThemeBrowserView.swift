@@ -1,5 +1,5 @@
 // Theme browser panel: an overlay anchored to the right side of the content area.
-// Lists all available Ghostty themes with search filtering. Selecting a theme
+// Lists the whole DanTerm theme catalog with search filtering. Selecting a theme
 // (via click or keyboard navigation) applies it to the focused pane immediately.
 import Cocoa
 

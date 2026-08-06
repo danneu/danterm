@@ -682,7 +682,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .exportState:
         return [.exportState(toSnapshot(model, home: env.homeDirectory()))]
 
-    // MARK: - Ghostty Callbacks
+    // MARK: - Terminal Session Callbacks
 
     case .sessionTitle(let paneId, let title):
         guard title.fitsTerminalMetadataValueLimit else { return [] }

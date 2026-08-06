@@ -6,7 +6,7 @@
 // the right Msg.
 import Cocoa
 
-/// Registers Preferences-panel coverage in the GhosttyKit-free UI harness.
+/// Registers Preferences-panel coverage in the standalone UI harness.
 func preferencesPanelTests() {
     print("PreferencesPanel")
 

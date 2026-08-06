@@ -93,7 +93,7 @@ enum Msg {
     // Export
     case exportState
 
-    // Ghostty callbacks
+    // Terminal session callbacks
     case sessionTitle(paneId: PaneId, title: String)
     case sessionCwd(paneId: PaneId, cwd: String?)
     case sessionBell(paneId: PaneId)

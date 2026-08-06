@@ -7,7 +7,7 @@
 // template point at, and the unit-test boundary for the reconcile layer: derive view
 // state from `AppModel` here (purely), apply it to Cocoa there. Keep it
 // `import Foundation` only -- no AppKit -- which is what keeps the projection layer
-// testable without Cocoa or GhosttyKit. Cross-layer model helpers these call back into
+// testable without Cocoa or the terminal engine. Cross-layer model helpers these call back into
 // (queries, alert counts, container shapes) stay in ModelOperations.swift; this earns
 // its own file as the named pure peer of Reconcile.swift.
 import Foundation

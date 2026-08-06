@@ -20,8 +20,9 @@ func terminalLaunchEnvironment(
 ) -> [(String, String)] {
     [
         (EnvVars.flag, "1"),
-        // libghostty's environment API can override inherited values but cannot
-        // remove them. Empty is the CLI's explicit fail-closed representation.
+        // A pane's environment is a list of assignments layered over the inherited
+        // process environment: it can override a variable but has no way to unset one.
+        // Empty is the CLI's explicit fail-closed representation.
         (EnvVars.sock, ipcSocketPath ?? ""),
         (EnvVars.pane, paneId.rawValue.uuidString),
     ]

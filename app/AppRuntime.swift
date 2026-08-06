@@ -1,4 +1,4 @@
-// Runtime bridge that performs update commands and synchronizes AppKit/Ghostty views.
+// Runtime bridge that performs update commands and synchronizes the AppKit view tree.
 import Cocoa
 import DanTermProtocol
 import UniformTypeIdentifiers
@@ -116,7 +116,7 @@ private func writePaneTapeFollowRecords(
 }
 
 // App runtime owns the mutable app model, performs the commands emitted by the
-// pure update function, and bridges model changes into AppKit/Ghostty objects.
+// pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
 class AppRuntime {
     private struct StagedRestoreSession {
@@ -185,8 +185,10 @@ class AppRuntime {
     private var paneTapeFollowTimer: DispatchSourceTimer?
     private var ipcServer: IpcServer?
     private static let checkpointDebounceInterval: TimeInterval = 2.0
-    // Matches Ghostty's title coalesce interval: quick enough to feel live, slow
-    // enough to avoid flickering chrome under terminal-title spam.
+    // Coalescing window for the reconcile pass, sized for its noisiest driver: a
+    // shell that rewrites its OSC 0/2 title on every prompt. 75ms still reads as
+    // instant to a human, and it collapses a burst of title writes into one chrome
+    // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
     private static let paneTapeFollowInterval: TimeInterval = 0.05
 

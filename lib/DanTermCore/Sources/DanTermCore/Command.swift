@@ -15,17 +15,17 @@ enum Command {
     case createSession(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
     // Session *destruction* is a projection (reconcileSessionExistence tears down sessions
     // for panes gone from model.allPaneIds), so there is no destroy-session command.
-    // Paste path (ghostty_surface_text). Strips control bytes and applies
-    // bracketed-paste mode if active. Used by direct IPC callers that send
-    // the top-level `text` field.
+    // The paste path, taken by IPC's top-level `text` field. Delivered through the
+    // same safe-paste policy as the clipboard: control bytes stripped, bracketed-paste
+    // markers applied when the child asked for them. Deliberately distinct from
+    // sendInputText -- an untrusted blob must not be able to fake keystrokes.
     case sendText(paneId: PaneId, text: String)
-    // Structured-input text run, dispatched as a key event with keycode=0
-    // through ghostty_surface_key. Bypasses paste-stripping and bracketed
-    // paste so vim/htop see characters as if typed.
+    // The structured-input path, taken by IPC's `input` array alongside sendInputKey.
+    // Delivered raw, with no stripping and no paste brackets, because the caller is
+    // scripting a keyboard: vim and htop must see the characters as if typed.
     case sendInputText(paneId: PaneId, text: String)
-    // Single named/letter key event with optional modifiers, dispatched
-    // through ghostty_surface_key so escape sequences (arrows, F-keys, C-c,
-    // Esc) actually reach the PTY.
+    // One named/letter key with modifiers, encoded by the terminal's key encoder so
+    // arrows, F-keys, C-c, and Esc reach the PTY as real escape sequences.
     case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods)
 
     // Focus

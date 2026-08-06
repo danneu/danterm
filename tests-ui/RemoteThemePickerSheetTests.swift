@@ -3,7 +3,7 @@
 // production dismiss path no-ops instead of depending on real sheet presentation.
 import Cocoa
 
-/// Registers RemoteThemePickerSheet coverage in the GhosttyKit-free UI harness.
+/// Registers RemoteThemePickerSheet coverage in the standalone UI harness.
 func remoteThemePickerSheetTests() {
     print("RemoteThemePickerSheet")
 

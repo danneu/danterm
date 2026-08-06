@@ -49,6 +49,15 @@ final class TerminalSessionCallbackGate {
 }
 
 /// Inputs needed to create one terminal session without exposing adapter handles.
+///
+/// The three appearance fields are passed in rather than read from `DanTermConfig` at
+/// the creation seam, and that is deliberate on two counts. `themeName` is genuinely
+/// per-pane: it resolves `remoteThemeOverride ?? pane.theme ?? config default`, so the
+/// global value is only the last fallback. `fontSize` and `fontFamily` are global, but
+/// *which* model they come from is not -- restore builds its sessions against a staged
+/// model that has not replaced the live one yet, so a seam that read `self.model` would
+/// dress restored panes in the pre-restore config. `fontFamily` additionally is not a
+/// config value at all: it is the CoreText-resolved family the core cannot compute.
 struct TerminalSessionRequest {
     let workingDirectory: String?
     let command: String?

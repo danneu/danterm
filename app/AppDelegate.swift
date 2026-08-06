@@ -260,7 +260,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
-        appMenu.addItem(withTitle: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: "")
+        let openConfigItem = NSMenuItem(title: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: ",")
+        openConfigItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(openConfigItem)
         let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)

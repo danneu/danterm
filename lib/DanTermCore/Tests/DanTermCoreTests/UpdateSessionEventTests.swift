@@ -1,18 +1,15 @@
-// Swift Testing migration of the legacy `tests/UpdateGhosttyTests.swift`
-// harness suite. Pins the session-event Msg paths: sessionBell + OSC
+// Pins the Msg paths a live terminal session drives: sessionBell + OSC
 // desktopNotification routing (focused-pane suppression vs background-pane
 // alert + sendNotification, with per-kind throttling), sessionCreationFailed
 // cleanup (single + split tab, terminate vs fallback), session metadata
-// updates (title/cwd/progress), alert and command-event coalescing policy
-// against post-reconcile forcing. The few tests already carrying Intent /
-// Why / Scenario preambles in the legacy file keep them verbatim; the rest
-// get new spec-first preambles.
+// updates (title/cwd/progress), and alert/command-event coalescing policy
+// against post-reconcile forcing.
 import Foundation
 import Testing
 
 @testable import DanTermCore
 
-@Suite struct UpdateGhosttyTests {
+@Suite struct UpdateSessionEventTests {
     @Test("testBellOnFocusedPaneIsIgnored")
     func testBellOnFocusedPaneIsIgnored() {
         // Intent: a bell from the selected tab's focused pane is ignored while

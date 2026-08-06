@@ -2,7 +2,7 @@
 // selection dispatch, context-menu shape, and AppKit menu-target lifetime.
 import Cocoa
 
-/// Registers ThemeBrowserView coverage in the GhosttyKit-free UI harness.
+/// Registers ThemeBrowserView coverage in the standalone UI harness.
 func themeBrowserViewTests() {
     print("ThemeBrowserView")
 

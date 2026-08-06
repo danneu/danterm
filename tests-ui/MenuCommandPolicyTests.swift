@@ -1,6 +1,6 @@
 // Behavioral tests for the standalone menu command policy used by AppDelegate.
 // The cases pin default-deny terminal command gating without compiling the full
-// app runtime or GhosttyKit into the UI harness.
+// app runtime into the UI harness.
 import Foundation
 
 func menuCommandPolicyTests() {

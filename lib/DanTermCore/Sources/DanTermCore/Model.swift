@@ -95,7 +95,7 @@ struct PaneModel: Equatable {
     var cwd: String?
     var lastCommand: String?
     var progress: ProgressState? = nil
-    var theme: String? = nil  // ghostty theme name; nil = app default
+    var theme: String? = nil  // catalog theme name; nil = app default
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
     var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
@@ -418,7 +418,7 @@ struct PaneSnapshot: Codable {
     let cwd: String?
     let launch: PaneLaunchSnapshot?
     var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
-    let theme: String?       // raw ghostty theme name; nil = default
+    let theme: String?       // raw catalog theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
     var agentSession: AgentSessionSnapshot? = nil  // nil for backward compat; raw recovery-only DTO
 }

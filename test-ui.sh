@@ -66,7 +66,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
-        "$SCRIPT_DIR/app/TerminalBackend.swift" \
+        "$SCRIPT_DIR/app/TerminalSession.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/FontAvailability.swift" \
         "$SCRIPT_DIR/lib/DanTermSupport/Sources/DanTermSupport/PaneTapeFollow.swift" \

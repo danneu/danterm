@@ -1,6 +1,6 @@
 // Menu command enablement policy shared by the app delegate and the UI-test
 // harness. Keep this file free of AppKit view/runtime dependencies so command
-// validation can be tested without GhosttyKit.
+// validation can be tested without standing up the app runtime.
 import Foundation
 
 /// App-level commands that remain valid even when the terminal window is not
