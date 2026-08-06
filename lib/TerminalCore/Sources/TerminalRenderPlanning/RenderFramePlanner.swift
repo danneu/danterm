@@ -23,6 +23,9 @@ public func clipFramePlan(
     // `0..<plan.rows` by construction (`FramePlanner.plan` is the only producer), so
     // pre-filtering the set could only drop rows nothing below asks about.
     let rows = damage.rows
+    if rows.count == plan.rows, rows.allSatisfy({ 0..<plan.rows ~= $0 }) {
+        return plan
+    }
     return RenderFramePlan(
         columns: plan.columns,
         rows: plan.rows,

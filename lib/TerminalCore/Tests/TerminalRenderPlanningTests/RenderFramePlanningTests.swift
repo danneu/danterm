@@ -87,6 +87,29 @@ struct RenderFramePlanningTests {
         #expect(clipFramePlan(plan, to: .none).textRuns.isEmpty)
     }
 
+    @Test("Damage naming every viewport row preserves the complete frame plan")
+    func exhaustiveRowDamagePreservesPlan() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
+        let plan = invisiblePlan(terminal)
+
+        let clipped = clipFramePlan(plan, to: TerminalDamage(rows: Set(0..<plan.rows)))
+
+        #expect(clipped == plan)
+    }
+
+    @Test("Out-of-range damage cannot substitute for a missing viewport row")
+    func outOfRangeDamageDoesNotQualifyAsExhaustive() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
+        let plan = invisiblePlan(terminal)
+
+        let clipped = clipFramePlan(plan, to: TerminalDamage(rows: [0, 1, plan.rows]))
+
+        #expect(clipped != plan)
+        #expect(clipped.textRuns.allSatisfy { $0.row < 2 })
+    }
+
     @Test("Frame planning preserves exact glyph payloads and canonical split keys")
     func textRunContentAndSplitting() throws {
         var terminal = try #require(Terminal(columns: 10, rows: 1))
