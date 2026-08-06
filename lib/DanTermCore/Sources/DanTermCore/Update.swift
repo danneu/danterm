@@ -166,12 +166,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         let newSplitId = SplitId(rawValue: env.newId())
         let cwd = launch?.cwd ?? model.pane(targetPaneId)?.cwd
         let theme = model.pane(targetPaneId)?.theme
+        let fontSizeSteps = model.pane(targetPaneId)?.fontSizeSteps ?? 0
 
         var newPane = PaneModel(id: newPaneId)
         if let title = launch?.title {
             newPane.title = title
         }
         newPane.theme = theme
+        newPane.fontSizeSteps = fontSizeSteps
 
         // splitLeaf embeds the new pane's payload directly into the leaf.
         guard let newRoot = splitLeaf(
@@ -455,6 +457,24 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .setPaneTheme(let paneId, let themeName):
         model.updatePane(paneId) { $0.theme = themeName }
+        return [.scheduleCheckpoint]
+
+    case .adjustPaneFontSize(let paneId, let steps):
+        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+              let pane = model.pane(targetId) else { return [] }
+        // Bound the requested delta before adding it, so the sum cannot overflow
+        // and a caller asking for a huge jump lands on the bound rather than
+        // wrapping past it.
+        let next = clampedPaneFontSizeSteps(pane.fontSizeSteps + clampedPaneFontSizeSteps(steps))
+        guard next != pane.fontSizeSteps else { return [] }
+        model.updatePane(targetId) { $0.fontSizeSteps = next }
+        // The pane re-grids via reconcilePaneConfig (font size is in the projection).
+        return [.scheduleCheckpoint]
+
+    case .resetPaneFontSize(let paneId):
+        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+              let pane = model.pane(targetId), pane.fontSizeSteps != 0 else { return [] }
+        model.updatePane(targetId) { $0.fontSizeSteps = 0 }
         return [.scheduleCheckpoint]
 
     case .renameTab(let id, let name):

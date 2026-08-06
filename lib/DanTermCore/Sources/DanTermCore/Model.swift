@@ -96,6 +96,11 @@ struct PaneModel: Equatable {
     var lastCommand: String?
     var progress: ProgressState? = nil
     var theme: String? = nil  // catalog theme name; nil = app default
+    /// Font-size zoom relative to the configured size, in `paneFontSizeStepPoints`
+    /// steps; 0 = follow the configuration. Relative rather than absolute so a
+    /// configuration change moves zoomed and unzoomed panes alike. Always inside
+    /// `paneFontSizeStepRange` -- every ingress bounds it.
+    var fontSizeSteps: Int = 0
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
     var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
@@ -422,6 +427,9 @@ struct PaneSnapshot: Codable {
     let theme: String?       // raw catalog theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
     var agentSession: AgentSessionSnapshot? = nil  // nil for backward compat; raw recovery-only DTO
+    // Absent for an unzoomed pane, so a pane at the configured size persists
+    // exactly as it did before per-pane zoom existed.
+    var fontSizeSteps: Int? = nil
 }
 
 struct PaneLaunchSnapshot: Codable {
@@ -633,6 +641,10 @@ private func parseSplitNode(
         // the returned paneSnapshots map (the restore replay/scrollback source).
         let expandedCwd = resolveLaunch(ps, home: env.homeDirectory()).cwd
         var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        // A hand-edited or corrupt step count is bounded here rather than at
+        // projection, so the restored pane responds to the next adjustment
+        // exactly as one the user zoomed to that bound would.
+        paneModel.fontSizeSteps = clampedPaneFontSizeSteps(ps.fontSizeSteps ?? 0)
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in
                 guard let uuid = UUID(uuidString: ts.id) else { return nil }

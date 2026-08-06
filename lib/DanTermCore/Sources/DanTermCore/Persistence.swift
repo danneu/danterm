@@ -123,6 +123,7 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     theme: pane.theme
   )
   snapshot.todos = todoSnapshots
+  snapshot.fontSizeSteps = pane.fontSizeSteps == 0 ? nil : pane.fontSizeSteps
   snapshot.agentSession = pane.agentSession.map {
     AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
   }

@@ -69,6 +69,10 @@ enum Msg {
     case clearCustomTitles(tabIds: [TabId])
     case clearAlertsForTabs(tabIds: [TabId])
     case setPaneTheme(paneId: PaneId, themeName: String?)
+    // Font-size zoom for one pane. nil paneId = the selected tab's focused pane
+    // (menubar path), matching .toggleZoomPane.
+    case adjustPaneFontSize(paneId: PaneId?, steps: Int)
+    case resetPaneFontSize(paneId: PaneId?)
     case renameTab(id: TabId, name: String?)
     case sidebarRenameEnded
 

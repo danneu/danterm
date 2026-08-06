@@ -332,14 +332,14 @@ struct PaneConfigKey: Equatable {
   }
 }
 
-/// Projects the resolved theme, global font size, resolved font family, and
-/// copy-on-select onto every live pane.
+/// Projects the resolved theme, per-pane effective font size, resolved font
+/// family, and copy-on-select onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneConfigKey(
       theme: effectiveTheme(for: pane, config: model.config),
-      fontSize: model.config.resolvedFontSize,
+      fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,
       copyOnSelect: model.config.copyOnSelect
     )

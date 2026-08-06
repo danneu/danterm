@@ -23,6 +23,24 @@ struct DanTermConfig: Equatable {
 
     static let `default` = DanTermConfig()
 
+    static let defaultFontSize: Double = 13
+
+    /// Bounds `resolvedFontSize` maps into. Together with `paneFontSizeStepRange`
+    /// this keeps every configured size plus every per-pane zoom offset inside
+    /// `renderableFontSizeRange`, so the projection needs no clamp of its own.
+    static let fontSizeRange: ClosedRange<Double> = 8...72
+
     var resolvedDefaultTheme: String { defaultTheme ?? "Monokai Remastered" }
-    var resolvedFontSize: Double { fontSize ?? 13 }
+
+    /// The configured size mapped into `fontSizeRange`. A hand-edited config can
+    /// name any number, including one no renderer can use; nothing downstream
+    /// re-checks, so the bound belongs here.
+    var resolvedFontSize: Double {
+        guard let fontSize, fontSize.isFinite else { return Self.defaultFontSize }
+        return min(max(fontSize, Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
+    }
 }
+
+/// Every font size the render layer may be asked for. `fontSizeRange` and
+/// `paneFontSizeStepRange` are chosen so their sum cannot leave this range.
+let renderableFontSizeRange: ClosedRange<Double> = 4...96

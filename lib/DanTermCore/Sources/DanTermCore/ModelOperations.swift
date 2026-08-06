@@ -44,6 +44,42 @@ func effectiveTheme(for pane: PaneModel, config: DanTermConfig = .default) -> St
   pane.remoteThemeOverride ?? pane.theme ?? config.resolvedDefaultTheme
 }
 
+/// Points one zoom step moves a pane. Whole points: a fractional step would
+/// produce sizes too close to distinguish while still forcing a re-raster and a
+/// PTY reflow, and would lose the exact return to the configured size.
+let paneFontSizeStepPoints: Double = 1
+
+/// How far a pane may be zoomed from the configured size. Bounded on every
+/// ingress, not at projection, so repeated presses at a bound accumulate no
+/// hidden state and one press in the other direction is always visible.
+let paneFontSizeStepRange: ClosedRange<Int> = -4...24
+
+/// Bound a step count arriving from an adjustment or a persisted snapshot.
+func clampedPaneFontSizeSteps(_ steps: Int) -> Int {
+  min(max(steps, paneFontSizeStepRange.lowerBound), paneFontSizeStepRange.upperBound)
+}
+
+/// The size a pane actually renders at. No clamp: both operands are already
+/// bounded, and clamping here would silently eat steps the pane still holds.
+func effectiveFontSize(for pane: PaneModel, config: DanTermConfig = .default) -> Double {
+  config.resolvedFontSize + Double(pane.fontSizeSteps) * paneFontSizeStepPoints
+}
+
+/// Carry the live appearance settings onto a model rebuilt from a snapshot.
+/// `config` and `resolvedFontFamily` are loaded from disk at launch and never
+/// snapshotted, so a restored model arrives with them at their defaults. The
+/// restore path applies this before it creates any session from the model, so a
+/// zoomed pane is built at its real size instead of the default one and the
+/// committed model does not revert the user's configuration.
+func carryingLiveAppearance(
+  _ model: AppModel, config: DanTermConfig, resolvedFontFamily: String?
+) -> AppModel {
+  var carried = model
+  carried.config = config
+  carried.resolvedFontFamily = resolvedFontFamily
+  return carried
+}
+
 // MARK: - Pane side-table cleanup
 
 /// Remove all alerts for a pane being destroyed. Called via `clearPaneSideTables`.

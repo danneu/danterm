@@ -185,7 +185,7 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
 
 - `just test` -- the full local gate, including the new suites and the golden
   master.
-- `just build-run`, then in one window: split a pane, Cmd-plus a few times on the
+- `just launch-slot`, then in one window: split a pane, Cmd-plus a few times on the
   focused pane and confirm only that pane grows and its shell reflows to the new
   grid; Cmd-0 returns it to the configured size; Cmd-9 clears a tab color and Cmd-0
   no longer does. Verify Cmd-= (no shift) also increases and that the View menu
@@ -202,3 +202,29 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
 - The step increment, the step range, the configured-size range, and the renderable
   bounds are chosen at implementation time subject to I3 and I4.
 - Whether adjust and reset are two messages or one is a shape choice.
+
+## Commit progress
+- [x] 1. feat(core): per-pane font-size zoom in model, projection, and snapshot
+- [ ] 2. feat(app): bind per-pane font-size zoom to the View menu
+
+## Implementation notes
+
+- Bounds chosen for I3/I4: configured size resolves into `8...72`
+  (`DanTermConfig.fontSizeRange`), zoom spans `-4...24` whole points
+  (`paneFontSizeStepRange`), so every sum lands inside `renderableFontSizeRange`
+  (`4...96`) by construction. `renderableFontSizeRange` exists only as the named
+  contract the I3 test asserts against; no production code reads it.
+- `resolvedFontSize` also rejects a non-finite configured size. JSON cannot
+  express one today, but the guard is what makes the clamp total.
+- Adjust and reset are two messages, mirroring `.setPaneTheme` /
+  `.toggleZoomPane` rather than one message with an enum payload.
+- `.adjustPaneFontSize` bounds its `steps` argument before adding it to the
+  pane's, so no caller can overflow the sum.
+
+## Follow Up
+
+- Preferences accepts any positive finite font size
+  (`lib/DanTermCore/Sources/DanTermCore/Update.swift:689`), but
+  `resolvedFontSize` now clamps to `8...72`. A user who types 200 sees 200 in
+  the panel while panes render at 72. Either validate the draft against
+  `DanTermConfig.fontSizeRange` at save, or show the resolved value back.
