@@ -1135,9 +1135,10 @@ public struct Terminal: Equatable, Sendable {
 
     /// Gives deterministic tests a small budget while production remains fixed at 16 MiB.
     ///
-    /// The lower bound is the arena's: the store reserves its whole capacity at construction and
-    /// holds it below the budget by a fixed metadata reserve (`research/31/DD36`), so a budget too small to
-    /// hold a record plus its index is not a shallower history but an unusable one.
+    /// The lower bound is the arena's: the store fixes its whole address-space capacity at
+    /// construction and holds it below the budget by a metadata reserve (`research/31/DD36`),
+    /// even though physical backing materializes lazily. A budget too small to hold a record
+    /// plus its index is not a shallower history but an unusable one.
     init?(
         columns: Int,
         rows: Int,
@@ -2323,14 +2324,15 @@ public struct Terminal: Equatable, Sendable {
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
     ///
     /// Rebases history onto an arena at the production budget rather than raising a bound in
-    /// place: the arena reserves its whole capacity at construction and is never grown
-    /// (`31/I2`), so "this terminal with an unlimited budget" is not a value that exists.
+    /// place: the arena fixes its whole address-space capacity at construction and never grows
+    /// that capacity (`31/I2`), so "this terminal with an unlimited budget" is not a value that
+    /// exists. Its backing still materializes lazily while the records are copied.
     ///
-    /// `budgetBytes` exists because the arena is zero-filled at its full capacity on every
-    /// construction, so a caller that builds one twin per action pays the whole budget as a
-    /// memset each time. "Unlimited" only ever means "cannot evict for what this oracle feeds
-    /// it", so such a caller may name a smaller budget -- and owes a fixture-specific argument
-    /// that eviction is unreachable, since a twin that evicts is a silently wrong oracle.
+    /// `budgetBytes` lets a caller that builds one twin per action avoid materializing more
+    /// backing than its fixture can reach while the existing records are replayed. "Unlimited"
+    /// only ever means "cannot evict for what this oracle feeds it", so such a caller may name a
+    /// smaller budget -- and owes a fixture-specific argument that eviction is unreachable,
+    /// since a twin that evicts is a silently wrong oracle.
     func withUnlimitedScrollbackForTesting(
         budgetBytes: Int = Terminal.productionScrollbackBudgetBytes
     ) -> Self {

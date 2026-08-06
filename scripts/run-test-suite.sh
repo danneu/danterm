@@ -81,6 +81,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_fixtures_test.py'
     'python3 ./scripts/tests/terminal_retained_row_shape_test.py'
     'python3 ./scripts/tests/terminal_memory_profile_test.py'
+    'python3 ./scripts/tests/terminal_fixed_cost_probe_test.py'
     'python3 ./scripts/tests/terminal_btop_stimulus_test.py'
     'python3 ./scripts/tests/terminal_btop_artifacts_test.py'
     'python3 ./scripts/tests/terminal_btop_workload_test.py'

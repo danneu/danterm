@@ -76,15 +76,16 @@ struct TerminalScrollbackBudgetTests {
         #expect(resized == direct)
     }
 
-    @Test("the arena is reserved once, and the charge never passes its capacity")
+    @Test("the arena capacity is fixed, and the charge never passes it")
     func budgetChargesReservedStorageNotJustCells() throws {
         // Intent: what history charges stays inside the capacity it was built at, and that
         //   capacity does not move however much is fed through it.
         // Why it exists: the `research/15/F7` and `research/15/F12` incident restated for the arena
         //   (`research/31/DD11`). The old
         //   charge modelled per-row allocations and drifted from what malloc really reserved; the
-        //   arena is allocated once, below the budget by a fixed metadata reserve (`research/31/DD36`), so
-        //   the bound holds by construction and the proof is that capacity never grows.
+        //   arena's address-space capacity is fixed below the budget by a metadata reserve
+        //   (`research/31/DD36`), so the bound holds by construction even though backing chunks
+        //   now materialize lazily.
         // Scenario: a pane at ordinary widths streams enough history to force steady eviction.
         for columns in [80, 200] {
             var terminal = try #require(Terminal(

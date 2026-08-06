@@ -79,13 +79,12 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// proof reads, together with the index and out-of-arena side-table terms below.
     public var retainedArenaBytesInUse: Int
 
-    /// The arena's allocated capacity, held below the byte budget by a fixed metadata reserve so
+    /// The arena's reserved capacity, held below the byte budget by a fixed metadata reserve so
     /// the index and the side tables are resident *inside* the bound (`research/31/DD36`).
     ///
-    /// Allocated once and never grown, compacted or shrunk, which is what makes `research/15/F4`
-    /// leak unrepresentable: there are no per-row allocations left for eviction to strand, and
-    /// the proof is "bytes-in-use falls when records are evicted, and this does not grow"
-    /// (`research/31/DD11`).
+    /// Fixed once and never grown. Backing materializes lazily in fixed-size chunks, but that
+    /// physical high-water is deliberately not part of this logical capacity or the budget
+    /// charge. Materialized chunks are never reclaimed, while the address space stays bounded.
     public var retainedArenaCapacityBytes: Int
 
     /// The derived index's charge: per-record offsets plus per-block display-row totals.

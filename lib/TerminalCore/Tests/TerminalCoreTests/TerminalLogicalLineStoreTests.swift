@@ -340,14 +340,14 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
-    @Test("The arena's capacity is allocated below the byte budget by the metadata reserve")
+    @Test("The arena's capacity is reserved below the byte budget by the metadata reserve")
     func arenaCapacityIsHeldBelowTheBudget() {
         // Intent: the store reserves less than its budget for the arena, so the index and the
         //   side tables are resident inside the bound rather than on top of it, and the charge
         //   is tested against the arena's capacity rather than against the budget.
         // Why it exists: `research/31/F8` Observation 4 measured a cycled arena pane at 1.118x today's
-        //   resident bytes for the same fed input, because the reservation is dirty from
-        //   construction and the metadata sits on top of it. `research/31/D4`'s residency remedy is
+        //   resident bytes for the same fed input, because the eager reservation was dirty from
+        //   construction and the metadata sat on top of it. `research/31/D4`'s residency remedy is
         //   exactly this reserve, and without a test the two numbers can silently become one
         //   again -- which is the state `31/I2`'s original "the arena's capacity *is* that
         //   budget" describes.
@@ -1260,6 +1260,55 @@ struct TerminalLogicalLineStoreTests {
 
     // MARK: - Chunked backing (`research/31/D5`)
 
+    @Test("arena backing materializes only when a record is first written")
+    func arenaBackingMaterializesOnFirstWrite() {
+        // Intent: a fresh store owns no backing chunks, and admitting one record materializes
+        //   exactly the chunk that holds it while leaving the logical capacity unchanged.
+        // Why it exists: eager construction dirties the full per-pane arena before the pane has
+        //   any history, turning a logical capacity bound into a fixed resident-memory cost.
+        // Scenario: a newly created pane receives its first hard-ended scrollback row.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+        let capacity = store.capacityBytes
+
+        #expect(store.chunkStorageIdentitiesForTesting().isEmpty)
+        #expect(store.capacityBytes == capacity)
+
+        store.admit(Self.shortRow(width: 80, count: 20, seed: 0))
+
+        #expect(store.chunkStorageIdentitiesForTesting().count == 1)
+        #expect(store.capacityBytes == capacity)
+    }
+
+    @Test("materialization high-water does not affect content, equality, or census")
+    func materializationHighWaterIsUnobservable() {
+        // Intent: stores with equal retained content compare equal, read identically, and report
+        //   the same census even when one has materialized more arena backing.
+        // Why it exists: lazy backing is a physical high-water only; letting it enter equality or
+        //   the fixed metadata charge would make allocation history observable to callers.
+        // Scenario: two stores grow identical index capacity through compact versus wide records,
+        //   clear, then retain the same new line after reaching different backing chunks.
+        var shallow = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+        var deep = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+
+        for seed in 0..<128 {
+            shallow.admit(Self.shortRow(width: 80, count: 0, seed: seed))
+            deep.admit(Self.filledRow(width: 80, seed: seed, softWrapped: false))
+        }
+        shallow.removeAll()
+        deep.removeAll()
+
+        #expect(shallow.chunkStorageIdentitiesForTesting().count == 1)
+        #expect(deep.chunkStorageIdentitiesForTesting().count > 1)
+
+        let common = Self.shortRow(width: 80, count: 20, seed: 1_000)
+        shallow.admit(common)
+        deep.admit(common)
+
+        #expect(shallow == deep)
+        #expect(shallow.recordCells(at: 0) == deep.recordCells(at: 0))
+        #expect(shallow.census == deep.census)
+    }
+
     @Test("a published value and the next admission share every chunk but the one written")
     func publishedValueThenAdmitCopiesOneChunkNotTheWholeArena() {
         // Intent: after the store's value has been copied -- which is what publishing a frame
@@ -1322,6 +1371,9 @@ struct TerminalLogicalLineStoreTests {
 
         let retained = Self.readLogicalLines(store)
         #expect(retained.isEmpty == false)
+        let fullChunkCount = (store.capacityBytes + store.chunkCapacityBytesForTesting - 1)
+            / store.chunkCapacityBytesForTesting
+        #expect(store.chunkStorageIdentitiesForTesting().count <= fullChunkCount)
         #expect(store.independentDisplayRowRecount() == store.grandDisplayRowTotal)
         // The retained lines are a suffix of what was fed, with the oldest one possibly trimmed
         // at the head (`31/I4`) and every later one whole.

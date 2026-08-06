@@ -5,9 +5,10 @@
 // specified. History holds one record per
 // logical line a program printed; wrapping is derived at read from (record, width); a width
 // change rewrites no retained byte and evicts nothing, because there is no width in storage to
-// rewrite (`I1`, `I3`). The arena is allocated once at a capacity held *below* the byte budget by
-// the metadata reserve, and is never grown, compacted or shrunk (`I2` as amended by `research/31/D4`'s
-// residency remedy), so at steady state admission allocates nothing.
+// rewrite (`I1`, `I3`). The arena reserves a byte address space held *below* the byte budget by
+// the metadata reserve, then materializes its fixed-size backing chunks as writes first reach
+// them. The address space is never grown or compacted (`I2` as amended by `research/31/D4`'s
+// residency remedy), and materialized backing is never shrunk.
 //
 // What belongs here: the arena and its ring discipline, the five mutating operations `research/31/D2`
 // Decision 2 enumerates (admit, close/reopen the tail, evict at the head, truncate the tail,
@@ -163,16 +164,17 @@ extension Terminal {
         /// arena terms).
         ///
         /// `chargedBytes` is the single quantity `31/I2` bounds, and it is bounded by
-        /// `capacityBytes` rather than by `budgetBytes`: the arena is allocated **below** the
-        /// budget by the metadata reserve, so that the index and the side tables live inside the
-        /// bound rather than resident on top of it (`research/31/D4`'s residency remedy, `research/31/DD36`).
+        /// `capacityBytes` rather than by `budgetBytes`: the arena's address space is reserved
+        /// **below** the budget by the metadata reserve, so that the index and the side tables
+        /// live inside the bound rather than resident on top of it (`research/31/D4`'s residency
+        /// remedy, `research/31/DD36`).
         /// Charged is still **not** resident: once the ring's write cursor has cycled every arena
         /// page has been touched, which is the reading `31/AR6` promoted to a gate.
         struct Census: Equatable, Sendable {
             /// The byte budget the store was configured with -- what a pane's history may cost.
             var budgetBytes: Int
-            /// The arena's allocated capacity, which is the budget less the metadata reserve and
-            /// is the number `chargedBytes` is bounded by.
+            /// The arena's reserved capacity, which is the budget less the metadata reserve and
+            /// is the number `chargedBytes` is bounded by. Backing materializes lazily within it.
             var capacityBytes: Int
             var arenaBytesInUse: Int
             var indexBytes: Int
@@ -209,10 +211,12 @@ extension Terminal {
 
         // MARK: - Stored state
 
-        /// The arena, stored as 64-bit words over a fixed number of copy-on-write chunks.
-        /// Allocated once at `arenaCapacity` and never resized -- `research/31/D2` Decision 1 rejected
-        /// both geometric growth (resident slack no charge model can see, the shape of `research/15/F4`'s
-        /// leak) and `memmove` compaction (a 16 MiB copy on the admission path).
+        /// The arena, stored as 64-bit words over copy-on-write chunks materialized on first use.
+        /// Its byte address space is fixed at `arenaCapacity`; only the consecutive backing prefix
+        /// grows, one chunk at a time, and materialized chunks are never reclaimed. `research/31/D2`
+        /// Decision 1 rejected geometric address-space growth (resident slack no charge model can
+        /// see, the shape of `research/15/F4`'s leak) and `memmove` compaction (a 16 MiB copy on the
+        /// admission path).
         ///
         /// Words rather than bytes because every offset in the store is a byte offset on an
         /// 8-byte grain -- headers, cells and both in-arena tables all are -- so a word is
@@ -280,8 +284,9 @@ extension Terminal {
         /// The byte budget `31/I2` bounds the charge by, as configured.
         private let budget: Int
 
-        /// The arena's allocated capacity: the budget less the metadata reserve, and the number
-        /// the charge is actually tested against (`research/31/DD36`).
+        /// The arena's reserved capacity: the budget less the metadata reserve, and the number
+        /// the charge is actually tested against (`research/31/DD36`). Backing materialization
+        /// does not change it.
         private let arenaCapacity: Int
 
         private let forcedSplitCellCap: Int
@@ -331,9 +336,8 @@ extension Terminal {
 
         // MARK: - Construction
 
-        /// Reserves the arena up front, at the budget less the metadata reserve, which is what
-        /// makes the bound hold by construction rather than by a model checked against a second
-        /// model.
+        /// Reserves the arena's byte address space at the budget less the metadata reserve.
+        /// Backing starts empty and materializes in consecutive chunks as records first reach it.
         init(budgetBytes: Int = Terminal.productionScrollbackBudgetBytes, width: Int) {
             precondition(budgetBytes >= Terminal.minimumScrollbackBudgetBytes)
             precondition(budgetBytes % 8 == 0)
@@ -344,14 +348,7 @@ extension Terminal {
             chunkByteShift = shift
             chunkByteMask = (1 << shift) - 1
             chunkBytes = 1 << shift
-            var backing = ContiguousArray<ContiguousArray<UInt64>>()
-            var placed = 0
-            while placed < arenaCapacity {
-                let size = min(1 << shift, arenaCapacity - placed)
-                backing.append(ContiguousArray(repeating: 0, count: size / 8))
-                placed += size
-            }
-            chunks = backing
+            chunks = []
             self.width = width
             forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
@@ -427,6 +424,11 @@ extension Terminal {
         /// mutation copies at most.
         var chunkCapacityBytesForTesting: Int { regionCapacityBytes }
 
+        /// The full backing chunk count implied by fixed capacity, whether materialized or not.
+        private var fullChunkCount: Int {
+            (arenaCapacity + chunkBytes - 1) / chunkBytes
+        }
+
         // MARK: - Census
 
         var budgetBytes: Int { budget }
@@ -466,14 +468,13 @@ extension Terminal {
 
         /// What splitting the arena's backing costs beyond the bytes it holds (`research/31/D5`).
         ///
-        /// One array storage header per chunk plus the outer array that names them --
-        /// ~1.2 KiB of a 15 MiB capacity at the production budget. Charged rather than ignored
-        /// at the allocator's bucket count rather than the live entry count: a charge that
-        /// describes a model rather than an allocation is `research/15/F2`'s error class,
-        /// and the backing change is exactly the kind of thing that would hide inside it.
+        /// One array storage header per possible chunk plus the outer array that names them --
+        /// ~1.2 KiB of a 15 MiB capacity at the production budget. This stays fixed at the full
+        /// chunk count even while backing materializes lazily, preserving the metadata reserve
+        /// and preventing the charge from drifting underneath live content.
         private var arenaBackingOverheadBytes: Int {
-            Terminal.arrayStorageHeaderBytes * (chunks.count + 1)
-                + chunks.count * MemoryLayout<ContiguousArray<UInt64>>.stride
+            Terminal.arrayStorageHeaderBytes * (fullChunkCount + 1)
+                + fullChunkCount * MemoryLayout<ContiguousArray<UInt64>>.stride
         }
 
         private var sideTableChargeBytes: Int {
@@ -548,8 +549,9 @@ extension Terminal {
             let admission = admissionExtent(row)
 
             // A budget too small to hold one display row of this width retains nothing rather
-            // than trapping. The arena is reserved once and never grown (`31/I2`), so there is
-            // no room to make for a row that does not fit an empty region; the honest answer is
+            // than trapping. The arena's address space is reserved once and never grown
+            // (`31/I2`), so there is no room to make for a row that does not fit an empty region;
+            // the honest answer is
             // that such a pane has no history, and the degenerate configuration stays reachable
             // instead of being a crash. The unit is a backing chunk rather than the capacity
             // because a record may not straddle one (`research/31/DD54`), which at the 64 KiB chunk floor
@@ -1325,7 +1327,7 @@ extension Terminal {
         /// A copy of this store at a different byte budget, holding exactly the same records.
         ///
         /// The only way to build an eviction oracle, and the reason it is a record-level copy
-        /// rather than a replay: the arena reserves its whole capacity at construction
+        /// rather than a replay: the arena fixes its whole address-space capacity at construction
         /// (`31/I2`), so a store cannot be re-bounded in place, and re-admitting its folded rows
         /// would not reproduce it -- admission measures a soft-wrapped row to full width, which
         /// the open tail's deliberately short final display row is not.
@@ -1983,6 +1985,7 @@ extension Terminal {
 
         private mutating func openRecordIfNeeded(mark: Terminal.SemanticPromptRow) {
             if openTailRecord() != nil { return }
+            materializeChunk(at: writeCursor)
             let inherited = pendingStartsMidLine
             pendingStartsMidLine = false
             // A record opened after a forced split continues the previous line, so the mark
@@ -2291,6 +2294,20 @@ extension Terminal {
         /// The largest contiguous run one record may occupy: a backing chunk, or the whole
         /// capacity when the capacity is smaller than one (`research/31/D5`, `research/31/DD54`).
         private var regionCapacityBytes: Int { min(chunkBytes, arenaCapacity) }
+
+        /// Appends the backing chunk containing `offset` before its first write.
+        ///
+        /// First visits are consecutive by the ring placement invariant. A backward cursor move
+        /// can therefore only name an existing chunk, so a sparse chunk table is unnecessary.
+        private mutating func materializeChunk(at offset: Int) {
+            let index = chunkIndex(of: offset)
+            precondition(index <= chunks.count, "arena chunks must materialize consecutively")
+            guard index == chunks.count else { return }
+            precondition(chunks.count < fullChunkCount)
+            let start = index * chunkBytes
+            let size = min(chunkBytes, arenaCapacity - start)
+            chunks.append(ContiguousArray(repeating: 0, count: size / 8))
+        }
 
         /// The region end at the write cursor: the next chunk boundary, capped at the arena's
         /// physical end.
