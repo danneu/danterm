@@ -34,16 +34,17 @@ import terminal_btop_stimulus as stimulus  # noqa: E402
 
 
 WORKLOAD_NAME = "btop-scroll"
-# The three profiling modes btop is admitted to (I1). `memory` is absent on
+# The only three modes btop may enter. `memory` is absent on
 # purpose, and so is every calibrated comparison: those reach a verdict, and a
 # live process list is not a workload any verdict may rest on.
 PROFILING_MODES = ("loop", "sample", "trace")
 BOUNDED_MODES = ("sample", "trace")
-# I2's window. The floor keeps a recording from being shorter than the profiler's
-# own attach cost; the ceiling is what AR3 accepts as covered.
+# The bounded interface's 1-20 second window. The floor keeps a recording from
+# being shorter than the profiler's own attach cost; the ceiling scopes the
+# diagnostic to the reproduced incident.
 MIN_DURATION_SECONDS = 1
 MAX_DURATION_SECONDS = 20
-# I4's canonical geometry, as `stty size` reports it: rows first.
+# The canonical live-PTY geometry, as `stty size` reports it: rows first.
 CANONICAL_ROWS = 66
 CANONICAL_COLUMNS = 179
 LOOP_LEG_SECONDS = 10.0
@@ -53,7 +54,7 @@ DEFAULT_LEAD_SECONDS = 1.0
 DEFAULT_TRAIL_SECONDS = 1.0
 # How long past its requested window a profiler may take to attach, save, and
 # exit before the capture is abandoned. `xctrace` spends seconds on each end; the
-# bound exists so a wedged one cannot hold an arrow key down indefinitely (I5).
+# bound exists so a wedged one cannot violate the release-on-every-exit guarantee.
 PROFILER_OVERHEAD_SECONDS = 180.0
 MACHINE_STATE_INTERVAL_SECONDS = 1.0
 READINESS_TIMEOUT_SECONDS = 60.0
@@ -78,7 +79,7 @@ class WorkloadRejected(RuntimeError):
 
 
 def admit_mode(mode):
-    """Admit `btop-scroll` to the profiling modes only (I1)."""
+    """Admit `btop-scroll` only to sample, trace, and loop profiling."""
     if mode not in PROFILING_MODES:
         raise WorkloadRejected(
             f"`{WORKLOAD_NAME}` is a profiling-only workload: it is offered to "
@@ -89,7 +90,7 @@ def admit_mode(mode):
 
 
 def admit_duration(mode, raw):
-    """Admit a bounded mode's recording window and refuse one for loop (I2).
+    """Require sample and trace to use 1-20 whole seconds and refuse a duration for loop.
 
     Returns the whole seconds a bounded capture will record, or `None` for loop --
     which runs until interrupted, so a duration there would describe nothing.
@@ -164,7 +165,7 @@ def descendant_pids(entries, root_pid):
 
 
 def select_owned_btop(entries, *, executable, app_pid):
-    """Find the one btop this invocation owns, refusing zero and refusing several (I3).
+    """Find the one btop this invocation owns, refusing zero and refusing several.
 
     Ambiguity is rejected rather than resolved: with two candidates there is no
     fact on the table saying which one the profiler's samples came from, and
@@ -207,7 +208,7 @@ def parse_stty_size(text):
 
 
 def require_canonical_geometry(rows, columns):
-    """Require the live PTY to be the canonical 179x66 the diagnostic is defined at (I4)."""
+    """Require the owned btop's live PTY to report the canonical 179x66 geometry."""
     if (rows, columns) != (CANONICAL_ROWS, CANONICAL_COLUMNS):
         raise WorkloadRejected(
             f"the owned btop PTY reports {columns}x{rows}, not the canonical "
@@ -221,8 +222,8 @@ def read_live_pty_size(tty, *, run_command=subprocess.run):
     """Ask the kernel for the owned PTY's current winsize.
 
     Read from the device rather than from inside the pane: an in-pane `stty` run
-    before btop starts reports the size at that moment, and the claim I4 needs is
-    about the geometry the profiled process is drawing at now.
+    before btop starts reports the size at that moment, while readiness requires
+    the geometry the uniquely owned profiled process is drawing at now.
     """
     device = tty if str(tty).startswith("/dev/") else f"/dev/{tty}"
     result = run_command(
@@ -437,9 +438,9 @@ def drive_loop(*, arm, app_pid, live_path, leg_seconds=LOOP_LEG_SECONDS, cadence
                should_continue=None):
     """Alternate fixed legs until interrupted, publishing the current direction as it goes.
 
-    Loop issues no coverage verdict (AR2); what it owes an attaching agent is the
-    live direction and leg start it would otherwise have to guess, so each leg is
-    published before it is held.
+    A loop leg may end in an idle tail, so loop issues no coverage verdict; what it
+    owes an attaching agent is the live direction and leg start it would
+    otherwise have to guess, so each leg is published before it is held.
     """
     cadence = cadence or stimulus.read_key_repeat_cadence()
     arm_process = _arm_process(arm, app_pid)

@@ -92,8 +92,9 @@ case "$WORKLOAD" in
     btop-scroll)
         # Live, profiling-only, and never measured: the workload's content is the
         # host's process table, so admitting it to the measuring mode -- the one
-        # every paired comparison collects blocks through -- would put an
-        # uncontrolled workload behind a decision (I1).
+        # every paired comparison collects blocks through -- would violate the
+        # profiling-only boundary by putting an uncontrolled workload behind a
+        # decision.
         [[ "$MODE" != "measure" ]] || {
             echo "btop-scroll is a profiling-only workload and is never measured" >&2
             exit 2
@@ -268,8 +269,9 @@ fi
 "$CLI" pane input --pane "$PANE_ID" -- Enter
 if [[ "$MODE" == "loop" || "$MODE" == "persistent" ]]; then
     if [[ "$WORKLOAD" == "btop-scroll" ]]; then
-        # The live workload has no producer to converge geometry, so readiness is
-        # the owned btop's own PTY reporting the canonical size (I4).
+        # The live workload has no producer to converge geometry, so readiness
+        # requires the uniquely owned btop's own PTY to report the canonical
+        # 66x179 size.
         python3 "$SCRIPT_DIR/terminal_btop_workload.py" readiness --app-pid "$APP_PID" \
             --executable "$BTOP_EXECUTABLE" --home "$HOME_DIR" \
             --output "$ARTIFACTS/btop-readiness.json" >&2

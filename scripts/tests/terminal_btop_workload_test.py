@@ -76,7 +76,7 @@ class AdmissionTests(unittest.TestCase):
     def test_btop_is_offered_to_the_profiling_modes_and_to_nothing_else(self):
         # Intent: `btop-scroll` is admitted to sample, trace, and loop, and refused
         #   by memory profiling and by every other named mode.
-        # Why it exists: I1. The workload is an attribution instrument over a live
+        # Why it exists: this is a profiling-only attribution instrument over a live
         #   process list; any path that reaches a verdict, a comparison, or a
         #   memory number would be resting it on a workload with no fixed content.
         for mode in ("sample", "trace", "loop"):
@@ -90,8 +90,8 @@ class AdmissionTests(unittest.TestCase):
     def test_bounded_modes_take_one_to_twenty_whole_seconds_and_loop_takes_none(self):
         # Intent: sample and trace require an explicit whole-number duration in
         #   1-20; loop accepts no duration at all.
-        # Why it exists: I2. An unbounded or fractional recording is a window the
-        #   held-key stimulus cannot promise to contain, and a duration handed to
+        # Why it exists: sample and trace require an explicit 1-20 second
+        #   whole-number window that the held-key stimulus can contain, while a duration handed to
         #   loop would describe a run that stops only when interrupted.
         for mode in ("sample", "trace"):
             for seconds in ("1", "20", 7):
@@ -119,9 +119,10 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
 
     def test_memory_profiling_refuses_the_live_workload(self):
         # Intent: `benchmark-memory btop-scroll` is rejected outright.
-        # Why it exists: I1 has to hold at the command an operator actually types,
-        #   not only in the admission table. Memory profiling produces a footprint
-        #   number, which is a claim this workload may not support.
+        # Why it exists: the profiling-only boundary must hold at the command an
+        #   operator actually types, not only in the admission table. Memory
+        #   profiling produces a footprint number, which is a claim this workload
+        #   may not support.
         result = self.run_profile("memory", "btop-scroll", "swift", "90", "15")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("btop-scroll", result.stderr)
@@ -129,8 +130,9 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
     def test_a_bounded_recording_window_outside_one_to_twenty_is_refused(self):
         # Intent: sample and trace reject a 0-, 21-, or fractional-second window
         #   for `btop-scroll` before anything is built or launched.
-        # Why it exists: I2, at the command surface. The generic profiling
-        #   duration check accepts any positive whole number, so without a
+        # Why it exists: the command surface must enforce the 1-20 second
+        #   whole-number bound. The generic profiling duration check accepts any
+        #   positive whole number, so without a
         #   workload-specific bound a 600-second btop recording would build an
         #   app and launch btop before failing -- or worse, not fail at all.
         for seconds in ("0", "21", "45"):
@@ -142,8 +144,8 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
     def test_the_measuring_harness_refuses_the_live_workload(self):
         # Intent: `terminal-benchmark.sh btop-scroll` in its default measuring mode
         #   is rejected.
-        # Why it exists: I1's other reachable door. The harness's measure mode is
-        #   what every paired comparison collects blocks through, so admitting the
+        # Why it exists: measure mode is another door into decision-bearing work.
+        #   Every paired comparison collects blocks through it, so admitting the
         #   workload there for the profiling modes must not admit it for the
         #   decision-bearing one.
         result = subprocess.run(
@@ -158,8 +160,9 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
     def test_no_calibrated_comparison_can_name_the_workload(self):
         # Intent: the paired comparison ladder neither contains `btop-scroll` nor
         #   accepts it as a selected workload.
-        # Why it exists: I1's decision-bearing half. `quick` takes a workload name
-        #   straight from the operator, so the rejection has to come from the
+        # Why it exists: quick and confirm must never admit this profiling-only
+        #   workload. `quick` takes a workload name straight from the operator,
+        #   so the rejection has to come from the
         #   ladder's own closed set rather than from documentation.
         import importlib.util
 
@@ -183,9 +186,9 @@ class PreflightTests(unittest.TestCase):
     def test_a_missing_btop_is_refused_before_anything_is_compiled(self):
         # Intent: preflight with no btop on PATH exits nonzero and leaves its
         #   output directory empty.
-        # Why it exists: PO1. The preflight's whole reason to exist is to fail
-        #   before a release build and a GUI launch, so "it eventually failed" is
-        #   not the property -- "it failed having built nothing" is.
+        # Why it exists: missing btop must fail before a release build and GUI
+        #   launch, so "it eventually failed" is not the property -- "it failed
+        #   having built nothing" is.
         with tempfile.TemporaryDirectory() as directory:
             empty_path = pathlib.Path(directory) / "bin"
             empty_path.mkdir()
@@ -212,8 +215,9 @@ class PreflightTests(unittest.TestCase):
 
     def test_an_inadmissible_mode_is_refused_before_btop_is_even_resolved(self):
         # Intent: preflight rejects `memory` without touching PATH or the compiler.
-        # Why it exists: PO1's ordering claim. Admission is cheaper than every
-        #   other check, and a host that happens to lack btop must not be told the
+        # Why it exists: inadmissible modes must fail before executable or permission
+        #   preflight. Admission is cheaper than every other check, and a host
+        #   that happens to lack btop must not be told the
         #   mode was the acceptable part.
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "out"
@@ -249,9 +253,9 @@ class OwnedProcessTests(unittest.TestCase):
     def test_only_a_btop_inside_the_owned_process_tree_is_the_workload(self):
         # Intent: the owned btop is selected by lineage from the benchmark app,
         #   and an identical binary running under another app is not a candidate.
-        # Why it exists: I3. The operator very plausibly has their own btop open
-        #   while running this; profiling theirs, or tearing it down at cleanup,
-        #   is the exact failure `RI2` rejected targeting a user pane to avoid.
+        # Why it exists: every btop and profiler process must belong to this
+        #   invocation. The operator may have another btop open; profiling or terminating it would
+        #   violate the owned-process boundary that rules out targeting a user pane.
         entries = WORKLOAD.parse_process_table(self.TABLE)
         owned = WORKLOAD.select_owned_btop(
             entries, executable="/opt/homebrew/bin/btop", app_pid=200
@@ -262,8 +266,9 @@ class OwnedProcessTests(unittest.TestCase):
     def test_an_ambiguous_or_absent_owned_btop_is_refused(self):
         # Intent: zero owned btop processes and two owned btop processes are both
         #   rejected, rather than one being picked.
-        # Why it exists: I3 again. With two candidates nothing on the table says
-        #   which one the profiler sampled, so choosing either would put an
+        # Why it exists: owned isolation requires one uniquely identified btop.
+        #   With two candidates nothing says which one the profiler sampled, so
+        #   choosing either would put an
         #   unattributable process's behavior into the record as if it were this
         #   workload's.
         entries = WORKLOAD.parse_process_table(self.TABLE)
@@ -282,9 +287,9 @@ class OwnedProcessTests(unittest.TestCase):
     def test_readiness_requires_the_live_pty_to_be_canonical(self):
         # Intent: readiness returns the owned process only once the live PTY
         #   reports 179x66, and reports the geometry it saw when it never does.
-        # Why it exists: I4. btop lays its process list out from the terminal size
-        #   it is given, so a profile taken at another geometry is a different
-        #   workload wearing this one's name.
+        # Why it exists: readiness requires the uniquely owned btop's live PTY to
+        #   report 66x179. btop lays out its process list from that geometry, so
+        #   another size is a different workload wearing this one's name.
         sizes = iter(["24 80\n", "24 80\n", "66 179\n"])
 
         def run_command(argv, **_):
@@ -367,8 +372,8 @@ class CaptureDriverTests(unittest.TestCase):
     def test_a_contained_profiler_window_is_recorded_as_the_capture(self):
         # Intent: a profiler that ran wholly inside the held key produces a capture
         #   whose overlap is contained and whose exit status is the profiler's.
-        # Why it exists: PO2's success case at the driver level -- the seam that
-        #   turns the stimulus module's timing rules into an artifact on disk.
+        # Why it exists: the tested driver seam must turn measured stimulus/profiler
+        #   containment into a preserved artifact on disk.
         with tempfile.TemporaryDirectory() as directory:
             arm, log = self.arm(directory)
             capture, status = WORKLOAD.drive_bounded_capture(
@@ -393,9 +398,10 @@ class CaptureDriverTests(unittest.TestCase):
         # Intent: a profiler whose reported window falls outside the measured
         #   stimulus comes back as `contained: false` with a reason and a nonzero
         #   status -- and the arrow key is still released.
-        # Why it exists: I5 plus the plan's preservation rule. The bundle grader
-        #   is what issues the verdict, so the reason has to survive to disk; an
-        #   exception here would abandon the run before the grader could name why.
+        # Why it exists: an invalid bounded overlap must exit nonzero while
+        #   preserving its partial bundle. The grader issues the verdict, so the
+        #   reason has to survive to disk; an exception here would abandon the run
+        #   before the grader could name why.
         with tempfile.TemporaryDirectory() as directory:
             arm, log = self.arm(directory)
             capture, status = WORKLOAD.drive_bounded_capture(
@@ -417,8 +423,9 @@ class CaptureDriverTests(unittest.TestCase):
     def test_loop_alternates_directions_and_publishes_the_live_leg(self):
         # Intent: loop holds alternating legs, publishes the direction it is
         #   currently holding, and releases the key when it stops.
-        # Why it exists: AR2. Loop issues no verdict, so the live direction and
-        #   leg start are the entire contract an attaching agent has to bracket
+        # Why it exists: a loop leg may end in an idle tail and issues no verdict,
+        #   so the live direction and leg start are the entire contract an
+        #   attaching agent has to bracket
         #   its own profiler window against.
         with tempfile.TemporaryDirectory() as directory:
             arm, log = self.arm(directory)

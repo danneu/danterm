@@ -252,7 +252,8 @@ class PairedDifferenceTests(unittest.TestCase):
         #   wrong metric would be invisible: a block carries draw time and process
         #   CPU side by side, so the paired series would still look well-formed.
         # Scenario: spec-first; research/29/D3 begins each workload collectable and
-        #   undecidable, and 29/PO3 refuses classification before a frozen rule.
+        #   undecidable: each pairs on its own metric and refuses classification
+        #   before a frozen rule exists.
         schedule = [
             {"measurementRole": role, "physicalArm": "a", "quartet": 0}
             for role in ("A", "B", "B", "A")

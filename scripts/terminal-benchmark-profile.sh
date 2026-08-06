@@ -194,7 +194,7 @@ fi
 # Runs one profiler invocation. For the corpus workloads that is the profiler
 # itself; for the live one the same argv is handed to the capture driver, which
 # holds an arrow key across it and records whether the recording window stayed
-# inside the stimulus (I5).
+# wholly inside the measured stimulus lifetime.
 run_profiler() {
     if [[ -z "$BTOP_WORKLOAD" ]]; then
         "$@"

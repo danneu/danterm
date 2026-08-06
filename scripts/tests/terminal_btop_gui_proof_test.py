@@ -32,7 +32,7 @@ PROOF = _load("terminal_btop_gui_proof", "scripts/terminal-btop-gui-proof.py")
 
 
 def valid_identity(mode="sample"):
-    """A bundle identity from a run that proved everything PO4 asks a bounded capture to."""
+    """A bundle identity from a valid live bounded capture at the owned 179x66 PTY."""
     identity = {
         "capture": {"mode": mode, "valid": True, "invalidReasons": []},
         "coverage": {
@@ -145,7 +145,7 @@ class BoundedCaptureJudgment(unittest.TestCase):
         self.assertTrue(any("input" in failure for failure in failures))
 
     def test_a_trace_without_a_time_profile_table_fails(self):
-        # The claim PO4 makes is specifically about a Time Profiler report, and
+        # A valid live trace specifically requires a Time Profiler report, and
         # `xctrace` records happily with a template that exports no such table.
         identity = valid_identity("trace")
         identity["traceExport"] = {"hasTimeProfile": False, "schemas": ["allocations"]}
@@ -192,7 +192,7 @@ class ForegroundLapseJudgment(unittest.TestCase):
         #   something rejected the run.
         # Why it exists: a 20-second live capture has several ways to fail at
         #   once. Accepting any reason would let this stay green while the exact
-        #   gate PO4 names quietly stopped working.
+        #   live-proof gate quietly stopped working.
         identity = self.lapsed_identity()
         identity["capture"]["invalidReasons"] = [
             "machineState: the host changed state inside the measured interval: low-power-mode"
@@ -239,8 +239,8 @@ class LoopJudgment(unittest.TestCase):
 
     def test_loop_must_keep_disclaiming_a_verdict(self):
         # Intent: every published leg still says loop measures nothing.
-        # Why it exists: AR2 -- loop's legs can end on an idle tail, so an
-        #   attaching agent brackets its own window. The disclaimer is the only
+        # Why it exists: loop's legs can end on an idle tail, so an attaching
+        #   agent must bracket its own window. The disclaimer is the only
         #   thing in the live file that tells it so.
         publications = [self.publication("down", 1.0), self.publication("up", 11.0)]
         del publications[1]["coverageVerdict"]

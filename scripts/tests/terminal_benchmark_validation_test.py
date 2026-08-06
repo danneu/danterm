@@ -1127,8 +1127,9 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   count. Validating on that rectangle would accept a block measuring a
         #   topology the workload does not name, and its numbers would look
         #   perfectly well-formed.
-        # Scenario: spec-first; 29/I1 and 29/I2 make a verdict impossible unless
-        #   every measured draw carried 2 rows in 2 spans, or 17 rows in 17 spans.
+        # Scenario: spec-first; each verdict is impossible unless every measured
+        #   draw carried its exact engine topology: 2 rows in 2 spans, or 17 rows
+        #   in 17 spans.
         for collect, workload, engine_rows, engine_spans in (
             (VALIDATION.collect_sparse_spans_few, "sparse-spans-few", 2, 2),
             (VALIDATION.collect_sparse_spans_max, "sparse-spans-max", 17, 17),
@@ -1186,8 +1187,9 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   coverage silently turns that proof into a claim about some of the
         #   draws while the aggregate still describes all of them -- which is the
         #   one failure a reader cannot see in the number.
-        # Scenario: spec-first; 29/I4 invalidates a block whose draw, metric, and
-        #   topology sample counts do not cover the same accepted draw set.
+        # Scenario: spec-first; a block is invalid when draw, primary-metric, engine-
+        #   topology, and renderer-behavior counts do not cover the same accepted
+        #   draws.
         missing = self._sparse_span_artifact("sparse-spans-few")
         del missing["finalDraw"]["sparseSpanTopology"]
         self.assertEqual(
@@ -1222,8 +1224,8 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   None. For every other workload that is a descriptive line going
         #   missing; for this one it is the deciding metric, so pairing would be
         #   reduced to arithmetic on an absent number.
-        # Scenario: spec-first; 29/I4 invalidates a block whose primary-metric
-        #   coverage does not match its accepted draw set, and research/29/D2 is what makes
+        # Scenario: spec-first; a block is invalid when its primary-metric coverage
+        #   does not match its accepted draw set, and research/29/D2 is what makes
         #   whole-process CPU that metric here.
         short = self._sparse_span_artifact("sparse-spans-max")
         short["finalDraw"]["processCPUCount"] = 49
@@ -1262,8 +1264,8 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   resolution, so gating on renderer behavior would turn the regression
         #   being measured into an unmeasured block -- the instrument would refuse
         #   to observe the only thing it was built to observe.
-        # Scenario: spec-first; 29/I3 records a declared renderer deviation in an
-        #   arm's provenance instead of failing its stimulus validity.
+        # Scenario: spec-first; a synthesized known-bad arm records its declared
+        #   renderer deviation in provenance instead of failing stimulus validity.
         artifact = self._sparse_span_artifact("sparse-spans-max")
         artifact["finalDraw"]["sparseSpanTopology"]["dirtyRectFallbackCount"] = 50
         artifact["finalDraw"]["sparseSpanTopology"]["clipFullDamageCount"] = 50
@@ -1285,8 +1287,9 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         # Why it exists: those rules were screened against blocks with no topology
         #   accounting on the measured path, so adding a field or a check to them
         #   would silently change the thing the thresholds describe.
-        # Scenario: spec-first; 29/PO7 isolates the existing five workloads from
-        #   this change.
+        # Scenario: spec-first; the existing five workloads publish no topology
+        #   evidence and retain the artifact and metric contract their frozen
+        #   rules cover.
         evidence = VALIDATION.collect_incremental_mixed(
             [{"measurementRole": "A", "physicalArm": "a"}],
             run_block=lambda arm: self._draw_churn_artifact(

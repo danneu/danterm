@@ -99,9 +99,9 @@ class KeyRepeatCadence:
 def read_key_repeat_cadence(run_command=subprocess.run):
     """Read the host's key repeat settings, falling back to the system defaults.
 
-    AR1 accepts that event rates differ between machines; what it does not accept
-    is a run that cannot say which rate it produced. Every path here yields a
-    labelled `source`.
+    The diagnostic follows the host's repeat timing, so event rates may differ
+    between machines; every run must record the rate it produced. Every path here
+    yields a labelled `source`.
     """
     def read_tick(name, fallback):
         try:
@@ -163,9 +163,9 @@ class ArmSink:
 class ArrowStimulus:
     """Holds one arrow key at a time and records exactly when it did.
 
-    The invariant it exists to keep is I5's: at most one key is ever down, every
-    direction change and every exit posts the matching key-up, and the resulting
-    press/release times are measured rather than inferred from the requested
+    At most one key is ever down, every direction change and every exit posts the
+    matching key-up, and the resulting press/release times are measured rather
+    than inferred from the requested
     duration -- because `validate_profiler_overlap` decides a capture's validity
     from them.
     """
@@ -239,7 +239,8 @@ class ArrowStimulus:
         At most one per call, and a driver that fell behind resyncs to now rather
         than replaying what it missed. A real held key does not catch up: bursting
         the backlog after a scheduling stall would deliver a scroll rate no user
-        can produce, which is the whole thing AR1 says this workload reproduces.
+        can produce, contradicting the local held-key behavior this workload
+        reproduces.
         """
         if self._active is None:
             return 0
@@ -319,9 +320,9 @@ class ArrowStimulus:
 def alternate(stimulus, *, leg_seconds, should_continue, directions=ARROW_DIRECTIONS, on_leg=None):
     """Run fixed-length legs, turning around each time, until `should_continue` goes false.
 
-    Loop mode's whole job. It issues no coverage verdict (AR2): an attaching
-    agent brackets its own window against the direction and timing this
-    publishes.
+    Loop mode's whole job. Because a leg may end in an idle tail, it issues no
+    coverage verdict: an attaching agent brackets its own window against the
+    direction and timing this publishes.
     """
     index = 0
     while should_continue():
@@ -334,7 +335,7 @@ def alternate(stimulus, *, leg_seconds, should_continue, directions=ARROW_DIRECT
 
 
 def validate_profiler_overlap(stimulus_window, profiler_window):
-    """Require the profiler's window to lie wholly inside the measured stimulus (I5).
+    """Require the profiler's window to lie wholly inside the measured stimulus lifetime.
 
     Raises rather than returning a flag: a capture whose edges profile an
     unstimulated window is not a weaker measurement, it is a different one, and
@@ -436,7 +437,7 @@ def compile_stimulus_arm(output_directory, *, source_path=STIMULUS_ARM_SOURCE,
 
 
 def preflight_input_permission(arm_binary, *, run_command=subprocess.run):
-    """Prove this process may post events before anything expensive happens (PO1).
+    """Prove this process may post events before build or launch begins.
 
     Asks the arm rather than a second mechanism: the permission that matters is
     the one the stimulus will actually exercise, and a preflight through some

@@ -22,8 +22,9 @@ profile identity. What does not: launching or profiling anything, workload
 admission, readiness checks, and the held-key timing logic -- those are the
 profiling harness's and `terminal_btop_stimulus`'s.
 
-Loop mode has no verdict to compute here: it issues none by design (AR2), so
-this grades only the bounded `sample` and `trace` captures.
+Loop mode has no verdict to compute here: an attaching agent must bracket and
+validate its own window, so this grades only bounded `sample` and `trace`
+captures.
 """
 import argparse
 import hashlib

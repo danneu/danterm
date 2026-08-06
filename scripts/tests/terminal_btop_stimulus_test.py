@@ -105,7 +105,7 @@ class KeyRepeatCadenceTests(unittest.TestCase):
     def test_host_repeat_ticks_convert_to_seconds(self):
         # Intent: the cadence comes from the host's own `defaults` values, converted
         #   through the 60 Hz tick the preference is stored in.
-        # Why it exists: AR1 accepts that hosts differ, which is only tolerable if
+        # Why it exists: host repeat settings may differ, which is only tolerable if
         #   each run records the cadence it actually used; a hardcoded interval
         #   would make two machines' artifacts silently incomparable.
         # Scenario: spec-first -- an operator whose key repeat is set fast.
@@ -200,8 +200,8 @@ class ArrowStimulusTests(unittest.TestCase):
     def test_a_stalled_driver_resyncs_instead_of_bursting_the_repeats_it_missed(self):
         # Intent: after a long gap, the next pump emits one repeat and schedules the
         #   following one a full interval from now -- it does not replay the backlog.
-        # Why it exists: AR1 says this workload reproduces local held-key behavior,
-        #   and a real held key does not catch up after the system deschedules the
+        # Why it exists: this workload reproduces local held-key behavior, and a
+        #   real held key does not catch up after the system deschedules the
         #   driver. Bursting 150 queued repeats would scroll btop at a rate no user
         #   can produce and attribute the resulting draws to a cadence the run
         #   claims it used.
@@ -220,9 +220,9 @@ class ArrowStimulusTests(unittest.TestCase):
 
     def test_changing_direction_releases_the_held_key_before_pressing_the_next(self):
         # Intent: a direction change emits release(down) strictly before press(up).
-        # Why it exists: I5 requires every transition to release the active key.
-        #   Posting the second key-down first leaves both arrows down as far as the
-        #   app is concerned, which scrolls in a direction no leg claims and
+        # Why it exists: every transition must release the active key before
+        #   pressing the next. Posting the second key-down first leaves both arrows
+        #   down as far as the app is concerned, which scrolls in a direction no leg claims and
         #   corrupts the topology the capture attributes to that leg.
         # Scenario: spec-first -- loop mode turning around at a leg boundary.
         clock = ManualClock()
@@ -252,8 +252,8 @@ class ArrowStimulusTests(unittest.TestCase):
     def test_the_active_key_is_released_when_the_body_raises(self):
         # Intent: leaving the stimulus by any path -- including an exception -- posts
         #   the key-up for whatever was held.
-        # Why it exists: I5's "every exit releases the active key". A stimulus that
-        #   dies holding Down leaves the key stuck down in a live GUI session, which
+        # Why it exists: every exit must release the active key. A stimulus that dies
+        #   holding Down leaves the key stuck down in a live GUI session, which
         #   outlives the run and silently poisons whatever the operator does next.
         # Scenario: spec-first -- the profiler subprocess fails mid-capture.
         clock = ManualClock()
@@ -308,8 +308,9 @@ class ArrowStimulusTests(unittest.TestCase):
     def test_each_leg_records_its_measured_press_and_release_times(self):
         # Intent: every leg carries the clock readings it was pressed and released
         #   at, plus the repeats it emitted.
-        # Why it exists: I7 asks the run to explain itself; the overlap check in
-        #   `validate_profiler_overlap` is only meaningful if the stimulus window it
+        # Why it exists: every run must record enough timing provenance to explain
+        #   its conditions; the overlap check in `validate_profiler_overlap` is
+        #   only meaningful if the stimulus window it
         #   compares against was measured rather than assumed from the requested
         #   duration.
         # Scenario: spec-first -- reading the identity of a finished capture.
@@ -336,9 +337,9 @@ class ArrowStimulusTests(unittest.TestCase):
     def test_a_loop_alternates_direction_on_every_leg_boundary(self):
         # Intent: loop mode alternates Down and Up in fixed legs and stops only when
         #   the caller's continuation predicate goes false.
-        # Why it exists: AR2 accepts an idle tail at the end of a leg, but not a
-        #   direction that never turns around -- a one-way loop parks btop at the end
-        #   of its process list and profiles an idle window.
+        # Why it exists: a loop leg may have an idle tail, but a direction that
+        #   never turns around would park btop at the end of its process list and
+        #   profile an idle window.
         # Scenario: spec-first -- `just benchmark-loop btop-scroll` until interrupted.
         clock = ManualClock()
         sink = RecordingSink()
@@ -364,8 +365,8 @@ class ProfilerOverlapTests(unittest.TestCase):
     def test_a_profiler_window_starting_before_the_stimulus_is_rejected(self):
         # Intent: recording that began before the first key-down invalidates the
         #   capture.
-        # Why it exists: I5 requires the profiler window to lie wholly inside the
-        #   measured stimulus lifetime. Samples taken before any arrow was pressed
+        # Why it exists: the profiler window must lie wholly inside the measured
+        #   stimulus lifetime. Samples taken before any arrow was pressed
         #   are idle-window samples, and averaging them into the report understates
         #   exactly the cost the diagnostic exists to attribute.
         # Scenario: spec-first -- a profiler that attached faster than the stimulus
@@ -387,8 +388,9 @@ class BoundedCaptureTests(unittest.TestCase):
         # Intent: a bounded capture presses first, keeps repeating for the profiler's
         #   entire run, and releases only afterwards -- and says so with measured
         #   times.
-        # Why it exists: this is the composed shape I5 names, and the one a caller
-        #   cannot get right by hand: starting the profiler first, or releasing at
+        # Why it exists: a bounded profiler window must lie wholly inside a measured
+        #   foreground held-key stimulus, a shape a caller cannot get right by
+        #   hand: starting the profiler first, or releasing at
         #   the profiler's time limit rather than after it exits, both produce a
         #   report whose edges profile an unstimulated window.
         # Scenario: spec-first -- `just benchmark-sample btop-scroll 20`.
@@ -450,7 +452,7 @@ class BoundedCaptureTests(unittest.TestCase):
         # Why it exists: this is the one way the containment check can fail
         #   silently. A window widened by an earlier leg makes any profiler window
         #   look contained, so the capture would be blessed without proving the
-        #   thing I5 asks for.
+        #   measured-window containment the capture requires.
         # Scenario: spec-first -- a driver that warms btop up before profiling it.
         clock = ManualClock()
         sink = RecordingSink(clock)
@@ -473,8 +475,8 @@ class BoundedCaptureTests(unittest.TestCase):
     def test_a_profiler_that_never_exits_releases_the_key_and_fails_the_capture(self):
         # Intent: the wait on the profiler is bounded, and overrunning the bound
         #   releases the arrow key before failing the capture.
-        # Why it exists: I5's "every exit releases the active key" has to hold for
-        #   the exit nobody plans -- a profiler that hangs. An unbounded wait is not
+        # Why it exists: every exit must release the active key, including the exit
+        #   nobody plans -- a profiler that hangs. An unbounded wait is not
         #   an exit at all: it leaves Down held indefinitely in a live GUI session,
         #   long after the operator has given up on the run.
         # Scenario: spec-first -- `xctrace` wedged while attaching.
@@ -531,10 +533,10 @@ class InputPermissionTests(unittest.TestCase):
     def test_a_granted_preflight_records_the_mechanism_it_proved(self):
         # Intent: the preflight returns the mechanism name the run will actually use
         #   to synthesize input.
-        # Why it exists: I7 requires the identity to record the input mechanism and
-        #   permission result together. A bare boolean cannot distinguish "allowed to
-        #   post CGEvents" from "allowed to drive System Events", which are different
-        #   privileges with different failure modes.
+        # Why it exists: reproducible provenance requires the identity to record the
+        #   input mechanism and permission result together. A bare boolean cannot
+        #   distinguish "allowed to post CGEvents" from "allowed to drive System
+        #   Events", which are different privileges with different failure modes.
         # Scenario: spec-first -- a host that has already granted Accessibility.
         def run_command(command, **kwargs):
             return subprocess.CompletedProcess(
@@ -549,9 +551,9 @@ class InputPermissionTests(unittest.TestCase):
 
     def test_a_denied_preflight_raises_before_anything_is_built(self):
         # Intent: a host that cannot post events fails the preflight outright.
-        # Why it exists: PO1 requires rejection before build or launch. Discovering
-        #   the denial after a release build and a GUI launch wastes minutes and
-        #   leaves a half-configured app on screen.
+        # Why it exists: input permission must be rejected before build or launch.
+        #   Discovering the denial after a release build and a GUI launch wastes
+        #   minutes and leaves a half-configured app on screen.
         # Scenario: spec-first -- a shell without Accessibility permission.
         def run_command(command, **kwargs):
             return subprocess.CompletedProcess(
