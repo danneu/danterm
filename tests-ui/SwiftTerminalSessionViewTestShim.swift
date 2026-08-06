@@ -193,6 +193,13 @@ struct TerminalPaneViewportState: Equatable {
 struct TerminalViewportCell: Equatable {
     let column: Int
     let row: Int
+    let offsetX: Double
+
+    init(column: Int, row: Int, offsetX: Double = 0) {
+        self.column = column
+        self.row = row
+        self.offsetX = offsetX
+    }
 }
 
 struct TerminalHyperlink: Equatable {
@@ -210,6 +217,7 @@ enum TerminalPointerEvent: Equatable {
         TerminalMouseButton,
         column: Int,
         row: Int,
+        offsetX: Double = 0,
         modifiers: TerminalKeyModifiers = [],
         clickCount: Int = 1
     )
@@ -219,7 +227,7 @@ enum TerminalPointerEvent: Equatable {
         row: Int,
         modifiers: TerminalKeyModifiers = []
     )
-    case move(column: Int, row: Int, modifiers: TerminalKeyModifiers = [])
+    case move(column: Int, row: Int, offsetX: Double = 0, modifiers: TerminalKeyModifiers = [])
 }
 
 enum TerminalWheelPhase: Equatable {
@@ -261,9 +269,15 @@ func terminalCell(
     rows: Int
 ) -> TerminalViewportCell? {
     guard cellSize.width > 0, cellSize.height > 0, columns > 0, rows > 0 else { return nil }
+    let scaledColumn = point.x / cellSize.width
+    let column = Int(scaledColumn.rounded(.down))
+    let clampedColumn = min(max(column, 0), columns - 1)
     return TerminalViewportCell(
-        column: min(max(Int((point.x / cellSize.width).rounded(.down)), 0), columns - 1),
-        row: min(max(Int((point.y / cellSize.height).rounded(.down)), 0), rows - 1)
+        column: clampedColumn,
+        row: min(max(Int((point.y / cellSize.height).rounded(.down)), 0), rows - 1),
+        offsetX: column == clampedColumn
+            ? min(max(scaledColumn - scaledColumn.rounded(.down), 0), 1)
+            : (column < clampedColumn ? 0 : 1)
     )
 }
 
@@ -349,10 +363,10 @@ final class TerminalPaneSessionController {
             onPaneMenu?(.init(column: column, row: row))
         }
         switch event {
-        case let .move(_, _, modifiers):
+        case let .move(_, _, _, modifiers):
             cachedHoveredLink = modifiers.contains(.command) ? hoveredLinkForCommandMove : nil
             emitFrame()
-        case let .down(.left, _, _, modifiers, _):
+        case let .down(.left, _, _, _, modifiers, _):
             linkClickArmed = modifiers.contains(.command) && linkForCommandClick != nil
         case let .up(.left, _, _, modifiers):
             if linkClickArmed, modifiers.contains(.command), let linkForCommandClick {

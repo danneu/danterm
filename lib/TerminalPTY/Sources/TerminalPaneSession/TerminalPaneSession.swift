@@ -930,12 +930,13 @@ public final class TerminalPaneSessionController {
 
     private func neutralMouseEvent(for event: TerminalPointerEvent) -> NeutralTerminalMouseEvent {
         switch event {
-        case let .down(button, column, row, modifiers, clickCount):
+        case let .down(button, column, row, offsetX, modifiers, clickCount):
             NeutralTerminalMouseEvent(
                 action: .down,
                 button: button.rawValue + 1,
                 column: column,
                 row: row,
+                offsetX: offsetX,
                 modifiers: modifiers,
                 clickCount: clickCount
             )
@@ -947,11 +948,12 @@ public final class TerminalPaneSessionController {
                 row: row,
                 modifiers: modifiers
             )
-        case let .move(column, row, modifiers):
+        case let .move(column, row, offsetX, modifiers):
             NeutralTerminalMouseEvent(
                 action: .move,
                 column: column,
                 row: row,
+                offsetX: offsetX,
                 modifiers: modifiers
             )
         }

@@ -334,7 +334,7 @@ struct TerminalPTYHostTests {
         let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
             switch transition {
             case .resize: true
-            case .mouse(.down(.left, _, _, _, _)): true
+            case .mouse(.down(.left, _, _, _, _, _)): true
             default: false
             }
         }
@@ -1584,7 +1584,9 @@ struct TerminalPTYHostTests {
             row: row,
             modifiers: [.shift]
         ))
-        host.sendPointer(.move(column: column + 4, row: row, modifiers: [.shift]))
+        // Out to the trailing edge of "alpha"'s last cell, so the whole word is inside the
+        // two boundaries the drag names.
+        host.sendPointer(.move(column: column + 4, row: row, offsetX: 1, modifiers: [.shift]))
         host.sendPointer(.up(.left, column: column + 4, row: row, modifiers: [.shift]))
         let snapshot = host.fencedSnapshot()
         let recording = NeutralTerminalRecording(
@@ -1974,12 +1976,13 @@ private extension TerminalPTYAppliedTransition {
 private extension TerminalPointerEvent {
     var neutralEvent: NeutralTerminalMouseEvent {
         switch self {
-        case let .down(button, column, row, modifiers, clickCount):
+        case let .down(button, column, row, offsetX, modifiers, clickCount):
             .init(
                 action: .down,
                 button: button.rawValue + 1,
                 column: column,
                 row: row,
+                offsetX: offsetX,
                 modifiers: modifiers,
                 clickCount: clickCount
             )
@@ -1991,8 +1994,14 @@ private extension TerminalPointerEvent {
                 row: row,
                 modifiers: modifiers
             )
-        case let .move(column, row, modifiers):
-            .init(action: .move, column: column, row: row, modifiers: modifiers)
+        case let .move(column, row, offsetX, modifiers):
+            .init(
+                action: .move,
+                column: column,
+                row: row,
+                offsetX: offsetX,
+                modifiers: modifiers
+            )
         }
     }
 }

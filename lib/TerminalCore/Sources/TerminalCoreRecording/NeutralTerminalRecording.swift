@@ -183,6 +183,10 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
     public let column: Int
     /// Zero-based pointed viewport row.
     public let row: Int
+    /// Pointer position inside the pointed cell as a `0...1` fraction of its width, which
+    /// character-granularity selection resolves a boundary from. Recordings captured before
+    /// this was carried decode to `0`, the cell's leading edge.
+    public let offsetX: Double
     /// Modifier snapshot forwarded with the transition.
     public let modifiers: TerminalKeyModifiers
     /// Native click count retained for local selection granularity.
@@ -194,6 +198,7 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
         button: Int? = nil,
         column: Int,
         row: Int,
+        offsetX: Double = 0,
         modifiers: TerminalKeyModifiers = [],
         clickCount: Int = 1
     ) {
@@ -201,6 +206,7 @@ public struct NeutralTerminalMouseEvent: Equatable, Sendable {
         self.button = button
         self.column = column
         self.row = row
+        self.offsetX = offsetX
         self.modifiers = modifiers
         self.clickCount = clickCount
     }
@@ -221,7 +227,7 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
         case type, text, base64, columns, rows, action, key, scalar, modifiers, focused
-        case button, column, row, clickCount, expect, elapsedNanoseconds
+        case button, column, row, offsetX, clickCount, expect, elapsedNanoseconds
     }
 
     public init(from decoder: any Decoder) throws {
@@ -302,7 +308,7 @@ extension NeutralTerminalRecordingEvent: Codable {
             try Self.validateKeys(
                 keys,
                 required: ["type", "action", "column", "row"],
-                optional: ["button", "modifiers", "clickCount", "elapsedNanoseconds"],
+                optional: ["button", "offsetX", "modifiers", "clickCount", "elapsedNanoseconds"],
                 type: type
             )
             guard let action = NeutralTerminalMouseAction(
@@ -319,6 +325,7 @@ extension NeutralTerminalRecordingEvent: Codable {
                 button: button,
                 column: try values.decode(Int.self, forKey: .column),
                 row: try values.decode(Int.self, forKey: .row),
+                offsetX: try values.decodeIfPresent(Double.self, forKey: .offsetX) ?? 0,
                 modifiers: try Self.decodeModifiers(
                     try values.decodeIfPresent([String].self, forKey: .modifiers) ?? []
                 ),
@@ -391,6 +398,7 @@ extension NeutralTerminalRecordingEvent: Codable {
             try values.encodeIfPresent(mouse.button, forKey: .button)
             try values.encode(mouse.column, forKey: .column)
             try values.encode(mouse.row, forKey: .row)
+            try values.encode(mouse.offsetX, forKey: .offsetX)
             try values.encode(Self.encodeModifiers(mouse.modifiers), forKey: .modifiers)
             try values.encode(mouse.clickCount, forKey: .clickCount)
         case .resize(let columns, let rows):
@@ -558,6 +566,7 @@ private func neutralPointerEvent(for mouse: NeutralTerminalMouseEvent) -> Termin
             button,
             column: mouse.column,
             row: mouse.row,
+            offsetX: mouse.offsetX,
             modifiers: mouse.modifiers,
             clickCount: mouse.clickCount
         )
@@ -570,7 +579,12 @@ private func neutralPointerEvent(for mouse: NeutralTerminalMouseEvent) -> Termin
             modifiers: mouse.modifiers
         )
     case .move:
-        return .move(column: mouse.column, row: mouse.row, modifiers: mouse.modifiers)
+        return .move(
+            column: mouse.column,
+            row: mouse.row,
+            offsetX: mouse.offsetX,
+            modifiers: mouse.modifiers
+        )
     }
 }
 

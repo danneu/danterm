@@ -313,6 +313,58 @@ struct NeutralTerminalRecordingTests {
         #expect(replayed.selectedText == "hello")
     }
 
+    @Test("a recorded character drag replays to the selection its sub-cell offsets named")
+    func characterDragOffsetRoundTrip() throws {
+        // Intent: a captured pointer transition carries the horizontal position the live path
+        //   resolved a character boundary from, so encoding, decoding, and replay reproduce the
+        //   selection the user saw. A recording written before that field decodes to the cell's
+        //   leading edge rather than failing.
+        // Why it exists: the recorded event rebuilt pointer events from column and row alone.
+        //   A character drag confined to one cell would then replay as a drag that never moved,
+        //   turning the fixture for that gesture into a fixture for no gesture at all.
+        let events: [NeutralTerminalRecordingEvent] = [
+            .feed(Array("hello".utf8)),
+            .mouse(.init(action: .down, button: 1, column: 1, row: 0, offsetX: 0.1)),
+            .mouse(.init(action: .move, column: 1, row: 0, offsetX: 0.9)),
+            .mouse(.init(action: .up, button: 1, column: 1, row: 0)),
+        ]
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "character-drag-offset"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: events
+        )
+
+        let decoded = try JSONDecoder().decode(
+            NeutralTerminalRecording.self,
+            from: try JSONEncoder().encode(recording)
+        )
+        #expect(decoded == recording)
+        #expect(try decoded.replay().selectedText == "e")
+
+        // A document written before the field existed: the key is absent, not zero, and must
+        // still decode and replay. Both ends then land on one boundary, which is the honest
+        // answer -- the gesture's sub-cell intent was never captured.
+        let older = try JSONDecoder().decode(NeutralTerminalRecording.self, from: Data(#"""
+        {
+          "version": 1,
+          "provenance": {
+            "source":"danterm",
+            "author":"DanTerm",
+            "test":"character-drag-no-offset"
+          },
+          "initial": {"columns": 8, "rows": 2},
+          "events": [
+            {"type":"feed", "text":"hello"},
+            {"type":"mouse", "action":"down", "button":1, "column":1, "row":0},
+            {"type":"mouse", "action":"move", "column":1, "row":0},
+            {"type":"mouse", "action":"up", "button":1, "column":1, "row":0}
+          ]
+        }
+        """#.utf8))
+
+        #expect(try older.replay().selectionRange == nil)
+    }
+
     @Test("captured mouse reports are discarded without mutating replayed terminal state")
     func capturedMouseReplayIsTransparent() throws {
         let recording = NeutralTerminalRecording(

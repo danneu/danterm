@@ -984,6 +984,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             button,
             column: cell.column,
             row: cell.row,
+            offsetX: cell.offsetX,
             modifiers: Self.terminalModifiers(event.modifierFlags),
             clickCount: event.clickCount
         ))
@@ -1021,6 +1022,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         controller.sendPointer(.move(
             column: cell.column,
             row: cell.row,
+            offsetX: cell.offsetX,
             modifiers: Self.terminalModifiers(modifiers)
         ))
         if pointerIsOutsideGrid(locationInWindow) {

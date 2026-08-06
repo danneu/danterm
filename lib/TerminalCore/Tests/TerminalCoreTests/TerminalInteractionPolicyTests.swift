@@ -71,11 +71,16 @@ struct TerminalInteractionPolicyTests {
         )
         #expect(redundantDown.consumption == .selection)
         #expect(redundantDown.selectionMutation == nil)
+        // Pressed at column 0's leading edge and dragged to column 3's, so the selection runs
+        // from one boundary to the other and stops short of column 3's character.
         let localMove = decideTerminalPointer(
             .move(column: 3, row: 0, modifiers: [.alt]), terminal: localTerminal, state: &local
         )
         #expect(localMove.consumption == .selection)
-        #expect(localMove.selectionMutation == .set(range(0, 0, 0, 4)))
+        #expect(localMove.selectionMutation == .set(range(0, 0, 0, 3)))
+        var settled = localTerminal
+        settled.setSelection(range(0, 0, 0, 3))
+        #expect(settled.selectedText == "abc")
         #expect(localMove.inputBytes.isEmpty)
 
         var reportTerminal = localTerminal
@@ -114,13 +119,18 @@ struct TerminalInteractionPolicyTests {
             #expect(down.selectionMutation == expectedMutations[clickCount - 1])
         }
 
+        // Character granularity runs boundary to boundary: pressed at column 1's leading edge
+        // and dragged to column 3's, the selection is the two characters between them.
         var character = TerminalInteractionState()
         _ = decideTerminalPointer(
             .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &character
         )
         #expect(decideTerminalPointer(
             .move(column: 3, row: 0), terminal: terminal, state: &character
-        ).selectionMutation == .set(range(0, 1, 0, 4)))
+        ).selectionMutation == .set(range(0, 1, 0, 3)))
+        var characterSettled = terminal
+        characterSettled.setSelection(range(0, 1, 0, 3))
+        #expect(characterSettled.selectedText == ".b")
 
         var terminalToken = TerminalInteractionState()
         _ = decideTerminalPointer(
@@ -270,9 +280,11 @@ struct TerminalInteractionPolicyTests {
         #expect(decideTerminalPointer(
             .down(.left, column: 2, row: 0), terminal: terminal, state: &local
         ).selectionMutation == .clear)
+        // The move lands on the same boundary the press did, so it clears again rather than
+        // setting a present-but-empty selection that would leave Copy enabled.
         #expect(decideTerminalPointer(
             .move(column: 2, row: 0), terminal: terminal, state: &local
-        ).selectionMutation == nil)
+        ).selectionMutation == .clear)
         #expect(decideTerminalPointer(
             .up(.left, column: 2, row: 0), terminal: terminal, state: &local
         ).selectionMutation == nil)
@@ -462,18 +474,27 @@ struct TerminalInteractionPolicyTests {
 
     @Test("point normalization floors clamps and rejects degenerate geometry")
     func pointNormalization() {
+        // The horizontal remainder is clamped with the column rather than on its own, so an
+        // off-grid point reads as the edge it left through and a drag never snaps back across
+        // the pointer.
         #expect(terminalCell(
-            at: .init(x: 25.9, y: 39.9),
+            at: .init(x: 27.5, y: 39.9),
             cellSize: .init(width: 10, height: 13),
             columns: 8,
             rows: 4
-        ) == .init(column: 2, row: 3))
+        ) == .init(column: 2, row: 3, offsetX: 0.75))
         #expect(terminalCell(
             at: .init(x: -4, y: 100),
             cellSize: .init(width: 10, height: 13),
             columns: 8,
             rows: 4
-        ) == .init(column: 0, row: 3))
+        ) == .init(column: 0, row: 3, offsetX: 0))
+        #expect(terminalCell(
+            at: .init(x: 402, y: 0),
+            cellSize: .init(width: 10, height: 13),
+            columns: 8,
+            rows: 4
+        ) == .init(column: 7, row: 0, offsetX: 1))
         #expect(terminalCell(
             at: .init(x: 1, y: 1),
             cellSize: .init(width: 0, height: 13),
@@ -748,8 +769,9 @@ struct TerminalInteractionPolicyTests {
         _ = decideTerminalPointer(
             .down(.left, column: 0, row: 0), terminal: following, state: &followingState
         )
+        // Past the midpoint of column 2, so the character under the pointer is included.
         let followingMove = decideTerminalPointer(
-            .move(column: 2, row: 1), terminal: following, state: &followingState
+            .move(column: 2, row: 1, offsetX: 0.6), terminal: following, state: &followingState
         )
         #expect(followingMove.selectionMutation == .set(range(0, 0, 1, 3)))
         following.setSelection(range(0, 0, 1, 3))
@@ -767,7 +789,7 @@ struct TerminalInteractionPolicyTests {
             .down(.left, column: 0, row: 0), terminal: browsing, state: &browsingState
         )
         let browsingMove = decideTerminalPointer(
-            .move(column: 2, row: 1), terminal: browsing, state: &browsingState
+            .move(column: 2, row: 1, offsetX: 0.6), terminal: browsing, state: &browsingState
         )
         #expect(browsingMove.selectionMutation == .set(range(2, 0, 3, 3)))
         browsing.setSelection(range(2, 0, 3, 3))
@@ -846,11 +868,11 @@ struct TerminalInteractionPolicyTests {
 
     @Test("a press that never moves selects nothing even after eviction")
     func unmovedCharacterPressSelectsNothingAcrossEviction() throws {
-        // Intent: character granularity suppresses a drag that has not left its own cell,
-        //   and eviction beneath the pointer does not count as leaving it.
-        // Why it exists: the suppression compares the resolved anchor against a freshly
-        //   computed unit. A drifting anchor makes those differ for free, so eviction alone
-        //   would turn a plain click into a selection of text the user never dragged over.
+        // Intent: a character press whose pointer never crosses a character midpoint leaves no
+        //   selection present, and eviction beneath the pointer does not count as crossing one.
+        // Why it exists: the press boundary is re-derived from the pinned anchor on every move.
+        //   A drifting anchor would move it for free, so eviction alone would turn a plain
+        //   click into a selection of text the user never dragged over.
         var terminal = try #require(Terminal(
             columns: 12,
             rows: 2,
@@ -865,16 +887,148 @@ struct TerminalInteractionPolicyTests {
         ).selectionMutation == .clear)
 
         terminal.feed(Array("\r\nr09".utf8))
+        // Asserted as the absence of a selection, not as empty selected text: a present but
+        // empty selection is exactly the state this test exists to exclude.
         #expect(decideTerminalPointer(
             .move(column: 1, row: 1), terminal: terminal, state: &state
-        ).selectionMutation == nil)
+        ).selectionMutation == .clear)
 
         let extended = decideTerminalPointer(
             .move(column: 2, row: 1), terminal: terminal, state: &state
         )
-        #expect(extended.selectionMutation == .set(range(2, 1, 2, 3)))
-        terminal.setSelection(range(2, 1, 2, 3))
-        #expect(terminal.selectedText == "04")
+        #expect(extended.selectionMutation == .set(range(2, 1, 2, 2)))
+        terminal.setSelection(range(2, 1, 2, 2))
+        #expect(terminal.selectedText == "0")
+    }
+
+    @Test("a pointer position resolves to a whole character's nearer outer boundary")
+    func characterBoundariesSnapAcrossTheWholeCharacter() throws {
+        // Intent: every position inside a character resolves to one of the two boundaries
+        //   around it, choosing by distance across the character's full width -- so a
+        //   double-width character snaps at its visual center, not at either cell's.
+        // Why it exists: measuring within each cell separately would put a boundary in the
+        //   middle of a wide character, which is a position no selection can name.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("a\u{6F22}b".utf8))
+
+        // The wide character owns columns 1 and 2; its boundaries are 1 and 3.
+        let wideProbes: [(Int, Double, Int)] = [
+            (1, 0.0, 1), (1, 0.4, 1), (1, 0.9, 1),
+            (2, 0.0, 3), (2, 0.5, 3), (2, 0.9, 3),
+        ]
+        for (column, offsetX, expected) in wideProbes {
+            let boundary = terminal.characterBoundary(
+                at: .init(row: 0, column: column),
+                offsetX: offsetX
+            )
+            #expect(boundary == .init(row: 0, column: expected), "column \(column) @ \(offsetX)")
+        }
+
+        // A narrow character snaps at its own midpoint, which belongs to the boundary after it.
+        #expect(terminal.characterBoundary(at: .init(row: 0, column: 0), offsetX: 0.49)
+            == .init(row: 0, column: 0))
+        #expect(terminal.characterBoundary(at: .init(row: 0, column: 0), offsetX: 0.5)
+            == .init(row: 0, column: 1))
+    }
+
+    @Test("a drag inside one cell selects that one character once it crosses the midpoint")
+    func singleCharacterDragSelectsOneCharacter() throws {
+        // Intent: the smallest reachable drag selects exactly one character, without leaving
+        //   the cell it started in.
+        // Why it exists: the reported symptom. A whole-cell union of the pressed and pointed
+        //   cells always spans both, so its smallest non-empty result was two characters and a
+        //   drag confined to one cell selected nothing at all.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("abcdef".utf8))
+
+        var state = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.left, column: 2, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+        ).selectionMutation == .clear)
+        let crossed = decideTerminalPointer(
+            .move(column: 2, row: 0, offsetX: 0.9), terminal: terminal, state: &state
+        )
+
+        #expect(crossed.selectionMutation == .set(range(0, 2, 0, 3)))
+        terminal.setSelection(range(0, 2, 0, 3))
+        #expect(terminal.selectedText == "c")
+    }
+
+    @Test("a character drag grows shrinks and reverses symmetrically, including across a wrap")
+    func characterDragExtendsAndShrinksInBothDirections() throws {
+        // Intent: the selection is the ordered pair of the press boundary and the current one,
+        //   so dragging further grows it, dragging back shortens it, and dragging past the
+        //   press point selects on the other side -- within a row and across a soft wrap alike.
+        // Why it exists: a union of two whole-cell ranges can only ever grow, so reversing and
+        //   shrinking were both unreachable; and the two spellings of a wrap seam are one
+        //   visual position, which a boundary comparison has to agree about.
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        terminal.feed(Array("abcdefgh".utf8))
+        #expect(terminal.characterRange(at: .init(row: 0, column: 3)) == range(0, 3, 0, 4))
+
+        var state = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+        )
+
+        let gestures: [(String, Int, Int, Double, TerminalTextRange, String)] = [
+            ("extended into the wrapped row", 1, 1, 0.9, range(0, 1, 1, 2), "bcdef"),
+            ("shrunk back toward the press", 0, 1, 0.9, range(0, 1, 0, 2), "b"),
+            ("reversed past the press", 0, 0, 0.1, range(0, 0, 0, 1), "a"),
+        ]
+        for (label, row, column, offsetX, expected, text) in gestures {
+            let moved = decideTerminalPointer(
+                .move(column: column, row: row, offsetX: offsetX),
+                terminal: terminal,
+                state: &state
+            )
+            #expect(moved.selectionMutation == .set(expected), "\(label)")
+            var settled = terminal
+            settled.setSelection(expected)
+            #expect(settled.selectedText == text, "\(label)")
+        }
+
+        // The seam itself: the trailing boundary of row 0's last column and the leading
+        // boundary of row 1's first name one position, so a drag between them selects nothing.
+        var seam = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 3, row: 0, offsetX: 0.9), terminal: terminal, state: &seam
+        )
+        #expect(decideTerminalPointer(
+            .move(column: 0, row: 1, offsetX: 0.1), terminal: terminal, state: &seam
+        ).selectionMutation == .clear)
+    }
+
+    @Test("a drag leaving the grid selects out to the edge it left through")
+    func offGridDragSelectsToTheEdgeItLeftThrough() throws {
+        // Intent: normalization clamps the horizontal position together with the column, so a
+        //   pointer dragged off the right edge keeps selecting through the last character
+        //   instead of snapping back to the boundary before it.
+        // Why it exists: clamping the column while leaving the offset at its raw value would
+        //   put the resolved boundary on the wrong side of the last character -- the selection
+        //   would visibly retreat across the pointer at the moment it left the grid.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("wxyz".utf8))
+        let offGrid = try #require(terminalCell(
+            at: .init(x: 97, y: 1),
+            cellSize: .init(width: 10, height: 13),
+            columns: 4,
+            rows: 2
+        ))
+
+        var state = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 2, row: 0, offsetX: 0.1), terminal: terminal, state: &state
+        )
+        let dragged = decideTerminalPointer(
+            .move(column: offGrid.column, row: offGrid.row, offsetX: offGrid.offsetX),
+            terminal: terminal,
+            state: &state
+        )
+
+        #expect(dragged.selectionMutation == .set(range(0, 2, 0, 4)))
+        terminal.setSelection(range(0, 2, 0, 4))
+        #expect(terminal.selectedText == "yz")
     }
 
     @Test("pinning a selection unit and resolving it back reproduces it exactly")
@@ -882,10 +1036,10 @@ struct TerminalInteractionPolicyTests {
         // Intent: mint-then-resolve is the identity on every unit a pointer gesture can
         //   anchor on, including the boundary shapes -- a wide cell, a hard line end, and a
         //   line that trims to nothing.
-        // Why it exists: the drag compares its resolved anchor against a freshly computed
-        //   unit, both to decide `hasExtended` and to suppress an unmoved character press.
-        //   A round trip that shifted a boundary by one column would misfire both silently,
-        //   with no eviction anywhere in sight.
+        // Why it exists: a token or line drag unions its resolved anchor with a freshly
+        //   computed unit, and a character drag reads its press boundary straight off the
+        //   resolved anchor's edge. A round trip that shifted a boundary by one column would
+        //   misplace both silently, with no eviction anywhere in sight.
         var fed = try #require(Terminal(columns: 12, rows: 3))
         fed.feed(Array("a\u{6F22}b cd\r\n\r\nlast".utf8))
 

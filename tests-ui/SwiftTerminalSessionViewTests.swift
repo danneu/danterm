@@ -503,9 +503,12 @@ func swiftTerminalSessionViewTests() {
             modifiers: [.shift]
         ))
 
+        // Cells are 8 points wide here, so x=17 and x=31 land an eighth and seven eighths of
+        // the way into their columns: the sub-cell position character selection resolves a
+        // boundary from has to survive the view boundary, not just the column.
         try uiExpect(controller.pointerEvents == [
-            .down(.left, column: 2, row: 2, modifiers: [.shift], clickCount: 2),
-            .move(column: 3, row: 3, modifiers: [.shift]),
+            .down(.left, column: 2, row: 2, offsetX: 0.125, modifiers: [.shift], clickCount: 2),
+            .move(column: 3, row: 3, offsetX: 0.875, modifiers: [.shift]),
             .up(.left, column: 9, row: 9, modifiers: [.shift]),
         ], "pointer normalization diverged: \(controller.pointerEvents)")
         try uiExpect(controller.linkInteractionCancellations == 1,
@@ -590,7 +593,7 @@ func swiftTerminalSessionViewTests() {
         pane.mouseUp(with: up)
 
         try uiExpect(controller.pointerEvents == [
-            .down(.right, column: 1, row: 1, modifiers: [.control], clickCount: 1),
+            .down(.right, column: 1, row: 1, offsetX: 0.125, modifiers: [.control], clickCount: 1),
             .up(.right, column: 1, row: 1, modifiers: [.control]),
         ], "control-click escaped the right-button owner lifecycle")
         try uiExpect(menuCells == [.init(column: 1, row: 1)], "control-click menu was not deferred")
@@ -749,7 +752,7 @@ func swiftTerminalSessionViewTests() {
             modifiers: [.option]
         ))
         try uiExpect(controller.pointerEvents == [
-            .move(column: 2, row: 2, modifiers: [.alt]),
+            .move(column: 2, row: 2, offsetX: 0.125, modifiers: [.alt]),
         ], "mouse move did not reach the owner adapter")
     }
 
@@ -799,6 +802,7 @@ func swiftTerminalSessionViewTests() {
                 .left,
                 column: 2,
                 row: 2,
+                offsetX: 0.125,
                 modifiers: [.command],
                 clickCount: 1
             ),
@@ -836,8 +840,8 @@ func swiftTerminalSessionViewTests() {
         pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: [.command]))
 
         try uiExpect(controller.pointerEvents.suffix(2) == [
-            .move(column: 2, row: 2),
-            .move(column: 2, row: 2, modifiers: [.command]),
+            .move(column: 2, row: 2, offsetX: 0.125),
+            .move(column: 2, row: 2, offsetX: 0.125, modifiers: [.command]),
         ], "Cmd press did not replay the last pointer cell")
         let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
         try uiExpect(preview?.isHidden == false, "hover did not show the URL pill")
@@ -849,7 +853,7 @@ func swiftTerminalSessionViewTests() {
 
         pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: []))
 
-        try uiExpect(controller.pointerEvents.last == .move(column: 2, row: 2),
+        try uiExpect(controller.pointerEvents.last == .move(column: 2, row: 2, offsetX: 0.125),
                      "Cmd release did not replay the last pointer cell")
         try uiExpect(preview?.isHidden == true, "Cmd release did not hide the URL pill")
 

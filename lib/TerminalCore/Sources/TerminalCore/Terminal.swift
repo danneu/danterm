@@ -2749,6 +2749,39 @@ public struct Terminal: Equatable, Sendable {
         )) ?? emptyRange(at: position)
     }
 
+    /// Resolves a pointed position to the nearer of the two boundaries surrounding the character
+    /// under it. `offsetX` is the pointer's `0...1` position inside its own cell; the comparison
+    /// spans the whole character, so a double-width cell snaps at its visual center rather than
+    /// at either half's, and the midpoint itself belongs to the following boundary.
+    func characterBoundary(
+        at position: TerminalTextPosition,
+        offsetX: Double
+    ) -> TerminalTextPosition {
+        let cell = normalizedCellPosition(position)
+        let leading = anchor(before: cell)
+        let trailing = anchor(after: cell)
+        let width = max(1, trailing.column - leading.column)
+        let clampedColumn = min(max(position.column, 0), columnCount - 1)
+        let offsetInCharacter =
+            Double(clampedColumn - cell.column) + min(max(offsetX, 0), 1)
+        let column = offsetInCharacter >= Double(width) / 2 ? trailing.column : leading.column
+        return canonicalBoundary(TerminalTextPosition(row: cell.row, column: column))
+    }
+
+    /// Collapses the two spellings of a soft-wrap seam -- past a wrapped row's last column, and
+    /// before its continuation's first -- onto the second. They name one visual position, so
+    /// without this a drag across the seam could compare two ends as distinct while selecting
+    /// nothing between them.
+    func canonicalBoundary(_ position: TerminalTextPosition) -> TerminalTextPosition {
+        let stream = activeProjection()
+        guard position.column >= columnCount,
+              position.row >= 0,
+              position.row + 1 < stream.count,
+              stream[position.row].isSoftWrapped
+        else { return position }
+        return TerminalTextPosition(row: position.row + 1, column: 0)
+    }
+
     /// Resolves explicit OSC 8 metadata or a detected URL through the HTTP(S) activation gate.
     public func activatableLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
         if let explicit = explicitLink(at: position) {

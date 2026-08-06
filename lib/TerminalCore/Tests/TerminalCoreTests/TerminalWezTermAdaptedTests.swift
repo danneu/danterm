@@ -167,7 +167,9 @@ struct TerminalWezTermAdaptedTests {
     /// Runs one press-drag-release at character granularity through the real pointer seam,
     /// returning both the range policy computed and the text a Copy would then yield. Written
     /// against `decideTerminalPointer` rather than `setSelection` on purpose: these scenarios
-    /// are about which *cell* a pointer coordinate names, the step `setSelection` skips.
+    /// are about which *boundary* a pointer coordinate names, the step `setSelection` skips.
+    /// The two offsets are the pointer's position inside its own cell; both default to that
+    /// cell's leading edge, which is the boundary before its character.
     ///
     /// Both halves are reported because a caller can consume either one. `setSelection`
     /// re-snaps its endpoints, so a policy range that split a wide cell would still copy the
@@ -175,13 +177,15 @@ struct TerminalWezTermAdaptedTests {
     private func dragSelect(
         _ terminal: inout Terminal,
         from: (column: Int, row: Int),
-        to: (column: Int, row: Int)
+        fromOffsetX: Double = 0,
+        to: (column: Int, row: Int),
+        toOffsetX: Double = 0
     ) -> (range: TerminalTextRange?, text: String?) {
         var state = TerminalInteractionState()
         var policyRange: TerminalTextRange?
         for event: TerminalPointerEvent in [
-            .down(.left, column: from.column, row: from.row),
-            .move(column: to.column, row: to.row),
+            .down(.left, column: from.column, row: from.row, offsetX: fromOffsetX),
+            .move(column: to.column, row: to.row, offsetX: toOffsetX),
             .up(.left, column: to.column, row: to.row),
         ] {
             switch decideTerminalPointer(event, terminal: terminal, state: &state)
@@ -203,9 +207,9 @@ struct TerminalWezTermAdaptedTests {
     @Test("a character drag names whole cells and survives ends outside the viewport")
     func characterDragSnapsWideCellsAndClampsOutOfBounds() throws {
         // Intent: a press-drag-release at character granularity copies the text between the
-        //   two pointed cells, where "cell" means a whole display cell -- a wide character is
-        //   never half-selected -- and an endpoint outside the grid resolves to the nearest
-        //   real content instead of trapping.
+        //   two boundaries its ends resolve to, where a boundary always falls outside a whole
+        //   display cell -- a wide character is never half-selected -- and an endpoint outside
+        //   the grid resolves to the nearest real content instead of trapping.
         // Why it exists: the two ends of a drag reach the stream by different routes. The
         //   anchor is pinned at pointer-down and the moving end is resolved fresh on every
         //   move, and only the moving end's route is guarded against out-of-viewport input
@@ -220,18 +224,19 @@ struct TerminalWezTermAdaptedTests {
         //   of range", and the whole of TerminalInteractionPolicyTests, TerminalSelectionTests,
         //   TerminalSelectionUnitTests, and TerminalHyperlinkInteractionTests still passes
         //   under that mutation -- no other test drags to a coordinate outside the grid.
-        //   The wide-cell legs do not discriminate and are not claimed to: DanTerm enforces
-        //   cluster snapping at three independent layers (`normalizedCellPosition`, the
+        //   The wide-cell legs do not discriminate on atomicity and are not claimed to: DanTerm
+        //   enforces cluster snapping at three independent layers (`characterBoundary`, the
         //   pin/resolve round trip the drag anchor takes, and `setSelection`), so removing any
-        //   one still yields these answers. They are kept as the executable statement of the
-        //   divergence below, which is otherwise only a comment.
+        //   one still yields boundaries outside the cluster. They are kept as the executable
+        //   statement of the divergence below, which is otherwise only a comment.
         //
         // Adapted from term/src/test/selection.rs#drag_selection (WezTerm d69264d).
-        //   Divergence, wide cells: WezTerm drops the emoji when the drag starts on its
-        //   second column and yields "skul"; DanTerm snaps a pointed cell outward to its
-        //   whole cluster, so both that drag and the one starting a column earlier yield
-        //   "\u{1F480}skul". WezTerm's rule makes the emoji unselectable from its right half;
-        //   ours is the same rule `clusterAtomicity` already pins for every other entry point.
+        //   Convergence, wide cells: both drop the emoji when the drag starts on its second
+        //   column and yield "skul", but for different reasons. WezTerm's rule is per-cell;
+        //   DanTerm's is that a boundary is chosen across the character's whole width, so the
+        //   emoji's second column is past its visual center and snaps to the boundary after
+        //   it. Starting one column earlier -- the left half of the same character -- selects
+        //   the emoji whole. Neither drag can name a position inside the cluster.
         //   Divergence, off-grid end: WezTerm's drag past the last row picks up the blank row
         //   below and copies a trailing "\n"; DanTerm clamps to the last retained content, the
         //   rule `a stripped trailing blank endpoint clamps to retained content` already
@@ -241,30 +246,41 @@ struct TerminalWezTermAdaptedTests {
         terminal.feed(Array("\u{1F480}skull\r\n".utf8))
         #expect(terminal.screenText == "hello world \n\u{1F480}skull     \n            ")
 
-        #expect(dragSelect(&terminal, from: (1, 0), to: (4, 0)).text == "ello")
+        #expect(dragSelect(
+            &terminal, from: (1, 0), to: (4, 0), toOffsetX: 1
+        ).text == "ello")
 
-        // Row 1 is `[skull-head][skull-tail]s k u l l`, so column 1 is the emoji's tail. Both
-        // drags must produce the same *range*, not merely the same text -- that is the half
-        // `setSelection` cannot rescue.
-        let wideRange = TerminalTextRange(
+        // Row 1 is `[skull-head][skull-tail]s k u l l`, so column 1 is the emoji's tail and the
+        // emoji's visual center is the seam between columns 0 and 1. Each drag must produce a
+        // *range* on a cluster boundary, not merely the right text -- splitting a cluster is
+        // the half `setSelection` cannot rescue.
+        let fromTail = dragSelect(&terminal, from: (1, 1), to: (5, 1), toOffsetX: 1)
+        #expect(fromTail.range == TerminalTextRange(
+            start: TerminalTextPosition(row: 1, column: 2),
+            end: TerminalTextPosition(row: 1, column: 6)
+        ))
+        #expect(fromTail.text == "skul")
+        let fromHead = dragSelect(&terminal, from: (0, 1), to: (5, 1), toOffsetX: 1)
+        #expect(fromHead.range == TerminalTextRange(
             start: TerminalTextPosition(row: 1, column: 0),
             end: TerminalTextPosition(row: 1, column: 6)
-        )
-        let fromTail = dragSelect(&terminal, from: (1, 1), to: (5, 1))
-        #expect(fromTail.range == wideRange)
-        #expect(fromTail.text == "\u{1F480}skul")
-        let fromHead = dragSelect(&terminal, from: (0, 1), to: (5, 1))
-        #expect(fromHead.range == wideRange)
+        ))
         #expect(fromHead.text == "\u{1F480}skul")
 
         // Across a hard line break: the newline is the break, and row 0's trailing blank
         // column is not part of the text.
-        #expect(dragSelect(&terminal, from: (1, 0), to: (6, 1)).text == "ello world\n\u{1F480}skull")
-        #expect(dragSelect(&terminal, from: (6, 0), to: (3, 1)).text == "world\n\u{1F480}sk")
+        #expect(dragSelect(
+            &terminal, from: (1, 0), to: (6, 1), toOffsetX: 1
+        ).text == "ello world\n\u{1F480}skull")
+        #expect(dragSelect(
+            &terminal, from: (6, 0), to: (3, 1), toOffsetX: 1
+        ).text == "world\n\u{1F480}sk")
 
-        // Dragging back the way it came selects the same text: the gesture is a union of two
-        // cells, not a directed span.
-        #expect(dragSelect(&terminal, from: (4, 0), to: (1, 0)).text == "ello")
+        // Dragging back the way it came selects the same text: the two ends are boundaries and
+        // the gesture orders them, so direction is symmetric rather than special-cased.
+        #expect(dragSelect(
+            &terminal, from: (4, 0), fromOffsetX: 1, to: (1, 0)
+        ).text == "ello")
 
         // Off-grid ends. A real caller normalizes through `terminalCell(at:)`, which clamps,
         // but the policy seam is public and takes raw coordinates, so each end has to be
@@ -274,6 +290,8 @@ struct TerminalWezTermAdaptedTests {
         #expect(dragSelect(&terminal, from: (0, 0), to: (15, 3)).text == whole)
         #expect(dragSelect(&terminal, from: (0, 0), to: (9999, 9999)).text == whole)
         #expect(dragSelect(&terminal, from: (99, 9), to: (2, 0)).text == "llo world\n\u{1F480}skull")
-        #expect(dragSelect(&terminal, from: (0, 1), to: (-5, -5)).text == "hello world\n\u{1F480}")
+        // The press names the boundary before the emoji and the drag never crossed back over
+        // its center, so the emoji itself is outside the span.
+        #expect(dragSelect(&terminal, from: (0, 1), to: (-5, -5)).text == "hello world\n")
     }
 }
