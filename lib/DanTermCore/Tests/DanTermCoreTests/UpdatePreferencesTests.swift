@@ -9,8 +9,12 @@
 // theme + font-size ownership, and invalid font-size handling),
 // configLoaded while open (resets only DanTerm fields), and the
 // no-op-when-draft-nil guards
-// + helper functions (resolveRemoteTheme / isDraftDirty). The eight
+// + the resolveRemoteTheme helper. The eight
 // `guard let projection = ... else { throw }` unwraps convert to `try #require`.
+//
+// Dirty detection is asserted through the projection, never through a helper:
+// the panel's rendered labels are the behavior, and a separate predicate for
+// the same question is free to drift from the one the panel actually uses.
 import Foundation
 import Testing
 
@@ -546,7 +550,7 @@ private func openPrefs(
     }
 
     @Test("prefSave resets dirty state")
-    func prefSaveResetsDirtyState() {
+    func prefSaveResetsDirtyState() throws {
         // Intent: after a successful save, the draft is clean against the
         //   committed config.
         // Why it exists: pins the post-save invariant.
@@ -554,9 +558,11 @@ private func openPrefs(
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        #expect(isDraftDirty(model.preferencesDraft!, vs: model.config), "should be dirty before save")
+        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled,
+            "should be dirty before save")
         _ = update(&model, .prefSave)
-        #expect(!isDraftDirty(model.preferencesDraft!, vs: model.config), "should be clean after save")
+        #expect(!(try #require(desiredPreferencesPanel(in: model)).saveEnabled),
+            "should be clean after save")
     }
 
     @Test("prefSave with remoteTheme change updates remote panes")
@@ -733,75 +739,5 @@ private func openPrefs(
         // Scenario: spec-first default fallback.
         #expect(resolveRemoteTheme("") == "Purplepeter")
         #expect(resolveRemoteTheme("   ") == "Purplepeter")
-    }
-
-    @Test("isDraftDirty returns false when all fields match")
-    func isDraftDirtyFalseWhenAllMatch() {
-        // Intent: a draft matching every committed field reports clean.
-        // Why it exists: pins the dirty-check happy path (with normalize
-        //   on whitespace-padded remote theme).
-        // Scenario: spec-first clean.
-        let config = DanTermConfig.default
-        let draft = PreferencesDraft(alertClearMode: .focus, remoteTheme: "  Purplepeter  ", theme: nil, fontSize: nil)
-        #expect(!isDraftDirty(draft, vs: config), "should not be dirty")
-    }
-
-    @Test("isDraftDirty returns true when alertClearMode differs")
-    func isDraftDirtyTrueWhenAlertClearModeDiffers() {
-        // Intent: alert mode mismatch flags dirty.
-        // Why it exists: pins the alert-mode branch.
-        // Scenario: spec-first alert mismatch.
-        let config = DanTermConfig.default
-        let draft = PreferencesDraft(alertClearMode: .manual, remoteTheme: "Purplepeter", theme: nil, fontSize: nil)
-        #expect(isDraftDirty(draft, vs: config), "should be dirty")
-    }
-
-    @Test("isDraftDirty returns true when remoteTheme differs")
-    func isDraftDirtyTrueWhenRemoteThemeDiffers() {
-        // Intent: remote-theme mismatch flags dirty.
-        // Why it exists: pins the remote-theme branch.
-        // Scenario: spec-first remote mismatch.
-        let config = DanTermConfig.default
-        let draft = PreferencesDraft(alertClearMode: .focus, remoteTheme: "Grape", theme: nil, fontSize: nil)
-        #expect(isDraftDirty(draft, vs: config), "should be dirty")
-    }
-
-    @Test("isDraftDirty returns true when theme differs from the saved config")
-    func isDraftDirtyTrueWhenThemeDiffersFromConfig() {
-        // Intent: theme mismatch flags dirty.
-        // Why it exists: pins the theme branch.
-        // Scenario: spec-first theme mismatch.
-        var config = DanTermConfig.default
-        config.defaultTheme = "Dracula"
-        let draft = PreferencesDraft(alertClearMode: .focus, remoteTheme: "Purplepeter", theme: "Solarized", fontSize: nil)
-        #expect(isDraftDirty(draft, vs: config), "should be dirty")
-    }
-
-    @Test("isDraftDirty returns true when fontSize differs from the saved config")
-    func isDraftDirtyTrueWhenFontSizeDiffersFromConfig() {
-        // Intent: font-size mismatch flags dirty.
-        // Why it exists: pins the font-size branch.
-        // Scenario: spec-first font-size mismatch.
-        var config = DanTermConfig.default
-        config.fontSize = 14
-        let draft = PreferencesDraft(alertClearMode: .focus, remoteTheme: "Purplepeter", theme: nil, fontSize: "16")
-        #expect(isDraftDirty(draft, vs: config), "should be dirty")
-    }
-
-    @Test("isDraftDirty reads the saved font size and its field text as equal")
-    func isDraftDirtyTreatsRenderedFontSizeAsClean() {
-        // Intent: the draft's raw text and the saved number are the same setting
-        //   when the number renders to that text.
-        // Why it exists: the draft stores font size as text and the config stores
-        //   it as a number, so the comparison has to bridge the two; getting it
-        //   wrong makes an untouched panel report dirty the moment a size is set.
-        // Scenario: spec-first -- open on a config with a size, touch nothing.
-        var config = DanTermConfig.default
-        config.fontSize = 13
-        let whole = PreferencesDraft(alertClearMode: .focus, remoteTheme: "Purplepeter", theme: nil, fontSize: "13")
-        #expect(!isDraftDirty(whole, vs: config), "13.0 and \"13\" are the same size")
-        config.fontSize = 13.5
-        let fractional = PreferencesDraft(alertClearMode: .focus, remoteTheme: "Purplepeter", theme: nil, fontSize: "13.5")
-        #expect(!isDraftDirty(fractional, vs: config), "13.5 and \"13.5\" are the same size")
     }
 }

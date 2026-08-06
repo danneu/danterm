@@ -706,15 +706,6 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
   }
 }
 
-/// Whether the preferences draft has any changes compared to the committed config.
-func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig) -> Bool {
-    draft.alertClearMode != config.alertClearMode
-        || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
-        || draft.theme != config.defaultTheme
-        || draft.fontSize != config.fontSize.map(configFontSizeText)
-        || resolveFontFamilyDraft(draft.fontFamily) != config.fontFamily
-}
-
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
   let paneIds = Set(allPaneIds(tab.rootNode))
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count

@@ -145,10 +145,6 @@ import Testing
         _ = update(&model, .prefSetFontFamily("Menlo"))
 
         #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled)
-        #expect(isDraftDirty(
-            try #require(model.preferencesDraft),
-            vs: model.config
-        ))
     }
 
     @Test("configLoaded while the panel is open resets the font-family draft")
