@@ -1,4 +1,4 @@
-// The F8 eviction probe for doc 31, plus the `AR6` residency reading `research/31/D4` sequences into the
+// The research/31/F8 eviction probe for doc 31, plus the `AR6` residency reading `research/31/D4` sequences into the
 // same slice: what does head-granular eviction on the arena cost against today's budget
 // enforcement, and what does an arena pane actually leave resident once its ring has cycled?
 //
@@ -13,34 +13,34 @@
 // `scrollbackByteCost` and `storedCellCount` subtractions, the `isSoftWrapped` read, and once per
 // call the `isHistoryHeadTruncated` write, the observation bump and what survives of
 // `handleEviction` without a `Terminal` to hold anchors (see its doc comment); its `steady`
-// statistic also carries `appendToScrollback` exactly as `F3`'s baseline did. Those members are
+// statistic also carries `appendToScrollback` exactly as `research/31/F3`'s baseline did. Those members are
 // `private` to `Terminal`, so the arm reproduces them rather than calling them, which is this
-// probe's stated fidelity limit exactly as it was `F1`'s and `F3`'s. `B` is **not** a prototype: it
+// probe's stated fidelity limit exactly as it was `research/31/F1`'s and `research/31/F3`'s. `B` is **not** a prototype: it
 // is `Terminal.LogicalLineStore`, the store slice 3 landed, driven through `admit` and
 // `evictOneDisplayRow`. `C` is whole-record eviction, descriptive only and outside the verdict.
 //
 // Belongs here: the two evicters, the five stimulus classes, arm C's granularity pair, the gates,
-// and the residency reading. Does not belong here: a threshold, a verdict, or any edit to `F1`'s,
-// `F2`'s, `F3`'s, `F7`'s or `F9`'s probe files -- the isolation practice `F2` established and every
+// and the residency reading. Does not belong here: a threshold, a verdict, or any edit to `research/31/F1`'s,
+// `research/31/F2`'s, `research/31/F3`'s, `research/31/F7`'s or `research/31/F9`'s probe files -- the isolation practice `research/31/F2` established and every
 // probe since has kept. Nothing under `lib/TerminalCore/Sources/` is touched by this finding.
 //
-// Two places where `D4`'s letter cannot be executed as written, both resolved **here, in the file
+// Two places where `research/31/D4`'s letter cannot be executed as written, both resolved **here, in the file
 // header, before the probe was first run**, so the resolution is visible in the same commit as the
-// numbers it governs, and both recorded as deferred decisions in `F8`:
+// numbers it governs, and both recorded as deferred decisions in `research/31/F8`:
 //
-//   * **`DD29` -- the `drain` statistic times a fixed step count, not a budget-driven call.** `D4`
+//   * **`research/31/DD29` -- the `drain` statistic times a fixed step count, not a budget-driven call.** `research/31/D4`
 //     asks for 2,000 display rows admitted "with enforcement suppressed" and then one enforcement
 //     call that drains back to the budget. Under `31/I2` the arena's capacity *is* the budget and
 //     is a `let`, so admission cannot be run with enforcement suppressed without changing the
 //     arena's defining geometry. Both arms therefore run the same fixed 2,000-step eviction loop --
 //     which is the body of `evictToBudget` / `enforceScrollbackBudget` with the loop condition
 //     supplied by the harness -- and each arm's once-per-call epilogue runs once. Both arms are
-//     treated identically, so the ratio the rule reads is unaffected; `D4` gate 3's drain half is
+//     treated identically, so the ratio the rule reads is unaffected; `research/31/D4` gate 3's drain half is
 //     satisfied by construction and is reported as such rather than dropped.
-//   * **`DD30` -- arm C is the arena *design* reproduced in this file, run in both granularities.**
-//     `D4` asks for whole-record eviction "on the same arena". `LogicalLineStore` exposes no
+//   * **`research/31/DD30` -- arm C is the arena *design* reproduced in this file, run in both granularities.**
+//     `research/31/D4` asks for whole-record eviction "on the same arena". `LogicalLineStore` exposes no
 //     whole-record eviction and adding one to production for a descriptive arm is not licensed by
-//     `D1`'s scoping, so arm C is a linear reproduction of the arena -- same 8-byte
+//     `research/31/D1`'s scoping, so arm C is a linear reproduction of the arena -- same 8-byte
 //     `LogicalLineRecord` header, same `LogicalLineFold`, same cell words -- run head-granular and
 //     whole-record. The granularity ratio is therefore measured on **one** implementation, which is
 //     what the attribution needs, and the reproduction's head-granular arm is reported against the
@@ -52,13 +52,13 @@
 //     DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
 //       --filter TerminalLogicalLineEvictionProbe
 //
-// and the residency reading one process per state, as `D4` requires for an attributable footprint
+// and the residency reading one process per state, as `research/31/D4` requires for an attributable footprint
 // delta:
 //
 //     DANTERM_LOGICAL_LINE_PROBE=1 DANTERM_RESIDENCY_CASE=arena/plain/cycled \
 //       swift test -c release --package-path lib/TerminalCore --filter residencyReading
 //
-// Release matters: `D4`'s 1.09x line is derived from release-build cost shares.
+// Release matters: `research/31/D4`'s 1.09x line is derived from release-build cost shares.
 import Darwin
 import Foundation
 import Testing
@@ -71,9 +71,9 @@ import Testing
 ///
 /// `mix` and `full` are `research/28/F23`'s measured distribution and its full-width saturation bound;
 /// `stream` is `research/28/F20` Observation 5's `scrollback-stream` row shape and the class the 1.09x line
-/// is derived from; `wrapped` is new at `D4` (`DD21`) and is the only class in which a step trims
+/// is derived from; `wrapped` is new at `research/31/D4` (`research/31/DD21`) and is the only class in which a step trims
 /// *inside* a record, so it is the only class that exercises the persisted head cell offset at all;
-/// `wide` is `F3`'s CJK generator and is descriptive, because no ladder threshold derives from wide
+/// `wide` is `research/31/F3`'s CJK generator and is descriptive, because no ladder threshold derives from wide
 /// content.
 enum EvictionContentClass: String, CaseIterable {
     case mix
@@ -94,9 +94,9 @@ enum EvictionContentClass: String, CaseIterable {
 
 /// The logical lines a class is made of, before the engine wraps them.
 ///
-/// `mix` and `full` delegate to `F1`'s generator and `stream` reproduces `F3`'s verbatim
+/// `mix` and `full` delegate to `research/31/F1`'s generator and `stream` reproduces `research/31/F3`'s verbatim
 /// `scrollback-stream` template, so the campaign's probes keep measuring one content model.
-/// `wrapped` is 60,000 cells -- 91.6% of `DD3`'s 65,536-cell cap, deliberately below it so the
+/// `wrapped` is 60,000 cells -- 91.6% of `research/31/DD3`'s 65,536-cell cap, deliberately below it so the
 /// forced-split path does not fire inside a measured region -- which folds to 336 display rows at
 /// 179 columns.
 func evictionLogicalLines(for contentClass: EvictionContentClass, count: Int) -> [String] {
@@ -127,8 +127,8 @@ func evictionLogicalLines(for contentClass: EvictionContentClass, count: Int) ->
 ///
 /// Full width because production admission is handed a live-grid row -- `pack` walks every column
 /// and decides the trim itself, and so must the candidate. The two side-table fields are stripped
-/// from every cell, exactly as `F1` and `F3` stripped them and conservative toward the baseline for
-/// the same reason (`D4`'s "what this measurement does not see"). Caps are raised far above
+/// from every cell, exactly as `research/31/F1` and `research/31/F3` stripped them and conservative toward the baseline for
+/// the same reason (`research/31/D4`'s "what this measurement does not see"). Caps are raised far above
 /// production so the fill stops on the stimulus rather than on a bound; eviction is driven here by
 /// the arms, not by the source terminal.
 func buildEvictionStimulus(
@@ -178,7 +178,7 @@ func buildEvictionStimulus(
 ///
 /// `research/31/D4` gate 1 compares the two arms over the display rows both retain, and the two stores
 /// legitimately disagree about how much *default* trailing padding they keep -- today's `pack`
-/// trims to canonical extent, the arena measures a hard-ended row to its content end (`DD25`). So
+/// trims to canonical extent, the arena measures a hard-ended row to its content end (`research/31/DD25`). So
 /// only cells that differ from the default contribute, keyed by column, which makes the check
 /// exactly "the same content in the same places" and not "the same array length".
 @inline(__always)
@@ -264,7 +264,7 @@ struct BudgetEnforcedRowStore {
     }
 
     /// `Terminal.swift#enforceScrollbackBudget`, with the two deleted caps' terms omitted because
-    /// the arms are compared at the byte budget alone (`D2` Decision 4 deletes both caps).
+    /// the arms are compared at the byte budget alone (`research/31/D2` Decision 4 deletes both caps).
     @discardableResult
     @inline(__always)
     mutating func enforceBudget() -> Int {
@@ -281,7 +281,7 @@ struct BudgetEnforcedRowStore {
         return evictedCount
     }
 
-    /// The same loop bounded by a step count instead of by the charge (`F8`'s `DD29`).
+    /// The same loop bounded by a step count instead of by the charge (`research/31/F8`'s `research/31/DD29`).
     @discardableResult
     @inline(__always)
     mutating func evictSteps(_ steps: Int) -> Int {
@@ -313,7 +313,7 @@ struct BudgetEnforcedRowStore {
     /// would be deleted by the optimizer, and a hand-rolled stand-in would be a cost this rule did
     /// not ask for. So arm A is charged slightly *less* than production here, which is
     /// conservative toward the candidate -- and the arena's step 4 has no analogue at all
-    /// (`D2` Decision 2 as amended: no anchor cache), so the omission cannot flatter arm B.
+    /// (`research/31/D2` Decision 2 as amended: no anchor cache), so the omission cannot flatter arm B.
     @inline(__always)
     private mutating func handleEviction(of rowCount: Int) {
         guard rowCount > 0 else { return }
@@ -370,7 +370,7 @@ struct BudgetEnforcedRowStore {
 // MARK: - Arm C: the arena design at two granularities
 
 /// A linear reproduction of the arena, evicted either one display row at a time or one whole
-/// record at a time (`F8`'s `DD30`).
+/// record at a time (`research/31/F8`'s `research/31/DD30`).
 ///
 /// Linear rather than a ring on purpose: arm C measures a **drain**, which writes nothing at the
 /// tail, so the ring's wrap discipline cannot participate in the number and reproducing it would
@@ -430,7 +430,7 @@ struct GranularityArena {
     }
 
     /// Evicts until at least `rows` display rows are gone. Returns the rows actually dropped,
-    /// which whole-record granularity overshoots -- that overshoot is `F6` `HR5`'s hazard and is
+    /// which whole-record granularity overshoots -- that overshoot is `research/31/F6` `research/31/HR5`'s hazard and is
     /// reported rather than hidden.
     @discardableResult
     @inline(__always)
@@ -512,7 +512,7 @@ struct GranularityArena {
 /// The process's physical footprint, the same `task_vm_info.phys_footprint` quantity
 /// `TerminalMemoryProbeSupport#processPhysicalFootprintBytes` reads.
 ///
-/// Reproduced here rather than imported for the reason `F8` records as `DD31`:
+/// Reproduced here rather than imported for the reason `research/31/F8` records as `research/31/DD31`:
 /// `Terminal.LogicalLineStore` is internal to `TerminalCore`, so the probe **binary** cannot see the
 /// arena at all, and the reading has to run where `@testable import` reaches it. The mechanism is
 /// the probe's; only the caller moved.
@@ -718,7 +718,7 @@ struct TerminalLogicalLineEvictionProbe {
         print("[F8] load average after: \(loadAverageDescription())")
     }
 
-    /// Gates 1 and 2, plus the depth reading `D4` asks for beside every class.
+    /// Gates 1 and 2, plus the depth reading `research/31/D4` asks for beside every class.
     private func reportDepthsAndFidelity(_ bench: Bench) throws {
         let armA = bench.baselineA
         let armB = bench.baselineB
@@ -861,7 +861,7 @@ struct TerminalLogicalLineEvictionProbe {
         #expect(abs(evictedB - admissions) * 100 <= admissions)
     }
 
-    /// `drain`: eviction alone per evicted display row, over a fixed 2,000-step loop (`DD29`).
+    /// `drain`: eviction alone per evicted display row, over a fixed 2,000-step loop (`research/31/DD29`).
     private func measureDrain(_ bench: Bench) throws {
         let steps = Self.drainRows
 
@@ -896,7 +896,7 @@ struct TerminalLogicalLineEvictionProbe {
             measured: measured, aa: aa, samples: steps,
             extra: """
                 gate3 armA evicted=\(expectedA.readCount)/\(steps) armB evicted=\(expectedB.readCount)/\(steps) \
-                (satisfied by construction: DD29's fixed-step loop)
+                (satisfied by construction: research/31/DD29's fixed-step loop)
                   gate4 products armAExpected=\(expectedA.checksum) measured=\(measured.checksumA) \
                 armBExpected=\(expectedB.checksum) measured=\(measured.checksumB)
                 """
@@ -1055,7 +1055,7 @@ struct TerminalLogicalLineEvictionProbe {
         }
     }
 
-    /// The substitution `DD30` names, measured rather than assumed: the reproduction's
+    /// The substitution `research/31/DD30` names, measured rather than assumed: the reproduction's
     /// head-granular drain against the real store's, on the same class and the same step count.
     @Test("F8 arm C fidelity: the reproduction against the real store", .enabled(if: probeIsEnabled))
     func granularityReproductionFidelity() throws {
@@ -1116,16 +1116,16 @@ struct TerminalLogicalLineEvictionProbe {
     // MARK: Attribution, descriptive and outside the verdict
 
     /// Splits the candidate's admission cost into "the arena design" and "this implementation of
-    /// it", by running `F3`'s own prototype beside the landed store on the same rows.
+    /// it", by running `research/31/F3`'s own prototype beside the landed store on the same rows.
     ///
-    /// **Outside `D4`'s rule entirely**, and it exists for one reason: if the verdict-bearing arms
+    /// **Outside `research/31/D4`'s rule entirely**, and it exists for one reason: if the verdict-bearing arms
     /// reject, the first competing interpretation is "wrap-at-read admission is expensive", and
-    /// `F3` already measured the opposite on a prototype. Running `F3`'s `OpenLineAdmitter` in the
+    /// `research/31/F3` already measured the opposite on a prototype. Running `research/31/F3`'s `OpenLineAdmitter` in the
     /// same session on the same stimulus is the only thing that can tell a design cost from an
     /// implementation cost -- the same job arm C does for granularity. Eviction is not in this
     /// reading: every store here has room, so nothing evicts and the three arms price admission
     /// alone.
-    @Test("F8 attribution: today's admission, F3's prototype, and the landed store", .enabled(if: probeIsEnabled))
+    @Test("F8 attribution: today's admission, research/31/F3's prototype, and the landed store", .enabled(if: probeIsEnabled))
     func implementationAttribution() throws {
         for contentClass in EvictionContentClass.allCases {
             let stimulus = buildEvictionStimulus(contentClass: contentClass)
@@ -1281,7 +1281,7 @@ struct TerminalLogicalLineEvictionProbe {
     /// `scrollback-plain` and `scrollback-mixed` are `MemoryProbeMatrix`'s, transcribed rather than
     /// imported (`TerminalCoreTests` does not depend on `TerminalMemoryProbeSupport`, and adding a
     /// module dependency to run a probe is not a change this slice is licensed to make). `blank` is
-    /// the degenerate regime `D4` says carries no trigger.
+    /// the degenerate regime `research/31/D4` says carries no trigger.
     static func residencySourceRows(className: String, stateName: String) throws -> [Terminal.GridRow] {
         guard stateName != "empty" else { return [] }
 

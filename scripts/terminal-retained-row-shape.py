@@ -18,15 +18,15 @@ of a recording was not replayed.
 
 Three reductions, in the order the findings quote them:
 
-  shape        -- lengths, blank rows, size-class rounding (`F9`, `F10`)
+  shape        -- lengths, blank rows, size-class rounding (`research/28/F9`, `research/28/F10`)
   composition  -- what the stored cells contain, and which row classes hold the
-                  bytes (`F11`)
-  packing      -- what each candidate `H3` representation would charge for those
-                  exact rows, through the same allocator (`F11`, `D5`)
+                  bytes (`research/28/F11`)
+  packing      -- what each candidate `research/28/H3` representation would charge for those
+                  exact rows, through the same allocator (`research/28/F11`, `research/28/D5`)
 
 The third is arithmetic over the first two, not a measurement of an
 implementation: no packing candidate exists in the engine, and pricing one here
-before writing it is precisely what `D3`'s admission test demands.
+before writing it is precisely what `research/28/D3`'s admission test demands.
 
 No threshold, no verdict, no pairing. This is a sizing measurement with one arm.
 """
@@ -129,9 +129,9 @@ def bound_stimuli():
     """Yield the one generated stimulus, and it is a bound rather than a sample.
 
     A history of nothing but blank lines is not realistic content and is not
-    counted in either pool. It exists because `F9` is asked for `H2`'s ceiling in
+    counted in either pool. It exists because `research/28/F9` is asked for `research/28/H2`'s ceiling in
     absolute bytes, and a ceiling has to be evaluated where the hypothesis is
-    most favored -- the same way `F8` stated `H4`'s ceiling at zero per-row
+    most favored -- the same way `research/28/F8` stated `research/28/H4`'s ceiling at zero per-row
     overhead, a condition nothing achieves either. Reported as `kind: bound` so no
     reader can mistake it for evidence about real sessions.
     """
@@ -146,9 +146,9 @@ def bound_stimuli():
 
 
 def reference_stimuli():
-    """Yield `F8`'s payload, replicated so its per-row residual can be re-explained.
+    """Yield `research/28/F8`'s payload, replicated so its per-row residual can be re-explained.
 
-    `F8` measured 197.5 bytes of per-row overhead at 179 columns with the memory
+    `research/28/F8` measured 197.5 bytes of per-row overhead at 179 columns with the memory
     probe's `scrollback-plain` payload, and attributed it to an array header plus
     "roughly another 100-160 B" of size-class rounding -- stated there as a
     consistency check, explicitly not a measurement. Replaying the identical line
@@ -190,8 +190,8 @@ MAX_SATURATION_FEED_BYTES = 16 * 1024 * 1024
 def saturated_stimulus(stimulus, report):
     """Repeat one stimulus's own committed bytes until its history saturates.
 
-    `F8`'s split, `F9`'s blank fraction and `F10`'s rounding were all read at
-    *depth*, but only two corpus stimuli reach depth in a single pass. `F11` asks
+    `research/28/F8`'s split, `research/28/F9`'s blank fraction and `research/28/F10`'s rounding were all read at
+    *depth*, but only two corpus stimuli reach depth in a single pass. `research/28/F11` asks
     what styled and multi-scalar rows cost at depth specifically -- and the
     styled content in this corpus lives in recordings and TUI workloads that
     retain a screenful or less per pass. Repeating the stimulus is the honest way
@@ -201,7 +201,7 @@ def saturated_stimulus(stimulus, report):
     Repeat count comes from the stimulus's own measured charge rather than from a
     guess: enough passes to fill the budget. A stimulus that retained *nothing* in
     one pass is repeated to the byte cap instead of skipped -- "this content never
-    reaches history however long it runs" is the answer `F11` most needs from the
+    reaches history however long it runs" is the answer `research/28/F11` most needs from the
     styled TUI recordings, and skipping them would leave it unmeasured. Both caps
     bound the run; a report that hit one is still reported, with its repeat count
     and fed bytes, so a reader can see it did not saturate.
@@ -282,13 +282,13 @@ def derive(report):
         "roundingFractionOfAllocated": ((allocated - request) / allocated) if allocated else 0.0,
         "fullWidthAllocatedBytes": full_width,
         "fullWidthRequestBytes": len(counts) * (header + report["columns"] * stride),
-        # The two halves of `F10`'s question: what ragged rows save on paper, and
+        # The two halves of `research/28/F10`'s question: what ragged rows save on paper, and
         # what survives after both sides pass through the allocator.
         "paperSavingFraction": (
             1 - request / (len(counts) * (header + report["columns"] * stride))
         ) if counts else 0.0,
         "realizedSavingFraction": (1 - allocated / full_width) if full_width else 0.0,
-        # `F8` measured this quantity independently, as a malloc `bytesInUse` delta
+        # `research/28/F8` measured this quantity independently, as a malloc `bytesInUse` delta
         # minus exact census bytes. Re-derived here from the size classes so the two
         # can be held against each other.
         "perRowOverheadBytes": (
@@ -383,7 +383,7 @@ def charged_bytes(report):
     return sum(row_charge(f["stored"] * stride, f) for f in row_facts(report))
 
 
-# Row classes, on the two axes `D3` named as unmeasured. They are exhaustive and
+# Row classes, on the two axes `research/28/D3` named as unmeasured. They are exhaustive and
 # mutually exclusive, so the byte shares below sum to the whole history, and they
 # are the two axes rather than a finer taxonomy because those are the two a packing
 # scheme prices differently: a styled row needs style representation, a
@@ -414,7 +414,7 @@ def compose_facts(facts, stride):
     does -- the pooled numbers a finding quotes must not come from a second
     implementation that could disagree with the per-stimulus one.
 
-    `meanChargeBytes` per class is the quantity `F9`'s 1,808 B content-row figure
+    `meanChargeBytes` per class is the quantity `research/28/F9`'s 1,808 B content-row figure
     is the plain-row instance of: what one retained row of that class costs the
     budget, and therefore what one row of that class costs in depth.
     """
@@ -460,7 +460,7 @@ def compose_facts(facts, stride):
     }
 
 
-# Candidate `H3` representations, priced as payload bytes per row from the measured
+# Candidate `research/28/H3` representations, priced as payload bytes per row from the measured
 # composition. Each takes one row's facts and returns what that row's single cell
 # allocation would ask malloc for -- the row slot, the array header, the spills and
 # the size-class rounding are added identically by `row_charge`, because the point
@@ -468,7 +468,7 @@ def compose_facts(facts, stride):
 #
 # These are proposals, not implementations: nothing in the engine packs anything.
 # Pricing them here against real rows before any of them is built is exactly what
-# `D3`'s admission test asks for, and the test it enforces -- more than one ~12.5%
+# `research/28/D3`'s admission test asks for, and the test it enforces -- more than one ~12.5%
 # bucket step of shrink, or the saving can round back to zero -- is reported per
 # candidate as `rowsDroppingAClass`.
 
@@ -501,7 +501,7 @@ def metadata_charge(fact):
 
 
 def pack_narrow_cell(fact):
-    """C1: same array-of-cells, an 8-byte retained cell. **Selected by `D9`; shipped.**
+    """C1: same array-of-cells, an 8-byte retained cell. **Selected by `research/28/D9`; shipped.**
 
     The shipped layout packs one 64-bit word: 21 bits of scalar (or spill index), 3 bits
     of kind, a spill flag, and a **full-width 32-bit** interned style id, with 7 bits
@@ -517,7 +517,7 @@ def pack_narrow_cell(fact):
     other candidate. `contentIdentity` was charged the same way until the engine started
     choosing its encoding per record at admission time; see `metadata_charge`.
 
-    Like every candidate here it is charged no per-row header (`F13` Observation 2). C1's
+    Like every candidate here it is charged no per-row header (`research/28/F13` Observation 2). C1's
     is 7 bytes; `research/28/F18` adds it back when pricing the pivot, and a reader pricing a new
     candidate against this table must do the same or the comparison tilts.
     """
@@ -643,7 +643,7 @@ def price_facts(facts, stride):
 
         charged = [row_charge(payload(f), f) for f in facts]
         total = sum(charged)
-        # `D3`'s admission test, per row: did the request shrink enough to leave its
+        # `research/28/D3`'s admission test, per row: did the request shrink enough to leave its
         # size class? A candidate that saves on paper but keeps rows in the same
         # bucket delivers exactly zero bytes, however clean its arithmetic.
         dropped = sum(
@@ -663,12 +663,12 @@ def price_facts(facts, stride):
             "depthAtBudget": int(SCROLLBACK_BUDGET_BYTES / (total / len(facts))),
             "depthMultiple": current_total / total if total else 0.0,
         }
-        # `H4` composed in, per `D3`: an aggregate store removes the per-row array
+        # `research/28/H4` composed in, per `research/28/D3`: an aggregate store removes the per-row array
         # header and its size-class rounding, leaving the row slot and the payload.
         # Priced on top of every candidate rather than alone, because that is the
-        # only form `D3` left it alive in -- and because a packing scheme shrinks
+        # only form `research/28/D3` left it alive in -- and because a packing scheme shrinks
         # the payload, which makes the fixed header a *larger* share than the 10.5%
-        # `F8` measured against 32-byte cells.
+        # `research/28/F8` measured against 32-byte cells.
         arena = sum(GRID_ROW_SLOT_BYTES + payload(f) + spill_charge(f) for f in facts)
         priced[name]["arenaChargedBytes"] = arena
         priced[name]["arenaSavingFraction"] = (1 - arena / current_total) if current_total else 0.0
@@ -694,7 +694,7 @@ def good_size(request):
     """Round like macOS malloc: 16B steps to 256B, four buckets per octave, then pages.
 
     The middle regime is the one every retained row lands in, and it is what makes
-    `F10` come out the way it does: four buckets per octave is ~12.5% granularity,
+    `research/28/F10` come out the way it does: four buckets per octave is ~12.5% granularity,
     so rounding is *proportional* to the request rather than a fixed quantum. Above
     the small zone's 32 KB limit the large allocator takes over and rounds to
     16 KB pages -- unreachable for a row at any sane width, and modelled anyway so
@@ -717,7 +717,7 @@ def summarize(reports):
     """Pool the corpus, and pool the recordings separately.
 
     Recordings are pooled on their own because they are the *recorded* half of the
-    corpus -- the half `F9` treats as honest evidence about blank rows. The
+    corpus -- the half `research/28/F9` treats as honest evidence about blank rows. The
     generated benchmark workloads contain whatever their templates contain, which
     is a fact about the template, not about real sessions.
 
@@ -802,7 +802,7 @@ def render(reports, summary):
 
 
 def render_composition(reports, summary):
-    """Print what the stored cells contain -- `F11`'s first half."""
+    """Print what the stored cells contain -- `research/28/F11`'s first half."""
     print()
     header = (
         f"{'stimulus':44s} {'rows':>6s} {'styled%':>8s} {'multi%':>7s} "
@@ -843,7 +843,7 @@ def render_composition(reports, summary):
 
 
 def render_packing(summary):
-    """Print what each candidate representation would charge -- `F11`'s second half."""
+    """Print what each candidate representation would charge -- `research/28/F11`'s second half."""
     print()
     for name, pool in summary.items():
         packing = pool["packing"]

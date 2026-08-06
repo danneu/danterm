@@ -12,8 +12,8 @@
 // four things the gate asks about -- how many records the line becomes, what it costs to admit,
 // what browsing that region costs against an ordinary-content control, and whether copy still sees
 // one logical line. Does not belong here: a threshold or a verdict (the gate's own words are "the
-// cap bounds the hazard either way", so this reading is descriptive), and any edit to `F1`'s,
-// `F2`'s, `F3`'s, `F7`'s, `F8`'s or `F9`'s probe files -- the isolation practice `F2` established
+// cap bounds the hazard either way", so this reading is descriptive), and any edit to `research/31/F1`'s,
+// `research/31/F2`'s, `research/31/F3`'s, `research/31/F7`'s, `research/31/F8`'s or `research/31/F9`'s probe files -- the isolation practice `research/31/F2` established
 // and every probe since has kept. Nothing under `lib/TerminalCore/Sources/` is touched by it.
 //
 // Two stimuli, because the interesting question splits in two:

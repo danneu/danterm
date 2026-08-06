@@ -1,4 +1,4 @@
-// The F2 counting-pass probe for doc 31: what does the eager block-total recompute cost at
+// The research/31/F2 counting-pass probe for doc 31: what does the eager block-total recompute cost at
 // depth, when a width change discards every cached total and rebuilds the index in one pass?
 //
 // Doc 31 stores nothing width-dependent, so a resize's only history-side work is recounting
@@ -6,10 +6,10 @@
 // milliseconds where reflow was `research/28/F15`'s `1.85 us x rows + 0.352 us x cells`. This file
 // measures it, at 10,000 and 100,000 logical lines, for both count-sources `research/31/D1` named:
 // `arena` (the count read from each record's header, which is what the candidate direction
-// sketches) and `counts` (a dense parallel array, which is what F1's prototype happened to do
+// sketches) and `counts` (a dense parallel array, which is what research/31/F1's prototype happened to do
 // and which costs 8 bytes per line of extra index state).
 //
-// Belongs here: the F2 harness, the synthetic-depth control, and the reporting. Does not belong
+// Belongs here: the research/31/F2 harness, the synthetic-depth control, and the reporting. Does not belong
 // here: the arena itself (`TerminalLogicalLineReadProbe.swift` owns it), a threshold, or a
 // verdict -- `research/31/D1`'s Part B rule holds those, frozen at `497d181` before this file existed.
 //
@@ -42,7 +42,7 @@ enum CountSource: String, CaseIterable {
 /// Cuts a stimulus down to exactly `lineCount` logical lines.
 ///
 /// `buildStimulus` fills to a display-row target, which overshoots in logical lines by an amount
-/// that depends on the content class. F2's depths are stated in logical lines, so a run that
+/// that depends on the content class. research/31/F2's depths are stated in logical lines, so a run that
 /// measured "10,000 lines" of one class against 12,000 of another would not be one depth.
 func truncated(_ stimulus: RetainedStimulus, toLineCount lineCount: Int) -> RetainedStimulus {
     precondition(stimulus.lineCount >= lineCount, "stimulus has \(stimulus.lineCount) lines, needed \(lineCount)")

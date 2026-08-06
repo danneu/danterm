@@ -1,22 +1,22 @@
-// The F7 blank-record counting-pass probe for doc 31: what does the eager block-total recompute
+// The research/31/F7 blank-record counting-pass probe for doc 31: what does the eager block-total recompute
 // cost at the record count `research/31/D2` Decision 1 actually admits?
 //
 // `research/31/D2` charges the block index 8 bytes per record, so a 16 MiB budget admits 1,048,576 blank
 // logical lines (8 arena bytes + 8 index bytes each) -- 10.5x the deepest depth `research/31/F2` measured.
-// `D2`'s own open-question section extrapolated `F2`'s 100,000-line per-line rate to ~6.4 ms
-// against `F2`'s one-frame (16.67 ms) reject bound, and froze a decision rule that has to be read
+// `research/31/D2`'s own open-question section extrapolated `research/31/F2`'s 100,000-line per-line rate to ~6.4 ms
+// against `research/31/F2`'s one-frame (16.67 ms) reject bound, and froze a decision rule that has to be read
 // against a measurement rather than that arithmetic. This file takes the measurement.
 //
-// It follows `F2`'s instrument as closely as a zero-cell stimulus allows -- same 9 measured
+// It follows `research/31/F2`'s instrument as closely as a zero-cell stimulus allows -- same 9 measured
 // rounds plus 2 warmup, same median-of-rounds statistic with min/max/n, same three width changes,
-// both count-sources, release build, headless, one process -- and reuses `F2`'s harness
+// both count-sources, release build, headless, one process -- and reuses `research/31/F2`'s harness
 // (`CountSource`, `measurePass`, `passSummary`, `medianMilliseconds`, `loadAverageDescription`)
-// and `F1`'s arena rather than reimplementing either.
+// and `research/31/F1`'s arena rather than reimplementing either.
 //
 // Belongs here: the blank stimulus, the two controls a zero-cell stimulus needs (a real-engine
 // fidelity control, and a sentinel arm that restores the width-responsiveness gate 1 loses when
 // every record folds to one display row at every width), and the reporting. Does not belong here:
-// the arena (`TerminalLogicalLineReadProbe.swift` owns it), `F2`'s own arms
+// the arena (`TerminalLogicalLineReadProbe.swift` owns it), `research/31/F2`'s own arms
 // (`TerminalLogicalLineIndexProbe.swift`, unedited), a threshold, or a verdict -- `research/31/D2`'s open
 // question holds the rule, frozen before this file existed.
 //
@@ -40,12 +40,13 @@ import Testing
 /// is its own logical line and every record is as small as a record gets. Built through the engine
 /// rather than by hand so the control arena's geometry is the engine's own.
 ///
-/// **The one thing it does not reproduce is `D2`'s zero-cell record.** Today's canonical extent
-/// (`PackedRetainedRow.pack`, invariant `I2`) is floored at one cell, so a blank retained row packs
+/// **The one thing it does not reproduce is `research/31/D2`'s zero-cell record.** Today's canonical extent
+/// (`PackedRetainedRow.pack`) remains a pure function of the row's observable content and is
+/// floored at one cell, so a blank retained row packs
 /// to *one* stored cell, not zero. That floor is a property of today's per-display-row store, not
-/// of the arena, and `D2`'s 1,048,576 derivation assumes a zero-cell record is representable
-/// (`DD15`). The probe therefore measures both: the zero-cell arm is the verdict-bearing one
-/// because it is `D2`'s stimulus, and the one-cell arm bounds the alternative record format --
+/// of the arena, and `research/31/D2`'s 1,048,576 derivation assumes a zero-cell record is representable
+/// (`research/31/DD15`). The probe therefore measures both: the zero-cell arm is the verdict-bearing one
+/// because it is `research/31/D2`'s stimulus, and the one-cell arm bounds the alternative record format --
 /// which, being 16 arena bytes per record, admits *fewer* records at the same budget (699,050),
 /// so the zero-cell record count bounds it from above.
 func buildBlankStimulus(lineCount: Int, columns: Int = 179, rows: Int = 66) -> RetainedStimulus {
@@ -87,7 +88,7 @@ func blankCellCountsWithSentinels(_ count: Int, stride: Int, cells: Int) -> [Int
 
 // MARK: - The probe
 
-/// `research/31/F7`: prices `F2`'s eager counting pass at the blank-record count `research/31/D2` admits.
+/// `research/31/F7`: prices `research/31/F2`'s eager counting pass at the blank-record count `research/31/D2` admits.
 ///
 /// Reports distributions and gate outcomes; it prints no verdict. The rule is `research/31/D2`'s open
 /// question -- at or above one 60 Hz frame a record-count safety bound ships -- and it is applied
@@ -98,9 +99,9 @@ struct TerminalLogicalLineBlankIndexProbe {
 
     /// `research/31/D2` Decision 1: 16,777,216 B / (8 arena + 8 index) B per blank record.
     static let budgetRecords = 1_048_576
-    /// The depth `F2`'s gate 2 control is taken at, and `F2`'s own shallow depth.
+    /// The depth `research/31/F2`'s gate 2 control is taken at, and `research/31/F2`'s own shallow depth.
     static let controlRecords = 10_000
-    /// `F2`'s three width changes, unchanged: same-width floor, narrow, widen.
+    /// `research/31/F2`'s three width changes, unchanged: same-width floor, narrow, widen.
     static let widths = [179, 100, 200]
 
     @Test(
@@ -113,7 +114,7 @@ struct TerminalLogicalLineBlankIndexProbe {
 
         // Gate 2's control, adapted: the real-engine arena at 10,000 blank records against a
         // synthetic one built from the *same* per-record counts, so the two agree on geometry
-        // exactly and the only variable is how they were constructed. `F2`'s rule allows 15%.
+        // exactly and the only variable is how they were constructed. `research/31/F2`'s rule allows 15%.
         let stimulus = buildBlankStimulus(lineCount: Self.controlRecords)
         #expect(stimulus.lineCount == Self.controlRecords)
         var realArena = LogicalLineArena(stimulus)
@@ -128,16 +129,16 @@ struct TerminalLogicalLineBlankIndexProbe {
             [F7] control arenas at \(Self.controlRecords) engine-produced blank records: real \
             \(realArena.arenaByteCount) bytes, synthetic \(syntheticControl.arenaByteCount) bytes; \
             engine stored-cell counts min \(realCounts.min() ?? -1) max \(realCounts.max() ?? -1) \
-            (canonical extent is floored at one cell -- see `DD15`)
+            (canonical extent is floored at one cell -- see `research/31/DD15`)
             """)
 
-        // The verdict-bearing arm: `D2`'s stimulus, 1,048,576 zero-cell records.
+        // The verdict-bearing arm: `research/31/D2`'s stimulus, 1,048,576 zero-cell records.
         var deep = LogicalLineArena(
             syntheticCellCounts: uniformCellCounts(Self.budgetRecords, cells: 0),
             width: stimulus.columns
         )
         // Descriptive: the same record count with today's one-cell canonical floor, which doubles
-        // the arena stride from 8 B to 16 B. It bounds the record format `DD15` decides against.
+        // the arena stride from 8 B to 16 B. It bounds the record format `research/31/DD15` decides against.
         var deepOneCell = LogicalLineArena(
             syntheticCellCounts: uniformCellCounts(Self.budgetRecords, cells: 1),
             width: stimulus.columns
@@ -199,7 +200,7 @@ struct TerminalLogicalLineBlankIndexProbe {
 
     /// Descriptive: the pass's cost against blank-record count, with the middle of the curve.
     ///
-    /// `research/31/D2`'s open question extrapolated from `F2`'s two-point curve, and
+    /// `research/31/D2`'s open question extrapolated from `research/31/F2`'s two-point curve, and
     /// `agent-docs/measurement-discipline.md` is explicit that a model predicting a curve gets its
     /// middle measured before it is acted on. No threshold is read off this arm.
     @Test("F7 -- blank counting-pass cost against record count (descriptive)", .enabled(if: probeIsEnabled))

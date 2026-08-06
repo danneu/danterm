@@ -1,4 +1,4 @@
-// The F1 read-path probe for doc 31: does storing history as unwrapped logical lines and
+// The research/31/F1 read-path probe for doc 31: does storing history as unwrapped logical lines and
 // wrapping at read cost more to *browse* than today's display-row store?
 //
 // Two arms, one process, interleaved. **Baseline** is today's shape: one
@@ -9,16 +9,16 @@
 // display-row total per block) whose display-row lookup is a binary search then an in-block
 // scan. Both arms read the *same cells in the same order* and prove it with a checksum.
 //
-// Belongs here: the two stores, the two access patterns D1 froze (sequential browse, random
+// Belongs here: the two stores, the two access patterns research/31/D1 froze (sequential browse, random
 // seek), the stimulus that reproduces `research/28/F23`'s content distribution, and the calibration
 // that decides whether a run may be quoted. Does not belong here: a threshold, a verdict, or
 // anything a production type has to change to accommodate. Nothing in `lib/TerminalCore`'s
 // sources is touched by this file, and the candidate store is local to it -- Phase 1
-// prototypes live in a test target until `D1` answers go (doc 31, Investigation rules).
+// prototypes live in a test target until `research/31/D1` answers go (doc 31, Investigation rules).
 //
-// `TerminalLogicalLineIndexProbe.swift` (F2) reuses `LogicalLineArena` from this file and adds
+// `TerminalLogicalLineIndexProbe.swift` (research/31/F2) reuses `LogicalLineArena` from this file and adds
 // its own harness there rather than editing the arms above; the arena's synthetic initializer
-// and its second counting-pass variant are the only things F2 added here, because they need the
+// and its second counting-pass variant are the only things research/31/F2 added here, because they need the
 // type's private storage.
 //
 // It lives in the test target for the same reason `TerminalHistoryDepthSizingProbe` does: it
@@ -157,7 +157,7 @@ func buildStimulus(
     // lose them, so the comparison stays controlled -- and the loss is *conservative toward
     // the baseline*: under the candidate a content-identity run table would be built once per
     // logical line instead of once per display row, so keeping the tables could only widen
-    // the candidate's margin. F1 therefore measures the wrapping indirection alone.
+    // the candidate's margin. research/31/F1 therefore measures the wrapping indirection alone.
     var displayRows: [Terminal.GridRow] = []
     var lineStarts: [Int] = [0]
     var index = 0
@@ -186,7 +186,7 @@ func buildStimulus(
 /// Today's retained-row store, reproduced: one packed row per display row at an O(1) index.
 ///
 /// `Terminal.ScrollbackBuffer` is `private`, so this reproduces its element type, its readers
-/// and its index arithmetic rather than calling it. That substitution is F1's stated fidelity
+/// and its index arithmetic rather than calling it. That substitution is research/31/F1's stated fidelity
 /// limit. What it does *not* substitute is the encoding or the decode: rows are built by
 /// `PackedRetainedRow.pack` and read by the production walks.
 struct DisplayRowStore {
@@ -205,7 +205,7 @@ struct DisplayRowStore {
     /// `PackedRetainedRow` *by value*, and that struct owns two Swift arrays, so every row
     /// read retains and releases both. This variant is the control that separates "the
     /// candidate's storage shape is better" from "today's store pays ARC per row read", which
-    /// is a competing interpretation F1 cannot otherwise distinguish and which, if it
+    /// is a competing interpretation research/31/F1 cannot otherwise distinguish and which, if it
     /// dominates, is fixable inside today's design with no storage change at all.
     @inline(__always)
     func readBorrowed(displayRow: Int, into checksum: inout UInt64) {
@@ -250,7 +250,7 @@ struct DisplayRowStore {
 ///     bytes 8..    cell count x the C1 8-byte cell word, verbatim from `PackedRetainedRow`
 ///
 /// Nothing width-dependent is stored. `blockPrefix` -- the only width-dependent state -- is
-/// derived by `recomputeIndex(width:)` and is what `F2` will price; F1 builds it once and
+/// derived by `recomputeIndex(width:)` and is what `research/31/F2` will price; research/31/F1 builds it once and
 /// then only reads it.
 struct LogicalLineArena {
     private var arena: [UInt8] = []
@@ -334,7 +334,7 @@ struct LogicalLineArena {
         }
     }
 
-    /// Builds an arena with real record geometry but unpopulated cell payload. **F2 only.**
+    /// Builds an arena with real record geometry but unpopulated cell payload. **research/31/F2 only.**
     ///
     /// The counting pass reads a record header and nothing else, so an arena whose cell words
     /// are left zero prices it exactly -- and it is the only way to reach 100,000 lines of wide
@@ -344,7 +344,7 @@ struct LogicalLineArena {
     /// is the control that holds this claim to account -- at 10,000 lines the synthetic arena
     /// and the real one are both measured, and must agree.
     ///
-    /// Not usable for reading: `read` would decode zeros. Nothing in F2 reads a cell.
+    /// Not usable for reading: `read` would decode zeros. Nothing in research/31/F2 reads a cell.
     init(syntheticCellCounts counts: [Int], width: Int, blockSize: Int = 256) {
         self.width = width
         self.blockSize = blockSize
@@ -369,7 +369,7 @@ struct LogicalLineArena {
         recomputeIndex(width: width)
     }
 
-    /// The per-line cell counts, so F2 can build a synthetic arena from a real one's geometry.
+    /// The per-line cell counts, so research/31/F2 can build a synthetic arena from a real one's geometry.
     func lineCellCountsSnapshot() -> [Int] { lineCellCounts }
 
     /// The display-row total computed by a route the blocked prefix cannot share.
@@ -383,11 +383,11 @@ struct LogicalLineArena {
     }
 
     /// The eager recompute doc 31 settled on: discard every cached block total and rebuild it
-    /// in one pass. F1 calls it once at construction; `F2` prices it at depth.
+    /// in one pass. research/31/F1 calls it once at construction; `research/31/F2` prices it at depth.
     ///
     /// This is `research/31/D1`'s `counts` count-source: the per-line cell count comes from a dense
     /// parallel array. That is *not* what the candidate direction sketches -- the sketched index
-    /// holds record offsets and the count lives in the record -- so F2's primary variant is
+    /// holds record offsets and the count lives in the record -- so research/31/F2's primary variant is
     /// `recomputeIndexFromArena` below and this one is the priced alternative.
     mutating func recomputeIndex(width: Int) {
         self.width = width
@@ -494,7 +494,7 @@ struct LogicalLineArena {
     ///
     /// Per-cell work is identical to `PackedRetainedRow`'s by construction: `forEachKind`'s
     /// safe byte-wise `u64` read for the kind walk, and the unsafe-buffer read for the
-    /// content walk. The only difference F1 is measuring is where the bytes came from.
+    /// content walk. The only difference research/31/F1 is measuring is where the bytes came from.
     @inline(__always)
     func read(line: Int, rowWithinLine: Int, into checksum: inout UInt64) {
         let offset = lineOffsets[line]
@@ -825,7 +825,7 @@ struct TerminalLogicalLineReadProbe {
                 #expect(measured.readCount > 0)
             }
 
-            // The ARC control, descriptive and outside D1's rule. Same baseline store, same
+            // The ARC control, descriptive and outside research/31/D1's rule. Same baseline store, same
             // walks, the row borrowed in place rather than copied out. What it isolates is how
             // much of the candidate's margin is the storage shape and how much is a per-read
             // retain/release pair today's subscript performs.
@@ -862,7 +862,7 @@ struct TerminalLogicalLineReadProbe {
 
     @Test("F1 supplementary: how random seek responds to block size", .enabled(if: probeIsEnabled))
     func blockSizeSweep() throws {
-        // Descriptive, and outside `D1`'s rule: the rule is frozen at the design's stated
+        // Descriptive, and outside `research/31/D1`'s rule: the rule is frozen at the design's stated
         // ~256 lines per block. This exists so a `narrow-go` on random seek has a measured
         // starting point rather than a guess about which way to move the parameter.
         for contentClass in LogicalLineContentClass.allCases {

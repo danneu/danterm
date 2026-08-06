@@ -1,4 +1,4 @@
-// The F9 wide-content counting-pass probe for doc 31: what does the eager block-total recompute
+// The research/31/F9 wide-content counting-pass probe for doc 31: what does the eager block-total recompute
 // cost when every record takes the wide-cell fallback instead of one divide?
 //
 // `research/31/D3` Decision 7 reframed that fallback from "an O(cells) scan" to `O(display rows)` -- the
@@ -6,35 +6,35 @@
 // is one probe per display row and not one per cell -- and then declined to close inherited
 // condition 1 on arithmetic: the bracket clears one 60 Hz frame by ~3.2x on a per-probe constant
 // nobody measured. It froze this probe and a three-way decision rule instead. This file takes the
-// measurement; the rule is `D3` Decision 7's and is applied once, by hand, to what this prints.
+// measurement; the rule is `research/31/D3` Decision 7's and is applied once, by hand, to what this prints.
 //
-// The instrument is `F2`'s, with the three changes `D3` Decision 7 names and no others: the
-// stimulus is `F3`'s `wide` CJK generator (so every record carries `hasWideCells` and every
+// The instrument is `research/31/F2`'s, with the three changes `research/31/D3` Decision 7 names and no others: the
+// stimulus is `research/31/F3`'s `wide` CJK generator (so every record carries `hasWideCells` and every
 // boundary probe fires), the depths are the record count a 16 MiB arena admits for that class plus
-// `F2`'s 10,000 and 100,000 rungs for continuity, and the width changes add `179 -> 2` -- the
-// engine minimum (`F4` case 3), where display rows per record and therefore boundary probes are
+// `research/31/F2`'s 10,000 and 100,000 rungs for continuity, and the width changes add `179 -> 2` -- the
+// engine minimum (`research/31/F4` case 3), where display rows per record and therefore boundary probes are
 // maximised. Everything else is unchanged: 9 measured rounds plus 2 warmup, median over rounds of
 // wall time for one whole pass, min/max/n beside every aggregate, release, headless, one process.
 //
-// Per `F7`, the ladder that matters is **cells per record**, not record count: the counting pass's
+// Per `research/31/F7`, the ladder that matters is **cells per record**, not record count: the counting pass's
 // cost is governed by stride, and the blank end of that ladder is already measured. So the
 // cells-per-record ladder here holds the byte budget fixed and varies bytes per record, and every
 // rung of it is budget-admissible and therefore verdict-bearing. The record-count ladder is the
 // continuity arm and is descriptive: 10,000 wide records is already 22 MB of arena, which the
 // budget does not admit.
 //
-// One arm of `F2`'s instrument is **inapplicable here and is replaced rather than dropped
-// silently**: `D1`'s two count-sources. `arena` versus `counts` prices carrying a dense parallel
+// One arm of `research/31/F2`'s instrument is **inapplicable here and is replaced rather than dropped
+// silently**: `research/31/D1`'s two count-sources. `arena` versus `counts` prices carrying a dense parallel
 // array of per-record cell counts, and a flagged record cannot be counted from it at all -- the
 // boundary probes have to read the record's cells wherever the count came from. So the primary
 // source is the only one measurable, and what takes the second arm's place is the **fast path over
-// the same records** (`F2`'s divide, which counts wide content *wrong*): it is what the fallback is
+// the same records** (`research/31/F2`'s divide, which counts wide content *wrong*): it is what the fallback is
 // measured against, and at an odd width its total differs, which is this stimulus's elision guard.
 //
 // Belongs here: the wide arena and its two counting variants (the wide-aware fold and, as the
-// contrast arm, `F2`'s fast path over the same records), the wide stimulus controls, and the
-// reporting. Does not belong here: `F1`'s arena or `F2`'s, `F3`'s admitters, a threshold, or a
-// verdict. **`F1`'s, `F2`'s, `F3`'s and `F7`'s probe files are unedited**, the practice `F2`
+// contrast arm, `research/31/F2`'s fast path over the same records), the wide stimulus controls, and the
+// reporting. Does not belong here: `research/31/F1`'s arena or `research/31/F2`'s, `research/31/F3`'s admitters, a threshold, or a
+// verdict. **`research/31/F1`'s, `research/31/F2`'s, `research/31/F3`'s and `research/31/F7`'s probe files are unedited**, the practice `research/31/F2`
 // established and every probe since has kept; nothing under `lib/TerminalCore/Sources/` is touched.
 //
 // Not part of the `just test` gate. Every measurement is skipped unless
@@ -43,7 +43,7 @@
 //     DANTERM_LOGICAL_LINE_PROBE=1 swift test -c release --package-path lib/TerminalCore \
 //       --filter TerminalLogicalLineWideIndexProbe
 //
-// Release matters: `D3` Decision 7's 1.67 ms and 16.67 ms bounds are release-build bounds.
+// Release matters: `research/31/D3` Decision 7's 1.67 ms and 16.67 ms bounds are release-build bounds.
 import Foundation
 import Testing
 
@@ -53,9 +53,9 @@ import Testing
 
 /// Which counting pass a round measures.
 ///
-/// `wideAware` is the fallback `D3` Decision 7 is about: a flagged record is folded by walking its
+/// `wideAware` is the fallback `research/31/D3` Decision 7 is about: a flagged record is folded by walking its
 /// display-row boundaries, probing the cell that would land in the last column. `fastPath` is
-/// `F2`'s pass over the *same* records -- one divide, no probe -- and is the contrast arm that says
+/// `research/31/F2`'s pass over the *same* records -- one divide, no probe -- and is the contrast arm that says
 /// what the fallback costs over the arithmetic it replaces. It is also this stimulus's elision
 /// guard: at an odd width the two produce **different** totals (a 179-column row of CJK holds 178
 /// cells, not 179), so a boundary walk an optimizer hoisted or deleted fails the cross-check.
@@ -66,18 +66,18 @@ enum WidePassVariant: String {
 
 /// Doc 31's record arena, restricted to what a counting pass touches, with wide cells in it.
 ///
-/// Record layout is `F1`'s and `F3`'s, so the campaign's probes agree on one format:
+/// Record layout is `research/31/F1`'s and `research/31/F3`'s, so the campaign's probes agree on one format:
 ///
 ///     bytes 0..3   cell count (UInt32)
 ///     byte  4      flags -- bit 0 hasWideCells
 ///     bytes 5..7   spare
 ///     bytes 8..    cell count x the C1 8-byte cell word, verbatim from `PackedRetainedRow`
 ///
-/// **The spacer is never stored** (`F4` case 10, `F3`'s admitter): a `.spacerHead` is a wrap
+/// **The spacer is never stored** (`research/31/F4` case 10, `research/31/F3`'s admitter): a `.spacerHead` is a wrap
 /// artifact of one width, so the fold re-derives it -- which is exactly why the display-row count
 /// of a wide record is not `ceil(cells / width)` and why this probe exists. Its own type rather
-/// than `F1`'s `LogicalLineArena` because the boundary probe has to read cell kinds out of the
-/// arena's bytes, and that storage is `private` to `F1`'s file.
+/// than `research/31/F1`'s `LogicalLineArena` because the boundary probe has to read cell kinds out of the
+/// arena's bytes, and that storage is `private` to `research/31/F1`'s file.
 struct WideLogicalLineArena {
     private var arena: [UInt8] = []
     private var lineOffsets: [Int] = []
@@ -96,7 +96,7 @@ struct WideLogicalLineArena {
     var displayRowCount: Int { blockPrefix.last ?? 0 }
     var recordCount: Int { lineOffsets.count }
     var arenaByteCount: Int { arena.count }
-    /// `D2` Decision 1's charge: the arena's bytes plus 8 index bytes per record.
+    /// `research/31/D2` Decision 1's charge: the arena's bytes plus 8 index bytes per record.
     var chargedBytes: Int { arena.count + lineOffsets.count * 8 }
     var cellCount: Int { lineCellCounts.reduce(0, +) }
 
@@ -104,7 +104,7 @@ struct WideLogicalLineArena {
     ///
     /// A logical line's cells are its display rows concatenated with the spacers dropped, each row
     /// measured to full width if it soft-wraps and to its canonical extent if it ends the line --
-    /// `Terminal.swift#reconstructLogicalLines`'s own rule, and the same one `F3`'s admitter
+    /// `Terminal.swift#reconstructLogicalLines`'s own rule, and the same one `research/31/F3`'s admitter
     /// follows.
     init(_ stimulus: RetainedStimulus, blockSize: Int = 256) {
         self.width = stimulus.columns
@@ -144,10 +144,10 @@ struct WideLogicalLineArena {
 
     /// Builds an arena of all-wide records with the given cell counts.
     ///
-    /// The synthetic form `F2`'s gate 2 controls: real record geometry -- header offsets, record
-    /// sizes, total footprint -- and, unlike `F2`'s synthetic arena, real *kind* bytes, because the
+    /// The synthetic form `research/31/F2`'s gate 2 controls: real record geometry -- header offsets, record
+    /// sizes, total footprint -- and, unlike `research/31/F2`'s synthetic arena, real *kind* bytes, because the
     /// boundary probe reads them. Every record is CJK clusters end to end (head, tail, head, ...),
-    /// which is the stimulus `D3` Decision 7 asks for taken to its limit: every boundary probe
+    /// which is the stimulus `research/31/D3` Decision 7 asks for taken to its limit: every boundary probe
     /// fires and every record is flagged.
     init(syntheticWideCellCounts counts: [Int], width: Int, blockSize: Int = 256) {
         self.width = width
@@ -210,12 +210,12 @@ struct WideLogicalLineArena {
 
     // MARK: The two counting passes
 
-    /// The wide-aware eager recompute: the fallback `D3` Decision 7 prices.
+    /// The wide-aware eager recompute: the fallback `research/31/D3` Decision 7 prices.
     ///
     /// A flagged record is folded by walking its display-row boundaries -- one probe of the cell
     /// that would occupy the last column, backing the row off by one when that cell starts a 2-cell
     /// cluster, which is `Terminal.swift#pack`'s spacer rule read from the record's side and
-    /// iTerm2's `LineBuffer` loop read from the other. An unflagged record takes `F2`'s divide.
+    /// iTerm2's `LineBuffer` loop read from the other. An unflagged record takes `research/31/F2`'s divide.
     /// The probe reads the byte holding the kind field rather than the whole cell word: both touch
     /// the same cache line, so the difference is register work, not memory traffic.
     mutating func recomputeIndexWideAware(width: Int) {
@@ -259,10 +259,10 @@ struct WideLogicalLineArena {
         blockPrefix[blockCount] = total
     }
 
-    /// `F2`'s pass over the same records: `max(1, ceil(cells / width))`, flags ignored.
+    /// `research/31/F2`'s pass over the same records: `max(1, ceil(cells / width))`, flags ignored.
     ///
     /// The contrast arm. It is not a candidate implementation -- it counts wrong for wide content,
-    /// which is `F4`'s arithmetic correction -- it is what the wide fallback is measured against,
+    /// which is `research/31/F4`'s arithmetic correction -- it is what the wide fallback is measured against,
     /// and the difference between the two totals at an odd width is this probe's elision guard.
     mutating func recomputeIndexFastPath(width: Int) {
         self.width = width
@@ -291,7 +291,7 @@ struct WideLogicalLineArena {
 
     /// The display-row total for all-wide records, computed by a route that reads no arena byte.
     ///
-    /// `F2` gate 1: a counting pass is the loop shape an optimizer deletes, and a deleted loop
+    /// `research/31/F2` gate 1: a counting pass is the loop shape an optimizer deletes, and a deleted loop
     /// reports an excellent number. For content that is CJK end to end a row holds
     /// `2 * (width / 2)` cells -- an odd width leaves the last column to a spacer -- so the total is
     /// closed-form arithmetic over the cell counts, sharing nothing with the boundary walk.
@@ -334,7 +334,7 @@ struct WideLogicalLineArena {
 
     /// Proves the fold reproduces the display rows the engine itself produced, record by record.
     ///
-    /// What replaces `F2`'s content-class calibration for this stimulus (see the probe's gate 5):
+    /// What replaces `research/31/F2`'s content-class calibration for this stimulus (see the probe's gate 5):
     /// `research/28/F23` measured an ASCII band, so there is no cell-count band a CJK stimulus can be held
     /// to -- but the engine did wrap this exact content at 179 columns, spacers and all, and the
     /// fold has to agree with it or nothing measured here is a fold of the retained content.
@@ -358,7 +358,7 @@ struct WideLogicalLineArena {
 
 // MARK: - Timing
 
-/// `F2`'s `measurePass`, over this file's arena and its two variants. Round counts are `F2`'s.
+/// `research/31/F2`'s `measurePass`, over this file's arena and its two variants. Round counts are `research/31/F2`'s.
 func measureWidePass(
     _ arena: inout WideLogicalLineArena,
     width: Int,
@@ -394,9 +394,9 @@ func measureWidePass(
 
 /// Tiles a real arena's per-record cell counts until the charge reaches `budgetBytes`.
 ///
-/// `D2` Decision 1's charge is the arena's bytes plus 8 index bytes per record, so the depth a
+/// `research/31/D2` Decision 1's charge is the arena's bytes plus 8 index bytes per record, so the depth a
 /// class actually reaches is a property of its record sizes. Taking the counts from a real arena
-/// rather than from the generator keeps the geometry the engine's own, exactly as `F2`'s
+/// rather than from the generator keeps the geometry the engine's own, exactly as `research/31/F2`'s
 /// `tiledCounts` does.
 func wideCountsFillingBudget(_ counts: [Int], budgetBytes: Int) -> [Int] {
     var out: [Int] = []
@@ -415,7 +415,7 @@ func wideCountsFillingBudget(_ counts: [Int], budgetBytes: Int) -> [Int] {
 
 // MARK: - The probe
 
-/// `research/31/F9`: prices the wide-content counting pass at the depths and widths `D3` Decision 7 froze.
+/// `research/31/F9`: prices the wide-content counting pass at the depths and widths `research/31/D3` Decision 7 froze.
 ///
 /// Reports distributions and gate outcomes; it prints no verdict. The three-way rule -- confirm
 /// under 1.67 ms, narrow confirm under 16.67 ms, reject at or above one 60 Hz frame -- lives in
@@ -424,12 +424,12 @@ func wideCountsFillingBudget(_ counts: [Int], budgetBytes: Int) -> [Int] {
 struct TerminalLogicalLineWideIndexProbe {
     static let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICAL_LINE_PROBE"] != nil
 
-    /// `Terminal.swift#productionScrollbackBudgetBytes`, which `D2` Decision 1 keeps unchanged.
+    /// `Terminal.swift#productionScrollbackBudgetBytes`, which `research/31/D2` Decision 1 keeps unchanged.
     static let budgetBytes = 16_777_216
-    /// `F2`'s three width changes plus `D3` Decision 7's addition: the engine minimum, where
+    /// `research/31/F2`'s three width changes plus `research/31/D3` Decision 7's addition: the engine minimum, where
     /// display rows per record -- and so boundary probes -- are maximised.
     static let widths = [179, 100, 200, 2]
-    /// `F2`'s shallow depth, which is also where its synthetic-fidelity control is taken.
+    /// `research/31/F2`'s shallow depth, which is also where its synthetic-fidelity control is taken.
     static let controlRecords = 10_000
 
     /// The verdict-bearing measurement: a budget-full wide arena, at all four widths.
@@ -441,7 +441,7 @@ struct TerminalLogicalLineWideIndexProbe {
         print("[F9] eager block-total recompute, wide (CJK) records; 9 measured rounds + 2 warmup per cell")
         print("[F9] load average before: \(loadAverageDescription())")
 
-        // `F3`'s `wide` class, through a real engine at 179x66, cut to `F2`'s shallow depth.
+        // `research/31/F3`'s `wide` class, through a real engine at 179x66, cut to `research/31/F2`'s shallow depth.
         let raw = buildAdmissionStimulus(contentClass: .wide, targetDisplayRows: 26_000)
         #expect(raw.lineCount >= Self.controlRecords)
         let stimulus = truncated(raw, toLineCount: Self.controlRecords)
@@ -455,7 +455,7 @@ struct TerminalLogicalLineWideIndexProbe {
         let spacers = stimulus.displayRows.reduce(0) { total, row in
             total + row.cells.filter { $0.kind == .spacerHead }.count
         }
-        // `F3`'s own band for this class, which is what `research/28/F23`'s ASCII cell-count band cannot be
+        // `research/31/F3`'s own band for this class, which is what `research/28/F23`'s ASCII cell-count band cannot be
         // for CJK: at least half the admitted rows carry a wide cell, and at least one spacer is
         // present -- the artifact the store refuses to hold and the fold has to put back.
         let wideRows = stimulus.displayRows.filter { row in row.cells.contains { $0.kind == .wideHead } }.count
@@ -464,10 +464,10 @@ struct TerminalLogicalLineWideIndexProbe {
             [F9] stimulus: \(stimulus.lineCount) records, \(stimulus.displayRowCount) engine display \
             rows, \(realArena.cellCount) cells, \(realArena.arenaByteCount) arena bytes \
             (\(String(format: "%.1f", Double(realArena.arenaByteCount) / Double(stimulus.lineCount))) \
-            B/record against `F3` Observation 4's 2,215), mean \
+            B/record against `research/31/F3` Observation 4's 2,215), mean \
             \(String(format: "%.1f", Double(realArena.cellCount) / Double(stimulus.lineCount))) \
             cells/record, \(spacers) spacers at 179, wide rows \
-            \(String(format: "%.1f%%", wideRowFraction * 100)) (`F3` band: >=50%, >=1 spacer); \
+            \(String(format: "%.1f%%", wideRowFraction * 100)) (`research/31/F3` band: >=50%, >=1 spacer); \
             flagged \(audit.flagged)/\(stimulus.lineCount), \
             all-wide \(audit.allWideCells)/\(stimulus.lineCount); fold-vs-engine \(foldProblem ?? "ok")
             """)
@@ -489,7 +489,7 @@ struct TerminalLogicalLineWideIndexProbe {
             \(budgetArena.arenaByteCount) arena bytes + \(budgetArena.recordCount * 8) index bytes \
             = \(budgetArena.chargedBytes) B charged of \(Self.budgetBytes); control arena \
             \(realArena.recordCount) records at \(realArena.chargedBytes) B charged (over budget, \
-            it is `F2`'s fidelity depth rather than a verdict-bearing one)
+            it is `research/31/F2`'s fidelity depth rather than a verdict-bearing one)
             """)
 
         for width in Self.widths {
@@ -527,10 +527,10 @@ struct TerminalLogicalLineWideIndexProbe {
         print("[F9] load average after: \(loadAverageDescription())")
     }
 
-    /// The ladder `F7` said would matter: cells per record, at a fixed 16 MiB charge.
+    /// The ladder `research/31/F7` said would matter: cells per record, at a fixed 16 MiB charge.
     ///
     /// Every rung is budget-admissible, so every rung is verdict-bearing. The extreme is the
-    /// narrow end -- `D3` Decision 7's worst case is narrowness, not depth: CJK folded at the
+    /// narrow end -- `research/31/D3` Decision 7's worst case is narrowness, not depth: CJK folded at the
     /// 2-column minimum puts one cluster per display row, so the whole arena's cells become
     /// boundary probes.
     @Test("F9 -- the wide counting pass against cells per record", .enabled(if: probeIsEnabled))
@@ -555,11 +555,11 @@ struct TerminalLogicalLineWideIndexProbe {
         }
     }
 
-    /// Descriptive continuity with `F2`'s own rungs, and outside the verdict.
+    /// Descriptive continuity with `research/31/F2`'s own rungs, and outside the verdict.
     ///
-    /// `F2` measured 10,000 and 100,000 logical lines; at this class's ~2,215 bytes a record those
-    /// are 22 MB and 222 MB of arena, which the 16 MiB budget does not admit -- the same thing `F2`
-    /// Observation 3 said about its own deep rung. They are here because `D3` Decision 7 named
+    /// `research/31/F2` measured 10,000 and 100,000 logical lines; at this class's ~2,215 bytes a record those
+    /// are 22 MB and 222 MB of arena, which the 16 MiB budget does not admit -- the same thing `research/31/F2`
+    /// Observation 3 said about its own deep rung. They are here because `research/31/D3` Decision 7 named
     /// them, and they are reported as a curve rather than read against a bound.
     @Test("F9 -- the wide counting pass against record count (descriptive)", .enabled(if: probeIsEnabled))
     func wideCountingPassRecordCountLadder() throws {
@@ -586,14 +586,14 @@ struct TerminalLogicalLineWideIndexProbe {
         }
     }
 
-    /// `F2`'s own arms, re-run in this session as the control `D3` Decision 7 asks for.
+    /// `research/31/F2`'s own arms, re-run in this session as the control `research/31/D3` Decision 7 asks for.
     ///
     /// `mix` and `full` contain no wide cell, so no record is flagged and none takes the fallback.
     /// Two things this is for: it says the fast path is untouched by the wide arm, and -- because
-    /// it is `F2`'s instrument on `F2`'s stimulus at `F2`'s depth -- its numbers are directly
-    /// comparable to `F2`'s published 0.015-0.016 ms, which is the cheapest available check that
-    /// this session's machine is the one `F2` measured on.
-    @Test("F9 -- F2's mix and full arms, re-run as the control", .enabled(if: probeIsEnabled))
+    /// it is `research/31/F2`'s instrument on `research/31/F2`'s stimulus at `research/31/F2`'s depth -- its numbers are directly
+    /// comparable to `research/31/F2`'s published 0.015-0.016 ms, which is the cheapest available check that
+    /// this session's machine is the one `research/31/F2` measured on.
+    @Test("F9 -- research/31/F2's mix and full arms, re-run as the control", .enabled(if: probeIsEnabled))
     func fastPathControl() throws {
         for contentClass in LogicalLineContentClass.allCases {
             let raw = buildStimulus(contentClass: contentClass, targetDisplayRows: 34_000)
