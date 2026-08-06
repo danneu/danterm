@@ -68,7 +68,7 @@ struct TerminalViewportTests {
         #expect(browsing == following)
     }
 
-    @Test("width and height changes remap a browsing anchor without following")
+    @Test("width and height changes remap a retained browsing anchor without following")
     func resizePreservesBrowsingAnchor() throws {
         // Intent: reflow attaches the viewport top to its source row, including
         //   blank retained rows, while height changes only re-fit the window.
@@ -107,12 +107,22 @@ struct TerminalViewportTests {
         height.resize(columns: 4, rows: 4)
         #expect(height.scrollProjection.topRow == 1)
         #expect(height.scrollProjection.isFollowing == false)
-        height.resize(columns: 4, rows: 5)
-        #expect(height.scrollProjection.topRow == 0)
-        #expect(height.scrollProjection.isFollowing == false)
     }
 
-    @Test("eviction clamps a browsing anchor without enabling follow")
+    @Test("height growth that absorbs all history resumes bottom follow")
+    func heightGrowthRestoresBottomFollow() throws {
+        var height = try makeLineHistory()
+        height.scroll(toTopRow: 1)
+
+        height.resize(columns: 4, rows: 5)
+        #expect(height.scrollProjection.topRow == 0)
+        #expect(height.scrollProjection.isFollowing)
+        height.feed(Array("\r\nf".utf8))
+        #expect(height.scrollProjection.isFollowing)
+        #expect(height.screenText.hasSuffix("f   "))
+    }
+
+    @Test("eviction keeps browsing while older retained content remains")
     func evictionClampsBrowsingAnchor() throws {
         var terminal = try #require(Terminal(
             columns: 4,
@@ -127,24 +137,48 @@ struct TerminalViewportTests {
         #expect(terminal.scrollProjection.topRow == 0)
         #expect(terminal.scrollProjection.isFollowing == false)
         #expect(terminal.scrollbackRowCount <= 2)
+    }
 
-        terminal.feed(Array("\u{1B}[3J".utf8))
+    @Test("history wipe returns a displaced browsing viewport to live-bottom follow")
+    func historyWipeRestoresBottomFollow() throws {
+        // Intent: a history wipe that destroys the browse anchor resumes live-bottom follow.
+        // Why it exists: codex clears and reprints its inline transcript after SIGWINCH; keeping
+        //   the now-unaddressable anchor strands that repaint below the visible window.
+        // Scenario: the captured repaint shape clears retained history before emitting a fresh
+        //   transcript, as codex 0.146.1 did when a split resized its PTY.
+        var terminal = try makeLineHistory()
+        terminal.scroll(toTopRow: 1)
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\u{1B}[r\u{1B}[H\u{1B}[2J\u{1B}[3J\u{1B}[H".utf8))
         #expect(terminal.scrollbackRowCount == 0)
         #expect(terminal.scrollProjection.topRow == 0)
-        #expect(terminal.scrollProjection.isFollowing == false)
+        #expect(terminal.scrollProjection.isFollowing)
+        #expect(terminal.drainDamage() == .full)
 
+        terminal.feed(Array("new0\r\nnew1\r\nnew2\r\nnew3".utf8))
+        #expect(terminal.scrollProjection.isFollowing)
+        #expect(terminal.screenText == "new1\nnew2\nnew3")
+    }
+
+    @Test("width reflow that displaces browsing onto the newest window resumes follow")
+    func shorteningWidthReflowRestoresBottomFollow() throws {
         var reflow = try #require(Terminal(
-            columns: 8,
+            columns: 2,
             rows: 2,
-            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 8)
+            scrollbackBudgetBytes: historyBudget(lines: 20, cells: 40)
         ))
         reflow.feed(Array("abcdefghijklmnopqrstuvwxyz012345".utf8))
-        reflow.scroll(toTopRow: 0)
-        let historyBeforeReflow = reflow.fullHistoryText
-        reflow.resize(columns: 2, rows: 2)
-        #expect(reflow.fullHistoryText.count < historyBeforeReflow.count)
-        #expect(reflow.scrollProjection.topRow == 0)
-        #expect(reflow.scrollProjection.isFollowing == false)
+        reflow.scroll(toTopRow: 10)
+        let rowsBeforeReflow = reflow.scrollProjection.totalRows
+        reflow.resize(columns: 8, rows: 2)
+        #expect(reflow.scrollProjection.totalRows < rowsBeforeReflow)
+        #expect(reflow.scrollProjection.topRow == 2)
+        #expect(reflow.scrollProjection.isFollowing)
+
+        reflow.feed(Array("\r\nZ".utf8))
+        #expect(reflow.scrollProjection.isFollowing)
+        #expect(reflow.screenText.hasSuffix("Z       "))
     }
 
     @Test("screen replacements reset browsing while primary soft reset and no-op modes preserve it")
@@ -195,6 +229,13 @@ struct TerminalViewportTests {
         #expect(terminal.scrollProjection.topRow == 2)
         #expect(terminal.scrollProjection.isFollowing == false)
         #expect(terminal.activeSearchMatchRange != nil)
+
+        terminal.resize(columns: 4, rows: 2)
+        #expect(terminal.scrollProjection.topRow == 2)
+        #expect(terminal.scrollProjection.isFollowing == false)
+        terminal.feed(Array("\r\nf".utf8))
+        #expect(terminal.scrollProjection.topRow == 2)
+        #expect(terminal.scrollProjection.isFollowing == false)
 
         terminal.scroll(byRows: -1)
         #expect(terminal.selectionRange != nil)

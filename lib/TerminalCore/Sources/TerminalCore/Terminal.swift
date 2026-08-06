@@ -3974,19 +3974,27 @@ public struct Terminal: Equatable, Sendable {
         if let armedLinkState, armedLinkState.range.start < firstRetained {
             self.armedLinkState = nil
         }
-        if case let .browsing(anchor) = viewportState, anchor < firstRetained {
-            viewportState = .browsing(top: firstRetained)
-        }
         clampViewportAnchorToRetainedStream()
     }
 
-    private mutating func clampViewportAnchorToRetainedStream() {
+    /// Keeps a browsing anchor addressable, resuming follow only when displaced to live bottom.
+    private mutating func clampViewportAnchorToRetainedStream(
+        previousTopBeforeReflow: TextAnchor? = nil
+    ) {
         guard case let .browsing(anchor) = viewportState else { return }
         let maximumTop = evictedRowCount + max(0, historyRowCount + rows.count - rowCount)
-        viewportState = .browsing(top: TextAnchor(
+        let clamped = TextAnchor(
             row: min(max(anchor.row, evictedRowCount), maximumTop),
             column: 0
-        ))
+        )
+        let reflowDisplaced = previousTopBeforeReflow.map {
+            $0.row < evictedRowCount || $0.row > maximumTop
+        } ?? false
+        guard clamped != anchor || reflowDisplaced else { return }
+        viewportState = clamped.row == maximumTop
+            ? .following
+            : .browsing(top: clamped)
+        recordPresentationFullDamage()
     }
 
     /// Bytes a `[GridCell]` array header costs on top of its elements. Not derived from
@@ -4438,6 +4446,12 @@ public struct Terminal: Equatable, Sendable {
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row
         let historyRowsBefore = historyRowCount
+        let viewportTopBeforeReflow: TextAnchor?
+        if case let .browsing(top) = viewportState {
+            viewportTopBeforeReflow = top
+        } else {
+            viewportTopBeforeReflow = nil
+        }
 
         // Captured against the *old* fold, which exists only until the index is recomputed.
         // `research/31/D3` Decision 2's one new ordering invariant, stated rather than discovered later.
@@ -4585,7 +4599,7 @@ public struct Terminal: Equatable, Sendable {
             appendToScrollback(Array(rebuiltRows[..<viewportStart]))
         }
         enforceScrollbackBudget()
-        clampViewportAnchorToRetainedStream()
+        clampViewportAnchorToRetainedStream(previousTopBeforeReflow: viewportTopBeforeReflow)
     }
 
     /// Names one of the anchors a width change has to restate, so capture and restatement cannot

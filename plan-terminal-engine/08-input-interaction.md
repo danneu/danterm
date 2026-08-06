@@ -51,8 +51,11 @@ user navigates to older content. While at bottom, output and reflow keep it at
 the newest rows. While browsing history, the top displayed logical position is
 the stable anchor: output and reflow do not snap it to the bottom, and eviction
 clamps it to the oldest retained logical position without re-enabling bottom
-follow. Navigating explicitly to the newest row re-enables bottom follow. The
-scrollbar represents the currently reflowed visual-row extent and viewport.
+follow unless the clamp displaces it onto the newest showable window. That
+fallback resumes bottom follow because the anchored content no longer exists;
+an already-valid anchor remains browsing even when it addresses that window.
+Navigating explicitly to the newest row re-enables bottom follow. The scrollbar
+represents the currently reflowed visual-row extent and viewport.
 
 Search navigation reveals its selected match without enabling bottom follow,
 and local scrolling does not clear a selection or search. Selection endpoints
