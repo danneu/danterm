@@ -189,6 +189,9 @@ jobs:
           APP_PATH="build/DanTerm.app"
           test -x "$APP_PATH/Contents/MacOS/DanTerm"
           test -x "$APP_PATH/Contents/Helpers/danterm"
+          # The Swift terminal backend reports itself not ready without this
+          # helper, so a bundle missing it launches and then fails to open a session.
+          test -x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
           done
@@ -213,6 +216,7 @@ jobs:
           ( cd build && zip -qr DanTerm-test.zip DanTerm.app )
           unzip -q build/DanTerm-test.zip -d "$ZIP_WORK"
           codesign --verify --deep --strict --verbose=2 "$ZIP_WORK/DanTerm.app"
+          test -x "$ZIP_WORK/DanTerm.app/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$ZIP_WORK/DanTerm.app/Contents/Resources/danterm-hooks/$h"
           done

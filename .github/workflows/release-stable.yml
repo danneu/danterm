@@ -63,6 +63,9 @@ jobs:
           APP_PATH="build/${{ env.APP_NAME }}.app"
           test -x "$APP_PATH/Contents/MacOS/DanTerm"
           test -x "$APP_PATH/Contents/Helpers/danterm"
+          # The Swift terminal backend reports itself not ready without this
+          # helper, so a bundle missing it launches and then fails to open a session.
+          test -x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
           done
@@ -103,8 +106,12 @@ jobs:
       - name: Codesign app
         run: |
           APP_PATH="build/${{ env.APP_NAME }}.app"
+          # Nested code first: signing the container seals whatever signatures the
+          # helpers already carry, so a helper signed afterwards invalidates the app.
           codesign --force --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/danterm"
+          codesign --force --options runtime \
+            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
           codesign --force --deep --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -130,6 +137,7 @@ jobs:
           mkdir -p "$WORK"
           unzip -q "build/${{ env.ZIP_NAME }}" -d "$WORK"
           codesign --verify --deep --strict --verbose=2 "$WORK/${{ env.APP_NAME }}.app"
+          test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/danterm-hooks/$h"
           done

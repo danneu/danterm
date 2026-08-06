@@ -31,6 +31,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_snapshot_test.py'
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     './scripts/tests/dev-build-configuration-contract_test.sh'
+    './scripts/tests/build-app-helpers-contract_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'
     'swift test --scratch-path .build-app-tests'

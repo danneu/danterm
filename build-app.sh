@@ -29,6 +29,17 @@ echo "Compiling (release)..."
 swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --configuration release
 BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --configuration release --show-bin-path)
 
+# The PTY session bootstrap is its own package and its own executable: the Swift
+# terminal backend spawns it per session and reports itself not ready when the
+# bundled copy is missing, so it must be built and bundled on the release path
+# exactly as dev-build.sh does.
+swift build --package-path "$SCRIPT_DIR/lib/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --configuration release --product PTYSessionBootstrap
+BOOTSTRAP_BIN_PATH=$(swift build --package-path "$SCRIPT_DIR/lib/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --configuration release --show-bin-path)
+
 # Assemble app bundle
 APP_PATH="$SCRIPT_DIR/build/DanTerm.app"
 rm -rf "$APP_PATH"
@@ -37,6 +48,8 @@ cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm"
 mkdir -p "$APP_PATH/Contents/Helpers"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 chmod +x "$APP_PATH/Contents/Helpers/danterm"
+cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
+chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 
 # Defense in depth. A case-insensitive filesystem can collapse paths
 # that differ only by case, and a copy-source mistake can write the CLI
