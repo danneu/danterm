@@ -1,28 +1,39 @@
 # DanTerm Terminal Engine Plan
 
-This directory is the planning home for replacing libghostty with a terminal
-engine implemented for DanTerm in Swift and Apple frameworks.
+This directory is the planning home for the terminal engine DanTerm owns and
+ships, implemented in Swift and Apple frameworks. On this branch the engine is
+the only terminal backend: libghostty was removed at
+[Milestone 10](14-roadmap.md), and Ghostty survives solely as an optional,
+gitignored reference checkout under `references/ghostty` fetched by
+`scripts/fetch-references.py`.
 
-The plan is intentionally a set of component contracts rather than one large
-implementation script. A claim belongs here only when changing it would alter
-observable behavior, an invariant, or the architectural direction. Exact types,
-file layouts, and algorithms remain implementation discretion until a later
-design decision makes them load-bearing.
+The documents here are still normative for ongoing engine work. The plan is
+intentionally a set of component contracts rather than one large implementation
+script. A claim belongs here only when changing it would alter observable
+behavior, an invariant, or the architectural direction. Exact types, file
+layouts, and algorithms remain implementation discretion until a later design
+decision makes them load-bearing.
 
-## Desired outcome
+## What the engine is
 
 DanTerm owns a macOS-only terminal engine that supports the shells and terminal
-applications its users rely on, remains idle when no work is required, and can
-be developed incrementally behind a narrow DanTerm-facing boundary. The engine
-does not inherit libghostty release timing, power behavior, configuration, or
+applications its users rely on, remains idle when no work is required, and is
+developed incrementally behind a narrow DanTerm-facing boundary. The engine does
+not inherit libghostty release timing, power behavior, configuration, or
 architecture.
+
+That outcome is reached rather than aspirational: DanTerm builds, runs, and
+tests without libghostty, GhosttyKit, an xcframework, or Zig. What is still open
+is quality work inside the engine DanTerm already ships -- Milestone 9's
+power-and-performance gate is deliberately unchecked, and the component
+contracts below remain the acceptance standard for every further change.
 
 ## Component plans
 
 | Document                                                             | Scope                                                                      | Planning status            |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------- |
 | [Product contract](01-product-contract.md)                           | Product scope, compatibility target, non-goals                             | Initial decisions captured |
-| [Migration and app boundary](02-migration-and-boundary.md)           | Temporary backend coexistence and DanTerm-facing terminal contract         | Initial direction captured |
+| [Migration and app boundary](02-migration-and-boundary.md)           | DanTerm-facing terminal contract; record of the completed backend migration | Migration done; contract live |
 | [Engine architecture and testability](03-engine-architecture.md)     | Reducer boundaries, ownership, effects, and pure policy seams              | Initial direction captured |
 | [Terminal core](04-terminal-core.md)                                 | Pure parser, terminal state, modes, and semantic output                    | Initial direction captured |
 | [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md)       | Grapheme behavior, widths, reflow, and retention                           | Initial decisions captured |
@@ -34,10 +45,10 @@ architecture.
 | [Configuration and themes](11-configuration-themes.md)               | Baked defaults and future DanTerm-owned formats                            | Initial decisions captured |
 | [Testing and conformance](12-testing-conformance.md)                 | Behavioral proof strategy and compatibility gates                          | Initial direction captured |
 | [Power and performance](13-power-performance.md)                     | Idle, visibility, sleep/wake, and responsiveness contracts                 | Initial decisions captured |
-| [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Initial checklist captured |
+| [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Milestones 1-8 and 10 done; 9 open |
 | [Open questions](15-open-questions.md)                               | Decisions intentionally left for the next planning rounds                  | Active                     |
 | [Live pane semantic model](16-semantic-model.md)                     | Latest-value integration, command, connection, and agent facets; no history | Initial direction captured |
-| [Deferred command journal](17-command-journal.md)                    | Candidate command history, output spans, queries, and fresh-pane launch-and-await | Deferred; not on replacement path |
+| [Deferred command journal](17-command-journal.md)                    | Candidate command history, output spans, queries, and fresh-pane launch-and-await | Deferred; not implemented |
 
 ## Decisions already fixed
 
@@ -46,11 +57,13 @@ architecture.
   specific justification.
 - Ghostty compatibility is not a goal for config, themes, keybindings, or
   internal architecture.
-- Development may run Ghostty and the Swift engine behind the same narrow app
-  boundary, but DanTerm does not need to ship two permanent backends.
-- Engine development begins on an isolated `experiment/swift-terminal-engine`
-  branch. It does not join normal DanTerm development until an interactive
-  vertical slice passes the explicit viability gate.
+- DanTerm ships exactly one terminal backend. Development ran Ghostty and the
+  Swift engine behind the same narrow app boundary for a time; that coexistence
+  ended when libghostty was removed, and the boundary is now a single concrete
+  backend.
+- Engine development began on an isolated `experiment/swift-terminal-engine`
+  branch, which it had to pass an explicit interactive viability gate to leave.
+  The work still lives on that branch; `master` has not taken the removal yet.
 - The engine uses Elm-style reduction at control boundaries: deterministic
   terminal and lifecycle policy produces ordered effects, while one serialized
   owner per pane interprets them outside DanTerm's top-level model.

@@ -1,5 +1,13 @@
 # Migration and App Boundary
 
+> **Status, 2026-08-06: the migration described here is complete.** libghostty
+> was removed at Milestone 10, so the backend coexistence and the selection
+> facility this document plans for no longer exist -- there is one concrete
+> backend and no `DANTERM_TERMINAL_BACKEND` variable. What remains normative is
+> the narrow, product-specific terminal boundary itself and the reasoning for
+> keeping it narrow. The body below is left as the record of the decisions that
+> were made, not as a description of the current tree.
+
 ## Problem
 
 A terminal replacement needs daily-use feedback before it reaches full parity,

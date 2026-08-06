@@ -179,9 +179,9 @@ The first useful consumers are deliberately narrow:
   focuses that pane
 
 CLI surface changes carry the standing `integrations/danterm/SKILL.md`
-co-update rule. While both backends exist, these structured facets are a
-Swift-engine capability; a Ghostty pane reports the capability absent rather
-than emulating it.
+co-update rule. These structured facets are an engine capability. They were
+scoped that way while two backends coexisted, and a pane that cannot supply
+one still reports the capability absent rather than emulating it.
 
 ## Invariants
 

@@ -90,8 +90,9 @@ remains scheduled. Clean termination flushes dirty recovery.
   completion racing later output, clean idle, and termination flush; every
   mutation remains dirty until a persisted checkpoint covers it, and clean
   state becomes quiescent.
-- The Ghostty and Swift backends return identical IPC text for the
-  characterization corpus while both backends exist.
+- The engine returns the recorded IPC text for the characterization corpus.
+  This began as a two-backend equivalence check; the recorder is gone but the
+  corpus it captured is committed and still replays as a gating regression.
 
 ## Non-goals
 
