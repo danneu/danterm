@@ -45,94 +45,66 @@ func brightnessSeparation(_ first: RenderColor, _ second: RenderColor) -> Int {
     abs(perceivedBrightness(of: first) - perceivedBrightness(of: second))
 }
 
+/// Widest gap between a requested target brightness and the brightness the moved
+/// color actually achieves. Component rounding contributes at most half a code
+/// point each, and the weights sum to 256, so that is half a unit of brightness;
+/// the `>> 8` truncation costs one more; and the seed's own truncated fraction
+/// re-enters scaled by at most one. Three units, probed with one to spare.
+private let brightnessQuantizationDrift = 4
+
 /// Keeps a qualifying seed exact or moves it to the nearest brightness that
 /// clears every competing color, preferring the darker result on a tie.
+///
+/// Each competing color forbids one closed brightness interval, so the nearest
+/// allowed brightness always sits against some interval's edge or at the ends of
+/// the domain -- a set of size O(colors), not the whole 0...255 range. Requested
+/// targets and achieved brightnesses diverge under 8-bit quantization, so each
+/// edge is probed within `brightnessQuantizationDrift` and every candidate is
+/// judged on what it achieved, never on what it asked for.
 func resolveBrightnessSeparatedColor(
     seed: RenderColor,
     avoiding colors: [RenderColor],
     minimumSeparation: Int
 ) -> RenderColor {
     precondition((0...255).contains(minimumSeparation))
-    guard colors.allSatisfy({ brightnessSeparation(seed, $0) >= minimumSeparation }) == false
-    else {
+    let seedBrightness = perceivedBrightness(of: seed)
+    let competing = colors.map(perceivedBrightness(of:))
+    guard competing.contains(where: { abs(seedBrightness - $0) < minimumSeparation }) else {
         return seed
     }
-    if colors.count == 1 {
-        return resolveBrightnessSeparatedColor(
-            seed: seed,
-            avoiding: colors[0],
-            minimumSeparation: minimumSeparation
-        )
-    }
 
-    let seedBrightness = perceivedBrightness(of: seed)
     var best: RenderColor?
     var bestDistance = Int.max
     var bestBrightness = Int.max
-    for targetBrightness in 0...255 {
-        let candidate = colorMoved(seed, toBrightness: targetBrightness)
-        guard colors.allSatisfy({
-            brightnessSeparation(candidate, $0) >= minimumSeparation
-        }) else {
-            continue
-        }
-        let candidateBrightness = perceivedBrightness(of: candidate)
-        let distance = abs(candidateBrightness - seedBrightness)
-        if distance < bestDistance
-            || (distance == bestDistance && candidateBrightness < bestBrightness)
-        {
-            best = candidate
-            bestDistance = distance
-            bestBrightness = candidateBrightness
+    for edge in [0, 255] + competing.flatMap({
+        [$0 - minimumSeparation, $0 + minimumSeparation]
+    }) {
+        for offset in -brightnessQuantizationDrift...brightnessQuantizationDrift {
+            let target = edge + offset
+            guard (0...255).contains(target) else { continue }
+            let candidate = colorMoved(seed, toBrightness: target)
+            let brightness = perceivedBrightness(of: candidate)
+            guard competing.allSatisfy({ abs(brightness - $0) >= minimumSeparation }) else {
+                continue
+            }
+            let distance = abs(brightness - seedBrightness)
+            if distance < bestDistance
+                || (distance == bestDistance && brightness < bestBrightness)
+            {
+                best = candidate
+                bestDistance = distance
+                bestBrightness = brightness
+            }
         }
     }
 
-    // The overlay ladder needs at most four points spaced by 40 in a 0...255
-    // domain, so its progressively built avoidance set always leaves a result.
-    return best!
-}
-
-private func resolveBrightnessSeparatedColor(
-    seed: RenderColor,
-    avoiding color: RenderColor,
-    minimumSeparation: Int
-) -> RenderColor {
-    let competingBrightness = perceivedBrightness(of: color)
-    var darker: RenderColor?
-    var target = competingBrightness - minimumSeparation
-    while target >= 0 {
-        let candidate = colorMoved(seed, toBrightness: target)
-        if brightnessSeparation(candidate, color) >= minimumSeparation {
-            darker = candidate
-            break
-        }
-        target -= 1
+    guard let best else {
+        // Unreachable for the ladders this planner builds -- the widest is four
+        // points spaced by 40 in a 0...255 domain -- but a caller asking for a
+        // separation no color can satisfy has no answer to be given.
+        preconditionFailure("no color clears \(minimumSeparation) from every competing color")
     }
-
-    var brighter: RenderColor?
-    target = competingBrightness + minimumSeparation
-    while target <= 255 {
-        let candidate = colorMoved(seed, toBrightness: target)
-        if brightnessSeparation(candidate, color) >= minimumSeparation {
-            brighter = candidate
-            break
-        }
-        target += 1
-    }
-
-    switch (darker, brighter) {
-    case (.some(let darker), .some(let brighter)):
-        let seedBrightness = perceivedBrightness(of: seed)
-        let darkerDistance = abs(perceivedBrightness(of: darker) - seedBrightness)
-        let brighterDistance = abs(perceivedBrightness(of: brighter) - seedBrightness)
-        return darkerDistance <= brighterDistance ? darker : brighter
-    case (.some(let darker), nil):
-        return darker
-    case (nil, .some(let brighter)):
-        return brighter
-    case (nil, nil):
-        preconditionFailure("brightness separation has no result in the RGB domain")
-    }
+    return best
 }
 
 /// Resolves one overlay fill against the cell background and every earlier

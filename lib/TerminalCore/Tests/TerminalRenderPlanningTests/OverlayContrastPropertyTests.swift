@@ -140,6 +140,149 @@ struct OverlayContrastPropertyTests {
         #expect(flips <= 1)
     }
 
+    // Intent: the resolver returns an admissible color at the minimum achieved-
+    // brightness distance from its seed, breaking ties toward the darker result.
+    // Why it exists: every other proof here checks that the answer clears its
+    // separations, never that it is the *nearest* answer that does. A resolver
+    // that derives candidates from forbidden-interval edges plus a bounded
+    // quantization probe would still pass all of them while silently returning a
+    // farther color whenever the drift exceeded its probe.
+    // Scenario: an independent oracle enumerates the whole requested-target
+    // domain, judges admissibility on achieved post-quantization brightness, and
+    // is run over the avoidance-set sizes and separations the planner passes.
+    @Test("Brightness resolution matches a full-domain oracle's nearest admissible result")
+    func nearestAdmissibleMatchesFullDomainOracle() {
+        for seed in oracleSeeds() {
+            for probe in oracleProbes() {
+                let avoided = probe.avoided.map(perceivedBrightness(of:))
+                let resolved = resolveBrightnessSeparatedColor(
+                    seed: seed,
+                    avoiding: probe.avoided,
+                    minimumSeparation: probe.separation
+                )
+                let resolvedBrightness = perceivedBrightness(of: resolved)
+                let seedBrightness = perceivedBrightness(of: seed)
+
+                guard let expected = oracleOutcome(
+                    seed: seed,
+                    avoided: avoided,
+                    separation: probe.separation
+                ) else {
+                    Issue.record("No admissible color exists for \(seed) vs \(probe.avoided)")
+                    return
+                }
+
+                // A seed already clearing every separation must come back untouched,
+                // not merely at distance zero: the identity is what makes overlay
+                // resolution idempotent.
+                if expected.distance == 0 && resolved != seed {
+                    Issue.record("Qualifying seed \(seed) was not preserved")
+                    return
+                }
+                let actual = OracleOutcome(
+                    distance: abs(resolvedBrightness - seedBrightness),
+                    brightness: resolvedBrightness
+                )
+                if actual != expected {
+                    let message: String = "Resolving \(seed) against \(probe.avoided)"
+                        + " at \(probe.separation) gave \(actual), oracle says \(expected)"
+                    Issue.record(Comment(rawValue: message))
+                    return
+                }
+                if avoided.contains(where: { abs(resolvedBrightness - $0) < probe.separation }) {
+                    Issue.record("Resolved \(resolved) violates its own separation")
+                    return
+                }
+            }
+        }
+    }
+
+    /// The behavioral tuple the resolver's contract fixes. Exact RGB is not part
+    /// of it: several targets can reach one achieved brightness, and which color
+    /// carries it is an implementation detail of the quantization.
+    private struct OracleOutcome: Equatable {
+        let distance: Int
+        let brightness: Int
+    }
+
+    /// Re-derives the contract by brute force over the requested-target domain,
+    /// sharing nothing with the resolver but `colorMoved` and the brightness metric.
+    private func oracleOutcome(
+        seed: RenderColor,
+        avoided: [Int],
+        separation: Int
+    ) -> OracleOutcome? {
+        var best: OracleOutcome?
+        let seedBrightness = perceivedBrightness(of: seed)
+        for target in 0...255 {
+            let brightness = perceivedBrightness(of: colorMoved(seed, toBrightness: target))
+            guard avoided.allSatisfy({ abs(brightness - $0) >= separation }) else { continue }
+            let outcome = OracleOutcome(
+                distance: abs(brightness - seedBrightness),
+                brightness: brightness
+            )
+            guard let current = best else {
+                best = outcome
+                continue
+            }
+            if outcome.distance < current.distance
+                || (outcome.distance == current.distance && outcome.brightness < current.brightness)
+            {
+                best = outcome
+            }
+        }
+        return best
+    }
+
+    /// Seeds spanning the planner's own (theme colors, glyph colors) plus ones
+    /// whose weighted sum truncates hard, where target and achieved diverge most.
+    private func oracleSeeds() -> [RenderColor] {
+        [
+            RenderColor(red: 0, green: 0, blue: 0),
+            RenderColor(red: 255, green: 255, blue: 255),
+            RenderColor(red: 1, green: 0, blue: 0),
+            RenderColor(red: 0, green: 0, blue: 1),
+            RenderColor(red: 2, green: 1, blue: 3),
+            RenderColor(red: 254, green: 255, blue: 253),
+            RenderColor(red: 80, green: 127, blue: 235),
+            RenderColor(red: 220, green: 220, blue: 220),
+            RenderColor(red: 255, green: 108, blue: 0),
+            RenderColor(red: 17, green: 3, blue: 250),
+        ]
+    }
+
+    /// The avoidance sets the planner actually builds: one color for the glyph
+    /// push and the cursor fill, and the progressively grown fill ladder.
+    private func oracleProbes() -> [(avoided: [RenderColor], separation: Int)] {
+        var probes: [(avoided: [RenderColor], separation: Int)] = []
+        for component in UInt8.min...UInt8.max {
+            let background = RenderColor(red: component, green: 255 - component, blue: component)
+            for separation in [40, 60, 100] {
+                probes.append(([background], separation))
+            }
+        }
+        for component in UInt8.min...UInt8.max {
+            let background = RenderColor(
+                red: component,
+                green: component,
+                blue: 255 - component
+            )
+            let selection = resolveBrightnessSeparatedColor(
+                seed: RenderColor(red: 220, green: 220, blue: 220),
+                avoiding: [background],
+                minimumSeparation: 40
+            )
+            let match = resolveBrightnessSeparatedColor(
+                seed: RenderColor(red: 246, green: 190, blue: 0),
+                avoiding: [background, selection],
+                minimumSeparation: 40
+            )
+            probes.append(([background, selection], 40))
+            probes.append(([background, selection, match], 40))
+        }
+        return probes
+    }
+
     private func requireSeparation(
         _ first: RenderColor,
         _ second: RenderColor,

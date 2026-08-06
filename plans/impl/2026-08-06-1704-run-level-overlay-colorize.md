@@ -204,7 +204,7 @@ the contract.
 
 ## Commit progress
 - [x] 1. perf(render): colorize overlays at run granularity
-- [ ] 2. perf(render): resolve brightness separation in closed form
+- [x] 2. perf(render): resolve brightness separation in closed form
 
 ## Implementation discretion
 
@@ -222,6 +222,29 @@ the contract.
   and the push spans handed to the text and decoration layers are the fragments
   *minus* the cursor's columns. The overlay layer keeps the unsplit fragment, so
   a cursor inside a selection neither recolors nor divides the overlay run.
+- **Commit 2, the probe width is measured, not assumed.** The closed form
+  derives its candidates from the forbidden intervals' edges plus the domain
+  extremes, then probes +/-4 requested targets around each to absorb the gap
+  between a requested brightness and the one `colorMoved` achieves. A throwaway
+  exhaustive sweep -- 3,348,508 single-color cases over a dense seed grid, four
+  separations, and every third competing brightness -- put the worst achieved-vs-
+  requested drift at 1 and the optimal target at most 2 from an edge, with zero
+  disagreements against PO7's oracle. The probe therefore runs with more than
+  double the margin it needs. The sweep was deleted; PO7 is the standing proof.
+- **Commit 2, AR2 is realized, and by the old single-color walk.** The scan the
+  plan set out to replace was already optimal; the walk beside it was not. It
+  started at the ideal boundary target and only stepped outward, so it never saw
+  a slightly-higher target whose achieved brightness quantized back down to a
+  nearer allowed value -- resolving `(17,3,250)` against `(253,2,253)` at
+  separation 100 returned achieved brightness 3 where 4 was reachable. PO7 fails
+  against the pre-change code for exactly that input and passes after. Every such
+  color still satisfies the separation, idempotence, and tie-break contract.
+- **Commit 2, unsolvable inputs still trap.** `best!` became a
+  `preconditionFailure` naming the condition rather than a bare force-unwrap, but
+  the domain is unchanged: a caller demanding a separation no color can satisfy
+  had no answer before and has none now. Nothing structural in the closed form
+  removes that case -- an allowed brightness gap narrow enough that quantization
+  never lands in it is representable -- so it is stated rather than hidden.
 - **Commit 1, PO3 is unreachable as written.** `Terminal.setSelection` routes
   both endpoints through `normalizedCellPosition`, which snaps them to cell
   boundaries, so a tail-only selection cannot be constructed through the
