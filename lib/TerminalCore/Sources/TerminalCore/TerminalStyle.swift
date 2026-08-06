@@ -20,7 +20,7 @@ public enum TerminalUnderlineStyle: Hashable, Sendable {
 /// Captures semantic SGR presentation state without resolving renderer policy.
 ///
 /// `Hashable` rather than merely `Equatable` because the grid stores a style *id* per cell and
-/// interns styles through a dictionary keyed on this type (doc 15's `H3`); hashing is what makes
+/// interns styles through a dictionary keyed on this type (`research/15/H3`); hashing is what makes
 /// that intern O(1).
 public struct TerminalStyle: Hashable, Sendable {
     /// Foreground remains semantic until a renderer applies palette policy.

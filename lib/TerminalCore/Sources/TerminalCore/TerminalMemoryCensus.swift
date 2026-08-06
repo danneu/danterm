@@ -1,7 +1,8 @@
 // The permanent, on-demand answer to "what is the grid holding, and in what shape".
 //
 // This exists because the alternative kept being: widen `Terminal`'s `private` grid types for one
-// measurement, walk them, record a number, and revert. Doc 12's F1 and F3 were both taken that way,
+// measurement, walk them, record a number, and revert. `research/12/F1` and `research/12/F3` were
+// both taken that way,
 // which is why neither can be re-run, re-checked, or refreshed after the code moved underneath
 // them. A census that ships means any agent can re-derive those numbers in one call, and a memory
 // claim can cite something reproducible.
@@ -15,7 +16,7 @@
 // Deliberately reports *exact* bytes from `MemoryLayout` stride rather than anything derived from
 // `heap` or `footprint`. Those report malloc bucket sizes and process pages respectively; neither
 // is the question this type answers, and conflating them has already produced two wrong numbers in
-// doc 15 (its F1 uncertainty and its F4 inference 2).
+// doc 15 (`research/15/F1` and `research/15/F4` inference 2).
 //
 // No imports: `TerminalCore` is enforced import-free by `scripts/core-purity-lint.sh`, and
 // everything here (`Codable`, `MemoryLayout`) is standard library.
@@ -51,7 +52,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
 
     /// `MemoryLayout<GridCell>.stride` -- what a cell costs *in an array*, which is the only way
     /// *live* cells are ever stored. Not `size`: array storage is strided, and the difference is
-    /// the padding doc 12's F1 measured as 65 vs 72.
+    /// the padding `research/12/F1` measured as 65 vs 72.
     ///
     /// Applies to the live screens only since doc 28's packing. A retained row does not store
     /// `GridCell`s at all, so multiplying a retained cell count by this stride answers a question
@@ -79,12 +80,12 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     public var retainedArenaBytesInUse: Int
 
     /// The arena's allocated capacity, held below the byte budget by a fixed metadata reserve so
-    /// the index and the side tables are resident *inside* the bound (`31/DD36`).
+    /// the index and the side tables are resident *inside* the bound (`research/31/DD36`).
     ///
-    /// Allocated once and never grown, compacted or shrunk, which is what makes doc 15's `F4`
+    /// Allocated once and never grown, compacted or shrunk, which is what makes `research/15/F4`
     /// leak unrepresentable: there are no per-row allocations left for eviction to strand, and
     /// the proof is "bytes-in-use falls when records are evicted, and this does not grow"
-    /// (`31/DD11`).
+    /// (`research/31/DD11`).
     public var retainedArenaCapacityBytes: Int
 
     /// The derived index's charge: per-record offsets plus per-block display-row totals.
@@ -92,19 +93,19 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
 
     /// Side tables held outside the arena -- multi-scalar spills and trailing fill styles --
     /// charged at what their allocator gave rather than at what their live entries weigh
-    /// (`31/DD37`).
+    /// (`research/31/DD37`).
     public var retainedSideTableBytes: Int
 
-    /// Separate heap allocations backing *live* rows -- one per row with cells. Doc 15's H7 is
+    /// Separate heap allocations backing *live* rows -- one per row with cells. `research/15/H7` is
     /// about the per-allocation overhead this number multiplies. History contributes none: its
     /// cells all live in the one arena.
     public var rowStorageAllocationCount: Int
 
-    /// Cells whose style differs from the default. Sizes doc 15's H3.
+    /// Cells whose style differs from the default. Sizes `research/15/H3`.
     public var styledCellCount: Int
 
     /// Distinct styles resident across the grid -- the size a deduplicated style table would need.
-    /// Sizes doc 15's H3.
+    /// Sizes `research/15/H3`.
     public var distinctStyleCount: Int
 
     /// Cells holding a multi-scalar grapheme cluster, the only case where a cell owns a
@@ -114,14 +115,14 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// Class-backed scalar storage allocations, one per multi-scalar cell.
     public var multiScalarAllocationCount: Int
 
-    /// Cells carrying a hyperlink id. Sizes doc 15's H2: doc 12's F3 found this zero across all
+    /// Cells carrying a hyperlink id. Sizes `research/15/H2`: `research/12/F3` found this zero across all
     /// four fixture workloads.
     public var hyperlinkCellCount: Int
 
-    /// Cells carrying a content identity. Sizes doc 15's H4.
+    /// Cells carrying a content identity. Sizes `research/15/H4`.
     public var contentIdentityCellCount: Int
 
-    /// Distinct content identities, which doc 12's F3 found to be near-unique per printed cell --
+    /// Distinct content identities, which `research/12/F3` found to be near-unique per printed cell --
     /// the observation that killed narrowing the field to 16 bits.
     public var distinctContentIdentityCount: Int
 
@@ -147,7 +148,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     }
 
     /// True when history charges more than the capacity it was built at, which the one bound
-    /// `31/I2` states makes unreachable. Replaces doc 15's per-row leak flag, whose subject --
+    /// `31/I2` states makes unreachable. Replaces `research/15/F4`'s per-row leak flag, whose subject --
     /// a heap allocation per retained row -- no longer exists.
     public var hasRetainedStorageOverdraft: Bool {
         retainedChargedBytes > retainedArenaCapacityBytes

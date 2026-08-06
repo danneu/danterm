@@ -125,7 +125,7 @@ public struct TerminalContentIdentityShape: Equatable, Sendable {
     /// entry is `(startColumn, extent, base)`, and the only value sequence that triple can
     /// reconstruct exactly is a strict arithmetic one, so a wide glyph -- whose head and tail
     /// share a single identity -- opens a new run in the encoder while `runCount` keeps them in
-    /// one. `runCount` stays as doc 28's `F12` defined and measured it; this is what the encoder
+    /// one. `runCount` stays as `research/28/F12` defined and measured it; this is what the encoder
     /// charges, and what the probe's payload model must use to predict a row's packed size.
     public let strictRunCount: Int
 

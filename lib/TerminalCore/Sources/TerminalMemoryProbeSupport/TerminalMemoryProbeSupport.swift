@@ -2,7 +2,7 @@
 //
 // This is the instrument doc 15's Phase 1 asks for, and it exists because the tool that came
 // before it cannot do the job. `just benchmark-memory` drives the GUI app and samples process
-// footprint; doc 15's F6 showed it reporting a *fixed* build as larger than a leaky one, because
+// footprint; `research/15/F6` showed it reporting a *fixed* build as larger than a leaky one, because
 // one memgraph samples one arbitrary point on a sawtooth and GUI compositing churn dwarfs anything
 // the grid does. It is a leak detector, not a measurement instrument.
 //
@@ -35,7 +35,7 @@ public struct MemoryProbePayload: Sendable {
 
 /// What the malloc zones hold at one instant, across every zone in the process.
 ///
-/// Exists to split the cost doc 15's `F3/F5` could only measure in aggregate. `phys_footprint`
+/// Exists to split the cost `research/15/F3` and `research/15/F5` could only measure in aggregate. `phys_footprint`
 /// answers "what did the OS charge", which conflates three causes with three different fixes:
 /// bytes genuinely live on the heap, bytes the allocator obtained but nothing is using, and pages
 /// that are not malloc's at all. These two counters separate the first two; the third falls out by
@@ -99,7 +99,7 @@ public struct MemoryProbePayloadReport: Codable, Equatable, Sendable {
 
     /// How much of the process delta the grid's own cell bytes explain. Below 1.0 means the
     /// allocator is holding pages the census cannot see; above 1.0 means pages were returned.
-    /// This is the ratio doc 15's F5 is about.
+    /// This is the ratio `research/15/F5` is about.
     public var footprintCoverageOfCellStorage: Double {
         footprintDeltaBytes == 0 ? 0 : Double(census.cellStorageBytes) / Double(footprintDeltaBytes)
     }
@@ -190,8 +190,8 @@ public enum MemoryProbeMatrix {
     }
 
     /// Varies foreground, background, and attribute bits so a dedup table would have real work to
-    /// do. Sizes doc 15's H3 against something less trivial than the fixture corpus, which doc
-    /// 12's F3 found had at most nine distinct styles.
+    /// do. Sizes `research/15/H3` against something less trivial than the fixture corpus, which
+    /// `research/12/F3` found had at most nine distinct styles.
     static func styledLine(_ line: Int) -> [UInt8] {
         let foreground = 30 + line % 8
         let background = 40 + (line / 8) % 8
@@ -227,7 +227,8 @@ public enum MemoryProbeMatrix {
 /// Reads the process's physical footprint -- the same quantity `footprint(1)` reports.
 ///
 /// Sampled in-process rather than by polling from outside so each payload's delta is attributable
-/// to that payload, which is the whole reason the probe can answer doc 15's F3 and F5 where
+/// to that payload, which is the whole reason the probe can answer `research/15/F3` and
+/// `research/15/F5` where
 /// `benchmark-memory` cannot.
 public func processPhysicalFootprintBytes() -> UInt64 {
     var info = task_vm_info_data_t()

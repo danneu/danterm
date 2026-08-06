@@ -37,7 +37,7 @@ public func feedOccupancyCorpus(into terminal: inout Terminal, from: Int, count:
 ///
 /// Uses `Terminal`'s public initializer on purpose, so the budget is the one the app ships
 /// rather than a test-sized one: the whole point of this probe is the depth a real pane
-/// reaches, and doc 19's `F5`/`F11` numbers are only comparable at that budget.
+/// reaches, and `research/19/F5` and `research/19/F11` are only comparable at that budget.
 public func makeOccupancyTerminal(columns: Int, rows: Int, lines: Int) -> Terminal {
     guard var terminal = Terminal(columns: columns, rows: rows) else {
         preconditionFailure("occupancy probe requires a representable geometry")

@@ -168,9 +168,9 @@ public struct Terminal: Equatable, Sendable {
 
     /// Indexes `hyperlinkTargets` from inside a cell. Narrow on purpose: an `Int?` here needs
     /// 8-byte alignment, which padded `GridCell` from 56 bytes to 72 -- so the field cost 16 bytes
-    /// in every cell for a feature `15/F2` measured as unused in 100% of them. Two bytes fit in
-    /// padding `TerminalStyle` already leaves behind, and the whole 16 bytes come back (doc 15's
-    /// `D3`). The price is a finite id space, which is why `allocateHyperlinkId` recycles rather
+    /// in every cell for a feature `research/15/F2` measured as unused in 100% of them. Two bytes fit in
+    /// padding `TerminalStyle` already leaves behind, and the whole 16 bytes come back
+    /// (`research/15/D3`). The price is a finite id space, which is why `allocateHyperlinkId` recycles rather
     /// than counting up; see the invariant stated there.
     typealias HyperlinkId = UInt16
 
@@ -178,14 +178,14 @@ public struct Terminal: Equatable, Sendable {
     /// link armed at pointer-down can reject a run recreated before release.
     ///
     /// 32-bit for the same reason `HyperlinkId` is 16-bit: an `Int?` cost 8 bytes and forced
-    /// `GridCell` to 8-byte alignment, so narrowing it takes the cell from 56 bytes to 48 (doc
-    /// 15's `H4`). The price is a counter that can exhaust in minutes of maximal output --
-    /// `allocateContentIdentity` owns what happens then, and `15/F12` explains why the naive
+    /// `GridCell` to 8-byte alignment, so narrowing it takes the cell from 56 bytes to 48
+    /// (`research/15/H4`). The price is a counter that can exhaust in minutes of maximal output --
+    /// `allocateContentIdentity` owns what happens then, and `research/15/F12` explains why the naive
     /// wrap is not safe.
     typealias ContentIdentity = UInt32
 
     /// Indexes `styleTable` from inside a cell, replacing the 19-byte `TerminalStyle` that used to
-    /// sit inline in every one (doc 15's `H3`). `15/F11` measured 9-23 million style *writes* per
+    /// sit inline in every one (`research/15/H3`). `research/15/F11` measured 9-23 million style *writes* per
     /// corpus against 1-5 distinct *values*, which is what rules out a refcount and leaves a swept
     /// table -- see `reclaimDeadStyleEntries`.
     ///
@@ -202,7 +202,7 @@ public struct Terminal: Equatable, Sendable {
     /// Field order is load-bearing, not stylistic. Swift lays stored properties out in declaration
     /// order, and `scalars` is the only 8-byte-aligned member; declared after `kind` it forced
     /// seven bytes of padding into every cell. Leading with it recovers them, which is what takes
-    /// the stride to 32 rather than 40 -- a whole malloc bucket at every width `15/F12` checked.
+    /// the stride to 32 rather than 40 -- a whole malloc bucket at every width `research/15/F12` checked.
     struct GridCell: Equatable, Sendable {
         var scalars = TerminalScalars.empty
         var kind: TerminalCellKind = .padding
@@ -283,7 +283,7 @@ public struct Terminal: Equatable, Sendable {
     /// construction, copy and destruction into a value-witness call. Holding the hovered
     /// `TerminalResolvedLink` did exactly that -- its `TerminalHyperlink` carries `uri`
     /// and `explicitId` Strings -- and cost 8.3% of the throughput workload's on-CPU time
-    /// (`17/F7`). The hovered link is therefore represented by a revision counter plus its
+    /// (`research/17/F7`). The hovered link is therefore represented by a revision counter plus its
     /// projected range, which is all `recordDamage(from:to:)` ever needed. Keep it POD:
     /// adding a String, array, or class reference here reintroduces that cost.
     private struct DamageActionSnapshot {
@@ -310,7 +310,7 @@ public struct Terminal: Equatable, Sendable {
     /// Constructing one is O(1): both row collections are copy-on-write and nothing here mutates
     /// them, so the whole type is a store, a row array and a flag.
     ///
-    /// Materializes a `GridRow` per history subscript, which is `31/D3` Decision 5's deliberate
+    /// Materializes a `GridRow` per history subscript, which is `research/31/D3` Decision 5's deliberate
     /// scope line for milestone 1: today's subscript already unpacks one row per access, so the
     /// facade is a wash against it, and the per-frame path never comes through here at all.
     /// Replacing it with a borrowing cursor is the follow-up plan's.
@@ -644,7 +644,7 @@ public struct Terminal: Equatable, Sendable {
     private var armedLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
 
     /// Counts writes to `hoveredLinkState` so `DamageActionSnapshot` can notice a hover
-    /// change without copying the link's refcounted target -- the whole point of `17/F7`.
+    /// change without copying the link's refcounted target -- the whole point of `research/17/F7`.
     ///
     /// Reuses `ObservationGeneration` for its equality-neutral `==`: this is repaint
     /// bookkeeping, and two terminals with identical visible state must not compare
@@ -696,14 +696,14 @@ public struct Terminal: Equatable, Sendable {
 
     /// The retained-history byte bound: the valve for rows whose bytes the cell cap cannot see.
     ///
-    /// Raised from 10 MiB to 16 MiB by doc 28's `D11`, because the two caps below no longer fit
-    /// under the old budget. `F23` measured a full-width retained row at 179 columns costing
-    /// **1,552 charged B/row**, so `D11`'s target depth needs `89,500 x 1,552` ~ 14.8 MiB and at
+    /// Raised from 10 MiB to 16 MiB by `research/28/D11`, because the two caps below no longer fit
+    /// under the old budget. `research/28/F23` measured a full-width retained row at 179 columns costing
+    /// **1,552 charged B/row**, so `research/28/D11`'s target depth needs `89,500 x 1,552` ~ 14.8 MiB and at
     /// 10 MiB the *byte* bound bound first, stopping a full-width fill at 6,756 rows. 16 MiB is
     /// that measured requirement plus headroom, not a round number chosen first.
     ///
-    /// This is a per-pane figure, and `D11` is a trial: it gives back most of the 3.72 MB
-    /// retained footprint `D10` banked. Read `D11` before treating it as settled.
+    /// This is a per-pane figure, and `research/28/D11` is a trial: it gives back most of the 3.72 MB
+    /// retained footprint `research/28/D10` banked. Read `research/28/D11` before treating it as settled.
     ///
     /// Public so measurement tools can report the budget they ran against. Deliberately just the
     /// constant: the budget-taking initializer stays internal, because the public initializer
@@ -724,7 +724,7 @@ public struct Terminal: Equatable, Sendable {
     /// Reserved for `TerminalStyle()`. Fixed so an unwritten cell costs no intern and no lookup.
     static let defaultStyleId: StyleId = 0
 
-    /// Smallest table size worth a sweep. Well above the 1-5 distinct styles `15/F11` measured in
+    /// Smallest table size worth a sweep. Well above the 1-5 distinct styles `research/15/F11` measured in
     /// ordinary output, so a normal session never sweeps at all.
     static let baseStyleSweepThreshold = 512
     static let maximumTerminalMetadataBytes = 256 * 1_024
@@ -754,17 +754,17 @@ public struct Terminal: Equatable, Sendable {
     /// Makes the active bound visible to shared structural test assertions.
     ///
     /// The one bound history has since doc 31: the cell and row caps priced a width reflow of
-    /// retained rows, and history is no longer reflowed (`31/D2` Decision 4).
+    /// retained rows, and history is no longer reflowed (`research/31/D2` Decision 4).
     var scrollbackBudgetBytes: Int { history.budgetBytes }
 
     /// The store's own accounting, with budget, capacity and bytes-in-use reported separately so
-    /// a proof can hold each against the others (`31/PO3`, `31/DD11`).
+    /// a proof can hold each against the others (`31/PO3`, `research/31/DD11`).
     var scrollbackCensus: LogicalLineStore.Census { history.census }
 
     /// Display rows retained history currently folds to at this width.
     ///
     /// Derived rather than counted since doc 31 -- it is the index's maintained grand total, not
-    /// an array length -- which is why `31/D3` Decision 1 insists it stay O(1): the tree reads it
+    /// an array length -- which is why `research/31/D3` Decision 1 insists it stay O(1): the tree reads it
     /// around every `feed` and roughly 200 times per planned frame.
     private var historyRowCount: Int { history.grandDisplayRowTotal }
 
@@ -772,7 +772,7 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// The `didSet` is what keeps `H3` cheap. Every cell write sources its style from this pen or
     /// from `backgroundEraseStyle`, so interning can happen once per *pen change* -- thousands of
-    /// times per corpus -- rather than once per *cell write*, which `15/F11` counted in the tens of
+    /// times per corpus -- rather than once per *cell write*, which `research/15/F11` counted in the tens of
     /// millions. Invalidating here instead of interning eagerly also keeps a run of SGR parameters
     /// (each one a separate assignment) to a single intern at the first cell that uses the result.
     public private(set) var currentStyle = TerminalStyle() {
@@ -912,8 +912,8 @@ public struct Terminal: Equatable, Sendable {
     /// runs between the two points and every statement below writes only `damage` and
     /// `pendingConsumerWork`, neither of which `damageActionSnapshot` reads -- so the carried
     /// value is bit-for-bit what a fresh capture would produce. Anything added here that mutates
-    /// snapshot-visible state breaks that, and no test would catch it (see F8 in
-    /// `docs/research/10-terminal-feed-hotspots.md`); it belongs at the call site instead.
+    /// snapshot-visible state breaks that, and no test would catch it (see `research/10/F8`);
+    /// it belongs at the call site instead.
     private mutating func recordDamage(
         from before: DamageActionSnapshot,
         to after: DamageActionSnapshot
@@ -1128,7 +1128,7 @@ public struct Terminal: Equatable, Sendable {
     /// Gives deterministic tests a small budget while production remains fixed at 16 MiB.
     ///
     /// The lower bound is the arena's: the store reserves its whole capacity at construction and
-    /// holds it below the budget by a fixed metadata reserve (`31/DD36`), so a budget too small to
+    /// holds it below the budget by a fixed metadata reserve (`research/31/DD36`), so a budget too small to
     /// hold a record plus its index is not a shallower history but an unusable one.
     init?(
         columns: Int,
@@ -2118,7 +2118,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports one retained **logical line**'s content-identity run shape.
     ///
-    /// Record-scoped since doc 31 (`31/D3` Decision 6, `31/DD17`), where the old row-scoped
+    /// Record-scoped since doc 31 (`research/31/D3` Decision 6, `research/31/DD17`), where the old row-scoped
     /// reader's contract stops being expressible: a display row is a slice the current width
     /// chooses, so "the row's own content, not the pane's width" has no meaning at a fold
     /// boundary. A record's stored cells are width-free by construction, so the contract is
@@ -2176,12 +2176,12 @@ public struct Terminal: Equatable, Sendable {
     /// public evidence without widening the grid types, which is what forced doc 12's censuses to
     /// be throwaway probes. O(cells) -- for measurement, not for a hot path.
     ///
-    /// History is arena-denominated since doc 31 (`31/F6` `R16`, `31/DD11`): there is one region
-    /// rather than a heap allocation per retained row, so the per-row leak proof doc 15's `F4`
+    /// History is arena-denominated since doc 31 (`research/31/F6` `R16`, `research/31/DD11`): there is one region
+    /// rather than a heap allocation per retained row, so the per-row leak proof `research/15/F4`
     /// motivated is restated as bytes-in-use against a capacity that never grows.
     public var memoryCensus: TerminalMemoryCensus {
         // Distinct styles are counted by id rather than by value: ids are canonical (equal styles
-        // always intern to the same one), so this is the same number doc `12/F3` reported, reached
+        // always intern to the same one), so this is the same number `research/12/F3` reported, reached
         // without re-deriving a hash for a type the table already hashes.
         let stride = MemoryLayout<GridCell>.stride
         let arena = history.census
@@ -2446,7 +2446,7 @@ public struct Terminal: Equatable, Sendable {
         var stream: [GridRow] = []
         stream.reserveCapacity(historyRowCount - start + primaryRows.count)
         // One `locate` for the start row and `advance` for the rest, which is the traversal
-        // rule retained-history readers follow (`31/D3` Decision 1 rule 2).
+        // rule retained-history readers follow (`research/31/D3` Decision 1 rule 2).
         var cursor = history.locate(displayRow: start)
         while let at = cursor {
             stream.append(history.paintedRow(at: at))
@@ -3199,7 +3199,7 @@ public struct Terminal: Equatable, Sendable {
     /// Separate from `presentedRows` because that materializes whole rows, and for a
     /// retained row materializing means decoding a style, a hyperlink, and a content
     /// identity per cell plus retaining a `TerminalScalars` -- every one of which
-    /// `TerminalGeometry` then drops. `28/F17` measured this as roughly half the browsing
+    /// `TerminalGeometry` then drops. `research/28/F17` measured this as roughly half the browsing
     /// regression, and it was pure waste: geometry has never read a scalar.
     ///
     /// Padding past a content-sized row's stored extent is synthesized here rather than
@@ -3243,7 +3243,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Addresses a stream row inside retained history, or nil when it names a live row.
     ///
-    /// The one `locate` a viewport traversal is allowed (`31/I7`, `31/D3` Decision 1 rule 2):
+    /// The one `locate` a viewport traversal is allowed (`31/I7`, `research/31/D3` Decision 1 rule 2):
     /// callers take one of these for the top row and carry it forward with
     /// `LogicalLineStore.advance(_:)`, so the number of locates a frame spends is a small
     /// constant rather than one per visible row.
@@ -3933,7 +3933,7 @@ public struct Terminal: Equatable, Sendable {
     /// Admits scrolled-off display rows into the open tail of retained history.
     ///
     /// One `admit` per display row, which appends its content to the logical line still being
-    /// printed and closes that line when the row ends it (`31/D2` operation 1). Admission enforces
+    /// printed and closes that line when the row ends it (`research/31/D2` operation 1). Admission enforces
     /// the byte budget itself, so the eviction it causes is reported through
     /// `syncHistoryEvictions` rather than counted here.
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
@@ -3946,7 +3946,7 @@ public struct Terminal: Equatable, Sendable {
     /// Brings retained history back inside its one charged-byte bound (`31/I2`).
     ///
     /// One bound, not three: the cell and row caps existed to bound the two terms of a width
-    /// reflow's cost, and there is no reflow of history left to bound (`31/D2` Decision 4).
+    /// reflow's cost, and there is no reflow of history left to bound (`research/31/D2` Decision 4).
     private mutating func enforceScrollbackBudget() {
         history.evictToBudget()
         syncHistoryEvictions()
@@ -4075,7 +4075,7 @@ public struct Terminal: Equatable, Sendable {
     /// **Row-scoped rather than cell-scoped on purpose.** A caller that plans a row needs three
     /// things resolved per row and read per column -- the row's cell kinds, its hovered span and
     /// its selected span. Under a single per-cell closure those become captured mutable variables
-    /// that the closure re-reads on every column, and `31/F13` measured the result at 60% of the
+    /// that the closure re-reads on every column, and `research/31/F13` measured the result at 60% of the
     /// browsing regression; handing the row out first lets the caller hold them as ordinary
     /// locals, which is what the pre-plural spelling did. Calling `visit` is the caller's choice:
     /// a row it declines to visit still steps the traversal forward correctly.
@@ -4118,7 +4118,7 @@ public struct Terminal: Equatable, Sendable {
                 // Retained rows stream out of the arena rather than being materialized first.
                 // A frame reads every visible row once and discards it, so folding a `GridRow`
                 // here would buy an allocation and a full `GridCell` write per cell that nothing
-                // outlives -- `28/F17` measured that as the dominant term in the browsing
+                // outlives -- `research/28/F17` measured that as the dominant term in the browsing
                 // regression. The style memoization is written out at each site rather than
                 // funnelled through a nested function: a local function called from inside the
                 // fold's own closure is one more indirect call per cell, on the frame path.
@@ -4338,7 +4338,7 @@ public struct Terminal: Equatable, Sendable {
             if cursor.row == rowCount - 1 {
                 pulledCount = min(addedCount, historyRowCount)
                 if pulledCount > 0 {
-                    // `31/D2` operation 4: the only write that shrinks the arena from the back.
+                    // `research/31/D2` operation 4: the only write that shrinks the arena from the back.
                     // The rows keep their absolute stream positions and merely change which side
                     // of the history/live seam they sit on, so no anchor moves and
                     // `evictedRowCount` does not advance.
@@ -4377,7 +4377,7 @@ public struct Terminal: Equatable, Sendable {
         let historyRowsBefore = historyRowCount
 
         // Captured against the *old* fold, which exists only until the index is recomputed.
-        // `31/D3` Decision 2's one new ordering invariant, stated rather than discovered later.
+        // `research/31/D3` Decision 2's one new ordering invariant, stated rather than discovered later.
         let capturedBeforeSeam = capturedAnchorAddresses(historyRows: historyRowsBefore)
 
         // A line still being printed keeps its prompt mark on its record -- unless the pull-back
@@ -4485,7 +4485,7 @@ public struct Terminal: Equatable, Sendable {
         // A widening leaves the refolded live half shorter than the viewport, and the rows to
         // fill it with are the ones history is holding directly above it. Padding with blanks
         // instead would leave a blank line at the bottom of the stream that the same content at
-        // the same width never had -- `31/D2` operation 4 exists for exactly this hand-back, and
+        // the same width never had -- `research/31/D2` operation 4 exists for exactly this hand-back, and
         // it moves no anchor.
         let deficit = rowCount - rebuiltRows.count
         if deficit > 0, historyRowCount > 0 {
@@ -4552,7 +4552,7 @@ public struct Terminal: Equatable, Sendable {
     /// Two cases rather than one because the two halves of the stream change for different
     /// reasons: history keeps its bytes and refolds, so a record address is enough; the live
     /// screen is genuinely rebuilt, so its address is the reflow line and offset the rebuild is
-    /// keyed by. `31/D3` Decision 2 rejected making the *stored* anchor either of these -- these
+    /// keyed by. `research/31/D3` Decision 2 rejected making the *stored* anchor either of these -- these
     /// are transients that live for the duration of one resize.
     private enum WidthChangeAddress {
         case history(recordIndex: Int, cellOffset: Int)
@@ -4561,7 +4561,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Moves the addresses the seam pull-back invalidated onto the live side of it.
     ///
-    /// `31/D3` Decision 4 hands the open tail's partial final display row to the live refold, so a
+    /// `research/31/D3` Decision 4 hands the open tail's partial final display row to the live refold, so a
     /// history address that pointed into those cells no longer resolves -- and the cells did not
     /// vanish, they changed which side of the seam they sit on. The prefix seeds the refold's
     /// first logical line at offset zero, which is what makes the conversion arithmetic; the same
@@ -4630,7 +4630,7 @@ public struct Terminal: Equatable, Sendable {
     /// Writes the restated anchors back, dropping a range whose two ends did not both survive.
     ///
     /// The counterpart of `capturedAnchorAddresses`, and the only place a width change edits an
-    /// anchor: `31/D3` Decision 2 keeps the stored coordinate an absolute display row, so
+    /// anchor: `research/31/D3` Decision 2 keeps the stored coordinate an absolute display row, so
     /// eviction still needs no anchor edit at all and this loop is the whole restatement.
     private mutating func restateAnchors(
         _ captured: [(WidthChangeAnchor, WidthChangeAddress)],
@@ -4651,7 +4651,7 @@ public struct Terminal: Equatable, Sendable {
                     )
                 } else {
                     // The only unresolvable case is a cell the seam pull-back handed to the live
-                    // grid (`31/D3` Decision 4); it is now the first live row's head.
+                    // grid (`research/31/D3` Decision 4); it is now the first live row's head.
                     restated[slot] = TextAnchor(
                         row: evictedRowCount + historyRowsAfter,
                         column: 0
@@ -4744,9 +4744,9 @@ public struct Terminal: Equatable, Sendable {
     /// the new width.
     ///
     /// History is no longer a source: it stores logical lines already, so there is nothing there
-    /// to reconstruct and nothing to rebuild (`31/F6` `X1`). What history does contribute is
+    /// to reconstruct and nothing to rebuild (`research/31/F6` `X1`). What history does contribute is
     /// `leadingCells` -- the sub-row remainder `setWidth` cut off its open tail so no short
-    /// display row is left in the middle of a line that continues here (`31/D3` Decision 4).
+    /// display row is left in the middle of a line that continues here (`research/31/D3` Decision 4).
     private func reconstructLogicalLines(
         from sourceRows: [GridRow],
         leadingCells: [GridCell],
@@ -5606,7 +5606,7 @@ public struct Terminal: Equatable, Sendable {
     /// close it. Left open across such an erase it asserts a continuation whose cells are gone,
     /// and both readers act on it: `admit` appends the next scrolled-off row into the pre-clear
     /// record, and a later width change pulls the record's partial row back onto the cleared
-    /// screen (`31/D2` operation 2, amended 2026-08-05). Call only for erases that blank *all*
+    /// screen (`research/31/D2` operation 2, amended 2026-08-05). Call only for erases that blank *all*
     /// of row 0 -- a surviving prefix is a real continuation, and severing would split one
     /// logical line in two. The funnel is a no-op on the alternate screen.
     private mutating func severHistoryWrapClaimForRowZeroErase() {
@@ -6590,9 +6590,9 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Ends the logical line history is still printing, which is `31/D2` operation 2.
+    /// Ends the logical line history is still printing, which is `research/31/D2` operation 2.
     ///
-    /// A header bit plus at most one appended cell (`31/D3` Decision 3): the background-erase
+    /// A header bit plus at most one appended cell (`research/31/D3` Decision 3): the background-erase
     /// style the sever paints into the vacated spacer column is a cell today's `pack` stores and
     /// the renderer paints, so it is materialized into the open record before the line closes
     /// rather than lost to a record measured at its content end.
@@ -6664,8 +6664,8 @@ public struct Terminal: Equatable, Sendable {
         } else if row == 0, isAlternateScreenActive == false, historyRowCount > 0 {
             // The store never held the spacer -- where one sits is a function of the width, which
             // `31/I1` forbids storing -- so the column the clear vacated shows up as the open
-            // tail's short final display row, and the repair fills it (`31/D3` Decision 3, which
-            // measured this against the real engine and found `31/F6` `X9`'s "no-op" wrong).
+            // tail's short final display row, and the repair fills it (`research/31/D3` Decision 3, which
+            // measured this against the real engine and found `research/31/F6` `X9`'s "no-op" wrong).
             let repaired = history.repairClearedSpacer(styleId: replacementStyleId)
             // Even when nothing was stored, the seam's spacer is *derived* from the live cell
             // this clear just overwrote, so the last retained row displays differently now.

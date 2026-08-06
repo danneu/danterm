@@ -37,7 +37,7 @@ public struct DrawBenchmarkGrid: Codable, Equatable, Sendable {
     ///
     /// 80x24 stays because two grids are worth more than one: per-cell cost is
     /// linear in cell count, so a run whose two grids disagree on ns/cell is a run
-    /// with an arithmetic bug in it. That check is what `11/F4` needed and did not
+    /// with an arithmetic bug in it. That check is what `research/11/F4` needed and did not
     /// have. It costs 1920 cells. Adding a third grid buys nothing the second does
     /// not already buy.
     public static let standard = [
@@ -68,7 +68,7 @@ public enum DrawBenchmarkWorkload: String, Codable, CaseIterable, Sendable {
 /// The denominators a per-draw duration has to be read against.
 ///
 /// Exists because a duration alone cannot be checked. A published finding
-/// (`docs/research/11-render-frame-budget.md`, F2) quoted per-draw times 16x
+/// (`research/11/F2`) quoted per-draw times 16x
 /// below what a bare `CGContextFillRects` of the same cells costs -- the numbers
 /// had been divided by the batch count twice in a summarizing script, and the
 /// report carried nothing a reader could have divided to catch it. The tool

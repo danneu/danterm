@@ -1,16 +1,16 @@
 // The retained-row shape probe: how long retained rows are, what they are made of, how
 // many are blank, and what the allocator actually charges for them.
 //
-// This is the instrument doc 28's Phase 2 needs for `F9` (blank-row frequency, sizing
-// `H2`'s ceiling) and `F10` (allocator behavior under ragged rows, sizing whether `H3`'s
+// This is the instrument doc 28's Phase 2 needs for `research/28/F9` (blank-row frequency, sizing
+// `research/28/H2`'s ceiling) and `research/28/F10` (allocator behavior under ragged rows, sizing whether `research/28/H3`'s
 // paper savings survive malloc's size classes). Both questions are answered by the same
 // two facts about a history -- the distribution of *stored* cells per retained row, and
 // what malloc hands back for a request of that size -- so they share one instrument
 // rather than two that could disagree.
 //
-// Phase 3 added the third fact, for `F11`: what a retained row's cells actually *contain*.
-// `F8` and `F10` both closed on the same stated gap -- `styledCellCount` and
-// `multiScalarCellCount` were zero in every run, so `H3`'s packing argument had never met
+// Phase 3 added the third fact, for `research/28/F11`: what a retained row's cells actually *contain*.
+// `research/28/F8` and `research/28/F10` both closed on the same stated gap -- `styledCellCount` and
+// `multiScalarCellCount` were zero in every run, so `research/28/H3`'s packing argument had never met
 // the content that would stress it. A packing scheme is priced against composition, not
 // against length: a representation that compresses what real rows do not contain wins
 // nothing. `RetainedRowComposition` is that measurement, carried as parallel per-row
@@ -28,7 +28,7 @@
 // Belongs here: the per-row derivation, the size-class arithmetic, and the reductions the
 // two findings quote. Does not belong here: a stimulus corpus (the driver supplies bytes,
 // so the probe cannot be accused of shaping content to flatter a hypothesis), a threshold,
-// or a verdict -- `F9` and `F10` are sizing measurements, and neither has a second arm.
+// or a verdict -- `research/28/F9` and `research/28/F10` are sizing measurements, and neither has a second arm.
 //
 // Depends on `TerminalCore` and Darwin's `malloc_good_size` alone. No planning, no
 // rendering, no AppKit, and no timing: nothing here is a hot path and nothing here is
@@ -52,15 +52,15 @@ public let defaultTerminalCell = TerminalCell(
 ///
 /// Mirrors `Terminal.arrayStorageHeaderBytes`, which is private to the engine. Restated
 /// rather than plumbed out because the probe must be able to model an allocation the
-/// engine does not expose, and because `derivationMatchesCensus` plus `F8`'s independently
+/// engine does not expose, and because `derivationMatchesCensus` plus `research/28/F8`'s independently
 /// measured per-row residual are what check the model.
 public let arrayStorageHeaderBytes = 32
 
 /// Rounds an allocation request the way macOS malloc really does.
 ///
 /// `malloc_good_size` is the allocator's own answer, not a table of size classes modelled
-/// from memory -- the same reason doc 15's `D4` charges `Array.capacity` instead of
-/// predicting buckets. `F10`'s whole question is what this function does to ragged
+/// from memory -- the same reason `research/15/D4` charges `Array.capacity` instead of
+/// predicting buckets. `research/28/F10`'s whole question is what this function does to ragged
 /// requests, so asking libmalloc is the measurement.
 public func allocatedBytes(forRequest request: Int) -> Int {
     request <= 0 ? 0 : malloc_good_size(request)
@@ -102,7 +102,7 @@ public func utf8ByteCount(of scalar: Unicode.Scalar) -> Int {
 /// Every array here is per display row. The three `contentIdentity` axes that used to sit
 /// alongside them -- run counts, identified cells, strict run counts -- were retired with
 /// the per-row representation they priced: they measured doc 28's per-row candidates
-/// `C1`-`C6`, and since doc 31's record arena shipped the engine picks a record's identity
+/// `research/28/C1-C6`, and since doc 31's record arena shipped the engine picks a record's identity
 /// encoding at admission time (`LogicalLineStore`'s `identityPerCell` fallback), so the
 /// question they were built to answer is closed. This is the same retirement
 /// `packedPayloadModelBytes` took. `Terminal.scrollbackRecordContentIdentityShape` survives
@@ -193,7 +193,7 @@ public struct RetainedRowComposition: Codable, Equatable, Sendable {
 /// One stimulus's retained-row shape, plus every quantity `F9` and `F10` are reduced from.
 ///
 /// Raw counts are retained alongside the reductions -- `storedCellCounts` is the whole
-/// distribution -- because `20/F12` is the standing example of an artifact that had to be
+/// distribution -- because `research/20/F12` is the standing example of an artifact that had to be
 /// recovered by hand when only a summary was kept.
 public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     public let stimulus: String
@@ -231,7 +231,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     ///
     /// Denominated per *logical line* since doc 31, not per display row: there is one header per
     /// record rather than per retained row, which is why `packedPayloadModelBytes` -- a per-row
-    /// model of doc 28's `C6` -- was retired with the representation it described.
+    /// model of `research/28/C6` -- was retired with the representation it described.
     public let censusRetainedArenaBytesInUse: Int
 
     /// Retained stored cells the census counted, held against the extent this probe derives
@@ -290,7 +290,7 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         }
     }
 
-    /// Arena bytes per retained display row -- the successor to the figure `28/F18` priced at
+    /// Arena bytes per retained display row -- the successor to the figure `research/28/F18` priced at
     /// 423.0 on the CRLF reference payload, restated against the record arena.
     public var packedPayloadBytesPerRow: Double {
         retainedRowCount == 0
@@ -446,7 +446,7 @@ public func readRetainedRowShape(
     // plus what history's packed blobs hold. Reconstructing both halves is what turns the
     // derivation from an assumption into a check.
     //
-    // Retained rows no longer contribute cell-stride bytes at all (doc 28's `C1` shipped the
+    // Retained rows no longer contribute cell-stride bytes at all (`research/28/C1` shipped the
     // packed arena), so the scrollback half of this check is an *extent* claim, not a byte
     // one: `derivationMatchesCensus` below holds the derived stored-cell total against the
     // census's own, and the bytes come from `retainedArenaBytesInUse` rather than being

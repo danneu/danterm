@@ -1,7 +1,8 @@
 // The on-arena record format for doc 31's logical-line scrollback store, and the pure fold
 // that derives display rows from one record and a width.
 //
-// This is doc 31's `D2`/`D3` in bytes: a logical line is one contiguous arena record -- an
+// This is `research/31/D2` and `research/31/D3` in bytes: a logical line is one contiguous
+// arena record -- an
 // 8-byte header, then the C1 cell words `PackedRetainedRow` already defines, then the two
 // column-sorted side tables -- and *nothing* in it depends on the pane's width (`I1`). The
 // fold below is the other half of that bargain: everything a per-display-row store baked in
@@ -9,7 +10,7 @@
 // recomputed here from (record, width). The trailing background-erase fill is the same bargain
 // one step further: the *style* a line's tail is painted in is content, so the header carries a
 // bit for it, while *which columns* that paint covers is width-relative and so is derived at
-// read (`31/DD25` as amended).
+// read (`research/31/DD25` as amended).
 //
 // What belongs here: the header's bit layout, a record's decoded shape and byte length, and
 // the width-derived row walk. What does not: the arena, the ring, the derived index and the
@@ -27,7 +28,7 @@ extension Terminal {
     /// it into one of these, and works in named fields from there. Every field is a **content**
     /// property -- `31/I1` is the whole design, so a width may never reach this struct.
     struct LogicalLineRecord: Equatable, Sendable {
-        /// Cells the record currently stores. Reduced by a head trim (`31/D2` Decision 2
+        /// Cells the record currently stores. Reduced by a head trim (`research/31/D2` Decision 2
         /// step 3), which rewrites this header forward over the cells it drops.
         var cellCount: Int
 
@@ -35,7 +36,7 @@ extension Terminal {
         var hyperlinkCount: Int
 
         /// Entries in the record's identity table: runs, or one per originally stored cell
-        /// when `identityPerCell` is set (`31/D3` Decision 6 keeps `PackedRetainedRow`'s two
+        /// when `identityPerCell` is set (`research/31/D3` Decision 6 keeps `PackedRetainedRow`'s two
         /// encodings). **Never reduced by a head trim**, because the table stays where it is
         /// and keeps its original keys.
         var identityEntryCount: Int
@@ -43,7 +44,7 @@ extension Terminal {
         /// Selects the identity table's encoding, exactly as `PackedRetainedRow`'s flag does.
         var identityPerCell: Bool
 
-        /// The one semantic mark a logical line carries (`31/F4` case 16). Continuation rows
+        /// The one semantic mark a logical line carries (`research/31/F4` case 16). Continuation rows
         /// are stamped at read, never stored.
         var semanticPrompt: Terminal.SemanticPromptRow
 
@@ -51,27 +52,27 @@ extension Terminal {
         /// append to this record and its last display row reads as soft-wrapped.
         var isOpen: Bool
 
-        /// The line was cut here by the cap (`31/DD3`) or by the arena's physical end
-        /// (`31/DD20`), and continues in the next record. Readers rejoin by adjacency --
-        /// `31/DD6` leaves no back-pointer.
+        /// The line was cut here by the cap (`research/31/DD3`) or by the arena's physical end
+        /// (`research/31/DD20`), and continues in the next record. Readers rejoin by adjacency --
+        /// `research/31/DD6` leaves no back-pointer.
         var isForcedSplit: Bool
 
         /// Some cell in the record is a wide head, so the fold must walk boundaries instead
-        /// of dividing (`31/F4` Observation 1). Carried per record rather than per buffer
-        /// (`31/DD4`), which is why one CJK line never downgrades the whole history.
+        /// of dividing (`research/31/F4` Observation 1). Carried per record rather than per buffer
+        /// (`research/31/DD4`), which is why one CJK line never downgrades the whole history.
         var hasWideCells: Bool
 
-        /// This record does not start its logical line: its head was trimmed (`31/D2`
-        /// Decision 5) or the forced-split piece before it was evicted (`31/D2` Decision 2
+        /// This record does not start its logical line: its head was trimmed (`research/31/D2`
+        /// Decision 5) or the forced-split piece before it was evicted (`research/31/D2` Decision 2
         /// step 2 as amended). Its first display row reads as a continuation.
         var startsMidLine: Bool
 
         /// Filler placed before the ring's wrap point so a record stays contiguous
-        /// (`31/DD14`). Skipped by the head like any other bytes, and charged like them.
+        /// (`research/31/DD14`). Skipped by the head like any other bytes, and charged like them.
         var isPad: Bool
 
         /// The line's last display row is painted to the right margin, after its content ends,
-        /// in a style the store holds in a side table keyed by this record (`31/DD25` as
+        /// in a style the store holds in a side table keyed by this record (`research/31/DD25` as
         /// amended: the trailing background-erase fill is an attribute, not cells).
         ///
         /// A bit rather than a table probe per read: the fill is reachable on a small
@@ -83,11 +84,11 @@ extension Terminal {
 
         /// Field positions in the header word, in one place.
         ///
-        /// One little-endian `UInt64`, and it has to stay one: `31/D2` Decision 1 prices a
+        /// One little-endian `UInt64`, and it has to stay one: `research/31/D2` Decision 1 prices a
         /// blank logical line at **8 arena bytes and 8 index bytes**, and the 1,048,576-record
         /// blank-history depth that whole decision rests on is that arithmetic. Three 18-bit
         /// counts, a 3-bit mark and seven flags is exactly 64 bits, and the word is now **full**:
-        /// `31/DD25`'s amendment spent the spare bit on the trailing fill, so the next flag costs
+        /// `research/31/DD25`'s amendment spent the spare bit on the trailing fill, so the next flag costs
         /// either a narrower count field or a ninth byte no blank record can afford.
         ///
         ///     bits  0..17  cell count
@@ -218,7 +219,7 @@ extension Terminal {
         /// The cap `31/I10` states as "no record exceeds 1/32 of the byte budget", derived
         /// from the arena's capacity rather than frozen as a literal.
         ///
-        /// `31/DD3` ratified the **rule**, not the number: at the 16 MiB budget it is 65,536
+        /// `research/31/DD3` ratified the **rule**, not the number: at the 16 MiB budget it is 65,536
         /// cells, and it moves if the budget does. Clamped to what the header can express, so
         /// a budget larger than 64 MiB narrows the cap instead of silently truncating a count.
         static func forcedSplitCellCount(forCapacity capacity: Int) -> Int {
@@ -231,14 +232,14 @@ extension Terminal {
     /// Pure arithmetic over a cell count, a width and a "is this cell a wide head" probe, so
     /// it can be reasoned about and tested without an arena. This is the work a
     /// per-display-row store did once at admission and this design does at every read --
-    /// which `31/F1` measured as the *cheaper* of the two, not the dearer.
+    /// which `research/31/F1` measured as the *cheaper* of the two, not the dearer.
     enum LogicalLineFold {
         /// Display rows the record occupies at `width`.
         ///
         /// `max(1, ceil((cells + spacers) / width))`. The floor is what makes a zero-cell
-        /// record one display row (`31/DD15`); without it a blank history folds to nothing.
+        /// record one display row (`research/31/DD15`); without it a blank history folds to nothing.
         /// The fast path is exact whenever no wide cell can meet a boundary, which is the
-        /// `hasWideCells` bit's entire job (`31/F4` Observation 1, `31/DD4`).
+        /// `hasWideCells` bit's entire job (`research/31/F4` Observation 1, `research/31/DD4`).
         static func rowCount(
             cellCount: Int,
             width: Int,
@@ -262,7 +263,7 @@ extension Terminal {
         /// The spacer rule is `Terminal.pack(line:columns:)`'s, restated: a 2-cell cluster
         /// that meets a row with one column left does not split -- a spacer fills the column
         /// and the cluster starts the next row. The spacer is derived here and never stored
-        /// (`31/F4` case 1), which is what keeps a record's bytes width-free.
+        /// (`research/31/F4` case 1), which is what keeps a record's bytes width-free.
         @discardableResult
         static func enumerateRows(
             cellCount: Int,
@@ -304,18 +305,18 @@ extension Terminal {
         /// it has only one.
         ///
         /// Split out from `enumerateRows` because eviction asks exactly this question and must
-        /// stop at the answer: `31/D2` Decision 2 step 1 folds **one display row** per trim step
+        /// stop at the answer: `research/31/D2` Decision 2 step 1 folds **one display row** per trim step
         /// -- `O(width)`, or `O(cells in that row)` on the wide path -- and the complexity that
-        /// bound rests on is the reading `31/D4` froze its decision rule against.
+        /// bound rests on is the reading `research/31/D4` froze its decision rule against.
         ///
         /// The *first* row is the one case `enumerateRows`' walk collapses to arithmetic: its
         /// column and its cell index advance together from zero, so the only boundary test that
         /// can fire is the one at the last column. One display row per trim step therefore costs
         /// one probe rather than a walk over the row -- which matters because eviction asks this
-        /// once per dropped display row, and `31/D4` gate 7 measures exactly that step.
+        /// once per dropped display row, and `research/31/D4` gate 7 measures exactly that step.
         ///
         /// `hasWideCells` skips even the probe for a record that cannot contain a wide head --
-        /// the same fast path, and the same reason, as `rowCount`'s (`31/DD4`); it defaults to
+        /// the same fast path, and the same reason, as `rowCount`'s (`research/31/DD4`); it defaults to
         /// taking it, which is correct for every record.
         static func firstRowCellEnd(
             cellCount: Int,

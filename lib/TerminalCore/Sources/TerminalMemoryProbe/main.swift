@@ -143,7 +143,7 @@ if wantsJSON {
     }
 
     print("")
-    print("content shape (sizes doc 15's H2/H3/H4)")
+    print("content shape (sizes research/15/H2, research/15/H3, research/15/H4)")
     print("payload               styled   distinct styles   multi-scalar   hyperlink   identities")
     print("---------------------------------------------------------------------------------------")
     for payload in report.payloads {

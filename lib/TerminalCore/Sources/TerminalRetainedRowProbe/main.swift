@@ -2,7 +2,7 @@
 //
 // Takes its stimulus as length-framed chunks on stdin -- the same framing
 // `TerminalCoreBenchmark` reads -- rather than owning a corpus of its own. That is
-// deliberate: doc 28's `F9` asks how often *real* retained rows are blank, and a probe
+// deliberate: `research/28/F9` asks how often *real* retained rows are blank, and a probe
 // that generated its own content could be accused of shaping that content. The driver
 // supplies committed, recorded bytes; this binary only reports what they produced.
 //

@@ -3,7 +3,7 @@
 // A probe, not a benchmark block: no collector schedules this and nothing pairs
 // its output. It is run by hand, its JSON is pasted into a finding, and it stays
 // committed so the next reader can re-run the same recipe -- which is exactly
-// what `15/F18`'s deleted browsing probe could not offer.
+// what `research/15/F18`'s deleted browsing probe could not offer.
 //
 // Kept to a thin argument parse so the recipe and the timing loop stay in the
 // support target, where they are tested headlessly.

@@ -1,16 +1,16 @@
 // The saturated-history resize probe: how long a width change costs on a full scrollback.
 //
-// `28/H1` asks an *absolute* question -- does a width change on a saturated
-// history fit in a frame budget, and where does its time go -- and `28/D1`
+// `research/28/H1` asks an *absolute* question -- does a width change on a saturated
+// history fit in a frame budget, and where does its time go -- and `research/28/D1`
 // pitch 2 answered it with a deliberate refusal: this is a committed probe
 // recipe, not a candidate workload. A paired workload would need two arms, and
 // there is no pre-trim arm to compare against (the doc's evidence floor forbids
 // wanting one). So this reports a distribution and no verdict; nothing here
 // selects a threshold and nothing here decides anything.
 //
-// It exists as committed code because `15/F18`'s browsing probe was deleted
+// It exists as committed code because `research/15/F18`'s browsing probe was deleted
 // after it was read, which cost this doc a whole re-implementation task
-// (`28/F5`). A probe whose recipe is frozen in prose but whose code is gone is
+// (`research/28/F5`). A probe whose recipe is frozen in prose but whose code is gone is
 // a recipe nobody can re-run.
 //
 // Belongs here: the saturation stimulus, the resize loop, and the distribution
@@ -109,11 +109,11 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// scratch every later one reuses.
     public let warmupCount: Int
 
-    /// The standard recipe: `15/F18`'s saturation geometry and payload at the
+    /// The standard recipe: `research/15/F18`'s saturation geometry and payload at the
     /// production budget, alternating 179 <-> 100 columns.
     ///
     /// The stimulus is deliberately the browsing workload's, so a reader
-    /// comparing this probe against `28/F5`'s numbers is looking at the same
+    /// comparing this probe against `research/28/F5`'s numbers is looking at the same
     /// history rather than two differently-shaped ones.
     public static let standard = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 10_000,
@@ -217,7 +217,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
 /// reason is the question: "does this fit in a frame budget" is answered by the
 /// tail, not the median. Every raw sample is retained so a later reader can
 /// re-reduce them under different quantiles without re-running the probe --
-/// `20/F12` is the standing example of an artifact that had to be recovered by
+/// `research/20/F12` is the standing example of an artifact that had to be recovered by
 /// hand because only a summary was kept.
 public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
     public let sampleCount: Int

@@ -532,7 +532,7 @@ private extension Dictionary where Value == [CGRect] {
 /// entering the family switch at all. Almost every cell a terminal draws is ASCII or Latin
 /// text, and for those the switch's eight `ClosedRange.contains` calls are pure overhead --
 /// they are also generic range-membership witnesses rather than inlined comparisons, which
-/// made them measurable (~5% of the draw bracket; `docs/research/18-*.md` `F4`).
+/// made them measurable (~5% of the draw bracket; `research/18/F4`).
 ///
 /// This duplicates where the families actually start, so it can drift out from under them:
 /// a family claiming scalars below this floor would fall to the font path with no other

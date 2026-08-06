@@ -95,11 +95,11 @@ if wantsJSON {
     print("""
 
         A 60Hz frame is 16.667 ms; a 120Hz frame is 8.333 ms. Occupancy above a frame is what
-        the main thread's drain fence can wait behind (19/F8, 19/F11).
+        the main thread's drain fence can wait behind (research/19/F8, research/19/F11).
         """)
     // Printed only for the held-Enter case, because it is the only one a user can repeat
     // faster than the queue serves it. macOS key repeat is 15/s by default and 66/s at the
-    // fastest setting; a sustainable rate below those is 19/F9's queueing knee.
+    // fastest setting; a sustainable rate below those is research/19/F9's queueing knee.
     if let quiet = report.samples.first(where: { $0.name == OccupancyCase.searchHeldEnterQuiet.rawValue }) {
         let rate = quiet.operationsPerSecond
             .map { String(format: "%.1f presses/second", $0) }

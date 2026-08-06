@@ -1,13 +1,13 @@
-// The measured cases themselves: the jobs doc 19's `F1` found unbounded on
+// The measured cases themselves: the jobs `research/19/F1` found unbounded on
 // `TerminalPTYHost`'s serial queue, priced at a realistic history depth.
 //
 // Measures `Terminal` methods directly rather than driving the host. That is legitimate here
-// rather than a shortcut, and doc 19's `F5` says why: these jobs run *synchronously* on the
+// rather than a shortcut, and `research/19/F5` says why: these jobs run *synchronously* on the
 // owner queue, so a job's duration is its occupancy, and interposing the queue would only add
 // its own overhead to the reading.
 //
 // What this file cannot do is reproduce a number from a revision that no longer exists. The
-// 99.3 ms held-Enter baseline in `19/F11` was measured before `257bfee` and is only
+// 99.3 ms held-Enter baseline in `research/19/F11` was measured before `257bfee` and is only
 // re-derivable by checking that commit out. This probe exists so the *next* change does not
 // inherit the same problem.
 import TerminalCore
@@ -38,7 +38,7 @@ public enum OccupancyCase: String, Sendable, CaseIterable {
 /// Runs every case against one saturated pane and returns the report.
 ///
 /// Cases share a pane on purpose: building a saturated history is the expensive part, and
-/// `19/F5`'s copy-on-write control established that mutating a uniquely-owned terminal in
+/// `research/19/F5`'s copy-on-write control established that mutating a uniquely-owned terminal in
 /// place does not charge the job for a copy. Nothing here keeps a second live reference to
 /// the terminal, which is the condition that control depended on -- do not introduce one.
 public func runOccupancyProbe(
@@ -64,7 +64,7 @@ public func runOccupancyProbe(
     }
     samples.append(OccupancySample(name: OccupancyCase.searchNewNeedle.rawValue, milliseconds: newNeedle))
 
-    // The reported symptom (`19/F9`): the needle is unchanged and only the selection moves.
+    // The reported symptom (`research/19/F9`): the needle is unchanged and only the selection moves.
     // Both halves of the job are measured together because `applySearch` pays both on every
     // mutation -- `searchNext` and then `searchStatus` for the overlay's counter.
     _ = terminal.beginSearch("NEEDLE_")
@@ -92,7 +92,7 @@ public func runOccupancyProbe(
         OccupancySample(name: OccupancyCase.searchHeldEnterStreaming.rawValue, milliseconds: streaming)
     )
 
-    // Cmd-A walks the same projection search does, without needing a needle (`19/F1`).
+    // Cmd-A walks the same projection search does, without needing a needle (`research/19/F1`).
     var selectAll: [Double] = []
     for _ in 0..<iterations {
         terminal.clearSelection()
@@ -101,7 +101,7 @@ public func runOccupancyProbe(
     samples.append(OccupancySample(name: OccupancyCase.selectAll.rawValue, milliseconds: selectAll))
 
     // Alternating widths, because a resize to the current width is not a reflow. One step of
-    // a live window or split drag looks like this; its *rate* during a drag is `19/H2` and is
+    // a live window or split drag looks like this; its *rate* during a drag is `research/19/H2` and is
     // still unmeasured.
     var resize: [Double] = []
     for step in 0..<iterations {

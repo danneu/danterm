@@ -1,9 +1,9 @@
 // The packed, immutable form a row takes once it leaves the live grid for history.
 //
-// This is doc 28's `C1`, selected by `D9`: a retained row is one byte blob holding a fixed
+// This is `research/28/C1`, selected by `research/28/D9`: a retained row is one byte blob holding a fixed
 // **8-byte cell** per stored column, plus two column-sorted side tables (hyperlinks and
 // `contentIdentity`) and the two row-level fields (`isSoftWrapped`, `semanticPrompt`) that
-// no cell carries. It exists because doc 28's `F8` put 89.5% of saturated attributable
+// no cell carries. It exists because `research/28/F8` put 89.5% of saturated attributable
 // footprint in stored cell bytes, and a retained cell was paying a 32-byte live-grid struct
 // for content that needs eight.
 //
@@ -18,13 +18,13 @@
 //
 // **Why eight bytes and not one.** The predecessor here was `C6`: a per-row stride tier, a
 // run-length style table, and three exception tables, priced at 128 B/row against this
-// design's 528 B/row. It shipped, and it failed the deciding ladder -- `28/F16` measured
-// `retained-browse` at +19.83%, `28/F17` fixed everything that was wiring and landed at
-// +3.27%, and what remained was the decode itself at roughly 3.8 ns per cell. `D9` took the
-// bytes back to buy the read. What makes that affordable is `D8`: both retained-history caps
+// design's 528 B/row. It shipped, and it failed the deciding ladder -- `research/28/F16` measured
+// `retained-browse` at +19.83%, `research/28/F17` fixed everything that was wiring and landed at
+// +3.27%, and what remained was the decode itself at roughly 3.8 ns per cell. `research/28/D9`
+// took the bytes back to buy the read. What makes that affordable is `research/28/D8`: both retained-history caps
 // count *content* (327,680 stored cells, 16,384 rows), not bytes, so an 8-byte cell retains
 // exactly the rows a 1-byte cell retained and the byte budget binds under neither. The
-// exchange is memory alone -- `28/F18` has the arithmetic.
+// exchange is memory alone -- `research/28/F18` has the arithmetic.
 //
 // **The read contract is `I5`, and under this shape most of it is structural.** A random cell
 // read is one load at `base + column * 8`: no stride to resolve, no run to search, no
@@ -43,7 +43,7 @@ extension Terminal {
     /// bytes for every retained row, which at the depths this change unlocks costs more
     /// than the bit-packing saves.
     ///
-    /// `spills` is empty for the 99.88% of rows with no multi-scalar cell (`F11`), and an
+    /// `spills` is empty for the 99.88% of rows with no multi-scalar cell (`research/28/F11`), and an
     /// empty Swift array allocates nothing, so the second word is free in the common case.
     struct PackedRetainedRow: Equatable, Sendable {
         /// The blob. Layout is documented on `Header` and fixed by `pack(_:)`/the readers.
@@ -297,7 +297,7 @@ extension Terminal {
         /// Split out because the render path reads every visible retained row once per frame
         /// and then discards it. Materializing first cost an allocation and a 32-byte
         /// `GridCell` write per stored cell -- work the pre-packing representation never did,
-        /// since it could hand back its stored array by reference. `28/F17` measured that as
+        /// since it could hand back its stored array by reference. `research/28/F17` measured that as
         /// the dominant term in the browsing regression, and the fix outlived the
         /// representation it was written for.
         ///
@@ -422,7 +422,7 @@ extension Terminal {
         /// **Trimming belongs here, not at the call site.** Admission used to hand this
         /// `sourceRow.compacted()`, which allocated a second cell array and copied every
         /// `GridCell` into it -- retaining each one's `TerminalScalars` -- purely to drop a
-        /// suffix the encoder was about to stop at anyway. `28/F20` measured that copy, with
+        /// suffix the encoder was about to stop at anyway. `research/28/F20` measured that copy, with
         /// the encoder's own two walks over the same cells, at 19.7% of the drain thread on
         /// `benchmark/scrollback-stream`. Trimming is a decision about `storedCellCount`,
         /// which is this type's field; making it the encoder's removes the copy. `I2` is
@@ -435,7 +435,7 @@ extension Terminal {
         /// every byte into a blob allocated at its exact final size, through one unsafe
         /// buffer, with no `append` anywhere.
         ///
-        /// `28/F17` had measured `C6`'s encoder at 9.2% of feed self time and this design's
+        /// `research/28/F17` had measured `C6`'s encoder at 9.2% of feed self time and this design's
         /// whole claim on admission was that a translate-copy is cheaper than a
         /// classification pass -- but the first version of it measured **+6.19%** on
         /// `terminal-feed`, *worse* than `C6`, because it appended each cell byte by byte:
@@ -542,7 +542,7 @@ extension Terminal {
                         }
                         // A never-written cell encodes to a zero word, and the blob is
                         // already zero -- so the cheapest way to write it is not to. On the
-                        // staircase rows `28/F11` found in `scrollback-stream`, two thirds of
+                        // staircase rows `research/28/F11` found in `scrollback-stream`, two thirds of
                         // stored columns take this branch. `interiorBlankRunsRoundTrip` is
                         // what holds "default cell" and "zero word" to the same meaning.
                         if word == 0 { continue }

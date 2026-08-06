@@ -1,14 +1,15 @@
 // Doc 31's retained-history store: one fixed-capacity byte arena of logical-line records, a
 // derived index over it, and the read-time fold that turns both back into display rows.
 //
-// This is the store `31/D1` funded and `31/D2`/`31/D3` specified. History holds one record per
+// This is the store `research/31/D1` funded and `research/31/D2` and `research/31/D3`
+// specified. History holds one record per
 // logical line a program printed; wrapping is derived at read from (record, width); a width
 // change rewrites no retained byte and evicts nothing, because there is no width in storage to
 // rewrite (`I1`, `I3`). The arena is allocated once at a capacity held *below* the byte budget by
-// the metadata reserve, and is never grown, compacted or shrunk (`I2` as amended by `31/D4`'s
+// the metadata reserve, and is never grown, compacted or shrunk (`I2` as amended by `research/31/D4`'s
 // residency remedy), so at steady state admission allocates nothing.
 //
-// What belongs here: the arena and its ring discipline, the five mutating operations `31/D2`
+// What belongs here: the arena and its ring discipline, the five mutating operations `research/31/D2`
 // Decision 2 enumerates (admit, close/reopen the tail, evict at the head, truncate the tail,
 // clear), the derived index (per-block display-row totals plus one grand total), the side tables
 // keyed by record -- spills and the trailing background-erase fill style -- and the two reads the
@@ -102,12 +103,12 @@ extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///
     /// Owns its own width, because the derived index's totals are only meaningful at one
-    /// (`31/D3` Decision 1). Callers change it through `setWidth(_:)`, which is the only entry
+    /// (`research/31/D3` Decision 1). Callers change it through `setWidth(_:)`, which is the only entry
     /// point that recomputes the whole index; every other operation maintains it in O(1).
     struct LogicalLineStore: Sendable, Equatable {
         // MARK: - Nested types
 
-        /// One index block's cached display-row total (`31/D3` Decision 1).
+        /// One index block's cached display-row total (`research/31/D3` Decision 1).
         ///
         /// `rowStart` is an **absolute** stream position measured from the same monotone origin
         /// `evictedRowCount` counts against, which is what lets a head eviction touch only the
@@ -124,7 +125,7 @@ extension Terminal {
         }
 
         /// One contiguous `contentIdentity` run, keyed by cell offset within the record
-        /// (`31/D3` Decision 6, `31/DD17`) rather than by column within a display row.
+        /// (`research/31/D3` Decision 6, `research/31/DD17`) rather than by column within a display row.
         private struct IdentityRun: Sendable, Equatable {
             var start: Int
             var extent: Int
@@ -132,13 +133,13 @@ extension Terminal {
         }
 
         /// What the store charges against its budget, reported so budget, capacity and
-        /// bytes-in-use are separately visible (`31/DD11`, restating `15/F4`'s leak proof in
+        /// bytes-in-use are separately visible (`research/31/DD11`, restating `research/15/F4`'s leak proof in
         /// arena terms).
         ///
         /// `chargedBytes` is the single quantity `31/I2` bounds, and it is bounded by
         /// `capacityBytes` rather than by `budgetBytes`: the arena is allocated **below** the
         /// budget by the metadata reserve, so that the index and the side tables live inside the
-        /// bound rather than resident on top of it (`31/D4`'s residency remedy, `31/DD36`).
+        /// bound rather than resident on top of it (`research/31/D4`'s residency remedy, `research/31/DD36`).
         /// Charged is still **not** resident: once the ring's write cursor has cycled every arena
         /// page has been touched, which is the reading `31/AR6` promoted to a gate.
         struct Census: Equatable, Sendable {
@@ -165,16 +166,16 @@ extension Terminal {
             var hasWideCells: Bool
             var semanticPrompt: Terminal.SemanticPromptRow
             /// The style the line's tail is painted in past its content end, or nil when the
-            /// tail is default-painted (`31/DD25` as amended). Never part of the line's cells.
+            /// tail is default-painted (`research/31/DD25` as amended). Never part of the line's cells.
             var trailingFillStyle: Terminal.StyleId?
         }
 
         /// A display row's address as (record, row within record).
         ///
-        /// The transient `31/D3` Decision 2 keeps out of anchors: it is produced on demand and
+        /// The transient `research/31/D3` Decision 2 keeps out of anchors: it is produced on demand and
         /// never stored, so the public coordinate stays an absolute display row. Readers get one
         /// from `locate(displayRow:)` and carry it forward with `advance(_:)`, which is how a
-        /// frame plans with at most one locate (`31/D3` Decision 1 rule 2).
+        /// frame plans with at most one locate (`research/31/D3` Decision 1 rule 2).
         struct DisplayRowCursor: Equatable, Sendable {
             var recordIndex: Int
             var rowWithinRecord: Int
@@ -183,30 +184,30 @@ extension Terminal {
         // MARK: - Stored state
 
         /// The arena, stored as 64-bit words over a fixed number of copy-on-write chunks.
-        /// Allocated once at `arenaCapacity` and never resized -- `31/D2` Decision 1 rejected
-        /// both geometric growth (resident slack no charge model can see, the shape of `15/F4`'s
+        /// Allocated once at `arenaCapacity` and never resized -- `research/31/D2` Decision 1 rejected
+        /// both geometric growth (resident slack no charge model can see, the shape of `research/15/F4`'s
         /// leak) and `memmove` compaction (a 16 MiB copy on the admission path).
         ///
         /// Words rather than bytes because every offset in the store is a byte offset on an
         /// 8-byte grain -- headers, cells and both in-arena tables all are -- so a word is
-        /// addressed as `offset >> 3` and read or written whole. `31/F8` Observation 3 priced the
+        /// addressed as `offset >> 3` and read or written whole. `research/31/F8` Observation 3 priced the
         /// alternative: composing a word out of eight checked `[UInt8]` subscripts put admission
         /// at ~1.1 ns per stored cell byte, which was the whole of that finding's reject.
         ///
-        /// **Chunked rather than one allocation (`31/D5`, amending `31/D2` Decision 1).** The
+        /// **Chunked rather than one allocation (`research/31/D5`, amending `research/31/D2` Decision 1).** The
         /// byte address space is still one linear ring over `[0, arenaCapacity)`; only the
         /// backing is split. `TerminalPTYHost.drainedFrameState()` publishes the `Terminal`
         /// **value**, so between two published frames the arena is non-uniquely referenced and
-        /// the next write copies it: with one buffer that was all 15.75 MiB, which `31/F13` M1
+        /// the next write copies it: with one buffer that was all 15.75 MiB, which `research/31/F13` M1
         /// measured as `memcpy` at 12.1%-16.1% of whole-process CPU under `admit`. With chunks
         /// it is the one chunk the write touches. **A record never straddles a chunk** -- a
         /// chunk boundary is a second kind of physical end, force-split and padded exactly as
-        /// `31/DD20` and `31/DD14` treat the arena's own -- which is what lets every walk below
+        /// `research/31/DD20` and `research/31/DD14` treat the arena's own -- which is what lets every walk below
         /// hoist one chunk and index it the way it indexed the single arena.
         private var chunks: ContiguousArray<ContiguousArray<UInt64>>
 
         /// The chunk size as a power of two, so a byte offset splits into a chunk index and an
-        /// in-chunk word index with two shifts and a mask and no division (`31/DD53`).
+        /// in-chunk word index with two shifts and a mask and no division (`research/31/DD53`).
         private let chunkByteShift: Int
         private let chunkByteMask: Int
         private let chunkBytes: Int
@@ -220,7 +221,7 @@ extension Terminal {
         private var bytesInUse = 0
 
         /// One byte offset per live record, oldest first. Charged at capacity, which is the
-        /// term that bounds the degenerate blank-line regime (`31/D2` Decision 1).
+        /// term that bounds the degenerate blank-line regime (`research/31/D2` Decision 1).
         private var offsets: RingBuffer<Int>
 
         /// Cached display-row totals, one per `blockSize` records.
@@ -232,19 +233,19 @@ extension Terminal {
         /// Cells trimmed off the head record's front, which rebases its side-table keys.
         ///
         /// Store-level rather than a header field because **only the head record is ever
-        /// trimmed**, and the header word is full: `31/D2` Decision 1 prices a blank record at
+        /// trimmed**, and the header word is full: `research/31/D2` Decision 1 prices a blank record at
         /// eight arena bytes, so a per-record trim field would have cost the blank-history depth
         /// the whole budget derivation rests on.
         private var headTrimmedCells = 0
 
         /// Set when eviction dropped an open record whose line has no follower yet, so the next
-        /// record opened continues that line rather than starting one (`31/D2` Decision 2).
+        /// record opened continues that line rather than starting one (`research/31/D2` Decision 2).
         private var pendingStartsMidLine = false
 
         private(set) var grandDisplayRowTotal = 0
 
         /// Display rows dropped at the head, at the width in force when they were dropped, and
-        /// only ever increasing (`31/D2` Decision 2's invariant, which replaces
+        /// only ever increasing (`research/31/D2` Decision 2's invariant, which replaces
         /// `isHistoryHeadTruncated`).
         private(set) var evictedRowCount = 0
 
@@ -254,7 +255,7 @@ extension Terminal {
         private let budget: Int
 
         /// The arena's allocated capacity: the budget less the metadata reserve, and the number
-        /// the charge is actually tested against (`31/DD36`).
+        /// the charge is actually tested against (`research/31/DD36`).
         private let arenaCapacity: Int
 
         private let forcedSplitCellCap: Int
@@ -264,7 +265,7 @@ extension Terminal {
         ///
         /// The same discipline `grandDisplayRowTotal` keeps, and for the same reason: the write
         /// path tests the charge against the capacity once per admission and once per eviction
-        /// step, and `31/F8` Observation 3 counted a full `census` recompute -- two dictionary
+        /// step, and `research/31/F8` Observation 3 counted a full `census` recompute -- two dictionary
         /// capacities and four array capacities -- on each of those. `census` recomputes it from
         /// scratch and asserts the two agree, so a missed refresh fails a test rather than
         /// silently drifting the bound (`31/AR4`'s failure mode, applied to the charge).
@@ -282,22 +283,22 @@ extension Terminal {
 
         /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena for the
         /// same reason `PackedRetainedRow` holds them outside its blob: inlining them would make
-        /// a cell variable-width, and 99.88% of rows have none (`28/F11`).
+        /// a cell variable-width, and 99.88% of rows have none (`research/28/F11`).
         private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
         private var spillBytes = 0
 
         /// The trailing background-erase fill style, keyed by absolute record sequence
-        /// (`31/DD25` as amended).
+        /// (`research/31/DD25` as amended).
         ///
-        /// A side table rather than a header field for the reason `31/D3` Decision 3 rejected a
+        /// A side table rather than a header field for the reason `research/31/D3` Decision 3 rejected a
         /// header style slot: it is reachable on a minority of records, and a 32-bit slot in
-        /// every header would cost the blank-history depth `31/D2` Decision 1 rests on. Keyed
+        /// every header would cost the blank-history depth `research/31/D2` Decision 1 rests on. Keyed
         /// like the spill table, so the two are evicted and charged by the same rules.
         private var fillStylesBySequence: [Int: Terminal.StyleId] = [:]
 
         /// Records per index block.
         ///
-        /// `31/F1` Observation 4 measured sequential browse at 677 ns (32), 697 ns (64), 801 ns
+        /// `research/31/F1` Observation 4 measured sequential browse at 677 ns (32), 697 ns (64), 801 ns
         /// (128) and 870 ns (256) per display row: small blocks read faster because the in-block
         /// scan shortens faster than the binary search lengthens. 64 keeps that while charging
         /// 0.25 B per record for the block totals, against the 8 B the offsets cost.
@@ -333,12 +334,12 @@ extension Terminal {
             metadataBytes = indexChargeBytes + sideTableChargeBytes
         }
 
-        /// The spelling `31/F8`'s eviction probe compiles against.
+        /// The spelling `research/31/F8`'s eviction probe compiles against.
         ///
-        /// That probe is a frozen instrument -- `31/D4`'s rule is applied to it unedited -- and it
+        /// That probe is a frozen instrument -- `research/31/D4`'s rule is applied to it unedited -- and it
         /// constructs the store with the production **budget** under this label, which is what the
         /// argument has always meant to a caller: how many bytes a pane's history may cost. The
-        /// arena's capacity stopped being that same number when `31/D4`'s residency remedy landed,
+        /// arena's capacity stopped being that same number when `research/31/D4`'s residency remedy landed,
         /// so new call sites say `budgetBytes:` and this stays to keep the instrument runnable.
         init(capacityBytes: Int, width: Int) {
             self.init(budgetBytes: capacityBytes, width: width)
@@ -347,7 +348,7 @@ extension Terminal {
         /// How far below the byte budget the arena's capacity is held, so the index and the side
         /// tables are resident *inside* the bound rather than on top of it.
         ///
-        /// `31/DD36` derives the 1/16: `31/F8` measured the metadata share at 3.23% of the budget
+        /// `research/31/DD36` derives the 1/16: `research/31/F8` measured the metadata share at 3.23% of the budget
         /// on `plain` and 15.29% on `mixed`, and measured the arena's depth margin over today's
         /// store at 1.076x on its tightest class -- so a reserve above ~7.1% would make a content
         /// class retain *less* than today's engine, which `31/PO11` forbids. 1/16 is the largest
@@ -356,24 +357,24 @@ extension Terminal {
             ((budget / 16) + 7) & ~7
         }
 
-        /// 64 KiB, the smallest chunk this store will build (`31/DD53`).
+        /// 64 KiB, the smallest chunk this store will build (`research/31/DD53`).
         ///
-        /// The floor is what keeps `31/DD54`'s admissible unit generous: a record may not
+        /// The floor is what keeps `research/31/DD54`'s admissible unit generous: a record may not
         /// straddle a chunk, so the chunk bounds the widest admissible row, and 64 KiB holds
         /// ~4,090 columns of worst-case side-table content -- past anything a pane reaches.
         static let minimumChunkByteShift = 16
 
         /// 512 KiB, the largest. Bigger chunks copy more per published frame, which is the whole
-        /// cost `31/D5` exists to bound.
+        /// cost `research/31/D5` exists to bound.
         static let maximumChunkByteShift = 19
 
-        /// `31/DD53`: the power of two at or above `capacity / 32`, clamped to
+        /// `research/31/DD53`: the power of two at or above `capacity / 32`, clamped to
         /// [64 KiB, 512 KiB], with a capacity at or under the floor left as a single chunk.
         ///
         /// At the production budget the capacity is 15,728,640 B and this returns 19, dividing
         /// the arena into exactly 30 chunks of 512 KiB. Below the floor it returns the smallest
         /// shift that covers the whole capacity, so a small-budget store keeps exactly the
-        /// single-region placement it had before `31/D5` -- which is what keeps the suite's
+        /// single-region placement it had before `research/31/D5` -- which is what keeps the suite's
         /// existing expectations resting on the placement rule they were written against.
         static func chunkByteShift(forCapacity capacity: Int) -> Int {
             precondition(capacity >= 8)
@@ -389,7 +390,7 @@ extension Terminal {
 
         /// Test support: the identity of each backing chunk's storage.
         ///
-        /// The only way to assert `31/D5`'s mechanism rather than time it: after a value copy,
+        /// The only way to assert `research/31/D5`'s mechanism rather than time it: after a value copy,
         /// the chunks a mutation did *not* write must still be the same buffers the copy holds.
         func chunkStorageIdentitiesForTesting() -> [UInt] {
             chunks.map { chunk in
@@ -438,12 +439,12 @@ extension Terminal {
                 + arenaBackingOverheadBytes
         }
 
-        /// What splitting the arena's backing costs beyond the bytes it holds (`31/D5`).
+        /// What splitting the arena's backing costs beyond the bytes it holds (`research/31/D5`).
         ///
         /// One array storage header per chunk plus the outer array that names them --
         /// ~1.2 KiB of a 15 MiB capacity at the production budget. Charged rather than ignored
-        /// on `31/DD37`'s rule: a charge that describes a model rather than an allocation is
-        /// `15/F2`'s error class, and the backing change is exactly the kind of thing that would
+        /// on `research/31/DD37`'s rule: a charge that describes a model rather than an allocation is
+        /// `research/15/F2`'s error class, and the backing change is exactly the kind of thing that would
         /// hide inside it.
         private var arenaBackingOverheadBytes: Int {
             Terminal.arrayStorageHeaderBytes * (chunks.count + 1)
@@ -465,10 +466,10 @@ extension Terminal {
 
         /// The spill table's charge: its payloads **and** the hash table holding them.
         ///
-        /// The second term is what `31/F8` Observation 4 found missing -- the census charged
+        /// The second term is what `research/31/F8` Observation 4 found missing -- the census charged
         /// 1.931 MiB of side tables on `scrollback-mixed` while the arena's resident excess was
         /// 4.375 MiB, and the gap was this dictionary's own storage. A charge that describes the
-        /// payloads and not the allocation is `15/F2`'s error class, recurring inside `31/I2`.
+        /// payloads and not the allocation is `research/15/F2`'s error class, recurring inside `31/I2`.
         private var spillTableBytes: Int {
             spillBytes
                 + Self.hashTableBytes(
@@ -491,7 +492,7 @@ extension Terminal {
         ///
         /// `Dictionary.capacity` is the count it holds *before* it resizes -- three quarters of
         /// the power-of-two bucket count it allocated -- so `capacity * stride` under-charges the
-        /// allocation by a third plus the occupancy bitmap. Charging the buckets is `15/D4`'s
+        /// allocation by a third plus the occupancy bitmap. Charging the buckets is `research/15/D4`'s
         /// rule, the same one the index's 8-B-per-record charge follows: charge what the
         /// allocator gave, not what the model says is in use.
         private static func hashTableBytes(capacity: Int, entryStride: Int) -> Int {
@@ -513,11 +514,11 @@ extension Terminal {
         /// the previous logical line ended.
         ///
         /// The row's measurement rule is `reconstructLogicalLines`': a soft-wrapped row is
-        /// measured to full width and a hard-ended row to its content end (`31/F4` case 17),
+        /// measured to full width and a hard-ended row to its content end (`research/31/F4` case 17),
         /// and the `.spacerHead` a wrap left in the last column is dropped, because where a
         /// spacer sits is a function of the width and `31/I1` forbids storing one. A hard-ended
         /// row whose tail past the content is painted by a background erase contributes that
-        /// paint as the record's **trailing fill style**, not as cells (`31/DD25` as amended).
+        /// paint as the record's **trailing fill style**, not as cells (`research/31/DD25` as amended).
         mutating func admit(_ row: Terminal.GridRow) {
             let admission = admissionExtent(row)
 
@@ -526,7 +527,7 @@ extension Terminal {
             // no room to make for a row that does not fit an empty region; the honest answer is
             // that such a pane has no history, and the degenerate configuration stays reachable
             // instead of being a crash. The unit is a backing chunk rather than the capacity
-            // because a record may not straddle one (`31/DD54`), which at the 64 KiB chunk floor
+            // because a record may not straddle one (`research/31/DD54`), which at the 64 KiB chunk floor
             // is ~4,090 columns of worst-case side-table content.
             let worstCase = LogicalLineRecord.Header.byteCount
                 + max(1, admission.contentEnd) * LogicalLineRecord.cellBytes
@@ -536,16 +537,16 @@ extension Terminal {
             // A hard-ended row with no content still occupies a display row when the line
             // already has cells, and a zero-cell append would fold that row away. One blank
             // cell restores it -- the same thing today's store holds for a blank row, and
-            // `31/DD15`'s zero-cell record is untouched, because that case is an *empty*
+            // `research/31/DD15`'s zero-cell record is untouched, because that case is an *empty*
             // record rather than an empty append. It takes the fill's style when there is one,
             // so the restored row is painted from its first column exactly as today's stored
-            // row is (`31/DD34`).
+            // row is (`research/31/DD34`).
             let restoresBlankRow = row.isSoftWrapped == false
                 && admission.contentEnd == 0
                 && openRecordCellCount > 0
             let cellCount = restoresBlankRow ? 1 : admission.contentEnd
 
-            // `31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
+            // `research/31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
             // the cut on a display-row boundary at the admitting width.
             if let open = openTailRecord(), open.cellCount + cellCount > forcedSplitCellCap {
                 forceSplitOpenRecord()
@@ -566,7 +567,7 @@ extension Terminal {
             }
             setTrailingFillOnTail(admission.fillStyle)
 
-            // `31/DD5`: the display-row count is *counted* here, not derived -- admission knows
+            // `research/31/DD5`: the display-row count is *counted* here, not derived -- admission knows
             // it consumed one row, so no `ceil` and no wide-cell scan runs on the write path.
             addDisplayRowsToTail(1)
 
@@ -580,20 +581,20 @@ extension Terminal {
         /// and the style its tail is painted in.
         ///
         /// An **extent** rather than a materialized `[GridCell]`: the caller's row already holds
-        /// those cells contiguously, and `31/F8` Observation 3 charged the admission path one
+        /// those cells contiguously, and `research/31/F8` Observation 3 charged the admission path one
         /// array allocation plus a full copy of every cell per admitted row for the privilege of
         /// naming them twice.
         ///
-        /// `reconstructLogicalLines`' own rule (`31/F4` case 17): a soft-wrapped row is measured
+        /// `reconstructLogicalLines`' own rule (`research/31/F4` case 17): a soft-wrapped row is measured
         /// to full width, a hard-ended row to its **content** end. It is deliberately not
         /// `PackedRetainedRow.pack`'s canonical extent, which keeps the trailing
         /// background-erase-styled blanks past the content as *cells*: as a display row those
         /// are painted columns, but as line content they are cells the fold would re-wrap, so a
         /// painted tail on a hard-ended line would grow into whole extra display rows at a
         /// narrower width. There is no floor of one either -- a record's cell count is a content
-        /// property and zero is representable (`31/DD15`).
+        /// property and zero is representable (`research/31/DD15`).
         ///
-        /// What `pack` sees and this splits (`31/DD25` as amended): the same predicate that
+        /// What `pack` sees and this splits (`research/31/DD25` as amended): the same predicate that
         /// extends `pack`'s canonical extent past the content -- a blank cell carrying a
         /// non-default style -- identifies the fill. The maximal run of such blanks reaching the
         /// right margin is the **trailing fill**, recorded as one style on the record and
@@ -652,7 +653,7 @@ extension Terminal {
         ///
         /// Written after the row's cells so it lands on the record that holds the line's *end*,
         /// which is what makes a forced-split line's fill the **last** piece's by construction:
-        /// a split closes the piece before these cells were appended (`31/DD33`).
+        /// a split closes the piece before these cells were appended (`research/31/DD33`).
         private mutating func setTrailingFillOnTail(_ styleId: Terminal.StyleId?) {
             guard offsets.count > 0 else { return }
             let index = offsets.count - 1
@@ -705,7 +706,7 @@ extension Terminal {
         /// Reopening drops the trailing fill: the fill describes the paint after the *end* of a
         /// line, and a reopened line has no end yet -- its last display row is about to be
         /// extended, and admission re-derives the tail of whatever row finally closes it
-        /// (`31/DD35`).
+        /// (`research/31/DD35`).
         mutating func reopenTailRecord() {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
@@ -756,7 +757,7 @@ extension Terminal {
         }
 
         /// Materializes the styled blank a background-erase sever or spacer clear leaves behind
-        /// (`31/D3` Decision 3).
+        /// (`research/31/D3` Decision 3).
         ///
         /// Asymmetric on purpose: today's `pack` trims a default-styled trailing blank and keeps
         /// a non-default one, so storing nothing in the default case is what *reproduces* today's
@@ -775,7 +776,7 @@ extension Terminal {
         }
 
         /// Cuts the open logical line here and lets the next admission continue it in a new
-        /// record, which readers rejoin by adjacency (`31/DD6`).
+        /// record, which readers rejoin by adjacency (`research/31/DD6`).
         mutating func forceSplitOpenRecord() {
             guard var record = openTailRecord(), record.cellCount > 0 else { return }
             let offset = offsets[offsets.count - 1]
@@ -793,8 +794,8 @@ extension Terminal {
 
         /// Drops the oldest display row, trimming inside the head record when it holds more.
         ///
-        /// Display-row granular by decision, not by convenience: `31/D2` Decision 2 took
-        /// `31/DD2`'s recorded alternative so that no anchor and no scrollbar position moves
+        /// Display-row granular by decision, not by convenience: `research/31/D2` Decision 2 took
+        /// `research/31/DD2`'s recorded alternative so that no anchor and no scrollbar position moves
         /// further per admitted row than it does today. The termination measure is display rows
         /// rather than bytes -- a one-cell row frees eight bytes and spends eight on the
         /// rewritten header, so a step can free nothing and still make progress.
@@ -847,7 +848,7 @@ extension Terminal {
             var trimmed = record
             trimmed.cellCount -= cut
             trimmed.startsMidLine = true
-            // `31/D2` Decision 5: the mark referred to a line start that no longer exists. What
+            // `research/31/D2` Decision 5: the mark referred to a line start that no longer exists. What
             // survives is the *continuation* reading the trimmed head had under today's store,
             // which is `.continuation` for a marked line and nothing at all for an unmarked one.
             trimmed.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
@@ -860,7 +861,7 @@ extension Terminal {
         }
 
         private mutating func dropHeadRecord(_ record: LogicalLineRecord, at offset: Int) {
-            // `31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
+            // `research/31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
             // must stamp what follows it, or the follower reads as a fresh logical line -- the
             // divergence from `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` that inherited
             // condition 10 exists to prevent. A forced split's follower is already a record; an
@@ -903,7 +904,7 @@ extension Terminal {
             // The head lands on the next record, and everything between the two is what this step
             // reclaims: the dropped record, plus any pad the ring left before the wrap. Reading
             // the span off the index rather than re-deriving the record's length and then walking
-            // the pads (`31/DD14`) charges the same bytes with one subtraction and no decode.
+            // the pads (`research/31/DD14`) charges the same bytes with one subtraction and no decode.
             let next = offsets[0]
             bytesInUse -= next > offset ? next - offset : (arenaCapacity - offset) + next
             head = next
@@ -995,7 +996,7 @@ extension Terminal {
         ///
         /// One derivation for the three callers that need it -- the spacer repair, tail
         /// truncation and the width-change pull-back -- so the fold's last-row semantics have a
-        /// single place to change. `enumerateRows` always fires at least once (`31/DD15`'s
+        /// single place to change. `enumerateRows` always fires at least once (`research/31/DD15`'s
         /// one-row floor), so the seeded defaults never survive.
         private func lastRowRange(
             ofRecordAt offset: Int,
@@ -1086,8 +1087,8 @@ extension Terminal {
         /// Adopts a new width, pulling the open tail's partial display row back into the live
         /// refold and recomputing the whole index.
         ///
-        /// Returns the cells the live grid must take as its continued line's prefix (`31/D3`
-        /// Decision 4, `31/DD16`): without the pull-back a resize leaves a short display row in
+        /// Returns the cells the live grid must take as its continued line's prefix (`research/31/D3`
+        /// Decision 4, `research/31/DD16`): without the pull-back a resize leaves a short display row in
         /// the *middle* of a logical line, which today's `reconstructLogicalLines` makes
         /// impossible and inherited condition 10 forbids diverging on.
         ///
@@ -1120,10 +1121,10 @@ extension Terminal {
 
         /// Rebuilds every block total and sets the grand total to their sum.
         ///
-        /// Eager rather than lazy by measurement: `31/F2` read 0.016 ms at trial depth, `31/F7`
-        /// 0.76 ms at the record count the budget admits, and `31/F9` 5.6 ms on the deepest wide
+        /// Eager rather than lazy by measurement: `research/31/F2` read 0.016 ms at trial depth, `research/31/F7`
+        /// 0.76 ms at the record count the budget admits, and `research/31/F9` 5.6 ms on the deepest wide
         /// history at the two-column minimum -- all inside one 60 Hz frame, so neither of
-        /// `31/D3` Decision 7's mitigations ships.
+        /// `research/31/D3` Decision 7's mitigations ships.
         private mutating func recomputeIndex() {
             blocks.removeAll()
             firstBlockNumber = firstRecordSequence / Self.blockSize
@@ -1167,7 +1168,7 @@ extension Terminal {
         /// Converts an absolute-from-the-head display row into a record address.
         ///
         /// One binary search over the block totals, then a scan inside the block. A reader plans
-        /// a frame with **one** of these and `advance(_:)` for the rest (`31/D3` Decision 1).
+        /// a frame with **one** of these and `advance(_:)` for the rest (`research/31/D3` Decision 1).
         func locate(displayRow: Int) -> DisplayRowCursor? {
             LocateCounter.record()
             guard displayRow >= 0, displayRow < grandDisplayRowTotal else { return nil }
@@ -1233,7 +1234,7 @@ extension Terminal {
         ///
         /// The **content walk**: it stops at the line's cells and never emits a trailing fill,
         /// which is what makes it the right read for copy, selection and search -- the fill is
-        /// paint, not text (`31/DD25` as amended). Renderers want `paintedRow(at:)`.
+        /// paint, not text (`research/31/DD25` as amended). Renderers want `paintedRow(at:)`.
         func gridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
             gridRow(recordIndex: cursor.recordIndex, rowWithinRecord: cursor.rowWithinRecord)
         }
@@ -1284,7 +1285,7 @@ extension Terminal {
 
         /// One logical line's stored cells, in order. Width-free by construction, which is what
         /// makes `scrollbackRecordContentIdentityShape`'s contract literally true
-        /// (`31/D3` Decision 6).
+        /// (`research/31/D3` Decision 6).
         ///
         /// Content only: a trailing fill is never among these cells, so a caller that copies a
         /// logical line copies what the program printed and not what the erase painted.
@@ -1347,7 +1348,7 @@ extension Terminal {
         /// `[Terminal.GridCell]` for every retained logical line and decoded every cell in it,
         /// with both side-table probes, on both sides. `Terminal` is `Equatable` and declares
         /// `history` before `rows`, so a single `terminal != previousTerminal` on the pointer
-        /// path walked all of retained history that way -- `31/F13` measured it at 9.3% of
+        /// path walked all of retained history that way -- `research/31/F13` measured it at 9.3% of
         /// whole-process CPU under ambient mouse motion.
         static func == (lhs: Self, rhs: Self) -> Bool {
             guard lhs.budget == rhs.budget,
@@ -1368,7 +1369,7 @@ extension Terminal {
         /// Sound because a record's bytes are a function of its content alone (`31/I1`): equal
         /// header, equal cell words and equal side-table entries mean every reader sees the same
         /// cells. The one thing the bytes do not carry is the key base the head record's tables
-        /// are read against, which a head trim moves (`31/D2` Decision 2 step 3) -- so a trimmed
+        /// are read against, which a head trim moves (`research/31/D2` Decision 2 step 3) -- so a trimmed
         /// head carrying a table falls back to comparing what a reader would actually see.
         ///
         /// The header word subsumes what `recordSummary` would compare and is why `==` no longer
@@ -1387,7 +1388,7 @@ extension Terminal {
             guard left.word == rhs.word(at: rightOffset) else { return false }
 
             // The cells are one contiguous run of whole words inside one backing chunk on each
-            // side (`31/D5`: a record never straddles one), so this walks two raw word pointers
+            // side (`research/31/D5`: a record never straddles one), so this walks two raw word pointers
             // rather than paying a bounds check per subscript -- this loop is what a
             // whole-terminal equality spends nearly all of its time in. The record's alignment
             // tail is deliberately outside the run: those bytes are whatever the ring last wrote
@@ -1437,7 +1438,7 @@ extension Terminal {
             }
 
             // The spill payloads are the one part of a record that never lived in the arena
-            // (`31/DD28`), so they are compared through the table that holds them -- and only
+            // (`research/31/DD28`), so they are compared through the table that holds them -- and only
             // when there is one, which `spillBytes` answers for the whole store at once.
             guard lhs.spillBytes > 0 || rhs.spillBytes > 0 else { return true }
             return lhs.spillsBySequence[lhs.firstRecordSequence + index]
@@ -1446,7 +1447,7 @@ extension Terminal {
 
         /// Every retained display row, oldest first, as the renderer must paint it.
         ///
-        /// The whole-history materialization `31/D3` Decision 5 keeps for milestone 1: search,
+        /// The whole-history materialization `research/31/D3` Decision 5 keeps for milestone 1: search,
         /// Select All and history export all read all of history, and this walks the records once
         /// instead of paying `locate(displayRow:)` per row the way a subscript would.
         func allPaintedDisplayRows() -> [Terminal.GridRow] {
@@ -1465,7 +1466,7 @@ extension Terminal {
         /// Visits one display row's painted cells without materializing a `GridRow`.
         ///
         /// The frame path's read, and the reason milestone 1 lands the arena on exactly the path
-        /// `31/F1` measured (`31/D3` Decision 5): `28/F17` found the per-row `GridRow` allocation
+        /// `research/31/F1` measured (`research/31/D3` Decision 5): `research/28/F17` found the per-row `GridRow` allocation
         /// to be the dominant term of the browsing regression, and a facade that materialized here
         /// would put it straight back. Columns ascend from zero and stop at the row's painted
         /// extent; the caller pads the rest, exactly as the packed-row reader's contract did.
@@ -1476,7 +1477,7 @@ extension Terminal {
             let shape = foldedRow(at: cursor, includeFill: true)
             let sequence = firstRecordSequence + cursor.recordIndex
 
-            // The record's cells are one run inside one backing chunk (`31/D5`), so the chunk is
+            // The record's cells are one run inside one backing chunk (`research/31/D5`), so the chunk is
             // resolved once per display row and read through a raw pointer per cell.
             //
             // The pointer rather than the array subscript because the subscript is the one place
@@ -1486,7 +1487,7 @@ extension Terminal {
             // this way for the same reason. The buffer is borrowed from the **local** `chunk`,
             // not from `self.chunks`, so `body` -- an arbitrary caller closure -- cannot conflict
             // with the access and no dynamic exclusivity check replaces the static one
-            // (`31/DD51` measured what that costs when it happens).
+            // (`research/31/DD51` measured what that costs when it happens).
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
@@ -1566,7 +1567,7 @@ extension Terminal {
 
         /// The record address a display row's column names, under the fold in force now.
         ///
-        /// One half of `31/D3` Decision 2's function pair: an anchor is captured through this
+        /// One half of `research/31/D3` Decision 2's function pair: an anchor is captured through this
         /// before a width change and restated through `position(ofRecord:cellOffset:)` after, which
         /// is the whole of what replaces the reflow attachment machinery on the history side. The
         /// address is a transient -- it is never stored in an anchor and never leaves this module.
@@ -1686,7 +1687,7 @@ extension Terminal {
         /// The **one** definition of a display row's shape, so the materializing read and the two
         /// borrowing ones cannot drift apart on a spacer, a split seam or a fill. What each read
         /// then does with a column is its own -- and is the whole point of having three
-        /// (`31/F13`: the frame path was materializing a `GridCell` per cell, plus both side-table
+        /// (`research/31/F13`: the frame path was materializing a `GridCell` per cell, plus both side-table
         /// probes, for readers that keep two fields or three bits).
         private struct FoldedRow {
             var recordOffset = 0
@@ -1695,7 +1696,7 @@ extension Terminal {
             var start = 0
             var end = 0
             /// The record and cell offset of the wide head a derived spacer defers, or -1 for
-            /// none. It is a *different* record at a forced split's seam (`31/DD6`).
+            /// none. It is a *different* record at a forced split's seam (`research/31/DD6`).
             var spacerRecordIndex = -1
             var spacerOffset = 0
             /// The style this row's tail is painted in past `end`, when it carries one and the
@@ -1705,7 +1706,7 @@ extension Terminal {
 
         /// Resolves one display row's shape.
         ///
-        /// `includeFill` is the content/painted split (`31/DD25` as amended): the content walk
+        /// `includeFill` is the content/painted split (`research/31/DD25` as amended): the content walk
         /// stops at the line's cells because the fill is paint rather than text, and the painted
         /// walk runs it out to the right margin on the line's last display row.
         private func foldedRow(at cursor: DisplayRowCursor, includeFill: Bool) -> FoldedRow {
@@ -1718,8 +1719,8 @@ extension Terminal {
 
             if record.hasWideCells == false || width < 2 {
                 // No wide cell can meet a boundary, so the walk `enumerateRows` performs has one
-                // possible answer and it is arithmetic (`31/DD4`, and the fast path `rowCount`
-                // and `firstRowCellEnd` already take). This is `31/F12`'s ~1.95 ns per
+                // possible answer and it is arithmetic (`research/31/DD4`, and the fast path `rowCount`
+                // and `firstRowCellEnd` already take). This is `research/31/F12`'s ~1.95 ns per
                 // record-cell per display row, which is what made browsing a near-cap record
                 // cost 40x ordinary content.
                 rows = max(1, (record.cellCount + width - 1) / width)
@@ -1758,16 +1759,16 @@ extension Terminal {
             {
                 // The split cut the line exactly where admission dropped a spacer, so the wide
                 // head that explains the column is the *follower's* first cell rather than this
-                // record's next one. Readers rejoin split pieces by adjacency (`31/DD6`) and this
+                // record's next one. Readers rejoin split pieces by adjacency (`research/31/DD6`) and this
                 // is one doing it: without the reach across the seam the column is lost for good,
-                // which is what `31/F8`'s re-run caught as a gate 1 failure on `wide`. The open
+                // which is what `research/31/F8`'s re-run caught as a gate 1 failure on `wide`. The open
                 // tail is deliberately not covered -- its short final row is the acknowledged
                 // divergence that ends as soon as the next row is admitted.
                 shape.spacerRecordIndex = recordIndex + 1
                 shape.spacerOffset = 0
             }
 
-            // `31/DD15`'s floor: a zero-cell record folds to one display row, and the
+            // `research/31/DD15`'s floor: a zero-cell record folds to one display row, and the
             // enumeration emits nothing for it -- so the record's last row is row 0, not row -1.
             // Missing this drops the fill on exactly the ED-with-background case it exists for.
             if includeFill, cursor.rowWithinRecord == max(1, rows) - 1 {
@@ -1846,7 +1847,7 @@ extension Terminal {
 
         /// The same decode with the record's address and header supplied by the caller, so a walk
         /// over a row does not re-read the ring's offset slot and re-decode eleven header fields
-        /// once per column (`31/F13`).
+        /// once per column (`research/31/F13`).
         private func cell(
             recordIndex: Int,
             recordOffset offset: Int,
@@ -2028,7 +2029,7 @@ extension Terminal {
         /// Takes the cells through a buffer pointer so admission can hand it a slice of the
         /// caller's own row, and so the loop below reads a cell's fields in place.
         ///
-        /// Both halves of that are `31/F8` Observation 3's: materializing a `[GridCell]` per
+        /// Both halves of that are `research/31/F8` Observation 3's: materializing a `[GridCell]` per
         /// admitted row cost an allocation and a copy of every cell, and *binding* each element
         /// costs a copy and a release of a `TerminalScalars` on every one. `PackedRetainedRow.pack`
         /// walks a row the same way for the same reason, so the two stores read a row alike.
@@ -2042,11 +2043,11 @@ extension Terminal {
             var sideTablesGrew = false
             spillBytes -= spillCost(of: spillsBySequence[sequence])
 
-            // The record's cells are one run inside one backing chunk (`31/D5`), and moving that
+            // The record's cells are one run inside one backing chunk (`research/31/D5`), and moving that
             // chunk into a local for the loop keeps the store's per-cell write the single
             // uniqueness check and single bounds check it was when the arena was one buffer.
             // The first write here after a publish is what pays copy-on-write -- of this chunk,
-            // not of the arena, which is the whole of what `31/F13` M1 measured.
+            // not of the arena, which is the whole of what `research/31/F13` M1 measured.
             // Nothing between the two swaps may read the arena: the chunk is out of `chunks`
             // until the second one, and a stray read would trap on bounds rather than lie.
             let chunkAt = chunkIndex(of: offset)
@@ -2201,7 +2202,7 @@ extension Terminal {
         // MARK: - Ring discipline
 
         /// Makes `cells` cells' worth of contiguous room at the write cursor, splitting the open
-        /// tail at the physical end (`31/DD20`) and evicting at the head as needed.
+        /// tail at the physical end (`research/31/DD20`) and evicting at the head as needed.
         private mutating func makeRoom(forCells cells: Int) {
             while true {
                 let openNow = openTailRecord() != nil
@@ -2234,7 +2235,7 @@ extension Terminal {
         }
 
         /// What opening one more record would add to the index's charge, counting the doubling
-        /// an append at capacity triggers (`31/DD56`).
+        /// an append at capacity triggers (`research/31/DD56`).
         ///
         /// Charged **before** the append rather than discovered after it, because a ring never
         /// shrinks: a doubling taken while the charge was already near the capacity would leave
@@ -2265,7 +2266,7 @@ extension Terminal {
         }
 
         /// The largest contiguous run one record may occupy: a backing chunk, or the whole
-        /// capacity when the capacity is smaller than one (`31/D5`, `31/DD54`).
+        /// capacity when the capacity is smaller than one (`research/31/D5`, `research/31/DD54`).
         private var regionCapacityBytes: Int { min(chunkBytes, arenaCapacity) }
 
         /// The region end at the write cursor: the next chunk boundary, capped at the arena's
@@ -2277,8 +2278,8 @@ extension Terminal {
         /// The region end the cursor may pad forward to without colliding with the head, or nil
         /// when it cannot and eviction is the only way to make room.
         ///
-        /// `31/D5`: a chunk boundary is a second kind of physical end, so `31/DD14`'s pad and
-        /// `31/DD20`'s forced split fire at it on exactly the terms they fire at the arena's own.
+        /// `research/31/D5`: a chunk boundary is a second kind of physical end, so `research/31/DD14`'s pad and
+        /// `research/31/DD20`'s forced split fire at it on exactly the terms they fire at the arena's own.
         /// The head bounds it for the same reason it bounds `contiguousRoomAtCursor` -- padding
         /// up to or past the head would write over live bytes and leave a cursor that reads as
         /// an empty ring.
@@ -2296,12 +2297,12 @@ extension Terminal {
 
         private var contiguousRoomAtCursor: Int {
             // Bounded by the head when the ring has wrapped, and by the region end always: a
-            // record may not straddle a backing chunk (`31/D5`).
+            // record may not straddle a backing chunk (`research/31/D5`).
             let limit = writeCursorPrecedesHead ? head : arenaCapacity
             return min(limit, regionEndAtCursor) - writeCursor
         }
 
-        /// `31/DD20`: the open tail is forced-split at a region's physical end rather than
+        /// `research/31/DD20`: the open tail is forced-split at a region's physical end rather than
         /// reserved for.
         ///
         /// A pad needs a record's length at placement time, which is true of a closed record and
@@ -2311,7 +2312,7 @@ extension Terminal {
         /// remainder, and the continuation opens at offset 0. The two edges: an empty open record
         /// needs no split, and the pad is omitted when the remainder is zero.
         ///
-        /// `31/D5` generalizes the seam from the arena's end to any region end: `boundary` is a
+        /// `research/31/D5` generalizes the seam from the arena's end to any region end: `boundary` is a
         /// backing chunk boundary or the physical end, and only the physical end wraps the
         /// cursor back to zero.
         private mutating func wrapWriteCursorAtSeam(to boundary: Int) {
@@ -2319,7 +2320,7 @@ extension Terminal {
                 if open.cellCount > 0 {
                     forceSplitOpenRecord()
                 } else {
-                    // An open record with no cells still folds to one display row (`31/DD15`'s
+                    // An open record with no cells still folds to one display row (`research/31/DD15`'s
                     // floor), so discarding it has to give that row back or the index goes
                     // stale. Reachable only through `reopenTailRecord()` on a blank line.
                     let offset = offsets[offsets.count - 1]
@@ -2356,7 +2357,7 @@ extension Terminal {
 
         /// An upper bound on the bytes the open record's side tables will need when it closes.
         ///
-        /// Reserved before every append so `31/DD20`'s split can always write them: the seam
+        /// Reserved before every append so `research/31/DD20`'s split can always write them: the seam
         /// test keeps `writeCursor + tables <= arenaCapacity` true after each append, which is what
         /// makes "close the open record at its current end" a move that always fits.
         private func projectedTableBytes(addingCells cells: Int) -> Int {
@@ -2437,7 +2438,7 @@ extension Terminal {
         // of these has a carry path. The assertions state it where a future layout change would
         // break it.
 
-        /// Which backing chunk a byte offset lives in, and where in it (`31/D5`).
+        /// Which backing chunk a byte offset lives in, and where in it (`research/31/D5`).
         ///
         /// A record never straddles a chunk, so every walk over one record's bytes can call
         /// these once and index the chunk directly afterwards.
@@ -2504,9 +2505,9 @@ extension Terminal {
     /// A fixed-element ring the index deques are built on.
     ///
     /// Written out rather than reached for because the index's charge is
-    /// `31/D2` Decision 1's "8 B per record, at the deque's *capacity*": a structure that
+    /// `research/31/D2` Decision 1's "8 B per record, at the deque's *capacity*": a structure that
     /// charges what the allocator gave needs a capacity it can report, and one that never
-    /// shrinks keeps `31/DD11`'s "capacity does not grow" checkable in one comparison.
+    /// shrinks keeps `research/31/DD11`'s "capacity does not grow" checkable in one comparison.
     /// Its capacity is a power of two, so an index wraps by masking rather than by dividing.
     ///
     /// Not an implementation detail of the type so much as of the write path: every eviction step
@@ -2522,7 +2523,7 @@ extension Terminal {
         private let filler: Element
 
         /// The floor is small on purpose: the index is charged at what its rings *allocated*
-        /// (`31/DD37`), so an empty store's charge is a fixed cost every budget pays, and a
+        /// (`research/31/DD37`), so an empty store's charge is a fixed cost every budget pays, and a
         /// generous floor would make a small history unrepresentable rather than merely
         /// shallow. Production depth grows both rings far past this within one screenful.
         init(filler: Element, minimumCapacity: Int = 4) {

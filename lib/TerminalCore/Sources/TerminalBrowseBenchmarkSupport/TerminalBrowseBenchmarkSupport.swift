@@ -5,15 +5,15 @@
 // follows the bottom, and the three serialized-draw workloads start from the
 // current screen. Nothing else on the ladder scrolls back and plans a frame whose
 // rows come out of scrollback storage -- so the one measurement that most
-// motivated compact retained rows (`15/F18`, -5.79% on browsing frame planning)
+// motivated compact retained rows (`research/15/F18`, -5.79% on browsing frame planning)
 // rested on a temporary probe that was deleted right after it was read, and
-// cannot be re-run. `28/D1` pitch 1 admitted this workload to end that.
+// cannot be re-run. `research/28/D1` pitch 1 admitted this workload to end that.
 //
 // Belongs here: the browsing stimulus (geometry, payload, where the viewport is
 // parked), the warm/measure loop, and the checksum that proves both arms planned
 // the same cells. Does not belong here: any decision rule. This harness collects
 // descriptively; `retained-browse`'s screened threshold was moved into the frozen
-// table by hand (per `20`'s precedent and `23/D4`'s worked example) and now lives in
+// table by hand (per `20`'s precedent and `research/23/D4`'s worked example) and now lives in
 // `scripts/terminal-benchmark-validation.py#DECISION_RULES`, in both `quick` and
 // `confirm`.
 //
@@ -36,7 +36,7 @@ public struct BrowseBenchmarkStimulus: Equatable, Sendable {
     public let rows: Int
     public let lineCount: Int
 
-    /// `15/F18`'s recipe exactly: identical 179x66 terminals, 10,000 short
+    /// `research/15/F18`'s recipe exactly: identical 179x66 terminals, 10,000 short
     /// hard-terminated lines, browsed from the oldest retained row. Reproduced
     /// rather than re-derived so this workload's numbers are comparable in kind
     /// with the descriptive result it replaces.
@@ -62,7 +62,7 @@ public struct BrowseBenchmarkMeasurements: Codable, Equatable, Sendable {
     public let retainedRowCount: Int
     /// Cells the plan actually covered, summed across the measured calls. Both
     /// arms must report the same value or they did not plan the same frame --
-    /// this is `15/F18`'s checksum obligation, kept.
+    /// this is `research/15/F18`'s checksum obligation, kept.
     public let planCellChecksum: UInt64
     public let warmupCount: Int
     public let measuredCount: Int
@@ -137,7 +137,7 @@ public func planCellCoverage(_ plan: RenderFramePlan) -> UInt64 {
 ///
 /// Warms first because the first plans allocate the retained-row scratch the
 /// later ones reuse; measuring those would charge one arm for an allocation the
-/// other already paid. `15/F18` used 20 warm and 2,000 measured calls, and those
+/// other already paid. `research/15/F18` used 20 warm and 2,000 measured calls, and those
 /// counts are kept so the two results are comparable.
 public func measureBrowsingPlan(
     stimulus: BrowseBenchmarkStimulus = .standard,

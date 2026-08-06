@@ -178,7 +178,7 @@ struct FramePlanner {
 
         // One traversal for every replanned row rather than one per row: retained history is
         // addressed once and carried forward, which is the contract `31/I7` states and the
-        // mechanism `31/D3` Decision 1 rule 2 requires of a frame.
+        // mechanism `research/31/D3` Decision 1 rule 2 requires of a frame.
         let cells = inspectedCells(
             rowCount: rowCount,
             replanning: { reusable == nil || damage.rows.contains($0) },
@@ -316,10 +316,10 @@ struct FramePlanner {
         // row-scoped traversal is for. `terminal.cell(row:column:)` re-resolved the viewport row
         // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
         // column; a profile put that per-cell traffic at ~20% of `planFrame` (see
-        // docs/research/14-live-scroll-workload-profile.md, F10). Making the traversal plural
-        // (`31/DD45`) put three of them back inside a single per-cell closure -- the row's kind
+        // `research/14/F10`). Making the traversal plural
+        // (`research/31/DD45`) put three of them back inside a single per-cell closure -- the row's kind
         // array, which is an array *extraction* and so a retain/release pair per cell, and the
-        // two overlay spans -- and `31/F13` measured the result at 60% of the browsing
+        // two overlay spans -- and `research/31/F13` measured the result at 60% of the browsing
         // regression. `forEachViewportRow` hands the row out first precisely so all three can be
         // `let`s of this closure's own frame again, which is what the per-row spelling had.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
