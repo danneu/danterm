@@ -989,6 +989,101 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("system sleep preserves pane state and visible wake publishes one complete frame")
+    func systemSleepAndVisibleWake() async throws {
+        // Intent: lifecycle suspension gates only presentation while terminal and
+        //   semantic state continue, then visible wake publishes one complete frame.
+        // Why it exists: system sleep must not lose PTY state or queue one frame per
+        //   sleeping update, and a quiet wake still needs a current presentation.
+        // Scenario: a visible pane sleeps, receives text and a title, wakes twice,
+        //   then repeats a quiet sleep/wake cycle before teardown.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) hold \"$0\""
+            )
+        )
+        var frames: [TerminalPaneFrame] = []
+        var semantics: [TerminalSemanticEvent] = []
+        var recoveryMutationCount = 0
+        controller.onFrame = { frames.append($0) }
+        controller.onSemanticEvents = { semantics.append(contentsOf: $0) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        frames.removeAll()
+        semantics.removeAll()
+        controller.onPrimaryHistoryMutation = { recoveryMutationCount += 1 }
+
+        controller.setRenderingAvailable(false)
+        controller.setRenderingAvailable(false)
+        host.deliverOutputForTesting(Array("sleeping\u{1B}]2;sleep-title\u{7}".utf8))
+        controller.consumePendingHostUpdateForTesting()
+
+        #expect(frames.isEmpty)
+        #expect(controller.readViewportText().contains("sleeping"))
+        #expect(semantics == [.title("sleep-title")])
+        #expect(recoveryMutationCount == 1)
+
+        host.deliverOutputForTesting(Array("wake-edge".utf8))
+        controller.setRenderingAvailable(true)
+        #expect(frames.count == 1)
+        #expect(frames[0].damage == .full)
+        #expect(frames[0].plan.projectedText.contains("sleeping"))
+        #expect(frames[0].plan.projectedText.contains("wake-edge"))
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(frames.count == 1)
+        controller.setRenderingAvailable(true)
+        #expect(frames.count == 1)
+
+        controller.setRenderingAvailable(false)
+        controller.setRenderingAvailable(true)
+        #expect(frames.count == 2)
+        #expect(frames[1].damage == .full)
+
+        controller.tearDown()
+        controller.setRenderingAvailable(false)
+        controller.setRenderingAvailable(true)
+        #expect(frames.count == 2)
+        await host.close()
+    }
+
+    @Test("hidden wake defers one complete frame until reveal")
+    func hiddenWakeDefersUntilReveal() async throws {
+        // Intent: lifecycle availability and pane visibility remain independent
+        //   gates whose requests converge on one complete current reveal frame.
+        // Why it exists: waking an occluded window must not render early or forget
+        //   that its next visible presentation needs complete current state.
+        // Scenario: a hidden pane sleeps, changes, wakes, and is revealed twice.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            isVisible: false
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+
+        controller.setRenderingAvailable(false)
+        host.deliverOutputForTesting(Array("hidden-asleep".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        controller.setRenderingAvailable(true)
+
+        #expect(frames.isEmpty)
+        #expect(controller.readViewportText().contains("hidden-asleep"))
+        controller.setVisible(true)
+        #expect(frames.count == 1)
+        #expect(frames[0].damage == .full)
+        #expect(frames[0].plan.projectedText.contains("hidden-asleep"))
+        controller.setVisible(true)
+        #expect(frames.count == 1)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("grid submissions dedupe and remain disabled after teardown", .timeLimit(.minutes(1)))
     func gridDedupeAndPostTeardownNoOps() async throws {
         // Intent: repeated layout reports submit one resize, and teardown closes

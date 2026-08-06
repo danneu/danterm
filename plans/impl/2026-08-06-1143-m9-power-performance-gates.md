@@ -58,9 +58,10 @@ measurements are preserved in
   sustained-output convergence and release, but no AppKit input ordering or
   latency claim.
 - Research 29/F7 proves why the existing partial-draw workload and synchronous
-  draw metric missed the Core Animation regression. The benchmark already
-  records whole-process CPU and topology, but neither is currently a primary,
-  decision-bearing workload contract.
+  draw metric missed the Core Animation regression. The `sparse-spans-max`
+  workload already exists and already names whole-process CPU as its primary
+  metric, but it is collected as an undecidable candidate: no frozen rule lets
+  it issue a verdict.
 
 ## Owner decisions required
 
@@ -81,7 +82,9 @@ artifact. DanTerm already closes that loop in production:
 `AppDelegate#windowDidChangeOcclusionState` calls
 `AppRuntime#syncPaneVisibility`, which reads
 `occlusionState.contains(.visible)` and pushes `TerminalSession#setVisible`,
-which is the same input that gates `TerminalPaneSession#planIfNeeded`.
+which is the same input that gates `TerminalPaneSession#planIfNeeded`. That
+route is currently untested end to end, which is what PO3b closes: an exclusion
+resting on it requires it to be load-bearing under test.
 
 Adding a screens adapter would therefore introduce a second input controlling
 the suppression occlusion already controls, with a real risk the two disagree.
@@ -147,20 +150,41 @@ to prove that no owner-bound work remains and that callbacks captured before
 shutdown become inert. Benchmark-only instrumentation is outside the production
 teardown census unless it shares a production owner.
 
-### D3 -- promote sparse topology to a whole-process CPU benchmark
+### D3 -- promote the existing sparse topology to a decision-bearing CPU gate
 
-Add a permanent `sparse-many-runs` workload using the proven stride-four shape
-at 179x66. Whole-process CPU per accepted draw is its primary decision metric,
-not an auxiliary quantity. Every valid block proves that the intended
-independent variable reached drawing: exactly 50 damaged rows in 17 maximal
-spans, no full-damage path, no dirty-rectangle fallback, and complete CPU and
-topology sample coverage for the accepted draws.
+No new workload. `sparse-spans-max` is already implemented -- stimulus
+(`scripts/terminal-benchmark-producer.py#SPARSE_SPAN_WORKLOADS`), per-draw
+engine-damage topology recording, block contract
+(`scripts/terminal-benchmark-validation.py#BLOCK_CONTRACTS`), and collection as
+an undecidable candidate. This plan promotes that candidate to a gate and adds
+nothing beside it; specifying a duplicate is a rewrite of work already merged.
 
-The workload begins as collectable but undecidable. An A/A candidate screen may
-select a pair count and threshold because CPU is primary for this workload; a
-fresh held-out confirmation must then freeze the exact rule before it can join
-quick or confirm verdicts. Existing draw workloads keep their current primary
-metrics and their process-CPU quantities remain unclassified.
+Its contract is preserved exactly as implemented, because changing the stimulus
+would protect different geometry than the reproduced regression:
+
+- The stride-four shape at 179x66 damages **17 engine rows in 17 maximal
+  spans**, which the shared glyph halo expands to 50 drawing rows still in 17
+  spans. The block contract is stated in engine rows, and validation judges the
+  recorded engine damage rather than the bounding dirty rectangle, which cannot
+  distinguish two spans from seventeen.
+- A valid block is 50 accepted serialized draws, each carrying that exact
+  topology, with complete CPU and topology sample coverage.
+- Renderer-behavior validity is **arm-specific**, not universal. An arm
+  presented as the exact sparse implementation accepts neither full engine
+  damage nor renderer dirty-rectangle fallback during a measured draw --
+  otherwise the gate could bless a shipped implementation that never exercised
+  the sparse renderer path it claims to protect. A synthesized known-bad arm's
+  renderer deviation is valid and recorded in its provenance, because rejecting
+  its draws would turn the regression being measured into an unmeasured block.
+  Each synthesized arm records its source tree, defect-only renderer diff, and
+  declared downstream behavior alongside the frozen-rule evidence.
+
+Whole-process CPU per accepted draw (`process-cpu-nanoseconds-per-draw`) is
+already its primary metric. What is missing is the frozen rule: an A/A candidate
+screen selects a pair count and threshold, and a fresh held-out confirmation
+freezes the exact rule before the workload can join quick or confirm verdicts.
+Existing draw workloads keep their current primary metrics and their process-CPU
+quantities remain unclassified.
 
 ### D4 -- close existing gates by evidence, not duplicate implementation
 
@@ -190,8 +214,15 @@ the evidence that closes each gate.
 - **I7 -- ordinary sleep.** DanTerm creates no macOS power assertion and never
   keeps the display awake for terminal activity.
 - **I8 -- measured topology.** A sparse-topology CPU verdict is impossible
-  unless the block proves its geometry, draw count, CPU coverage, and exact
-  post-halo span topology.
+  unless the block proves its draw count, CPU coverage, and the exact recorded
+  engine-damage row and span counts its workload contract names. That engine
+  topology binds every arm without exception -- full engine damage is always
+  invalid, because an arm that damaged a different row set measured a different
+  independent variable. Only *renderer-side* behavior admits an exception: an
+  arm presented as the exact sparse implementation additionally rejects
+  dirty-rectangle fallback in a measured draw, while a declared synthesized
+  known-bad arm may fall back there once its engine topology is proven, with the
+  deviation recorded in its provenance.
 - **I9 -- responsive visible output.** The AppKit input routes selected by OD2
   take effect before sustained output completes, and the pane subsequently
   converges to the final output state.
@@ -211,21 +242,50 @@ the evidence that closes each gate.
   the workspace notification center and cannot reach it after owner teardown.
   Real sleep/wake evidence corroborates this adapter but does not replace the
   deterministic proof.
+- **PO3b -- occlusion route.** An AppKit integration proof drives an occlusion
+  transition through `AppDelegate#windowDidChangeOcclusionState` and shows it
+  reaching the terminal-session visibility seam, and that restoring visibility
+  produces the expected reveal. OD1 excludes a screen-sleep adapter *because*
+  this route covers screen sleep, so that route must be load-bearing under test:
+  today no test names either `windowDidChangeOcclusionState` or
+  `AppRuntime#syncPaneVisibility`, and the cited hidden/reveal tests would all
+  stay green if the forwarding were deleted.
 - **PO4 -- runtime teardown.** Arm every production runtime-owned category of
   scheduled work, shut down twice, and prove through an explicit trace that the
   owner census is empty, captured callbacks are inert, and scheduling cannot
   restart. Existing PTY source-registry tests remain the proof for native
   resources.
-- **PO5 -- sparse benchmark instrument.** Behavioral tests prove the producer's
-  stride-four topology, rejection of missing or wrong topology/CPU coverage,
-  primary pairing on whole-process CPU, and the absence of a verdict before a
-  rule is frozen.
-- **PO6 -- sparse benchmark calibration.** A/A evidence selects a candidate
-  pair-count/threshold cell, and fresh disjoint evidence confirms its false-
-  positive and detection requirements before the rule and workload membership
-  are frozen. The final gate can reproduce a known per-row-clip regression and
-  classify the shipped coalesced implementation as equivalent or better than
-  its parent.
+- **PO5 -- sparse benchmark instrument.** The existing behavioral tests for the
+  `sparse-spans-max` stimulus, engine-damage recording, and block validation
+  keep passing unchanged; promotion adds no new stimulus or topology instrument
+  to prove. New tests are admitted for exactly two things: the frozen rule
+  itself -- that no verdict is issued before a rule exists and that the frozen
+  rule is applied once it does -- and I8's arm-specific validity: a block whose
+  measured draws report full engine damage is invalid for every arm, and a block
+  reporting dirty-rectangle fallback is invalid unless the arm declares a
+  synthesized known-bad provenance.
+- **PO6 -- sparse benchmark calibration.** The exact candidate
+  pair-count/threshold cell clears all four `select_candidate` gates -- false
+  positive, detection, inconclusive, and wrong direction -- and clears them on
+  each independently collected series on its own, not only pooled, on both the
+  screening evidence and the fresh disjoint confirmation. Only then are the rule
+  and workload membership frozen.
+
+  Sensitivity is then judged, not assumed. The frozen rule classifies the
+  shipped coalesced implementation as equivalent to itself, then applies
+  unchanged to a synthesized shipped-tree arm restoring uncoalesced `d378096`
+  per-row rectangle emission -- no threshold adjustment, no repeated sampling.
+  Rejection grants the historical-per-row-regression coverage claim.
+  Non-rejection is a permitted outcome, not a stuck gate: `sparse-spans-max`
+  keeps its frozen rule and membership as a maximum-topology cost-bound guard,
+  its documentation may not claim coverage of the historical per-row regression,
+  and the criterion-2 record names which branch was taken. Under that branch the
+  gate closes on the cost-bound claim while the documented deterministic
+  btop-shaped candidate workload is evaluated, and that candidate is admitted
+  only if its measured separation justifies its calibration and run-time cost.
+  Arm validity follows D3: the shipped arm's draws are invalid if the renderer
+  falls back to dirty rectangles, while the synthesized arm's declared deviation
+  is valid and recorded with its provenance.
 - **PO7 -- responsiveness.** A real AppKit input route selected by OD2 takes
   effect while a sustained-output producer is still active, after which the
   final terminal state arrives and all pending work remains bounded. Any test
@@ -283,3 +343,17 @@ the evidence that closes each gate.
 - The runtime scheduled-work census and test scheduler shape, provided every
   production owner category participates and post-shutdown rearming is
   impossible.
+
+## Commit progress
+
+- [x] 1. Suspend terminal frame planning across system sleep and wake
+- [ ] 2. Forward workspace lifecycle and window occlusion through AppKit
+- [ ] 3. Make application-runtime shutdown terminal and observable
+- [ ] 4. Freeze and apply the sparse-topology CPU benchmark gate
+- [ ] 5. Prove keyboard responsiveness and close the milestone evidence
+
+## Implementation notes
+
+- Lifecycle wake uses the existing accounted frame-state fence before planning,
+  so output already accepted by the PTY owner joins the single complete resume
+  frame and its previously queued delivery becomes inert.

@@ -231,6 +231,8 @@ public final class TerminalPaneSessionController {
     private var pendingDamage = TerminalDamage.none
     private var lastSubmittedDimensions: TerminalDimensions
     private var isVisible: Bool
+    private var isRenderingAvailable = true
+    private var requiresCompleteFrame = false
     private var isTornDown = false
     private var didChildExit = false
     private var didEmitSessionEnded = false
@@ -562,7 +564,21 @@ public final class TerminalPaneSessionController {
     public func setVisible(_ visible: Bool) {
         guard isTornDown == false, visible != isVisible else { return }
         isVisible = visible
-        if visible { planIfNeeded(cachedTerminal) }
+        if visible, isRenderingAvailable { planIfNeeded(cachedTerminal) }
+    }
+
+    /// Suspends presentation without stopping PTY, terminal, semantic, or recovery updates.
+    public func setRenderingAvailable(_ available: Bool) {
+        guard isTornDown == false, available != isRenderingAvailable else { return }
+        isRenderingAvailable = available
+        guard available else { return }
+        requiresCompleteFrame = true
+        pendingDamage.formUnion(.full)
+        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
+        guard case .frameState(let frameState) = fence else {
+            preconditionFailure("frame-state fence returned the wrong payload")
+        }
+        consume(frameState: frameState, result: nil, transitions: nil)
     }
 
     /// Applies one complete theme, deferring its full repaint through existing visibility gates.
@@ -572,7 +588,7 @@ public final class TerminalPaneSessionController {
         cachedTerminal.setDefaultColors(theme.defaultColors)
         host.setDefaultColors(theme.defaultColors)
         pendingDamage.formUnion(.full)
-        if isVisible { planIfNeeded(cachedTerminal) }
+        if isVisible, isRenderingAvailable { planIfNeeded(cachedTerminal) }
     }
 
     /// Fences host work and applies the newest state before a synchronous checkpoint read.
@@ -889,7 +905,7 @@ public final class TerminalPaneSessionController {
         if case .some(.exited) = result {
             didChildExit = true
         }
-        if isVisible { planIfNeeded(frameState.terminal) }
+        if isVisible, isRenderingAvailable { planIfNeeded(frameState.terminal) }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
             if let transitions {
@@ -947,8 +963,12 @@ public final class TerminalPaneSessionController {
     }
 
     private func planIfNeeded(_ terminal: Terminal) {
+        guard isVisible, isRenderingAvailable else { return }
         guard pendingDamage != .none else { return }
-        guard terminal != lastPlannedTerminal || renderTheme != lastPlannedTheme else { return }
+        guard requiresCompleteFrame
+            || terminal != lastPlannedTerminal
+            || renderTheme != lastPlannedTheme
+        else { return }
         let presentation = terminal.presentation
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
         #if DANTERM_TERMINAL_BENCHMARK
@@ -977,6 +997,7 @@ public final class TerminalPaneSessionController {
         currentDamage = pendingDamage
         let frame = TerminalPaneFrame(plan: plan, damage: pendingDamage)
         pendingDamage = .none
+        requiresCompleteFrame = false
         onFrame?(frame)
     }
 }
