@@ -33,7 +33,9 @@ or heap. Layout and entry points:
 [agent-docs/reference-sources.md](agent-docs/reference-sources.md).
 
 Cite refetchable source trees as `file#identifier`, never `file:line`; use the
-nearest enclosing named identifier when the point itself is unnamed.
+nearest enclosing named identifier when the point itself is unnamed. This form
+is for external trees under `references/`; see **Citing docs** for DanTerm's own
+documents.
 
 Two rules govern how much weight source carries:
 
@@ -133,6 +135,21 @@ you write one, use three labeled sections: **Intent** (the behavior verified),
 **Why it exists** (the risk it guards), **Scenario** (the concrete story; for a
 bug fix, name the incident -- don't invent one, most tests here are spec-first
 and legitimately have none).
+
+### Citing docs
+
+- Cite research outside `docs/research/` as `research/N/ID`, such as
+  `research/15/F4`; the prefix names the tree, and
+  [docs/research/README.md](docs/research/README.md) resolves the stable number
+  to a path. Inside `docs/research/`, keep the portable bare cross-doc form such
+  as `9/F3` required by `FORMAT.md`.
+- Cite a design doc by path and id, then use the bare id within that same file;
+  design docs are durable statements of their contracts, so a direct pointer
+  is better than a paraphrase.
+- Do not cite plan ids. Restate the invariant in the clause that would have
+  carried the id, because plans are historical and their ids are not unique.
+  When the same invariant needs restating across many files, graduate it to a
+  design doc instead.
 
 ## Build
 

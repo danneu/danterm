@@ -69,6 +69,9 @@ is generic research prose meant to survive extraction as a portable skill, so no
 link in it may resolve outside `docs/research/`. The DanTerm-local pointers live
 here instead:
 
+- Outside `docs/research/`, cite a finding as `research/N/ID`; within this tree,
+  use `FORMAT.md`'s portable bare cross-doc form such as `9/F3`. The full rule
+  lives in [AGENTS.md](../../AGENTS.md#citing-docs).
 - Read [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
   before measuring anything or planning against a number in one of these docs.
   It owns the benchmark, commit, and compatibility conditions a performance
