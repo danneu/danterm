@@ -55,10 +55,6 @@ test-ui:
 test-agent-notifications-live agent="all":
     ./scripts/agent-notifications-live.py {{agent}}
 
-# Run opt-in real-Ghostty pane-read and recovery characterization (requires GUI + Accessibility)
-test-terminal-characterization:
-    ./scripts/terminal-characterization.sh
-
 # Run the opt-in Swift terminal viability gate (requires GUI + Accessibility)
 test-terminal-viability:
     ./scripts/terminal-viability.sh

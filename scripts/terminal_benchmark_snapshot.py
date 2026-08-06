@@ -5,11 +5,17 @@ The paired comparison workflow may never build in the operator's checkout: both
 arms must come from immutable trees so a mid-session edit cannot redefine what a
 measured binary contains. This module owns that boundary -- resolving an explicit
 baseline revision, snapshotting the complete working tree without touching the
-caller's index, exporting each tree into its own arm root together with the
-ignored build prerequisites `git archive` omits, and reusing compiled products
-only on an exact match of tree, configuration, toolchain, and prerequisite
-digests. Scheduling, measurement, and the decision rule live in the comparison
-runner; nothing here knows which arm is baseline once both roots exist.
+caller's index, exporting each tree into its own arm root, and reusing compiled
+products only on an exact match of tree, configuration, and toolchain.
+Scheduling, measurement, and the decision rule live in the comparison runner;
+nothing here knows which arm is baseline once both roots exist.
+
+An arm is now built from `git archive` output alone, because every build input is
+tracked. That bounds how far back a *live* comparison can reach: the libghostty
+removal commit is the oldest supported baseline revision, since older trees link
+against `lib/GhosttyKit.xcframework` and bundle `lib/ghostty-themes` -- ignored
+prerequisites this module no longer provisions. Saved measurements from before
+the cutover remain valid as recorded history; they simply cannot be re-run here.
 """
 import hashlib
 import json
@@ -25,9 +31,6 @@ BUILD_FLAGS = ("-Xswiftc", "-DDANTERM_TERMINAL_BENCHMARK")
 # Mirrors the path terminal-benchmark.sh compiles into, so a populated cache entry
 # makes the harness's own `swift build` a no-op instead of a hidden recompile.
 BUILD_PATH_SUFFIX = ".build/terminal-benchmark-swiftpm"
-# Build inputs `git archive` cannot carry: .gitignore excludes them, but no arm
-# links without them. Their content is part of every cache key.
-IGNORED_PREREQUISITES = ("lib/GhosttyKit.xcframework", "lib/ghostty-themes")
 # The terminal-feed workload runs this product out of its own package rather than
 # the app bundle, so an arm is only fully cached once it is compiled too.
 TERMINAL_FEED_PACKAGE = "lib/TerminalCore"
@@ -144,48 +147,12 @@ def describe_sources(baseline, candidate):
     return "\n".join(lines)
 
 
-def _digest_path(path):
-    """Digest a file or directory by its sorted relative-path/content listing."""
-    digest = hashlib.sha256()
-    if path.is_file() and not path.is_symlink():
-        digest.update(b"file\0")
-        digest.update(file_sha256(path).encode())
-        return digest.hexdigest()
-    entries = []
-    for child in sorted(path.rglob("*")):
-        relative = child.relative_to(path).as_posix()
-        if child.is_symlink():
-            entries.append((relative, "link", str(child.readlink())))
-        elif child.is_dir():
-            entries.append((relative, "dir", ""))
-        else:
-            entries.append((relative, "file", file_sha256(child)))
-    digest.update(json.dumps(entries, sort_keys=True).encode())
-    return digest.hexdigest()
-
-
-def digest_prerequisites(repository_root, prerequisites=IGNORED_PREREQUISITES):
-    """Digest every ignored build input, refusing to key a cache entry on a missing one."""
-    repository_root = pathlib.Path(repository_root)
-    digests = {}
-    for relative in prerequisites:
-        path = repository_root / relative
-        if not path.exists():
-            raise FileNotFoundError(
-                f"benchmark build prerequisite is missing: {relative} "
-                "(run ./build-lib.sh)"
-            )
-        digests[relative] = _digest_path(path)
-    return digests
-
-
-def cache_key(*, tree, configuration, toolchain, prerequisites):
+def cache_key(*, tree, configuration, toolchain):
     """Bind a build product to every input that can change it."""
     components = {
         "tree": tree,
         "configuration": configuration,
         "toolchain": toolchain,
-        "prerequisites": dict(sorted(prerequisites.items())),
     }
     payload = json.dumps(components, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -217,8 +184,8 @@ def verify_binary_identity(path, recorded, *, read_uuid=_mach_o_uuid):
     return actual
 
 
-def export_snapshot(repository_root, snapshot, destination, prerequisites=IGNORED_PREREQUISITES):
-    """Lay down one immutable tree plus its ignored prerequisites as a buildable arm root."""
+def export_snapshot(repository_root, snapshot, destination):
+    """Lay down one immutable tree as a buildable arm root."""
     repository_root = pathlib.Path(repository_root).resolve()
     destination = pathlib.Path(destination).resolve()
     if destination == repository_root or destination in repository_root.parents:
@@ -239,24 +206,7 @@ def export_snapshot(repository_root, snapshot, destination, prerequisites=IGNORE
     archive.stdout.close()
     if extract.wait() != 0 or archive.wait() != 0:
         raise RuntimeError(f"failed to export tree {snapshot['tree']}")
-    for relative in prerequisites:
-        source = repository_root / relative
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _clone_tree(source, target)
     return destination
-
-
-def _clone_tree(source, target):
-    """Prefer APFS clones so one cache entry per candidate stays cheap to materialize."""
-    clone = subprocess.run(
-        ["cp", "-Rc", str(source), str(target)], capture_output=True, text=True
-    )
-    if clone.returncode == 0:
-        return
-    subprocess.run(
-        ["cp", "-R", str(source), str(target)], check=True, capture_output=True, text=True
-    )
 
 
 def current_toolchain():
@@ -335,7 +285,6 @@ def materialize_arm(
         tree=snapshot["tree"],
         configuration=CONFIGURATION,
         toolchain=current_toolchain() if toolchain is None else toolchain,
-        prerequisites=digest_prerequisites(repository_root),
     )
     entry = cache_root / key
     root = entry / "source"

@@ -229,7 +229,6 @@ def run_workload(
     await_draw_result,
     acknowledge_geometry,
     write_result,
-    backend,
     start_marker,
     completion,
     max_loop_iterations=None,
@@ -248,8 +247,7 @@ def run_workload(
         return
 
     write(start_marker)
-    if backend == "swift":
-        await_start_ack()
+    await_start_ack()
 
     # Counted here rather than derived from the corpus at report time: the rate
     # this feeds (`20/D1`) is only as trustworthy as its denominator, and a
@@ -265,8 +263,7 @@ def run_workload(
     elapsed = monotonic_ns() - started
     write_result(elapsed, achieved, written)
 
-    if backend == "swift":
-        await_draw_result()
+    await_draw_result()
 
 
 def write_json_result(output, payload):
@@ -364,7 +361,6 @@ def main():
         except KeyError as error:
             raise SystemExit(f"unknown benchmark workload: {workload_name}") from error
 
-    backend = environment["DANTERM_TERMINAL_BENCHMARK_BACKEND"]
     start_ack = environment["DANTERM_TERMINAL_BENCHMARK_START_ACK"]
     draw_result = environment["DANTERM_TERMINAL_BENCHMARK_RESULT"]
     geometry_ready = environment["DANTERM_TERMINAL_BENCHMARK_GEOMETRY_READY"]
@@ -489,7 +485,6 @@ def main():
             ),
             acknowledge_geometry=lambda: Path(geometry_ready).touch(),
             write_result=write_result,
-            backend=backend,
             start_marker=(environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"] + "\n").encode(),
             completion=completion,
         )

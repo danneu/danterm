@@ -10,18 +10,22 @@ HARNESS="$ROOT/scripts/terminal-benchmark.sh"
 PRODUCER="$ROOT/scripts/terminal-benchmark-producer.py"
 PROFILE="$ROOT/scripts/terminal-benchmark-profile.sh"
 
-grep -q 'DANTERM_TERMINAL_BACKEND="$BACKEND"' "$HARNESS"
 grep -q 'terminate_owned_pid "$APP_PID"' "$HARNESS"
-grep -q 'swift|ghostty' "$HARNESS"
+# Swift is the only backend. The harness must still refuse a named one rather
+# than relabel it, and must never reintroduce a backend selector for the app.
 grep -q 'BACKEND="${BACKEND#backend=}"' "$HARNESS"
-grep -q 'DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND"' "$HARNESS"
+if grep -qE 'ghostty|DANTERM_TERMINAL_BACKEND' "$HARNESS" "$PRODUCER"; then
+    echo "the benchmark harness must not carry a second terminal backend" >&2
+    exit 1
+fi
 grep -q 'monotonic_ns=time.monotonic_ns' "$PRODUCER"
-grep -q 'backend == "swift"' "$PRODUCER"
 grep -q 'wait_for_target_geometry' "$PRODUCER"
 grep -q 'await_start_ack()' "$PRODUCER"
 grep -q 'await_draw_result()' "$PRODUCER"
 grep -q 'draw_elapsed >= producer_elapsed' "$HARNESS"
-grep -q 'finalDraw.*available.*false' "$HARNESS"
+# An invalidated block is the one remaining way a run reports no final draw, and
+# it must stay reported rather than becoming a timeout the operator has to guess at.
+grep -q 'available: false,' "$HARNESS"
 grep -q 'Benchmark path escaped isolated runtime' "$HARNESS"
 grep -q '"geometry"' "$PRODUCER"
 grep -q 'displayScale' "$HARNESS"

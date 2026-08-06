@@ -39,7 +39,6 @@ STEPS=(
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/test-ui-harness_test.sh'
-    './scripts/tests/terminal-characterization-harness_test.sh'
     './scripts/tests/research-index-lint_test.sh'
     './scripts/tests/terminal-backend-boundary-lint_test.sh'
     './scripts/tests/agent-notifications-live_test.py'

@@ -319,7 +319,6 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     await_draw_result=lambda: None,
                     acknowledge_geometry=lambda: events.append("geometry-ready"),
                     write_result=lambda _elapsed, _geometry, _written=None: events.append("result"),
-                    backend="ghostty",
                     start_marker=b"start\n",
                     completion=b"complete\n",
                     max_loop_iterations=1,
@@ -361,7 +360,6 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             await_draw_result=lambda: None,
             acknowledge_geometry=lambda: None,
             write_result=lambda _elapsed, _geometry, written: recorded.append(written),
-            backend="swift",
             start_marker=b"start-marker\n",
             completion=b"complete\n",
         )
@@ -468,7 +466,6 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             await_draw_result=lambda: events.append("draw-result"),
             acknowledge_geometry=lambda: events.append("geometry-ready"),
             write_result=lambda _elapsed, _geometry, _written=None: events.append("result"),
-            backend="swift",
             start_marker=b"start\n",
             completion=b"complete\n",
         )

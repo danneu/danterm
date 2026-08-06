@@ -29,6 +29,9 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 
 WORKLOAD="${1:-scrollback-stream}"
+# The Swift engine is the only terminal backend. The positional survives its
+# retired sibling so a caller naming any other backend is refused outright,
+# rather than silently relabelled `swift` in the artifact consumers key on.
 BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
 MODE="${DANTERM_BENCHMARK_MODE:-measure}"
@@ -45,8 +48,8 @@ REDRAW_UPDATES="${DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES:-0}"
 BTOP_EXECUTABLE="${DANTERM_TERMINAL_BENCHMARK_BTOP:-}"
 CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
 case "$BACKEND" in
-    swift|ghostty) ;;
-    *) echo "Unknown backend: $BACKEND (expected swift or ghostty)" >&2; exit 2 ;;
+    swift) ;;
+    *) echo "Unknown backend: $BACKEND (swift is the only backend)" >&2; exit 2 ;;
 esac
 case "$MODE" in
     measure|loop|persistent) ;;
@@ -201,7 +204,6 @@ codesign -d --entitlements :- "$APP_PATH" 2>&1 | grep -q '<key>com.apple.securit
 record_phase "assemble-sign-complete"
 
 env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$ZDOTDIR" \
-    DANTERM_TERMINAL_BACKEND="$BACKEND" \
     DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE="$PATH_PROBE" \
     DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT="$TMP_DIR" \
     DANTERM_TERMINAL_BENCHMARK_START_MARKER="$START_MARKER" \
@@ -217,7 +219,6 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_STATE_RESULT="$STATE_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_GEOMETRY_READY="$GEOMETRY_READY" \
-    DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND" \
     DANTERM_TERMINAL_BENCHMARK_WORKLOAD="$WORKLOAD" \
     DANTERM_TERMINAL_BENCHMARK_COLUMNS="$TARGET_COLUMNS" \
     DANTERM_TERMINAL_BENCHMARK_ROWS="$TARGET_ROWS" \
@@ -309,7 +310,7 @@ while true; do
     fi
     if [[ -f "$PRODUCER_RESULT" ]]; then
         [[ -n "$(jq -r '.error // empty' "$PRODUCER_RESULT")" ]] && break
-        [[ "$BACKEND" != "swift" || -f "$DRAW_RESULT" ]] && break
+        [[ -f "$DRAW_RESULT" ]] && break
     fi
     (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
     sleep 0.05
@@ -349,28 +350,21 @@ if [[ "$reported_columns" != "$TARGET_COLUMNS" || "$reported_rows" != "$TARGET_R
     exit 1
 fi
 display_scale="$(jq -er '.displayScale' "$PATH_PROBE")"
-if [[ "$BACKEND" == "swift" ]]; then
-    draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
-    (( draw_elapsed >= producer_elapsed )) || {
-        echo "Invalid timing order: final draw preceded the producer's final write" >&2
-        exit 1
-    }
-    block_state="$(python3 "$SCRIPT_DIR/terminal-benchmark-state.py" "$DRAW_RESULT")"
-    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
-        --arg fixtureIdentity "$FIXTURE_IDENTITY" \
-        --argjson processId "$APP_PID" --arg sessionId "$PANE_ID" \
-        --argjson displayScale "$display_scale" \
-        --argjson blockState "$block_state" \
-        --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
-        '{schemaVersion: 1, backend: $backend, workload: $workload,
-          fixtureIdentity: $fixtureIdentity, processId: $processId,
-          sessionId: $sessionId, geometry: $geometry, displayScale: $displayScale,
-          blockState: $blockState, producerWrite: $producer[0],
-          finalDraw: ($draw[0] + {available: true})}'
-else
-    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
-        --argjson displayScale "$display_scale" \
-        --slurpfile producer "$PRODUCER_RESULT" \
-        '{schemaVersion: 1, backend: $backend, workload: $workload, geometry: $geometry, displayScale: $displayScale, producerWrite: $producer[0], finalDraw: {available: false, reason: "unavailable-for-ghostty-backend"}}'
-fi
+draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
+(( draw_elapsed >= producer_elapsed )) || {
+    echo "Invalid timing order: final draw preceded the producer's final write" >&2
+    exit 1
+}
+block_state="$(python3 "$SCRIPT_DIR/terminal-benchmark-state.py" "$DRAW_RESULT")"
+jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
+    --arg fixtureIdentity "$FIXTURE_IDENTITY" \
+    --argjson processId "$APP_PID" --arg sessionId "$PANE_ID" \
+    --argjson displayScale "$display_scale" \
+    --argjson blockState "$block_state" \
+    --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
+    '{schemaVersion: 1, backend: $backend, workload: $workload,
+      fixtureIdentity: $fixtureIdentity, processId: $processId,
+      sessionId: $sessionId, geometry: $geometry, displayScale: $displayScale,
+      blockState: $blockState, producerWrite: $producer[0],
+      finalDraw: ($draw[0] + {available: true})}'
 echo "Benchmark diagnostics: $ARTIFACTS" >&2

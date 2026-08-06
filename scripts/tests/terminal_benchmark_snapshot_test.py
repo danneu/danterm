@@ -29,25 +29,19 @@ def git(repository, *arguments):
 
 
 def make_repository(directory):
-    """Build a miniature repo shaped like DanTerm: tracked sources plus ignored prerequisites."""
+    """Build a miniature repo shaped like DanTerm: tracked sources plus an ignored build directory."""
     repository = pathlib.Path(directory)
     git(repository, "init", "--quiet", "-b", "main")
     git(repository, "config", "user.email", "test@example.com")
     git(repository, "config", "user.name", "Test")
-    (repository / ".gitignore").write_text(
-        "lib/GhosttyKit.xcframework\nlib/ghostty-themes\n.build/\n",
-        encoding="utf-8",
-    )
+    (repository / ".gitignore").write_text(".build/\n", encoding="utf-8")
     (repository / "app").mkdir()
     (repository / "app" / "main.swift").write_text("baseline\n", encoding="utf-8")
     git(repository, "add", "-A")
     git(repository, "commit", "--quiet", "-m", "baseline")
-    prerequisite = repository / "lib" / "GhosttyKit.xcframework"
-    prerequisite.mkdir(parents=True)
-    (prerequisite / "Info.plist").write_text("framework\n", encoding="utf-8")
-    themes = repository / "lib" / "ghostty-themes"
-    themes.mkdir(parents=True)
-    (themes / "Dark").write_text("theme\n", encoding="utf-8")
+    ignored = repository / ".build" / "stale"
+    ignored.mkdir(parents=True)
+    (ignored / "artifact").write_text("stale\n", encoding="utf-8")
     return repository
 
 
@@ -97,7 +91,7 @@ class CandidateSnapshotTests(unittest.TestCase):
         #   non-ignored untracked file. A candidate built from HEAD alone would
         #   measure code the operator never wrote.
         # Scenario: an in-progress optimization has one edited tracked file and one
-        #   brand-new untracked file, alongside an ignored build prerequisite.
+        #   brand-new untracked file, alongside an ignored build directory.
         with tempfile.TemporaryDirectory() as directory:
             repository = make_repository(directory)
             (repository / "app" / "main.swift").write_text("candidate\n", encoding="utf-8")
@@ -116,8 +110,7 @@ class CandidateSnapshotTests(unittest.TestCase):
                 repository, "ls-tree", "-r", "--name-only", candidate["tree"]
             ).split()
             self.assertIn("app/new.swift", listing)
-            self.assertNotIn("lib/GhosttyKit.xcframework/Info.plist", listing)
-            self.assertNotIn("lib/ghostty-themes/Dark", listing)
+            self.assertNotIn(".build/stale/artifact", listing)
 
     def test_candidate_captures_deletions(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -223,12 +216,14 @@ class SourceReportTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
-    def test_export_materializes_the_tree_and_its_ignored_prerequisites(self):
-        # Intent: an arm root is a complete, buildable copy of an immutable tree.
-        # Why it exists: `git archive` omits ignored paths, but GhosttyKit.xcframework
-        #   and the Ghostty themes are ignored build prerequisites. Without them the
-        #   exported arm cannot build at all.
-        # Scenario: exporting the candidate snapshot into its own arm root.
+    def test_export_materializes_the_tree_and_nothing_the_operator_ignored(self):
+        # Intent: an arm root is exactly the immutable tree, with no untracked
+        #   working-tree state leaking in beside it.
+        # Why it exists: every build input is tracked now that libghostty is gone,
+        #   so an arm builds from `git archive` output alone. Copying ignored paths
+        #   in would reintroduce mutable, unversioned content into a measured arm.
+        # Scenario: exporting the candidate snapshot into its own arm root while
+        #   the checkout holds a stale ignored build directory.
         with tempfile.TemporaryDirectory() as directory:
             repository = make_repository(directory)
             candidate = SNAPSHOT.snapshot_candidate(repository)
@@ -240,18 +235,7 @@ class ExportTests(unittest.TestCase):
                 (destination / "app" / "main.swift").read_text(encoding="utf-8"),
                 "baseline\n",
             )
-            self.assertEqual(
-                (destination / "lib" / "GhosttyKit.xcframework" / "Info.plist").read_text(
-                    encoding="utf-8"
-                ),
-                "framework\n",
-            )
-            self.assertEqual(
-                (destination / "lib" / "ghostty-themes" / "Dark").read_text(
-                    encoding="utf-8"
-                ),
-                "theme\n",
-            )
+            self.assertFalse((destination / ".build").exists())
 
     def test_export_refuses_to_write_into_the_live_checkout(self):
         # Intent: an export can never overwrite the operator's checkout.
@@ -270,7 +254,6 @@ class CacheKeyTests(unittest.TestCase):
             "tree": "b" * 40,
             "configuration": "release",
             "toolchain": "swift-6.1",
-            "prerequisites": {"lib/GhosttyKit.xcframework": "1" * 64},
         }
         components.update(overrides)
         return SNAPSHOT.cache_key(**components)
@@ -281,53 +264,13 @@ class CacheKeyTests(unittest.TestCase):
     def test_every_key_component_repopulates_instead_of_reusing(self):
         # Intent: a cache hit requires an exact match on every key component.
         # Why it exists: PO1 forbids reusing build products across a changed source
-        #   tree, build configuration, toolchain, or ignored prerequisite -- each of
-        #   those changes the binary, so a stale reuse would measure the wrong code.
+        #   tree, build configuration, or toolchain -- each of those changes the
+        #   binary, so a stale reuse would measure the wrong code.
         # Scenario: one component changes at a time while the rest stay fixed.
         original = self.key()
         self.assertNotEqual(original, self.key(tree="e" * 40))
         self.assertNotEqual(original, self.key(configuration="debug"))
         self.assertNotEqual(original, self.key(toolchain="swift-6.2"))
-        self.assertNotEqual(
-            original,
-            self.key(prerequisites={"lib/GhosttyKit.xcframework": "2" * 64}),
-        )
-        self.assertNotEqual(
-            original,
-            self.key(
-                prerequisites={
-                    "lib/GhosttyKit.xcframework": "1" * 64,
-                    "lib/ghostty-themes": "3" * 64,
-                }
-            ),
-        )
-
-    def test_prerequisite_digests_track_ignored_content(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repository = make_repository(directory)
-            before = SNAPSHOT.digest_prerequisites(repository)
-            self.assertEqual(
-                sorted(before), ["lib/GhosttyKit.xcframework", "lib/ghostty-themes"]
-            )
-
-            (repository / "lib" / "GhosttyKit.xcframework" / "Info.plist").write_text(
-                "rebuilt\n", encoding="utf-8"
-            )
-            after = SNAPSHOT.digest_prerequisites(repository)
-
-            self.assertNotEqual(
-                before["lib/GhosttyKit.xcframework"],
-                after["lib/GhosttyKit.xcframework"],
-            )
-            self.assertEqual(before["lib/ghostty-themes"], after["lib/ghostty-themes"])
-
-    def test_missing_prerequisite_is_reported_not_silently_skipped(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repository = make_repository(directory)
-            (repository / "lib" / "ghostty-themes" / "Dark").unlink()
-            (repository / "lib" / "ghostty-themes").rmdir()
-            with self.assertRaises(FileNotFoundError):
-                SNAPSHOT.digest_prerequisites(repository)
 
 
 class BinaryIdentityTests(unittest.TestCase):
