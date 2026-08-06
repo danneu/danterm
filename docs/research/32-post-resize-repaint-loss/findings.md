@@ -57,7 +57,12 @@ steps) but the converse -- that an unsettled step cannot do it -- is not.
 **Next action.** `H2`'s rebuild (Phase 1, task 1), then the frame instrumentation
 that decides `H1`.
 
-## `F2` -- the resize-storm debris is not ours
+## `F2` -- the resize-storm debris is not ours -- **inference superseded** (`F10`)
+
+**Superseded 2026-08-05.** The debris tracked DanTerm's zsh integration failing
+to load, not the shell. The observations below stand as recorded; the "not ours"
+inference does not, and neither does the three-terminal control that supported
+it -- see `F10` for why that control could not have detected the real variable.
 
 **Reproduction.** The same pane, and then the same shell and prompt in two
 other terminals. Grab the window edge and shake it -- fast drags wide to narrow
@@ -342,7 +347,12 @@ recipe: it is deterministic and high-frequency, so it can pass the calibration
 gate `F7` failed. Build a fast-drag flicker detector, gate it on showing flicker
 at `d3780961` and none at `a94abc26`, and use it as Phase 2's regression signal.
 
-## `F9` -- the fix clears the flicker, and the remaining debris is grid-resident
+## `F9` -- the fix clears the flicker, and the remaining debris is grid-resident -- **debris half superseded** (`F10`)
+
+**Superseded 2026-08-05, in part.** The flicker result stands and is what this
+finding is cited for. The debris half does not: the dev slot named below is
+precisely where DanTerm's zsh integration failed to load, so the grid reading
+describes an unintegrated pane. See `F10`.
 
 **Reproduction.** `D1` applied, dev slot at `experiment/swift-terminal-engine`,
 pane staged with the `F1` recipe. User drove fast drags by hand, then narrowed
@@ -380,3 +390,45 @@ someone later reads increased debris as a regression.
 
 **Next action.** None for this doc; `F2`'s boundary already excludes the debris.
 It belongs to the shell.
+
+## `F10` -- the debris tracked DanTerm's zsh integration being absent, not the shell
+
+**Reproduction.** The user, in a `just build` dev app with the DanTerm zsh
+integration active, ran the narrowing and widening resize that had produced
+debris throughout this doc.
+
+**Observed.** No debris. The DanTerm zsh integration was not loading in the
+slotted dev apps (`danterm.1` and friends); with it loading, the resize is clean.
+
+**Supersedes `F2`'s inference and `F9`'s.** Both concluded the debris was the
+shell's own redraw race and therefore not DanTerm's. That conclusion does not
+survive: the debris tracked a DanTerm-side condition.
+
+**Why neither finding could have caught it.** `F9` names a **dev slot** in its
+own Reproduction line -- the exact environment where the integration did not
+load. `F2` is subtler, and the mistake is worth naming. Its control was three
+terminals agreeing (DanTerm, Terminal.app, iTerm2 all showing debris under zsh,
+all clean under bash), which read as decisive. But Terminal.app and iTerm2 can
+never carry DanTerm's integration, so in the unintegrated condition all three
+agreeing was guaranteed *regardless of cause*. The control was structurally
+blind to the one variable that mattered, and it looked strong precisely because
+it was broad.
+
+Compounding it, no finding in this doc ever verified the integration was **on**.
+`F3` carefully verified it was **off** for its own test -- PS1 plain, no
+`^[]133;A`, `LC_DANTERM` empty -- and that rigor on the control state was
+mistaken for rigor on the baseline. Every debris observation here is consistent
+with the integration having been absent throughout.
+
+**Alternative interpretations.** The integration could be masking the debris
+rather than preventing it -- suppressing a redraw that still races. Nothing here
+distinguishes those, and this doc does not need them distinguished.
+
+**Uncertainty.** This is the user's observation, reported after the fact and not
+reproduced under agent direction; the mechanism by which the integration
+prevents the debris is unestablished. Both are acceptable, because the finding's
+job is to retract a claim rather than to support a new one.
+
+**Next action.** None. The debris is out of this doc's scope in either
+direction: it was never what `D1` fixed, and it is no longer a defect this doc
+hands to anyone. `README.md` no longer reasons about it.

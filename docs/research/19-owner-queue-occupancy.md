@@ -6,14 +6,15 @@ measured (`257bfee`), and `C2`/`C3`/`C5` are all rejected as premature by `D4`. 
 its gate and is landed as latest-wins coalescing at the host's submission
 boundary; `D4`'s claim that it would be measured by a new probe case is corrected
 at its own heading. `F15`'s single-settled-resize test ran on 2026-08-05 and came
-back on `D4`'s first branch (`F16`): settled resizes are clean, the stacked prompts
-need the storm, and the debris is the shell's own redraw race -- it reproduces in
-Terminal.app and iTerm2 too. Every ledger item is now closed. The session's
-incidental discovery, rows that stop being painted after a settled resize, is a
-repaint defect rather than a reflow one; it -- **and not the debris** -- moved to
+back on `D4`'s first branch (`F16`): settled resizes are clean and the stacked
+prompts need the storm. Every ledger item is now closed. The session's incidental
+discovery, rows that stop being painted after a settled resize, is a repaint
+defect rather than a reflow one; it moved to
 [doc 32](32-post-resize-repaint-loss/README.md), which fixed it in `44b875cd`.
-The debris remains attributed to the shell and owned by no doc; `F16` records
-under "what nobody owns" the one question that attribution left open.**
+`F16`'s further claim that the resize-storm debris was the shell's own race is
+**retracted** -- see the correction at `F16` and `32/F10`. It tracked DanTerm's
+zsh integration failing to load, and is gone now that it loads; nothing about it
+is open or unowned.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -230,10 +231,11 @@ Added here, because the axis is different:
       problem, which `H2` had left open.**
 - [x] Run the single-settled-resize test from `F15`, which decides whether `C4` is
       a performance change or a correctness bug wearing one. **Done 2026-08-05 --
-      `F16`. `D4`'s first branch: settled single resizes are clean, the debris
-      needs the storm, and the debris is the shell's (reproduced in Terminal.app
-      and iTerm2). The session's incidental discovery -- rows that stop being
-      painted after a settled resize -- is a repaint defect and moved to doc 32.**
+      `F16`. `D4`'s first branch: settled single resizes are clean and the
+      stacking needs the storm. The session's incidental discovery -- rows that
+      stop being painted after a settled resize -- is a repaint defect and moved
+      to doc 32. The same finding's debris attribution is retracted; see the
+      correction at `F16`.**
 - [x] ~~Add an N-distinct-grids drain case to `just terminal-occupancy-probe`.~~
       **Dropped, not done.** The probe measures `Terminal` directly and coalescing
       lives above it in the host, so no case it can carry observes the fix; the
@@ -711,7 +713,15 @@ resize also duplicates a prompt, there is a reflow cursor bug underneath, which
 coalescing would only make rarer -- and that outranks the performance finding, the
 same way `F10` did.
 
-### `F16` -- the test ran: storm artifact, and it is the shell's
+### `F16` -- the test ran: storm artifact, and it is the shell's -- **debris half retracted**
+
+**Correction, 2026-08-05.** The `D4`-first-branch result below stands: a settled
+single resize is clean and the stacking needs the storm. The debris attribution
+does not. `32/F10` establishes that the debris tracked DanTerm's zsh integration
+failing to load in slotted dev apps, and that it is gone now that it loads. The
+two paragraphs it licensed -- "the storm's debris is not ours" and "what nobody
+owns" -- are struck below. Nothing is unowned; the question that paragraph opened
+does not exist.
 
 Run 2026-08-05, interactively, in a `just build` dev app at `69f6cbc8` --
 `C4`'s coalescing (`02f3ba1a`, `0935ccc4`) and the logical-line cutover
@@ -722,19 +732,18 @@ full property lists and the three-terminal table are in `32/F1` and `32/F2`.
 prompt, in either direction, in fish or in zsh. The duplication needs the storm,
 and the storm needs a continuous drag.
 
-**And the storm's debris is not ours.** The same fast-shake stimulus produces the
-same fragment debris in Terminal.app and iTerm2, in zsh and in fish, and all three
-terminals are clean under bash (`32/F2`). `F15` left two candidate explanations
-for the stacking -- our reflow's cursor placement, or the shell losing its own
-redraw race -- and this is the second. DanTerm renders faithfully what the shell
-emits under a SIGWINCH burst. `32/F9` later confirmed this at the grid rather
-than the screen: `danterm pane read` returns the fragments, so they are terminal
-state the shell wrote, not pixels we misplaced.
+**~~And the storm's debris is not ours.~~ Retracted.** The claim was that the
+same fast-shake stimulus produced the same fragment debris in Terminal.app and
+iTerm2 (`32/F2`), with `32/F9`'s grid reading as confirmation, so DanTerm was
+rendering faithfully what the shell emitted. Both supports failed: the panes
+compared had DanTerm's zsh integration absent, and neither of the other two
+terminals could ever have carried it, so the agreement that looked decisive was
+guaranteed regardless of cause (`32/F10`). `F15`'s two candidate explanations for
+the stacking were therefore never narrowed to the second one here.
 
-**The debris did not move to doc 32.** Its *evidence* is recorded there, because
-the same session produced both, and the citations above point at it. But doc 32
-excludes the debris from its scope by its own boundary and fixed only the repaint
-defect. Nothing owns fixing the debris -- see "what nobody owns" below.
+**The debris did not move to doc 32, and did not need to.** Doc 32 excluded it by
+its own boundary and fixed only the repaint defect. It stopped being a defect on
+its own once the integration loaded.
 
 **The lag half is separately settled.** `F15` priced a reflow step at ~53.7-64 ms
 and derived 4x-8x owner-queue utilization from it. `28/D11`'s amendment records the
@@ -751,24 +760,25 @@ this**, is what moved out of this doc; it owns
 **[32-post-resize-repaint-loss](32-post-resize-repaint-loss/README.md)**, which
 attributed it to `d3780961` and fixed it in `44b875cd`.
 
-**What nobody owns.** Whether DanTerm can reduce the debris despite the race
-being the shell's. "Not our defect" was treated as closing the question, and it
-does not: DanTerm chooses how often the child is told a new size during a drag,
-which is an input to how badly the shell races. The obvious lever is already
-pulled -- `C4`'s latest-wins coalescing means a drag tells the child
-proportionally fewer sizes than columns crossed -- and the debris survives it.
-So a further mitigation would first have to establish *why* it survives: whether
-the surviving rate is still above what zsh's redraw can absorb, or whether the
-debris does not track rate at all. Nobody has measured that. It needs its own doc
-if it is ever pursued, and it does not block this one from closing.
+**~~What nobody owns.~~ Void.** This paragraph asked whether DanTerm could reduce
+the debris despite the race being the shell's, and reasoned from `C4`'s
+coalescing already being pulled without the debris going away. The premise was
+wrong in both halves: the race was not established as the shell's, and the debris
+did go away -- to the shell integration loading, not to any resize lever. There
+is no unowned question here.
+
+It is worth keeping as a record of how the wrong question got framed. "Not our
+defect" was correctly identified as not closing the inquiry, and the follow-up
+was then aimed at the resize rate, the variable this doc had been studying for
+five phases, rather than at whether the attribution was sound. The available
+lever was mistaken for the likely cause.
 
 **Uncertainty.** The reproduction is a hand-driven mouse drag, and the fragment
 pattern differs from `F15`'s screenshot -- whole stacked prompts there, mid-row
-fragments here. Same class, possibly not the identical failure; not pursued,
-because the three-terminal control makes it the shell's either way.
+fragments here. The clause that previously closed this ("the three-terminal
+control makes it the shell's either way") is retracted with the rest.
 
-**Next action.** None owed by this doc. The debris mitigation named above is an
-unowned question, not an item of this doc's ledger.
+**Next action.** None owed by this doc.
 
 ## Decisions
 
@@ -1156,6 +1166,18 @@ unbounded jobs are the ones `D4` deliberately left.
 
 **What left this file, and what did not.** The repaint defect `F16` found owns
 [doc 32](32-post-resize-repaint-loss/README.md); it was attributed to `d3780961`
-and fixed in `44b875cd`. The resize-storm debris did **not** leave with it. It is
-the shell's own redraw race, confirmed at the grid by `32/F9`, and `F16`'s "what
-nobody owns" records the one question that attribution left open.
+and fixed in `44b875cd`. The resize-storm debris did not leave with it and did
+not need to: `32/F10` retracts the attribution `F16` made, and the debris turned
+out to track DanTerm's zsh integration failing to load rather than anything about
+resize. It is gone now that the integration loads. Nothing here is unowned.
+
+**A third correction-shaped lesson, added after closing.** This doc already
+recorded two (`D4` replacing `D1`'s deciding rule; a correctness bug twice hiding
+inside a slowness symptom). The debris retraction is the third and the sharpest:
+a control can be blind and look strong for the same reason. Comparing DanTerm
+against Terminal.app and iTerm2 felt decisive because it was broad, but neither
+of the other two could ever have carried the variable that mattered, so their
+agreement was guaranteed whatever the cause. The follow-up question this doc then
+framed -- can DanTerm reduce the debris by resizing the child less often? -- aimed
+at the lever already in hand rather than at whether the attribution was sound.
+`32/README.md`'s Outcome states the general form.

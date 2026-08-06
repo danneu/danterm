@@ -14,17 +14,22 @@ them, brings them back unchanged -- so nothing is lost from the terminal state.
 What is lost is the paint.
 
 It exists because `19/F15` sent an agent to run one live test and that test
-found something other than what it predicted. `19/D4` framed the outcome as a
-binary: either the stacked prompts on resize were a storm artifact, or there was
-a reflow cursor bug underneath. The answer is the first (`F2`), and the storm
-half now belongs to the shell rather than to DanTerm. But the same session
-surfaced a second, unrelated symptom that is DanTerm-only and reproduces on a
-*settled* single-column resize (`F1`). That is this doc's subject.
+found something other than what it predicted. `19/D4` expected either a storm
+artifact or a reflow cursor bug; the same session surfaced a third thing, a
+DanTerm-only symptom that reproduces on a *settled* single-column resize (`F1`).
+That is this doc's subject, and its only one.
 
-The boundary inherited from doc 19: the resize-storm debris is **not ours** and
-is not investigated here (`F2`). Reflow *cost* is settled and not reopened --
-`28/D11`'s amendment records the same recipe at 1.58 ms after `9ad7cc5`, so
-nothing in this doc is a performance question.
+**The resize-storm debris is not this doc's.** It was never in scope, `D1` never
+addressed it, and this doc no longer reasons about it in either direction --
+`F10` retracts the "it belongs to the shell" attribution that `F2` and `F9`
+recorded, and nothing replaced it here. The debris turned out to track DanTerm's
+zsh integration failing to load in slotted dev apps, and is gone now that it
+loads. Read `F2`, `F9`, and `F10` as a record of how a wrong attribution got
+made and caught, not as evidence about resize.
+
+Reflow *cost* is settled and not reopened -- `28/D11`'s amendment records the
+same recipe at 1.58 ms after `9ad7cc5`, so nothing here is a performance
+question.
 
 ## Investigation rules
 
@@ -37,9 +42,11 @@ nothing in this doc is a performance question.
   `Terminal.swift#resize` marking full damage on every resize. Any hypothesis
   that blames the core has to explain that line first.
 - **Shell dependence is a timing signal, not an attribution.** zsh reproduces
-  and fish/bash do not (`F1`), but the shell integration is innocent (`F3`) and
-  the debris control (`F2`) shows zsh's redraw is normal terminal traffic. Treat
-  zsh as a reliable *stimulus*, not as a cause.
+  and fish/bash do not (`F1`), but the shell integration is innocent *for the
+  vanish* (`F3`, which verified the marks were off and got the vanish anyway).
+  Treat zsh as a reliable *stimulus*, not as a cause. `F10` is the standing
+  caution on the other direction: verify which shell-integration state a pane is
+  actually in before attributing anything to the shell.
 - No fix lands without a test that fails first in the automated AppKit harness
   (`just test-ui`), which already has a `clipRectsForTesting` seam on the draw
   path.
@@ -180,9 +187,9 @@ been directly excluded, and because it predicts a different fix.
       `SwiftTerminalSessionView#setFrameSize` invalidates fully on a size
       change. UI suite 208/208, `just test` 77/77, and the three sparse-clip
       tests still pass.
-- [x] Confirm by hand. `F9`: the fast-drag flicker is gone. Debris on narrowing
-      remains and is `F2` -- `danterm pane read` shows it in the grid, so the
-      shell wrote it and DanTerm is painting faithfully.
+- [x] Confirm by hand. `F9`: the fast-drag flicker is gone, which per `F8` is
+      the deterministic form of the defect and so the strongest hand
+      confirmation available.
 - [x] Confirm the sparse-clip benefit doc 29 measured is still present.
       Structurally untouched: doc 29's win is steady-state sparse damage, and
       `#setFrameSize` is not on that path -- typing and TUI redraws never reach
@@ -215,9 +222,14 @@ only if a case appears where the vanish *depends* on the marks.
 
 ### zsh's redraw, as the cause of the vanish
 
-`F2` establishes zsh's post-resize redraw is ordinary: three terminals render
-the storm debris the same way, so zsh is not emitting anything exotic. zsh
-remains the reliable stimulus, and Phase 2 exists to remove even that dependence.
+Rejected on the attribution chain, not on `F2`. `F6` puts the mechanism in
+DanTerm's own draw path at `d3780961`, `F8` shows the vanish absent at
+`d3780961~1` with the same shell and prompt, and the Phase 2 harness test
+reproduces it with no shell at all. zsh remains the reliable stimulus and
+nothing more.
+
+`F2`'s three-terminal control was the original basis here and no longer carries
+weight; `F10` explains why it could not distinguish what it appeared to.
 
 ## Open questions and caveats
 
@@ -240,13 +252,12 @@ remains the reliable stimulus, and Phase 2 exists to remove even that dependence
 
 **Fixed** -- meaning the repaint loss, which is all this doc ever owned.
 
-**What "fixed" does not cover.** The resize-storm prompt debris is untouched and
-was never in scope (`F2`, and the Purpose section's inherited boundary). It is
-the shell's own redraw race, confirmed at the grid rather than the screen by
-`F9`: `danterm pane read` returns the fragments, so they are terminal state zsh
-wrote. If you arrived here from doc 19 expecting the debris to be handled, it is
-not, by any doc -- `19/F16`'s "what nobody owns" states the one question that
-attribution left open, and pursuing it would need a new doc.
+**The debris is not part of this, in either direction.** It was never in scope,
+`D1` never touched it, and the attribution this doc originally recorded for it
+was wrong: `F10` retracts `F2`'s "it belongs to the shell" and `F9`'s
+grid-reading support for it. The debris tracked DanTerm's zsh integration failing
+to load in slotted dev apps, and is gone now that it loads. Nothing about it is
+outstanding and nothing about it is handed on.
 
 The defect was attributed to `d3780961` (`F6`, `F8`), `H3` was rejected on
 measured pixels (`F5`), and `H1` and `H2` were confirmed as the two halves of
@@ -263,3 +274,13 @@ damage, and `#setFrameSize` is not on that path.
 
 Also open, and optional: the `H1` frame instrumentation. `D1` was chosen so that
 no shipped behaviour depends on the answer.
+
+**The lesson worth carrying out of here is `F10`'s, and it is not about resize.**
+A broad control can be blind and look strong for the same reason. `F2` compared
+three terminals and read their agreement as decisive, but two of them could never
+have carried the variable that mattered, so agreement was guaranteed whatever the
+cause. The check that would have caught it is cheap and was skipped: `F3`
+rigorously verified the shell integration was *off* for its own test and no
+finding ever verified it was *on* anywhere else. Confirming the control state is
+not the same as confirming the baseline state, and rigor on one reads as rigor on
+both.
