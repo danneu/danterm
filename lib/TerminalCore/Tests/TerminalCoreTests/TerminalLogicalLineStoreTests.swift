@@ -623,7 +623,7 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.displayRow(at: 2)!.semanticPrompt == .none)
     }
 
-    // MARK: - `research/31/DD25` as amended: the trailing fill as a record attribute
+    // MARK: - The trailing fill as a record attribute
 
     @Test("The trailing fill is charged as a side-table slot and released when its record goes")
     func trailingFillIsChargedAndReleased() {
@@ -688,7 +688,7 @@ struct TerminalLogicalLineStoreTests {
         // Why it exists: the fill describes the paint after the line ends, so the *last* piece
         //   is its only coherent owner -- a fill on the first piece would paint a margin in the
         //   middle of a line. Ownership falls out of admission order (the split closes the piece
-        //   before the closing row's cells are appended), and this pins it (`research/31/DD33`).
+        //   before the closing row's cells are appended), and this pins the ordering.
         let capacity = 1 << 16
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
         let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
@@ -718,7 +718,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: resuming a closed logical line clears the fill it carried.
         // Why it exists: a fill is the paint after a line's *end*, and a reopened line has no
         //   end -- its last display row is about to be extended by the next admission, which
-        //   re-derives whatever tail finally closes it (`research/31/DD35`).
+        //   re-derives whatever tail finally closes it.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         store.admit(Self.backgroundErasedRow(width: 8, count: 4, seed: 0, fillStyle: 15))
         #expect(store.recordSummary(at: 0)!.trailingFillStyle == 15)
@@ -1009,7 +1009,7 @@ struct TerminalLogicalLineStoreTests {
         // Intent: alternating identified and unidentified cells -- the shape whose run table
         //   costs more than four bytes per stored cell -- reads back every value.
         // Why it exists: `research/31/D3` Decision 6 keeps `PackedRetainedRow`'s two-encoding scheme,
-        //   and `28/I3` requires that neither encoding lose a value, because
+        //   and both encodings must preserve every stored value because
         //   `activationIdentity` reads this out of history.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
         var cells: [Terminal.GridCell] = []

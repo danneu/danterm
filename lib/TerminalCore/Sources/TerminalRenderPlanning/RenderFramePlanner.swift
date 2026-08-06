@@ -316,12 +316,12 @@ struct FramePlanner {
         // row-scoped traversal is for. `terminal.cell(row:column:)` re-resolved the viewport row
         // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
         // column; a profile put that per-cell traffic at ~20% of `planFrame` (see
-        // `research/14/F10`). Making the traversal plural
-        // (`research/31/DD45`) put three of them back inside a single per-cell closure -- the row's kind
-        // array, which is an array *extraction* and so a retain/release pair per cell, and the
-        // two overlay spans -- and `research/31/F13` measured the result at 60% of the browsing
-        // regression. `forEachViewportRow` hands the row out first precisely so all three can be
-        // `let`s of this closure's own frame again, which is what the per-row spelling had.
+        // `research/14/F10`). Making the traversal plural put three of them back inside a
+        // single per-cell closure -- the row's kind array, which is an array *extraction* and
+        // so a retain/release pair per cell, and the two overlay spans -- and
+        // `research/31/F13` measured the result at 60% of the browsing regression.
+        // `forEachViewportRow` hands the row out first precisely so all three can be `let`s of
+        // this closure's own frame again, which is what the per-row spelling had.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
         terminal.forEachViewportRow(rows: 0..<rowCount, where: replanning) { row, visit in
             let kinds = geometry.rows[row].cells

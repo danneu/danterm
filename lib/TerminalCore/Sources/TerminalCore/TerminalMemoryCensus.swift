@@ -92,8 +92,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     public var retainedIndexBytes: Int
 
     /// Side tables held outside the arena -- multi-scalar spills and trailing fill styles --
-    /// charged at what their allocator gave rather than at what their live entries weigh
-    /// (`research/31/DD37`).
+    /// charged at the allocator's bucket count rather than the live entry count.
     public var retainedSideTableBytes: Int
 
     /// Separate heap allocations backing *live* rows -- one per row with cells. `research/15/H7` is

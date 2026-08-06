@@ -51,8 +51,8 @@ enum TerminalSemanticPromptStamp: Equatable, Sendable {
 }
 
 /// Names the snapshot-provable prompt-anchor contracts so corpus failures identify the broken
-/// guarantee. The transition invariants (I3 output floor, I5 geometry coherence, I6 redraw-mode
-/// scope) are deliberately absent: they are proven by targeted behavioral tests that bracket the
+/// guarantee. The transition invariants for output floor, geometry coherence, and redraw-mode
+/// scope are deliberately absent: they are proven by targeted behavioral tests that bracket the
 /// blanking or reclaim operation, not by this oracle.
 enum TerminalSemanticPromptInvariantViolation: String, Equatable, Hashable, Sendable {
     case ownership = "I1 ownership"

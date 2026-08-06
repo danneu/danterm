@@ -1,16 +1,15 @@
-// Proof obligations for doc 28's packed retained row (`C6`).
+// Proof obligations for doc 28's packed retained row (`research/28/C6`).
 //
-// `PO2` is the canonical-extent claim -- packing must not change what a retained row
-// stores, only how. `PO3` is the observability contract, and it is the one with teeth: a
-// packed row reconstructs every field a `GridCell` carried, across each axis the encoding
-// treats separately, and it does so through all three paths a retained row takes
-// (admission, width reflow, height transfer back into the live grid).
+// Packing must not change what a retained row stores, only how. The observability
+// contract is the one with teeth: a packed row reconstructs every field a `GridCell`
+// carried, across each axis the encoding treats separately, and through all three paths
+// a retained row takes (admission, width reflow, height transfer back into the live grid).
 //
-// `PO5` -- `I5`, the read cost this representation was chosen for -- is deliberately *not*
-// here any more. Retained history is doc 31's `LogicalLineStore`, which reimplements its own
-// readers and shares only the C1 cell word with this type, so the two wall-clock ratio tests
-// that stood for `PO5` were timing a path no frame takes. If that property needs a guard
-// again, it belongs against `LogicalLineStore.locate(displayRow:)` and
+// The random-read cost this representation was chosen for is deliberately *not* here any
+// more. Retained history is doc 31's `LogicalLineStore`, which reimplements its own readers
+// and shares only the `research/28/C1` cell word with this type, so the two wall-clock ratio
+// tests were timing a path no frame takes. If that property needs a guard again, it belongs
+// against `LogicalLineStore.locate(displayRow:)` and
 // `forEachPaintedCell(at:_:)`, which is what the frame path really reads.
 //
 // Why the encoder is tested directly and not only through the terminal: the terminal
@@ -46,19 +45,19 @@ struct TerminalPackedRetainedRowTests {
         Terminal.PackedRetainedRow.pack(row).unpacked() == row
     }
 
-    // MARK: - PO3, at the encoder
+    // MARK: - Observability at the encoder
 
     @Test("Every cell axis the packed encoding treats separately survives a round trip")
     func encoderRoundTripsEveryAxis() {
         // Intent: pack-then-unpack is the identity on rows built from each shape the
         //   encoding handles by a different mechanism -- slot, style run, kind exception,
         //   spill, hyperlink table, identity run.
-        // Why it exists: this is `I3` at the level the encoding actually fails. Each axis
+        // Why it exists: every column must reconstruct exactly what it stored. Each axis
         //   below reaches a different table, and an off-by-one in any one of them would
         //   still leave the other five reading correctly -- so a single mixed row would
         //   report "broken" without saying what, and a plain-ASCII row would report
         //   "fine" while five tables were wrong.
-        // Scenario: spec-first. These are the axes doc 28's PO3 enumerates.
+        // Scenario: spec-first. These are the axes the packed representation treats separately.
         let axes: [(String, Terminal.GridRow)] = [
             ("plain ASCII", Terminal.GridRow(cells: "hello".unicodeScalars.enumerated().map {
                 cell($0.element, identity: Terminal.ContentIdentity($0.offset + 1))
@@ -152,7 +151,7 @@ struct TerminalPackedRetainedRowTests {
         // Intent: a row whose identities fragment badly enough that a run table would cost
         //   more than four bytes per stored cell switches to the per-cell encoding, and
         //   every identity still reads back exactly.
-        // Why it exists: `D6` charges `contentIdentity` per contiguous run, which is only
+        // Why it exists: `research/28/D6` charges `contentIdentity` per contiguous run, which is only
         //   the cheaper of two encodings -- the fallback is what keeps the *worst* case
         //   bounded at the floor rather than unbounded. An encoder that never took the
         //   fallback would pay 8 bytes per cell on fragmented content, above the floor it
@@ -174,8 +173,8 @@ struct TerminalPackedRetainedRowTests {
     func randomReadAgreesWithSequentialRead() {
         // Intent: `cell(at:)` -- the O(log) point read -- returns exactly what the linear
         //   `unpacked()` walk produces, at every column including past the stored extent.
-        // Why it exists: the two readers are separate implementations of one contract, and
-        //   `I5` is the reason the point reader exists at all. They drift silently: the
+        // Why it exists: a random cell read must never scan the row, which is why the point
+        //   reader exists at all. The two readers can drift silently: the
         //   linear walk advances cursors and the point reader binary-searches, so a table
         //   whose entries the walk consumes in the wrong order would still look right from
         //   one side.
@@ -209,7 +208,7 @@ struct TerminalPackedRetainedRowTests {
         //   whole cell array (and retained every `TerminalScalars` in it) purely to drop a
         //   suffix the encoder was about to bound anyway. Folding the trim into the encoder
         //   removes that copy, and this pins the two spellings as the same row so the
-        //   removal cannot quietly change what history stores -- which is `I2`.
+        //   removal cannot quietly violate canonical trimming by changing what history stores.
         // Scenario: spec-first.
         let content = "hi".unicodeScalars.enumerated().map {
             cell($0.element, identity: Terminal.ContentIdentity($0.offset + 1))
@@ -255,14 +254,14 @@ struct TerminalPackedRetainedRowTests {
         }
     }
 
-    // MARK: - PO2, through the terminal
+    // MARK: - Canonical extent through the terminal
 
     @Test("Packing leaves a retained row's stored extent exactly where canonical trim put it")
     func retainedExtentIsUnchangedByPacking() throws {
         // Intent: for blank, ragged, trailing-whitespace and full-width rows, the number of
         //   cells history stores is the canonical trimmed extent -- the index of the last
         //   non-default cell plus one, floored at one.
-        // Why it exists: `I2` says the stored extent stays a pure function of observable
+        // Why it exists: the stored extent must remain a pure function of observable
         //   content. Packing runs at admission, right where trimming does, so an encoder
         //   that padded to the stride tier or rounded a table would silently widen every
         //   retained row and turn the budget's row count into a different number.
@@ -293,7 +292,7 @@ struct TerminalPackedRetainedRowTests {
         #expect(terminal.memoryCensus.retainedStoredCellCount == extents.reduce(0, +) - 1)
     }
 
-    // MARK: - PO3, through the terminal's three paths
+    // MARK: - Observability through the terminal's three paths
 
     @Test("A combined-metadata row survives admission, width reflow, and height transfer")
     func combinedRowSurvivesAllThreePaths() throws {
@@ -301,8 +300,8 @@ struct TerminalPackedRetainedRowTests {
         //   sequence reads back identically after it scrolls into history, after the pane
         //   is made narrower and wider again, and after it is pulled back into the live
         //   grid by a taller pane.
-        // Why it exists: `PO3` names all three paths because they are three different
-        //   pieces of code. Admission packs, reflow unpacks and repacks, and height
+        // Why it exists: all three paths must preserve the row because they are three
+        //   different pieces of code. Admission packs, reflow unpacks and repacks, and height
         //   transfer unpacks into the live grid -- and only the first is exercised by a
         //   test that merely scrolls content off.
         // Scenario: spec-first.
@@ -393,8 +392,8 @@ struct TerminalPackedRetainedRowTests {
         //   identities `activationIdentity` reads, and an arm taken over it survives.
         // Why it exists: `activationIdentity` takes `max(contentIdentity)` over a projected
         //   range that spans retained rows, and reads zero as "no identity". A fallback that
-        //   lost values would silently stop adjudicating links living in scrollback --
-        //   `I3` with no reader that tolerates it.
+        //   lost values would silently stop adjudicating links living in scrollback,
+        //   violating the requirement that every stored column read back unchanged.
         // Scenario: spec-first; the row models a line assembled by cursor moves.
         var terminal = try #require(Terminal(columns: 30, rows: 2, scrollbackBudgetBytes: 1 << 20))
         // Print right-to-left in chunks so identities descend across the row.

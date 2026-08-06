@@ -166,7 +166,7 @@ extension Terminal {
             var hasWideCells: Bool
             var semanticPrompt: Terminal.SemanticPromptRow
             /// The style the line's tail is painted in past its content end, or nil when the
-            /// tail is default-painted (`research/31/DD25` as amended). Never part of the line's cells.
+            /// tail is default-painted. Never part of the line's cells.
             var trailingFillStyle: Terminal.StyleId?
         }
 
@@ -287,8 +287,7 @@ extension Terminal {
         private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
         private var spillBytes = 0
 
-        /// The trailing background-erase fill style, keyed by absolute record sequence
-        /// (`research/31/DD25` as amended).
+        /// The trailing background-erase fill style, keyed by absolute record sequence.
         ///
         /// A side table rather than a header field for the reason `research/31/D3` Decision 3 rejected a
         /// header style slot: it is reachable on a minority of records, and a 32-bit slot in
@@ -443,9 +442,9 @@ extension Terminal {
         ///
         /// One array storage header per chunk plus the outer array that names them --
         /// ~1.2 KiB of a 15 MiB capacity at the production budget. Charged rather than ignored
-        /// on `research/31/DD37`'s rule: a charge that describes a model rather than an allocation is
-        /// `research/15/F2`'s error class, and the backing change is exactly the kind of thing that would
-        /// hide inside it.
+        /// at the allocator's bucket count rather than the live entry count: a charge that
+        /// describes a model rather than an allocation is `research/15/F2`'s error class,
+        /// and the backing change is exactly the kind of thing that would hide inside it.
         private var arenaBackingOverheadBytes: Int {
             Terminal.arrayStorageHeaderBytes * (chunks.count + 1)
                 + chunks.count * MemoryLayout<ContiguousArray<UInt64>>.stride
@@ -518,7 +517,7 @@ extension Terminal {
         /// and the `.spacerHead` a wrap left in the last column is dropped, because where a
         /// spacer sits is a function of the width and `31/I1` forbids storing one. A hard-ended
         /// row whose tail past the content is painted by a background erase contributes that
-        /// paint as the record's **trailing fill style**, not as cells (`research/31/DD25` as amended).
+        /// paint as the record's **trailing fill style**, not as cells.
         mutating func admit(_ row: Terminal.GridRow) {
             let admission = admissionExtent(row)
 
@@ -540,7 +539,7 @@ extension Terminal {
             // `research/31/DD15`'s zero-cell record is untouched, because that case is an *empty*
             // record rather than an empty append. It takes the fill's style when there is one,
             // so the restored row is painted from its first column exactly as today's stored
-            // row is (`research/31/DD34`).
+            // row is.
             let restoresBlankRow = row.isSoftWrapped == false
                 && admission.contentEnd == 0
                 && openRecordCellCount > 0
@@ -594,8 +593,7 @@ extension Terminal {
         /// narrower width. There is no floor of one either -- a record's cell count is a content
         /// property and zero is representable (`research/31/DD15`).
         ///
-        /// What `pack` sees and this splits (`research/31/DD25` as amended): the same predicate that
-        /// extends `pack`'s canonical extent past the content -- a blank cell carrying a
+        /// What `pack` sees and this splits use the same predicate: a blank cell carrying a
         /// non-default style -- identifies the fill. The maximal run of such blanks reaching the
         /// right margin is the **trailing fill**, recorded as one style on the record and
         /// re-derived at read against whatever width is in force. Blanks that do *not* reach the
@@ -653,7 +651,7 @@ extension Terminal {
         ///
         /// Written after the row's cells so it lands on the record that holds the line's *end*,
         /// which is what makes a forced-split line's fill the **last** piece's by construction:
-        /// a split closes the piece before these cells were appended (`research/31/DD33`).
+        /// a split closes the piece before these cells are appended.
         private mutating func setTrailingFillOnTail(_ styleId: Terminal.StyleId?) {
             guard offsets.count > 0 else { return }
             let index = offsets.count - 1
@@ -705,8 +703,7 @@ extension Terminal {
         ///
         /// Reopening drops the trailing fill: the fill describes the paint after the *end* of a
         /// line, and a reopened line has no end yet -- its last display row is about to be
-        /// extended, and admission re-derives the tail of whatever row finally closes it
-        /// (`research/31/DD35`).
+        /// extended, and admission re-derives the tail of whatever row finally closes it.
         mutating func reopenTailRecord() {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
@@ -1234,7 +1231,7 @@ extension Terminal {
         ///
         /// The **content walk**: it stops at the line's cells and never emits a trailing fill,
         /// which is what makes it the right read for copy, selection and search -- the fill is
-        /// paint, not text (`research/31/DD25` as amended). Renderers want `paintedRow(at:)`.
+        /// paint, not text. Renderers want `paintedRow(at:)`.
         func gridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
             gridRow(recordIndex: cursor.recordIndex, rowWithinRecord: cursor.rowWithinRecord)
         }
@@ -1437,9 +1434,9 @@ extension Terminal {
                 return false
             }
 
-            // The spill payloads are the one part of a record that never lived in the arena
-            // (`research/31/DD28`), so they are compared through the table that holds them -- and only
-            // when there is one, which `spillBytes` answers for the whole store at once.
+            // Variable-width spill payloads live outside the arena in a table keyed by
+            // absolute record sequence, so compare them through that table -- and only when
+            // one exists, which `spillBytes` answers for the whole store at once.
             guard lhs.spillBytes > 0 || rhs.spillBytes > 0 else { return true }
             return lhs.spillsBySequence[lhs.firstRecordSequence + index]
                 == rhs.spillsBySequence[rhs.firstRecordSequence + index]
@@ -1486,8 +1483,8 @@ extension Terminal {
             // two separate per-frame costs. `recordsHoldTheSameContent` already reads the arena
             // this way for the same reason. The buffer is borrowed from the **local** `chunk`,
             // not from `self.chunks`, so `body` -- an arbitrary caller closure -- cannot conflict
-            // with the access and no dynamic exclusivity check replaces the static one
-            // (`research/31/DD51` measured what that costs when it happens).
+            // with the access and no dynamic exclusivity check replaces the static one; the
+            // rejected nested-closure shape measured that enforcement at about 210 us per frame.
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
@@ -1706,8 +1703,8 @@ extension Terminal {
 
         /// Resolves one display row's shape.
         ///
-        /// `includeFill` is the content/painted split (`research/31/DD25` as amended): the content walk
-        /// stops at the line's cells because the fill is paint rather than text, and the painted
+        /// `includeFill` selects the content/painted split: the content walk stops at the
+        /// line's cells because the fill is paint rather than text, and the painted
         /// walk runs it out to the right margin on the line's last display row.
         private func foldedRow(at cursor: DisplayRowCursor, includeFill: Bool) -> FoldedRow {
             let recordIndex = cursor.recordIndex
@@ -2522,10 +2519,11 @@ extension Terminal {
         private(set) var count = 0
         private let filler: Element
 
-        /// The floor is small on purpose: the index is charged at what its rings *allocated*
-        /// (`research/31/DD37`), so an empty store's charge is a fixed cost every budget pays, and a
-        /// generous floor would make a small history unrepresentable rather than merely
-        /// shallow. Production depth grows both rings far past this within one screenful.
+        /// The floor is small on purpose: the index is charged at the rings' allocated bucket
+        /// count rather than their live entry count, so an empty store's charge is a fixed
+        /// cost every budget pays, and a generous floor would make a small history
+        /// unrepresentable rather than merely shallow. Production depth grows both rings far
+        /// past this within one screenful.
         init(filler: Element, minimumCapacity: Int = 4) {
             precondition(minimumCapacity > 0)
             var capacity = 1

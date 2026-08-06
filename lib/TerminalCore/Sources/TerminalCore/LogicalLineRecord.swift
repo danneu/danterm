@@ -10,7 +10,7 @@
 // recomputed here from (record, width). The trailing background-erase fill is the same bargain
 // one step further: the *style* a line's tail is painted in is content, so the header carries a
 // bit for it, while *which columns* that paint covers is width-relative and so is derived at
-// read (`research/31/DD25` as amended).
+// read.
 //
 // What belongs here: the header's bit layout, a record's decoded shape and byte length, and
 // the width-derived row walk. What does not: the arena, the ring, the derived index and the
@@ -72,8 +72,8 @@ extension Terminal {
         var isPad: Bool
 
         /// The line's last display row is painted to the right margin, after its content ends,
-        /// in a style the store holds in a side table keyed by this record (`research/31/DD25` as
-        /// amended: the trailing background-erase fill is an attribute, not cells).
+        /// in a style the store holds in a side table keyed by this record. The trailing
+        /// background-erase fill is an attribute, not cells.
         ///
         /// A bit rather than a table probe per read: the fill is reachable on a small
         /// minority of records, and the whole point of keeping the style outside the header is
@@ -88,8 +88,8 @@ extension Terminal {
         /// blank logical line at **8 arena bytes and 8 index bytes**, and the 1,048,576-record
         /// blank-history depth that whole decision rests on is that arithmetic. Three 18-bit
         /// counts, a 3-bit mark and seven flags is exactly 64 bits, and the word is now **full**:
-        /// `research/31/DD25`'s amendment spent the spare bit on the trailing fill, so the next flag costs
-        /// either a narrower count field or a ninth byte no blank record can afford.
+        /// The trailing-fill amendment spent the spare bit, so the next flag costs either a
+        /// narrower count field or a ninth byte no blank record can afford.
         ///
         ///     bits  0..17  cell count
         ///     bits 18..35  hyperlink table entries

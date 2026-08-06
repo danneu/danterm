@@ -156,7 +156,7 @@ func sidebarSelectionCacheTests() {
     uiTest("off-screen nil-cell badge reload is not retained") {
         // Intent: a reload for an off-screen tab row does not request cache
         //   retention even when the cell is unavailable.
-        // Why it exists: prevents the F1 over-retention case where an ordinary
+        // Why it exists: prevents the over-retention case where an ordinary
         //   discarded off-screen cell would re-emit reloadTab every reconcile.
         // Scenario: a sidebar with enough rows to scroll has an off-screen tab
         //   badge clear before the user scrolls it back into view.

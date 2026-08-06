@@ -306,8 +306,15 @@ help path and read the operator-facing heredoc.
 - [x] 8. `docs(recovery): restate the checkpoint plan's invariants inline` -- checkpoint tests in `lib/DanTermSupport/`, `lib/DanTermCore/`, `app-tests/`.
 - [x] 9. `docs(scripts): restate the btop diagnostic plan's invariants inline` -- `terminal_btop_*`, `terminal-benchmark{,-profile}.sh`, plus the mis-attributed `29/I*`/`29/PO*`. Message names the mis-attribution.
 - [x] 10. `docs(scripts): restate the paired-benchmark plan's invariants inline` -- `terminal_benchmark_{compare,snapshot}_test.py`, `terminal_draw_acceptance_test.py`, plus the two bare `D1` -> `research/7/D1`.
-- [ ] 11. `docs(terminal): restate the packed-retained-row plan's invariants inline` -- `TerminalPackedRetainedRowTests.swift`, `TerminalLogicalLineStoreTests.swift`, `SidebarSelectionCacheTests.swift`.
+- [x] 11. `docs(terminal): restate the packed-retained-row plan's invariants inline` -- `TerminalPackedRetainedRowTests.swift`, `TerminalLogicalLineStoreTests.swift`, `SidebarSelectionCacheTests.swift`; final whole-plan audit repairs the prompt-oracle comment and doc-31 `DD*` labels whose definitions live only in the implementation plan.
 
 Commits 2-6 are the mechanical block and can split further by directory if the
 diffs are too large to review in one pass. Commits 7-11 are judgment work and
 should not be batched -- each requires reading a different plan.
+
+## Implementation notes
+
+- The final resolution audit found 26 `research/31/DD*` citations whose definitions live
+  only in `plans/impl/2026-08-04-1137-logical-line-scrollback-store.md`, not in research
+  doc 31. They are plan-owned under this plan's rule and were restated inline rather than
+  left falsely qualified as research citations.

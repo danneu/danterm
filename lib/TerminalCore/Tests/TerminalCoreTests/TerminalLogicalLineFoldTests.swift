@@ -17,7 +17,7 @@
 // legitimately disagree about how many trailing default cells a blank row *stores* while
 // agreeing about every column a reader can observe.
 //
-// **Which of the store's two walks is compared against what, since `research/31/DD25`'s amendment.** The
+// **Which of the store's two walks is compared against what after the trailing-fill amendment.** The
 // **painted** walk is the one held to today's stored row column for column at the admitting
 // width -- including the background-erase paint past the content end, which today's store holds
 // as cells and this store holds as a per-record fill style. The **content** walk is held to
@@ -292,7 +292,7 @@ struct TerminalLogicalLineFoldTests {
         #expect(store.displayRow(at: 1)!.cell(at: 0).kind == .wideHead)
     }
 
-    // MARK: - `research/31/DD25` as amended: the trailing background-erase fill
+    // MARK: - The trailing background-erase fill
 
     @Test("A hard-ended row's painted tail becomes a fill style, and repaints at every width")
     func hardEndedRowStoresItsBackgroundEraseTailAsAFillStyle() throws {
@@ -300,7 +300,7 @@ struct TerminalLogicalLineFoldTests {
         //   background-erase style stores the content cells plus one fill style, and the
         //   painted walk repaints from the content's end to the right margin at the admitting
         //   width, at a narrower one and at a wider one.
-        // Why it exists: `research/31/DD25` originally measured such a row to its content end and
+        // Why it exists: the original design measured such a row to its content end and
         //   dropped the paint, because storing it as *cells* would wrap a painted tail into
         //   whole blank display rows on a narrow. The amended design keeps both properties at
         //   once -- the paint is width-relative, so it is an attribute rather than cells -- and
@@ -386,7 +386,7 @@ struct TerminalLogicalLineFoldTests {
         // Intent: a styled blank with content on both sides is stored as a cell, keeps its
         //   column relative to the content when the line re-wraps, and is not folded into the
         //   record's trailing fill.
-        // Why it exists: the amended `research/31/DD25` draws exactly one line -- a *trailing*
+        // Why it exists: the amended design draws exactly one line -- a *trailing*
         //   to-edge paint is width-relative and becomes an attribute, while an interior erase
         //   is positionally real content. Without this test the fill rule could quietly swallow
         //   any styled blank and lose a column a program deliberately painted mid-line.

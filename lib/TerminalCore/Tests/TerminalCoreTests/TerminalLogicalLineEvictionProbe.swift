@@ -178,7 +178,7 @@ func buildEvictionStimulus(
 ///
 /// `research/31/D4` gate 1 compares the two arms over the display rows both retain, and the two stores
 /// legitimately disagree about how much *default* trailing padding they keep -- today's `pack`
-/// trims to canonical extent, the arena measures a hard-ended row to its content end (`research/31/DD25`). So
+/// trims to canonical extent, while the arena measures a hard-ended row to its content end. So
 /// only cells that differ from the default contribute, keyed by column, which makes the check
 /// exactly "the same content in the same places" and not "the same array length".
 @inline(__always)
