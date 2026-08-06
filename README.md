@@ -657,28 +657,32 @@ Same trick works inside vim with `set mouse=a`, inside less, inside htop, etc.
 
 ## Development
 
-The dev loop is to make changes and `just build-run` to try them out.
+The dev loop is to make changes and `just replace-dev` to try them out. That
+command replaces the canonical `~/Applications/DanTerm Dev.app` and quits the
+instance currently running from it, so it belongs to whoever owns that app --
+you. Anything else building this tree, an agent especially, wants
+`just launch-slot`: it runs an isolated slot and leaves your app alone.
 
 After creating a linked Git worktree, run `just provision-worktree` from that
 worktree before its first build. The repeatable command links the primary
 checkout's reference sources without modifying the primary checkout. Fetch
 those prerequisites in the primary checkout first if the command reports one
-missing. In a worktree, use
-the isolated `just launch` path below instead of `just build-run`, which replaces
-the user's canonical dev app.
+missing.
 
 - `just build` or `bash ./dev-build.sh` to build a local dev app to
   ".build/DanTerm Dev.app" and copy to "~/Applications/DanTerm Dev.app".
-- `just build-run` or `bash ./dev-build-run.sh` to build + run it.
+- `just replace-dev` or `bash ./dev-build-run.sh` to build + run it, replacing
+  the canonical dev app.
 - `just build-optimized` or `bash ./dev-build.sh --release` to build the same
   dev app with SwiftPM's release configuration.
-- `just build-run-optimized` or `bash ./dev-build-run.sh --release` to build
-  and run that optimized dev app.
-- `just launch` or `./scripts/dev-slot-launcher.py` to claim and directly run
-  an isolated, unattended development slot without replacing the user's app.
-- `just launch-optimized` to do the same with SwiftPM's release configuration.
-- `just launch-prime` to launch one fresh slot in the foreground when granting
-  that slot notification permission for the first time.
+- `just replace-dev-optimized` or `bash ./dev-build-run.sh --release` to build
+  and run that optimized dev app in place of the canonical one.
+- `just launch-slot` or `./scripts/dev-slot-launcher.py` to claim and directly
+  run an isolated, unattended development slot without replacing the user's app.
+- `just launch-slot-optimized` to do the same with SwiftPM's release
+  configuration.
+- `just launch-slot-prime` to launch one fresh slot in the foreground when
+  granting that slot notification permission for the first time.
 
 The build-optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
 development signing, and install path. They do not create a production release

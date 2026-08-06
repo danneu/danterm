@@ -262,24 +262,24 @@ build:
 build-optimized:
     ./dev-build.sh --release
 
-# Build, install to ~/Applications, and run DanTerm Dev
-build-run:
+# Replace the canonical ~/Applications DanTerm Dev app and run it
+replace-dev:
     ./dev-build-run.sh
 
-# Build an optimized DanTerm Dev app, install it, and run it
-build-run-optimized:
+# Replace the canonical DanTerm Dev app with an optimized build and run it
+replace-dev-optimized:
     ./dev-build-run.sh --release
 
-# Build and launch an unattended isolated development slot
-launch:
+# Launch an isolated unattended development slot, leaving the canonical app alone
+launch-slot:
     ./scripts/dev-slot-launcher.py
 
-# Build and launch an optimized unattended isolated development slot
-launch-optimized:
+# Launch an isolated unattended optimized development slot
+launch-slot-optimized:
     ./scripts/dev-slot-launcher.py --release
 
-# Build and launch a foreground slot to grant notification authorization once
-launch-prime:
+# Launch an isolated slot in the foreground to grant notification authorization once
+launch-slot-prime:
     ./scripts/dev-slot-launcher.py --foreground
 
 # Show current version

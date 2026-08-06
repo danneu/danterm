@@ -22,9 +22,13 @@ command reports it missing.
 
 ## Launch an isolated slot
 
-Use `just launch`, not `just build-run`. The latter quits and replaces the
-user's canonical dev app. The isolated launcher claims an unattended slot from
-1 through 8 without replacing or focusing the canonical app.
+Use `just launch-slot`, not `just replace-dev`. The latter quits and replaces
+the user's canonical dev app. The isolated launcher claims an unattended slot
+from 1 through 8 without replacing or focusing the canonical app.
+
+This rule is not worktree-specific -- the primary checkout builds the same
+canonical app, so an agent running the app from anywhere in this repo wants a
+slot. Provisioning is the only part of this document a worktree adds.
 
 Capture the launcher's JSON handle and pass its socket explicitly on every CLI
 call:
@@ -46,9 +50,9 @@ The handle also contains the slot number, bundle ID, and app PID. The launcher
 uses direct exec, so the background PID is the launched app. If all slots are
 occupied, the launcher exits with status 75 without launching another app.
 
-Use `just launch-optimized` for an optimized isolated build. Use
-`just launch-prime` only when granting a slot notification permission in the
-foreground for the first time.
+Use `just launch-slot-optimized` for an optimized isolated build. Use
+`just launch-slot-prime` only when granting a slot notification permission in
+the foreground for the first time.
 
 ## Pass an allowed environment value
 

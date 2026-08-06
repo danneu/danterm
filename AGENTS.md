@@ -156,10 +156,18 @@ and legitimately have none).
 `swift build` (via the recipes below) is the whole toolchain. There is no
 prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
 
-- `just build` / `just build-run` -- compile `.build/DanTerm Dev.app` and install
-  to `~/Applications/`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side
-  with production `DanTerm.app`. Suffix `-optimized` for a release-configuration
-  dev build (still not a release or publish operation).
+- `just launch-slot` -- **the way an agent runs the app.** Builds without
+  installing, claims an isolated slot from 1 through 8, and execs it. Suffix
+  `-optimized` for a release-configuration build, `-prime` only when a human is
+  granting a slot notification permission. Drive the slot with an explicit
+  `danterm --socket` argument every time; do not rely on ambient `DANTERM_SOCK`.
+- `just build` / `just replace-dev` -- **the user's commands; do not run them
+  unless asked.** Both overwrite `~/Applications/DanTerm Dev.app`, and
+  `replace-dev` also quits the running instance the user may be working in.
+  `bash ./dev-build.sh --no-install` is the compile-only form that touches
+  nothing outside `.build/`. Dev bundle ID `com.danneu.danterm-dev` runs
+  side-by-side with production `DanTerm.app`. Suffix `-optimized` for a
+  release-configuration dev build (still not a release or publish operation).
 - `just test` -- the local gate. Steps live in `scripts/run-test-suite.sh`, not
   the justfile; add new ones there, and only steps independent of every other
   one (no shared temp path, build directory, port, or socket). `just test-serial`
@@ -169,10 +177,8 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   logged-in GUI session, including an agent's.
 - Targeted: `swift test --package-path lib/DanTermCore [--filter CheckpointTests]`.
 
-**In a worktree:** run `just provision-worktree` first, and launch with
-`just launch`, never `just build-run`, so the user's canonical dev app is not
-replaced. Drive the launched slot with an explicit `danterm --socket` argument
-every time; do not rely on ambient `DANTERM_SOCK`. See
+**In a worktree:** run `just provision-worktree` before the first build, then
+use the same `just launch-slot` path. See
 [agent-docs/worktree-development.md](agent-docs/worktree-development.md).
 
 ## CLI

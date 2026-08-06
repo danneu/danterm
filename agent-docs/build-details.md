@@ -23,16 +23,17 @@ CoreText, and UniformTypeIdentifiers.
   SwiftPM release mode with `--release`. Both modes use dev icons, the dev
   bundle ID, and development signing. The default installs to `~/Applications`;
   `--no-install` stops after producing `.build/DanTerm Dev.app`. Wrapped by
-  `just build` / `just build-run` for debug and `just build-optimized` / `just
-  build-run-optimized` for optimized dev builds. The optimized variants are
+  `just build` / `just replace-dev` for debug and `just build-optimized` / `just
+  replace-dev-optimized` for optimized dev builds. The optimized variants are
   not production releases and do not publish anything.
 - `scripts/dev-slot-launcher.py` -- claims a user-global slot from 1 through 8,
   runs `dev-build.sh --no-install`, stages and signs the slot clone, emits its
   JSON handle, and directly execs the app with fresh/background policy. Wrapped
-  by `just launch`, `just launch-optimized`, and the foreground notification-
-  permission path `just launch-prime`. Slot 0 is never claimed. The build-only
-  `DanTermInstanceIdentityTool` resolves each clone's identity and paths through
-  `DanTermProtocol` so the launcher does not duplicate the naming scheme.
+  by `just launch-slot`, `just launch-slot-optimized`, and the foreground
+  notification-permission path `just launch-slot-prime`. Slot 0 is never
+  claimed. The build-only `DanTermInstanceIdentityTool` resolves each clone's
+  identity and paths through `DanTermProtocol` so the launcher does not
+  duplicate the naming scheme.
 - `build-app.sh` -- release mode (`--configuration release`, applies `-O`),
   production icons, optional `--version` stamping. Called by CI and release
   workflows. It does not sign or notarize.
