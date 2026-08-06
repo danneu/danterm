@@ -4,8 +4,8 @@ Custom macOS terminal emulator running on its own Swift terminal engine
 (`lib/TerminalCore` for the grid, parser, and renderer; `lib/TerminalPTY` for
 process lifecycle). It was built on libghostty until that dependency was removed
 outright: there is no Zig, no xcframework, and no second backend left. Read
-[plan-terminal-engine/README.md](plan-terminal-engine/README.md) before planning
-or implementing engine work.
+[docs/design/2026-08-06-swift-terminal-engine.md](docs/design/2026-08-06-swift-terminal-engine.md)
+before planning or implementing engine work.
 
 ## Boundaries
 
@@ -202,7 +202,7 @@ shape, parser errors) means updating that file in the same change.
 
 | Working on | Read |
 |---|---|
-| The Swift terminal engine | [plan-terminal-engine/README.md](plan-terminal-engine/README.md) |
+| The Swift terminal engine | [docs/design/2026-08-06-swift-terminal-engine.md](docs/design/2026-08-06-swift-terminal-engine.md) |
 | Layer placement, a new side-effecting utility, `core-purity-lint.sh` | [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) |
 | Test architecture, the `app/DanTermCore` symlink, `lib/*/Package.swift` | [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) |
 | An observer, NSEvent monitor, timer, popover, escaping closure, or C `userdata` callback | [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) |

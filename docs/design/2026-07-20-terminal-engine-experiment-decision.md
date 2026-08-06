@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-20
+- Superseded by: [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md)
 
 > **2026-08-06: carried out.** This record's decision was "continue the
 > experiment, do not commit to cutover yet", with Ghostty remaining the
