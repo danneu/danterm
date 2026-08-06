@@ -116,9 +116,8 @@ user-provided criteria.
 ## Isolated source-tree instances
 
 In a fresh linked worktree, run `just provision-worktree` before the first
-build. It repeatably links the primary checkout's cached GhosttyKit framework,
-themes, and reference sources into the worktree without changing the primary
-checkout.
+build. It repeatably links the primary checkout's reference sources into the
+worktree without changing the primary checkout.
 
 When an agent needs its own development app, run `just launch` from the source
 tree instead of `just build-run`. The launcher builds without replacing or

@@ -12,18 +12,10 @@ clean:
 provision-worktree:
     ./scripts/provision-worktree.sh
 
-# Clone/fetch Ghostty source for reference (no xcframework build).
-fetch-ghostty:
-    ./build-lib.sh fetch
-
 # Materialize all pinned references, one named reference, or list them with:
 # `just fetch-references`, `just fetch-references alacritty`, or `just fetch-references --list`.
 fetch-references *args:
     python3 ./scripts/fetch-references.py {{args}}
-
-# Fetch Ghostty source and build the GhosttyKit xcframework.
-build-lib:
-    ./build-lib.sh
 
 # Refresh tracked JSON themes from DanTerm's pinned iTerm2-Color-Schemes release.
 update-themes:

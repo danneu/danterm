@@ -20,14 +20,12 @@ fail() {
 
 BUILD_ROOT="$TEST_ROOT/build-root"
 FAKE_BIN="$TEST_ROOT/fake-bin"
-mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
-    "$BUILD_ROOT/lib/TerminalPTY" \
+mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/app" \
     "$BUILD_ROOT/icon/AppIcon" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
     "$BUILD_ROOT/integrations/shell-integration/vendor" \
-    "$BUILD_ROOT/lib/ghostty-themes" \
     "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
     "$BUILD_ROOT/themes" \
@@ -36,7 +34,6 @@ ln -s "$ROOT_DIR/build-app.sh" "$BUILD_ROOT/build-app.sh"
 cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
-: > "$BUILD_ROOT/lib/ghostty-themes/Fixture"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
 : > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"

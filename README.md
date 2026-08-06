@@ -662,9 +662,9 @@ The dev loop is to make changes and `just build-run` to try them out.
 
 After creating a linked Git worktree, run `just provision-worktree` from that
 worktree before its first build. The repeatable command links the primary
-checkout's cached GhosttyKit framework, themes, and reference sources without
-modifying the primary checkout. Build or fetch those prerequisites in the
-primary checkout first if the command reports one missing. In a worktree, use
+checkout's reference sources without modifying the primary checkout. Fetch
+those prerequisites in the primary checkout first if the command reports one
+missing. In a worktree, use
 the isolated `just launch` path below instead of `just build-run`, which replaces
 the user's canonical dev app.
 

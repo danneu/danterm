@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Build DanTerm Dev locally without nix.
-# Assumes build-lib.sh has already been run to produce lib/GhosttyKit.xcframework.
 #
 set -euo pipefail
 
@@ -41,12 +40,6 @@ INSTALL_APP="$HOME/Applications/DanTerm Dev.app"
 LSREGISTER="${DANTERM_DEV_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister}"
 SRC_DIR="$SCRIPT_DIR/app"
 LIB_DIR="$SCRIPT_DIR/lib"
-
-# Verify XCFramework exists
-if [ ! -d "$LIB_DIR/GhosttyKit.xcframework" ]; then
-    echo "Error: GhosttyKit.xcframework not found. Run ./build-lib.sh first."
-    exit 1
-fi
 
 # Build with SwiftPM (incremental — only recompiles changed files).
 echo "Compiling..."

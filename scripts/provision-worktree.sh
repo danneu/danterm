@@ -18,8 +18,6 @@ PRIMARY_ROOT="$(cd "$COMMON_DIR/.." && pwd -P)"
     || fail "the current checkout is the primary checkout, not a linked worktree"
 
 PREREQUISITES=(
-    "lib/GhosttyKit.xcframework"
-    "lib/ghostty-themes"
     "references"
 )
 

@@ -18,12 +18,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify XCFramework exists
-if [ ! -d "$SCRIPT_DIR/lib/GhosttyKit.xcframework" ]; then
-    echo "Error: GhosttyKit.xcframework not found. Run ./build-lib.sh first."
-    exit 1
-fi
-
 # Compile with SwiftPM (release mode, optimized)
 echo "Compiling (release)..."
 swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --configuration release

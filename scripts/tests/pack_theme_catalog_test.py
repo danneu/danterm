@@ -164,7 +164,6 @@ class AssemblerContractTests(unittest.TestCase):
             ROOT / "build-app.sh",
             ROOT / "dev-build.sh",
             ROOT / "scripts" / "terminal-benchmark.sh",
-            ROOT / "scripts" / "terminal-characterization.sh",
             ROOT / "scripts" / "terminal-viability.sh",
         ]
 
@@ -199,15 +198,11 @@ class AssemblerContractTests(unittest.TestCase):
         self.assertIn("mbadolato/iTerm2-Color-Schemes", notice)
         self.assertNotIn("bundled by Ghostty", notice)
 
-    def test_shared_bundle_step_packs_runtime_catalog_and_preserves_legacy_themes(self):
+    def test_shared_bundle_step_packs_runtime_catalog_and_symbol_font(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository = root / "repo"
             shutil.copytree(ROOT / "themes", repository / "themes")
-            (repository / "lib" / "ghostty-themes").mkdir(parents=True)
-            (repository / "lib" / "ghostty-themes" / "Legacy").write_text(
-                "legacy\n", encoding="utf-8"
-            )
             self.write_symbols_fixture(repository)
             (repository / "scripts").mkdir()
             shutil.copy2(SCRIPT, repository / "scripts" / SCRIPT.name)
@@ -227,10 +222,6 @@ class AssemblerContractTests(unittest.TestCase):
                 (app / "Contents" / "Resources" / "themes" / "catalog.json").read_bytes()
             )
             self.assertEqual(len(catalog["themes"]), 592)
-            self.assertEqual(
-                (app / "Contents" / "Resources" / "ghostty" / "themes" / "Legacy").read_text(),
-                "legacy\n",
-            )
             self.assertEqual(
                 (
                     app
@@ -258,30 +249,6 @@ class AssemblerContractTests(unittest.TestCase):
                 },
                 source_before,
             )
-
-    def test_shared_bundle_step_rejects_an_empty_legacy_catalog(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            repository = root / "repo"
-            shutil.copytree(ROOT / "themes", repository / "themes")
-            (repository / "lib" / "ghostty-themes").mkdir(parents=True)
-            self.write_symbols_fixture(repository)
-            (repository / "scripts").mkdir()
-            shutil.copy2(SCRIPT, repository / "scripts" / SCRIPT.name)
-            helper = ROOT / "scripts" / "bundle-theme-resources.sh"
-            shutil.copy2(helper, repository / "scripts" / helper.name)
-
-            import subprocess
-
-            result = subprocess.run(
-                [repository / "scripts" / helper.name, repository, root / "Fixture.app"],
-                capture_output=True,
-                text=True,
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Ghostty themes are missing", result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()
