@@ -1,13 +1,8 @@
-// DanTerm-owned AppKit boundary for process-wide terminal backends and stable
-// per-pane sessions. Backend-specific handles, bytes, grids, and rendering stay out.
+// DanTerm-owned AppKit boundary for stable per-pane terminal sessions -- the
+// contract that pane containers, the reconciler, and UI test doubles all speak.
+// Terminal handles, bytes, grids, and rendering stay out.
 import Cocoa
 import DanTermProtocol
-
-/// Selects temporary Ghostty fallback polling or mutation-driven Swift recovery.
-enum TerminalRecoveryScheduling {
-    case periodicFallback
-    case eventDriven
-}
 
 /// Scrollbar position reported by a terminal session in logical terminal rows.
 struct TerminalScrollPosition: Equatable {
@@ -86,8 +81,6 @@ protocol TerminalSession: AnyObject {
     func sendInputKey(_ key: KeyName, modifiers: KeyMods)
     func setFocused(_ focused: Bool)
     func setVisible(_ visible: Bool)
-    func setDisplayID(_ displayID: UInt32)
-    func setScrollbarEnabled(_ enabled: Bool)
     func refreshBackingProperties()
     func applyTheme(_ themeName: String)
     func clearTheme()
@@ -104,8 +97,8 @@ protocol TerminalSession: AnyObject {
     /// Reads only the primary-history tail a truncation at this budget can keep.
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String?
     /// Copies the pane's terminal now and returns that same bounded read, deferred off the main
-    /// actor -- the recovery checkpoint's expensive half. nil when the backend can only read on
-    /// the main thread, which leaves the caller to read eagerly instead.
+    /// actor -- the recovery checkpoint's expensive half. nil when this session has no history
+    /// to read, which leaves the caller to read eagerly instead.
     func primaryHistoryTailReader() -> CheckpointScrollbackRead?
     /// Copies the pane tape now and returns work that can encode it away from the main actor.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)?
@@ -127,45 +120,15 @@ protocol TerminalSession: AnyObject {
     func tearDown()
 }
 
-/// Process-wide terminal factory and app/config operations consumed by DanTerm.
-@MainActor
-protocol TerminalBackend: AnyObject {
-    var isReady: Bool { get }
-    var onEvent: ((TerminalBackendEvent) -> Void)? { get set }
-    var preferences: GhosttyPrefs { get }
-    var configFilePath: String? { get }
-    var recoveryScheduling: TerminalRecoveryScheduling { get }
-
-    func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)?
-    func setAppFocused(_ focused: Bool)
-    func reloadConfig()
-    /// Runs the backend's bounded process teardown after the final checkpoint is captured.
-    func terminateForApplicationExit()
-}
-
-extension TerminalBackend {
-    /// Gives backends a final synchronous process-lifetime teardown hook during orderly exit.
-    func terminateForApplicationExit() {}
-}
-
 extension TerminalSession {
-    /// A backend with no bounded history read answers with the whole projection, which is a
-    /// valid tail of itself: the caller truncates either way, and only pays more to do it.
-    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
-        readPrimaryHistoryText()
-    }
-
-    /// A backend whose history can only be read on the main actor has no deferred reader; the
-    /// checkpoint falls back to reading it eagerly, paying on the main thread as it always did.
-    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
-
-    /// Backends without the dev-only recorder advertise the unsupported state explicitly.
+    /// Only a bundle built with recording enabled has a tape to encode; the default keeps
+    /// every other bundle out of the recorder's implementation entirely.
     func flightRecordingEncoder() -> (@Sendable () throws -> Data)? { nil }
-    /// Keeps non-recording backends outside the follow implementation and unsupported by default.
+    /// A bundle without a recorded tape has no follow origin to fence.
     func paneTapeFollowStart(
         fromNow: Bool
     ) -> (@Sendable () throws -> PaneTapeFollowStart)? { nil }
-    /// A backend without a follow origin can never produce a later cursor batch.
+    /// Without a follow origin there can never be a later cursor batch.
     func paneTapeFollowBatch(
         from cursor: PaneTapeFollowCursor
     ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? { nil }

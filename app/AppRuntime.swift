@@ -55,22 +55,6 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
     appendTerminalCharacterizationEvent(description)
 }
 
-/// Records process-wide boundary events without serializing Ghostty preference
-/// details that are already covered by pure event translation tests.
-@MainActor
-func recordTerminalCharacterizationEvent(_ event: TerminalBackendEvent) {
-    let description: String
-    switch event {
-    case .configReloaded:
-        description = "backend.configReloaded"
-    case .configChanged(_, let scrollbarEnabled):
-        description = "backend.configChanged:scrollbar=\(scrollbarEnabled)"
-    case .quitRequested:
-        description = "backend.quitRequested"
-    }
-    appendTerminalCharacterizationEvent(description)
-}
-
 /// Marks a complete frame reaching the visible Swift terminal view so harnesses
 /// can prove hidden and idle panes do not schedule rendering work.
 @MainActor
@@ -149,9 +133,9 @@ class AppRuntime {
     // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
     // read only by reconcileSidebar's rename guard.
     var viewLocalState = ViewLocalState()
-    let terminalBackend: any TerminalBackend
+    let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
-    // Last libghostty occlusion value pushed for each live session.
+    // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
     private var paneVisibility: [PaneId: Bool] = [:]
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
@@ -183,8 +167,8 @@ class AppRuntime {
     // Session persistence uses two tiers of checkpoints:
     //   Light  — pure model serialization (no scrollback), written after a 2s debounce
     //            following any state-mutating Msg. Cheap and frequent.
-    //   Enriched -- model + primary history, mutation-driven for Swift and temporarily
-    //               periodic for Ghostty, plus one final synchronous clean-exit write.
+    //   Enriched -- model + primary history, driven by primary-history mutations,
+    //               plus one final synchronous clean-exit write.
     private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
     private var recoveryPolicy = RecoveryCheckpointPolicy(
@@ -205,12 +189,9 @@ class AppRuntime {
     // enough to avoid flickering chrome under terminal-title spam.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
     private static let paneTapeFollowInterval: TimeInterval = 0.05
-    // Slowed from 60s to 10min until the libghostty memory leak is fixed.
-    // https://github.com/danneu/danterm/issues/31
-    private static let enrichedCheckpointInterval: TimeInterval = 600.0
 
     init(
-        terminalBackend: any TerminalBackend,
+        terminalBackend: SwiftTerminalBackend,
         configStore: DanTermConfigStore = DanTermConfigStore(),
         notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded
     ) {
@@ -233,19 +214,6 @@ class AppRuntime {
         }
         self.model.config = launchConfig
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
-
-        terminalBackend.onEvent = { [weak self] event in
-            guard let self else { return }
-            #if DANTERM_TERMINAL_CHARACTERIZATION
-            recordTerminalCharacterizationEvent(event)
-            #endif
-            if case .configChanged(_, let scrollbarEnabled) = event {
-                for session in self.sessions.values {
-                    session.setScrollbarEnabled(scrollbarEnabled)
-                }
-            }
-            self.send(terminalMessage(for: event))
-        }
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -489,16 +457,10 @@ class AppRuntime {
         }
     }
 
-    /// Push the active monitor's display id to every live session so libghostty's
-    /// per-session CVDisplayLink re-syncs to that monitor's refresh rate.
-    func syncSessionDisplayID() {
-        guard let displayID = window?.screen?.displayID else { return }
-        for session in sessions.values {
-            session.setDisplayID(displayID)
-        }
-
-        // Mirror Ghostty's screen-change path: nudge backing properties on the
-        // next main-loop turn because AppKit can skip the automatic callback.
+    /// Re-reads every live session's backing scale after the window changes screens.
+    /// Deferred one main-loop turn because AppKit can skip the automatic
+    /// backing-properties callback on a screen change.
+    func refreshSessionsForScreenChange() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             for session in self.sessions.values {
@@ -966,9 +928,6 @@ class AppRuntime {
             NSApp.activate(ignoringOtherApps: true)
             window?.makeKeyAndOrderFront(nil)
 
-        case .setAppFocus(let focused):
-            terminalBackend.setAppFocused(focused)
-
         case .dismissAlertsPopover:
             alertsPopover?.performClose(nil)
             alertsPopover = nil
@@ -1182,24 +1141,6 @@ class AppRuntime {
         }
     }
 
-    /// Starts the temporary repeating Ghostty fallback; Swift schedules from mutations.
-    func startEnrichedCheckpointTimer() {
-        enrichedCheckpointTimer?.cancel()
-        enrichedCheckpointTimer = nil
-        guard terminalBackend.recoveryScheduling == .periodicFallback else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(
-            deadline: .now() + Self.enrichedCheckpointInterval,
-            repeating: Self.enrichedCheckpointInterval,
-            leeway: .seconds(30)
-        )
-        timer.setEventHandler { [weak self] in
-            self?.performEnrichedCheckpoint(async: true)
-        }
-        timer.resume()
-        enrichedCheckpointTimer = timer
-    }
-
     /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
     func prepareRecoveryForApplicationExit() {
         enrichedCheckpointTimer?.cancel()
@@ -1212,7 +1153,6 @@ class AppRuntime {
     }
 
     private func notePrimaryHistoryMutation() {
-        guard terminalBackend.recoveryScheduling == .eventDriven else { return }
         applyRecoveryAction(recoveryPolicy.mutation(at: DispatchTime.now().uptimeNanoseconds))
     }
 
@@ -1393,11 +1333,9 @@ class AppRuntime {
         dragCoordinator = nil
     }
 
-    /// Full config reload: Ghostty files, DanTerm config, then themed pane re-layering.
+    /// Full config reload, re-reading the DanTerm config file and re-layering themed panes.
     func reloadAllConfig() {
-        terminalBackend.reloadConfig()
         reloadDanTermConfig()
-        send(.ghosttyConfigReloaded)
     }
 
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
@@ -1916,14 +1854,4 @@ func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastT
 
 private enum RestoreBuildError: Error {
     case sessionCreationFailed
-}
-
-/// Re-homed from the deleted Ghostty adapter: `syncSessionDisplayID` is its only
-/// consumer, and AppKit exposes the screen's `CGDirectDisplayID` only through the
-/// untyped device description.
-extension NSScreen {
-    var displayID: UInt32 {
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
-        return deviceDescription[key] as? UInt32 ?? 0
-    }
 }

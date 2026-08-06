@@ -20,13 +20,6 @@ enum TerminalSessionEvent: Equatable {
     case closeRequested
 }
 
-/// Product-level events the process-wide terminal backend may emit.
-enum TerminalBackendEvent: Equatable {
-    case configReloaded
-    case configChanged(prefs: GhosttyPrefs, scrollbarEnabled: Bool)
-    case quitRequested
-}
-
 /// Translates the closed session-event vocabulary into the existing pane messages.
 func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
     switch event {
@@ -61,17 +54,5 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
         return .paneBecameFirstResponder(paneId: paneId)
     case .closeRequested:
         return .sessionClosed(paneId: paneId)
-    }
-}
-
-/// Translates process-wide backend events into the existing application messages.
-func terminalMessage(for event: TerminalBackendEvent) -> Msg {
-    switch event {
-    case .configReloaded:
-        return .ghosttyConfigReloaded
-    case .configChanged(let prefs, _):
-        return .ghosttyPrefsRefreshed(prefs)
-    case .quitRequested:
-        return .requestQuit
     }
 }

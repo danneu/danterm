@@ -3097,7 +3097,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
         #expect(
             desiredPaneConfig(in: model)[paneId] ==
-            PaneConfigKey(theme: "Dracula", generation: 0),
+            PaneConfigKey(theme: "Dracula"),
             "set theme keys the pane")
 
         update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
@@ -3122,53 +3122,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         #expect(
             desiredPaneConfig(in: model)[paneId] ==
-            PaneConfigKey(theme: "Purplepeter", generation: 0),
+            PaneConfigKey(theme: "Purplepeter"),
             "effective theme prefers remote override")
-    }
-
-    @Test("desiredPaneConfig: ghosttyConfigReloaded changes every pane generation")
-    func desiredPaneConfigReloadBumpsGeneration() {
-        // Intent: ghosttyConfigReloaded bumps every live pane's generation.
-        // Why it exists: pins the reload-propagation rule that drives
-        //   per-pane config refreshes after a global Ghostty reload.
-        // Scenario: spec-first reload -- two themed panes + one
-        //   unthemed; reload increments both themed generations and
-        //   keeps the unthemed pane absent.
-        var model = makeModel()
-        createTab(&model)
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .setPaneTheme(paneId: firstPaneId, themeName: "Dracula"))
-        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let firstTabPaneIds = Set(desiredPaneConfig(in: model).keys)
-        createTab(&model)
-        let unthemedPaneId = selectedTab(in: model)!.focusedPaneId
-        let allPaneIds = firstTabPaneIds.union([unthemedPaneId])
-
-        let before = desiredPaneConfig(in: model)
-        #expect(Set(before.keys) == allPaneIds)
-        #expect(before[unthemedPaneId]?.theme == "Monokai Remastered")
-
-        update(&model, .ghosttyConfigReloaded)
-        let after = desiredPaneConfig(in: model)
-        #expect(Set(after.keys) == allPaneIds)
-        for paneId in allPaneIds {
-            #expect(after[paneId]?.generation == (before[paneId]?.generation ?? -1) + 1)
-            #expect(after[paneId]?.theme == before[paneId]?.theme)
-        }
-    }
-
-    @Test("ghosttyConfigReloaded increments generation and returns no commands")
-    func ghosttyConfigReloadedIncrementsGenerationNoCommands() {
-        // Intent: ghosttyConfigReloaded bumps model.ghosttyConfigGeneration
-        //   and emits no commands.
-        // Why it exists: pins the bare state mutation against silent
-        //   side-effect leakage.
-        // Scenario: spec-first generation bump.
-        var model = makeModel()
-        let commands = update(&model, .ghosttyConfigReloaded)
-
-        #expect(model.ghosttyConfigGeneration == 1)
-        #expect(commands.count == 0)
     }
 
     // MARK: - desiredSidebar (sidebar projection, Stage 5)

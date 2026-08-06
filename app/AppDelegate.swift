@@ -10,7 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     nonisolated static let minSidebarWidth: CGFloat = 200
 
     var window: NSWindow!
-    var terminalBackend: (any TerminalBackend)!
+    var terminalBackend: SwiftTerminalBackend!
     var runtime: AppRuntime!
     var sidebarView: SidebarView!
     var contentArea: NSView!
@@ -32,7 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // NSApplicationDelegate: finish bootstrapping the terminal backend, main
     // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        terminalBackend = makeSwiftTerminalBackend()
+        terminalBackend = SwiftTerminalBackend()
         guard terminalBackend.isReady else {
             print("Failed to create terminal backend")
             NSApp.terminate(nil)
@@ -140,9 +140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // overwrites any stale lock from a previous crash, so there's no window
         // where a startup crash would lose the lock.
         writeSessionLockFile()
-
-        // Start periodic enriched checkpoints (scrollback capture)
-        runtime.startEnrichedCheckpointTimer()
 
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()
@@ -264,9 +261,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
         appMenu.addItem(withTitle: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: "")
-        let openGhosttyItem = NSMenuItem(title: "Open Ghostty Config", action: #selector(openGhosttyConfig(_:)), keyEquivalent: ",")
-        openGhosttyItem.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(openGhosttyItem)
         let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)
@@ -577,12 +571,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.openDanTermConfig()
     }
 
-    @objc func openGhosttyConfig(_ sender: Any?) {
-        guard let path = terminalBackend.configFilePath else { return }
-        ensureFileExists(atPath: path, seed: nil)
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
-    }
-
     @objc func reloadConfig(_ sender: Any?) {
         runtime.reloadAllConfig()
     }
@@ -766,11 +754,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime?.syncPaneVisibility()
     }
 
-    // NSWindowDelegate: window screen changes alter the display link each
-    // session should sync against.
+    // NSWindowDelegate: a window moved to another screen may have a different
+    // backing scale, which every session's renderer has to pick up.
     func windowDidChangeScreen(_ notification: Notification) {
         guard notification.object is NSWindow else { return }
-        runtime?.syncSessionDisplayID()
+        runtime?.refreshSessionsForScreenChange()
     }
 
     // MARK: - App Lifecycle

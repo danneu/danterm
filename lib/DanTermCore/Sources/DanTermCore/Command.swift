@@ -57,7 +57,6 @@ enum Command {
     case showCloseTabsConfirmation(tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)
     case terminate
     case activateApp
-    case setAppFocus(Bool)
     case dismissAlertsPopover
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
@@ -104,7 +103,7 @@ extension Command {
              .focusSession, .exportState, .ipcReply, .ipcError,
              .readPaneText, .dumpPaneTape, .followPaneTape, .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
-             .setAppFocus, .dismissAlertsPopover,
+             .dismissAlertsPopover,
              .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,

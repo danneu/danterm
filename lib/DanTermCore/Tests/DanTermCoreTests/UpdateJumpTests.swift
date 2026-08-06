@@ -3,8 +3,7 @@
 // + active-cycle clear), jumpModeKeyPressed (mapped target selects + mode
 // clear, already-selected no-op, unmapped no-op, stale-target no-op),
 // jumpModeCanceled (clear without changing selection), and the
-// appResignedActive jump-mode side effect (clears mode + still emits
-// setAppFocus(false)).
+// appResignedActive jump-mode side effect (clears mode).
 import Foundation
 import Testing
 
@@ -146,30 +145,17 @@ import Testing
 
     @Test("appResignedActive clears jump mode")
     func appResignedActiveClearsJumpMode() {
-        // Intent: appResignedActive while jump mode is active clears it
-        //   and still emits setAppFocus(false).
+        // Intent: appResignedActive while jump mode is active clears it and still
+        //   records the app as inactive.
         // Why it exists: pins the lifecycle integration.
         // Scenario: spec-first lifecycle clear.
         let (m0, ids) = Self.buildModelWithTabs(2)
         var model = m0
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let commands = update(&model, .appResignedActive)
+        _ = update(&model, .appResignedActive)
 
         #expect(model.jumpMode == nil)
-        #expect(hasEffect(commands) { if case .setAppFocus(false) = $0 { return true }; return false })
-    }
-
-    @Test("appResignedActive without jump mode still defocuses")
-    func appResignedActiveWithoutJumpModeStillDefocuses() {
-        // Intent: without jump mode active, appResignedActive still
-        //   emits setAppFocus(false).
-        // Why it exists: pins the unconditional defocus path.
-        // Scenario: spec-first plain defocus.
-        var model = makeModel()
-
-        let commands = update(&model, .appResignedActive)
-
-        #expect(hasEffect(commands) { if case .setAppFocus(false) = $0 { return true }; return false })
+        #expect(model.isAppActive == false)
     }
 }

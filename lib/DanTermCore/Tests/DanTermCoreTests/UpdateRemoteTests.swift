@@ -311,8 +311,7 @@ import Testing
 
         #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
             theme: "Dracula",
-            fontSize: 18,
-            generation: 0
+            fontSize: 18
         ))
     }
 

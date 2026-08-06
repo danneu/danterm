@@ -12,7 +12,6 @@ import Foundation
     func importState(_ sender: Any?)
     func exportState(_ sender: Any?)
     func openDanTermConfig(_ sender: Any?)
-    func openGhosttyConfig(_ sender: Any?)
     func reloadConfig(_ sender: Any?)
     func installDantermInPath(_ sender: Any?)
 }
@@ -26,7 +25,6 @@ enum MenuCommandPolicy {
         #selector(WindowIndependentMenuActions.importState(_:)),
         #selector(WindowIndependentMenuActions.exportState(_:)),
         #selector(WindowIndependentMenuActions.openDanTermConfig(_:)),
-        #selector(WindowIndependentMenuActions.openGhosttyConfig(_:)),
         #selector(WindowIndependentMenuActions.reloadConfig(_:)),
         #selector(WindowIndependentMenuActions.installDantermInPath(_:)),
     ]

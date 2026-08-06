@@ -97,8 +97,7 @@ import Testing
         let paneId = selectedTab(in: model)!.focusedPaneId
         #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
             theme: "Monokai Remastered",
-            fontSize: 13,
-            generation: 0
+            fontSize: 13
         ))
     }
 

@@ -1,4 +1,4 @@
-// Pins the backend-neutral terminal event vocabulary and its exhaustive
+// Pins the backend-neutral pane-session event vocabulary and its exhaustive
 // translation into DanTerm messages.
 import Foundation
 import Testing
@@ -85,31 +85,6 @@ struct TerminalBackendBoundaryTests {
         }
     }
 
-    @Test("backend events translate to the complete process-scoped Msg vocabulary")
-    func backendEventsTranslateToMessages() {
-        // Intent: backend reload, preference-change, and quit events translate to
-        //   the existing process-scoped messages.
-        // Why it exists: keeps backend callbacks out of AppRuntime while preserving
-        //   the exact model/update entry points the Ghostty adapter used directly.
-        // Scenario: spec-first app-level callback contract.
-        let prefs = GhosttyPrefs(theme: "Dracula", fontSize: "14")
-
-        if case .ghosttyConfigReloaded = terminalMessage(for: TerminalBackendEvent.configReloaded) {
-        } else {
-            Issue.record("configReloaded translated to the wrong Msg")
-        }
-        if case .ghosttyPrefsRefreshed(let translated) = terminalMessage(
-            for: TerminalBackendEvent.configChanged(prefs: prefs, scrollbarEnabled: false)
-        ) {
-            #expect(translated == prefs)
-        } else {
-            Issue.record("configChanged translated to the wrong Msg")
-        }
-        if case .requestQuit = terminalMessage(for: TerminalBackendEvent.quitRequested) {
-        } else {
-            Issue.record("quitRequested translated to the wrong Msg")
-        }
-    }
 }
 
 private func assertSessionMessage(

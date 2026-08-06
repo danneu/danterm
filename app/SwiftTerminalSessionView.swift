@@ -566,9 +566,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         controller.setVisible(visible)
     }
 
-    func setDisplayID(_ displayID: UInt32) {}
-    func setScrollbarEnabled(_ enabled: Bool) {}
-
     func refreshBackingProperties() {
         synchronizeGeometry()
     }

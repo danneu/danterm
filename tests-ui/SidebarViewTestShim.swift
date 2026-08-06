@@ -66,8 +66,6 @@ class TerminalView: NSView, TerminalSession {
     func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
     func setFocused(_ focused: Bool) {}
     func setVisible(_ visible: Bool) {}
-    func setDisplayID(_ displayID: UInt32) {}
-    func setScrollbarEnabled(_ enabled: Bool) {}
     func refreshBackingProperties() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
@@ -80,6 +78,8 @@ class TerminalView: NSView, TerminalSession {
     func readViewportText() -> String? { nil }
     func readFullHistoryText() -> String? { nil }
     func readPrimaryHistoryText() -> String? { nil }
+    func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }
+    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}

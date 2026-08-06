@@ -7,8 +7,8 @@
 // remoteTheme, do NOT mutate committed config), reset operations, prefSave
 // (one whole-document transaction, remote-theme propagation to live panes,
 // theme + font-size ownership, and invalid font-size handling),
-// ghosttyPrefsRefreshed (committed-snapshot sync + draft reset), configLoaded
-// while open (resets only DanTerm fields), and the no-op-when-draft-nil guards
+// configLoaded while open (resets only DanTerm fields), and the
+// no-op-when-draft-nil guards
 // + helper functions (resolveRemoteTheme / isDraftDirty). The eight
 // `guard let projection = ... else { throw }` unwraps convert to `try #require`.
 import Foundation
@@ -565,41 +565,6 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
             if case .saveDanTermConfig = $0 { return true }
             return false
         }, "should not save invalid font-size")
-    }
-
-    // MARK: - ghosttyPrefsRefreshed
-
-    @Test("ghosttyPrefsRefreshed updates committed snapshot and resets draft")
-    func ghosttyPrefsRefreshedUpdatesCommittedResetsDraft() {
-        // Intent: ghosttyPrefsRefreshed updates committedGhosttyPrefs and
-        //   resets the draft's Ghostty fields to the new committed.
-        // Why it exists: pins the external-refresh syncing.
-        // Scenario: spec-first refresh sync.
-        var model = makeModel()
-        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
-        _ = update(&model, .prefSetTheme("Solarized"))
-        #expect(model.preferencesDraft?.theme == "Solarized")
-
-        let newPrefs = GhosttyPrefs(theme: "Monokai", fontSize: "16")
-        let commands = update(&model, .ghosttyPrefsRefreshed(newPrefs))
-        #expect(model.committedGhosttyPrefs == newPrefs)
-        #expect(model.preferencesDraft?.theme == "Monokai", "draft should reset to new committed")
-        #expect(model.preferencesDraft?.fontSize == "16", "draft should reset to new committed")
-        #expect(commands.count == 0)
-    }
-
-    @Test("ghosttyPrefsRefreshed with no draft open just updates committed")
-    func ghosttyPrefsRefreshedWithNoDraftJustUpdatesCommitted() {
-        // Intent: refresh with no draft open updates only the committed
-        //   snapshot.
-        // Why it exists: pins the no-draft branch.
-        // Scenario: spec-first closed refresh.
-        var model = makeModel()
-        let prefs = GhosttyPrefs(theme: "Dracula", fontSize: "14")
-        let commands = update(&model, .ghosttyPrefsRefreshed(prefs))
-        #expect(model.committedGhosttyPrefs == prefs)
-        #expect(model.preferencesDraft == nil, "draft should remain nil")
-        #expect(commands.count == 0, "no sync needed when panel not open")
     }
 
     // MARK: - External reload

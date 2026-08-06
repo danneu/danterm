@@ -554,8 +554,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // assigns either one, so panes can never render a stale family (I4).
         model.resolvedFontFamily = resolvedFontFamily
         // Reset draft to match new config if panel is open.
-        // Reset DanTerm draft fields to match new config; preserve Ghostty fields
-        // (ghosttyPrefsRefreshed handles those separately after CONFIG_CHANGE).
         if model.preferencesDraft != nil {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
@@ -578,10 +576,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .fontFamilyResolved(let resolvedFontFamily):
         model.resolvedFontFamily = resolvedFontFamily
-        return []
-
-    case .ghosttyConfigReloaded:
-        model.ghosttyConfigGeneration += 1
         return []
 
     // MARK: - Preferences Panel
@@ -655,14 +649,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .prefResetFontFamily:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.fontFamily = model.config.fontFamily
-        return []
-
-    case .ghosttyPrefsRefreshed(let ghostty):
-        model.committedGhosttyPrefs = ghostty
-        if model.preferencesDraft != nil {
-            model.preferencesDraft!.theme = ghostty.theme
-            model.preferencesDraft!.fontSize = ghostty.fontSize
-        }
         return []
 
     case .prefSave:
@@ -837,14 +823,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
            let focusedPaneId = selectedTab(in: model)?.focusedPaneId {
             markAlertsReadForPane(focusedPaneId, in: &model)
         }
-        return [.setAppFocus(true)]
+        return []
 
     case .appResignedActive:
         model.isAppActive = false
         if model.jumpMode != nil {
             model.jumpMode = nil   // jump badges clear via reconcileSidebar
         }
-        return [.setAppFocus(false)]
+        return []
 
     case .requestQuit:
         return emitTerminateConfirmation(&model)

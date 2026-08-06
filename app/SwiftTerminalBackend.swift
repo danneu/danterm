@@ -9,15 +9,9 @@ import TerminalCoreRecording
 #endif
 import TerminalPaneSession
 
-/// Constructs the Swift engine adapter selected by DANTERM_TERMINAL_BACKEND=swift.
-@MainActor
-func makeSwiftTerminalBackend() -> any TerminalBackend {
-    SwiftTerminalBackend()
-}
-
 /// Owns process-level Swift terminal launch and teardown policy outside the Elm runtime.
 @MainActor
-final class SwiftTerminalBackend: TerminalBackend {
+final class SwiftTerminalBackend {
     private let bundle: Bundle
     private let bootstrapExecutable: String
     private let recordsFlightTape: Bool
@@ -26,15 +20,10 @@ final class SwiftTerminalBackend: TerminalBackend {
     #endif
     private let activeHosts = TerminalPaneTerminationRegistry()
 
-    var onEvent: ((TerminalBackendEvent) -> Void)?
+    /// Whether the bundled PTY bootstrap helper is present; nothing can launch without it.
     var isReady: Bool {
         FileManager.default.isExecutableFile(atPath: bootstrapExecutable)
     }
-    var preferences: GhosttyPrefs {
-        GhosttyPrefs(theme: nil, fontSize: nil)
-    }
-    var configFilePath: String? { nil }
-    var recoveryScheduling: TerminalRecoveryScheduling { .eventDriven }
 
     init(bundle: Bundle = .main) {
         self.bundle = bundle
@@ -54,6 +43,7 @@ final class SwiftTerminalBackend: TerminalBackend {
         #endif
     }
 
+    /// Builds one pane's terminal session, or nil when the child process cannot start.
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)? {
         let theme = request.themeName.flatMap(ThemeCatalog.shared.renderTheme(named:)) ?? .dark
         let launchRequest = TerminalPaneLaunchRequest(
@@ -112,9 +102,7 @@ final class SwiftTerminalBackend: TerminalBackend {
         #endif
     }
 
-    func setAppFocused(_ focused: Bool) {}
-    func reloadConfig() {}
-
+    /// Runs the bounded process teardown after the final checkpoint is captured.
     func terminateForApplicationExit() {
         activeHosts.requestShutdownAndWait()
     }

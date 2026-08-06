@@ -120,7 +120,6 @@ enum Msg {
     // missing. A full configLoaded would also reset the draft, discarding text
     // the panel deliberately keeps on screen (an invalid font size).
     case fontFamilyResolved(String?)
-    case ghosttyConfigReloaded
 
     // Preferences panel
     // The installed-family catalog is injected for the same reason the font
@@ -140,7 +139,6 @@ enum Msg {
     case prefResetFontSize
     case prefResetFontFamily
     case prefSave
-    case ghosttyPrefsRefreshed(GhosttyPrefs)
 
     // Lifecycle
     case appBecameActive

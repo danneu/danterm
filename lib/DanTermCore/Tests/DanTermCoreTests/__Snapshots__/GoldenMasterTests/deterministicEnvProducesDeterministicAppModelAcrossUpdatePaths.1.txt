@@ -139,6 +139,5 @@ AppModel(
   ],
   mruCycle: nil,
   jumpMode: nil,
-  pendingConfirmation: nil,
-  ghosttyConfigGeneration: 0
+  pendingConfirmation: nil
 )

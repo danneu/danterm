@@ -299,26 +299,22 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
 }
 
 /// Per-pane terminal config render the reconciler diffs and pushes to the session.
-/// Every live pane is keyed because the JSON defaults always resolve both values;
-/// generation still lets legacy-backend config reloads force a fresh application.
+/// Every live pane is keyed because the JSON defaults always resolve both values.
 struct PaneConfigKey: Equatable {
   let theme: String
   let fontSize: Double
   /// The verified-installed family, or nil for the system monospace font. Never
   /// the raw name from config: only a resolved family may reach rendering (I3).
   let fontFamily: String?
-  let generation: Int
 
   init(
     theme: String,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
-    fontFamily: String? = nil,
-    generation: Int
+    fontFamily: String? = nil
   ) {
     self.theme = theme
     self.fontSize = fontSize
     self.fontFamily = fontFamily
-    self.generation = generation
   }
 }
 
@@ -330,8 +326,7 @@ func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
     result[pane.id] = PaneConfigKey(
       theme: effectiveTheme(for: pane, config: model.config),
       fontSize: model.config.resolvedFontSize,
-      fontFamily: model.resolvedFontFamily,
-      generation: model.ghosttyConfigGeneration
+      fontFamily: model.resolvedFontFamily
     )
   }
   return result
