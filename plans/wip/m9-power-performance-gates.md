@@ -64,13 +64,35 @@ measurements are preserved in
 
 ## Owner decisions required
 
-### OD1 -- sleep scope
+### OD1 -- sleep scope -- DECIDED 2026-08-06: system sleep only
 
-Choose whether the lifecycle scheduling contract covers system sleep/wake only,
-or both system and screen sleep/wake. The same headless policy can serve either
-scope, but the AppKit notification inputs and required real-system evidence
-differ. This decision must also make doc 13's currently ambiguous "sleep/wake"
-wording explicit.
+The lifecycle scheduling contract covers system sleep/wake only:
+`NSWorkspaceWillSleepNotification` and `NSWorkspaceDidWakeNotification`. Screen
+sleep is excluded, and doc 13's ambiguous "sleep/wake" is reworded to say system
+sleep, carrying the reason below so the exclusion reads as deliberate rather
+than as an oversight a later reader should "fix".
+
+Screen sleep is excluded because occlusion already covers it. A standalone
+AppKit probe run on 2026-08-06 observed, in order: `screensDidSleep` at 3.91s,
+`didChangeOcclusionState -> OCCLUDED` at 3.96s, and an independent 1 Hz poll
+confirming `OCCLUDED` at 4.12s -- so the display sleeping really does clear
+`NSWindow.OcclusionState.visible`, and not merely as a notification-only
+artifact. DanTerm already closes that loop in production:
+`AppDelegate#windowDidChangeOcclusionState` calls
+`AppRuntime#syncPaneVisibility`, which reads
+`occlusionState.contains(.visible)` and pushes `TerminalSession#setVisible`,
+which is the same input that gates `TerminalPaneSession#planIfNeeded`.
+
+Adding a screens adapter would therefore introduce a second input controlling
+the suppression occlusion already controls, with a real risk the two disagree.
+Occlusion is also strictly broader: it covers the lock screen, another app going
+fullscreen, and a fully covered window, none of which post `screensDidSleep`.
+
+Probe caveat, recorded so nobody re-derives it: the observed 2.3s gap between
+`screensDidWake` and occlusion returning to `VISIBLE` is confounded by a manual
+unlock during the run and is not a measurement of intrinsic wake latency. It
+does not bear on this decision -- a frame deferred until the pane is genuinely
+visible is what I3 requires.
 
 ### OD2 -- responsiveness scope
 
