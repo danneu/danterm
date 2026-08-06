@@ -103,9 +103,9 @@ class WorkloadSelectionTests(unittest.TestCase):
 class ScheduleTests(unittest.TestCase):
     def test_every_schedule_uses_the_frozen_fixed_pair_count(self):
         # Intent: block counts come from the frozen decision table, not from the runner.
-        # Why it exists: I2 forbids early stopping and optional peeking; the only
-        #   protection against both is that the schedule's size is fixed before any
-        #   measurement exists.
+        # Why it exists: completed comparisons forbid early stopping and optional
+        #   peeking; the only protection against both is fixing the schedule size
+        #   before any measurement exists.
         # Scenario: quick and confirm schedules are built for every workload.
         for mode, rule in VALIDATION.DECISION_RULES.items():
             for workload, workload_rule in rule["workloads"].items():
@@ -120,7 +120,7 @@ class ScheduleTests(unittest.TestCase):
     def test_every_quartet_is_position_balanced(self):
         # Intent: each group of four blocks is ABBA or BAAB, so source assignment
         #   is balanced against block order.
-        # Why it exists: I3 forbids confounding source assignment with block order;
+        # Why it exists: source assignment must not be confounded with block order;
         #   an unbalanced run would let warm-up or drift masquerade as a difference.
         # Scenario: the largest frozen schedule (confirm incremental-mixed, six
         #   pairs) is inspected quartet by quartet.
@@ -178,7 +178,7 @@ class ScheduleTests(unittest.TestCase):
     def test_the_physical_candidate_arm_is_derived_from_the_candidate_tree(self):
         # Intent: which physical slot holds the candidate is a reproducible
         #   function of the candidate's tree identity, not a constant.
-        # Why it exists: I3 forbids confounding source assignment with physical
+        # Why it exists: source assignment must not be confounded with physical
         #   position. Both arms are launched once per invocation, so the slot
         #   cannot alternate within a run; deriving it from the tree keeps the
         #   assignment reproducible, reportable, and varying across candidates.
@@ -229,7 +229,7 @@ class PairedDifferenceTests(unittest.TestCase):
     def test_pairing_reads_each_workloads_own_normalized_metric(self):
         # Intent: every workload is paired on the metric its collector normalizes,
         #   never on a raw cumulative total.
-        # Why it exists: I4 requires each workload to keep its own normalization;
+        # Why it exists: each workload must preserve its named normalization;
         #   pairing a per-draw workload on a cumulative field would compare
         #   different quantities across arms.
         # Scenario: each workload's blocks carry only its own metric key.
@@ -306,9 +306,9 @@ class FrozenDecisionTests(unittest.TestCase):
     def test_the_frozen_table_matches_the_plans_decision_contract(self):
         # Intent: the runner decides with exactly the calibrated pair counts,
         #   thresholds, and equivalence bands the plan freezes.
-        # Why it exists: AR2 makes these values machine-specific calibration
-        #   output; a drifted constant would silently invalidate every claim the
-        #   command makes without any test failing elsewhere.
+        # Why it exists: these values are calibration output for the fixed 179x66
+        #   geometry on one Mac; a drifted constant would silently invalidate every
+        #   claim the command makes without any test failing elsewhere.
         # Scenario: the frozen table in the plan is restated here and compared.
         expected = {
             "quick": (1.0, {
@@ -343,8 +343,8 @@ class FrozenDecisionTests(unittest.TestCase):
     def test_every_classification_is_reachable_for_every_mode_and_workload(self):
         # Intent: each frozen cell classifies slower, faster, equivalent, and
         #   inconclusive at the exact boundaries the plan states.
-        # Why it exists: PO2 requires the decision rule to be proven at its
-        #   boundaries rather than only in its interior, because a `>` written
+        # Why it exists: the frozen decision rule must be proven at its boundaries
+        #   rather than only in its interior, because a `>` written
         #   where the plan says "at or beyond" changes real verdicts.
         # Scenario: deterministic pair series placed exactly on each boundary.
         for mode in ("quick", "confirm"):
@@ -379,8 +379,9 @@ class FrozenDecisionTests(unittest.TestCase):
 
     def test_a_decision_requires_exactly_the_frozen_number_of_pairs(self):
         # Intent: neither a short nor a long pair series can produce a decision.
-        # Why it exists: I2 forbids early stopping and selective extension; the
-        #   fixed-N rule is only fixed if the runner refuses any other N.
+        # Why it exists: completed comparisons forbid early stopping and selective
+        #   extension; the fixed-N rule is only fixed if the runner refuses any
+        #   other N.
         # Scenario: a confirm incremental-mixed decision is attempted with five
         #   and seven pairs instead of the frozen six.
         for pair_count in (5, 7):
@@ -391,8 +392,9 @@ class FrozenDecisionTests(unittest.TestCase):
 
     def test_detected_outliers_are_reported_without_being_deleted(self):
         # Intent: an extreme pair is flagged but still counted in the estimate.
-        # Why it exists: I2 forbids silent outlier deletion -- the calibrated
-        #   error rates belong to the median of all pairs, not to a trimmed set.
+        # Why it exists: completed comparisons forbid silent outlier deletion --
+        #   the calibrated error rates belong to the median of all pairs, not to a
+        #   trimmed set.
         # Scenario: one confirm content-churn pair is wildly larger than its three
         #   siblings.
         values = [1.0, 1.0, 1.0, 50.0]
@@ -432,10 +434,9 @@ class InvalidationTests(unittest.TestCase):
     def test_an_invalid_block_at_any_position_voids_the_whole_invocation(self):
         # Intent: one invalid block anywhere in the schedule leaves the entire
         #   invocation without a decision, while keeping all of its evidence.
-        # Why it exists: I8 makes invalidation whole-invocation. Deciding from the
-        #   surviving blocks would silently change the pair count the calibrated
-        #   thresholds assume, and re-running only the bad block would reintroduce
-        #   the selective-rerun path I2 forbids.
+        # Why it exists: one invalid block invalidates the complete invocation.
+        #   Deciding from the survivors would silently change the calibrated pair
+        #   count, while re-running only the bad block would be a selective rerun.
         # Scenario: each schedule position in turn fails its machine-state check.
         workload = "incremental-mixed"
         schedule = COMPARE.make_schedule(
@@ -468,7 +469,7 @@ class InvalidationTests(unittest.TestCase):
     def test_one_invalid_workload_voids_the_other_confirm_workloads(self):
         # Intent: a confirm suite reports no decision for any workload once any
         #   single workload is invalid.
-        # Why it exists: I8 scopes invalidation to the invocation, not to the
+        # Why it exists: invalidation covers the complete invocation, not one
         #   workload; reporting the four clean workloads would let an operator
         #   harvest a decision from a run the contract already rejected.
         # Scenario: scrollback-stream is occluded while the other four are clean.
@@ -511,9 +512,9 @@ class InvalidationTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     def test_the_decision_report_is_source_oriented(self):
         # Intent: the operator-facing verdict speaks in baseline/candidate terms.
-        # Why it exists: PO1 requires the final report to stay source-oriented.
-        #   Physical arms are an internal scheduling detail; naming them in the
-        #   verdict invites the operator to read a position as a source.
+        # Why it exists: the final report must remain source-oriented. Physical
+        #   arms are an internal scheduling detail; naming them in the verdict
+        #   invites the operator to read a position as a source.
         # Scenario: a valid quick comparison is rendered.
         workload = "terminal-feed"
         schedule = COMPARE.make_schedule(
@@ -607,8 +608,8 @@ class RunComparisonTests(unittest.TestCase):
     def test_both_source_identities_are_reported_before_anything_is_built(self):
         # Intent: the operator sees exactly what each arm will contain before the
         #   command spends any time building or measuring it.
-        # Why it exists: PO1 requires both tree identities and every captured
-        #   candidate path to be reported before building, so a surprising
+        # Why it exists: both tree identities and every captured candidate path
+        #   must be reported before building, so a surprising
         #   snapshot (a stray untracked file, the wrong baseline) is caught while
         #   cancelling is still free.
         # Scenario: a quick comparison whose candidate captured two paths.
@@ -631,8 +632,8 @@ class RunComparisonTests(unittest.TestCase):
 
     def test_each_source_is_materialized_into_its_own_arm_root(self):
         # Intent: baseline and candidate never share a source or build directory.
-        # Why it exists: I1 requires each measured binary to come from its own
-        #   immutable tree; a shared root would let one arm's build products
+        # Why it exists: each measured binary must come from its intended immutable
+        #   tree; a shared root would let one arm's build products
         #   answer for the other.
         # Scenario: a quick comparison materializes both arms.
         with tempfile.TemporaryDirectory() as directory:
@@ -674,9 +675,10 @@ class RunComparisonTests(unittest.TestCase):
     def test_phase_and_total_wall_times_are_reported_separately(self):
         # Intent: snapshot, cache population, cached comparison, and total command
         #   time are each reported as their own number.
-        # Why it exists: PO8's budgets apply only to the cached comparison phase.
-        #   A single total would let a cold compile hide inside the number the
-        #   60-second and five-minute budgets are checked against.
+        # Why it exists: the under-60-second quick and under-five-minute confirm
+        #   budgets cover only the cached comparison phase. A single total would
+        #   let a cold compile hide inside the number checked against those
+        #   budgets.
         # Scenario: any completed quick comparison.
         with tempfile.TemporaryDirectory() as directory:
             result = self._run(
@@ -699,7 +701,7 @@ class RunComparisonTests(unittest.TestCase):
     def test_every_invocation_retains_its_complete_evidence_on_disk(self):
         # Intent: one artifact directory per run holds identities, schedule, raw
         #   blocks, the frozen rule, the decision, and the timings.
-        # Why it exists: I5 removes durable benchmark history, so the per-run
+        # Why it exists: no durable benchmark history exists, so the per-run
         #   artifact is the only place a decision's evidence survives; a missing
         #   field there cannot be recovered later.
         # Scenario: a completed quick comparison writes its run record.
@@ -732,9 +734,9 @@ class RunComparisonTests(unittest.TestCase):
     def test_an_invalid_block_stops_the_run_without_a_replacement_attempt(self):
         # Intent: an invalid workload ends the invocation with no decision and no
         #   second collection of anything.
-        # Why it exists: I8 forbids replacement blocks and partial continuation;
-        #   a retry loop would quietly convert an invalid run into a valid-looking
-        #   one and reintroduce the selective-rerun path.
+        # Why it exists: invalid invocations forbid replacement blocks and partial
+        #   continuation; a retry loop would quietly convert an invalid run into a
+        #   valid-looking one and reintroduce the selective-rerun path.
         # Scenario: the only scheduled workload reports an occluded window.
         with tempfile.TemporaryDirectory() as directory:
             result = self._run(
@@ -792,8 +794,8 @@ class RunComparisonTests(unittest.TestCase):
 
     def test_the_baseline_revision_is_resolved_once_for_the_whole_invocation(self):
         # Intent: a confirm run resolves its baseline a single time.
-        # Why it exists: I1 requires every workload in one invocation to compare
-        #   the same immutable pair; re-resolving mid-run would let a concurrent
+        # Why it exists: every workload in one invocation must compare the same
+        #   immutable pair; re-resolving mid-run would let a concurrent
         #   branch move redefine what "baseline" meant partway through.
         # Scenario: a five-workload confirm run counts baseline resolutions.
         resolutions = []

@@ -48,8 +48,8 @@ def make_repository(directory):
 class BaselineResolutionTests(unittest.TestCase):
     def test_baseline_must_be_named_explicitly(self):
         # Intent: the comparison commands can never invent a baseline.
-        # Why it exists: I1 requires the operator to name the baseline; inferring it
-        #   from HEAD, a merge-base, or the candidate would silently restore the
+        # Why it exists: the operator must name the baseline; inferring it from
+        #   HEAD, a merge-base, or the candidate would silently restore the
         #   history-vs-now decision the paired workflow replaces.
         # Scenario: an operator runs a comparison without passing baseline=.
         with tempfile.TemporaryDirectory() as directory:
@@ -87,9 +87,9 @@ class BaselineResolutionTests(unittest.TestCase):
 class CandidateSnapshotTests(unittest.TestCase):
     def test_candidate_captures_the_complete_working_tree(self):
         # Intent: the candidate tree is the operator's complete working state.
-        # Why it exists: I1 defines the candidate as tracked changes plus every
-        #   non-ignored untracked file. A candidate built from HEAD alone would
-        #   measure code the operator never wrote.
+        # Why it exists: the candidate is the complete working tree -- tracked
+        #   changes plus every non-ignored untracked file. A candidate built from
+        #   HEAD alone would measure code the operator never wrote.
         # Scenario: an in-progress optimization has one edited tracked file and one
         #   brand-new untracked file, alongside an ignored build directory.
         with tempfile.TemporaryDirectory() as directory:
@@ -177,8 +177,8 @@ class CandidateSnapshotTests(unittest.TestCase):
 class SourceReportTests(unittest.TestCase):
     def test_report_names_both_identities_and_every_candidate_path(self):
         # Intent: the operator sees exactly what is about to be compared.
-        # Why it exists: PO1 requires both tree identities and the captured candidate
-        #   paths to be reported before either build begins, so a stray untracked file
+        # Why it exists: both tree identities and the captured candidate paths must
+        #   be reported before either build begins, so a stray untracked file
         #   cannot silently enter a measured arm.
         # Scenario: a comparison starts against HEAD~1 with two working-tree edits.
         baseline = {
@@ -239,7 +239,7 @@ class ExportTests(unittest.TestCase):
 
     def test_export_refuses_to_write_into_the_live_checkout(self):
         # Intent: an export can never overwrite the operator's checkout.
-        # Why it exists: I6 limits benchmark commands to the files they create;
+        # Why it exists: benchmark commands own only the files they create;
         #   exporting onto the repository root would destroy uncommitted work.
         with tempfile.TemporaryDirectory() as directory:
             repository = make_repository(directory)
@@ -263,8 +263,8 @@ class CacheKeyTests(unittest.TestCase):
 
     def test_every_key_component_repopulates_instead_of_reusing(self):
         # Intent: a cache hit requires an exact match on every key component.
-        # Why it exists: PO1 forbids reusing build products across a changed source
-        #   tree, build configuration, or toolchain -- each of those changes the
+        # Why it exists: cache reuse requires an exact source tree, build
+        #   configuration, and toolchain match -- each of those changes the
         #   binary, so a stale reuse would measure the wrong code.
         # Scenario: one component changes at a time while the rest stay fixed.
         original = self.key()
@@ -286,9 +286,9 @@ class BinaryIdentityTests(unittest.TestCase):
 
     def test_a_changed_binary_fails_reverification(self):
         # Intent: a reused cache entry proves it still holds the binary it recorded.
-        # Why it exists: PO1 requires the recorded executable SHA-256 and Mach-O UUID
-        #   to be re-verified before the timed comparison, so a hand-edited or
-        #   partially rebuilt cache entry cannot silently supply the measured code.
+        # Why it exists: a reused bundle's recorded executable SHA-256 and Mach-O
+        #   UUID must be re-verified before the timed comparison, so a hand-edited
+        #   or partially rebuilt cache entry cannot silently supply the measured code.
         # Scenario: a cached arm's executable is replaced between two comparisons.
         with tempfile.TemporaryDirectory() as directory:
             binary = pathlib.Path(directory) / "DanTerm"
@@ -393,8 +393,8 @@ class ArmMaterializationTests(unittest.TestCase):
 
     def test_reuse_reverifies_the_recorded_binaries_before_measuring(self):
         # Intent: a tampered cache entry is rejected, not measured.
-        # Why it exists: PO1 requires re-verification of a reused bundle's recorded
-        #   identities before the timed comparison begins.
+        # Why it exists: a reused bundle's recorded identities must be re-verified
+        #   before the timed comparison begins.
         # Scenario: a cached arm's executable is overwritten between two runs.
         with tempfile.TemporaryDirectory() as directory:
             repository = make_repository(directory)

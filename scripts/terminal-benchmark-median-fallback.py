@@ -165,7 +165,7 @@ def tightest_threshold_clearing_false_positives(
 
 
 def cell_is_eligible(report, mode):
-    """Apply D1's fixed per-workload injected-effect gates."""
+    """Apply research/7/D1's fixed per-workload injected-effect gates."""
     rule = MODES[mode]
     effects = (report["conditions"]["positive"], report["conditions"]["negative"])
     return (

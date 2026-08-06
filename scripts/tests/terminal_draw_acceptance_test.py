@@ -76,9 +76,9 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
     def test_history_and_save_arguments_are_no_longer_accepted(self):
         # Intent: the surviving microbenchmark rejects every argument that used to
         #   route a result into durable redraw history.
-        # Why it exists: pins I5 at the operator's fingertips -- a stale
-        #   `workload=`/`save=`/`comment=`/`redraw=1` invocation must fail loudly
-        #   rather than silently degrade into an unrecorded diagnostic run.
+        # Why it exists: surviving microbenchmarks cannot form durable benchmark
+        #   history. A stale `workload=`/`save=`/`comment=`/`redraw=1` invocation
+        #   must fail loudly rather than silently degrade into an unrecorded run.
         for argument in (
             "redraw=1",
             "workload=full-screen-content-churn",
@@ -91,9 +91,9 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
     def test_report_is_diagnostic_only_and_writes_no_history(self):
         # Intent: a completed microbenchmark run prints one self-describing
         #   diagnostic report and touches no durable file.
-        # Why it exists: guards I5 at the module boundary -- the module keeps no
-        #   history path and no staging promotion, so there is nothing a future
-        #   caller could re-point at a committed JSONL.
+        # Why it exists: this diagnostic cannot form durable benchmark history.
+        #   The module keeps no history path and no staging promotion, so there is
+        #   nothing a future caller could re-point at a committed JSONL.
         batch = {
             "cumulativeDrawNanoseconds": 500_000_000,
             "drawCount": 10,

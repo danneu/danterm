@@ -1944,7 +1944,7 @@ def _counts(decisions, expected_direction):
 
 
 def evaluate_quick_cell(decisions, *, expected_direction):
-    """Apply D1's exact 60-trial quick acceptance rule."""
+    """Apply research/7/D1's exact 60-trial quick acceptance rule."""
     if len(decisions) != 60:
         raise ValueError("quick cells require exactly 60 decisions")
     if expected_direction == "aa":
