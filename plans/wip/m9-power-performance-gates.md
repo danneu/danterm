@@ -94,18 +94,20 @@ unlock during the run and is not a measurement of intrinsic wake latency. It
 does not bear on this decision -- a frame deferred until the pane is genuinely
 visible is what I3 requires.
 
-### OD2 -- responsiveness scope
+### OD2 -- responsiveness scope -- DECIDED 2026-08-06: keyboard only
 
-Choose the representative real AppKit input contract during sustained visible
-output:
+The gate covers keyboard input only. A keystroke must reach the child while a
+sustained-output producer is still running, after which the pane converges to
+the final output state with pending work bounded.
 
-- keyboard input only; or
-- keyboard plus pointer navigation.
+The gate remains ordering/liveness, not a guessed latency budget. Any test
+timeout is a hang guard, never a latency claim. A quantitative interactive-
+latency claim would require a separate calibrated metric and is not implied by
+this plan.
 
-The minimum behavioral gate is ordering/liveness, not a guessed latency budget:
-the input effect must be observed while output is still in progress, followed
-by final-state convergence. A quantitative interactive-latency claim would
-require a separate calibrated metric and is not implied by this plan.
+Pointer navigation was considered and excluded. `tests-ui` already has
+`makeScrollWheelEvent` and `makeMouseEvent`, so the exclusion is about gate
+scope rather than harness cost; see Accepted risks for what it leaves ungated.
 
 ## Decision
 
@@ -252,6 +254,16 @@ the evidence that closes each gate.
 - A behavioral responsiveness gate establishes progress and ordering, not a
   numerical upper bound on input latency. A stronger claim requires separate
   measurement and calibration.
+- **OD2's keyboard-only scope leaves the scroll route ungated.** Keyboard input
+  is a PTY write handed to the pane owner; a scroll is
+  `scrollWheel -> sendWheel -> Terminal.scroll(byRows:)`, which mutates the same
+  terminal being flooded and calls `Terminal#recordPresentationFullDamage`, so
+  it forces a full repaint while planning is already saturated. That is the
+  heavier interaction and it is not covered. The bet is that main-thread
+  starvation would surface on the keyboard route first, since both routes share
+  the main thread. Reopen if a scroll-during-flood stall is ever observed in
+  daily use -- the harness already has `makeScrollWheelEvent`, so the gate can
+  be widened without new infrastructure.
 
 ## Rejected ideas
 
