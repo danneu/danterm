@@ -16,44 +16,34 @@ struct AppRuntimeSchedulingToken: Hashable {
     fileprivate let id = UUID()
 }
 
-/// Describes whether runtime scheduling is live and how many owners remain in each category.
-struct AppRuntimeSchedulingSnapshot: Equatable {
+/// Owns cancellation and callback admission so application shutdown is terminal and observable.
+@MainActor
+final class AppRuntimeSchedulingLifecycle {
     /// Separates normal scheduling from the permanent post-termination state.
-    enum State: Equatable {
+    private enum State: Equatable {
         case active
         case shutdown
     }
 
-    let state: State
-    let ownerCounts: [AppRuntimeSchedulingCategory: Int]
-
-    static let shutdown = AppRuntimeSchedulingSnapshot(state: .shutdown, ownerCounts: [:])
-}
-
-/// Owns cancellation and callback admission so application shutdown is terminal and observable.
-@MainActor
-final class AppRuntimeSchedulingLifecycle {
     /// Couples one census entry to the mechanism that retires its concrete owner.
     private struct Owner {
         let category: AppRuntimeSchedulingCategory
         let cancel: () -> Void
     }
 
-    private var state = AppRuntimeSchedulingSnapshot.State.active
+    private var state = State.active
     private var owners: [AppRuntimeSchedulingToken: Owner] = [:]
 
-    /// Cheap hot-path gate: `snapshot` walks the owner census, so per-delivery and
-    /// per-reconcile guards read this instead.
+    /// Cheap O(1) hot-path gate; per-delivery and per-reconcile guards read this.
     var isActive: Bool { state == .active }
 
-    /// Returns a handle-free census suitable for termination assertions and diagnostics.
-    var snapshot: AppRuntimeSchedulingSnapshot {
-        AppRuntimeSchedulingSnapshot(
-            state: state,
-            ownerCounts: owners.values.reduce(into: [:]) { counts, owner in
-                counts[owner.category, default: 0] += 1
-            }
-        )
+    /// Walks every registered owner to tally a handle-free census, for termination
+    /// assertions and diagnostics. It carries no shutdown state on purpose -- hot-path
+    /// guards read `isActive` instead of paying for this walk.
+    func captureOwnerCensus() -> [AppRuntimeSchedulingCategory: Int] {
+        owners.values.reduce(into: [:]) { counts, owner in
+            counts[owner.category, default: 0] += 1
+        }
     }
 
     /// Admits one cancellable owner only while the runtime remains active.

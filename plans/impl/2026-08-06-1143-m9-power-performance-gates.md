@@ -350,8 +350,9 @@ the evidence that closes each gate.
 - [x] 2. Forward workspace lifecycle and window occlusion through AppKit
 - [x] 3. Make application-runtime shutdown terminal and observable
 - [x] 4. Gate hot-path scheduling guards on a cheap active read
-- [ ] 5. Freeze and apply the sparse-topology CPU benchmark gate
-- [ ] 6. Prove keyboard responsiveness and close the milestone evidence
+- [x] 5. Make the owner census stateless so hot-path guards cannot regress
+- [ ] 6. Freeze and apply the sparse-topology CPU benchmark gate
+- [ ] 7. Prove keyboard responsiveness and close the milestone evidence
 
 ## Implementation notes
 
@@ -364,7 +365,7 @@ the evidence that closes each gate.
 - Runtime scheduling uses one main-actor token census across six owner
   categories. Shutdown enters its terminal state before invoking cancellation,
   so queued one-shot and repeating callbacks fail closed through the same gate.
-- Shutdown guards on paths that fire at output-delivery or reconcile frequency
-  read the lifecycle's O(1) active flag, never the owner-census snapshot, whose
-  construction walks every registered owner and is reserved for termination
-  assertions and diagnostics.
+- Shutdown state is readable only through the lifecycle's O(1) active flag. The
+  owner census is a separate capture method that walks every registered owner
+  and carries no state field, so a guard on census state cannot be written --
+  the census is reserved for termination assertions and diagnostics.

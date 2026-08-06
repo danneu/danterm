@@ -511,11 +511,6 @@ class AppRuntime {
         ipcServer?.socketPath
     }
 
-    /// Exposes the shutdown state and live owner census without leaking scheduling handles.
-    var schedulingSnapshot: AppRuntimeSchedulingSnapshot {
-        schedulingLifecycle.snapshot
-    }
-
     func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
         guard schedulingLifecycle.isActive else {
             connection.close()

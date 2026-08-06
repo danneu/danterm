@@ -27,8 +27,7 @@ struct AppRuntimeSchedulingLifecycleTests {
         }
 
         #expect(lifecycle.isActive)
-        #expect(lifecycle.snapshot.state == .active)
-        #expect(lifecycle.snapshot.ownerCounts == Dictionary(
+        #expect(lifecycle.captureOwnerCensus() == Dictionary(
             uniqueKeysWithValues: AppRuntimeSchedulingCategory.allCases.map { ($0, 1) }
         ))
 
@@ -36,7 +35,7 @@ struct AppRuntimeSchedulingLifecycleTests {
         lifecycle.shutdown()
 
         #expect(lifecycle.isActive == false)
-        #expect(lifecycle.snapshot == .shutdown)
+        #expect(lifecycle.captureOwnerCensus().isEmpty)
         #expect(cancellations == Dictionary(
             uniqueKeysWithValues: AppRuntimeSchedulingCategory.allCases.map { ($0, 1) }
         ))
@@ -51,6 +50,7 @@ struct AppRuntimeSchedulingLifecycleTests {
         }
 
         #expect(effects.isEmpty)
-        #expect(lifecycle.snapshot == .shutdown)
+        #expect(lifecycle.isActive == false)
+        #expect(lifecycle.captureOwnerCensus().isEmpty)
     }
 }
