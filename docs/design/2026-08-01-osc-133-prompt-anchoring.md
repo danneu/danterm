@@ -87,6 +87,18 @@ no prompt-block stamp. The vacate remains ahead of both resize legs: during a
 combined shrink, moving the head into history first would leave the live-grid
 upward walk unable to find the block's ownership boundary.
 
+I7 assumes that no shell expects the terminal to clear the prompt on a resize
+that keeps the width the same. Three reasons make this safe. First, the clear
+was never a service to the shell: `redraw=1` gives the terminal permission to
+clear, and the shell has no way to detect whether the clear happened, so it
+cannot depend on it. Second, when the width is unchanged the prompt on screen
+is still correct -- no cell or wrap flag changed -- so the worst case is a
+shell repainting its prompt without erasing the old one, leaving a short-lived
+duplicate that reclaim deletes at the next prompt mark. Third, no shell could
+have learned to rely on the clear: mainstream terminals cleared nothing on
+resize for decades, and fish, bash, and zsh all clear their own rows on every
+SIGWINCH (F22).
+
 I1, I2, and I4 are state properties and can be checked on a terminal snapshot,
 so a universal oracle can replay every recording and check them after every
 event. I3, I5, I6, and I7 constrain mutations, and no external per-event trace
@@ -167,7 +179,9 @@ signals for ownership and repaint scope.
 
 - [OSC 133 dialect findings](../research/24-osc-133-dialect/findings.md) -- F16
   derives the vacate/reclaim protocol and output floor; F17 derives the
-  logical-line boundary and its ordering constraint.
+  logical-line boundary and its ordering constraint; F22 records the
+  height-only content loss and shows fish, bash, and zsh clearing their own
+  rows on SIGWINCH.
 - [OSC 133 dialect decisions](../research/24-osc-133-dialect/decisions.md) --
   the shell-specific `redraw=1` and `redraw=last` promises this design consumes.
 - [OSC 133 prompt redraw implementation plan](../../plans/impl/2026-07-22-1422-osc-133-prompt-redraw.md)
