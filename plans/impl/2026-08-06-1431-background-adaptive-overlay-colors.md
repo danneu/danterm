@@ -236,7 +236,7 @@ cursor's participation follow on top.
 
 ### Final benchmark pause
 
-- [ ] After implementation and tests are complete, pause before starting the PO10
+- [x] After implementation and tests are complete, pause before starting the PO10
   benchmark. Tell the user that the benchmark is ready to run so they can put the
   MacBook on AC power, leave it fully idle, and keep the benchmark window visible.
   Wait for the user's explicit confirmation, then run the benchmark against the
@@ -254,7 +254,7 @@ cursor's participation follow on top.
 
 - [x] 1. Merge selection and search into retained semantic overlay runs
 - [x] 2. Resolve overlay fills and text against each cell background
-- [ ] 3. Adapt every cursor shape and close the theme-wide contrast proof
+- [x] 3. Adapt every cursor shape and close the theme-wide contrast proof
 
 ## Implementation notes
 
@@ -267,3 +267,8 @@ cursor's participation follow on top.
 - Active matches retain the existing ochre candidate as their stable hue seed, while
   the combined state uses the former blue candidate; brightness separation, rather
   than either literal seed, now carries the semantic distinction.
+- Cursor resolution runs once after the existing row traversal and is retained with
+  undamaged rows. A separate cursor-cell lookup made calibrated `content-churn` plan
+  time 7.91% slower; the final shape measured 3.78% faster, while `style-churn` was
+  inconclusive at -1.97% and no-overlay `retained-browse` was 3.70% faster against the
+  pre-change revision.

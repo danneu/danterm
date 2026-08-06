@@ -96,15 +96,22 @@ struct SelectionRenderPlanningTests {
             foreground: theme.selectionForeground,
             theme: theme
         )
+        let selectedStyle = resolveOverlayStyle(
+            state: .selection,
+            background: theme.defaultBackground,
+            foreground: theme.selectionForeground,
+            theme: theme
+        )
+        let cursorStyle = resolveCursorStyle(background: selectedStyle.fill, theme: theme)
 
         #expect(plan.overlayRuns.first?.state == .selectionAndActiveSearchMatch)
         #expect(plan.textRuns.map(\.startColumn) == [0, 1, 2])
         #expect(plan.textRuns.map(\.foreground) == [
             combinedStyle.foreground,
-            theme.cursorText,
+            cursorStyle.foreground,
             theme.defaultForeground,
         ])
-        #expect(plan.cursor?.color == theme.cursor)
+        #expect(plan.cursor?.color == cursorStyle.fill)
     }
 
     @Test("A selection beginning mid-row splits one uniform text run in two")

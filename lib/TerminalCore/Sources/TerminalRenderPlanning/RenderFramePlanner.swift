@@ -51,6 +51,7 @@ struct RetainedFrameRows: Sendable {
     let overlays: [[RenderOverlayRun]]?
     let text: [[RenderTextRun]]
     let decorations: [[RenderDecorationRun]]
+    let cursorStyle: ResolvedCursorStyle?
 
     var rowCount: Int { background.count }
 }
@@ -79,6 +80,7 @@ private struct PlannedOverlay {
 private struct InspectedRows {
     var cells: [[PlannedCell]]
     var overlays: [[PlannedOverlay?]]?
+    var cursorStyle: ResolvedCursorStyle?
 }
 
 /// Records the cursor's normalized grid span once so both layer overrides and
@@ -87,10 +89,6 @@ private struct CursorSpan {
     let row: Int
     let column: Int
     let columnWidth: Int
-
-    func contains(row: Int, column: Int) -> Bool {
-        self.row == row && self.column..<self.column + columnWidth ~= column
-    }
 }
 
 /// Accumulates the text run currently being coalesced so extending it appends a
@@ -219,6 +217,7 @@ struct FramePlanner {
             decorations.append(decorationRuns(row: row, cells: cells.cells[row]))
         }
 
+        let cursorStyle = cells.cursorStyle ?? reusable?.cursorStyle
         let plan = RenderFramePlan(
             columns: geometry.columns,
             rows: rowCount,
@@ -233,7 +232,7 @@ struct FramePlanner {
                     column: $0.column,
                     columnWidth: $0.columnWidth,
                     shape: presentation.cursorShape,
-                    color: presentation.theme.cursor
+                    color: cursorStyle?.fill ?? presentation.theme.cursor
                 )
             }
         )
@@ -244,7 +243,8 @@ struct FramePlanner {
                 background: background,
                 overlays: overlays,
                 text: text,
-                decorations: decorations
+                decorations: decorations,
+                cursorStyle: cursorStyle
             )
         )
     }
@@ -331,7 +331,6 @@ struct FramePlanner {
                         semanticStyle: semanticStyle,
                         hovered: hovered,
                         selected: selected,
-                        cursorSpan: cursorSpan,
                         overlayState: state
                     )
                     cells.append(planned.cell)
@@ -340,16 +339,16 @@ struct FramePlanner {
             } else {
                 visit { column, scalars, semanticStyle in
                     guard column < kinds.count else { return }
-                    cells.append(plannedCell(
+                    let cell = plannedCell(
                         row: row,
                         column: column,
                         kind: kinds[column].kind,
                         scalars: scalars,
                         semanticStyle: semanticStyle,
                         hovered: hovered,
-                        selected: selected,
-                        cursorSpan: cursorSpan
-                    ))
+                        selected: selected
+                    )
+                    cells.append(cell)
                 }
             }
 
@@ -386,26 +385,51 @@ struct FramePlanner {
                         semanticStyle: TerminalStyle(),
                         hovered: hovered,
                         selected: selected,
-                        cursorSpan: cursorSpan,
                         overlayState: state
                     )
                     result[row].append(planned.cell)
                     plannedOverlays?[row].append(planned.overlay)
                 } else {
-                    result[row].append(plannedCell(
+                    let cell = plannedCell(
                         row: row,
                         column: column,
                         kind: kinds[column].kind,
                         scalars: .empty,
                         semanticStyle: TerminalStyle(),
                         hovered: hovered,
-                        selected: selected,
-                        cursorSpan: cursorSpan
-                    ))
+                        selected: selected
+                    )
+                    result[row].append(cell)
                 }
             }
         }
-        return InspectedRows(cells: result, overlays: plannedOverlays)
+        var cursorStyle: ResolvedCursorStyle?
+        if let cursorSpan,
+           replanning(cursorSpan.row),
+           result.indices.contains(cursorSpan.row),
+           result[cursorSpan.row].indices.contains(cursorSpan.column)
+        {
+            let background = plannedOverlays?[cursorSpan.row][cursorSpan.column]?.color
+                ?? result[cursorSpan.row][cursorSpan.column].style.background
+            let resolved = resolveCursorStyle(background: background, theme: presentation.theme)
+            cursorStyle = resolved
+            if presentation.cursorShape == .block {
+                let end = min(
+                    cursorSpan.column + cursorSpan.columnWidth,
+                    result[cursorSpan.row].count
+                )
+                for column in cursorSpan.column..<end {
+                    result[cursorSpan.row][column].style.foreground = resolved.foreground
+                    result[cursorSpan.row][column].style.background = resolved.fill
+                    result[cursorSpan.row][column].style.underlineColor = resolved.foreground
+                }
+            }
+        }
+        return InspectedRows(
+            cells: result,
+            overlays: plannedOverlays,
+            cursorStyle: cursorStyle
+        )
     }
 
     private func plannedCellAndOverlay(
@@ -416,7 +440,6 @@ struct FramePlanner {
         semanticStyle: TerminalStyle,
         hovered: Range<Int>?,
         selected: Range<Int>?,
-        cursorSpan: CursorSpan?,
         overlayState: RenderOverlayState?
     ) -> (cell: PlannedCell, overlay: PlannedOverlay?) {
         var cell = plannedCell(
@@ -426,8 +449,7 @@ struct FramePlanner {
             scalars: scalars,
             semanticStyle: semanticStyle,
             hovered: hovered,
-            selected: selected,
-            cursorSpan: nil
+            selected: selected
         )
         let overlay = overlayState.map { state in
             let resolved = resolveOverlayStyle(
@@ -439,13 +461,6 @@ struct FramePlanner {
             cell.style.foreground = resolved.foreground
             return PlannedOverlay(state: state, color: resolved.fill)
         }
-        if presentation.cursorShape == .block,
-           cursorSpan?.contains(row: row, column: column) == true
-        {
-            cell.style.foreground = presentation.theme.cursorText
-            cell.style.background = presentation.theme.cursor
-            cell.style.underlineColor = presentation.theme.cursorText
-        }
         return (cell, overlay)
     }
 
@@ -456,24 +471,16 @@ struct FramePlanner {
         scalars: TerminalScalars,
         semanticStyle: TerminalStyle,
         hovered: Range<Int>?,
-        selected: Range<Int>?,
-        cursorSpan: CursorSpan?
+        selected: Range<Int>?
     ) -> PlannedCell {
         var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
-        // Order is the policy: hover's underline color is the pre-selection foreground, and a
-        // block cursor overrides whatever the first two steps left behind.
+        // Order is the policy: hover's underline color is the pre-selection foreground.
         if style.underline == .none, hovered?.contains(column) == true {
             style.underline = .single
             style.underlineColor = style.foreground
         }
         if selected?.contains(column) == true {
             style.foreground = presentation.theme.selectionForeground
-        }
-        if presentation.cursorShape == .block,
-           cursorSpan?.contains(row: row, column: column) == true {
-            style.foreground = presentation.theme.cursorText
-            style.background = presentation.theme.cursor
-            style.underlineColor = presentation.theme.cursorText
         }
         return PlannedCell(kind: kind, scalars: scalars, style: style)
     }

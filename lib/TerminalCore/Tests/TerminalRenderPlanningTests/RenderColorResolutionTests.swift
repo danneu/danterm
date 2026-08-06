@@ -67,6 +67,17 @@ struct RenderColorResolutionTests {
         }
     }
 
+    @Test("Cursor fill and text separate from the color beneath the cursor")
+    func cursorStyleSeparation() throws {
+        let collision = RenderColor(red: 96, green: 96, blue: 96)
+        let theme = try makeTheme(cursor: collision, cursorText: collision)
+
+        let style = resolveCursorStyle(background: collision, theme: theme)
+
+        #expect(brightnessSeparation(style.fill, collision) >= 60)
+        #expect(brightnessSeparation(style.foreground, style.fill) >= 100)
+    }
+
     @Test("ANSI palettes accept exactly 16 entries")
     func ansiPaletteArity() throws {
         let colors: [RenderColor] = (0..<16).map { index in
@@ -231,7 +242,9 @@ struct RenderColorResolutionTests {
         ansiColors: [RenderColor] = Array(repeating: .init(red: 1, green: 2, blue: 3), count: 16),
         defaultBackground: RenderColor = .init(red: 4, green: 5, blue: 6),
         selectionBackground: RenderColor = .init(red: 7, green: 8, blue: 9),
-        selectionForeground: RenderColor = .init(red: 13, green: 14, blue: 15)
+        selectionForeground: RenderColor = .init(red: 13, green: 14, blue: 15),
+        cursor: RenderColor = .init(red: 16, green: 17, blue: 18),
+        cursorText: RenderColor = .init(red: 19, green: 20, blue: 21)
     ) throws -> RenderTheme {
         RenderTheme(
             ansiColors: try #require(RenderANSIColors(exactly: ansiColors)),
@@ -239,8 +252,8 @@ struct RenderColorResolutionTests {
             defaultBackground: defaultBackground,
             selectionForeground: selectionForeground,
             selectionBackground: selectionBackground,
-            cursor: .init(red: 16, green: 17, blue: 18),
-            cursorText: .init(red: 19, green: 20, blue: 21)
+            cursor: cursor,
+            cursorText: cursorText
         )
     }
 }

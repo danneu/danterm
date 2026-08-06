@@ -25,8 +25,15 @@ struct ResolvedOverlayStyle: Equatable, Sendable {
     let foreground: RenderColor
 }
 
+/// Carries the fill and glyph color selected for a cursor over one cell presentation.
+struct ResolvedCursorStyle: Equatable, Sendable {
+    let fill: RenderColor
+    let foreground: RenderColor
+}
+
 let overlayFillMinimumBrightnessSeparation = 40
 let overlayTextMinimumBrightnessSeparation = 100
+let cursorFillMinimumBrightnessSeparation = 60
 
 /// Maps an sRGB color to deterministic integer perceived brightness.
 func perceivedBrightness(of color: RenderColor) -> Int {
@@ -50,13 +57,20 @@ func resolveBrightnessSeparatedColor(
     else {
         return seed
     }
+    if colors.count == 1 {
+        return resolveBrightnessSeparatedColor(
+            seed: seed,
+            avoiding: colors[0],
+            minimumSeparation: minimumSeparation
+        )
+    }
 
     let seedBrightness = perceivedBrightness(of: seed)
     var best: RenderColor?
     var bestDistance = Int.max
     var bestBrightness = Int.max
     for targetBrightness in 0...255 {
-        let candidate = color(seed, movedTo: targetBrightness)
+        let candidate = colorMoved(seed, toBrightness: targetBrightness)
         guard colors.allSatisfy({
             brightnessSeparation(candidate, $0) >= minimumSeparation
         }) else {
@@ -76,6 +90,49 @@ func resolveBrightnessSeparatedColor(
     // The overlay ladder needs at most four points spaced by 40 in a 0...255
     // domain, so its progressively built avoidance set always leaves a result.
     return best!
+}
+
+private func resolveBrightnessSeparatedColor(
+    seed: RenderColor,
+    avoiding color: RenderColor,
+    minimumSeparation: Int
+) -> RenderColor {
+    let competingBrightness = perceivedBrightness(of: color)
+    var darker: RenderColor?
+    var target = competingBrightness - minimumSeparation
+    while target >= 0 {
+        let candidate = colorMoved(seed, toBrightness: target)
+        if brightnessSeparation(candidate, color) >= minimumSeparation {
+            darker = candidate
+            break
+        }
+        target -= 1
+    }
+
+    var brighter: RenderColor?
+    target = competingBrightness + minimumSeparation
+    while target <= 255 {
+        let candidate = colorMoved(seed, toBrightness: target)
+        if brightnessSeparation(candidate, color) >= minimumSeparation {
+            brighter = candidate
+            break
+        }
+        target += 1
+    }
+
+    switch (darker, brighter) {
+    case (.some(let darker), .some(let brighter)):
+        let seedBrightness = perceivedBrightness(of: seed)
+        let darkerDistance = abs(perceivedBrightness(of: darker) - seedBrightness)
+        let brighterDistance = abs(perceivedBrightness(of: brighter) - seedBrightness)
+        return darkerDistance <= brighterDistance ? darker : brighter
+    case (.some(let darker), nil):
+        return darker
+    case (nil, .some(let brighter)):
+        return brighter
+    case (nil, nil):
+        preconditionFailure("brightness separation has no result in the RGB domain")
+    }
 }
 
 /// Resolves one overlay against the cell background and every earlier semantic
@@ -124,9 +181,29 @@ private func resolvedOverlayStyle(
     )
 }
 
+/// Resolves a cursor fill against the topmost cell color and its glyph color against the fill.
+func resolveCursorStyle(
+    background: RenderColor,
+    theme: RenderTheme
+) -> ResolvedCursorStyle {
+    let fill = resolveBrightnessSeparatedColor(
+        seed: theme.cursor,
+        avoiding: [background],
+        minimumSeparation: cursorFillMinimumBrightnessSeparation
+    )
+    return ResolvedCursorStyle(
+        fill: fill,
+        foreground: resolveBrightnessSeparatedColor(
+            seed: theme.cursorText,
+            avoiding: [fill],
+            minimumSeparation: overlayTextMinimumBrightnessSeparation
+        )
+    )
+}
+
 /// Scales darker colors toward black and brighter colors toward white without
 /// floating point; component rounding stays within one stored code point.
-private func color(_ seed: RenderColor, movedTo targetBrightness: Int) -> RenderColor {
+func colorMoved(_ seed: RenderColor, toBrightness targetBrightness: Int) -> RenderColor {
     let sourceBrightness = perceivedBrightness(of: seed)
     guard targetBrightness != sourceBrightness else { return seed }
     if targetBrightness < sourceBrightness {

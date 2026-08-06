@@ -431,6 +431,74 @@ struct RenderFramePlanningTests {
         }
     }
 
+    @Test("Every cursor shape adapts over every colliding cell state")
+    func cursorShapesAdaptOverEveryCellState() throws {
+        let background = RenderColor(red: 96, green: 96, blue: 96)
+        let states: [RenderOverlayState?] = [
+            nil,
+            .selection,
+            .activeSearchMatch,
+            .selectionAndActiveSearchMatch,
+        ]
+
+        for state in states {
+            let seedTheme = try cursorCollisionTheme(
+                background: background,
+                cursor: background,
+                cursorText: background
+            )
+            let overlay = state.map {
+                resolveOverlayStyle(
+                    state: $0,
+                    background: background,
+                    foreground: seedTheme.selectionForeground,
+                    theme: seedTheme
+                )
+            }
+            let theme = try cursorCollisionTheme(
+                background: background,
+                cursor: overlay?.fill ?? background,
+                cursorText: overlay?.fill ?? background
+            )
+
+            for shape in [TerminalCursorShape.block, .underline, .bar] {
+                var terminal = try #require(Terminal(columns: 2, rows: 1))
+                feed("\u{1B}[38;2;96;96;96;48;2;96;96;96mA\u{1B}[1;1H", to: &terminal)
+                if state == .selection || state == .selectionAndActiveSearchMatch {
+                    terminal.setSelection(.init(
+                        start: .init(row: 0, column: 0),
+                        end: .init(row: 0, column: 1)
+                    ))
+                }
+                if state == .activeSearchMatch || state == .selectionAndActiveSearchMatch {
+                    let found = terminal.beginSearch("A")
+                    try #require(found)
+                }
+
+                let plan = planFrame(
+                    for: terminal,
+                    presentation: .init(theme: theme, isCursorVisible: true, cursorShape: shape)
+                )
+                let cursor = try #require(plan.cursor)
+                let topColor: RenderColor
+                if let state {
+                    let plannedOverlay = try #require(plan.overlayRuns.first)
+                    #expect(plannedOverlay.state == state)
+                    topColor = plannedOverlay.color
+                } else {
+                    #expect(plan.overlayRuns.isEmpty)
+                    topColor = background
+                }
+
+                #expect(brightnessSeparation(cursor.color, topColor) >= 60)
+                if shape == .block {
+                    let text = try #require(plan.textRuns.first)
+                    #expect(brightnessSeparation(text.foreground, cursor.color) >= 100)
+                }
+            }
+        }
+    }
+
     @Test("Every cursor shape shares wide-head and wide-tail snapping")
     func cursorShapeWideCellSnapping() throws {
         for shape in [TerminalCursorShape.block, .underline, .bar] {
@@ -541,6 +609,23 @@ struct RenderFramePlanningTests {
         #expect(plan.textRuns.flatMap(\.cells).allSatisfy { $0.scalars.isEmpty == false })
         #expect(plan.textRuns.flatMap(\.cells).count == 2)
     }
+}
+
+private func cursorCollisionTheme(
+    background: RenderColor,
+    cursor: RenderColor,
+    cursorText: RenderColor
+) throws -> RenderTheme {
+    let palette = try #require(RenderANSIColors(exactly: Array(repeating: background, count: 16)))
+    return RenderTheme(
+        ansiColors: palette,
+        defaultForeground: background,
+        defaultBackground: background,
+        selectionForeground: background,
+        selectionBackground: background,
+        cursor: cursor,
+        cursorText: cursorText
+    )
 }
 
 private func feed(_ text: String, to terminal: inout Terminal) {

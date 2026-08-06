@@ -68,8 +68,10 @@ struct SelectionExecutionTests {
         #expect(matched.contains(Pixel(combinedText.foreground)))
 
         let cursor = bitmap.pixels(in: cellRect(row: 0, column: 1, metrics: metrics))
-        #expect(cursor.contains(Pixel(theme.cursor)))
-        #expect(cursor.contains(Pixel(theme.cursorText)))
+        let cursorPlan = try #require(plan.cursor)
+        let cursorText = try #require(plan.textRuns.first { $0.startColumn == 1 })
+        #expect(cursor.contains(Pixel(cursorPlan.color)))
+        #expect(cursor.contains(Pixel(cursorText.foreground)))
         #expect(cursor.contains(Pixel(theme.selectionBackground)) == false)
     }
 
