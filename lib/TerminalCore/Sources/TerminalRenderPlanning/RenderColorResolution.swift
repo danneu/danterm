@@ -135,21 +135,25 @@ private func resolveBrightnessSeparatedColor(
     }
 }
 
-/// Resolves one overlay against the cell background and every earlier semantic
-/// state so the fill ladder stays pairwise distinguishable.
-func resolveOverlayStyle(
+/// Resolves one overlay fill against the cell background and every earlier
+/// semantic state so the fill ladder stays pairwise distinguishable.
+///
+/// Split from the glyph push because the two vary at different granularities:
+/// a fill is fixed by the fragment it covers, while the push follows each run's
+/// own foreground. The planner resolves one per fragment and the other per run,
+/// so anything that folds them back together reintroduces per-cell resolution.
+func resolveOverlayFill(
     state: RenderOverlayState,
     background: RenderColor,
-    foreground: RenderColor,
     theme: RenderTheme
-) -> ResolvedOverlayStyle {
+) -> RenderColor {
     let selection = resolveBrightnessSeparatedColor(
         seed: theme.selectionBackground,
         avoiding: [background],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
     if state == .selection {
-        return resolvedOverlayStyle(fill: selection, foreground: foreground)
+        return selection
     }
     let match = resolveBrightnessSeparatedColor(
         seed: theme.searchMatchBackground,
@@ -157,27 +161,36 @@ func resolveOverlayStyle(
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
     if state == .activeSearchMatch {
-        return resolvedOverlayStyle(fill: match, foreground: foreground)
+        return match
     }
-    let combined = resolveBrightnessSeparatedColor(
+    return resolveBrightnessSeparatedColor(
         seed: RenderColor(red: 80, green: 127, blue: 235),
         avoiding: [background, selection, match],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
-    return resolvedOverlayStyle(fill: combined, foreground: foreground)
 }
 
-private func resolvedOverlayStyle(
-    fill: RenderColor,
-    foreground: RenderColor
+/// Moves one glyph color clear of the overlay fill it will be drawn over.
+func overlayForeground(_ foreground: RenderColor, over fill: RenderColor) -> RenderColor {
+    resolveBrightnessSeparatedColor(
+        seed: foreground,
+        avoiding: [fill],
+        minimumSeparation: overlayTextMinimumBrightnessSeparation
+    )
+}
+
+/// Pairs the two halves above for callers holding a single cell's presentation,
+/// which is the form every overlay proof states its expectations in.
+func resolveOverlayStyle(
+    state: RenderOverlayState,
+    background: RenderColor,
+    foreground: RenderColor,
+    theme: RenderTheme
 ) -> ResolvedOverlayStyle {
+    let fill = resolveOverlayFill(state: state, background: background, theme: theme)
     return ResolvedOverlayStyle(
         fill: fill,
-        foreground: resolveBrightnessSeparatedColor(
-            seed: foreground,
-            avoiding: [fill],
-            minimumSeparation: overlayTextMinimumBrightnessSeparation
-        )
+        foreground: overlayForeground(foreground, over: fill)
     )
 }
 

@@ -70,17 +70,101 @@ private struct PlannedCell {
     var style: ResolvedCellStyle
 }
 
-/// Keeps an overlay's semantic identity and resolved fill together before coalescing.
-private struct PlannedOverlay {
+/// One maximal span of a row sharing an overlay state and the fill resolved for it.
+///
+/// The colorize step's unit of work, and the reason overlay resolution costs what
+/// the plan carries rather than what the row is wide: a fill is a function of
+/// (state, background, theme) alone, so it is resolved once here and reused by
+/// every layer the fragment covers.
+private struct OverlayFragment {
+    let columns: Range<Int>
     let state: RenderOverlayState
-    let color: RenderColor
+    let fill: RenderColor
 }
 
-/// Keeps optional overlays beside, rather than inside, the hot cell payload.
-private struct InspectedRows {
-    var cells: [[PlannedCell]]
-    var overlays: [[PlannedOverlay?]]?
-    var cursorStyle: ResolvedCursorStyle?
+/// One span of a row whose glyph colors must be pushed clear of an overlay fill.
+///
+/// The fragments minus the block cursor's span: the cursor bakes its own colors
+/// into the cells it covers and outranks the push there, while the overlay run
+/// still covers it unbroken.
+private struct OverlayPush {
+    let columns: Range<Int>
+    let fill: RenderColor
+
+    /// Removes the cursor's columns, keeping whatever push survives on each side.
+    func excluding(_ span: Range<Int>) -> [OverlayPush] {
+        guard columns.overlaps(span) else { return [self] }
+        var result: [OverlayPush] = []
+        if columns.lowerBound < span.lowerBound {
+            result.append(OverlayPush(columns: columns.lowerBound..<span.lowerBound, fill: fill))
+        }
+        if span.upperBound < columns.upperBound {
+            result.append(OverlayPush(columns: span.upperBound..<columns.upperBound, fill: fill))
+        }
+        return result
+    }
+}
+
+/// Walks a row's push spans in step with an ascending column scan, so asking for
+/// the fill over a column stays a bounded index bump rather than a search.
+private struct OverlayPushCursor {
+    private let pushes: [OverlayPush]
+    private var index = 0
+
+    init(_ pushes: [OverlayPush]) {
+        self.pushes = pushes
+    }
+
+    mutating func fill(at column: Int) -> RenderColor? {
+        while index < pushes.count, pushes[index].columns.upperBound <= column {
+            index += 1
+        }
+        guard index < pushes.count, pushes[index].columns.contains(column) else { return nil }
+        return pushes[index].fill
+    }
+}
+
+/// Splits one row's selection and match spans into non-overlapping segments, one
+/// per distinct overlay state, in ascending column order.
+///
+/// Replaces the per-column state classification the traversal used to do: the two
+/// inputs are contiguous ranges, so their partition has at most three pieces
+/// however wide the row is.
+private func overlayStateSegments(
+    selected: Range<Int>?,
+    matched: Range<Int>?
+) -> [(columns: Range<Int>, state: RenderOverlayState)] {
+    switch (selected, matched) {
+    case (nil, nil):
+        return []
+    case let (selection?, nil):
+        return [(selection, .selection)]
+    case let (nil, match?):
+        return [(match, .activeSearchMatch)]
+    case let (selection?, match?):
+        let lower = max(selection.lowerBound, match.lowerBound)
+        let upper = min(selection.upperBound, match.upperBound)
+        guard lower < upper else {
+            return selection.lowerBound < match.lowerBound
+                ? [(selection, .selection), (match, .activeSearchMatch)]
+                : [(match, .activeSearchMatch), (selection, .selection)]
+        }
+        var result: [(columns: Range<Int>, state: RenderOverlayState)] = []
+        if selection.lowerBound != match.lowerBound {
+            result.append((
+                min(selection.lowerBound, match.lowerBound)..<lower,
+                selection.lowerBound < match.lowerBound ? .selection : .activeSearchMatch
+            ))
+        }
+        result.append((lower..<upper, .selectionAndActiveSearchMatch))
+        if selection.upperBound != match.upperBound {
+            result.append((
+                upper..<max(selection.upperBound, match.upperBound),
+                selection.upperBound > match.upperBound ? .selection : .activeSearchMatch
+            ))
+        }
+        return result
+    }
 }
 
 /// Records the cursor's normalized grid span once so both layer overrides and
@@ -109,24 +193,59 @@ private struct OpenTextRun {
     private(set) var width: Int
 
     init(startColumn: Int, cell: RenderTextCell, style: ResolvedCellStyle) {
+        self.init(
+            startColumn: startColumn,
+            cells: [cell],
+            foreground: style.foreground,
+            bold: style.bold,
+            italic: style.italic
+        )
+    }
+
+    init(
+        startColumn: Int,
+        cells: [RenderTextCell],
+        foreground: RenderColor,
+        bold: Bool,
+        italic: Bool
+    ) {
         self.startColumn = startColumn
-        foreground = style.foreground
-        bold = style.bold
-        italic = style.italic
-        cells = [cell]
-        width = cell.columnWidth
+        self.foreground = foreground
+        self.bold = bold
+        self.italic = italic
+        self.cells = cells
+        width = cells.reduce(0) { $0 + $1.columnWidth }
     }
 
     func continues(at column: Int, style: ResolvedCellStyle) -> Bool {
+        continues(
+            at: column,
+            foreground: style.foreground,
+            bold: style.bold,
+            italic: style.italic
+        )
+    }
+
+    func continues(
+        at column: Int,
+        foreground: RenderColor,
+        bold: Bool,
+        italic: Bool
+    ) -> Bool {
         column == startColumn + width
-            && style.foreground == foreground
-            && style.bold == bold
-            && style.italic == italic
+            && foreground == self.foreground
+            && bold == self.bold
+            && italic == self.italic
     }
 
     mutating func extend(with cell: RenderTextCell) {
         cells.append(cell)
         width += cell.columnWidth
+    }
+
+    mutating func extend(with appended: [RenderTextCell]) {
+        cells.append(contentsOf: appended)
+        width += appended.reduce(0) { $0 + $1.columnWidth }
     }
 
     func finished(row: Int) -> RenderTextRun {
@@ -187,17 +306,19 @@ struct FramePlanner {
         // One traversal for every replanned row rather than one per row: retained history is
         // addressed once and carried forward, which is the contract `31/I7` states and the
         // mechanism `research/31/D3` Decision 1 rule 2 requires of a frame.
-        let cells = inspectedCells(
+        let selectionRange = terminal.selectionRange
+        let searchMatchRange = terminal.activeSearchMatchRange
+        var cells = inspectedCells(
             rowCount: rowCount,
             replanning: { reusable == nil || damage.rows.contains($0) },
             geometry: geometry,
-            cursorSpan: cursorSpan,
-            selectionRange: terminal.selectionRange,
-            activeSearchMatchRange: terminal.activeSearchMatchRange
+            selectionRange: selectionRange
         )
+        let overlaysActive = selectionRange != nil || searchMatchRange != nil
         var overlays: [[RenderOverlayRun]]? =
-            if cells.overlays != nil || reusable?.overlays != nil { [] } else { nil }
+            if overlaysActive || reusable?.overlays != nil { [] } else { nil }
         overlays?.reserveCapacity(rowCount)
+        var cursorStyle: ResolvedCursorStyle?
         for row in 0..<rowCount {
             if let reusable, damage.rows.contains(row) == false {
                 background.append(reusable.background[row])
@@ -206,18 +327,51 @@ struct FramePlanner {
                 decorations.append(reusable.decorations[row])
                 continue
             }
-            background.append(backgroundRuns(row: row, cells: cells.cells[row]))
-            if overlays != nil {
-                overlays?.append(overlayRuns(
-                    row: row,
-                    overlays: cells.overlays?[row] ?? []
-                ))
+            // Colorize before the cursor rewrite, so every fill resolves against the cell's own
+            // background rather than the one the cursor is about to bake into its span.
+            let fragments = overlayFragments(
+                cells: cells[row],
+                selected: columns(for: selectionRange, row: row, columns: geometry.columns),
+                matched: columns(for: searchMatchRange, row: row, columns: geometry.columns)
+            )
+            var pushes = fragments.map { OverlayPush(columns: $0.columns, fill: $0.fill) }
+            if let cursorSpan, cursorSpan.row == row,
+               cells[row].indices.contains(cursorSpan.column)
+            {
+                let beneath = fragments.first { $0.columns.contains(cursorSpan.column) }?.fill
+                    ?? cells[row][cursorSpan.column].style.background
+                let resolved = resolveCursorStyle(background: beneath, theme: presentation.theme)
+                cursorStyle = resolved
+                if presentation.cursorShape == .block {
+                    let span = cursorSpan.column
+                        ..< min(cursorSpan.column + cursorSpan.columnWidth, cells[row].count)
+                    for column in span {
+                        cells[row][column].style.foreground = resolved.foreground
+                        cells[row][column].style.background = resolved.fill
+                        cells[row][column].style.underlineColor = resolved.foreground
+                    }
+                    pushes = pushes.flatMap { $0.excluding(span) }
+                }
             }
-            text.append(textRuns(row: row, cells: cells.cells[row]))
-            decorations.append(decorationRuns(row: row, cells: cells.cells[row]))
+            background.append(backgroundRuns(row: row, cells: cells[row]))
+            overlays?.append(fragments.map {
+                RenderOverlayRun(
+                    row: row,
+                    startColumn: $0.columns.lowerBound,
+                    columnCount: $0.columns.count,
+                    state: $0.state,
+                    color: $0.fill
+                )
+            })
+            text.append(colorized(textRuns(row: row, cells: cells[row]), row: row, pushes: pushes))
+            decorations.append(colorized(
+                decorationRuns(row: row, cells: cells[row]),
+                row: row,
+                pushes: pushes
+            ))
         }
 
-        let cursorStyle = cells.cursorStyle ?? reusable?.cursorStyle
+        let resolvedCursorStyle = cursorStyle ?? reusable?.cursorStyle
         let plan = RenderFramePlan(
             columns: geometry.columns,
             rows: rowCount,
@@ -232,7 +386,7 @@ struct FramePlanner {
                     column: $0.column,
                     columnWidth: $0.columnWidth,
                     shape: presentation.cursorShape,
-                    color: cursorStyle?.fill ?? presentation.theme.cursor
+                    color: resolvedCursorStyle?.fill ?? presentation.theme.cursor
                 )
             }
         )
@@ -244,7 +398,7 @@ struct FramePlanner {
                 overlays: overlays,
                 text: text,
                 decorations: decorations,
-                cursorStyle: cursorStyle
+                cursorStyle: resolvedCursorStyle
             )
         )
     }
@@ -282,10 +436,8 @@ struct FramePlanner {
         rowCount: Int,
         replanning: (Int) -> Bool,
         geometry: TerminalGeometry,
-        cursorSpan: CursorSpan?,
-        selectionRange: TerminalTextRange?,
-        activeSearchMatchRange: TerminalTextRange?
-    ) -> InspectedRows {
+        selectionRange: TerminalTextRange?
+    ) -> [[PlannedCell]] {
         // Every row-scoped lookup is hoisted deliberately, and staying hoisted is what the
         // row-scoped traversal is for. `terminal.cell(row:column:)` re-resolved the viewport row
         // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
@@ -295,65 +447,30 @@ struct FramePlanner {
         // so a retain/release pair per cell, and the two overlay spans -- and
         // `research/31/F13` measured the result at 60% of the browsing regression.
         // `forEachViewportRow` hands the row out first precisely so all three can be `let`s of
-        // this closure's own frame again, which is what the per-row spelling had.
+        // this closure's own frame again, which is what the per-row spelling had. The overlay
+        // spans are gone from here entirely now: colorize resolves them per row, so this pass
+        // carries only the selection foreground override, which is not an overlay color.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
-        var plannedOverlays: [[PlannedOverlay?]]? =
-            if selectionRange != nil || activeSearchMatchRange != nil {
-                [[PlannedOverlay?]](repeating: [], count: rowCount)
-            } else {
-                nil
-            }
         terminal.forEachViewportRow(rows: 0..<rowCount, where: replanning) { row, visit in
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
             let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
-            let matched = columns(
-                for: activeSearchMatchRange,
-                row: row,
-                columns: geometry.columns
-            )
             var cells: [PlannedCell] = []
             cells.reserveCapacity(kinds.count)
-            var states: [PlannedOverlay?] = []
-            if plannedOverlays != nil {
-                states.reserveCapacity(kinds.count)
+            visit { column, scalars, semanticStyle in
+                guard column < kinds.count else { return }
+                let cell = plannedCell(
+                    row: row,
+                    column: column,
+                    kind: kinds[column].kind,
+                    scalars: scalars,
+                    semanticStyle: semanticStyle,
+                    hovered: hovered,
+                    selected: selected
+                )
+                cells.append(cell)
             }
-
-            if plannedOverlays != nil {
-                visit { column, scalars, semanticStyle in
-                    guard column < kinds.count else { return }
-                    let state = overlayState(column: column, selected: selected, matched: matched)
-                    let planned = plannedCellAndOverlay(
-                        row: row,
-                        column: column,
-                        kind: kinds[column].kind,
-                        scalars: scalars,
-                        semanticStyle: semanticStyle,
-                        hovered: hovered,
-                        selected: selected,
-                        overlayState: state
-                    )
-                    cells.append(planned.cell)
-                    states.append(planned.overlay)
-                }
-            } else {
-                visit { column, scalars, semanticStyle in
-                    guard column < kinds.count else { return }
-                    let cell = plannedCell(
-                        row: row,
-                        column: column,
-                        kind: kinds[column].kind,
-                        scalars: scalars,
-                        semanticStyle: semanticStyle,
-                        hovered: hovered,
-                        selected: selected
-                    )
-                    cells.append(cell)
-                }
-            }
-
             result[row] = cells
-            plannedOverlays?[row] = states
         }
 
         // The single padding site for columns the terminal row does not cover: they keep the
@@ -368,100 +485,21 @@ struct FramePlanner {
             let kinds = geometry.rows[row].cells
             let hovered = hoveredColumns(row: row, columns: geometry.columns)
             let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
-            let matched = columns(
-                for: activeSearchMatchRange,
-                row: row,
-                columns: geometry.columns
-            )
             while result[row].count < kinds.count {
                 let column = result[row].count
-                if plannedOverlays != nil {
-                    let state = overlayState(column: column, selected: selected, matched: matched)
-                    let planned = plannedCellAndOverlay(
-                        row: row,
-                        column: column,
-                        kind: kinds[column].kind,
-                        scalars: .empty,
-                        semanticStyle: TerminalStyle(),
-                        hovered: hovered,
-                        selected: selected,
-                        overlayState: state
-                    )
-                    result[row].append(planned.cell)
-                    plannedOverlays?[row].append(planned.overlay)
-                } else {
-                    let cell = plannedCell(
-                        row: row,
-                        column: column,
-                        kind: kinds[column].kind,
-                        scalars: .empty,
-                        semanticStyle: TerminalStyle(),
-                        hovered: hovered,
-                        selected: selected
-                    )
-                    result[row].append(cell)
-                }
-            }
-        }
-        var cursorStyle: ResolvedCursorStyle?
-        if let cursorSpan,
-           replanning(cursorSpan.row),
-           result.indices.contains(cursorSpan.row),
-           result[cursorSpan.row].indices.contains(cursorSpan.column)
-        {
-            let background = plannedOverlays?[cursorSpan.row][cursorSpan.column]?.color
-                ?? result[cursorSpan.row][cursorSpan.column].style.background
-            let resolved = resolveCursorStyle(background: background, theme: presentation.theme)
-            cursorStyle = resolved
-            if presentation.cursorShape == .block {
-                let end = min(
-                    cursorSpan.column + cursorSpan.columnWidth,
-                    result[cursorSpan.row].count
+                let cell = plannedCell(
+                    row: row,
+                    column: column,
+                    kind: kinds[column].kind,
+                    scalars: .empty,
+                    semanticStyle: TerminalStyle(),
+                    hovered: hovered,
+                    selected: selected
                 )
-                for column in cursorSpan.column..<end {
-                    result[cursorSpan.row][column].style.foreground = resolved.foreground
-                    result[cursorSpan.row][column].style.background = resolved.fill
-                    result[cursorSpan.row][column].style.underlineColor = resolved.foreground
-                }
+                result[row].append(cell)
             }
         }
-        return InspectedRows(
-            cells: result,
-            overlays: plannedOverlays,
-            cursorStyle: cursorStyle
-        )
-    }
-
-    private func plannedCellAndOverlay(
-        row: Int,
-        column: Int,
-        kind: TerminalCellKind,
-        scalars: TerminalScalars,
-        semanticStyle: TerminalStyle,
-        hovered: Range<Int>?,
-        selected: Range<Int>?,
-        overlayState: RenderOverlayState?
-    ) -> (cell: PlannedCell, overlay: PlannedOverlay?) {
-        var cell = plannedCell(
-            row: row,
-            column: column,
-            kind: kind,
-            scalars: scalars,
-            semanticStyle: semanticStyle,
-            hovered: hovered,
-            selected: selected
-        )
-        let overlay = overlayState.map { state in
-            let resolved = resolveOverlayStyle(
-                state: state,
-                background: cell.style.background,
-                foreground: cell.style.foreground,
-                theme: presentation.theme
-            )
-            cell.style.foreground = resolved.foreground
-            return PlannedOverlay(state: state, color: resolved.fill)
-        }
-        return (cell, overlay)
+        return result
     }
 
     private func plannedCell(
@@ -485,20 +523,208 @@ struct FramePlanner {
         return PlannedCell(kind: kind, scalars: scalars, style: style)
     }
 
-    private func overlayState(
-        column: Int,
+    /// Partitions one row into overlay state segments, intersects them with the
+    /// row's background partition, and resolves each resulting fragment's fill once.
+    ///
+    /// This is the whole colorize step's reason for existing. Both inputs vary at
+    /// run granularity -- state comes from two contiguous column ranges, fill from
+    /// the background beneath -- so the resolver runs once per distinct
+    /// (state, background) span and never once per column.
+    private func overlayFragments(
+        cells: [PlannedCell],
         selected: Range<Int>?,
         matched: Range<Int>?
-    ) -> RenderOverlayState? {
-        switch (
-            selected?.contains(column) == true,
-            matched?.contains(column) == true
-        ) {
-        case (true, true): .selectionAndActiveSearchMatch
-        case (true, false): .selection
-        case (false, true): .activeSearchMatch
-        case (false, false): nil
+    ) -> [OverlayFragment] {
+        var result: [OverlayFragment] = []
+
+        // Coalescing here rather than in a later pass: two fragments split by a
+        // background transition can still resolve to one fill, and `I4` requires
+        // the overlay layer to be maximal over the colors it actually carries.
+        func append(_ columns: Range<Int>, _ state: RenderOverlayState, _ background: RenderColor) {
+            let fill = resolveOverlayFill(
+                state: state,
+                background: background,
+                theme: presentation.theme
+            )
+            if let last = result.last,
+               last.state == state,
+               last.fill == fill,
+               last.columns.upperBound == columns.lowerBound
+            {
+                result[result.count - 1] = OverlayFragment(
+                    columns: last.columns.lowerBound..<columns.upperBound,
+                    state: state,
+                    fill: fill
+                )
+                return
+            }
+            result.append(OverlayFragment(columns: columns, state: state, fill: fill))
         }
+
+        for segment in overlayStateSegments(selected: selected, matched: matched) {
+            let lower = max(segment.columns.lowerBound, 0)
+            let upper = min(segment.columns.upperBound, cells.count)
+            guard lower < upper else { continue }
+            var start = lower
+            var background = cells[lower].style.background
+            for column in (lower + 1)..<upper {
+                let color = cells[column].style.background
+                guard color != background else { continue }
+                append(start..<column, segment.state, background)
+                start = column
+                background = color
+            }
+            append(start..<upper, segment.state, background)
+        }
+        return result
+    }
+
+    /// Rewrites the text runs the pushes cover, splitting a run only where the
+    /// fill beneath its cells changes and re-coalescing every piece.
+    ///
+    /// Splitting first is what keeps the push proportional to the plan: a piece
+    /// has one base foreground and one fill, so it costs one resolution however
+    /// many columns it spans. Re-coalescing then restores `I4` across both kinds
+    /// of seam a split leaves -- fragment boundaries, and neighbors whose distinct
+    /// base foregrounds were pushed onto the same color.
+    private func colorized(
+        _ runs: [RenderTextRun],
+        row: Int,
+        pushes: [OverlayPush]
+    ) -> [RenderTextRun] {
+        guard pushes.isEmpty == false else { return runs }
+        var result: [RenderTextRun] = []
+        var open: OpenTextRun?
+        var cursor = OverlayPushCursor(pushes)
+
+        for run in runs {
+            var pieceStart = run.startColumn
+            var pieceCells: [RenderTextCell] = []
+            var pieceFill: RenderColor?
+            var column = run.startColumn
+
+            func flushPiece() {
+                guard pieceCells.isEmpty == false else { return }
+                let foreground = pieceFill.map { overlayForeground(run.foreground, over: $0) }
+                    ?? run.foreground
+                if open?.continues(
+                    at: pieceStart,
+                    foreground: foreground,
+                    bold: run.bold,
+                    italic: run.italic
+                ) == true {
+                    open?.extend(with: pieceCells)
+                } else {
+                    if let open { result.append(open.finished(row: row)) }
+                    open = OpenTextRun(
+                        startColumn: pieceStart,
+                        cells: pieceCells,
+                        foreground: foreground,
+                        bold: run.bold,
+                        italic: run.italic
+                    )
+                }
+                pieceCells.removeAll(keepingCapacity: true)
+            }
+
+            // Attribution follows the cell's start column, so a wide glyph takes
+            // the fill over its head and never splits between head and tail.
+            for cell in run.cells {
+                let fill = cursor.fill(at: column)
+                if pieceCells.isEmpty == false, fill != pieceFill {
+                    flushPiece()
+                    pieceStart = column
+                }
+                pieceFill = fill
+                pieceCells.append(cell)
+                column += cell.columnWidth
+            }
+            flushPiece()
+        }
+        if let open { result.append(open.finished(row: row)) }
+        return result
+    }
+
+    /// Rewrites the decoration runs the pushes cover, per column and per piece.
+    private func colorized(
+        _ runs: [RenderDecorationRun],
+        row: Int,
+        pushes: [OverlayPush]
+    ) -> [RenderDecorationRun] {
+        guard pushes.isEmpty == false else { return runs }
+        var result: [RenderDecorationRun] = []
+        var current: RenderDecorationRun?
+        var cursor = OverlayPushCursor(pushes)
+
+        func append(_ piece: RenderDecorationRun) {
+            if let run = current,
+               piece.startColumn == run.startColumn + run.columnCount,
+               piece.kinds == run.kinds,
+               piece.color == run.color,
+               piece.strikethroughColor == run.strikethroughColor
+            {
+                current = RenderDecorationRun(
+                    row: row,
+                    startColumn: run.startColumn,
+                    columnCount: run.columnCount + piece.columnCount,
+                    kinds: run.kinds,
+                    color: run.color,
+                    strikethroughColor: run.strikethroughColor
+                )
+                return
+            }
+            if let current { result.append(current) }
+            current = piece
+        }
+
+        for run in runs {
+            let end = run.startColumn + run.columnCount
+            var pieceStart = run.startColumn
+            var pieceFill = cursor.fill(at: run.startColumn)
+            for column in (run.startColumn + 1)..<end {
+                let fill = cursor.fill(at: column)
+                guard fill != pieceFill else { continue }
+                append(pushed(run, columns: pieceStart..<column, over: pieceFill))
+                pieceStart = column
+                pieceFill = fill
+            }
+            append(pushed(run, columns: pieceStart..<end, over: pieceFill))
+        }
+        if let current { result.append(current) }
+        return result
+    }
+
+    /// Recolors one slice of a decoration run for the fill beneath it.
+    ///
+    /// Only the strikethrough color always moves: `color` is the underline's own
+    /// color whenever an underline is drawn, and that never came from the pushed
+    /// foreground. The two agree exactly when there is no underline, so a piece
+    /// costs one resolution either way.
+    private func pushed(
+        _ run: RenderDecorationRun,
+        columns: Range<Int>,
+        over fill: RenderColor?
+    ) -> RenderDecorationRun {
+        guard let fill else {
+            return RenderDecorationRun(
+                row: run.row,
+                startColumn: columns.lowerBound,
+                columnCount: columns.count,
+                kinds: run.kinds,
+                color: run.color,
+                strikethroughColor: run.strikethroughColor
+            )
+        }
+        let strikethroughColor = overlayForeground(run.strikethroughColor, over: fill)
+        let underlined = run.kinds.contains { $0 != .strikethrough }
+        return RenderDecorationRun(
+            row: run.row,
+            startColumn: columns.lowerBound,
+            columnCount: columns.count,
+            kinds: run.kinds,
+            color: underlined ? run.color : strikethroughColor,
+            strikethroughColor: strikethroughColor
+        )
     }
 
     /// The hovered-link span for one row, resolved once instead of per column.
@@ -527,65 +753,6 @@ struct FramePlanner {
         let clampedEnd = min(max(end, 0), columns)
         guard clampedStart < clampedEnd else { return nil }
         return clampedStart..<clampedEnd
-    }
-
-    private func overlayRuns(
-        row: Int,
-        overlays: [PlannedOverlay?]
-    ) -> [RenderOverlayRun] {
-        var result: [RenderOverlayRun] = []
-        var startColumn: Int?
-        var state: RenderOverlayState?
-        var color: RenderColor?
-
-        for (column, overlay) in overlays.enumerated() {
-            let cellState = overlay?.state
-            let cellColor = overlay?.color
-            if cellState != state || cellColor != color {
-                appendOverlayRun(
-                    row: row,
-                    endColumn: column,
-                    startColumn: &startColumn,
-                    state: &state,
-                    color: &color,
-                    to: &result
-                )
-                startColumn = cellState == nil ? nil : column
-                state = cellState
-                color = cellColor
-            }
-        }
-        appendOverlayRun(
-            row: row,
-            endColumn: overlays.count,
-            startColumn: &startColumn,
-            state: &state,
-            color: &color,
-            to: &result
-        )
-        return result
-    }
-
-    private func appendOverlayRun(
-        row: Int,
-        endColumn: Int,
-        startColumn: inout Int?,
-        state: inout RenderOverlayState?,
-        color: inout RenderColor?,
-        to result: inout [RenderOverlayRun]
-    ) {
-        if let startColumn, let state, let color {
-            result.append(RenderOverlayRun(
-                row: row,
-                startColumn: startColumn,
-                columnCount: endColumn - startColumn,
-                state: state,
-                color: color
-            ))
-        }
-        startColumn = nil
-        state = nil
-        color = nil
     }
 
     private func backgroundRuns(row: Int, cells: [PlannedCell]) -> [RenderBackgroundRun] {
