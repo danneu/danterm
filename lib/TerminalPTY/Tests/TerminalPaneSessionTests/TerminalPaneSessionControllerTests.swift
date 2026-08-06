@@ -1730,6 +1730,31 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("empty Select All enables Copy without projecting history", .timeLimit(.minutes(1)))
+    func emptySelectAllHasSelectionIsConstantCost() async throws {
+        // Intent: session menu validation reads selection presence, including an intentionally
+        //   empty selection, without serializing retained text.
+        // Why it exists: menu validation shares the main-thread fence path with pointer input;
+        //   a whole-history walk here can freeze the pane even though only a boolean is needed.
+        // Scenario: a blank sleeping pane receives Select All and asks whether Copy is enabled.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+
+        controller.selectAll()
+        controller.synchronizeState()
+        let materializations = WholeProjectionCounter.measure {
+            #expect(controller.hasSelection)
+        }
+
+        #expect(controller.readSelectedText() == "")
+        #expect(materializations == 0)
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("controller search enqueues report status on the main actor", .timeLimit(.minutes(1)))
     func controllerSearchReportsStatus() async throws {
         // Intent: the controller's search wrappers reach the owner and hop the owner's

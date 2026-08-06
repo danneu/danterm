@@ -2359,6 +2359,11 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Exposes selection provenance so equivalence tests read the engine's real decision.
+    var selectionRequiresNonemptyReflowResultForTesting: Bool {
+        selectionRequiresNonemptyReflowResult
+    }
+
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
         guard isAlternateScreenActive else { return primaryHistoryText }
@@ -2620,7 +2625,7 @@ public struct Terminal: Equatable, Sendable {
             start: anchor(before: ordered.0),
             end: anchor(after: ordered.1)
         )
-        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
+        selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
     }
 
@@ -2634,7 +2639,7 @@ public struct Terminal: Equatable, Sendable {
             start: normalizedSelectionBoundary(ordered.0, isEnd: false),
             end: normalizedSelectionBoundary(ordered.1, isEnd: true)
         )
-        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
+        selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
     }
 
@@ -2652,7 +2657,7 @@ public struct Terminal: Equatable, Sendable {
             let anchor = TextAnchor(row: evictedRowCount, column: 0)
             selection = TextAnchorRange(start: anchor, end: anchor)
         }
-        selectionRequiresNonemptyReflowResult = selectedText?.isEmpty == false
+        selectionRequiresNonemptyReflowResult = units.contains { $0.scalars.isEmpty == false }
         recordDamage(since: before)
     }
 
@@ -3366,6 +3371,7 @@ public struct Terminal: Equatable, Sendable {
     /// locates a display row per access, which is right for a point query and quadratic-ish for
     /// all of history.
     private func activeProjectionRows() -> [GridRow] {
+        WholeProjectionCounter.record()
         var stream = history.allPaintedDisplayRows()
         if let last = stream.indices.last {
             if isAlternateScreenActive {
@@ -3483,6 +3489,53 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         return result
+    }
+
+    /// Reports whether the current selection contains any unit the full projection emits.
+    ///
+    /// Selection creation is a pointer-move path, so this reads only the selected rows through
+    /// `ProjectionRows`. Locating the final emitted row may scan the trailing blank tail; that
+    /// is the same degenerate accepted by the other point-local projection queries.
+    private func selectionContainsProjectedText() -> Bool {
+        guard let selection else { return false }
+        let stream = activeProjection()
+        guard let lastContentRow = stream.lastIndex(where: rowContainsContent) else { return false }
+        let firstRow = max(0, selection.start.row - evictedRowCount)
+        let lastRow = min(lastContentRow, selection.end.row - evictedRowCount)
+        guard firstRow <= lastRow else { return false }
+
+        for rowIndex in firstRow...lastRow {
+            let row = stream[rowIndex]
+            var containsText = false
+            forEachRowTextUnit(
+                in: row,
+                rowIndex: rowIndex,
+                absoluteBase: evictedRowCount
+            ) { unit in
+                if unit.scalars.isEmpty == false,
+                   unit.start >= selection.start,
+                   unit.end <= selection.end {
+                    containsText = true
+                }
+            }
+            if containsText { return true }
+
+            guard row.isSoftWrapped == false, rowIndex < lastContentRow else { continue }
+            let boundary = ProjectionUnit(
+                scalars: ["\n"],
+                start: TextAnchor(
+                    row: evictedRowCount + rowIndex,
+                    column: projectedCellEnd(in: row)
+                ),
+                end: TextAnchor(row: evictedRowCount + rowIndex + 1, column: 0),
+                isHardBoundary: true
+            )
+            if boundary.start >= selection.start,
+               boundary.end <= selection.end {
+                return true
+            }
+        }
+        return false
     }
 
     /// Pins a just-computed range so a caller can hold it across appends, scrolls, and

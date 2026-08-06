@@ -99,6 +99,32 @@ enum ProjectionRowCounter {
     }
 }
 
+/// Counts complete active-projection materializations so point-local selection reads can prove
+/// they do not scale with retained history depth.
+enum WholeProjectionCounter {
+    /// The tally one `measure` is collecting.
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records one complete active-projection materialization.
+    @inline(__always)
+    static func record() {
+        active?.count += 1
+    }
+
+    /// Runs `body` and reports the complete projections materialized inside it.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///

@@ -644,9 +644,9 @@ public final class TerminalPaneSessionController {
         cachedTerminal.fullHistoryText
     }
 
-    /// Reflects whether the latest consumed terminal snapshot contains selected text.
+    /// Reflects whether the latest consumed terminal snapshot has a selection.
     public var hasSelection: Bool {
-        cachedTerminal.selectedText != nil
+        cachedTerminal.selectionRange != nil
     }
 
     /// Returns selection from the latest asynchronously consumed terminal snapshot.
