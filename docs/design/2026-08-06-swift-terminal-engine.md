@@ -23,6 +23,11 @@ status and leaving stale wording behind:
 - Contradicting a `live` row is a decision change and amends this document in
   the same commit as the code.
 - A `spent` row is never revived. It describes a world that no longer exists.
+- A row that never bound anything -- a truism, or a restatement of another row --
+  is removed rather than amended, and the removal commit says what subsumes it.
+  **Ids are never renumbered**, because code and other documents cite them, so
+  removal leaves a gap. A gap means "removed as non-binding", not "never
+  considered": check git history before re-proposing an idea whose id is missing.
 
 ## Context
 
@@ -74,7 +79,8 @@ The decisions below are the engine's acceptance standard. Cite one as
 Status values:
 
 - **live** -- binding on the code; this document is its owner
-- **elsewhere** -- binding, but another document owns it; this row is a pointer
+- **elsewhere** -- binding, but another document or row owns it; this row is a
+  pointer
 - **spent** -- true as history, describes a world that no longer exists
 - **deferred** -- a decision *not* to do something for now
 - **rejected** -- an alternative considered and declined
@@ -86,13 +92,12 @@ Status values:
 | A1 | The engine is a DanTerm component for macOS, not a general-purpose or cross-platform terminal framework, and not a reusable public API. | live |
 | A2 | The compatibility target is a finite, priority-ordered list: zsh/bash/fish, ssh, tmux, vim/neovim, fzf, more/less, btop/htop, lazygit, Claude Code, Codex. | live |
 | A3 | Apple frameworks are allowed without justification; a third-party dependency is admitted only when its benefit outweighs its release, security, maintenance, and integration cost. | live |
-| A4 | Existing terminal implementations inform design and serve as test references, but none is normative. | live |
+| A4 | Existing terminal implementations inform design and serve as test references, but none is normative. Protocol specifications and the DanTerm contract decide intended behavior; reference emulator output is evidence, not authority. Accepted risk: differential testing can reproduce a reference's bugs. | live |
 | A5 | The supported terminal contract is finite and documented; unsupported legacy behavior is not silently treated as a future requirement. | live |
 | A6 | Product behavior outside the terminal surface -- tabs, groups, splits, alerts, persistence, IPC -- stays owned by DanTerm and unchanged by the backend swap. | live |
 | A7 | A pane that cannot create its terminal process fails through DanTerm's existing pane lifecycle rather than leaving a ghost pane. | live |
 | A8 | Accepted risk: the initial support matrix is narrower than mature emulators, on the grounds that explicit compatibility can grow from measured need. | live |
 | A9 | Out of scope: bidirectional/RTL layout, terminal image protocols, VoiceOver, ligatures, and preserving or reconnecting to child processes across restart. | deferred |
-| A10 | Out of scope: complete emulation of every historical DEC, xterm, or vendor extension. | live |
 
 ### B. Architecture and ownership
 
@@ -112,7 +117,6 @@ Status values:
 | B12 | Rejected: immutable copying of the screen or scrollback after every transition. | rejected |
 | B13 | Rejected: routing terminal bytes or cell mutations through DanTerm `Msg` values. | rejected |
 | B14 | Rejected: concurrency inside the terminal semantics reducer. | rejected |
-| B15 | Rejected: a protocol or mock wrapper around every system call. | rejected |
 
 ### C. Terminal core semantics
 
@@ -177,7 +181,6 @@ Status values:
 | F10 | DanTerm does not preserve or reconnect to child processes across a restart; a restart creates new processes and may replay saved scrollback. | live |
 | F11 | Background and occluded panes continue consuming PTY output even when they do not render it. | live |
 | F12 | Accepted risk: after an abrupt crash, macOS closes the PTY master and ordinary hangup applies, but no in-process escalation can run, so a hangup-resistant background process may be reparented and survive. Accepted to keep session supervision outside the product. | live |
-| F13 | Out of scope: cross-platform PTY APIs. | live |
 | F14 | Rejected: a process broker, daemon, or session-survival service. | rejected |
 
 ### G. Input and interaction
@@ -238,7 +241,7 @@ Status values:
 | I12 | BEL emits DanTerm's existing pane-scoped bell event. **The engine never plays an audible bell.** A transient visual bell is permitted for the focused pane because that pane's normal alert is suppressed while the app is active. | live |
 | I13 | Inside tmux, the inner terminal identity remains tmux's responsibility; DanTerm implements the outer capabilities tmux consumes. | live |
 | I14 | Rejected: an initial `TERM=danterm` -- remote hosts would need a custom terminfo entry before ordinary applications could rely on it. | rejected |
-| I15 | Rejected: Ghostty terminal identity or protocol compatibility as a goal, and encoding private shell directives as terminal titles. | rejected |
+| I15 | Rejected: Ghostty terminal identity or protocol compatibility as a goal. | rejected |
 
 ### J. Per-pane resource and security policy
 
@@ -254,7 +257,7 @@ Status values:
 | J8 | In UTF-8 input mode, OSC, DCS, APC, PM, and SOS payloads own every encoded byte from `0x80` through `0x9f`; raw C1 values never transition or terminate an active string. OSC terminates on BEL or 7-bit ST; the other four families terminate only on 7-bit ST. CAN and SUB cancel every control string. An ESC followed by any byte other than `\` cancels the string without OSC dispatch and restarts escape recognition from that ESC. | live |
 | J9 | **DanTerm does not support 8-bit ST, raw C1 introducers, or S8C1T mode.** Raw C1 bytes in ground remain malformed UTF-8. | live |
 | J10 | Semantic consumers validate their own fields atomically: malformed OSC 8 URI bytes and malformed decoded OSC 52 text apply nothing, while malformed OSC 8 parameter bytes may discard the optional ID without invalidating a valid URI. | live |
-| J11 | Terminal output cannot activate file URLs or custom URL handlers through an OSC 8 target, remote output cannot read the system clipboard, paste cannot inject disallowed control sequences, and a remote application receives no broader host authority than the protocol policy grants. | live |
+| J11 | Terminal output carries no host authority of its own. A byte stream -- local, tmux, or remote -- can act on the host only through an affordance a decision here grants explicitly, and every such grant states its own bound. A new protocol that would let output reach the filesystem, the clipboard, another application, or the network is a decision this register must make before it is implemented, not a capability inherited from the sequence being supported. | live |
 
 ### K. Testing and conformance
 
@@ -262,16 +265,14 @@ Status values:
 |---|---|---|
 | K1 | "Fully tested" means every behavior in the declared support matrix has a deterministic behavioral proof **at the lowest appropriate layer**, with integration and real-application evidence for the seams between layers. | live |
 | K2 | TDD is the development rule: a new supported behavior begins with a test that fails for the expected reason. | elsewhere -- [AGENTS.md](../../AGENTS.md) |
-| K3 | Tests assert observable behavior and architecture boundaries, never private helper structure. | live |
 | K4 | Logical terminal snapshots, not screenshots, prove semantic behavior. Pixel snapshots stay narrowly scoped to geometry and rendering claims logical snapshots cannot prove, because they vary with system fonts. | live |
 | K5 | Parser proof requires input-chunk-boundary invariance across representative and exhaustive split points, plus arbitrary-byte fuzzing that demonstrates **recovery to later valid input**, not only absence of crashes. | live |
 | K6 | Unicode proof uses pinned official segmentation and width fixtures. | live |
-| K7 | Reference emulator output is evidence, not authority; protocol specifications and the DanTerm contract decide intended behavior. Accepted risk: differential testing can reproduce reference bugs. | live |
+| K7 | Reference emulator output is evidence, not authority. A4 owns this decision and states its accepted risk; cite A4. | elsewhere -- A4 |
 | K8 | Every named compatibility application has a fixed minimum user task, defined in **Minimum compatibility workflows** below. Each includes launch, representative input and output, resize while active, and clean exit and teardown, with direct, tmux, and ssh variants where those layers materially change behavior. A compatibility claim is not complete until its input, output, resize, and teardown behavior are exercised. | live |
 | K9 | Every externally meaningful limit and security policy has boundary coverage. | live |
 | K10 | External corpora are pinned at full commit hashes into ignored build storage, and DanTerm-authored replay commands and report expectations are checked in, so **upstream logs or screens are never accepted as DanTerm truth**. | live |
 | K11 | Standing constraints that outlive any milestone: never regenerate-and-auto-accept another emulator's output as DanTerm truth, and do not vendor wraptest until its reuse terms are clear. | elsewhere -- [docs/research/1-external-tests.md](../research/1-external-tests.md) |
-| K12 | Rejected: treating line count or feature count as progress independent of behavioral proof. | rejected |
 
 #### Minimum compatibility workflows
 
