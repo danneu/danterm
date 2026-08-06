@@ -8,8 +8,9 @@ import TerminalCore
 
 @testable import DanTerm
 
-/// Pins `I2`: the scrollback a checkpoint stores does not depend on how much history was read
-/// to produce it. The full projection is the reference; there is no separate expected value.
+/// Pins that bounded projection stores exactly what full-history projection followed by
+/// truncation would store. The full projection is the reference; there is no separate expected
+/// value.
 struct CheckpointScrollbackTailTests {
     /// One terminal state, named so a failure says which shape broke rather than which index.
     private struct Scenario {
@@ -19,9 +20,10 @@ struct CheckpointScrollbackTailTests {
         let feed: String
     }
 
-    /// The boundary conditions `I2` names, plus the ordinary over-budget case. A tail read is
-    /// only interesting where the budget falls *inside* history, so the budgets below are small
-    /// enough that these states straddle them.
+    /// The equivalence boundary conditions -- short and empty histories, no hard breaks, and
+    /// soft-wrapped runs spanning the tail boundary -- plus the ordinary over-budget case. A
+    /// tail read is only interesting where the budget falls *inside* history, so the budgets
+    /// below are small enough that these states straddle them.
     private static let scenarios: [Scenario] = [
         Scenario(name: "empty history", columns: 8, rows: 4, feed: ""),
         Scenario(name: "whitespace-only history", columns: 8, rows: 4, feed: "   \r\n \r\n  "),

@@ -45,11 +45,10 @@ private final class Outcome: @unchecked Sendable {
     func asyncWriteEncodesOffTheCallingThread() throws {
         // Intent: the encode closure handed to an async write runs on the writer's queue, never
         //   on the thread that submitted it.
-        // Why it exists: pins the half of I4 that the value types cannot carry. A capture that
-        //   defers its reads buys nothing if the caller turns around and runs the deferred work
-        //   itself -- the projection would be back on the main thread with every unit test still
-        //   green. Taking the encode as a parameter rather than bytes is what forecloses that,
-        //   and this is the test that says the writer honours it.
+        // Why it exists: periodic checkpoint projection, truncation, and encoding must stay off
+        //   the main thread. A capture that defers its reads buys nothing if the caller turns
+        //   around and runs the deferred work itself. Taking the encode as a parameter rather
+        //   than bytes is what forecloses that, and this proves the writer honours it.
         // Scenario: spec-first. One async write; the encode reports which thread ran it.
         let dir = makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -71,12 +70,10 @@ private final class Outcome: @unchecked Sendable {
     func writesLandInSubmissionOrder() throws {
         // Intent: of two writes to the same path, the one submitted second is the one left on
         //   disk -- even when the first is still encoding as the second arrives.
-        // Why it exists: pins I7. Checkpoints overlap, and the failure this forbids is silent
-        //   and asymmetric: an earlier capture finishing last leaves the recovery file holding
-        //   state the user already moved past, and nothing surfaces it until a restore comes
-        //   back stale. One serial queue with encode and write in the same work item is what
-        //   prevents it; splitting the stages across queues would not, and would still pass
-        //   every test that only checks the bytes.
+        // Why it exists: enriched checkpoint writes must land in capture order so an earlier
+        //   capture can never overwrite a later one. The failure is silent: an earlier capture
+        //   finishing last leaves stale recovery state. One serial queue with encode and write
+        //   in the same work item prevents it; splitting the stages across queues would not.
         // Scenario: spec-first. Write A's encode blocks until write B has been submitted, so B
         //   is queued and ready while A is mid-flight.
         let dir = makeTestCheckpointDir()
@@ -103,7 +100,8 @@ private final class Outcome: @unchecked Sendable {
         // Why it exists: this is what the quit checkpoint stands on. `applicationWillTerminate`
         //   runs the last checkpoint synchronously and the process exits immediately after; an
         //   async write still in flight at that moment either loses its own payload or lands
-        //   after the final one. I7 names the drain explicitly, and nothing else enforces it.
+        //   after the final one. The quit checkpoint must drain all in-flight work before
+        //   returning, and nothing else enforces that fence.
         // Scenario: spec-first. An async write is queued, then a synchronous write follows.
         let dir = makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -39,10 +39,10 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
     func capturePerformsNoRead() throws {
         // Intent: `CheckpointCapture.init` and `encoder()` read nothing; every pane read happens
         //   when the returned work runs.
-        // Why it exists: this is the whole mechanism behind I4. The checkpoint's cost is the
-        //   projection, and the only thing keeping it off the main thread is that the capture
-        //   holds reads rather than text -- a capture that eagerly resolved its panes would put
-        //   the cost right back where it was, with every other test still passing.
+        // Why it exists: a periodic checkpoint must perform no scrollback projection,
+        //   truncation, or encoding on the main thread. Holding reads rather than text is what
+        //   lets the capture defer that cost; eagerly resolving panes here would put it back on
+        //   the main thread with every other test still passing.
         // Scenario: spec-first. A capture is built and its encoder requested; neither may run
         //   the pane's read closure.
         let (model, paneIds) = makeModelWithPanes(1)
@@ -68,11 +68,10 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
     func capturePairsScrollbackWithItsOwnSnapshot() throws {
         // Intent: two captures taken at different moments encode independently -- each pane's
         //   text lands in the snapshot it was captured with, whatever order the encodes run in.
-        // Why it exists: pins I5. Checkpoints overlap: one can still be encoding on the queue
-        //   when the next is captured, and a pane can close in between. If scrollback and model
-        //   were carried separately, the later capture's model could be written against the
-        //   earlier one's text -- a restore showing a closed pane's history, or a live pane with
-        //   none. Bundling them makes that unrepresentable, and this is what says so.
+        // Why it exists: concurrent checkpoints must keep each pane's scrollback paired with
+        //   the model snapshot captured beside it. One capture can still be encoding when the
+        //   next is taken, and a pane can close in between; carrying the halves separately could
+        //   write a later model against earlier text. Bundling them makes that unrepresentable.
         // Scenario: spec-first. Capture A sees two panes; a pane then closes and capture B sees
         //   one. B encodes first, A second -- the reverse of capture order.
         var model = makeModel()
