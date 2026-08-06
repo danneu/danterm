@@ -33,15 +33,21 @@
   unmeasured policy after the measured worst-case endpoint already cleared the
   bar.
 
-### D3 -- retain topology diagnostics and hand permanent coverage to criterion 2
+### D3 -- retain topology diagnostics without a CPU verdict
 
-- Status: instrumentation shipped in `f3c774d`; workload calibration deferred
-  intentionally to the M9 criterion-2 plan.
+- Status: instrumentation shipped in `f3c774d`; M9 calibration refused a frozen
+  rule on 2026-08-06.
 - Evidence used: the existing direct-draw verdict improved while asynchronous
   Core Animation work doubled process CPU, so it cannot detect this defect.
+  Three valid 24-pair `sparse-spans-max` A/A screens then produced incompatible
+  outcomes: two selected no cell, including a low-load run with 4.71% SD and a
+  -15.05%..+7.23% range, while the other proposed cells that failed independently
+  against the first series.
 - Selected direction: retain benchmark-only row/span/full/fallback histograms
-  with a mandatory sample count. Use them to calibrate a future deterministic
-  sparse-many-runs workload whose primary verdict is whole-process CPU.
+  with a mandatory sample count and keep `sparse-spans-max` collectable but
+  outside the calibrated workload set.
 - Decision and rationale: topology accounting proves the workload exercised its
-  independent variable. Freezing the CPU rule belongs with the broader
-  visible-output gate, not with the already-settled renderer decision.
+  independent variable, but cannot make a noisy CPU quantity decision-bearing.
+  The controlled profiles remain the quantitative evidence for the renderer
+  decision; recurrence requires profiling rather than a knowingly unreliable
+  automated gate.

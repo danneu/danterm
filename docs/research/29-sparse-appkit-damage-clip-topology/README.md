@@ -21,7 +21,8 @@ It preserves the profiling record behind the
 [sparse-damage implementation](../../../plans/impl/2026-08-01-2219-preserve-sparse-appkit-terminal-damage.md)
 shipped in `f3c774d`,
 including the direct-draw metric's blind spot for asynchronous Core Animation
-replay and the remaining benchmark-coverage handoff to M9 criterion 2.
+replay and M9's later refusal to turn the retained topology diagnostic into an
+unreliable CPU gate.
 
 ## Investigation rules
 
@@ -84,12 +85,11 @@ whole-process CPU, so a threshold would add policy without measured benefit.
   (F6, D2).
 - [x] Run `just test` and `just test-ui`; 60/60 and 207/207 passed (D1).
 
-### Phase 3 -- hand off durable coverage
+### Phase 3 -- evaluate durable coverage
 
 - [x] Retain benchmark-only topology accounting as the calibration seam (D3).
-- [x] Hand permanent `sparse-many-runs` workload calibration to the future M9
-  criterion-2 plan; it is visible-output coverage, not unfinished renderer
-  selection work (D3).
+- [x] Screen `sparse-spans-max` in M9 and retain it as a descriptive diagnostic
+  after incompatible A/A series refused a frozen CPU rule (F8, D3).
 
 ## Rejected
 
@@ -115,9 +115,11 @@ list operations, while the simpler compound path already cleared the bar.
 - The maximum span exposure grows with grid height, approximately
   `ceil(rows / 4)` under the current one-row glyph halo. Only the reported
   179x66 geometry has a calibrated maximum-endpoint result.
-- The benchmark suite still lacks a permanent decision-bearing workload whose
-  primary metric includes post-`draw` Core Animation CPU. The reproduction
-  precondition is met; calibration belongs in the criterion-2 plan.
+- The benchmark suite has no permanent decision-bearing workload whose primary
+  metric includes post-`draw` Core Animation CPU. M9 screened the deterministic
+  17-span workload three times on 2026-08-06; incompatible A/A results refused a
+  frozen rule, including under a controlled low-load session. The workload
+  remains a descriptive topology diagnostic rather than an automated gate.
 - `.build/` artifacts are disposable. The decision-bearing values are therefore
   transcribed into findings as well as linked to local artifacts.
 
@@ -128,9 +130,11 @@ coalesced into the minimum number of vertical clip spans. This preserves the
 two-distant-row CPU win, removes the live-btop regression, and needs no
 complexity fallback at the calibrated 179x66 maximum topology.
 
-The investigation is closed. Reopen as a new research doc only if larger-grid
-evidence produces a separated regression or if permanent workload calibration
-reveals that whole-process CPU cannot support a stable verdict.
+The investigation is closed. Permanent workload calibration was attempted in
+M9 and refused because whole-process CPU could not support a stable verdict.
+Reopen as a new research doc only if larger-grid evidence produces a separated
+regression or a newly motivated instrument can first demonstrate stable A/A
+behavior.
 
 **Flagged from doc 28 (2026-08-03), not a reopening.** `28/F4` localizes a
 `style-churn` regression of roughly 3-7% to `dd51a12..e4556c0`, the range that

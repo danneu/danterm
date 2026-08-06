@@ -223,6 +223,23 @@ Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
 workload owns its blocks and so can buy more pairs, which is exactly what an
 auxiliary metric cannot do (`research/17/F15`). It writes a report and never a rule.
 
+### `sparse-spans-max` is a topology diagnostic and issues no verdict
+
+This candidate serializes 50 draws at 179x66 whose engine damage is exactly 17
+rows in 17 maximal spans, expanded by the glyph halo to 50 drawing rows in the
+same 17 spans. Its primary reported quantity is whole-process CPU per accepted
+draw because the historical per-row renderer regression lived in asynchronous
+Core Animation work outside the synchronous draw bracket.
+
+Do not promote that CPU quantity into a verdict. Three valid 24-pair A/A screens
+on 2026-08-06 produced incompatible calibration outcomes: two selected no cell,
+including a controlled low-load run with 4.71% SD and a -15.05%..+7.23% range,
+while the other proposed quick and confirm cells that failed independently
+against the first series. The protocol therefore refused a frozen rule before
+held-out confirmation or known-bad sensitivity measurement. The topology and
+coverage checks still make a collected block useful for diagnosis; they do not
+make the CPU difference decision-bearing. See `research/29/D3`.
+
 ### The third reported quantity: whole-process CPU per accepted draw
 
 The draw verdict times elapsed work between two points on the **main thread**, so

@@ -24,8 +24,9 @@ The remaining gaps are narrower:
   proof;
 - sustained-output tests prove convergence, not responsiveness through a real
   AppKit input route; and
-- the benchmark suite can report whole-process CPU but cannot issue a verdict
-  for the sparse clip topology that caused the `d378096` regression.
+- the benchmark suite can report whole-process CPU for the sparse clip topology
+  that caused the `d378096` regression, but calibration must decide whether that
+  quantity is stable enough to carry a verdict.
 
 The sparse-clip trigger, attribution, revised implementation, and acceptance
 measurements are preserved in
@@ -150,14 +151,14 @@ to prove that no owner-bound work remains and that callbacks captured before
 shutdown become inert. Benchmark-only instrumentation is outside the production
 teardown census unless it shares a production owner.
 
-### D3 -- promote the existing sparse topology to a decision-bearing CPU gate
+### D3 -- retain the existing sparse topology as a non-deciding diagnostic
 
 No new workload. `sparse-spans-max` is already implemented -- stimulus
 (`scripts/terminal-benchmark-producer.py#SPARSE_SPAN_WORKLOADS`), per-draw
 engine-damage topology recording, block contract
 (`scripts/terminal-benchmark-validation.py#BLOCK_CONTRACTS`), and collection as
-an undecidable candidate. This plan promotes that candidate to a gate and adds
-nothing beside it; specifying a duplicate is a rewrite of work already merged.
+an undecidable candidate. It remains a candidate because controlled A/A
+calibration could not support a trustworthy frozen CPU rule.
 
 Its contract is preserved exactly as implemented, because changing the stimulus
 would protect different geometry than the reproduced regression:
@@ -169,22 +170,16 @@ would protect different geometry than the reproduced regression:
   distinguish two spans from seventeen.
 - A valid block is 50 accepted serialized draws, each carrying that exact
   topology, with complete CPU and topology sample coverage.
-- Renderer-behavior validity is **arm-specific**, not universal. An arm
-  presented as the exact sparse implementation accepts neither full engine
-  damage nor renderer dirty-rectangle fallback during a measured draw --
-  otherwise the gate could bless a shipped implementation that never exercised
-  the sparse renderer path it claims to protect. A synthesized known-bad arm's
-  renderer deviation is valid and recorded in its provenance, because rejecting
-  its draws would turn the regression being measured into an unmeasured block.
-  Each synthesized arm records its source tree, defect-only renderer diff, and
-  declared downstream behavior alongside the frozen-rule evidence.
 
-Whole-process CPU per accepted draw (`process-cpu-nanoseconds-per-draw`) is
-already its primary metric. What is missing is the frozen rule: an A/A candidate
-screen selects a pair count and threshold, and a fresh held-out confirmation
-freezes the exact rule before the workload can join quick or confirm verdicts.
-Existing draw workloads keep their current primary metrics and their process-CPU
-quantities remain unclassified.
+Whole-process CPU per accepted draw (`process-cpu-nanoseconds-per-draw`) remains
+its primary reported metric, but it carries no verdict. Three valid 24-pair A/A
+screens exposed session-dependent spread: two selected no cell at all, including
+a controlled low-load run with 4.71% SD and a -15.05%..+7.23% range, while the
+other proposed cells that failed independently against the first series. The
+selection protocol therefore refused a rule before held-out confirmation or a
+known-bad sensitivity arm could legitimately run. Existing draw workloads keep
+their current primary metrics and their process-CPU quantities remain
+unclassified.
 
 ### D4 -- close existing gates by evidence, not duplicate implementation
 
@@ -213,16 +208,11 @@ the evidence that closes each gate.
   no scheduling entry point can rearm.
 - **I7 -- ordinary sleep.** DanTerm creates no macOS power assertion and never
   keeps the display awake for terminal activity.
-- **I8 -- measured topology.** A sparse-topology CPU verdict is impossible
-  unless the block proves its draw count, CPU coverage, and the exact recorded
-  engine-damage row and span counts its workload contract names. That engine
-  topology binds every arm without exception -- full engine damage is always
-  invalid, because an arm that damaged a different row set measured a different
-  independent variable. Only *renderer-side* behavior admits an exception: an
-  arm presented as the exact sparse implementation additionally rejects
-  dirty-rectangle fallback in a measured draw, while a declared synthesized
-  known-bad arm may fall back there once its engine topology is proven, with the
-  deviation recorded in its provenance.
+- **I8 -- measured topology.** A sparse-topology diagnostic is valid only when
+  the block proves its draw count, CPU coverage, and the exact recorded engine-
+  damage row and span counts its workload contract names. Valid topology makes
+  the descriptive quantity interpretable; it does not grant verdict authority
+  to an uncalibrated metric.
 - **I9 -- responsive visible output.** The AppKit input routes selected by OD2
   take effect before sustained output completes, and the pane subsequently
   converges to the final output state.
@@ -256,43 +246,23 @@ the evidence that closes each gate.
   restart. Existing PTY source-registry tests remain the proof for native
   resources.
 - **PO5 -- sparse benchmark instrument.** The existing behavioral tests for the
-  `sparse-spans-max` stimulus, engine-damage recording, and block validation
-  keep passing unchanged; promotion adds no new stimulus or topology instrument
-  to prove. New tests are admitted for exactly two things: the frozen rule
-  itself -- that no verdict is issued before a rule exists and that the frozen
-  rule is applied once it does -- and I8's arm-specific validity: a block whose
-  measured draws report full engine damage is invalid for every arm, and a block
-  reporting dirty-rectangle fallback is invalid unless the arm declares a
-  synthesized known-bad provenance.
-- **PO6 -- sparse benchmark calibration.** The exact candidate
-  pair-count/threshold cell clears all four `select_candidate` gates -- false
-  positive, detection, inconclusive, and wrong direction -- and clears them on
-  each independently collected series on its own, not only pooled, on both the
-  screening evidence and the fresh disjoint confirmation. Only then are the rule
-  and workload membership frozen.
-
-  Sensitivity is then judged, not assumed. The frozen rule classifies the
-  shipped coalesced implementation as equivalent to itself, then applies
-  unchanged to a synthesized shipped-tree arm restoring uncoalesced `d378096`
-  per-row rectangle emission -- no threshold adjustment, no repeated sampling.
-  Rejection grants the historical-per-row-regression coverage claim.
-  Non-rejection is a permitted outcome, not a stuck gate: `sparse-spans-max`
-  keeps its frozen rule and membership as a maximum-topology cost-bound guard,
-  its documentation may not claim coverage of the historical per-row regression,
-  and the criterion-2 record names which branch was taken. Under that branch the
-  gate closes on the cost-bound claim while the documented deterministic
-  btop-shaped candidate workload is evaluated, and that candidate is admitted
-  only if its measured separation justifies its calibration and run-time cost.
-  Arm validity follows D3: the shipped arm's draws are invalid if the renderer
-  falls back to dirty rectangles, while the synthesized arm's declared deviation
-  is valid and recorded with its provenance.
+  `sparse-spans-max` stimulus, engine-damage recording, and block validation keep
+  passing unchanged. No frozen-rule or synthesized-arm code is added after
+  calibration refused verdict authority.
+- **PO6 -- sparse benchmark calibration refusal.** Preserve the independently
+  collected A/A results and the exact selection outcome: no one series may be
+  discarded or pooled to manufacture a passing cell. `sparse-spans-max` remains
+  outside quick and confirm membership, and milestone evidence makes no claim of
+  automated coverage for the historical per-row renderer regression. The
+  existing controlled profiles remain its quantitative evidence; recurrence is
+  an accepted risk investigated by profiling, not by a knowingly noisy gate.
 - **PO7 -- responsiveness.** A real AppKit input route selected by OD2 takes
   effect while a sustained-output producer is still active, after which the
   final terminal state arrives and all pending work remains bounded. Any test
   timeout is a hang guard, not a latency claim.
 - **PO8 -- full gate.** `just test` and `just test-ui` pass, the selected real
   lifecycle observation passes, and the milestone record names the evidence for
-  all seven criterion-2 gates.
+  the scheduling and responsiveness gates plus the refused CPU calibration.
 
 ## Non-goals
 
@@ -308,9 +278,10 @@ the evidence that closes each gate.
 
 ## Accepted risks
 
-- The sparse workload's 17-span endpoint is specific to 179x66 and the current
-  one-row glyph halo. Its verdict protects the reproduced regression geometry,
-  not every possible future grid height.
+- The sparse workload's 17-span endpoint remains a descriptive diagnostic at
+  179x66, not an automated CPU gate. A recurrence of the historical renderer
+  regression requires controlled profiling; the test suite protects topology
+  correctness but cannot prove Core Animation processes it cheaply.
 - A behavioral responsiveness gate establishes progress and ordering, not a
   numerical upper bound on input latency. A stronger claim requires separate
   measurement and calibration.
@@ -335,6 +306,11 @@ the evidence that closes each gate.
   owner is the application runtime.
 - **Freeze the first CPU rule that passes a candidate screen.** Rejected because
   rule selection and confirmation on the same random series overfit noise.
+- **Replace the refused rule with another benchmark in this milestone.** Rejected
+  because M9's maintained contract is scheduling and responsiveness, while the
+  historical renderer decision already has controlled profiling evidence. A new
+  performance instrument needs its own measured motivation and calibration, not
+  automatic admission because this candidate was noisy.
 
 ## Implementation discretion
 
@@ -351,7 +327,7 @@ the evidence that closes each gate.
 - [x] 3. Make application-runtime shutdown terminal and observable
 - [x] 4. Gate hot-path scheduling guards on a cheap active read
 - [x] 5. Make the owner census stateless so hot-path guards cannot regress
-- [ ] 6. Freeze and apply the sparse-topology CPU benchmark gate
+- [x] 6. Record the refused sparse-topology CPU calibration
 - [ ] 7. Prove keyboard responsiveness and close the milestone evidence
 
 ## Implementation notes
@@ -369,3 +345,7 @@ the evidence that closes each gate.
   owner census is a separate capture method that walks every registered owner
   and carries no state field, so a guard on census state cannot be written --
   the census is reserved for termination assertions and diagnostics.
+- Three valid `sparse-spans-max` A/A screens produced incompatible calibration
+  outcomes. The controlled low-load screen still selected no cell, so the
+  workload remains descriptive and M9 claims no automated protection against
+  the historical Core Animation regression.

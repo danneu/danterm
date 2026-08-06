@@ -520,13 +520,11 @@ sparse-clip topology and whose metric includes post-`draw` CA CPU.
    was calibrated at 179x66 and measured under a frozen rule. Coalesced CPU
    overlaps or beats parent, so no threshold sweep, separate-draw variant, or
    complexity fallback is justified.
-5. **OPEN, with reproduction precondition met.** The automated btop stimulus
-   reliably separates uncoalesced from parent/coalesced CPU. Decide whether to
-   promote a deterministic `sparse-many-runs` shape into a permanent calibrated
-   workload, with topology as its independent variable and whole-process CPU as
-   its primary decision quantity. `drawNanosecondsPerDraw` is structurally the
-   wrong metric for this defect. The retained benchmark-only topology histogram
-   supplies the calibration gate and mandatory sample count.
+5. **COMPLETED 2026-08-06; calibration refused.** `sparse-spans-max` promoted the
+   deterministic 17-span shape into a collectable candidate whose primary
+   quantity is whole-process CPU. Three valid A/A screens produced incompatible
+   outcomes, so it remains descriptive rather than joining the calibrated
+   workload set (F8, D3).
 
 #### Keep, revise, or revert `d378096`
 
@@ -551,6 +549,36 @@ draw policy is justified. `just test` passed all 60 steps and `just test-ui`
 passed 207/207 after the final implementation and instrumentation cleanup. Do
 not generalize this into a direct-draw-only claim: the live profile proves that
 metric can improve while whole-process CPU regresses.
+
+## F8 -- permanent CPU calibration refused
+
+M9 screened `sparse-spans-max` three times on 2026-08-06. Each screen used the
+same immutable tree (`7682facd1badf435e2588de8a8d7fbb502485804`), 12 complete
+quartets, 24 A/A pairs, the existing pair-count and threshold grids, and 50,000
+resampling trials per condition. All blocks passed the 50-draw CPU-coverage and
+17-engine-row/17-engine-span topology contracts; no quartet was discarded.
+
+| Series | Median | SD | Trimmed SD | Range | Selection |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Exploratory 1 | -0.09% | 5.58% | 4.44% | -5.96%..+17.26% | no quick or confirm cell |
+| Exploratory 2 | -0.31% | 2.20% | 1.86% | -4.98%..+4.04% | quick 8 pairs at 3.0%; confirm 16 pairs at 2.15% |
+| Controlled low-load | -0.78% | 4.71% | 3.43% | -15.05%..+7.23% | no quick or confirm cell |
+
+The one series that proposed rules did not replicate. Applied unchanged to
+exploratory series 1, its quick cell produced 11.93% A/A false positives and
+85.59%/86.21% detection; its confirm cell produced 13.32% false positives and
+76.00%/76.33% detection. The gates require at most 1% false positives and at
+least 90% detection on every independently collected series. Pooling the series
+or discarding the noisy ones would hide the instability the protocol exists to
+surface.
+
+The controlled run began at load 1.69 across ten processors (0.17 per
+processor), so closing active applications did not make the quantity stable.
+Because screening selected no reproducible cell, no held-out confirmation or
+synthesized known-bad sensitivity arm could legitimately run. The candidate
+therefore remains useful for checking and describing exact topology, but issues
+no CPU verdict and provides no automated coverage claim for the historical
+per-row Core Animation regression.
 
 ## Open questions
 
