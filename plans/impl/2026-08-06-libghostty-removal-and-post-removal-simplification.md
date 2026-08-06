@@ -409,7 +409,7 @@ sections above.
 
 ### Wave 0 -- independent, do whenever
 
-- [ ] **Fix the IPC `text` paste divergence.** Point
+- [x] **Fix the IPC `text` paste divergence.** (commit `25665250`) Point
       `SwiftTerminalSessionView.sendText` at `controller.sendPaste` so the
       documented contract (control-byte stripping + bracketed paste) holds
       again, or change the contract and update `integrations/danterm/SKILL.md`.
@@ -417,7 +417,7 @@ sections above.
       text on raw committed-text delivery. Must land *before* task 11
       reconsiders the two commands. See "One real divergence found while
       researching".
-- [ ] **Make the production bundle capable of launching Swift sessions.** Add a
+- [x] **Make the production bundle capable of launching Swift sessions.** (commit `8cbfdf16`) Add a
       failing build-script contract first, then make `build-app.sh` build and
       bundle release `PTYSessionBootstrap`; require it in CI and stable-release
       layout checks; sign it before the outer app; and smoke a production-shaped
@@ -426,17 +426,17 @@ sections above.
 
 ### Wave 1 -- remove Ghostty
 
-- [ ] **1. Retire the Ghostty characterization recorder.** Delete
+- [x] **1. Retire the Ghostty characterization recorder.** (`8cbfdf16`, `48d907d2`) Delete
       `scripts/terminal-characterization.sh` (685),
       `terminal-characterization-driver.py` (116), the harness test, and the
       gate step. Keep every fixture and `GhosttyInspectionRecoveryReplayTests`
       -- they replay through `TerminalCore` with no libghostty involved.
-- [ ] **2. Drop the Ghostty benchmark arm.** `terminal-benchmark.sh` becomes
+- [x] **2. Drop the Ghostty benchmark arm.** (`48d907d2`) `terminal-benchmark.sh` becomes
       single-backend (lines 32-49, 204, 312, 352-374), and
       `terminal_benchmark_snapshot.py` stops provisioning Ghostty artifacts.
       Document the cutover commit as the oldest supported live benchmark
       baseline while retaining historical results.
-- [ ] **3. Delete the backend selection seam and the Ghostty adapter.**
+- [x] **3. Delete the backend selection seam and the Ghostty adapter.** (`b411d77f`)
       `GhosttyApp`, `TerminalView`, `GhosttyBindingAction`, `GhosttyText`,
       `ClipboardWriteSurface`, the five dead core helpers
       (`ClipboardWriteItems`, `TickCoalescer`, `BackingGeometry`,
@@ -449,7 +449,7 @@ sections above.
       `dev-slot-launcher.py` and `dev-build-configuration-contract_test.sh`
       stop forwarding or asserting `DANTERM_TERMINAL_BACKEND` in this same
       commit, alongside the selector they exercise.
-- [ ] **4. Delete the build dependency.** `GhosttyKit` binary target plus the
+- [x] **4. Delete the build dependency.** (`3e4b839b`) `GhosttyKit` binary target plus the
       six now-unused linked frameworks (`Metal`, `MetalKit`, `IOKit`,
       `IOSurface`, `Carbon`, `libc++`); `build-lib.sh`,
       `load-ghostty-version.sh`, `.ghostty-version`, `build.zig.zon.nix`, the
@@ -458,11 +458,11 @@ sections above.
       `bundle-theme-resources.sh`, the broad `lib/*` `.gitignore` plus package
       allowlist, and all four build-lib/version gate tests. Preserve the newly
       added release `PTYSessionBootstrap` build while removing Ghostty setup.
-- [ ] **5. Simplify CI.** Delete `.github/workflows/cache-ghosttykit.yml`; strip
+- [x] **5. Simplify CI.** (`9fde5694`) Delete `.github/workflows/cache-ghosttykit.yml`; strip
       the version/cache/build step groups from `ci.yml` and
       `release-stable.yml`. Keep the non-Ghostty Nix uses, and retain the new
       `PTYSessionBootstrap` layout and nested-code signing assertions.
-- [ ] **6. Move the Ghostty reference into `fetch-references.py`.**
+- [x] **6. Move the Ghostty reference into `fetch-references.py`.** (`f1a1a530`)
       `.ghostty-src/` -> `references/ghostty/`; update the normative citations
       (`AGENTS.md`, `agent-docs/reference-sources.md`, `Terminal.swift`) and both
       parity-lint skip-lists. Leave historical `plans/`/`docs/research/` paths
@@ -470,7 +470,7 @@ sections above.
 
 ### Wave 2 -- simplify now that nothing external constrains the shape
 
-- [ ] **7. Collapse `TerminalBackend` to a concrete type.** Six of its nine
+- [x] **7. Collapse `TerminalBackend` to a concrete type.** (`e355768e`) Six of its nine
       members are constants or no-ops under Swift. Delete the protocol,
       `TerminalBackendEvent` and its `Msg` translations
       (`ghosttyConfigReloaded`, `ghosttyPrefsRefreshed`,
@@ -485,7 +485,7 @@ sections above.
       Delete `Command.setAppFocus` and the process-backend call it performs;
       model app-active state remains product behavior. Keep `Msg.requestQuit`;
       only its Ghostty backend-event translation goes away.
-- [ ] **8. Tighten, but retain, `TerminalSession`.** Keep the protocol as the
+- [x] **8. Tighten, but retain, `TerminalSession`.** (`e355768e`) Keep the protocol as the
       narrow DanTerm/AppKit and UI-test boundary. Delete the no-op
       `setDisplayID` and `setScrollbarEnabled` requirements and take
       `syncSessionDisplayID` with them, preserving its live
@@ -494,7 +494,7 @@ sections above.
       history behavior required of the Swift session, but keep optional flight
       recording and pane-tape follow results where bundle capability, not
       backend choice, still makes `nil` meaningful.
-- [ ] **9. Delete the `GhosttyPrefs` shadow config.** Point the preferences
+- [x] **9. Delete the `GhosttyPrefs` shadow config.** (`ae43fbab`) Point the preferences
       draft's dirty/reset logic at `model.config` directly, as it already does
       for `alertClearMode` / `remoteTheme` / `fontFamily`. Removes
       `GhosttyPrefs`, `committedGhosttyPrefs`, `Msg.ghosttyPrefsRefreshed`, the
@@ -503,37 +503,37 @@ sections above.
       theme and font-size dirty detection and Reset behavior remain unchanged
       against `model.config`, including the committed-side font-size text
       round-trip. Make Reload Config reload DanTerm JSON only.
-- [ ] **10. Investigate folding `tests-ui` into a real test target.** Its only
+- [x] **10. Investigate folding `tests-ui` into a real test target.** (`85e157cb`; verdict NO, reason recorded) Its only
       recorded rationale is "the GhosttyKit-free UI harness". If SwiftPM can host
       it against `DanTerm` the way `app-tests` does, that deletes `test-ui.sh`'s
       60-file list, both shims, the per-view "promotion" ritual, and
       `test-ui-harness_test.sh`. If it cannot, write down the real reason.
-- [ ] **11. Reconsider the two text-input commands.** With paste semantics
+- [x] **11. Reconsider the two text-input commands.** (`34ea6c65`; kept as two) With paste semantics
       restored (Wave 0), decide whether `Command.sendText` and
       `Command.sendInputText` are still two things. Do not collapse them on the
       grounds that they currently behave identically.
-- [ ] **12. Reconsider `TerminalSessionRequest`.** Theme/fontSize/fontFamily are
+- [x] **12. Reconsider `TerminalSessionRequest`.** (`34ea6c65`; all three fields kept) Theme/fontSize/fontFamily are
       threaded per session because Ghostty owned its own config; with one
       backend some of that could be read from `DanTermConfig` at the creation
       seam. Not purely redundant -- per-pane and remote theme overrides are real.
-- [ ] **13. Shrink `terminal-backend-boundary-lint.sh`.** Drop the GhosttyKit
+- [x] **13. Shrink `terminal-backend-boundary-lint.sh`.** (`06579c87`, `40df94cc`) Drop the GhosttyKit
       allowlist and Ghostty-theme-path loops; keep (and lean harder on) the
       engine-import allowlist, which is the only thing holding the app boundary.
-- [ ] **14. Lexicon pass.** "Open Ghostty Config" menu item and its Cmd-Opt-,
+- [x] **14. Lexicon pass.** (`34ea6c65`) "Open Ghostty Config" menu item and its Cmd-Opt-,
       shortcut, `PreferencesPanel`'s ~12 `ghosttyTheme*` identifiers,
       `ThemeBrowserView`'s now-false reset copy, `Projections`'
       `ghosttyThemeText`, `// MARK: - Ghostty Callbacks`, the "matches Ghostty's
       title coalesce interval" rationale, `import-ghostty-themes.py` ->
       `import-themes.py`, and `UpdateGhosttyTests` -> `UpdateSessionEventTests`
       (rename only -- all 643 lines are generic session-event tests).
-- [ ] **15. Docs and roadmap.** Update `README.md`, `AGENTS.md` (Boundaries,
+- [x] **15. Docs and roadmap.** (`4b7a9a2b`) Update `README.md`, `AGENTS.md` (Boundaries,
       Build, the read-before table), `agent-docs/build-details.md`,
       `agent-docs/reference-sources.md`, `agent-docs/worktree-development.md`,
       `docs/ci.md`, and `integrations/danterm/SKILL.md`; retire
       `docs/upgrading-ghostty.md`; add supersession notes rather than rewriting
       historical ADRs/research/plans; decide the version bump (`TODO.md` line
       1); check off Milestone 10 in `plan-terminal-engine/14-roadmap.md`.
-- [ ] **16. Prove the final cutover from a clean checkout.** With no
+- [x] **16. Prove the final cutover.** (`a1d03292`) With no
       `.ghostty-src`, `lib/GhosttyKit.xcframework`, or `lib/ghostty-themes`, run
       the normal gate, UI gate, dev build, and release build. Verify the release
       bundle's three executable/signing boundaries (`DanTerm`, `danterm`,
@@ -554,3 +554,53 @@ sections above.
   line 1; the answer probably wants to be "minor, and say so loudly in the
   release notes", since the terminal engine changing is the largest behavioral
   change the app has ever shipped.
+
+## Outcome (2026-08-06)
+
+All 18 tasks landed across 14 commits, `5dd62902..40df94cc`.
+
+Cutover proof (task 16), run against the working tree at `a1d03292`:
+
+- Normal gate: **74/74 steps pass**.
+- UI gate: **201/201 pass**. `lib/DanTermCore` 1105, app-tests 155.
+- Release build (`build-app.sh`) and dev build (`dev-build.sh --no-install`)
+  both succeed; both bundles carry `Contents/Helpers/PTYSessionBootstrap`.
+- Production bundle links **no** Ghostty library and exports **0** Ghostty
+  symbols. The `libc++` / `libswiftIOKit` / `libswiftMetal` entries that remain
+  are weak Swift-runtime overlays, not our `linkerSettings`.
+- Runtime smoke, production-shaped bundle, no backend environment value: pane
+  created, `echo` ran under a real PTY, output read back, input round-tripped,
+  clean exit, no stray `PTYSessionBootstrap` processes, nothing leaked into
+  recovery state.
+
+The viability gate (`scripts/terminal-viability.sh`) could **not** be run: it
+requires a zsh account shell and this machine's is fish. Environmental, not a
+migration result; the smoke above covers the same launch/input/output/exit path.
+
+### Decisions that went against the plan's guess
+
+- **Task 10 is a NO.** `tests-ui` cannot become a SwiftPM test target. The
+  blocker was never GhosttyKit -- it is whole-module compile-time substitution.
+  Reason recorded in `docs/design/2026-08-06-ui-harness-whole-module-substitution.md`.
+- **Task 11: kept as two commands.** They differ in the bytes reaching the PTY,
+  and the separation is what stops an untrusted IPC blob faking keystrokes.
+- **Task 12: kept all three fields.** Beyond per-pane theme override, the
+  restore path reads a *staged* model, so reading config at the creation seam
+  would dress restored panes in the pre-restore config.
+- `flake.nix`'s `terminal-workflows` dev shell was NOT Zig-related and stayed.
+- `app/TerminalView.swift` could not be deleted outright: it held
+  `NSScreen.displayID`, which a live consumer needed.
+
+### Known follow-ups, deliberately not done here
+
+- Issue #31 (libghostty memory leak) is now closable -- the interval it
+  justified is deleted.
+- `DanTermSupport.ensureFileExists` is orphaned in production but still public
+  with passing tests. Left in place.
+- `isDraftDirty` has no production callers; it duplicates the projection's
+  dirty logic.
+- `plan-terminal-engine/README.md` and `02-migration-and-boundary.md` still read
+  as forward-looking ("replacing libghostty"), and `AGENTS.md` points every
+  agent at that README first.
+- Version bump recommendation recorded in `TODO.md`: minor, `0.0.84 -> 0.1.0`.
+  No release command was run.
