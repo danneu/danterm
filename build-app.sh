@@ -50,8 +50,10 @@ chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 # bytes into both files. Either produces a signed bundle that will not launch.
 GUI="$APP_PATH/Contents/MacOS/DanTerm"
 CLI="$APP_PATH/Contents/Helpers/danterm"
-GUI_INODE=$(stat -f %i "$GUI")
-CLI_INODE=$(stat -f %i "$CLI")
+# /usr/bin/stat, not stat: a nix profile earlier on PATH shadows it with GNU
+# coreutils, where -f asks for filesystem info and this guard aborts the build.
+GUI_INODE=$(/usr/bin/stat -f %i "$GUI")
+CLI_INODE=$(/usr/bin/stat -f %i "$CLI")
 if [ "$GUI_INODE" = "$CLI_INODE" ]; then
     echo "Error: GUI and CLI bundle paths collided (same inode)" >&2
     exit 1
