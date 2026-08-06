@@ -1,6 +1,6 @@
 # <img src="icon/raw-readme.svg" width="64" height="64" alt="DanTerm icon" align="center" style="vertical-align: middle;"> danterm
 
-A macOS terminal built on ghostty with the behavior I want.
+A macOS terminal with the behavior I want, built on its own Swift terminal engine.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
@@ -66,7 +66,7 @@ from the app menu to edit the file directly.
 }
 ```
 
-Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Option+,**.
+Reload with **Cmd+Shift+,**.
 
 Nix users can set `programs.danterm.configPath` to an absolute string path in
 their nix repo. Home Manager links the standard location to that out-of-store
@@ -100,7 +100,7 @@ a pane will not clear its badge.
 ## Bonus features:
 
 - Tabs can be grouped into collapsible sections
-- Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
+- Lightweight: AppKit and a terminal engine, both Swift, no web runtime
 - Theme browser sidebar lets you change the current pane's theme on the fly
 - Remote session integration (ssh, mosh, etc)
   - Give remote sessions a custom theme
@@ -110,8 +110,8 @@ a pane will not clear its badge.
 
 ## General terminal features
 
-- Cmd-click to open URL and file paths
-  - Cmd-shift-click needed if program is capturing mouse events (vim, tmux, etc). The shift modifier tells ghostty the click is for you, not the program.
+- Cmd-click to open `http`/`https` links. Other schemes and bare file paths are deliberately not clickable.
+  - Cmd-shift-click needed if program is capturing mouse events (vim, tmux, etc). The shift modifier tells the terminal the click is for you, not the program.
 
 ## Claude Code Integration
 
@@ -606,7 +606,6 @@ bash scripts/tests/shell-integration_test.sh
 | Toggle Tab To-do List          | ⌘'       |
 | Toggle Pane To-do List         | ⇧⌘'      |
 | Preferences                    | ⌘,       |
-| Open Ghostty Config            | ⌥⌘,      |
 | Reload Config                  | ⇧⌘,      |
 | Quit                           | ⌘Q       |
 
@@ -650,7 +649,7 @@ But it's more complicated than I'd like since it includes a browser, and its pan
 
 Many TUI programs — tmux, vim, less, htop, fzf, btop, ranger, k9s — turn on "mouse reporting" so they can handle clicks, drags, and scrolls themselves. The downside: your terminal stops doing native click-drag selection, so highlighting text to copy with ⌘C suddenly doesn't work. Either nothing gets selected, or the program highlights text into its own internal buffer that ⌘C can't reach.
 
-Ghostty (and other modern terminals) reserve **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release, ⌘C, done.
+DanTerm (like other modern terminals) reserves **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release, ⌘C, done.
 
 Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection you can ⌘C.
 
@@ -682,8 +681,8 @@ the user's canonical dev app.
   that slot notification permission for the first time.
 
 The build-optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
-development signing, install path, and selected terminal backend. They do not
-create a production release or publish anything.
+development signing, and install path. They do not create a production release
+or publish anything.
 
 Isolated launches use slots 1 through 8; slot 0 remains the canonical
 `~/Applications/DanTerm Dev.app`. The launcher prints one JSON handle containing
@@ -706,8 +705,8 @@ exit, including SIGKILL. If all slots are occupied, the launcher exits with stat
 canonical `.build/DanTerm Dev.app` artifact is wanted.
 
 Pass an environment-gated launch control only by naming its allowlisted variable,
-for example `DANTERM_TERMINAL_BACKEND=swift ./scripts/dev-slot-launcher.py
---pass-env DANTERM_TERMINAL_BACKEND`. Unnamed launching-shell state is not
+for example `DANTERM_PTY_RECORDING_DIR=/tmp/rec ./scripts/dev-slot-launcher.py
+--pass-env DANTERM_PTY_RECORDING_DIR`. Unnamed launching-shell state is not
 forwarded into the slot.
 
 The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for

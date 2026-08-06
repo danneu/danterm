@@ -12,11 +12,13 @@ Run this once before the first build in a fresh linked worktree:
 just provision-worktree
 ```
 
-The command links the primary checkout's cached
-`lib/GhosttyKit.xcframework`, themes, and reference sources into the worktree.
-It is safe to repeat and writes only inside the worktree being provisioned. The
-primary checkout must already contain those inputs; provisioning never fetches
-or rebuilds them.
+The command symlinks one shared prerequisite -- the primary checkout's
+`references/` tree -- into the worktree. Nothing else needs provisioning: the
+build compiles from Swift source with no prebuilt library to share. It is safe
+to repeat and writes only inside the worktree being provisioned. The primary
+checkout must already contain a non-empty `references/`; provisioning never
+fetches it, so run `just fetch-references` in the primary checkout first if the
+command reports it missing.
 
 ## Launch an isolated slot
 
@@ -51,13 +53,16 @@ foreground for the first time.
 ## Pass an allowed environment value
 
 The launcher does not inherit the launching shell's environment wholesale. To
-exercise an environment-gated path, name each allowed DanTerm-owned variable:
+exercise an environment-gated path, name each allowed DanTerm-owned variable.
+The allowlist is currently one entry, `DANTERM_PTY_RECORDING_DIR`:
 
 ```sh
-SWIFT_SLOT_HANDLE="$(mktemp /tmp/danterm-swift-slot.XXXXXX)"
-DANTERM_TERMINAL_BACKEND=swift ./scripts/dev-slot-launcher.py \
-  --pass-env DANTERM_TERMINAL_BACKEND > "$SWIFT_SLOT_HANDLE" &
+RECORDING_SLOT_HANDLE="$(mktemp /tmp/danterm-recording-slot.XXXXXX)"
+DANTERM_PTY_RECORDING_DIR="$(mktemp -d)" ./scripts/dev-slot-launcher.py \
+  --pass-env DANTERM_PTY_RECORDING_DIR > "$RECORDING_SLOT_HANDLE" &
 ```
+
+There is no backend-selection variable: the Swift engine is the only backend.
 
 See `./scripts/dev-slot-launcher.py --help` for the accepted flags and
 `integrations/danterm/SKILL.md` for the source-of-truth `danterm` CLI surface.

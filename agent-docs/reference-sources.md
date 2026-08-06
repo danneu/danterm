@@ -62,8 +62,9 @@ Read the checkout when picking a container and while using one: API and
 complexity guarantees, and how it stays fast (`@inlinable`, unsafe buffer
 access, COW).
 
-Also worth a web lookup, not checked out: `github:manaflow-ai/cmux`, another
-macOS terminal built on libghostty (vertical tabs, AI agent notifications).
+Also worth a web lookup, not checked out: `github:manaflow-ai/cmux`, a macOS
+terminal built on libghostty with the closest feature overlap to DanTerm
+(vertical tabs, AI agent notifications).
 
 ## Citing reference source
 

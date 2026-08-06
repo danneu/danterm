@@ -284,8 +284,9 @@ truncation metadata. Feed payloads emitted by the app use lossless base64.
 The output is unscrubbed; redirect it to a file, then run the repository's
 fixture converter before committing it. The converter refuses every snapshot
 that reports dropped events because its surviving geometry and event sequence
-cannot be trusted. There is no truncation override. Production and
-Ghostty-backed panes return an unsupported-backend error.
+cannot be trusted. There is no truncation override. Only a bundle built with
+recording enabled has a tape; production panes return an unsupported-backend
+error.
 
     danterm pane tape --pane "$PANE_ID" > tape.json
     scripts/terminal-tape-to-fixture.py tape.json \\

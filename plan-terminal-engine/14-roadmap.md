@@ -449,11 +449,49 @@ mean.
     the native gate, classified neutral fixtures, pinned 14-case esctest2 run,
     and pinned three-session vttest run are maintained gates.
 
-- [ ] **10. Remove libghostty**
-  - [ ] No required runtime, build, config, test, documentation, or release path
+- [x] **10. Remove libghostty**
+  - [x] No required runtime, build, config, test, documentation, or release path
     depends on Ghostty.
-  - [ ] The Swift engine is the sole terminal backend and the full DanTerm test gate
+    Milestone 10 judgment: this gate closes. Build and release: `build-lib.sh`,
+    `load-ghostty-version.sh`, `.ghostty-version`, `build.zig.zon.nix`, the
+    flake's zig-overlay input, the xcframework preflight checks, and the legacy
+    theme bundling are deleted; `Package.swift` has no `GhosttyKit`
+    `.binaryTarget` and the app target links only Cocoa, QuartzCore, CoreText,
+    and UniformTypeIdentifiers. The release path instead builds, bundles, and
+    signs `PTYSessionBootstrap` alongside `DanTerm` and `danterm`, and the CI
+    and release layout checks require all three. CI: `cache-ghosttykit.yml` and
+    every GhosttyKit version/cache/build step are gone, along with the
+    validator-self-test job that existed to guard them. Config: the
+    `GhosttyPrefs` shadow config is deleted and Preferences compares against
+    `model.config` directly. Tests: the Ghostty characterization recorder and
+    the Ghostty benchmark arm are retired, and the boundary lint now enforces
+    only the app/engine import boundary. Docs: this pass rewrote `AGENTS.md`,
+    `agent-docs/build-details.md`, `agent-docs/worktree-development.md`,
+    `README.md`, and retired `docs/upgrading-ghostty.md`; superseded ADRs
+    carry dated forward notes rather than edited bodies. What remains is not a
+    dependency: `references/ghostty` is a gitignored, optional reference
+    checkout pinned at v1.3.1 and fetched by `scripts/fetch-references.py`
+    like every other reference tree, the recorded Ghostty characterization
+    fixtures are captured data that still gate, and the theme importer's
+    upstream archive is named `ghostty-themes.tgz` by iTerm2-Color-Schemes.
+  - [x] The Swift engine is the sole terminal backend and the full DanTerm test gate
     remains green.
+    Milestone 10 judgment: this gate closes on the backend claim by
+    construction. The `TerminalBackend` protocol collapsed to the concrete
+    `SwiftTerminalBackend`; `TerminalBackendEvent`,
+    `TerminalRecoveryScheduling`, `Command.setAppFocus`, and the selection seam
+    are deleted, and there is no `DANTERM_TERMINAL_BACKEND` variable or fallback
+    left to select. One user-visible narrowing came with the deletion: Cmd-click
+    opens `http`/`https` links only, so bare file paths are no longer clickable.
+    The gate ran green on each landed commit; the end-to-end re-proof from a
+    clean checkout (normal gate, UI gate, dev build, release build, and a live
+    pane smoke test) is the final task of
+    `plans/impl/2026-08-06-libghostty-removal-and-post-removal-simplification.md`
+    and is the confirmation to point at if this milestone is ever questioned.
+    Note that Milestone 9 is deliberately still open: its power-and-performance
+    gate has not been run. Removal proceeded ahead of it by owner decision, and
+    Milestone 9's "no required fallback to Ghostty" criterion is now closed by
+    construction rather than by evidence.
 
 ## Deferred post-milestone work
 

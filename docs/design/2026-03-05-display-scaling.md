@@ -3,6 +3,16 @@
 Status: Accepted
 Date: 2026-03-05
 
+> **2026-08-06: mechanism superseded by the libghostty removal; invariant
+> retained.** `app/TerminalView.swift`,
+> `lib/DanTermCore/Sources/DanTermCore/BackingGeometry.swift`, and every
+> `ghostty_surface_*` call named below are gone. The equivalent code is
+> `SwiftTerminalSessionView.synchronizeGeometry`, which derives cell metrics and
+> grid dimensions from `window?.backingScaleFactor` and sets `layer.contentsScale`.
+> What still holds is the rule this ADR exists for: scale and pixel size are one
+> invariant, and the non-positive-dimension guard is part of it, not a cosmetic
+> defensive check. The body is unedited on purpose.
+
 ## Context
 
 DanTerm hosts Ghostty surfaces in AppKit views that may run on Retina and

@@ -1,17 +1,16 @@
 # DanTerm
 
-Custom macOS terminal emulator, currently built on libghostty (the Zig library
-from Ghostty). This experimental branch is replacing libghostty with a
-DanTerm-owned Swift terminal engine: read
+Custom macOS terminal emulator running on its own Swift terminal engine
+(`lib/TerminalCore` for the grid, parser, and renderer; `lib/TerminalPTY` for
+process lifecycle). It was built on libghostty until that dependency was removed
+outright: there is no Zig, no xcframework, and no second backend left. Read
 [plan-terminal-engine/README.md](plan-terminal-engine/README.md) before planning
-or implementing that work.
+or implementing engine work.
 
 ## Boundaries
 
-Don't edit -- both are regenerated, and manual edits get wiped or make the
-reference unreliable:
+Don't edit -- it is regenerated, and manual edits make the reference unreliable:
 
-- `lib/GhosttyKit.xcframework/` (rebuilt by `./build-lib.sh`)
 - `references/` (pinned external checkouts; materialize with `just fetch-references`)
 
 Don't run `just release patch|minor|major`, or any other release/publish
@@ -52,10 +51,10 @@ Two rules govern how much weight source carries:
 ## Architecture
 
 Elm architecture (unidirectional data flow). Model and update logic are pure and
-fully unit-testable without Cocoa or GhosttyKit.
+fully unit-testable without Cocoa or the terminal engine.
 
 ```
-User/Ghostty action
+User/engine action
     → Msg
     → update(&model, msg, env:) -> [Command]   (pure)
     → AppRuntime.perform(command)               (side effects)
@@ -64,10 +63,11 @@ User/Ghostty action
 
 Three layers, split across two symlinked modules plus the runtime:
 
-- `DanTermCore` -- pure, deterministic domain logic; no IO, AppKit, or GhosttyKit.
+- `DanTermCore` -- pure, deterministic domain logic; no IO, AppKit, or engine.
 - `DanTermSupport` -- portable side effects (sockets, timers, CLI-path installer,
   recovery store); depends on `DanTermProtocol` + Foundation, never on `DanTermCore`.
-- `app/` -- AppKit + GhosttyKit runtime, the `Command` interpreter, file IO.
+- `app/` -- AppKit runtime, the `Command` interpreter, file IO, and the host for
+  the `TerminalCore` / `TerminalPTY` engine packages.
 
 `app/DanTermCore` and `app/DanTermSupport` are tracked symlinks into
 `lib/*/Sources/`, so both modules compile same-module into the app target -- no
@@ -136,8 +136,8 @@ and legitimately have none).
 
 ## Build
 
-`./build-lib.sh` once before the first Swift build, and again only when the
-pinned Ghostty version changes.
+`swift build` (via the recipes below) is the whole toolchain. There is no
+prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
 
 - `just build` / `just build-run` -- compile `.build/DanTerm Dev.app` and install
   to `~/Applications/`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side
@@ -179,7 +179,7 @@ shape, parser errors) means updating that file in the same change.
 | Adding a metric, freezing a threshold, acting on a difference between two numbers | [agent-docs/measurement-discipline.md](agent-docs/measurement-discipline.md) |
 | `@inlinable`/`@usableFromInline` in `lib/TerminalCore`, or an `outlined copy` profile frame | [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) |
 | HiDPI scaling, content scale, zero-frame guards | [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) |
-| Build scripts, upgrading Ghostty | [agent-docs/build-details.md](agent-docs/build-details.md), [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) |
+| Build scripts, the dev/release bundle layout | [agent-docs/build-details.md](agent-docs/build-details.md) |
 | CI, signing, notarization, releases | [docs/ci.md](docs/ci.md) |
 
 Full ADR index: [docs/design/index.md](docs/design/index.md).

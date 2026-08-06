@@ -3,6 +3,16 @@
 - Status: Accepted
 - Date: 2026-07-20
 
+> **2026-08-06: carried out.** This record's decision was "continue the
+> experiment, do not commit to cutover yet", with Ghostty remaining the
+> production backend and backend selection a development facility. Milestones
+> 6-8 closed, and libghostty was then removed outright: the Swift engine is the
+> only backend, there is no backend-selection seam or fallback, and no build,
+> runtime, or release path depends on Ghostty. See Milestone 10 in
+> [plan-terminal-engine/14-roadmap.md](../../plan-terminal-engine/14-roadmap.md).
+> The body is unedited on purpose -- it records the evidence available on
+> 2026-07-20, not today's state.
+
 ## Context
 
 The Swift terminal engine experiment was required to pass an explicit
