@@ -5,10 +5,10 @@
 // ways: the root app build picks them up as part of the `app/` target via the
 // tracked `app/DanTermCore` symlink (so the core stays in the app's own module --
 // plain `internal`, no access annotations -- per plan R1), and THIS package
-// compiles them as a separate GhosttyKit-free `DanTermCore` module that the
+// compiles them as a separate `DanTermCore` module that the
 // Swift Testing suites reach via `@testable import DanTermCore`. Running
 // `swift test` here builds only DanTermCore + DanTermCoreTests -- not the
-// GhosttyKit-linked app -- which is the whole reason for a nested package (see
+// AppKit app -- which is the whole reason for a nested package (see
 // plan "Why a nested package").
 //
 // The symlink replaces the plan's `path: "."` design after Phase 0 found that
@@ -18,7 +18,7 @@
 // growth. See docs/design/<date>-danterm-core-symlink.md (added at Phase 3 cutover).
 //
 // Isolation enforced by this package: a core file that gains an app-only symbol
-// or `import GhosttyKit` fails to resolve here (neither is a dependency).
+// fails to resolve here (it is not a dependency).
 // Purity (no IO, no ambient nondeterminism) is enforced separately by a local
 // lint (scripts/core-purity-lint.sh, pure profile) -- the compiler enforces none
 // of it, since system frameworks link by default in any macOS SwiftPM target and

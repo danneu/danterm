@@ -13,7 +13,7 @@
 #          line, and the marker NEVER exempts a hard-ban on the same line;
 #        - comment/string stripping keeps pure comments and the deterministic
 #          UUID(uuidString:) / Date(timeIntervalSince1970:) parses from tripping;
-#   3. the portable profile's GhosttyKit rule plus its deliberate tolerance of
+#   3. the portable profile's Cocoa rule plus its deliberate tolerance of
 #      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support);
 #   4. the opt-in import gates either reject every library-target import or
 #      allow exactly the named modules while rejecting every other real import.
@@ -134,9 +134,8 @@ assert_lint pure pass "neg: tokens in /* */ block"     "        let x = 1 /* Fil
 assert_lint pure pass "neg: plain Foundation import"   "import Foundation"
 
 # ---------------------------------------------------------------------------
-# portable profile -- GhosttyKit + Cocoa banned; portable IO deliberately allowed.
+# portable profile -- Cocoa banned; portable IO deliberately allowed.
 # ---------------------------------------------------------------------------
-assert_lint portable trip "port: import GhosttyKit"    "import GhosttyKit"
 assert_lint portable trip "port: import AppKit"        "import AppKit"
 assert_lint portable pass "port: FileManager ok"       "        let d = FileManager.default.contents(atPath: p)"
 assert_lint portable pass "port: DispatchSource ok"    "        let t = DispatchSource.makeTimerSource(queue: q)"

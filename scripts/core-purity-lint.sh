@@ -14,7 +14,7 @@
 #                and the abbreviateHome/expandTilde leaf defaults). Anywhere else
 #                they are a fresh nondeterminism leak.
 #   portable (target lib/DanTermSupport/Sources/DanTermSupport)
-#            Bans Cocoa/AppKit/SwiftUI AND GhosttyKit imports -- and nothing else.
+#            Bans Cocoa/AppKit/SwiftUI imports -- and nothing else.
 #            DanTermSupport legitimately performs portable IO (FileManager,
 #            Process, DispatchSource, ProcessInfo), so the pure-tier IO bans do
 #            NOT apply here. The profiles are deliberately kept separate.
@@ -29,7 +29,7 @@
 #
 # The regex denylist is a heuristic regression guard, not the proof of purity:
 # the real proof is structural (the nested test packages compile core/support
-# with no GhosttyKit and no cross-module IO dependency). The lint keeps it that way.
+# with no cross-module IO dependency). The lint keeps it that way.
 #
 # The token pass strips comments and string literals before tokenizing (so a pure
 # comment mentioning FileManager/DispatchSourceTimer does not false-positive) but
@@ -110,12 +110,6 @@ if grep -rnE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(Cocoa
 fi
 
 if [[ "$PROFILE" == "portable" ]]; then
-    # --- GhosttyKit import rule (portable only; echoes the structural guarantee
-    # that the support nested package has no GhosttyKit dependency). ---
-    if grep -rnE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+GhosttyKit([^[:alnum:]_]|$)' "$TARGET"; then
-        echo "GhosttyKit import found in $TARGET (DanTermSupport must stay GhosttyKit-free)" >&2
-        exit 1
-    fi
     exit 0
 fi
 
