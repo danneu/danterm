@@ -97,7 +97,7 @@ memoized, explicitly ranking caches and fast paths below representation changes.
 What the survey established directly is in `findings.md`. In brief:
 
 - The parser materializes one 32-byte enum per input token before the grid is
-  touched (`F1`, stride measured).
+  touched (`F1`, stride measured), and `F9` sized that in situ per corpus.
 - The frame planner builds a whole-viewport geometry projection above its own
   damage-scoped reuse check, to read one field that is already in the packed
   word (`F4`) -- which corrects `17/F5`.
@@ -219,7 +219,7 @@ Scripts live in `scripts/research/33/`.
 These are all counters. None requires an idle machine, a paired run, or a
 direction gate; several may kill their own follow-on task, which is the point.
 
-- [ ] `T1` RESEARCH -- **Size the parser's intermediate action array in situ.**
+- [x] `T1` DONE -- **Size the parser's intermediate action array in situ.**
   Script: feed each committed corpus through `TerminalInputStream.feed` and
   report, per corpus, token count, peak `[TerminalStreamAction]` capacity, total
   bytes allocated, and the reallocation count. `F1` establishes stride 32 by
@@ -227,6 +227,12 @@ direction gate; several may kill their own follow-on task, which is the point.
   extrapolation. Record in a new finding. Gate for `T2`: if plain-text corpora
   do not show token counts within ~1x of their byte counts, the ASCII-run
   premise is wrong.
+  **Result in `F9`, script `scripts/research/33/t1-action-array-size.py`. The
+  gate passed:** `scrollback-stream` produces exactly 1.000 tokens per byte and
+  the two other plain-ish corpora sit at 0.86, so the ASCII-run premise holds.
+  The array is confirmed live in an `-O` build -- 275,355 of 275,355 feed calls
+  returned the predicted capacity -- and the parser hands the allocator 60-80x
+  the corpus's own byte count in total array bytes.
 - [ ] `T2` RESEARCH -- **Count per-printed-cell bookkeeping.** Script: instrument
   `Terminal.print`/`printNarrow` call counts for
   `terminalUnicodeClassification`, `invalidateInspection`,
@@ -534,5 +540,7 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 is entirely unstarted; every task in Phases
-2-4 is gated behind a counter that does not yet exist.
+Investigation in progress. Phase 1 has one task done: `T1` sized the parser's
+action array in situ (`F9`) and passed `T2`'s gate, so the ASCII-run premise
+under `T7`/`T8` stands. Every other task in Phases 2-4 is still gated behind a
+counter that does not yet exist.

@@ -266,3 +266,84 @@ performance verdict.
   new calibrated workload, which then surfaced a 13.6 ms -> 5.5 us win no
   workload would have found. Build `T6` so it is capable of returning
   "negligible".
+
+### F9 -- the parser's action array is real in an optimized build, and it allocates 60-80x the corpus's own byte count
+
+- Status: verified by direct probe. `T1`.
+- Date and investigator: 2026-08-06, T1 agent.
+- Commit and worktree state: `9abf3383`, clean apart from untracked
+  `scripts/research/` and an untracked plan file. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t1-action-array-size.py` (add `--json` for the
+  raw report). The driver frames each committed corpus exactly as the
+  `terminal-feed` workload does, then compiles
+  `scripts/research/33/t1-action-array-probe.swift` with `swiftc -O` into one
+  module together with the unmodified `lib/TerminalCore/Sources/TerminalCore`
+  sources. That single-module build is how the probe reaches the internal
+  `TerminalInputStream` without any edit to the engine.
+- Result or artifact paths: the two script files above; the run writes nothing
+  durable.
+- Measurements or examples. `MemoryLayout<TerminalStreamAction>`: size 26,
+  **stride 32**, reconfirming `F1` on this toolchain. `feed`'s array grows
+  through the capacities `1, 2, 4, 9, 19, 39, 79, 159, 319, 639, 1535, 3071,
+  6143, 12287, 24575, 49151, ...`, recorded by appending to a real
+  `[TerminalStreamAction]`, not assumed from Swift's documented policy.
+
+  At the corpora's own chunk framing, which is what `terminal-feed` feeds:
+
+  | corpus | feeds | bytes | tokens | tok/byte | peak capacity | peak live | total allocated | reallocations |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 25,000 | 1,525,000 | 1,525,000 | **1.000** | 79 | 2.5 KB | 122.40 MB | 150,000 |
+  | `styled-screen-redraw` | 3,501 | 5,211,504 | 4,399,501 | 0.844 | 1,535 | 48.0 KB | 314.16 MB | 35,000 |
+  | `unicode-wrapping` | 9,000 | 1,521,000 | 1,314,000 | 0.864 | 159 | 5.0 KB | 89.86 MB | 63,000 |
+  | `incremental-screen-updates` | 100,002 | 5,700,042 | 3,200,029 | 0.561 | 39 | 1.2 KB | 236.80 MB | 500,005 |
+  | `synchronized-frames` | 96 | 3,020,580 | 934,889 | 0.310 | 49,151 | 1,536.0 KB | 62.28 MB | 1,071 |
+
+  Re-chunking to the PTY host's 16 KiB turn limit changes only
+  `synchronized-frames` (96 feeds become 248; peak capacity 49,151 -> 12,287,
+  1,536 KB -> 384 KB; total allocated 62.28 -> 73.66 MB). Every other corpus is
+  already framed below 16 KiB, so its numbers are unchanged.
+
+  Fed single-shot -- the shape `terminal-memory-probe --chunk 0` uses -- the
+  same corpora reach one array of **1,572,863 elements (48 MB live)** for
+  `scrollback-stream` and **6,291,455 elements (192 MB live)** for
+  `styled-screen-redraw`, at 20-22 reallocations and 100-403 MB total
+  allocated.
+
+  Token composition at corpus framing: `scrollback-stream` is 1,500,000
+  `.print` plus 25,000 `.execute` and **zero** CSI; `incremental-screen-updates`
+  is 2,500,025 `.print`, 100,000 `.execute`, 600,004 `.csi`.
+- Observation: **275,355 of 275,355 feed calls returned an array whose live
+  `capacity` matched the replayed growth table exactly** -- zero mismatches
+  across all three chunkings. The array is not stack-promoted or elided in an
+  `-O` build; it is allocated, grown, and returned at full capacity.
+- Inference: the **T2 gate passes.** `scrollback-stream` produces exactly 1.000
+  tokens per byte, and the two other plain-ish corpora sit at 0.86; the
+  ASCII-run premise `T8` rests on is intact. The magnitude `F1` extrapolated is
+  confirmed and is larger than it estimated per unit of input: at production
+  delivery sizes the parser hands the allocator **60-80x the corpus's byte
+  count** in total array bytes, and a single 16 KiB all-ASCII PTY turn costs 15
+  allocations totalling 1.56 MB (48,881 elements x 32 B) to carry 16,384
+  tokens. The reallocation count also says where the cost is not: it is
+  dominated by feed count, not by array size, so `incremental-screen-updates`
+  pays 500,005 reallocations across small arrays while `synchronized-frames`
+  pays 1,071 across huge ones. Streaming the parser (`T7`) removes both shapes
+  at once.
+- Competing interpretations: the probe reads `capacity` on the returned array,
+  which by itself forces the array to survive optimization in *this* binary.
+  It therefore proves the array is materialized whenever a caller consumes it,
+  which `Terminal.feed` does, but it is not a proof about `Terminal.feed`'s own
+  optimized code. `15/F7`'s 37.2 MB of `MALLOC_LARGE (empty)` under
+  `--chunk 0`, and the chunk-invariance of the census that sits beside it, are
+  the independent evidence that it survives there too; the single-shot row
+  above matches that shape in magnitude. Separately, "total allocated" counts
+  every buffer handed to the allocator, and the freed ones are reused -- it is
+  an allocator-traffic number, not a footprint.
+- Uncertainty: none on the token counts, the stride, the growth capacities, or
+  the peak capacities -- all are exact counts of a deterministic replay. No
+  timing was taken and none is claimed. The share of `terminal-feed`'s wall
+  clock this represents is still unmeasured.
+- Next action: `T2` (per-printed-cell bookkeeping) is unblocked and its gate is
+  met. `T7`/`T8` may proceed to the direction gate; `T7`'s script is this one,
+  which must report zero allocations afterward.
