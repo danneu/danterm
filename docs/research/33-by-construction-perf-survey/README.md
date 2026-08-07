@@ -139,7 +139,7 @@ frame.
 Supports: `23/F5`. Competing explanation: much of the fence stall is main
 waiting for parsing that must happen regardless, so the recoverable part is only
 the plan + copy-on-write + set churn between fences. Distinguishing experiment:
-`T7`'s publish counter, live rather than in a benchmark block.
+`T4`'s publish counter, live rather than in a benchmark block.
 
 ### H3 -- a scroll is the worst case in the whole system, and it is the common case
 
@@ -149,7 +149,10 @@ the entire screen's glyphs to express a translation of one row. Every other
 finding in the draw and planning verticals is multiplied by this.
 
 Supports: `F5`, plus `17/F6`'s off-main-thread per-glyph bounds cost scaling
-with glyph occurrences submitted. Competing explanation: the retained-row reuse
+with glyph occurrences submitted. `F11` measured it and it is stronger than
+stated: a scroll does not damage the region's rows, it escalates to `.full`,
+which also refuses the planner's row reuse -- and at the live 16 KiB delivery
+size that is 100% of the frames on both plain-text streaming corpora. Competing explanation: the retained-row reuse
 in `PaneFramePlanner` may already absorb most of the planning half, leaving only
 the submission half. Distinguishing experiment: `T9`'s damaged-row and
 submitted-glyph counters under a one-newline-per-update stimulus.
@@ -177,8 +180,8 @@ predicted percentage:
    benchmark, and it sits on the drain that is ~96% of `scrollback-stream`.
 2. Give damage a shift component so a scroll is a translation (`T9`). Highest
    ceiling, highest risk, and it is the change that makes the damage-bitset
-   question (`T10`) worth answering.
-3. Bound publish rate by consumer demand (`T7`). Removes a multiplier on
+   question (`T20`) worth answering.
+3. Bound publish rate by consumer demand (`T10`). Removes a multiplier on
    everything downstream and retires the 16 KiB read-cap's reason to exist.
 
 Items 2 and 3 interact: bounding publish rate without shift damage still redraws
@@ -250,11 +253,24 @@ direction gate; several may kill their own follow-on task, which is the point.
   per-action `damageActionSnapshot` falls 2.5x to 16.9x. One caveat for `T8`:
   `currentStyleId` misses its cache once per corpus on the plain-text workloads,
   so hoisting it saves a call, not an interning.
-- [ ] `T3` RESEARCH -- **Count damage-representation round trips per frame.**
+- [x] `T3` DONE -- **Count damage-representation round trips per frame.**
   Script: per published frame, report damaged-row count, `Set<Int>` allocations
   (drain + `init(rows:)` + halo + union), hash operations, and whether the
-  emitted spans were already sorted before `sorted()` ran. Feeds `T10` and
-  supplies the diff-shape evidence `30/D2` asked for.
+  emitted spans were already sorted before `sorted()` ran. Feeds `T20` (the
+  ledger originally said `T10`, which is now the publish-rate task) and supplies
+  the diff-shape evidence `30/D2` asked for.
+  **Result in `F11`, script `scripts/research/33/t3-damage-round-trips.py`.**
+  A row-damaged frame costs **exactly 4 `Set` allocations, 3 array allocations**
+  and 386 to 721 hash operations, of which **198 = 3 x 66** are the planner's
+  membership lookups -- three per row, not two, because the padding sweep asks
+  the `replanning` predicate a second time. The spans were **never** already
+  sorted (0 to 2 calls out of 5,438), and they coalesce to one span per frame
+  anyway. The larger result is the one the task did not ask for: at the live
+  16 KiB delivery size, `scrollback-stream` and `unicode-wrapping` publish
+  `.full` on **every** frame, all of it from `recordDamage(from:to:)`'s
+  `topRow` guard, so the streaming corpora never execute this apparatus and
+  never get row-scoped drawing either. `T20` therefore stays a complexity claim
+  and a rider on `T9`; `T9` gains Phase 1's strongest evidence.
 - [ ] `T4` RESEARCH -- **Count published frames per second, live.** Script or
   small patch: expose `TerminalPaneFenceMetrics.delivery.count` on a sampling
   surface (this is doc 25's `T3`, still unbuilt) and report publishes/s and
@@ -552,11 +568,23 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 has two tasks done, and both point the same
-way: `T1` sized the parser's action array in situ (`F9`) and passed `T2`'s gate,
-and `T2` then sized the per-printed-cell bookkeeping (`F10`) and found the
-expected shape exactly -- every named site runs once per printed character, and
-ASCII runs are long enough for `T8` to collapse them 3.9x to 36x. So `T7` and
-`T8` are the two tasks whose mechanism is now measured rather than argued. Every
-other task in Phases 2-4 is still gated behind a counter that does not yet
-exist.
+Investigation in progress. Phase 1 has three tasks done. `T1` sized the parser's
+action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
+per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
+every named site runs once per printed character, and ASCII runs are long enough
+for `T8` to collapse them 3.9x to 36x. So `T7` and `T8` are the two tasks whose
+mechanism is now measured rather than argued.
+
+`T3` (`F11`) counted the damage round trips and returned two answers. The one it
+was asked for confirms `F2` and sizes it small: 4 `Set` allocations, 3 array
+allocations and 386-721 hash operations per row-damaged frame, on a set bounded
+by 66 -- so `T20` stays a complexity claim under `D1`, exactly as `30/D2`
+concluded on the numbers. The one it was not asked for is bigger: at the live
+16 KiB delivery size the two plain-text streaming corpora publish `.full` damage
+on every frame, entirely because a scroll changes `topRow`, so they never reach
+the damage set *or* row-scoped planning and drawing. That makes `T9` -- shift
+damage -- the best-evidenced structural item in the doc, and it makes `T5` a
+confirmation rather than a discovery.
+
+The remaining tasks in Phases 2-4 are still gated behind counters that do not
+yet exist, `T4`'s live publish rate first among them.

@@ -449,3 +449,166 @@ performance verdict.
   before/after script is this one, which must show the five per-character
   counters fall to the "units after `T8`" column. `T3` (damage round trips) is
   the next Phase 1 counter and is unaffected by this result.
+
+### F11 -- one row-damaged frame costs exactly 4 `Set` allocations, 3 array allocations and 386-721 hash operations, and a scroll skips the whole apparatus by escalating to `.full`
+
+- Status: verified by direct probe. `T3`. **Two results, and the second is the
+  larger one:** the round trips `F2` described are real and exactly sized, and
+  the corpora that stream text never reach them at all, because every scroll
+  publishes `.full`.
+- Date and investigator: 2026-08-06, T3 agent.
+- Commit and worktree state: `8d0ae09d`, clean apart from this task's untracked
+  scripts and an untracked plan file. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t3-damage-round-trips.py` (add `--json` for the
+  raw report). The driver copies `lib/TerminalCore/Sources/TerminalCore` **and**
+  `.../TerminalRenderPlanning` into a scratch directory, strips the
+  `import TerminalCore` lines so the two targets can compile as one module,
+  injects one counter increment at each site on the damage path, and builds the
+  copy with `swiftc -O` together with the probe. **The engine in the repo is
+  never edited**, and every injection is an exact-text anchor that must match
+  exactly once, so a source change that moves a site fails the run rather than
+  silently miscounting -- the same discipline as `F10`.
+- Result or artifact paths: `scripts/research/33/t3-damage-round-trips.py`,
+  `t3-damage-round-trips-probe.swift`, `t3-damage-round-trips-counters.swift`.
+  The run writes nothing durable.
+- Method, and what "a published frame" means here: the three owners of the
+  damage path do not share a module, so the probe restates the production
+  sequence headlessly -- `TerminalPaneSession.consume` (drain, `formUnion` into
+  `pendingDamage`), `planIfNeeded` (its three gates, `PaneFramePlanner`,
+  publish), `SwiftTerminalSessionView.publish` (halo, `TerminalDamage(rows:)`,
+  `formUnion` into `pendingDisplayDamage`, one `setNeedsDisplay` per haloed
+  row), then `drawingDamage` + `spanClipRects`. Every gate production applies
+  before publishing is applied, including the synchronized-output hold, so a
+  suppressed publish accumulates damage exactly as it does live. One delivery is
+  one drain and one publish attempt; one draw is modelled per publish. Two
+  framings are run: the PTY host's 16 KiB read-turn cap, which is the live
+  delivery size, and the corpus's own framing, which brackets the answer from
+  the many-small-deliveries side. Terminal is a fresh 179x66 per corpus.
+- Measurements, at the 16 KiB delivery cap (the production-shaped framing):
+
+  | corpus | deliveries | frames | full-damage frames | held | rows/frame | sets/frame | arrays/frame | hashes/frame |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 94 | 94 | **94** | 0 | 66.0 | 0.00 | 0.00 | 0.0 |
+  | `styled-screen-redraw` | 319 | 319 | 1 | 0 | 30.1 | 3.99 | 2.99 | 438.6 |
+  | `unicode-wrapping` | 93 | 93 | **93** | 0 | 66.0 | 0.00 | 0.00 | 0.0 |
+  | `incremental-screen-updates` | 348 | 348 | 1 | 0 | 23.1 | 3.99 | 2.99 | 384.9 |
+  | `synchronized-frames` | 185 | 1 | 1 | 184 | 66.0 | 368.00 | 184.00 | 18058.0 |
+
+  Per **row-damaged** frame -- the frames that actually pay -- the allocation
+  count is invariant across every corpus and both framings: **exactly 4.0
+  `Set<Int>` allocations and 3.0 array allocations**, never 3.9 or 4.1. The four
+  sets are `drain()`'s, `TerminalDamage.init(rows:)`'s rebuild of it,
+  `terminalDamageRowsWithGlyphHalo`'s, and `init(rows:)` again on the halo. The
+  three arrays are the two `rows.filter { $0 >= 0 }` results and `sorted()`.
+
+  | corpus (framing) | row-damaged frames | rows/frame | hashes/frame | drain inserts | init hashes | union hashes | halo inserts | planner lookups |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `styled-screen-redraw` (16 KiB) | 318 | 30.0 | **440.0** | 30 | 61 | 61 | 90 | 198 |
+  | `incremental-screen-updates` (16 KiB) | 347 | 23.0 | **386.0** | 23 | 48 | 48 | 69 | 198 |
+  | `scrollback-stream` (corpus) | 4,749 | 65.4 | **720.9** | 65 | 131 | 131 | 196 | 198 |
+  | `unicode-wrapping` (corpus) | 277 | 58.0 | **662.6** | 58 | 116 | 116 | 175 | 198 |
+  | `synchronized-frames` (corpus) | 95 | 50.8 | **607.7** | 51 | 103 | 103 | 152 | 198 |
+
+  Span ordering, over every call the draw path made:
+
+  | corpus (framing) | span calls | input already ascending | inversions | spans before halo | spans drawn |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | `styled-screen-redraw` (16 KiB) | 318 | **0** | 4,922 | 1.00 | 1.00 |
+  | `incremental-screen-updates` (16 KiB) | 347 | **0** | 4,514 | 1.00 | 1.00 |
+  | `scrollback-stream` (corpus) | 4,749 | **2** | 151,667 | 1.00 | 1.00 |
+  | `unicode-wrapping` (corpus) | 277 | **0** | 7,872 | 1.00 | 1.00 |
+  | `synchronized-frames` (corpus) | 95 | **0** | 2,420 | 1.79 | 1.01 |
+
+  Full-damage attribution, by call site:
+
+  | corpus (framing) | full-damage calls | escalations | from `topRow`/screen change | from any other site |
+  | --- | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` (16 KiB) | 23,873 | 93 | **23,873** | 0 |
+  | `unicode-wrapping` (16 KiB) | 15,336 | 92 | **15,336** | 0 |
+  | `scrollback-stream` (corpus) | 23,873 | 20,250 | **23,873** | 0 |
+  | `unicode-wrapping` (corpus) | 15,315 | 8,722 | **15,315** | 0 |
+  | `synchronized-frames` (corpus) | 2 | 0 | 1 | 1 |
+
+  `styled-screen-redraw` and `incremental-screen-updates` record zero
+  full-damage calls in either framing.
+- Observation, the round trips are exactly what `F2` read: four sets, three
+  arrays, and 386-721 hash operations per row-damaged frame, with the largest
+  single contributor being the planner's **198 = 3 x 66** membership lookups.
+  Three, not two: `damage.rows.contains(row)` is asked once by the traversal
+  predicate in `inspectedCells`, a second time by the padding sweep below it
+  (`for row in 0..<rowCount where replanning(row)`), and a third time by the
+  row-copy loop in `plan(reusing:damage:)`. The probe counts the predicate
+  (`plannerPredicateCalls`) and the loop (`plannerRowCopyLookups`) separately,
+  and the split is exactly 2:1 in every corpus.
+- Observation, the spans were **never** already sorted. Across 5,438 span calls
+  at the 16 KiB cap and corpus framing combined, 0 to 2 found their input set
+  already ascending, and the inversion count runs at roughly a third of adjacent
+  pairs -- the order is random, not nearly-sorted. The count varies run to run
+  (`scrollback-stream` corpus framing gave 1, 2, 2 already-ascending and
+  145,775-164,580 inversions across four runs) because Swift seeds `Set` hashing
+  per process; the conclusion does not vary. The drained set, before
+  `init(rows:)` rebuilds it, is equally unordered: 22 of 25,000 for
+  `scrollback-stream`.
+- Observation, and this is the larger one: **at the live 16 KiB delivery size,
+  `scrollback-stream` and `unicode-wrapping` publish `.full` on every single
+  frame** -- 94 of 94 and 93 of 93 -- so the whole `Set` apparatus costs them
+  literally zero and buys them nothing, because the entire viewport is redrawn.
+  100% of that escalation comes from one branch: `recordDamage(from:to:)`'s
+  `guard before.topRow == after.topRow`. Any scroll of the viewport window
+  changes `topRow` and therefore escalates. At the corpora's own (61-byte)
+  framing the same corpora still publish `.full` on 81% and 97% of frames.
+- Observation, the spans are already trivial. Damage coalesces to **1.00 spans
+  per frame** on four of five corpora *before* the halo runs, so the sort is
+  recovering a single contiguous block. Only `synchronized-frames` has sparse
+  damage (1.79 spans), and the halo collapses even that to 1.01.
+- Inference, for `T20` (damage carries words end to end): the mechanism it
+  deletes is confirmed and exactly sized -- 4 sets, 3 arrays, ~200-720 hashes
+  per row-damaged frame, plus the `filter { $0 >= 0 }` sanitizer and the
+  `sorted()`, which this finding shows is never a no-op. But the sizing also
+  confirms `F2`'s own uncertainty and `30/D2`'s rejection on the numbers: this
+  is a few hundred hash operations on a bounded-by-66 set, and the corpus where
+  the app spends its time does not execute it at all. So `T20` stays a
+  **complexity** claim under `D1` and stays sequenced as a rider on `T9`/`T14`.
+  Nothing here licenses a speed claim, and none is made.
+- Inference, for `T9` (shift damage) and `T5`: `F5` said a one-row scroll marks
+  the whole scroll region damaged. It is stronger than that -- a scroll does not
+  mark 66 rows, it publishes `.full`, which also refuses `PaneFramePlanner`'s row
+  reuse (`reusable` is `nil` whenever `damage.isFull`), so the planner replans
+  every row *and* the drawer redraws every row. On the streaming corpus that is
+  every frame at production delivery size. `T9` is therefore the task this
+  finding most strongly supports, and `T5` should measure the same escalation
+  with a synthetic scroll rather than assume row damage.
+- Inference, for `T4`/`T10` (publish rate): at the 16 KiB delivery cap the
+  corpora publish 94 to 348 frames for 1.5-5.7 MB, so the per-frame costs above
+  are multiplied by delivery count, not by byte count. `synchronized-frames` is
+  the extreme case in the other direction: 184 of 185 deliveries are held by the
+  synchronized-output guard and the single surviving publish carries 368 set
+  allocations' worth of accumulated round trips. Bounding publish rate moves
+  every number in the first table down proportionally.
+- Competing interpretations: the "one draw per publish" model is an upper bound
+  on `spanCalls`; a real display-rate-limited consumer draws less often, which
+  lowers the span count and raises the row count each surviving call sorts.
+  Every other counter sits on the publish side and is unaffected. Separately,
+  the corpus-framing run inflates frame count relative to production (61-byte
+  deliveries), which is why the 16 KiB run is quoted first -- but it is the
+  framing `terminal-feed` measures, so both are reported. Finally, the probe
+  reconstructs the app-side stages rather than running `SwiftTerminalSessionView`
+  itself, which no headless build can do; the reconstruction is line-for-line
+  against the two functions and any drift in them is not detected by an anchor
+  check, unlike the engine-side injections.
+- Competing interpretations, the counters themselves: injecting increments
+  perturbs inlining, so this build's *timing* means nothing and none is claimed.
+  The counts are exact and the instrumentation only adds statements.
+- Uncertainty: none on the allocation, hash, damaged-row or escalation counts --
+  all are exact tallies of a deterministic replay, and the 4.0/3.0 allocations
+  per row-damaged frame are invariant across ten corpus-framing pairs. The
+  already-ascending and inversion counts are the one nondeterministic pair, for
+  the per-process hash seed reason above, and the range across four runs is
+  recorded. No timing was taken.
+- Next action: `T20`'s disposition is settled as "complexity claim, rider on
+  `T9`/`T14`" and `D2` should record this sizing. `T5` is unblocked and should
+  be scoped to confirm the `.full` escalation with a synthetic scroll. `T9` gains
+  the strongest single piece of evidence in Phase 1: at production delivery size
+  the streaming corpora have no row damage at all, only whole-screen redraws.
