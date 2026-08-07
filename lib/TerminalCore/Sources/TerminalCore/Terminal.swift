@@ -6208,11 +6208,42 @@ public struct Terminal: Equatable, Sendable {
             clearPreviousSpacer(beforeRow: row, column: column)
         }
 
+        writeNarrowCells(
+            row: row,
+            column: column,
+            count: count,
+            baseIdentity: baseIdentity,
+            breakClass: .other
+        ) { Unicode.Scalar(bytes[start + $0]) }
+        rememberOpenCluster()
+        return count
+    }
+
+    /// The one writer of plain narrow cells: stamps `count` consecutive cells in a row, opens the
+    /// cluster context on the last of them, and advances the cursor with the pending-wrap latch.
+    ///
+    /// Both `printNarrow` (count 1) and `printBulkASCII` (a whole run) end here, and that is the
+    /// point: cell shape, cluster context, cursor advance and the wrap latch are the state machine
+    /// the two paths must agree on, so they share it instead of each restating it. The caller owns
+    /// everything that legitimately differs -- clearing the target cells, insert mode, identity
+    /// allocation -- and must guarantee the target range is in-bounds and needs no clearing.
+    ///
+    /// `scalar` is a non-escaping per-offset supplier so the bulk path reads straight from the fed
+    /// chunk without materializing scalars; same-module specialization keeps it out of the hot
+    /// loop's way.
+    private mutating func writeNarrowCells(
+        row: Int,
+        column: Int,
+        count: Int,
+        baseIdentity: ContentIdentity,
+        breakClass: GraphemeBreakClass,
+        scalar: (Int) -> Unicode.Scalar
+    ) {
         let styleId = currentStyleId()
         let hyperlinkId = hyperlinkPen
         for offset in 0..<count {
             rows[row].cells[column + offset] = GridCell(
-                scalars: .single(Unicode.Scalar(bytes[start + offset])),
+                scalars: .single(scalar(offset)),
                 kind: .narrow,
                 styleId: styleId,
                 hyperlinkId: hyperlinkId,
@@ -6222,7 +6253,7 @@ public struct Terminal: Equatable, Sendable {
 
         clusterContext = ClusterContext(
             target: CellPosition(row: row, column: column + count - 1),
-            previousClass: .other
+            previousClass: breakClass
         )
         if column + count == columnCount {
             cursor.column = columnCount - 1
@@ -6230,8 +6261,6 @@ public struct Terminal: Equatable, Sendable {
         } else {
             cursor.column = column + count
         }
-        rememberOpenCluster()
-        return count
     }
 
     private mutating func print(_ scalar: Unicode.Scalar) {
@@ -6448,21 +6477,13 @@ public struct Terminal: Equatable, Sendable {
             )
         }
         clearCellAndPair(row: cursor.row, column: cursor.column)
-        let styleId = currentStyleId()
-        rows[cursor.row].cells[cursor.column] = GridCell(
-            scalars: .single(scalar),
-            kind: .narrow,
-            styleId: styleId,
-            hyperlinkId: hyperlinkPen,
-            contentIdentity: contentIdentity
-        )
-        clusterContext = ClusterContext(target: cursor, previousClass: breakClass)
-
-        if cursor.column == columnCount - 1 {
-            isPendingWrap = isAutoWrapMode
-        } else {
-            cursor.column += 1
-        }
+        writeNarrowCells(
+            row: cursor.row,
+            column: cursor.column,
+            count: 1,
+            baseIdentity: contentIdentity,
+            breakClass: breakClass
+        ) { _ in scalar }
     }
 
     private mutating func printWide(
