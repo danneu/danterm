@@ -978,6 +978,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             frame.plan,
             damage: frame.damage,
             planDurationNanoseconds: controller.lastPlanDurationNanoseconds,
+            planThreadCPUNanoseconds: controller.lastPlanThreadCPUNanoseconds,
             fenceStallNanoseconds: controller.lastFenceStallNanoseconds
         )
         #endif

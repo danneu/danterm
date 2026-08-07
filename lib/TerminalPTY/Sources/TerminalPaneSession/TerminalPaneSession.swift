@@ -350,6 +350,12 @@ public final class TerminalPaneSessionController {
     /// is what lets a planner change be attributed at all. Benchmark builds only.
     public private(set) var lastPlanDurationNanoseconds: UInt64 = 0
 
+    /// Thread CPU time spent inside the same `planFrame` bracket, for separating "the planner
+    /// did more work" from "the planner was slowed down". Wall time inflates when planning runs
+    /// concurrently with a drain on another core; thread CPU time does not, so a wall rise with
+    /// flat thread CPU is contention, not work (`research/33/F16`'s open churn question).
+    public private(set) var lastPlanThreadCPUNanoseconds: UInt64 = 0
+
     #endif
 
     /// The one host-construction recipe behind every convenience initializer, so a new host
@@ -1137,6 +1143,7 @@ public final class TerminalPaneSessionController {
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
         #if DANTERM_TERMINAL_BENCHMARK
         let planStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
+        let planStartedThreadCPUNanoseconds = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         #endif
         let plan = framePlanner.planFrame(
             for: terminal,
@@ -1150,6 +1157,8 @@ public final class TerminalPaneSessionController {
         #if DANTERM_TERMINAL_BENCHMARK
         lastPlanDurationNanoseconds =
             DispatchTime.now().uptimeNanoseconds - planStartedNanoseconds
+        lastPlanThreadCPUNanoseconds =
+            clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - planStartedThreadCPUNanoseconds
         #endif
         // Below every early return above, so a suppressed publish carries its stall
         // forward to the next one instead of losing it.

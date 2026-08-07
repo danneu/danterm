@@ -286,8 +286,10 @@ final class TerminalBenchmarkObserver {
     /// published frames into one draw; summing attributes every plan the block
     /// actually paid for instead of silently discarding the superseded ones.
     private var pendingPlanNanoseconds: UInt64 = 0
+    private var pendingPlanThreadCPUNanoseconds: UInt64 = 0
     private var pendingPlanFrameCount = 0
     private var acceptedPlanDurations: [UInt64] = []
+    private var acceptedPlanThreadCPUDurations: [UInt64] = []
     private var acceptedPlanFrameCount = 0
     /// Main-actor time blocked in the per-delivery drain fence, accumulated the same
     /// way and for the same reason as the plan cost above: several published frames
@@ -504,12 +506,14 @@ final class TerminalBenchmarkObserver {
         _ plan: RenderFramePlan,
         damage: TerminalDamage,
         planDurationNanoseconds: UInt64 = 0,
+        planThreadCPUNanoseconds: UInt64 = 0,
         fenceStallNanoseconds: UInt64 = 0
     ) {
         if activityPath != nil { observedPlanFrameCount += 1 }
         reopenCompletedBlockIfRequested()
         if startNanoseconds != nil, completed == false {
             pendingPlanNanoseconds += planDurationNanoseconds
+            pendingPlanThreadCPUNanoseconds += planThreadCPUNanoseconds
             pendingPlanFrameCount += 1
             pendingFenceStallNanoseconds += fenceStallNanoseconds
             pendingFenceStallCount += 1
@@ -577,8 +581,10 @@ final class TerminalBenchmarkObserver {
         localizedDrawDurations = []
         localizedDirtyRowCounts = []
         pendingPlanNanoseconds = 0
+        pendingPlanThreadCPUNanoseconds = 0
         pendingPlanFrameCount = 0
         acceptedPlanDurations = []
+        acceptedPlanThreadCPUDurations = []
         acceptedPlanFrameCount = 0
         pendingFenceStallNanoseconds = 0
         pendingFenceStallCount = 0
@@ -762,6 +768,10 @@ final class TerminalBenchmarkObserver {
             // is outside the draw timer, so adding it would redefine the metric
             // the decision thresholds are calibrated for.
             object["cumulativePlanNanoseconds"] = acceptedPlanDurations.reduce(0, +)
+            // Thread CPU over the same bracket as `cumulativePlanNanoseconds`, so a reader can
+            // separate planner work (both move) from planner contention (only wall moves).
+            object["cumulativePlanThreadCPUNanoseconds"] =
+                acceptedPlanThreadCPUDurations.reduce(0, +)
             object["planCount"] = acceptedPlanDurations.count
             object["planFrameCount"] = acceptedPlanFrameCount
             object["planDurationsNanoseconds"] = acceptedPlanDurations
@@ -990,8 +1000,10 @@ final class TerminalBenchmarkObserver {
     /// single index.
     private func acceptPendingWork() {
         acceptedPlanDurations.append(pendingPlanNanoseconds)
+        acceptedPlanThreadCPUDurations.append(pendingPlanThreadCPUNanoseconds)
         acceptedPlanFrameCount += pendingPlanFrameCount
         pendingPlanNanoseconds = 0
+        pendingPlanThreadCPUNanoseconds = 0
         pendingPlanFrameCount = 0
         acceptedFenceStallDurations.append(pendingFenceStallNanoseconds)
         acceptedFenceStallCount += pendingFenceStallCount
