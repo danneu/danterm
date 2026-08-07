@@ -842,6 +842,19 @@ corpora with the shortest runs* -- -11.2% and -10.2% against -4.4% where runs ar
 says the win is not only the boundary: those two corpora are CSI-heavy, so their
 token count stays high under `T8` and the array they no longer build stays large.
 
+**The churn plan-metric question `F16` left open is closed by ablation
+(`F18`).** Thread CPU inside the plan bracket equals its wall time on both arms
+of every block, so the planner is never off-CPU and the contention hypothesis is
+refuted; the `slower` is composition -- the candidate plans 55-63% more frames
+per draw at 30-35% less per frame, because the faster drain publishes more
+often, and `planNanosecondsPerDraw` charges that as slowness. The extra plans
+are exactly what `T10` would delete. Alongside it, the landed pair was hardened
+after review: the identity-wrap straddle decline gained its missing test
+(`7b9c1d06`), and `printBulkASCII` and `printNarrow` now share one narrow-cell
+writer (`50595488`) -- gated by the counter script reading 1.0x arm-to-arm with
+`F16`'s run structure reproduced to the unit, a fully inlined `-O` disassembly,
+and a paired `equivalent` -0.28% on `scrollback-stream`.
+
 `F17` also corrects why `T7` existed at all. **`T8` alone had already deleted the
 31 MB parse spike**, taking the single-shot footprint difference from 30.95 MB to
 0.12 MB, because one 32-byte action per 44.8-character run is 36x smaller than one

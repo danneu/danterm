@@ -1485,3 +1485,78 @@ performance verdict.
   `D6`. The `terminal-feed` block floor remains unowned, and `T10` is the next
   Phase 2 item -- `F16` showed the faster drain slightly *raises* the delivery
   count, so `T8` enlarged `T10`'s target rather than shrinking it.
+
+### F18 -- the churn plan-metric `slower` is composition, not cost: the candidate plans 55-63% more frames per draw at 35% less per frame, and the planner is never off-CPU
+
+- Status: measured, closing `F16`'s one recorded uncertainty. The calibrated
+  plan-metric `slower` on the two churn workloads is real and reproduces
+  (+4.83% `content-churn`, +6.70% `style-churn` on this run), and it is fully
+  explained by frame composition: the faster drain publishes more frames per
+  draw, each planned frame covers a smaller accumulated diff and costs less,
+  and the per-draw *sum* rises because ~30 extra cheap plans outweigh the
+  per-frame savings. `F16`'s contention hypothesis is **refuted by ablation**:
+  thread CPU inside the plan bracket equals its wall time to within 0.1% on
+  both arms of every block, so the planner is never descheduled and never
+  blocked while planning.
+- Date and investigator: 2026-08-07, follow-up agent.
+- Commit and worktree state: measured between two purpose-built arms in a
+  detached worktree, `ec6f319e` (`63c693da` plus the instrumentation commit)
+  against `0e623913` (`50595488` plus the same commit), so the arms differ by
+  exactly `T8`, `T7`, and the shared-narrow-cell-writer refactor (`50595488`),
+  and the instrumentation cancels. The instrumentation commit is preserved on
+  branch `bench/plan-thread-cpu` and is 22 lines, all inside the existing
+  `#if DANTERM_TERMINAL_BENCHMARK` path: it captures
+  `clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)` across the same
+  `planFrame` bracket that produces `lastPlanDurationNanoseconds` and emits
+  `cumulativePlanThreadCPUNanoseconds` beside the wall figure in the block
+  artifact. Machine: 10 processors, load 0.27-0.30 per processor at
+  invocation, otherwise idle.
+- Commands, inputs, or reproduction:
+  `just benchmark-quick baseline=ec6f319e workload=content-churn` and
+  `workload=style-churn`, then read
+  `rawBlocks[].artifact.finalDraw.{cumulativePlanNanoseconds,cumulativePlanThreadCPUNanoseconds,planCount,planFrameCount}`
+  and `rawBlocks[].{measurementRole,drawCount}` from the comparison's
+  `run.json`.
+- Measurements, per block (A is baseline, B is candidate; 50 accepted draws
+  per block in all eight):
+
+  | workload | arm | planned frames | plan wall | plan thread CPU | per planned frame | per draw | fence stall |
+  | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `content-churn` | A | 51 | 25.4 ms | 25.3 ms | 497 us | 507 us | 33.5 ms |
+  | | B | 82 | 26.6 ms | 26.6 ms | 325 us | 533 us | 4.1 ms |
+  | | B | 81 | 26.5 ms | 26.5 ms | 328 us | 531 us | 5.4 ms |
+  | | A | 51 | 25.3 ms | 25.3 ms | 496 us | 506 us | 37.8 ms |
+  | `style-churn` | A | 51 | 24.7 ms | 24.7 ms | 485 us | 495 us | 36.0 ms |
+  | | B | 77 | 26.8 ms | 26.8 ms | 348 us | 536 us | 6.8 ms |
+  | | B | 83 | 26.5 ms | 26.5 ms | 319 us | 529 us | 6.0 ms |
+  | | A | 51 | 25.1 ms | 25.1 ms | 492 us | 502 us | 39.1 ms |
+
+  The stall column reproduces `F16`'s ~7x fence-stall reduction, and process
+  CPU read -21.71% and -16.76% in the same invocations, so the block totals
+  are unambiguously better while the plan metric reads `slower`.
+- Inference: `planNanosecondsPerDraw` divides cumulative plan time by accepted
+  draws, so it charges the candidate for planning *more often*, not for
+  planning *slower*. Per planned frame the candidate is 30-35% cheaper. The
+  thread-CPU column rules out the scheduling form of `F16`'s contention
+  hypothesis outright; what the wall/CPU identity cannot separate is
+  more-instructions from same-instructions-stalled-on-memory, but nothing is
+  left for that distinction to explain -- the extra planned frames account for
+  the whole rise with the per-frame cost *falling*. This is also direct
+  evidence for `T10`: the extra plans are exactly the publishes a
+  demand-bounded rate would not perform.
+- Competing interpretations: `F16` reported two invocations where the
+  *delivery* count was flat while plan-per-delivery rose; this run's
+  discriminator is the *planned frame* count, which deliveries do not proxy --
+  `planIfNeeded` is damage- and equality-gated, so frames planned per delivery
+  can move while deliveries hold still. No invocation in this run shows a
+  residual once planned frames are the denominator.
+- Uncertainty: 2-pair `quick` invocations, so the percentages are not
+  decision-bearing digits; the composition mechanism does not rest on them --
+  it rests on the planned-frame counts, which are exact tallies. The
+  instrumentation is not yet on the main branch: the working tree carries
+  another session's uncommitted edits to the same files, so it waits on
+  `bench/plan-thread-cpu` rather than colliding.
+- Next action: land `bench/plan-thread-cpu` once the tree is clean, and treat
+  the churn plan metric's `slower` as expected whenever a change raises
+  publishes per draw -- until `T10` bounds the publish rate, which deletes the
+  composition effect at its source.
