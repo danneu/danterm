@@ -1078,3 +1078,118 @@ performance verdict.
   `allPanes` walks and panes visited must fall to the panes the message named,
   `containerShapeNode` allocations to zero for a message that cannot change a
   shape, and the wall clock must not rise.
+
+### F15 -- streaming the parser deletes the array and the 31 MB parse spike, and costs 1.7-5.4% on the drain, so `T7` is parked rather than landed
+
+- Status: implemented, measured on both sides, **not landed**. `T7`. The
+  by-construction claim holds exactly -- the token stream is never materialized,
+  and feeding a corpus in one call now costs what feeding it in 4 KiB chunks
+  costs -- and the non-regression check `T7` itself named is the one that fails:
+  `benchmark-confirm` reads **`slower` (+5.43%) on `scrollback-stream`**, and a
+  headless paired A/B puts the same corpus at +1.7% and the four-stream fixture
+  at +2.1%. The parse spike this deletes is not paid at production's delivery
+  size, and the drain cost is.
+- Date and investigator: 2026-08-07, T7 agent.
+- Commit and worktree state: `0b643073`, clean apart from this task's untracked
+  scripts and an untracked plan file. Apple Swift 6.3.3, arm64-apple-macosx26.0.
+  Machine: 10 processors, load 0.17-0.20 per processor at invocation.
+- Commands, inputs, or reproduction: `python3 scripts/research/33/t7-streaming-parser.py`.
+  The implementation is committed as `scripts/research/33/t7-streaming-parser.patch`
+  rather than as engine source, because it is parked; the script builds **both**
+  arms itself -- two detached worktrees at the named revision, one with the patch
+  applied -- so the gate runs on both sides of a change the tree does not
+  contain. Roughly 6 minutes. Directional verdicts came separately from
+  `just benchmark-confirm baseline=0b643073`, run three times.
+- Result or artifact paths: `scripts/research/33/t7-streaming-parser.py`,
+  `t7-streaming-parser-probe.swift`, `t7-streaming-parser.patch`. The run writes
+  nothing durable.
+- What the change is: `TerminalInputStream.feed(_:) -> [TerminalStreamAction]`
+  becomes `nextAction(in:from:)`, which recognizes one token and advances a
+  caller-owned index, and `Terminal.feed` applies each action to the grid before
+  pulling the next. The index lives on the caller's stack on purpose: a
+  sink-closure form would mutate the grid inside a call that is already mutating
+  `Terminal.inputStream`, which is overlapping access to `self`, and storing the
+  chunk plus a position on the stream would put mid-feed state into a value that
+  is `Equatable` and compared between feeds. Two codegen shapes came from
+  measurement, not taste, and both are in the patch: the per-action dispatch is
+  an `@inline(never)` method, because letting the optimizer inline it into the
+  parse loop costs a further 1.5 points, and the chunk is passed as an
+  `UnsafeBufferPointer` obtained once per feed.
+- Measurements, claim 1 -- equivalence. All five corpora produce **F9's token
+  counts and composition exactly**, at corpus framing, at the 16 KiB PTY turn
+  limit, and single-shot; `scrollback-stream` is 1,500,000 `.print` plus 25,000
+  `.execute` and zero CSI as before. The probe's `peakLiveActions` is **1** for
+  every corpus at every chunking -- the structural claim stated as a number the
+  probe measures rather than asserts. `swift test --package-path lib/TerminalCore`
+  passes all 1,020 tests, including the 67-fixture replay that splits feeds
+  mid-token at 7 bytes.
+- Measurements, claim 3 -- the parse spike, from `TerminalMemoryProbe` on
+  `scrollback-plain` at 179x66:
+
+  | arm | single-shot | 4 KiB chunks | difference |
+  | --- | ---: | ---: | ---: |
+  | baseline | 103.72 MB | 72.80 MB | **30.92 MB** |
+  | candidate | 72.61 MB | 72.61 MB | **0.00 MB** |
+
+  `vmmap --summary` sampled while the terminal is resident, single-shot:
+  `MALLOC_LARGE (empty)` falls from **37.2 MB across 4 regions to 6.2 MB across
+  2**, and total dirty from 106.9 MB to 75.8 MB. That is `15/F7`'s figure, which
+  `F1` predicted this array would explain, disappearing.
+- Measurements, claim 4 -- the drain. `benchmark-confirm` against `0b643073`,
+  three invocations, first two on an earlier shape of the patch and the third on
+  the shape the patch file holds:
+
+  | invocation | terminal-feed | scrollback-stream |
+  | --- | --- | --- |
+  | 1 (inline dispatch) | `slower` +4.52% | `slower` +10.00% |
+  | 2 (inline dispatch) | not reported | drain 154.9 -> 173.8 ms |
+  | 3 (parked shape) | `inconclusive` +1.12% | **`slower` +5.43%** |
+
+  Thresholds are 2.5% and 1.85% at `confirm`. The headless paired A/B in the
+  script, which alternates the two arms ABBA over six runs each, reads +1.66% on
+  `scrollback-stream` and +2.05% on the four-stream fixture; it is stable to
+  0.3% across repeats (min and median agree to that). `content-churn`,
+  `style-churn`, `incremental-mixed` and `retained-browse` all read
+  `inconclusive` or `equivalent`, as they must -- none of them feeds.
+- Observation, where the cost is: `sample` over a sustained headless feed of
+  `scrollback-stream` shows `_platform_memmove` at **1.5% of the baseline's
+  samples and 12.9-14.1% of the candidate's**. Disassembly names it exactly: the
+  candidate's `feed` calls `memcpy(dst: stack, src: self, size: 0x4f9)` -- **1,273
+  bytes, the whole `Terminal` struct** -- immediately before each
+  `damageActionSnapshot` getter call, at 9 call sites in the first shape and 3 in
+  the parked one. The baseline emits the same copy at 3 sites, but not on its hot
+  path.
+- Inference: the array was not the cost `F1` and `F9` implied it was, and the
+  per-token call boundary that replaces it is a real one. The array is ~1.5 MB
+  and 15 allocations per 16 KiB PTY turn, allocated and freed back into the same
+  hot allocator buckets and read back sequentially from L1; the streaming shape
+  pays a call, an indirect 32-byte return and a defensive 1,273-byte copy of
+  `Terminal` **per token**, roughly 3.7 ns each at ~106 ns per token. `F9`'s
+  60-80x figure is allocator *traffic*, not footprint, and traffic in a reused
+  bucket is cheaper than a call per token.
+- Inference, what this does **not** say: the array's deletion is still the right
+  end state. It is the granularity that is wrong, not the direction. `T8` prints
+  ASCII runs in bulk, and `F10` measured those runs at 8.3 to 44.8 characters, so
+  under `T8` the parser's output granularity is a run and the per-token call
+  boundary amortizes 4x to 36x -- the exact factor that would turn this cost
+  into a win. `T7` and `T8` are therefore one change, not two, and the ledger's
+  ordering of them as separate confidence-ranked items is what this finding
+  corrects.
+- Competing interpretations: the third `benchmark-confirm` ran with
+  `duetexpertd` at 78.7% at invocation, so its +5.43% may overstate the effect;
+  the headless A/B on an otherwise idle machine says +1.66% on the same corpus.
+  Both are above `scrollback-stream`'s 1.85% threshold, and the direction
+  reproduced in three independent invocations plus two headless series, so the
+  sign is not in question even though the size is uncertain within roughly a
+  factor of three. Separately, the 1,273-byte copy before `damageActionSnapshot`
+  is a **pre-existing** pathology this change made hot rather than one it
+  introduced; an attempt to remove it by making the snapshot a `mutating` method
+  made both arms 18-22% *slower* and was discarded.
+- Uncertainty: none on the token counts, the footprints, or the `vmmap` regions
+  -- all are exact or reproduce to 0.1 MB. The drain cost is directionally
+  certain and sized only to within a factor of three. No claim is made about
+  what `T7` costs **with** `T8`, because that was not built.
+- Next action: **do not land `T7` alone.** Take it as the second half of `T8`:
+  implement bulk ASCII runs against the eager parser or against this patch, then
+  re-run this script's claim 4 and `benchmark-confirm`. If the pair is not at
+  least `equivalent` on `scrollback-stream`, the array stays. See `D5`.

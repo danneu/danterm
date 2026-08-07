@@ -148,3 +148,59 @@ rediscovering them.
   disagree, the cases it catches are the specification for what a generation
   counter would have to cover.
 - Decision and rationale: pending the assertion.
+
+### D5 -- the parser streams, but not one token at a time: `T7` waits for `T8`
+
+- Status: **settled for now, on measurement.** `T7` is implemented, gated, and
+  parked; the implementation is `scripts/research/33/t7-streaming-parser.patch`.
+- Evidence used: `F15` (this task's own before/after run: token equivalence, a
+  31 MB parse spike deleted, `slower` +5.43% on `scrollback-stream` under
+  `benchmark-confirm` and +1.66% headless); `F9` (the array is real in an `-O`
+  build and costs 60-80x the corpus's byte count in allocator traffic); `F10`
+  (ASCII runs are 8.3 to 44.8 characters); `12/F8` and `16/F3`, the two prior
+  engine changes this project implemented and reverted on a measured regression
+  of +6.74% and a repeated `slower`.
+- Candidate solutions considered:
+  - **Land it.** Rejected: the memory it buys is not paid at production's
+    delivery size. The spike it deletes is 31 MB under single-shot feeding, and
+    the PTY host feeds at most 16 KiB per turn, where the array is 1.5 MB and 15
+    allocations into reused buckets. The drain cost, by contrast, is paid on
+    every turn. Two prior reverts set the precedent that a measured
+    `scrollback-stream` regression is not traded for a structural improvement.
+  - **Keep tuning the codegen.** Partly done and then stopped: extracting the
+    per-action dispatch behind `@inline(never)` and passing the chunk as an
+    `UnsafeBufferPointer` took the regression from +10.00% to +5.43%, and three
+    further shapes (moving the parser state to a local for the loop, letting the
+    optimizer choose, making the damage snapshot `mutating`) were all worse --
+    the last by 18-22%. What remains is a per-token call boundary, and no
+    attribute deletes that.
+  - **A bounded stack batch** -- parse into a fixed-capacity inline buffer and
+    drain it. Not attempted. It would keep both loops tight and allocate nothing,
+    but it is the flatten-then-re-read structure `T7` exists to delete, with a
+    capacity constant added; it should only be reached for if the `T8` pairing
+    below also fails.
+  - **Pair it with `T8`.** Selected. `T8` makes the parser's output granularity a
+    run of printable ASCII rather than a character, and `F10` sized those runs at
+    8.3 to 44.8 characters. The per-token cost `F15` measured is a call, an
+    indirect 32-byte return and a defensive copy of `Terminal`, all of which
+    amortize by that factor -- so the pair is the first shape in which deleting
+    the array can be cheaper than keeping it.
+- Tradeoffs and correctness risks: parking has a cost of its own -- a patch file
+  rots against the tree, and `T8` is a larger change than `T7` with real
+  correctness edges (wide-cell overwrite, the right margin in both `DECAWM`
+  states, insert mode). The mitigation is that `t7-streaming-parser.py` builds
+  its own arms from the patch, so the day it stops applying is the day the gate
+  fails loudly rather than silently. The alternative risk, landing now, is a
+  known 1.7-5.4% regression on the hottest path in the engine in exchange for
+  memory nobody is short of.
+- Decision and rationale: **`T7` does not land alone.** It is re-scoped as the
+  second half of `T8`: build bulk ASCII runs, then re-run `T7`'s gate, and land
+  the pair only if `scrollback-stream` reads at least `equivalent`. The ledger's
+  ranking of `T7` and `T8` as two independently confident items is corrected --
+  they are one change. Nothing here reopens `F9`'s numbers, which were about
+  allocator traffic and remain correct; what `F15` corrects is the inference that
+  traffic of that size is a *cost worth a call per token*.
+- Behavioral verification, already satisfied and to be re-run with `T8`: token
+  equivalence against `F9` at three chunkings, `peakLiveActions == 1`, the full
+  1,020-test `TerminalCore` suite including the 67-fixture 7-byte-split replay,
+  and chunk-invariant footprint within 2 MB.

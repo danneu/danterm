@@ -127,6 +127,15 @@ Distinguishing experiment: the per-task counters in Phase 1; if seam removal
 moves the countable quantities but not any timing, H1 is about complexity, not
 speed, and the doc should say so plainly.
 
+**First test, and it is a partial refutation.** `F15` removed the
+parser-to-grid seam (`F1`) and the countable quantities all moved -- allocations
+to zero, the parse spike from 31 MB to 0 -- while the clock moved the *wrong
+way*, +1.7% to +5.4% on the drain. So a seam's flattening is not by itself a
+cost: this one traded array traffic in a reused allocator bucket for a call per
+token, and the call was dearer. The lesson for the remaining seam tasks (`T9`,
+`T11`, `T12`, `T13`, `T20`) is that the granularity the far side works at, not
+the fact of the flattening, is what decides whether removing it pays.
+
 ### H2 -- publish rate, not per-frame cost, sets the app's streaming CPU
 
 `23/F5` measured 78 published-frame charges in one `scrollback-stream` block
@@ -194,8 +203,12 @@ Provisional, and deliberately ordered by *confidence times reach* rather than by
 predicted percentage:
 
 1. Delete the parser's intermediate action array and print ASCII runs in bulk
-   (`T1`, `T2`). Highest confidence, deterministic proof available before any
+   (`T7`, `T8`). Highest confidence, deterministic proof available before any
    benchmark, and it sits on the drain that is ~96% of `scrollback-stream`.
+   **Corrected by `F15`:** these are one change, not two. Deleting the array on
+   its own is deterministic and costs 1.7-5.4% on the drain, because a call per
+   token is dearer than the array traffic it removes; only the run granularity
+   `T8` introduces makes the deletion pay. The confidence was in the wrong half.
 2. Give damage a shift component so a scroll is a translation (`T9`). Highest
    ceiling, highest risk, and it is the change that makes the damage-bitset
    question (`T20`) worth answering.
@@ -354,7 +367,8 @@ direction gate; several may kill their own follow-on task, which is the point.
 Direction gate: do not start any of these until its Phase 1 counter has run and
 its number is recorded. Each needs a `decisions.md` entry before implementation.
 
-- [ ] `T7` VETTING -- **Stream the parser: delete `[TerminalStreamAction]`.**
+- [x] `T7` **REJECTED as a standalone change; built, gated, and re-scoped as the
+  second half of `T8`** -- **Stream the parser: delete `[TerminalStreamAction]`.**
   `TerminalInputStream.feed` returns an eager array; `Terminal.feed` iterates it.
   Ideal: the parser pushes each action into the grid reducer as it is
   recognized, so the array never exists. Both types are in the same module, so
@@ -370,7 +384,24 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   streaming that argument must be replaced with the stronger true one (parser
   state lives in `inputStream`/`absorber`, which `damageActionSnapshot` does not
   read), or the next reader will believe the invariant was violated.
-- [ ] `T8` VETTING -- **Print ASCII runs in bulk.** An ASCII printable is
+  **Result in `F15`, script `scripts/research/33/t7-streaming-parser.py`,
+  implementation parked in `t7-streaming-parser.patch`. Both halves of the gate
+  ran and they disagree:** the by-construction claim holds exactly -- the token
+  stream is F9's to the unit at three chunkings, no action is ever collected, and
+  the single-shot footprint falls from 103.72 MB to 72.61 MB, which is
+  **chunk-invariant to 0.00 MB** and takes `15/F7`'s 37.2 MB of
+  `MALLOC_LARGE (empty)` down to 6.2 MB. The non-regression check fails:
+  `benchmark-confirm` reads **`slower` +5.43% on `scrollback-stream`** (+1.66%
+  headless on an idle machine), because the per-token call boundary costs more
+  than the array traffic it saves -- a call, an indirect 32-byte return, and a
+  defensive 1,273-byte copy of `Terminal` before each damage snapshot, at ~106 ns
+  per token. The spike this deletes is not paid at the 16 KiB delivery size and
+  the drain cost is. `D5` re-scopes this as the second half of `T8`, whose runs
+  of 8.3 to 44.8 characters (`F10`) amortize exactly the boundary that costs here.
+- [ ] `T8` VETTING -- **Print ASCII runs in bulk.** **Now carries `T7`** (`D5`):
+  the streaming parser is built and gated but costs 1.7-5.4% on the drain at
+  per-token granularity, and this task is what changes that granularity. Land the
+  pair, or neither. An ASCII printable is
   narrow and grapheme-break-`.other` *by construction from the generated table*,
   so a run of them can neither join a cluster nor be wide. One damage record,
   one `invalidateInspection`, one content-identity range, one style id, one
@@ -642,7 +673,7 @@ future reopening needs a new rule against new evidence.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
-run.** `T1` sized the parser's
+run. Phase 2 has begun: `T7` is built, gated and parked (`F15`, `D5`).** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -711,6 +742,23 @@ ledger over-counted it. And two cheaper items the counter surfaced are not
 sweep, each time a tree walk plus two `NSHomeDirectory()` calls, which is half
 the sweep at the realistic size; and `sessionBell`'s `tabForPane` scan is the
 only `update()` half whose cost grows with the model.
+
+**Phase 2 has started with `T7` (`F15`), and its result is a correction to this
+doc's own ranking.** Streaming the parser does exactly what it claimed
+structurally: the token stream is F9's to the unit, nothing collects an action,
+and the single-shot footprint becomes chunk-invariant -- 103.72 MB to 72.61 MB,
+with `15/F7`'s 37.2 MB of `MALLOC_LARGE (empty)` down to 6.2 MB. It also costs
+**+5.43% on `scrollback-stream` under `benchmark-confirm`** and +1.66% headless,
+because a per-token call boundary is dearer than the array traffic it deletes:
+the array is 1.5 MB into reused allocator buckets per 16 KiB turn, read back from
+L1, while the streaming shape pays a call, an indirect 32-byte return and a
+defensive 1,273-byte copy of `Terminal` on every one of ~1.5 M tokens. The spike
+it deletes is not paid at production's delivery size; the drain cost is. So `T7`
+is **parked in `t7-streaming-parser.patch` and re-scoped as the second half of
+`T8`** (`D5`), whose 8.3-to-44.8-character runs (`F10`) amortize precisely that
+boundary. The doc's first candidate direction listed `T7` and `T8` as two
+independently confident items; they are one change, and the confidence was in the
+wrong half.
 
 So Phase 1 leaves three tasks with measured mechanisms and one closed. `T9` is
 unblocked with the largest margin in the phase (66x rows, 65x glyphs), `T10` with

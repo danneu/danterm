@@ -1,0 +1,264 @@
+diff --git a/lib/TerminalCore/Sources/TerminalCore/Terminal.swift b/lib/TerminalCore/Sources/TerminalCore/Terminal.swift
+index b0d6d854..e90dc78c 100644
+--- a/lib/TerminalCore/Sources/TerminalCore/Terminal.swift
++++ b/lib/TerminalCore/Sources/TerminalCore/Terminal.swift
+@@ -873,6 +873,7 @@ public struct Terminal: Equatable, Sendable {
+         damage.drain()
+     }
+ 
++    @inline(__always)
+     private var damageActionSnapshot: DamageActionSnapshot {
+         let projection = scrollProjection
+         let cursorStreamRow = isAlternateScreenActive
+@@ -1174,38 +1175,59 @@ public struct Terminal: Equatable, Sendable {
+ 
+     /// Reduces a byte chunk synchronously while retaining unfinished stream state.
+     public mutating func feed(_ bytes: [UInt8]) {
+-        let actions = inputStream.feed(bytes)
+-        guard actions.isEmpty == false else { return }
++        // Pulled one action at a time and applied before the next is recognized, so the token
++        // stream never becomes an array (`research/33/F9`). The first action is pulled before the
++        // first snapshot because a chunk that ends mid-sequence produces none, and that feed
++        // should cost nothing.
++        bytes.withUnsafeBufferPointer { buffer in
++            feedBuffer(buffer)
++        }
++    }
++
++    private mutating func feedBuffer(_ bytes: UnsafeBufferPointer<UInt8>) {
++        var index = 0
++        guard var action = inputStream.nextAction(in: bytes, from: &index) else { return }
+         // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
+-        // would capture as its "before" -- nothing runs between them, and `recordDamage` writes
+-        // only damage bookkeeping, which the snapshot does not read -- so carrying it forward is
+-        // the same diff sequence at half the construction cost.
++        // would capture as its "before": the only things that run between them are `recordDamage`,
++        // which writes damage bookkeeping the snapshot does not read, and the parse step, which
++        // touches only the decoder and absorber inside `inputStream` -- and the snapshot reads
++        // neither. So carrying it forward is the same diff sequence at half the construction cost.
+         var before = damageActionSnapshot
+-        for action in actions {
+-            switch action {
+-            case let .print(scalar):
+-                print(scalar)
+-            case let .execute(control):
+-                if control == 0x07 {
+-                    admitDiscreteSemanticEvent(.bell)
+-                } else {
+-                    execute(control)
+-                }
+-            case let .escape(final):
+-                dispatchEscape(final)
+-            case let .escapeSequence(sequence):
+-                dispatchEscape(sequence)
+-            case let .csi(sequence):
+-                dispatchCSI(sequence)
+-            case let .osc(payload):
+-                dispatchOSC(payload)
+-            }
+-            let after = damageActionSnapshot
+-            recordDamage(from: before, to: after)
+-            before = after
++        while true {
++            apply(action, before: &before)
++            guard let next = inputStream.nextAction(in: bytes, from: &index) else { return }
++            action = next
+         }
+     }
+ 
++    @inline(never)
++    private mutating func apply(
++        _ action: TerminalStreamAction,
++        before: inout DamageActionSnapshot
++    ) {
++        switch action {
++        case let .print(scalar):
++            print(scalar)
++        case let .execute(control):
++            if control == 0x07 {
++                admitDiscreteSemanticEvent(.bell)
++            } else {
++                execute(control)
++            }
++        case let .escape(final):
++            dispatchEscape(final)
++        case let .escapeSequence(sequence):
++            dispatchEscape(sequence)
++        case let .csi(sequence):
++            dispatchCSI(sequence)
++        case let .osc(payload):
++            dispatchOSC(payload)
++        }
++        let after = damageActionSnapshot
++        recordDamage(from: before, to: after)
++        before = after
++    }
++
+     private mutating func dispatchOSC(_ payload: [UInt8]) {
+         guard let selectorEnd = payload.firstIndex(of: 0x3B), selectorEnd > payload.startIndex,
+               let selector = parseOSCSelector(payload[..<selectorEnd])
+diff --git a/lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift b/lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift
+index 0609ee08..827a25e0 100644
+--- a/lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift
++++ b/lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift
+@@ -15,47 +15,58 @@ struct TerminalInputStream: Equatable, Sendable {
+     private var decoder = UTF8Decoder()
+     private var absorber = EscapeAbsorber()
+ 
+-    /// Reduces a byte chunk synchronously without flushing unfinished UTF-8 or VT sequences.
+-    mutating func feed(_ bytes: [UInt8]) -> [TerminalStreamAction] {
+-        var actions: [TerminalStreamAction] = []
++    /// Recognizes the next action in `bytes` starting at `index`, advancing `index` over exactly
++    /// the bytes that action consumed, and returns nil once the chunk is exhausted. Unfinished
++    /// UTF-8 and VT sequences stay in `self` for the next chunk, so feeding is chunk-invariant.
++    ///
++    /// The caller owns the loop, and that is the whole point: `Terminal.feed` applies each action
++    /// to the grid before asking for the next one, so the token stream is never materialized as an
++    /// array (`research/33/F9` sized the one this replaced at 60-80x the corpus's own byte count).
++    /// A sink-closure form would put grid mutation inside a call that is already mutating
++    /// `Terminal.inputStream`, which is overlapping access to `self`; storing the chunk and a
++    /// position on the stream itself would put mid-feed state into a value that is `Equatable`
++    /// and compared between feeds. Both are avoided by leaving the position on the caller's stack.
++    ///
++    /// A byte the decoder does not consume -- the byte that proved a truncated sequence malformed
++    /// -- leaves `index` where it is and is re-offered on the next call, which is how one byte can
++    /// produce a replacement scalar and then its own action.
++    mutating func nextAction(in bytes: UnsafeBufferPointer<UInt8>, from index: inout Int) -> TerminalStreamAction? {
++        while index < bytes.count {
++            let byte = bytes[index]
+ 
+-        for byte in bytes {
+-            if absorber.isGround {
+-                decode(byte, into: &actions)
+-            } else if let event = absorber.consume(byte) {
++            guard absorber.isGround else {
++                index += 1
++                guard let event = absorber.consume(byte) else { continue }
+                 switch event {
+                 case let .execute(control):
+-                    actions.append(.execute(control))
++                    return .execute(control)
+                 case let .escape(final):
+-                    actions.append(.escape(final))
++                    return .escape(final)
+                 case let .escapeSequence(sequence):
+-                    actions.append(.escapeSequence(sequence))
++                    return .escapeSequence(sequence)
+                 case let .csi(sequence):
+-                    actions.append(.csi(sequence))
++                    return .csi(sequence)
+                 case let .osc(payload):
+-                    actions.append(.osc(payload))
++                    return .osc(payload)
+                 }
+             }
+-        }
+-
+-        return actions
+-    }
+ 
+-    private mutating func decode(_ byte: UInt8, into actions: inout [TerminalStreamAction]) {
+-        var consumed = false
+-        while consumed == false {
+             let result = decoder.next(byte)
+-            consumed = result.consumed
++            if result.consumed {
++                index += 1
++            }
+             guard let scalar = result.scalar else { continue }
+ 
+             switch scalar.value {
+             case 0x1B:
+                 absorber.startEscape()
+             case 0x00...0x1F, 0x7F:
+-                actions.append(.execute(UInt8(scalar.value)))
++                return .execute(UInt8(scalar.value))
+             default:
+-                actions.append(.print(scalar))
++                return .print(scalar)
+             }
+         }
++
++        return nil
+     }
+ }
+diff --git a/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamTests.swift b/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamTests.swift
+index 371f16f4..b54e9e86 100644
+--- a/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamTests.swift
++++ b/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamTests.swift
+@@ -464,6 +464,48 @@ struct TerminalInputStreamTests {
+         }
+     }
+ 
++    @Test("the cursor yields one action per call and consumes the whole chunk")
++    func streamingCursorConsumesTheChunk() {
++        // Intent: `nextAction(in:from:)` hands back exactly one token per call, advances the index
++        //   only over the bytes that token consumed, and reports the chunk exhausted by returning
++        //   nil at `bytes.count` -- including when the chunk ends inside an unfinished sequence.
++        // Why it exists: this is the seam that replaced the eager `[TerminalStreamAction]`
++        //   (`research/33/T7`). The grid reducer mutates the terminal between two calls, so an
++        //   index that ran ahead of the token it returned, or a call that emitted two tokens'
++        //   worth of parser progress, would drop or duplicate a grid mutation with nothing else
++        //   in the suite positioned to see it.
++        // Scenario: a chunk holding a printable, a control, a full CSI and a truncated CSI is
++        //   pulled one token at a time.
++        var stream = TerminalInputStream()
++        let bytes: [UInt8] = [0x41, 0x0A, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x1B, 0x5B, 0x33]
++
++        let csi31m = CSISequence(
++            parameters: [31],
++            colonSeparators: [false],
++            intermediates: [],
++            final: 0x6D
++        )
++        var index = 0
++        var actions: [TerminalStreamAction] = []
++        var indicesAfterEachAction: [Int] = []
++        bytes.withUnsafeBufferPointer { buffer in
++            while let action = stream.nextAction(in: buffer, from: &index) {
++                actions.append(action)
++                indicesAfterEachAction.append(index)
++            }
++        }
++
++        #expect(actions == [
++            .print("A"),
++            .execute(0x0A),
++            .csi(csi31m),
++        ])
++        #expect(indicesAfterEachAction == [1, 2, 7])
++        #expect(index == bytes.count)
++        // The truncated CSI stayed in the absorber rather than being dropped or emitted.
++        #expect(stream.feed([0x31, 0x6D]) == [.csi(csi31m)])
++    }
++
+     private func run(chunks: [[UInt8]]) -> (actions: [TerminalStreamAction], stream: TerminalInputStream) {
+         var stream = TerminalInputStream()
+         var actions: [TerminalStreamAction] = []
+diff --git a/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamCollecting.swift b/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamCollecting.swift
+new file mode 100644
+index 00000000..2e6ad173
+--- /dev/null
++++ b/lib/TerminalCore/Tests/TerminalCoreTests/TerminalInputStreamCollecting.swift
+@@ -0,0 +1,21 @@
++// Test-only eager collection of the parser's token stream.
++//
++// Production streams tokens straight into the grid reducer -- `Terminal.feed` pulls one action,
++// applies it, and pulls the next -- so no `[TerminalStreamAction]` is built anywhere outside this
++// file (`research/33/T7`). The parser's contract is still a token *sequence*, and asserting on one
++// array is how these tests state it, so the array lives here rather than in the engine.
++@testable import TerminalCore
++
++extension TerminalInputStream {
++    /// Drains a whole chunk into an array, leaving unfinished UTF-8 and VT state in `self`.
++    mutating func feed(_ bytes: [UInt8]) -> [TerminalStreamAction] {
++        var actions: [TerminalStreamAction] = []
++        bytes.withUnsafeBufferPointer { buffer in
++            var index = 0
++            while let action = nextAction(in: buffer, from: &index) {
++                actions.append(action)
++            }
++        }
++        return actions
++    }
++}
