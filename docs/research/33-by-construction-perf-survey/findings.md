@@ -727,3 +727,152 @@ performance verdict.
   roughly the same factor. The sampler it added is the in-app sampling surface doc
   25's `T3` asked for; that task also wants visibility tagging and a hidden
   flood, so it is unblocked rather than closed.
+
+### F13 -- a one-line scroll damages 66 rows and submits 11,570 glyph occurrences to express 2 changed rows and 178 changed cells
+
+- Status: verified by direct probe. `T5`. A confirmation, as `F11` predicted, and
+  it supplies the two amplification factors `T9` is written against: **66x on
+  rows and 65x on glyph occurrences** at one line per delivery, decaying to 1x
+  once a delivery carries a whole screen.
+- Date and investigator: 2026-08-06, T5 agent.
+- Commit and worktree state: `5e0ad1dc`, clean apart from this task's untracked
+  scripts and an untracked plan file. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t5-scroll-amplification.py` (add `--json` for the
+  raw report, `--events N` to change the run length; the table below is the
+  default 600 events). The driver reuses `F11`'s harness technique: it copies
+  `lib/TerminalCore/Sources/TerminalCore` **and** `.../TerminalRenderPlanning`
+  into a scratch directory, strips the `import TerminalCore` lines so the two
+  targets compile as one module, injects one counter increment at each site, and
+  builds the copy with `swiftc -O` together with the probe. **The engine in the
+  repo is never edited**, and every injection is an exact-text anchor that must
+  match exactly once, so a source change that moves a site fails the run rather
+  than silently miscounting.
+- Result or artifact paths: `scripts/research/33/t5-scroll-amplification.py`,
+  `t5-scroll-amplification-probe.swift`,
+  `t5-scroll-amplification-counters.swift`. The run writes nothing durable.
+- Method, and how the *ideal* is measured rather than assumed: the probe fills a
+  179x66 grid with text, plans one frame so the planner holds a retained
+  generation exactly as it does mid-stream, resets the counters, and then feeds
+  the stimulus. Each delivery runs the production sequence headlessly, gate for
+  gate, the same way `F11`'s probe does -- `TerminalPaneSession.consume` and
+  `planIfNeeded`, then `SwiftTerminalSessionView.publish`'s halo and its draw's
+  `clipFramePlan`, at one draw per publish. Before and after every delivery the
+  probe snapshots all 66 viewport rows cell by cell (scalars and style) together
+  with `scrollProjection.topRow`. A row counts as *ideally* damaged only when its
+  content differs from the row that translated into its place across
+  `afterTop - beforeTop` -- which is precisely the damage a shift-carrying
+  representation would publish. So the denominator of every amplification below
+  is measured on the same run as its numerator, not declared.
+- Method, the three stimuli. `bare-newline` is a lone `LF` at the bottom of a
+  full screen: the minimum-information scroll, one translation and one blank row.
+  `text-line` is 178 characters and `CR LF`, which is what streaming output
+  actually emits and the only stimulus whose screen stays full. And
+  `rewrite-bottom-row` is `CR` and 178 characters -- **the control**: the same
+  cell count changed, on a viewport that does not move. It is reachable by the
+  same code, so it separates "a scroll is expensive" from "this workload is
+  expensive". Three delivery sizes are run: 1 line (the worst case), 8, and 91,
+  which is the PTY host's 16 KiB read turn at this line width.
+- Measurements, 600 events per scenario, deterministic across two full runs:
+
+  | scenario | lines/delivery | frames | `.full` frames | rows/frame | ideal rows/frame | row amp | glyphs/frame | ideal glyphs/frame | glyph amp |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `bare-newline` | 1 | 600 | **600** | 66.0 | 1.0 | **66.0x** | 636 | 0 | n/a |
+  | `text-line` | 1 | 600 | **600** | 66.0 | 2.0 | **33.0x** | **11,570** | **178** | **65.0x** |
+  | `rewrite-bottom-row` | 1 | 600 | 0 | 1.0 | 1.0 | 1.0x | 356 | 178 | 2.0x |
+  | `bare-newline` | 8 | 75 | **75** | 66.0 | 8.0 | 8.2x | 570 | 0 | n/a |
+  | `text-line` | 8 | 75 | **75** | 66.0 | 9.0 | 7.3x | 11,570 | 1,424 | 8.1x |
+  | `rewrite-bottom-row` | 8 | 75 | 0 | 1.0 | 1.0 | 1.0x | 356 | 178 | 2.0x |
+  | `bare-newline` | 91 | 7 | **7** | 66.0 | 64.3 | 1.0x | 0 | 0 | n/a |
+  | `text-line` | 91 | 7 | **7** | 66.0 | 64.4 | 1.0x | 11,570 | 11,290 | 1.0x |
+  | `rewrite-bottom-row` | 91 | 7 | 0 | 1.0 | 1.0 | 1.0x | 356 | 178 | 2.0x |
+
+  Escalation attribution and the planning half:
+
+  | scenario | lines/delivery | scrolling deliveries | full-damage calls | escalations | from `topRow`/screen | any other site | drain inserts | planner rows/frame | planner cells/frame |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `bare-newline` | 1 | 600 | 600 | 600 | **600** | 0 | **0** | 66.0 | 11,814 |
+  | `text-line` | 1 | 600 | 600 | 600 | **600** | 0 | **0** | 66.0 | 11,814 |
+  | `rewrite-bottom-row` | 1 | 0 | 0 | 0 | 0 | 0 | 600 | **1.0** | **179** |
+  | `text-line` | 8 | 75 | 600 | 75 | 600 | 0 | **0** | 66.0 | 11,814 |
+  | `text-line` | 91 | 7 | 600 | 7 | 600 | 0 | **0** | 66.0 | 11,814 |
+
+- Observation, `F5`'s code path is confirmed and `F11`'s correction to it holds
+  under a synthetic scroll: a scroll never produces row damage at all. Every one
+  of the 600 scroll events calls `recordPresentationFullDamage`, 100% of them
+  through `recordDamage(from:to:)`'s `topRow`/screen guard and 0% through any
+  other site, and the damage accumulator's `drain()` inserts **zero** rows across
+  the entire run. The `.full` frame count equals the published frame count in
+  every scrolling scenario and every delivery size.
+- Observation, the amplification has two halves and both are total. The planner
+  re-inspects **66.0 rows and 11,814 cells per frame** -- the whole grid, since
+  `reusable` is `nil` whenever `damage.isFull` -- and the drawer receives
+  **11,570 glyph occurrences**, which is 65 full rows of 178 characters, the
+  entire screen's text. The information content of that frame is 2 changed rows
+  and 178 changed cells.
+- Observation, the control separates the scroll from the workload. The same 178
+  cells rewritten without moving the viewport damage **1 row**, re-inspect **1
+  row and 179 cells**, and submit **356 glyph occurrences** -- 2 rows, because
+  the glyph halo adds `row-1` and `row+1` and `row+1` is off the grid. So the
+  row-scoped path works exactly as designed and delivers a 66x smaller frame; a
+  scroll is what disables it. That 2.0x residue on the control is `F6`'s halo,
+  and it is the ceiling `T14` is aiming at, not something `T9` can remove.
+- Observation, the amplification is a function of delivery size and vanishes at
+  the top of the range. At 91 lines per delivery -- one 16 KiB read turn -- the
+  whole screen genuinely did change, ideal rows reach 64.4 of 66, and the
+  amplification is 1.0x on both rows and glyphs. This is the honest bound on
+  `T9`: shift damage wins nothing on a delivery that scrolls the screen more than
+  once, and it wins 33-66x on a delivery that scrolls it once. `F12` measured 594
+  publishes per second live, so the live regime is many small deliveries, not few
+  large ones -- but the exact live lines-per-delivery figure is not measured here
+  and is the one number that would place production on this curve.
+- Inference, for `T9` (shift damage): the gate passes with the largest margin in
+  Phase 1. At one line per delivery the frame is 33x wider than its content in
+  rows and **65x wider in glyph occurrences**, and `17/F6` puts the
+  off-main-thread per-glyph bounds cost in proportion to glyph occurrences
+  submitted -- so this is the multiplier on the draw vertical, measured. `T9`'s
+  stated verification ("damaged rows per scroll fall to O(1)") is now
+  operational: this script's `ideal rows/frame` column is the target, and after
+  the change `rows/frame` must equal it. The `bare-newline` row at one line per
+  delivery is the cleanest statement of the target: **66 damaged rows to express
+  1**.
+- Inference, for `T20`: unchanged and reinforced. The scrolling scenarios put
+  **zero** rows through the damage `Set` -- 0 drain inserts across 1,800 frames
+  -- so nothing on the damage-representation path is on the streaming hot path
+  today, and `T20` stays a complexity claim riding on `T9`, exactly as `F11`
+  concluded. What `T9` changes is that a shifted frame *would* carry rows, which
+  is when the word representation starts to matter.
+- Competing interpretations: `F5`'s uncertainty asked whether
+  `PaneFramePlanner`'s retained-row reuse already absorbs the planning half. It
+  does not, and the planner counters settle it directly -- 11,814 cells
+  re-inspected per scrolling frame against 179 on the control. Separately, the
+  "one draw per publish" model is an upper bound on draw count; a
+  display-rate-limited consumer draws less often, which would lower total
+  submitted glyphs but not the per-frame ratio, since a coalesced `.full` frame
+  still submits the whole screen. Finally, the ideal is content-based and ignores
+  the cursor: a shift-carrying representation must still damage the rows the
+  cursor left and entered, so the true ideal is at most two rows above the number
+  in the table -- which lowers the 66x toward 22x in the worst case and leaves
+  the 65x glyph figure untouched, because a cursor row's glyphs are already
+  counted when its content changed.
+- Competing interpretations, the counters themselves: injecting increments
+  perturbs inlining, so this build's *timing* means nothing and none is claimed.
+  The counts are exact and the instrumentation only adds statements.
+- Uncertainty: none on the counts -- every number is an exact tally of a
+  deterministic replay, and two full 600-event runs produced byte-identical
+  output. The `bare-newline` glyph column is the one figure that is not a steady
+  state: a screen fed only newlines empties, so its submitted-glyph average falls
+  with run length (636/frame at 600 events, 1,273 at 300) and its ideal is 0 by
+  construction. That is why `text-line` carries the glyph claim and
+  `bare-newline` carries only the row claim. No timing and no benchmark was run;
+  `31/F18` makes a ladder verdict on a corpus that cannot contain this mechanism
+  worthless, and the mechanism here is a synthetic stimulus, not a corpus.
+- Next action: `T9`'s Phase 1 gate is passed and it may proceed to its
+  `decisions.md` entry. This script is its before/after gate: after the change,
+  `rows/frame` must equal `ideal rows/frame` and `glyphs/frame` must approach
+  `ideal glyphs/frame` plus the halo, at every delivery size, with the
+  `rewrite-bottom-row` control unmoved at 1.0 rows and 356 glyphs. The one
+  measurement worth taking before `T9` starts is live lines-per-delivery, which
+  places production on the 1-to-91 curve above and therefore sets the win's real
+  size.

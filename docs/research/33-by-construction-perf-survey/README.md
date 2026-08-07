@@ -156,10 +156,17 @@ Supports: `F5`, plus `17/F6`'s off-main-thread per-glyph bounds cost scaling
 with glyph occurrences submitted. `F11` measured it and it is stronger than
 stated: a scroll does not damage the region's rows, it escalates to `.full`,
 which also refuses the planner's row reuse -- and at the live 16 KiB delivery
-size that is 100% of the frames on both plain-text streaming corpora. Competing explanation: the retained-row reuse
-in `PaneFramePlanner` may already absorb most of the planning half, leaving only
-the submission half. Distinguishing experiment: `T9`'s damaged-row and
-submitted-glyph counters under a one-newline-per-update stimulus.
+size that is 100% of the frames on both plain-text streaming corpora. `F13` then
+sized it under a synthetic scroll: 66 damaged rows to express 1, and 11,570
+submitted glyph occurrences to express 178 changed cells. Competing explanation:
+the retained-row reuse in `PaneFramePlanner` may already absorb most of the
+planning half, leaving only the submission half. **Refuted by `F13`** -- the
+planner re-inspects all 66 rows and 11,814 cells on every scrolling frame,
+because `reusable` is `nil` whenever `damage.isFull`, against 1 row and 179 cells
+on the non-scrolling control. Remaining qualifier, also from `F13`: the
+amplification is a function of delivery size and reaches 1.0x once a delivery
+scrolls the whole screen, so live lines-per-delivery sets the win's real size and
+is not yet measured.
 
 ### H4 -- the app-runtime vertical has real cost and no instrument, so it has never been ranked
 
@@ -293,10 +300,26 @@ direction gate; several may kill their own follow-on task, which is the point.
   nothing at all, so the script has to put the slot's window on screen. The
   sampler this added is the in-app surface doc 25's `T3` asked for, so that task
   is unblocked -- it still wants the visibility tagging and the hidden flood.
-- [ ] `T5` RESEARCH -- **Count damaged rows per scroll event.** Script: feed N
+- [x] `T5` DONE -- **Count damaged rows per scroll event.** Script: feed N
   newlines at the bottom of a full screen and report damaged rows per published
   frame, plus the glyph occurrences the resulting plan submits. `F5` establishes
   the code path; this establishes the amplification factor. Gate for `T9`.
+  **Result in `F13`, script `scripts/research/33/t5-scroll-amplification.py`. The
+  gate passes with Phase 1's largest margin, so `T9` is unblocked:** at one line
+  per delivery a scroll damages **66 rows to express 1**, and a line of text plus
+  a newline submits **11,570 glyph occurrences to express 178 changed cells --
+  65x**. The probe measures its own denominator rather than assuming one: it
+  diffs the viewport across the `topRow` shift, so the ideal is the damage `T9`'s
+  shift component would actually publish. `F11`'s correction holds under a
+  synthetic scroll -- 100% of the escalation is the `topRow` guard, the damage
+  `Set` receives **zero** rows across 1,800 scrolling frames, and the planner
+  re-inspects all 66 rows and 11,814 cells because `reusable` is `nil` under
+  `.full`. The control settles `F5`'s open question: the same 178 cells rewritten
+  *without* moving the viewport damage 1 row, inspect 179 cells and submit 356
+  glyphs. Two bounds ride along: the amplification decays to **1.0x** at 91 lines
+  per delivery (one 16 KiB read turn), so live lines-per-delivery is the number
+  that places production on the curve, and the control's residual 2.0x on glyphs
+  is `F6`'s halo, which `T14` owns and `T9` cannot remove.
 - [ ] `T6` RESEARCH -- **Build the per-`Msg` work counter the runtime vertical has
   no instrument for.** Script: a headless `DanTermCore` harness reporting, per
   `Msg`, the number of panes visited, projection calls, `allPanes` walks,
@@ -586,7 +609,7 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 has four tasks done. `T1` sized the parser's
+Investigation in progress. Phase 1 has five tasks done. `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -617,6 +640,24 @@ the app is unoptimized, and an occluded pane publishes nothing at all. `T10` is
 therefore live with its multiplier measured, and `T4`'s script is its
 before/after gate.
 
-The remaining tasks in Phases 2-4 are gated behind `T5` (damaged rows per
-scroll, a confirmation now that `F11` has shown the escalation) and `T6` (the
-per-`Msg` runtime counter, which nothing has yet built).
+`T5` (`F13`) then confirmed the scroll amplification and put numbers on both of
+its halves. Feeding one line per delivery at the bottom of a full screen, a
+scroll damages **66 rows to express 1** and submits **11,570 glyph occurrences to
+express 178 changed cells -- 65x** -- and the probe measures its own denominator
+by diffing the viewport across the `topRow` shift, so the ideal is the damage
+`T9` would actually publish rather than an assumed one. Both halves of the
+amplification are total: the planner re-inspects all 66 rows and 11,814 cells,
+which refutes `F5`'s hope that row reuse absorbs the planning side, and the
+drawer receives the whole screen's text. The non-scrolling control -- the same
+178 cells rewritten in place -- damages 1 row, inspects 179 cells and submits 356
+glyphs, so the row-scoped path is not broken; a scroll is what disables it. Two
+bounds came with it. The amplification decays with delivery size and is **1.0x**
+at 91 lines per delivery, which is one 16 KiB read turn, so the single most
+useful measurement before `T9` starts is live lines-per-delivery -- it places
+production somewhere on a 66x-to-1x curve. And the control's residual 2.0x on
+glyphs is the glyph halo from `F6`, which `T14` owns and `T9` cannot remove.
+
+So `T9` is unblocked with the largest measured margin in Phase 1, and `T10` with
+a measured 4.96x multiplier. The one Phase 1 task nothing has built is `T6`, the
+per-`Msg` runtime counter that Phase 3's `T23` and the ranking of `T14`-`T16`
+still wait on.
