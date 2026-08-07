@@ -215,6 +215,33 @@ public struct Terminal: Equatable, Sendable {
     struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
+
+        /// True while an erase is the last writer of this row's final column. `isSoftWrapped`
+        /// is the printer's *claim* that the row continues, and EL 1/2 deliberately leave it
+        /// standing over blanked cells (xterm parity, `eraseLine`); this bit records that the
+        /// claim's evidence was erased, so `logicallyContinues` can decline it until a print
+        /// reaches the margin again. Cell provenance, not cell shape: a reflow-folded row
+        /// whose interior blank lands on the margin holds identical cells but genuinely
+        /// continues, which is why the readers cannot re-derive this from the grid.
+        var marginErased = false
+
+        /// The wrap claim gated by its evidence: what every line-structure reader --
+        /// admission, reflow, the text projections -- consumes in place of `isSoftWrapped`.
+        /// The raw claim stays untouched for xterm parity and stays visible through
+        /// `geometry`; this is the only meaning it has anywhere else.
+        var logicallyContinues: Bool { isSoftWrapped && marginErased == false }
+
+        /// The row as the projection stream carries it: the claim collapsed to its gated
+        /// value, so every walk over a stream reads line structure without knowing about
+        /// the transient.
+        var withGatedContinuation: GridRow {
+            guard isSoftWrapped, marginErased else { return self }
+            var row = self
+            row.isSoftWrapped = false
+            row.marginErased = false
+            return row
+        }
+
         var semanticPrompt = SemanticPromptRow.none
 
         /// Reads the logical row rather than exposing its physical storage extent.
@@ -339,7 +366,7 @@ public struct Terminal: Equatable, Sendable {
 
         subscript(position: Int) -> GridRow {
             guard position < historyRows else {
-                return live[position - historyRows]
+                return live[position - historyRows].withGatedContinuation
             }
             guard var row = history.paintedDisplayRow(at: position) else {
                 preconditionFailure("the projection addressed a display row history does not hold")
@@ -2403,13 +2430,13 @@ public struct Terminal: Equatable, Sendable {
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
-        stream.append(contentsOf: rows)
+        stream.append(contentsOf: rows.map(\.withGatedContinuation))
         return projectedHistoryText(from: stream)
     }
 
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
-        let primaryRows = inactivePrimaryScreen?.rows ?? rows
+        let primaryRows = (inactivePrimaryScreen?.rows ?? rows).map(\.withGatedContinuation)
         return projectedHistoryText(from: history.allPaintedDisplayRows() + primaryRows)
     }
 
@@ -2482,8 +2509,9 @@ public struct Terminal: Equatable, Sendable {
     /// materializing the rows before it. `primaryHistoryText` is this with `start` at zero.
     private func primaryProjectionRows(
         from start: Int,
-        primary primaryRows: [GridRow]
+        primary rawPrimaryRows: [GridRow]
     ) -> [GridRow] {
+        let primaryRows = rawPrimaryRows.map(\.withGatedContinuation)
         guard start > 0 else { return history.allPaintedDisplayRows() + primaryRows }
         guard start < historyRowCount else {
             return Array(primaryRows[min(start - historyRowCount, primaryRows.count)...])
@@ -3271,7 +3299,9 @@ public struct Terminal: Equatable, Sendable {
             guard let row = viewportStreamRow(at: index) else {
                 preconditionFailure("viewport projection exceeded the active stream")
             }
-            return row
+            // Text projection, so live rows carry the gated continuation; `viewportStreamRow`
+            // itself stays raw for the geometry and render walks that share it.
+            return row.withGatedContinuation
         }
     }
 
@@ -3450,7 +3480,7 @@ public struct Terminal: Equatable, Sendable {
                 stream[last].cells.append(spacer)
             }
         }
-        stream.append(contentsOf: rows)
+        stream.append(contentsOf: rows.map(\.withGatedContinuation))
         return stream
     }
 
@@ -4341,6 +4371,11 @@ public struct Terminal: Equatable, Sendable {
                 cells[column] = blank
             }
         }
+        // The margin cell's last writer is now an erase, so a surviving wrap claim on this
+        // row is unwitnessed until a print reaches the margin again (`GridRow.marginErased`).
+        if upper == columnCount {
+            rows[row].marginErased = true
+        }
         // Loop-invariant: the repair is a no-op above column 1, so it runs once
         // for the range rather than once per erased cell. It is idempotent, so
         // the old per-cell calls at columns 0 and 1 did the work of this one.
@@ -4844,7 +4879,7 @@ public struct Terminal: Equatable, Sendable {
     /// above it, which is the same walk `reconstructLogicalLines` performs.
     private func liveReflowLine(ofRow row: Int) -> Int {
         var line = 0
-        for index in 0..<row where rows[index].isSoftWrapped == false {
+        for index in 0..<row where rows[index].logicallyContinues == false {
             line += 1
         }
         return line
@@ -4855,7 +4890,7 @@ public struct Terminal: Equatable, Sendable {
     private func liveReflowOffset(inRow row: Int, upTo column: Int) -> Int {
         var offset = 0
         var start = row
-        while start > 0, rows[start - 1].isSoftWrapped { start -= 1 }
+        while start > 0, rows[start - 1].logicallyContinues { start -= 1 }
         for index in start..<row {
             offset += logicalCellCount(in: rows[index], upTo: columnCount)
         }
@@ -4866,7 +4901,7 @@ public struct Terminal: Equatable, Sendable {
     private func logicalCellCount(in row: GridRow, upTo column: Int) -> Int {
         let end = min(
             column,
-            row.isSoftWrapped ? columnCount : retainedContentEnd(in: row)
+            row.logicallyContinues ? columnCount : retainedContentEnd(in: row)
         )
         var count = 0
         var index = 0
@@ -4948,7 +4983,7 @@ public struct Terminal: Equatable, Sendable {
                 currentLine.semanticPrompt = row.semanticPrompt
             }
             let retainedEnd = retainedContentEnd(in: row)
-            let iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd
+            let iterationEnd = row.logicallyContinues ? oldColumnCount : retainedEnd
             var column = 0
             while column < iterationEnd {
                 let cell = row.cell(at: column)
@@ -5006,14 +5041,14 @@ public struct Terminal: Equatable, Sendable {
                 boundaryOffset: logicalOffset,
                 retainedEnd: retainedEnd
             ))
-            if row.isSoftWrapped == false {
+            if row.logicallyContinues == false {
                 lines.append(currentLine)
                 currentLine = ReflowLine()
                 logicalOffset = 0
                 pendingSpacerKeys.removeAll(keepingCapacity: true)
             }
         }
-        if sourceRows.last?.isSoftWrapped == true || sourceRows.isEmpty {
+        if sourceRows.last?.logicallyContinues == true || sourceRows.isEmpty {
             lines.append(currentLine)
         }
 
@@ -5684,7 +5719,11 @@ public struct Terminal: Equatable, Sendable {
     /// line -- a blanked row mid-line is a coherent state (rewrite-in-place).
     /// Matches xterm (`util.c#ClearRight` is the only clear that drops the flag),
     /// Ghostty, kitty, and foot; tmux severs on EL 2 and is the lone outlier.
-    /// Pinned by CSIEraseTests#eraseLineWrapAsymmetry.
+    /// Pinned by CSIEraseTests#eraseLineWrapAsymmetry. What keeps the surviving
+    /// claim harmless is `eraseCells` recording the blanked margin
+    /// (`GridRow.marginErased`): the line-structure readers decline the claim
+    /// until a print reaches the margin again, so the parity state cannot fuse
+    /// separately printed lines (TerminalStaleWrapClaimTests).
     private mutating func eraseLine(mode: UInt16) {
         switch mode {
         case 0:
@@ -6256,6 +6295,7 @@ public struct Terminal: Equatable, Sendable {
             previousClass: breakClass
         )
         if column + count == columnCount {
+            rows[row].marginErased = false
             cursor.column = columnCount - 1
             isPendingWrap = isAutoWrapMode
         } else {
@@ -6394,6 +6434,7 @@ public struct Terminal: Equatable, Sendable {
                     contentIdentity: contentIdentity
                 )
                 rows[target.row].isSoftWrapped = true
+                rows[target.row].marginErased = false
                 cursor = target
                 advanceToNextRow(preservingWrapClaim: true)
                 cursor.column = 0
@@ -6424,6 +6465,9 @@ public struct Terminal: Equatable, Sendable {
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
         )
+        if destination.column + 2 == columnCount {
+            rows[destination.row].marginErased = false
+        }
         advanceCursorPastWideCell(at: destination)
         return destination
     }
@@ -6503,6 +6547,7 @@ public struct Terminal: Equatable, Sendable {
                     contentIdentity: contentIdentity
                 )
                 rows[cursor.row].isSoftWrapped = true
+                rows[cursor.row].marginErased = false
                 advanceToNextRow(preservingWrapClaim: true)
                 cursor.column = 0
                 preservesWrappedSpacer = true
@@ -6545,6 +6590,9 @@ public struct Terminal: Equatable, Sendable {
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
+        if cursor.column + 2 == columnCount {
+            rows[cursor.row].marginErased = false
+        }
         clusterContext = ClusterContext(target: cursor, previousClass: breakClass)
         advanceCursorPastWideCell(at: cursor)
     }
@@ -6589,6 +6637,12 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
         let region = activeScrollRegion
+        // The advance can be declined outright: a cursor on the last screen row *below* the
+        // region's bottom matches neither branch. Restoring a wrap claim then would stamp
+        // `rows[cursor.row - 1]` -- a region-interior row the wrap never touched -- so the
+        // restore runs only when the advance actually scrolled or moved. Reachable by
+        // inline-viewport TUIs that pin a footer with `CSI 1;N r` and print below it.
+        let advanced: Bool
         if cursor.row == region.upperBound - 1 {
             recordDamage(rows: region)
             moveAndFillRows(
@@ -6598,10 +6652,14 @@ public struct Terminal: Equatable, Sendable {
                 preservesTrailingWrap: preservingWrapClaim,
                 invalidatesInspection: false
             )
+            advanced = true
         } else if cursor.row < rowCount - 1 {
             cursor.row += 1
+            advanced = true
+        } else {
+            advanced = false
         }
-        if preservingWrapClaim {
+        if preservingWrapClaim, advanced {
             restoreWrapClaimBeforeCursor()
         }
     }
