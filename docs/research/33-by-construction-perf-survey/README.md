@@ -536,6 +536,20 @@ constraint among them except where noted.
   above. Verification: fill-rect area per draw compared against damaged area.
   Sequence before any fill-batching lead, since this decides the fill topology.
 
+- [ ] `T24` VETTING -- **Own the `benchmark-confirm` block floor.** `F16`
+  discovered that `confirm` calibrates `terminal-feed`'s fixed execution batch
+  on whichever arm runs first, so a candidate that finishes the batch under the
+  1-second block floor self-invalidates the whole invocation and no workload
+  gets a verdict -- which is why the largest win in this doc carries only
+  `quick` digits. Ideal: calibrate the batch per arm (each arm fills its own
+  floor) or size the batch on the faster arm, so a big win lengthens the
+  baseline's block instead of invalidating the candidate's. Verification: an
+  A/A run on byte-identical arms must still read `equivalent` with unchanged
+  thresholds, and a re-run of `F16`'s pair (`63c693da` against `90731fdc`) must
+  issue a `confirm` verdict for all six workloads. Harness change, so
+  `31/F18`'s directional-verdict-on-identical-source check is the regression
+  gate.
+
 ### Phase 4 -- gated reopens and larger bets
 
 Each of these reopens something a prior doc closed. None may start without a
