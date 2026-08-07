@@ -584,7 +584,7 @@ struct TerminalLogicalLineEvictionProbe {
     static let residencyIsEnabled = probeIsEnabled && residencyCase != nil
 
     static let columns = 179
-    static let budget = Terminal.productionScrollbackBudgetBytes
+    static let budget = Terminal.scrollbackByteLimit
     static let rounds = 5
     static let warmupRounds = 2
     static let steadyAdmissions = 5_000

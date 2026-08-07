@@ -31,11 +31,11 @@ import TerminalCore
 /// A retained row has been content-sized since doc 15, so the byte budget buys a
 /// number of rows that varies by an order of magnitude with how long the rows are:
 /// the corpus prices `benchmark/scrollback-stream` at 4,607 B/row and
-/// `alacritty/history` at 186 B/row, which is 2,276 rows against 56,273 at the same
-/// 10 MiB. A probe that only ever fed one density would report one point on that
-/// range and read as though it were the whole of it -- which is exactly how
-/// `saturated-resize-v1`'s 6,756-row baseline came to stand in for "a saturated
-/// pane" when it is near the shallow end.
+/// `alacritty/history` at 186 B/row, which is 3,414 rows against 84,562 in the
+/// same 15,728,640-byte arena. A probe that only ever fed one density would report
+/// one point on that range and read as though it were the whole of it -- which is
+/// exactly how `saturated-resize-v1`'s 6,756-row baseline came to stand in for "a
+/// saturated pane" when it is near the shallow end.
 public enum ResizeProbePayload: String, Equatable, Sendable {
     /// A ~50-column line: program output, and what `v1` and `v2` both feed.
     case dense
@@ -117,7 +117,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// history rather than two differently-shaped ones.
     public static let standard = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 10_000,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         alternateColumns: 100, sampleCount: 40, warmupCount: 4,
         name: "saturated-resize-v1"
     )
@@ -126,15 +126,15 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// **budget** decides retained depth again.
     ///
     /// `standard`'s 10,000 lines saturated the pre-packing representation and no
-    /// longer saturate the packed one, which admits ~82,000 rows at the same
-    /// 10 MiB. Reading a resize distribution off a history bounded by the line
+    /// longer saturate the packed one, which admits ~42,000 rows at the shipped
+    /// 16 MiB. Reading a resize distribution off a history bounded by the line
     /// count rather than the budget understates the cost by that whole ratio, so
     /// this recipe overshoots the ceiling and `saturatingRecipeReachesTheBudgetCeiling`
     /// pins that it still does. Sample count is halved because each sample now
     /// costs an order of magnitude more wall-clock.
     public static let saturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 120_000,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         alternateColumns: 100, sampleCount: 20, warmupCount: 4,
         name: "saturated-resize-v2"
     )
@@ -168,7 +168,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// 246,596 / 13,564,592 at 500,000).
     public static let sparseSaturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 500_000,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         alternateColumns: 100, sampleCount: 20, warmupCount: 4,
         name: "saturated-sparse-resize-v1", payload: .sparse
     )
@@ -183,7 +183,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// and `sparse`'s ~4.9.
     public static let wideSaturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 60_000,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         alternateColumns: 100, sampleCount: 20, warmupCount: 4,
         name: "saturated-wide-resize-v1", payload: .wide
     )

@@ -424,7 +424,7 @@ func wideCountsFillingBudget(_ counts: [Int], budgetBytes: Int) -> [Int] {
 struct TerminalLogicalLineWideIndexProbe {
     static let probeIsEnabled = ProcessInfo.processInfo.environment["DANTERM_LOGICAL_LINE_PROBE"] != nil
 
-    /// `Terminal.swift#productionScrollbackBudgetBytes`, which `research/31/D2` Decision 1 keeps unchanged.
+    /// `Terminal.swift#scrollbackByteLimit`, which `research/31/D2` Decision 1 keeps unchanged.
     static let budgetBytes = 16_777_216
     /// `research/31/F2`'s three width changes plus `research/31/D3` Decision 7's addition: the engine minimum, where
     /// display rows per record -- and so boundary probes -- are maximised.

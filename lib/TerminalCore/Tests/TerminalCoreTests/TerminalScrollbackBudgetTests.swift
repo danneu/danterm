@@ -183,7 +183,7 @@ struct TerminalScrollbackBudgetTests {
         let overridden = try #require(Terminal(
             columns: 4,
             rows: 2,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes - 8
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit - 8
         ))
         #expect(production != overridden)
     }

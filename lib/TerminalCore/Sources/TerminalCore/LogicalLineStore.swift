@@ -338,7 +338,7 @@ extension Terminal {
 
         /// Reserves the arena's byte address space at the budget less the metadata reserve.
         /// Backing starts empty and materializes in consecutive chunks as records first reach it.
-        init(budgetBytes: Int = Terminal.productionScrollbackBudgetBytes, width: Int) {
+        init(budgetBytes: Int = Terminal.scrollbackByteLimit, width: Int) {
             precondition(budgetBytes >= Terminal.minimumScrollbackBudgetBytes)
             precondition(budgetBytes % 8 == 0)
             precondition(width >= 1)

@@ -285,9 +285,8 @@ public func measure(
     let before = processPhysicalFootprintBytes()
     // The public initializer, so the probe always measures the production budget. The
     // budget-taking initializer is internal on purpose -- that the public one pins
-    // `Terminal.productionScrollbackBudgetBytes` is an
-    // invariant with its own test, and a measurement tool is not a reason to weaken it. Depth is
-    // varied with `lineCount` instead.
+    // `Terminal.scrollbackByteLimit` is an invariant with its own test, and a measurement tool
+    // is not a reason to weaken it. Depth is varied with `lineCount` instead.
     guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
     if payload.bytes.isEmpty == false {
         if let chunkBytes, chunkBytes > 0, chunkBytes < payload.bytes.count {
@@ -312,7 +311,7 @@ public func measure(
         name: payload.name,
         columns: columns,
         rows: rows,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         fedByteCount: payload.bytes.count,
         census: census,
         footprintBeforeBytes: before,
@@ -352,7 +351,7 @@ public func runMatrix(
         schemaVersion: 1,
         columns: columns,
         rows: rows,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         cellStrideBytes: reports.first?.census.cellStrideBytes ?? 0,
         payloads: reports
     )

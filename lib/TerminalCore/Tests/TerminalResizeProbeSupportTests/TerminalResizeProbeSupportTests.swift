@@ -209,7 +209,7 @@ struct TerminalResizeProbeSupportTests {
         //   below the production history budget.
         let recipe = ResizeProbeRecipe(
             columns: 179, rows: 66, lineCount: 1_000,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
             alternateColumns: 100, sampleCount: 1, warmupCount: 0
         )
 
@@ -217,7 +217,7 @@ struct TerminalResizeProbeSupportTests {
     }
 
     private func saturationEvidence(for recipe: ResizeProbeRecipe) -> SaturationEvidence? {
-        guard recipe.scrollbackBudgetBytes == Terminal.productionScrollbackBudgetBytes,
+        guard recipe.scrollbackBudgetBytes == Terminal.scrollbackByteLimit,
               var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)
         else { return nil }
 
@@ -319,7 +319,7 @@ struct TerminalResizeProbeSupportTests {
         //   looks like a fast resize rather than an absent one.
         let recipe = ResizeProbeRecipe(
             columns: 179, rows: 8, lineCount: 400,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
             alternateColumns: 100, sampleCount: 4, warmupCount: 0
         )
         var widths: [Int] = []
@@ -371,7 +371,7 @@ struct TerminalResizeProbeSupportTests {
         //   whose conditions had to be reconstructed from prose.
         let recipe = ResizeProbeRecipe(
             columns: 120, rows: 8, lineCount: 300,
-            scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
             alternateColumns: 60, sampleCount: 2, warmupCount: 1
         )
         let report = measureSaturatedResize(recipe: recipe)
@@ -382,7 +382,7 @@ struct TerminalResizeProbeSupportTests {
         #expect(report.lineCount == 300)
         #expect(report.alternateColumns == 60)
         #expect(report.warmupCount == 1)
-        #expect(report.scrollbackBudgetBytes == Terminal.productionScrollbackBudgetBytes)
+        #expect(report.scrollbackBudgetBytes == Terminal.scrollbackByteLimit)
         #expect(report.retainedRowCountAtStart > 0)
         #expect(report.distribution.sampleCount == 2)
         #expect(report.distribution.samplesNanoseconds.count == 2)

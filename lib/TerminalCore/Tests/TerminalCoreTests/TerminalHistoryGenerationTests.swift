@@ -169,7 +169,7 @@ struct TerminalHistoryGenerationTests {
         var terminal = try #require(Terminal(
             columns: 8,
             rows: 2,
-            scrollbackBudgetBytes: scrollbackBudgetBytes ?? Terminal.productionScrollbackBudgetBytes
+            scrollbackBudgetBytes: scrollbackBudgetBytes ?? Terminal.scrollbackByteLimit
         ))
         // The trailing line overflows the 8-column width, so it enters scrollback soft-wrapped.
         let tail = trailingWrappedLine ? "wrapping line\r\n" : "third\r\n"

@@ -53,7 +53,7 @@ struct TerminalLogicalLinePathologicalProbe {
 
     static let columns = 179
     static let rows = 66
-    static let budget = Terminal.productionScrollbackBudgetBytes
+    static let budget = Terminal.scrollbackByteLimit
     static let chunkBytes = 4096
 
     /// The cap the store derives for the production budget, read from the production code rather

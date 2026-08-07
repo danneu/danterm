@@ -16,7 +16,7 @@ import Testing
 func labeledTerminal(
     columns: Int,
     rows: Int,
-    scrollbackBudgetBytes: Int = Terminal.productionScrollbackBudgetBytes,
+    scrollbackBudgetBytes: Int = Terminal.scrollbackByteLimit,
     sourceLocation: SourceLocation = #_sourceLocation
 ) throws -> Terminal {
     var terminal = try #require(

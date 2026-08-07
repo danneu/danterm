@@ -458,7 +458,7 @@ public func readRetainedRowShape(
         stimulus: stimulus,
         columns: columns,
         rows: terminal.geometry.rows.count,
-        scrollbackBudgetBytes: Terminal.productionScrollbackBudgetBytes,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         fedByteCount: fedByteCount,
         cellStrideBytes: census.cellStrideBytes,
         retainedRowCount: terminal.scrollbackRowCount,

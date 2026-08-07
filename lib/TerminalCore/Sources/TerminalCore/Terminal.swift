@@ -716,7 +716,7 @@ public struct Terminal: Equatable, Sendable {
     /// Public so measurement tools can report the budget they ran against. Deliberately just the
     /// constant: the budget-taking initializer stays internal, because the public initializer
     /// enforcing this fixed value is an invariant with its own test.
-    public static let productionScrollbackBudgetBytes = 16_777_216
+    public static let scrollbackByteLimit = 16_777_216
 
     /// The smallest budget the arena can be built at, which is the store's own precondition.
     ///
@@ -1126,7 +1126,7 @@ public struct Terminal: Equatable, Sendable {
         self.init(
             columns: columns,
             rows: rows,
-            scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
+            scrollbackBudgetBytes: Self.scrollbackByteLimit,
             machineHostname: machineHostname,
             programVersion: programVersion,
             defaultColors: defaultColors
@@ -2334,7 +2334,7 @@ public struct Terminal: Equatable, Sendable {
     /// smaller budget -- and owes a fixture-specific argument that eviction is unreachable,
     /// since a twin that evicts is a silently wrong oracle.
     func withUnlimitedScrollbackForTesting(
-        budgetBytes: Int = Terminal.productionScrollbackBudgetBytes
+        budgetBytes: Int = Terminal.scrollbackByteLimit
     ) -> Self {
         var copy = self
         copy.history = history.rebased(toBudgetBytes: budgetBytes)

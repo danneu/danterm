@@ -139,11 +139,11 @@ Status values:
 | D2 | Width rules: zero-width marks extend their cluster; narrow clusters occupy one cell; East Asian Wide and Fullwidth occupy two; **East Asian Ambiguous occupies one by default**; supported emoji occupy a stable width and render through macOS font fallback. | live |
 | D3 | Private Use Area glyphs, including Nerd Font glyphs, are ordinary font glyphs. No separate Nerd Font protocol is required. | live |
 | D4 | Unicode behavior is pinned to a specific Unicode data version so width and segmentation cannot drift silently between releases. | live |
-| D5 | Scrollback has a fixed **10 MiB per-pane** storage budget. The active viewport is outside that budget. | live |
+| D5 | Scrollback has a fixed **16 MiB per-pane** storage budget (`Terminal.scrollbackByteLimit`). The active viewport is outside that budget. | live |
 | D6 | Scrollback preserves the difference between hard line endings and soft wraps, so content reflows when a pane changes width. | live |
 | D7 | Primary-screen resize reflows retained history and active rows as one ordered sequence of logical lines; a width change keeps the cursor attached to the same logical cell boundary, including explicit blank cells. | live |
 | D8 | At the live bottom, height shrink moves displaced rows into scrollback and growth pulls the newest eligible primary rows back before adding blank rows. | live |
-| D9 | Resize never duplicates or discards logical content, except through ordinary 10 MiB eviction or OSC 133 prompt/input rows blanked before reflow when the shell has promised to redraw them after SIGWINCH. | live |
+| D9 | Resize never duplicates or discards logical content, except through ordinary 16 MiB eviction or OSC 133 prompt/input rows blanked before reflow when the shell has promised to redraw them after SIGWINCH. | live |
 | D10 | Alternate-screen resize does not reflow and never contributes rows to primary history. Cells retain coordinates; shrink discards cells outside the rectangle and clears a grapheme or wide cell as a whole; growth adds blanks; cursors clamp without landing on a wide-cell tail; margins reset to the full grid. | live |
 | D11 | Eviction removes oldest content at valid grapheme boundaries. A single logical line larger than the budget may lose its oldest prefix, but retained content stays valid and is marked truncated. | live |
 | D12 | Out of scope: configurable ambiguous-width or scrollback policies. | deferred |
