@@ -237,6 +237,11 @@ read it from the working tree, not the installed skill at
 release and lags this branch. Changing the CLI surface (commands, flags, stdout
 shape, parser errors) means updating that file in the same change.
 
+DanTerm aims to be fully controllable remotely and programmatically, debugging
+included. Use the API to reproduce an issue, confirm the root cause, and try
+fixes. When it can't drive the action or report the state you need, extend the
+API with a general, reusable command or query and update `SKILL.md`.
+
 ## Read before you touch it
 
 | Working on | Read |
