@@ -233,6 +233,56 @@ struct TerminalASCIIRunTests {
         #expect(shape.unidentifiedCellCount == 0)
     }
 
+    @Test("a run straddling the content-identity wrap declines to the character path")
+    func runStraddlingIdentityWrapDeclines() throws {
+        // Intent: a run longer than the identity counter's remaining headroom is declined by the
+        //   bulk path, wraps the counter on the character path, drops the armed link there, and
+        //   produces the same grid as feeding the bytes one at a time.
+        // Why it exists: the straddle decline is the one cut rule the chunk sweep cannot reach --
+        //   priming the counter mid-replay is not expressible as a byte stream -- so nothing else
+        //   exercises `printBulkASCII` refusing a run for identity headroom. A bulk path that
+        //   ignored the wrap would mint identities past `.max` or reuse ones an armed link still
+        //   holds.
+        // Scenario: a long-running pane prints past the counter's range mid-run while a link is
+        //   armed.
+        var whole = try #require(Terminal(columns: 16, rows: 2))
+        whole.feed(Array("https://a.co".utf8))
+        let link = try #require(whole.activatableLink(at: .init(row: 0, column: 3)))
+        let armed = whole.setArmedLink(link)
+        #expect(armed)
+
+        whole.moveCursor(row: 1, column: 0)
+        whole.primeContentIdentityWrapForTesting()
+        whole.feed(Array("abc\r\n\r\n".utf8))
+
+        #expect(whole.armedLink == nil)
+        expectValidGrid(whole)
+
+        // The wrap splits the run's identities (`.max`, then 1, 2), so the retired row carries
+        // two contiguous runs, not one -- and every cell is still identified.
+        let shape = try #require(whole.scrollbackRecordContentIdentityShape(at: 1))
+        #expect(shape.runCount == 2)
+        #expect(shape.identifiedCellCount == 3)
+        #expect(shape.unidentifiedCellCount == 0)
+
+        // Byte-at-a-time hits the wrap inside a length-1 run instead of via the straddle decline;
+        // both routes must mean the same thing.
+        var single = try #require(Terminal(columns: 16, rows: 2))
+        single.feed(Array("https://a.co".utf8))
+        single.moveCursor(row: 1, column: 0)
+        single.primeContentIdentityWrapForTesting()
+        for byte in Array("abc\r\n\r\n".utf8) {
+            single.feed([byte])
+        }
+
+        #expect(single.screenText == whole.screenText)
+        #expect(single.geometry.cursor == whole.geometry.cursor)
+        #expect(
+            try #require(single.scrollbackRecordContentIdentityShape(at: 1)).runCount
+                == shape.runCount
+        )
+    }
+
     // MARK: - Equivalence sweep
 
     /// One named byte stream the chunk sweep replays. A struct rather than a tuple so a failing
