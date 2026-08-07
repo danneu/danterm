@@ -218,8 +218,13 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
   express one today, but the guard is what makes the clamp total.
 - Adjust and reset are two messages, mirroring `.setPaneTheme` /
   `.toggleZoomPane` rather than one message with an enum payload.
-- `.adjustPaneFontSize` bounds its `steps` argument before adding it to the
-  pane's, so no caller can overflow the sum.
+- `.adjustPaneFontSize` bounds its `steps` argument against the room the pane
+  has left rather than against `paneFontSizeStepRange`, so the sum cannot
+  overflow and an arbitrarily large delta lands exactly on the bound instead of
+  saturating short of it.
+- Preferences bounds what it commits into `fontSizeRange` and echoes the bounded
+  value back into the field, so the saved setting is the size panes render at.
+  An unparseable entry is still rejected outright and left on screen.
 - I9's carry-over lands in `stageValidatedRestore` alone, not also in
   `commitRestoreSession`: staging builds the sessions and returns the model that
   commit installs, so carrying once at the top of staging covers both halves of
@@ -228,11 +233,3 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
 - Session creation falls back to the configured size when the pane is missing
   from the model, matching how the adjacent `themeName` argument already
   degrades.
-
-## Follow Up
-
-- Preferences accepts any positive finite font size
-  (`lib/DanTermCore/Sources/DanTermCore/Update.swift:689`), but
-  `resolvedFontSize` now clamps to `8...72`. A user who types 200 sees 200 in
-  the panel while panes render at 72. Either validate the draft against
-  `DanTermConfig.fontSizeRange` at save, or show the resolved value back.

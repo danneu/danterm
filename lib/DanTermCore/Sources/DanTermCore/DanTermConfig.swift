@@ -32,12 +32,19 @@ struct DanTermConfig: Equatable {
 
     var resolvedDefaultTheme: String { defaultTheme ?? "Monokai Remastered" }
 
+    /// Map a size into `fontSizeRange`. Preferences applies this to what it
+    /// commits, so the stored setting is the one panes render at; the read path
+    /// below applies it again to a hand-edited file, which no one validated.
+    static func boundedFontSize(_ size: Double) -> Double {
+        min(max(size, fontSizeRange.lowerBound), fontSizeRange.upperBound)
+    }
+
     /// The configured size mapped into `fontSizeRange`. A hand-edited config can
     /// name any number, including one no renderer can use; nothing downstream
     /// re-checks, so the bound belongs here.
     var resolvedFontSize: Double {
         guard let fontSize, fontSize.isFinite else { return Self.defaultFontSize }
-        return min(max(fontSize, Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
+        return Self.boundedFontSize(fontSize)
     }
 }
 

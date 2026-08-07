@@ -186,6 +186,62 @@ import Testing
         #expect(size(model, paneId)! == ceiling)
     }
 
+    @Test("an adjustment far past a bound lands exactly on that bound")
+    func hugeAdjustmentSaturatesOnTheBound() {
+        // Intent: `steps` is a delta, so an arbitrarily large one moves the pane
+        //   all the way to the bound in its direction, from either starting end.
+        // Why it exists: bounding the delta against the step range instead of
+        //   against the room the pane has left saturates short -- a pane at the
+        //   floor jumped by Int.max would stop 8 steps below the ceiling -- and
+        //   an unbounded delta would overflow the addition outright.
+        // Scenario: spec-first -- a pane parked at one bound, jumped by Int.max
+        //   and Int.min toward the other.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        update(&model, .adjustPaneFontSize(paneId: paneId, steps: paneFontSizeStepRange.lowerBound))
+        #expect(model.pane(paneId)?.fontSizeSteps == paneFontSizeStepRange.lowerBound)
+        update(&model, .adjustPaneFontSize(paneId: paneId, steps: .max))
+        #expect(model.pane(paneId)?.fontSizeSteps == paneFontSizeStepRange.upperBound)
+
+        update(&model, .adjustPaneFontSize(paneId: paneId, steps: .min))
+        #expect(model.pane(paneId)?.fontSizeSteps == paneFontSizeStepRange.lowerBound)
+    }
+
+    // MARK: - Preferences ingress
+
+    @Test("a font size saved from Preferences is bounded, and the panel shows what renders")
+    func preferencesSaveBoundsTheFontSize() throws {
+        // Intent: the size Preferences commits is the size panes render at, so a
+        //   value outside `fontSizeRange` is bounded on the way in and echoed
+        //   back into the field.
+        // Why it exists: `resolvedFontSize` bounds at read while the panel showed
+        //   the raw saved number, so typing 200 displayed 200 over panes drawing
+        //   at 72 -- the stored setting no longer described the terminal.
+        // Scenario: spec-first -- save 200, then 4, with a pane on screen.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .preferencesOpened())
+
+        update(&model, .prefSetFontSize("200"))
+        update(&model, .prefSave)
+        #expect(model.config.fontSize == DanTermConfig.fontSizeRange.upperBound)
+        #expect(size(model, paneId) == DanTermConfig.fontSizeRange.upperBound)
+        var panel = try #require(desiredPreferencesPanel(in: model))
+        #expect(panel.fontSizeText == "72")
+        #expect(panel.fontSizeDirtyLabel == nil, "the bounded size reads clean against what was saved")
+
+        update(&model, .prefSetFontSize("4"))
+        update(&model, .prefSave)
+        #expect(model.config.fontSize == DanTermConfig.fontSizeRange.lowerBound)
+        #expect(size(model, paneId) == DanTermConfig.fontSizeRange.lowerBound)
+        panel = try #require(desiredPreferencesPanel(in: model))
+        #expect(panel.fontSizeText == "8")
+        #expect(panel.fontSizeDirtyLabel == nil)
+    }
+
     // MARK: - PO5
 
     @Test("snapshot round-trip preserves a non-default zoom")

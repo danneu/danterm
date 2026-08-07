@@ -462,10 +462,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .adjustPaneFontSize(let paneId, let steps):
         guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
               let pane = model.pane(targetId) else { return [] }
-        // Bound the requested delta before adding it, so the sum cannot overflow
-        // and a caller asking for a huge jump lands on the bound rather than
-        // wrapping past it.
-        let next = clampedPaneFontSizeSteps(pane.fontSizeSteps + clampedPaneFontSizeSteps(steps))
+        // Bound the delta against the room this pane has left, not against the
+        // step range: the latter saturates short (a pane at the floor jumped by
+        // Int.max would stop below the ceiling), while this lands a huge jump
+        // exactly on the bound and still keeps the addition from overflowing.
+        let roomDown = paneFontSizeStepRange.lowerBound - pane.fontSizeSteps
+        let roomUp = paneFontSizeStepRange.upperBound - pane.fontSizeSteps
+        let next = pane.fontSizeSteps + min(max(steps, roomDown), roomUp)
         guard next != pane.fontSizeSteps else { return [] }
         model.updatePane(targetId) { $0.fontSizeSteps = next }
         // The pane re-grids via reconcilePaneConfig (font size is in the projection).
@@ -686,11 +689,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         newConfig.copyOnSelect = draft.copyOnSelect
         newConfig.remoteTheme = resolvedTheme
         newConfig.defaultTheme = draft.theme
+        // A size outside the renderable range is bounded rather than rejected:
+        // the number the user typed says which end they wanted, and storing it
+        // raw would leave the panel showing a size no pane draws at.
         let parsedFontSize: Double? = draft.fontSize.flatMap { Double($0) }
         let validFontSize = draft.fontSize == nil
             || (parsedFontSize.map { $0.isFinite && $0 > 0 } ?? false)
         if validFontSize {
-            newConfig.fontSize = parsedFontSize
+            newConfig.fontSize = parsedFontSize.map(DanTermConfig.boundedFontSize)
         }
         // Whether the family is installed is not knowable here and is not a
         // validation question anyway: an unavailable name is still written, since
@@ -700,9 +706,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // without a manual reload.
         newConfig.fontFamily = resolveFontFamilyDraft(draft.fontFamily)
         model.config = newConfig
-        // Normalize draft to resolved values post-save.
+        // Normalize draft to resolved values post-save. The size is echoed back
+        // only when it was saved: text that failed to parse stays on screen for
+        // the user to correct, and the field keeps reading dirty.
         model.preferencesDraft!.remoteTheme = resolvedTheme
         model.preferencesDraft!.fontFamily = newConfig.fontFamily
+        if validFontSize {
+            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+        }
         // Update remote panes if theme changed.
         if resolvedTheme != oldConfig.remoteTheme {
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
