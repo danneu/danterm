@@ -180,6 +180,13 @@ activates only if Phase 1-2 evidence justifies it.
   which a hidden pane never produces. Add measurement instrumentation: emit
   timestamped, visibility-tagged counter snapshots through the
   characterization harness, then sample the hidden flood. Record in F7.
+  **Partly built by `research/33/T4`**: `app/TerminalFrameRateSampler.swift`
+  emits timestamped publish/draw/delivery counts per second when
+  `DANTERM_FRAME_RATE_LOG` names a file, and `33/F12` used it to read 594
+  publishes/s against 120 draws/s on a visible pane. It is not visibility-tagged
+  and the hidden flood is still unsampled, so this task stays open on that half
+  -- but note `33/F12`'s incidental result that an occluded pane publishes and
+  draws nothing at all, which is F2 seen from the instrument's side.
 - [ ] T4 App Nap backpressure check (H3): two fully occluded runs of the same
   fixed workload -- one naturally napping, one held un-napped by a temporary
   scoped activity assertion (measurement scaffolding only, removed after) --

@@ -42,6 +42,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
+    /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
+    private let frameRateSampler = TerminalFrameRateSampler.make()
     private var fontSize: CGFloat
     /// The verified-installed family to render, or nil for the system monospace
     /// font. Never a raw name from config -- only a resolved family reaches here.
@@ -170,6 +172,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        frameRateSampler?.recordDraw(deliveryCount: controller.fenceMetrics.delivery.count)
         #if DANTERM_TERMINAL_BENCHMARK
         let drawStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
         #endif
@@ -799,6 +802,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             self.mouseTrackingArea = nil
         }
         callbackGate.tearDown()
+        frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.detachFenceMetricsController(controller)
         #endif
@@ -942,6 +946,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             fenceStallNanoseconds: controller.lastFenceStallNanoseconds
         )
         #endif
+        frameRateSampler?.recordPublish(deliveryCount: controller.fenceMetrics.delivery.count)
         publishedFrame = (frame.plan, metrics)
         if frame.damage.isFull {
             invalidateFullDisplay()

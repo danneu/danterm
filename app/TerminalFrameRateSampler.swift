@@ -1,0 +1,112 @@
+// Live publish/draw rate sampler for one pane. It exists only to answer "how
+// many frames per second does a real pane actually publish, and how many of
+// those reach `draw(_:)`" in a running app, which no benchmark artifact can
+// report because those capture totals at draw boundaries only.
+//
+// Not a general metrics facility: it owns one counter the engine does not
+// already keep (draws), reads the delivery count the session controller
+// already keeps, and writes a line per elapsed window. Nothing else belongs
+// here -- a second question wants its own instrument, not a field on this one.
+import Foundation
+
+/// Appends one JSON line per sampling window so an external script can read
+/// publishes/s and draws/s off a live pane without attaching a profiler.
+///
+/// Created only when `DANTERM_FRAME_RATE_LOG` names a file, so an ordinary run
+/// pays one optional test per publish and per draw and nothing else. Owned by
+/// the view whose frames it counts, and it starts and stops with that view: it
+/// holds no timer, no observer, and no reference back to its owner.
+@MainActor
+final class TerminalFrameRateSampler {
+    /// Names the file to append to. Forwarded into a development slot with
+    /// `./scripts/dev-slot-launcher.py --pass-env DANTERM_FRAME_RATE_LOG`.
+    static let environmentVariable = "DANTERM_FRAME_RATE_LOG"
+
+    private static let windowNanoseconds: UInt64 = 1_000_000_000
+    private static var nextPaneIndex = 0
+
+    private let handle: FileHandle
+    private let paneIndex: Int
+    private var windowStartNanoseconds: UInt64
+    private var windowStartDeliveryCount: UInt64 = 0
+    /// False until the first sample supplies a delivery count, so the first
+    /// window reports deliveries measured from its own start, not from zero.
+    private var isDeliveryBaselineSet = false
+    private var publishes = 0
+    private var draws = 0
+
+    /// Returns a sampler only when the environment asked for one, so the call
+    /// site stays a single `let sampler = TerminalFrameRateSampler.make()`.
+    static func make(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> TerminalFrameRateSampler? {
+        guard let path = environment[environmentVariable], path.isEmpty == false else {
+            return nil
+        }
+        return TerminalFrameRateSampler(path: path)
+    }
+
+    private init?(path: String) {
+        if FileManager.default.fileExists(atPath: path) == false {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let handle = FileHandle(forWritingAtPath: path) else { return nil }
+        handle.seekToEndOfFile()
+        self.handle = handle
+        paneIndex = Self.nextPaneIndex
+        Self.nextPaneIndex += 1
+        windowStartNanoseconds = DispatchTime.now().uptimeNanoseconds
+    }
+
+    func recordPublish(deliveryCount: UInt64) {
+        publishes += 1
+        emitIfWindowElapsed(deliveryCount: deliveryCount)
+    }
+
+    func recordDraw(deliveryCount: UInt64) {
+        draws += 1
+        emitIfWindowElapsed(deliveryCount: deliveryCount)
+    }
+
+    /// Flushes the partial window the last publish or draw left open, so a
+    /// stream that stops does not lose its final second.
+    func flush(deliveryCount: UInt64) {
+        emit(deliveryCount: deliveryCount)
+        try? handle.close()
+    }
+
+    private func emitIfWindowElapsed(deliveryCount: UInt64) {
+        if isDeliveryBaselineSet == false {
+            windowStartDeliveryCount = deliveryCount
+            isDeliveryBaselineSet = true
+        }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now - windowStartNanoseconds >= Self.windowNanoseconds else { return }
+        emit(deliveryCount: deliveryCount, now: now)
+    }
+
+    private func emit(
+        deliveryCount: UInt64,
+        now: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) {
+        guard publishes > 0 || draws > 0 else { return }
+        let elapsed = Double(now - windowStartNanoseconds) / 1_000_000_000
+        let deliveries = deliveryCount >= windowStartDeliveryCount
+            ? deliveryCount - windowStartDeliveryCount
+            : 0
+        let line = """
+        {"pane":\(paneIndex),\
+        "uptimeSeconds":\(String(format: "%.3f", Double(now) / 1_000_000_000)),\
+        "windowSeconds":\(String(format: "%.3f", elapsed)),\
+        "deliveries":\(deliveries),\
+        "publishes":\(publishes),\
+        "draws":\(draws)}
+
+        """
+        try? handle.write(contentsOf: Data(line.utf8))
+        windowStartNanoseconds = now
+        windowStartDeliveryCount = deliveryCount
+        publishes = 0
+        draws = 0
+    }
+}

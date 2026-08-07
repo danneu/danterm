@@ -58,7 +58,9 @@ the foreground for the first time.
 
 The launcher does not inherit the launching shell's environment wholesale. To
 exercise an environment-gated path, name each allowed DanTerm-owned variable.
-The allowlist is currently one entry, `DANTERM_PTY_RECORDING_DIR`:
+The allowlist currently holds `DANTERM_PTY_RECORDING_DIR` and
+`DANTERM_FRAME_RATE_LOG` (a file each pane appends one publish/draw rate sample
+to per second):
 
 ```sh
 RECORDING_SLOT_HANDLE="$(mktemp /tmp/danterm-recording-slot.XXXXXX)"

@@ -291,6 +291,14 @@ struct TerminalCellSize {
     let height: Double
 }
 
+struct TerminalPaneFenceMetrics {
+    struct Measurement {
+        var count: UInt64 = 0
+    }
+
+    var delivery = Measurement()
+}
+
 @MainActor
 final class TerminalPaneSessionController {
     var onFrame: ((TerminalPaneFrame) -> Void)?
@@ -304,6 +312,10 @@ final class TerminalPaneSessionController {
     var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var currentPlan: RenderFramePlan?
+    /// Stands in for the real controller's fence census, which the frame-rate
+    /// sampler's call sites read. The harness never emits a rate sample, so a
+    /// frozen zero is the whole contract.
+    let fenceMetrics = TerminalPaneFenceMetrics()
     private(set) var renderTheme = RenderTheme.dark
     private(set) var appliedThemes: [RenderTheme] = []
     var viewportState: TerminalPaneViewportState

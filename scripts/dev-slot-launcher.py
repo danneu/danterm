@@ -23,7 +23,10 @@ from typing import Iterable, Mapping
 DEVELOPMENT_SLOTS = range(1, 9)
 POOL_EXHAUSTED_STATUS = 75
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
-PASSTHROUGH_ENVIRONMENT_VARIABLES = ("DANTERM_PTY_RECORDING_DIR",)
+PASSTHROUGH_ENVIRONMENT_VARIABLES = (
+    "DANTERM_PTY_RECORDING_DIR",
+    "DANTERM_FRAME_RATE_LOG",
+)
 
 
 class PoolExhaustedError(Exception):

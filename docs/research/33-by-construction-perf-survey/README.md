@@ -136,10 +136,14 @@ in the planner and the delivery path is multiplied by ~8x more than it needs to
 be, and the cheapest global win is to bound the rate rather than shrink any
 frame.
 
-Supports: `23/F5`. Competing explanation: much of the fence stall is main
-waiting for parsing that must happen regardless, so the recoverable part is only
-the plan + copy-on-write + set churn between fences. Distinguishing experiment:
-`T4`'s publish counter, live rather than in a benchmark block.
+Supports: `23/F5`, and now `F12`, which measured it live and confirmed the
+direction while correcting the size: a real `cat` publishes 594 frames/s against
+120 draws/s, so the multiplier is **4.96x, not 8x**. Competing explanation: much
+of the fence stall is main waiting for parsing that must happen regardless, so
+the recoverable part is only the plan + copy-on-write + set churn between
+fences. That one is still open -- `F12` counts frames, not the CPU inside them.
+Distinguishing experiment: `T4`'s publish counter, live rather than in a
+benchmark block. **Done, in `F12`.**
 
 ### H3 -- a scroll is the worst case in the whole system, and it is the common case
 
@@ -271,12 +275,24 @@ direction gate; several may kill their own follow-on task, which is the point.
   `topRow` guard, so the streaming corpora never execute this apparatus and
   never get row-scoped drawing either. `T20` therefore stays a complexity claim
   and a rider on `T9`; `T9` gains Phase 1's strongest evidence.
-- [ ] `T4` RESEARCH -- **Count published frames per second, live.** Script or
+- [x] `T4` DONE -- **Count published frames per second, live.** Script or
   small patch: expose `TerminalPaneFenceMetrics.delivery.count` on a sampling
   surface (this is doc 25's `T3`, still unbuilt) and report publishes/s and
   draws/s during a real `cat` of a large file, not a benchmark block. Gate for
-  `T7`: `H2` predicts a ratio near 8:1; if it is near 1:1 live, `T7` is dead and
-  should be closed with the number.
+  `T10` (the ledger originally said `T7`, which is now the parser-streaming
+  task): `H2` predicts a ratio near 8:1; if it is near 1:1 live, `T10` is dead
+  and should be closed with the number.
+  **Result in `F12`, script `scripts/research/33/t4-publish-rate.sh`. The gate
+  passes and `T10` stays open:** a real `cat` publishes **594 frames/s against
+  120 draws/s, a ratio of 4.96:1**, reproduced to 0.2% across two runs. So the
+  direction of `H2` is confirmed and its size is corrected from ~8x to 4.96x.
+  Two method results come with it. A **debug** build reads 1.07:1 -- exactly the
+  reading that would have wrongly closed `T10` -- because per-frame cost, not
+  delivery rate, binds when the app is unoptimized, so any publish-rate reading
+  must be release configuration. And an **occluded** pane publishes and draws
+  nothing at all, so the script has to put the slot's window on screen. The
+  sampler this added is the in-app surface doc 25's `T3` asked for, so that task
+  is unblocked -- it still wants the visibility tagging and the hidden flood.
 - [ ] `T5` RESEARCH -- **Count damaged rows per scroll event.** Script: feed N
   newlines at the bottom of a full screen and report damaged rows per published
   frame, plus the glyph occurrences the resulting plan submits. `F5` establishes
@@ -338,7 +354,9 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   row-local under a shift and must be re-derived after it; `scrollRect(_:by:)`
   on a layer-backed view needs verifying against the backing store. A wrong
   shift shows as a torn screen, not a slow one.
-- [ ] `T10` VETTING -- **Bound publish rate by consumer demand.** Gated on `T4`.
+- [ ] `T10` VETTING -- **Bound publish rate by consumer demand.** `T4`'s gate is
+  passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
+  every six published frames are overwritten before any display pass sees them.
   The consumer holds a deadline and will not fence again until
   `lastDelivery + refreshInterval`, arming exactly one one-shot timer while
   damage is pending -- so no damage means no timer and no wakeup, and doc 25's
@@ -568,7 +586,7 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 has three tasks done. `T1` sized the parser's
+Investigation in progress. Phase 1 has four tasks done. `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -586,5 +604,19 @@ the damage set *or* row-scoped planning and drawing. That makes `T9` -- shift
 damage -- the best-evidenced structural item in the doc, and it makes `T5` a
 confirmation rather than a discovery.
 
-The remaining tasks in Phases 2-4 are still gated behind counters that do not
-yet exist, `T4`'s live publish rate first among them.
+`T4` (`F12`) then counted the live publish rate and passed `T10`'s gate. A real
+`cat` in a real pane publishes 594 frames a second and draws 120 -- a 4.96:1
+ratio that reproduces to 0.2% -- so `H2` is confirmed in direction and corrected
+in size, from the ~8x it inferred from `23/F5` to a measured 4.96x. Deliveries
+and publishes match to within two frames across 7,000, so nothing coalesces
+before the publish; the only coalescing in the pipeline is the one AppKit does
+between publish and draw, after every per-frame cost has already been paid. Two
+method results ride along and both would have inverted the verdict: a debug
+build reads 1.07:1, because per-frame cost rather than delivery rate binds when
+the app is unoptimized, and an occluded pane publishes nothing at all. `T10` is
+therefore live with its multiplier measured, and `T4`'s script is its
+before/after gate.
+
+The remaining tasks in Phases 2-4 are gated behind `T5` (damaged rows per
+scroll, a confirmation now that `F11` has shown the escalation) and `T6` (the
+per-`Msg` runtime counter, which nothing has yet built).

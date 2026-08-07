@@ -612,3 +612,118 @@ performance verdict.
   be scoped to confirm the `.full` escalation with a synthetic scroll. `T9` gains
   the strongest single piece of evidence in Phase 1: at production delivery size
   the streaming corpora have no row damage at all, only whole-screen redraws.
+
+### F12 -- a live pane publishes 594 frames per second against 120 draws, a 4.96:1 ratio that reproduces to 0.2%
+
+- Status: verified by direct measurement in a running app. `T4`. `H2`'s
+  mechanism is confirmed live: the ratio is not near 1:1, so `T10` survives its
+  gate. Two secondary results are method-critical and are recorded because they
+  each would have produced the opposite verdict: a **debug** build reads 1.07:1,
+  and an **occluded** pane publishes nothing at all.
+- Date and investigator: 2026-08-06, T4 agent.
+- Commit and worktree state: `144d3054` plus this task's own changes -- the
+  sampler (`app/TerminalFrameRateSampler.swift`), its two call sites in
+  `SwiftTerminalSessionView`, and the launcher allowlist entry. Apple Swift
+  6.3.3, arm64-apple-macosx26.0, 179x66 pane, 120 Hz display.
+- Commands, inputs, or reproduction:
+  `scripts/research/33/t4-publish-rate.sh --seconds 15 --megabytes 96`
+  (add `--debug-build` for the debug-configuration comparison). The script
+  builds a 114 MB corpus by repeating every `.swift` file under `lib/`, launches
+  an isolated development slot with `DANTERM_FRAME_RATE_LOG` set, activates that
+  slot's window, runs a real `cat` of the corpus in the pane through
+  `danterm --socket ... pane input`, samples for 15 s, sends `C-c`, and hands
+  the front back to the app that held it.
+- Result or artifact paths: `scripts/research/33/t4-publish-rate.sh`. The run
+  writes only into its own scratch directory.
+- What the instrument counts: one line of JSON per pane per elapsed second,
+  written from inside `publish(_ frame:)` and `draw(_:)` themselves -- no timer,
+  no polling, and nothing at all unless the environment variable names a file.
+  `deliveries` is the delta of `TerminalPaneSessionController.fenceMetrics`
+  `.delivery.count`, the existing metric doc 25's `T3` asked for a surface on,
+  and it counts `consumeHostUpdate` calls. `publishes` counts frames that reach
+  the view. `draws` counts `draw(_:)` entries, which AppKit may split per
+  dirty rect, so it is an upper bound on display passes.
+- Measurements, release configuration, steady state (every window after the
+  settle window, which holds only shell startup):
+
+  | run | seconds | deliveries/s | publishes/s | draws/s | publishes per draw |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | 1 | 12.009 | 594.8 | **594.6** | **119.8** | **4.96** |
+  | 2 | 12.008 | 593.9 | **593.9** | **119.8** | **4.96** |
+
+  Per-second windows are flat, not bursty: publishes alternate between roughly
+  565 and 635 every second while draws hold 118-121, so the ratio is stable
+  within each window and not an artifact of averaging.
+
+  Whole-log figures including the 3.3 s settle window, which is what the
+  script prints: 466.8 / 463.9 publishes/s, 94.2 / 93.7 draws/s, 4.96 / 4.95.
+
+- Measurements, debug configuration, same script and same corpus:
+
+  | | seconds | deliveries/s | publishes/s | draws/s | publishes per draw |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | debug | 15.571 | 16.7 | **16.6** | **15.5** | **1.07** |
+
+- Observation, the answer `T4` asked for: a real `cat` in a real pane publishes
+  **594 frames per second** and draws **120**, and the second run reproduces
+  both to within 0.2%. Deliveries and publishes are the same number to within
+  two frames across a 7,000-frame run, so essentially every 16 KiB read turn
+  becomes a published frame -- the coalescing that exists is between publish and
+  draw, not between delivery and publish.
+- Observation, the debug build cannot see this mechanism. In debug the same
+  workload runs the whole pipeline at ~16 Hz and reads **1.07 publishes per
+  draw**, which is exactly the "near 1:1" reading the ledger named as the
+  condition for closing `T10`. The cause is that per-frame cost, not delivery
+  rate, is the binding constraint in an unoptimized build: the child is
+  flow-controlled by how fast the app drains the PTY, so a slower app produces
+  a slower child and the ratio collapses. Any future publish-rate reading must
+  be taken in release configuration, which is why the script defaults to it.
+- Observation, an occluded pane publishes nothing. The first attempt logged zero
+  samples: `just launch-slot` leaves the slot in the background, the window was
+  fully covered, and `syncPaneVisibility` therefore held every pane hidden, so
+  `planIfNeeded` never ran and neither `publish` nor `draw` was ever called
+  while the PTY streamed normally. This is `25/F2` observed from the other side
+  and it is why the script activates the slot window for the sampling interval.
+  The slot still launches with `--background`, which is the flag that refuses
+  the notification prompt, so activating it afterwards raises none.
+- Inference, for `T10` (bound publish rate by consumer demand): **the gate
+  passes and `T10` stays open.** The live ratio is 4.96:1, not 1:1. Five of
+  every six published frames are overwritten before any of them reaches a
+  display pass, so the plan, the copy-on-write, the damage set construction and
+  the delivery fence for those five are work whose result is discarded. Bounding
+  publish rate to the display rate would remove roughly 475 of the 594 publishes
+  per second.
+- Inference, `H2` is confirmed but its stated size is corrected. `H2` predicted
+  "near 8:1" from `23/F5`'s 470 publishes/s in a benchmark block. Live, the
+  publish rate is *higher* than `23/F5`'s -- 594/s -- but so is the draw rate,
+  because the display runs at 120 Hz, so the multiplier is **4.96x, not 8x**.
+  The direction is confirmed and the magnitude is now measured rather than
+  inferred; any `T10` claim should be written against 4.96x.
+- Inference, for `F11`: `F11` measured 94 published frames for `scrollback-stream`
+  at the 16 KiB delivery cap and inferred that per-frame costs multiply by
+  delivery count. This finding supplies the live multiplier for that inference:
+  at 594 deliveries/s each one is a full delivery fence, and `F11` showed the
+  streaming corpora publish `.full` damage on every one of them.
+- Competing interpretations: the `draws` counter is an upper bound on display
+  passes, because AppKit may call `draw(_:)` more than once per pass for
+  disjoint dirty rects. If it does so here, the true display-pass count is lower
+  and the ratio is *larger* than 4.96, so the verdict is unaffected in the only
+  direction that matters. In the other direction, the publish rate is set by how
+  fast the child can be drained, so a faster machine or a wider pane would move
+  the absolute numbers; the ratio against a fixed 120 Hz display is the stable
+  quantity. Finally, `cat` of a file is the fastest producer a pane sees; an
+  interactive program that writes a screen at a time will not reach 594
+  publishes/s, so this is the top of the range, not a typical rate.
+- Uncertainty: none on the counts, which are exact tallies. The window
+  boundaries are wall-clock and the samples are emitted from the next publish or
+  draw after a second elapses, so `windowSeconds` is 1.000-1.002 in release and
+  up to 1.06 in debug; the per-second rates divide by the measured window, not
+  by a nominal 1.0. No CPU time and no energy was measured, and no claim about
+  either is made here.
+- Next action: `T10` is unblocked with its multiplier measured at 4.96x and may
+  proceed to its `decisions.md` entry. This script is `T10`'s before/after gate:
+  after the change, `publishesPerSecond` must fall to the display rate while
+  `drawsPerSecond` holds, and `cumulativeFenceStallNanoseconds` must fall by
+  roughly the same factor. The sampler it added is the in-app sampling surface doc
+  25's `T3` asked for; that task also wants visibility tagging and a hidden
+  flood, so it is unblocked rather than closed.
