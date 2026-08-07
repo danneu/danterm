@@ -47,6 +47,12 @@ struct DanTermCLI {
           pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
+          pane zoom [--pane <pane-id>] on|off|toggle
+                                      Zoom a pane to fill its tab, or restore the
+                                      split. Prints the tab's resulting zoom state.
+          pane rows --pane <pane-id>
+                                      Print each display row's line structure as
+                                      JSON: wrap claim, content end, and width.
           pane tape --pane <pane-id> [--follow] [--from-now]
                                       Print a replayable snapshot, or follow the
                                       bounded backlog and live events as JSON Lines

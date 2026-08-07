@@ -984,6 +984,29 @@ class AppRuntime {
             let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
 
+        case .readPaneRowStructure(let reqId, let paneId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            guard let structure = session.readRowStructure() else {
+                connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane rows")
+                break
+            }
+            let rows = structure.map { row in
+                JSONValue.object([
+                    "index": .number(Double(row.index)),
+                    "retained": .bool(row.isRetained),
+                    "softWrapped": .bool(row.isSoftWrapped),
+                    "contentEnd": .number(Double(row.contentEnd)),
+                    "width": .number(Double(row.width)),
+                    "marginKind": .string(row.marginKind),
+                    "staleWrapClaim": .bool(row.staleWrapClaim),
+                ])
+            }
+            connection.writeSuccess(reqId: reqId, result: .object(["rows": .array(rows)]))
+
         case .dumpPaneTape(let reqId, let paneId):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {

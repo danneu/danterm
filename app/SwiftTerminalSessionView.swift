@@ -639,6 +639,29 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return controller.readViewportText()
     }
 
+    func readRowStructure() -> [TerminalSessionRowStructure]? {
+        controller.synchronizeState()
+        return controller.readRowStructure().map { row in
+            let marginKind: String
+            switch row.marginCellKind {
+            case .padding: marginKind = "padding"
+            case .narrow: marginKind = "narrow"
+            case .wideHead: marginKind = "wideHead"
+            case .wideTail: marginKind = "wideTail"
+            case .spacerHead: marginKind = "spacerHead"
+            }
+            return TerminalSessionRowStructure(
+                index: row.index,
+                isRetained: row.isRetained,
+                isSoftWrapped: row.isSoftWrapped,
+                contentEnd: row.contentEnd,
+                width: row.width,
+                marginKind: marginKind,
+                staleWrapClaim: row.staleWrapClaim
+            )
+        }
+    }
+
     func readFullHistoryText() -> String? {
         controller.synchronizeState()
         return controller.readFullHistoryText()

@@ -46,6 +46,7 @@ enum Command {
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
+    case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)
     case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
 
@@ -101,7 +102,8 @@ extension Command {
             return true
         case .createSession, .sendText, .sendInputText, .sendInputKey,
              .focusSession, .exportState, .ipcReply, .ipcError,
-             .readPaneText, .dumpPaneTape, .followPaneTape, .sendNotification,
+             .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
+             .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .dismissAlertsPopover,
              .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,

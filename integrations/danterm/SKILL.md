@@ -29,6 +29,8 @@ lookup.
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
+    danterm pane zoom [--pane <pane-id>] on|off|toggle
+    danterm pane rows --pane <pane-id>
     danterm pane tape --pane <pane-id> [--follow] [--from-now]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
@@ -172,6 +174,8 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
+| "make this pane fill the tab" / "restore the split" | `pane zoom on` / `pane zoom off` |
+| "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
 | "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
@@ -274,6 +278,61 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
 
     danterm pane read --pane "$PANE_ID"
     danterm pane read --pane "$PANE_ID" --lines 200
+
+### Zoom a pane
+
+`pane zoom` drives the same zoom the Pane menu and the pane toolbar button
+drive: the tab renders only the target pane, so the pane's width and height
+change without the window resizing. This is the scripted form of the
+resize stimulus, which is otherwise only reachable by a keyboard shortcut.
+
+    danterm pane zoom --pane "$PANE_ID" on
+    danterm pane zoom --pane "$PANE_ID" off
+
+Prefer `on` and `off` over `toggle`: they are idempotent, so a script reaches a
+known state without having to observe the current one first. The reply carries
+`tab.isZoomed`, which is the state after the request. A tab holding a single
+pane has nothing to zoom and reports `isZoomed: false` rather than failing --
+check the field, not the exit status.
+
+Zoom is deliberately transient and is not part of the persisted snapshot, so
+`ls` does not report it. `pane info` does.
+
+### Inspect a pane's line structure
+
+`pane rows` prints one JSON record per display row of the whole stream --
+retained scrollback first, then the live grid:
+
+    {"rows":[{"index":0,"retained":true,"softWrapped":false,"contentEnd":30,
+              "width":117,"marginKind":"padding","staleWrapClaim":false}, ...]}
+
+`contentEnd` is one past the last column holding printed content; background
+erase paint is not content. `marginKind` is the last column's cell kind
+(`padding`, `narrow`, `wideHead`, `wideTail`, `spacerHead`). `softWrapped` is
+the *gated* continuation the line-structure readers consume; `staleWrapClaim`
+marks the transient where a live row still carries a printer wrap claim whose
+margin an erase blanked (EL 1/2 keep the claim for xterm parity, and the engine
+declines it everywhere it would fuse lines). Use this when text lands at the
+wrong columns after a resize, which text projections cannot diagnose: `pane
+read` joins soft-wrapped rows, so a logical line holding more cells than its
+content reads the same as legitimately wrapped prose.
+
+The check worth running is heuristic, not exact: a wrap whose margin holds no
+content is *suspect*. An autowrap prints at the last column, and a wide glyph
+that could not fit leaves a `spacerHead` there -- but a reflow can legitimately
+fold a line so an interior blank lands on the margin, which is
+indistinguishable row-locally. Flag and then eyeball:
+
+    danterm pane rows --pane "$PANE_ID" | python3 -c '
+    import json, sys
+    for row in json.load(sys.stdin)["rows"]:
+        if row["softWrapped"] and row["contentEnd"] < row["width"] \
+           and row["marginKind"] != "spacerHead":
+            print(row)'
+
+A genuinely spurious row renders correctly at the width it was built for and
+garbled at every other one, so pair this with `pane tape` to capture the byte
+stream that made it.
 
 ### Dump a pane flight recording
 
@@ -417,6 +476,8 @@ else prints nothing on success and exits 0.
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
+| `pane zoom [--pane <pane-id>] on\|off\|toggle` | JSON: pane, tab (with `isZoomed`), group |
+| `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 | `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
 

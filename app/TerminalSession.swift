@@ -4,6 +4,20 @@
 import Cocoa
 import DanTermProtocol
 
+/// One display row's line structure, restated at this boundary so the engine's grid types stay
+/// out of the session protocol. Diagnostic only: `danterm pane rows` is its sole consumer.
+struct TerminalSessionRowStructure: Equatable {
+    let index: Int
+    let isRetained: Bool
+    let isSoftWrapped: Bool
+    let contentEnd: Int
+    let width: Int
+    /// The engine's margin cell kind spelled as its case name ("padding", "narrow", ...),
+    /// restated as a string for the same boundary reason the struct exists.
+    let marginKind: String
+    let staleWrapClaim: Bool
+}
+
 /// Scrollbar position reported by a terminal session in logical terminal rows.
 struct TerminalScrollPosition: Equatable {
     let total: UInt64
@@ -105,6 +119,7 @@ protocol TerminalSession: AnyObject {
     func navigateSearch(_ direction: SearchDirection)
     func endSearch()
     func readViewportText() -> String?
+    func readRowStructure() -> [TerminalSessionRowStructure]?
     func readFullHistoryText() -> String?
     /// Reads persistent primary history without changing pane-read active-screen semantics.
     func readPrimaryHistoryText() -> String?

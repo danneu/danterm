@@ -279,6 +279,35 @@ struct CLIParserTests {
         ]))
     }
 
+    @Test("pane rows requires an explicit pane and takes no other argument")
+    func paneRowsRequiresExplicitPane() throws {
+        let command = try parseCLI(["pane", "rows", "--pane", "P1"])
+        #expect(command.method == Methods.paneRows)
+        #expect(command.params == ["pane": .string("P1")])
+        #expect(command.outputMode == .json)
+
+        #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "rows"]) }
+        #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(["pane", "rows", "--pane", "P1", "--lines", "20"])
+        }
+    }
+
+    @Test("pane zoom takes a positional state and an optional pane")
+    func paneZoomTakesPositionalState() throws {
+        let explicit = try parseCLI(["pane", "zoom", "--pane", "P1", "on"])
+        #expect(explicit.method == Methods.paneZoom)
+        #expect(explicit.params == ["pane": .string("P1"), "state": .string("on")])
+        #expect(explicit.outputMode == .json)
+
+        // Omitting --pane leaves the pane out so the daemon resolves $DANTERM_PANE.
+        #expect(try parseCLI(["pane", "zoom", "toggle"]).params == ["state": .string("toggle")])
+        #expect(try parseCLI(["pane", "zoom", "off"]).params == ["state": .string("off")])
+
+        #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom"]) }
+        #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "sideways"]) }
+        #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "on", "off"]) }
+    }
+
     @Test("pane tape parses explicit pane as JSON output")
     func paneTapeParsesExplicitPaneAsJSONOutput() throws {
         let command = try parseCLI(["pane", "tape", "--pane", "P1"])

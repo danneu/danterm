@@ -2740,3 +2740,120 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         }
     }
 }
+
+// MARK: - pane.zoom
+
+@Suite struct UpdateIpcZoomTests {
+    @Test("pane.zoom sets an explicit state rather than toggling")
+    func paneZoomSetsExplicitState() throws {
+        // Intent: `state: "on"` and `state: "off"` drive the tab to that zoom state
+        //   regardless of what it was, so repeating a request is a no-op.
+        // Why it exists: a script that can only toggle cannot recover a known state
+        //   after any concurrent change, which makes an agent-driven resize stimulus
+        //   depend on history it cannot observe.
+        // Scenario: spec-first; an agent zooms a split tab twice, then unzooms twice.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let params = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("on"),
+        ])
+
+        for _ in 0..<2 {
+            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))
+            #expect(reply["tab"]?["isZoomed"]?.asBool == true)
+            #expect(selectedTab(in: model)!.isZoomed)
+        }
+
+        let off = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("off"),
+        ])
+        for _ in 0..<2 {
+            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: off))
+            #expect(reply["tab"]?["isZoomed"]?.asBool == false)
+            #expect(selectedTab(in: model)!.isZoomed == false)
+        }
+    }
+
+    @Test("pane.zoom toggle flips the tab and reports the resulting state")
+    func paneZoomToggleFlips() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let params = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("toggle"),
+        ])
+
+        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == true)
+        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == false)
+    }
+
+    @Test("pane.zoom on an unsplit tab reports not zoomed instead of failing")
+    func paneZoomUnsplitTabReportsNotZoomed() throws {
+        // Intent: a tab with no split cannot zoom, and the reply says so.
+        // Why it exists: a caller scripting a resize stimulus needs to distinguish
+        //   "zoom applied" from "nothing to zoom" without parsing an error string.
+        // Scenario: spec-first; an agent zooms a tab holding a single pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let reply = try requireIpcReply(sendIpc(
+            &model,
+            method: Methods.paneZoom,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "state": .string("on"),
+            ])
+        ))
+        #expect(reply["tab"]?["isZoomed"]?.asBool == false)
+    }
+
+    @Test("pane.zoom rejects an unknown state and an unknown pane")
+    func paneZoomRejectsBadInput() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let badState = sendIpc(&model, method: Methods.paneZoom, params: .object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("sideways"),
+        ]))
+        #expect(try requireIpcError(badState).code == -32602)
+
+        let unknownPane = sendIpc(&model, method: Methods.paneZoom, params: .object([
+            "pane": .string(UUID().uuidString),
+            "state": .string("on"),
+        ]))
+        #expect(try requireIpcError(unknownPane).code == -32602)
+        #expect(selectedTab(in: model)!.isZoomed == false)
+    }
+
+    @Test("pane.info reports the tab's zoom state")
+    func paneInfoReportsZoomState() throws {
+        // Intent: the state `pane.zoom` sets is readable through `pane.info`.
+        // Why it exists: zoom is deliberately transient and so is absent from the
+        //   persisted snapshot `ls` returns, which would otherwise leave an agent
+        //   able to set zoom but not observe it.
+        // Scenario: spec-first; an agent zooms a tab and reads it back.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+
+        let before = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        #expect(before["tab"]?["isZoomed"]?.asBool == false)
+
+        _ = update(&model, .toggleZoomPane(paneId: paneId))
+
+        let after = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        #expect(after["tab"]?["isZoomed"]?.asBool == true)
+    }
+}

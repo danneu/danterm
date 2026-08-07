@@ -659,6 +659,11 @@ public final class TerminalPaneSessionController {
         )
     }
 
+    /// Returns the latest cached line structure without crossing the host actor boundary.
+    public func readRowStructure() -> [TerminalRowStructure] {
+        cachedTerminal.rowStructure
+    }
+
     /// Returns the latest cached history without crossing the host actor boundary.
     public func readFullHistoryText() -> String {
         cachedTerminal.fullHistoryText

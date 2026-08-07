@@ -96,6 +96,67 @@ public struct TerminalScrollbackRow: Equatable, Sendable {
     public let isSoftWrapped: Bool
 }
 
+/// Reports one display row's line structure -- where its logical line ends and how far its
+/// content reaches -- so a caller outside the engine can check wrap and reflow invariants.
+///
+/// Exists because a logical line holding more cells than its content needs renders correctly at
+/// the width it was built for and garbled at every other width, so the defect only surfaces after
+/// a resize and only as misplaced text. Text projections cannot distinguish it from legitimately
+/// wrapped prose. The pair `(isSoftWrapped, contentEnd)` can: a real autowrap happens by printing
+/// *at* the last column, so `isSoftWrapped` with `contentEnd < width` is unreachable by printing
+/// and identifies a spurious wrap claim directly.
+public struct TerminalRowStructure: Equatable, Sendable {
+    /// Position in the whole stream, counting retained rows before live ones from zero.
+    public let index: Int
+
+    /// True when the row is a scrollback record rather than a live grid row, which is what
+    /// separates a defect the printer introduced from one admission or reflow introduced.
+    public let isRetained: Bool
+
+    /// True when this row continues into the next one without a line break.
+    public let isSoftWrapped: Bool
+
+    /// One past the last column holding printed content, counting a wide glyph's tail. Zero on
+    /// a row that has never been written, and never counts background-erase paint as content.
+    public let contentEnd: Int
+
+    /// Columns the row occupies, carried alongside `contentEnd` so the invariant reads without
+    /// the caller having to source the pane width separately.
+    public let width: Int
+
+    /// The last column's cell kind, which refines the wrap invariant for wide glyphs: a wide
+    /// glyph that cannot fit the last column leaves a `.spacerHead` there and wraps early, so
+    /// `isSoftWrapped` with `contentEnd == width - 1` and a `.spacerHead` margin is a
+    /// legitimate print outcome rather than a stale claim. `.padding` when the row stores
+    /// nothing at that column.
+    public let marginCellKind: TerminalCellKind
+
+    /// True while the row carries a wrap claim an erase left unwitnessed (`GridRow.marginErased`):
+    /// the xterm-parity transient EL 1/2 create. Such a claim has no line-structure meaning --
+    /// `isSoftWrapped` here already reports the gated value -- but the transient itself is what
+    /// this projection exists to make visible. Always false on retained rows, whose wrap facts
+    /// are derived from record structure rather than claimed.
+    public let staleWrapClaim: Bool
+
+    public init(
+        index: Int,
+        isRetained: Bool,
+        isSoftWrapped: Bool,
+        contentEnd: Int,
+        width: Int,
+        marginCellKind: TerminalCellKind,
+        staleWrapClaim: Bool
+    ) {
+        self.index = index
+        self.isRetained = isRetained
+        self.isSoftWrapped = isSoftWrapped
+        self.contentEnd = contentEnd
+        self.width = width
+        self.marginCellKind = marginCellKind
+        self.staleWrapClaim = staleWrapClaim
+    }
+}
+
 /// Reports how one retained row's per-cell content identities are laid out, without
 /// exposing the identities themselves.
 ///

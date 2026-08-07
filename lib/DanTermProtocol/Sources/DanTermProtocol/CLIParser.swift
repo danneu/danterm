@@ -101,6 +101,10 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
             return try parsePaneInputCommand(Array(args.dropFirst(2)))
         case "read":
             return try parsePaneReadCommand(Array(args.dropFirst(2)))
+        case "rows":
+            return try parsePaneRowsCommand(Array(args.dropFirst(2)))
+        case "zoom":
+            return try parsePaneZoomCommand(Array(args.dropFirst(2)))
         case "tape":
             return try parsePaneTapeCommand(Array(args.dropFirst(2)))
         default:
@@ -335,6 +339,61 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
         params["lines"] = .number(Double(lineLimit))
     }
     return CLICommand(method: Methods.paneRead, params: params, outputMode: .text)
+}
+
+// The state is a positional word rather than a flag, and `toggle` is opt-in rather than the
+// default: a script that can only toggle has to already know the current state, and the whole
+// point of the command is to reach a known one.
+private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane zoom [--pane <pane-id>] on|off|toggle"
+    var pane: String?
+    var state: String?
+    var index = 0
+    while index < args.count {
+        switch args[index] {
+        case "--pane":
+            guard index + 1 < args.count else { throw CLIParseError(usage) }
+            pane = args[index + 1]
+            index += 2
+        case "on", "off", "toggle":
+            guard state == nil else { throw CLIParseError(usage) }
+            state = args[index]
+            index += 1
+        default:
+            if args[index].hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(args[index])")
+            }
+            throw CLIParseError(usage)
+        }
+    }
+    guard let state else { throw CLIParseError(usage) }
+    var params: [String: JSONValue] = ["state": .string(state)]
+    if let pane, pane.isEmpty == false { params["pane"] = .string(pane) }
+    return CLICommand(method: Methods.paneZoom, params: params, outputMode: .json)
+}
+
+// `pane rows` reuses `pane read`'s argument grammar minus `--lines`: the projection is the
+// whole stream by construction, so a tail limit would only hide the retained rows it exists
+// to inspect.
+private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane rows --pane <pane-id>"
+    var pane: String?
+    var index = 0
+    while index < args.count {
+        switch args[index] {
+        case "--pane":
+            guard index + 1 < args.count else { throw CLIParseError(usage) }
+            pane = args[index + 1]
+            index += 2
+        default:
+            if args[index].hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(args[index])")
+            }
+            throw CLIParseError("unexpected argument: \(args[index])")
+        }
+    }
+    guard let pane, pane.isEmpty == false else { throw CLIParseError(usage) }
+    return CLICommand(method: Methods.paneRows, params: ["pane": .string(pane)], outputMode: .json)
 }
 
 private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {

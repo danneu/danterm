@@ -5,6 +5,24 @@ enum PaneLifecycleResult {
     case exited
 }
 
+enum TerminalCellKind {
+    case padding
+    case narrow
+    case wideHead
+    case wideTail
+    case spacerHead
+}
+
+struct TerminalRowStructure {
+    let index: Int
+    let isRetained: Bool
+    let isSoftWrapped: Bool
+    let contentEnd: Int
+    let width: Int
+    let marginCellKind: TerminalCellKind
+    let staleWrapClaim: Bool
+}
+
 enum TerminalSearchStatus {
     case empty
     case matched(selected: Int, total: Int)
@@ -418,6 +436,7 @@ final class TerminalPaneSessionController {
     func fenceForApplicationExit() {}
     func synchronizeState() {}
     func readViewportText() -> String { "" }
+    func readRowStructure() -> [TerminalRowStructure] { [] }
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }

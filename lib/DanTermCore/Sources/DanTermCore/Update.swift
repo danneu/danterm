@@ -1738,6 +1738,38 @@ private func dispatchIpc(
         }
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
+    case Methods.paneZoom:
+        let paneId = try resolvePane(params: params, context: context, in: model)
+        guard case .string(let requested)? = params["state"] else {
+            throw IpcParamsError("state must be one of on, off, toggle")
+        }
+        guard let tab = tabForPane(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
+        }
+        let target: Bool
+        switch requested {
+        case "on": target = true
+        case "off": target = false
+        case "toggle": target = tab.isZoomed == false
+        default:
+            throw IpcParamsError("state must be one of on, off, toggle")
+        }
+        // Route through `.toggleZoomPane` rather than writing `isZoomed` here, so the
+        // scripted path and the menubar/context-menu paths cannot drift: the guard that
+        // only a split tab may zoom lives there and is the reason a request can be
+        // honoured and still report `isZoomed: false`.
+        if tab.isZoomed != target {
+            _ = update(&model, .toggleZoomPane(paneId: paneId))
+        }
+        guard let result = paneInfoResult(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
+        }
+        return [.ipcReply(reqId: reqId, result: result)]
+
+    case Methods.paneRows:
+        let paneId = try resolvePane(params: params, context: context, in: model, requireExplicit: true)
+        return [.readPaneRowStructure(reqId: reqId, paneId: paneId)]
+
     case Methods.paneTape:
         let paneId = try resolvePane(
             params: params,
@@ -2191,6 +2223,9 @@ private func paneInfoResult(_ paneId: PaneId, in model: AppModel) -> JSONValue? 
             "id": .string(tab.id.rawValue.uuidString),
             "title": .string(tab.displayTitle),
             "groupId": .string(group.id.rawValue.uuidString),
+            // Zoom is transient and so never reaches the persisted snapshot `ls` returns.
+            // Reporting it here is what lets a caller observe the state it just set.
+            "isZoomed": .bool(tab.isZoomed),
         ]),
         "group": .object([
             "id": .string(group.id.rawValue.uuidString),

@@ -2434,6 +2434,45 @@ public struct Terminal: Equatable, Sendable {
         return projectedHistoryText(from: stream)
     }
 
+    /// Projects every retained and live row's line structure for wrap and reflow diagnosis.
+    ///
+    /// Reports the whole stream rather than the local window because the defect it exists to
+    /// expose (`TerminalRowStructure`) is introduced when a row is admitted or reflowed, which
+    /// is exactly when the row is leaving the window a viewport projection would show.
+    public var rowStructure: [TerminalRowStructure] {
+        var retained = history.allPaintedDisplayRows()
+        let liveRows = isAlternateScreenActive ? rows : (inactivePrimaryScreen?.rows ?? rows)
+        // The projection's seam rules, so the dump reports what a reader would see: the open
+        // tail's final display row gets back the `.spacerHead` admission dropped, and an
+        // active alternate screen severs the wrap into the rows appended after history.
+        if let last = retained.indices.last {
+            if isAlternateScreenActive {
+                retained[last].isSoftWrapped = false
+            } else if let spacer = Self.seamSpacer(
+                inHistory: history,
+                row: retained[last],
+                live: rows,
+                columns: columnCount
+            ) {
+                retained[last].cells.append(spacer)
+            }
+        }
+        var result: [TerminalRowStructure] = []
+        result.reserveCapacity(retained.count + liveRows.count)
+        for (offset, row) in (retained + liveRows).enumerated() {
+            result.append(TerminalRowStructure(
+                index: offset,
+                isRetained: offset < retained.count,
+                isSoftWrapped: row.logicallyContinues,
+                contentEnd: retainedContentEnd(in: row),
+                width: columnCount,
+                marginCellKind: row.cell(at: columnCount - 1).kind,
+                staleWrapClaim: row.isSoftWrapped && row.marginErased
+            ))
+        }
+        return result
+    }
+
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
         let primaryRows = (inactivePrimaryScreen?.rows ?? rows).map(\.withGatedContinuation)
