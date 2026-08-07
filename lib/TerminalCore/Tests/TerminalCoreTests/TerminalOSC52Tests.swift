@@ -15,7 +15,7 @@ struct TerminalOSC52Tests {
 
         for bytes in sequences {
             var stream = TerminalInputStream()
-            #expect(stream.feed(bytes) == [.osc(payload)])
+            #expect(stream.expandedFeed(bytes) == [.osc(payload)])
         }
     }
 
@@ -29,7 +29,7 @@ struct TerminalOSC52Tests {
 
         for prefix in prefixes {
             var stream = TerminalInputStream()
-            let actions = stream.feed(prefix + [0x41])
+            let actions = stream.expandedFeed(prefix + [0x41])
             #expect(actions.last == .print("A"))
             #expect(actions.contains { action in
                 if case .osc = action { return true }
@@ -45,7 +45,7 @@ struct TerminalOSC52Tests {
             + [0x00, 0x0A, 0x7F]
             + Array("VsbG8=".utf8) + [0x07]
 
-        #expect(stream.feed(bytes) == [.osc(Array("52;c;aGVsbG8=".utf8))])
+        #expect(stream.expandedFeed(bytes) == [.osc(Array("52;c;aGVsbG8=".utf8))])
     }
 
     @Test("OSC payload cap rejects the sequence and resumes after termination")
@@ -54,8 +54,8 @@ struct TerminalOSC52Tests {
         let oversized = [0x1B, 0x5D] + [UInt8](repeating: 0x41, count: 2 * 1_024 * 1_024 + 1)
         let valid = Array("\u{1B}]52;c;b2s=\u{7}".utf8)
 
-        #expect(stream.feed(oversized).isEmpty)
-        #expect(stream.feed([0x07] + valid) == [.osc(Array("52;c;b2s=".utf8))])
+        #expect(stream.expandedFeed(oversized).isEmpty)
+        #expect(stream.expandedFeed([0x07] + valid) == [.osc(Array("52;c;b2s=".utf8))])
     }
 
     @Test("OSC 52 accepts valid targets and coalesces writes newest-first")

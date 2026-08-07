@@ -1193,3 +1193,174 @@ performance verdict.
   implement bulk ASCII runs against the eager parser or against this patch, then
   re-run this script's claim 4 and `benchmark-confirm`. If the pair is not at
   least `equivalent` on `scrollback-stream`, the array stays. See `D5`.
+
+### F16 -- bulk ASCII runs collapse every print-path site to exactly `F10`'s predicted count, and `scrollback-stream` reads `faster` by 71%
+
+- Status: implemented and landed. `T8`, first half -- **`T8` alone, against the
+  eager parser**, which is the sequencing `D5` required so the pair's two halves
+  can be told apart. The by-construction claim holds and the collapse is
+  **exactly `F10`'s prediction, to the unit, on all five corpora**. The
+  non-regression check is not merely clear: `scrollback-stream` reads
+  **`faster` (-71.08%)** and its drain falls from 153.2 ms to 70.5 ms.
+- Date and investigator: 2026-08-07, T8 agent.
+- Commit and worktree state: measured with the change in the working tree over
+  `63c693da`; nothing else modified but this task's own files and an untracked
+  plan file. Apple Swift 6.3.3, arm64-apple-macosx26.0. Machine: 10 processors,
+  load 0.24-0.52 per processor at invocation.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t8-bulk-ascii-runs.py` (add `--json` for the raw
+  two-arm report), roughly 3 minutes. It builds **both** arms itself -- a
+  detached worktree at `--baseline` for the before side, this working tree for
+  the after side -- copies each arm's engine sources to scratch, injects one
+  counter increment at each site `F10` counted, and compiles each copy `-O` as
+  one module with the probe. No arm's working tree is ever edited, and every
+  injection is an exact-text anchor that must match once, so a source change
+  that moves a site fails the run rather than miscounting. Directional verdicts
+  came separately from `just benchmark-quick baseline=63c693da workload=<w>`.
+- Result or artifact paths: `scripts/research/33/t8-bulk-ascii-runs.py`,
+  `t8-bulk-ascii-runs-probe.swift`, `t8-bulk-ascii-runs-counters.swift`. The run
+  writes nothing durable.
+- What the change is: the parser recognizes a maximal run of printable ASCII
+  (0x20-0x7E, in ground state with an idle decoder) and emits one
+  `.printASCIIRun(Range<Int>)` naming it in the chunk being fed; `Terminal`
+  reduces that with `printBulkASCII`, which writes a prefix of the run into one
+  row in a single pass and pays the classification, the cluster-join attempt,
+  `invalidateInspection`, the content-identity allocation, the style-id read, the
+  wrap-spacer repair, `rememberOpenCluster` and `feed`'s damage snapshot **once
+  for the whole prefix**. It *declines* -- returning 0, which costs one character
+  on the per-character path and then re-enters -- on a latched pending wrap,
+  insert mode, an open Prepend cluster, a cell whose overwrite would have to
+  clear a partner, and a content-identity range that would straddle the
+  counter's wrap. So each cut rule costs a character rather than the run, and a
+  rule the reducer does not know about can only make it slower, never wrong.
+- Measurements, claim 1 -- equivalence. Both arms consume **identical** printed
+  character counts per corpus (1,500,000 / 4,189,500 / 1,305,000 / 2,500,025 /
+  762,108, which are `F10`'s to the unit) and land on the same cursor, the same
+  scrollback depth and the same screen text. `swift test --package-path
+  lib/TerminalCore` passes all **1,029** tests, including the 67-fixture replay
+  that splits feeds mid-token at 7 bytes, and `just test` passes all 75 steps.
+- Measurements, claim 2 -- the collapse. Per-corpus counts, before at
+  `63c693da` and after:
+
+  | corpus | site | before | after | factor |
+  | --- | --- | ---: | ---: | ---: |
+  | `scrollback-stream` | bookkeeping units | 1,500,000 | 41,665 | **36.0x** |
+  | | `terminalUnicodeClassification` | 1,500,000 | 8,333 | 180.0x |
+  | | `invalidateInspection` | 1,508,333 | 49,998 | 30.2x |
+  | | `rememberOpenCluster` | 1,500,000 | 41,665 | 36.0x |
+  | | `searchMatchCache.invalidate` | 1,541,601 | 83,266 | 18.5x |
+  | | `damageActionSnapshot` | 1,550,000 | 75,000 | 20.7x |
+  | | snapshot diffs | 1,525,000 | 50,000 | 30.5x |
+  | | content-identity allocations | 1,500,000 | 41,665 | 36.0x |
+  | | `currentStyleId` | 1,500,000 | 41,665 | 36.0x |
+  | `styled-screen-redraw` | bookkeeping units | 4,189,500 | 150,500 | **27.8x** |
+  | | `terminalUnicodeClassification` | 4,189,500 | 21,000 | 199.5x |
+  | | `damageActionSnapshot` | 4,403,002 | 322,002 | 13.7x |
+  | `unicode-wrapping` | bookkeeping units | 1,305,000 | 147,537 | **8.8x** |
+  | | `terminalUnicodeClassification` | 1,305,000 | 96,750 | 13.5x |
+  | | `damageActionSnapshot` | 1,323,000 | 153,000 | 8.6x |
+  | `incremental-screen-updates` | bookkeeping units | 2,500,025 | 300,001 | **8.3x** |
+  | | `terminalUnicodeClassification` | 2,500,025 | **0** | -- |
+  | | `damageActionSnapshot` | 3,300,031 | 1,100,007 | 3.0x |
+  | `synchronized-frames` | bookkeeping units | 762,108 | 197,879 | **3.9x** |
+  | | `terminalUnicodeClassification` | 762,108 | 147,463 | 5.2x |
+  | | `damageActionSnapshot` | 934,985 | 370,756 | 2.5x |
+
+  Nothing rose anywhere. `terminalUnicodeClassification` beats every other site
+  because the bulk path never consults the table at all, so on
+  `incremental-screen-updates` -- whose content is entirely printable ASCII and
+  CSI -- the Unicode table is **never read**.
+- Measurements, claim 3 -- the run structure, against `F10`'s prediction:
+
+  | corpus | runs | in runs | mean | longest | declined | units | `F10` predicted |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 33,332 | 1,491,667 | 44.8 | 60 | 8,333 | 41,665 | 41,665 |
+  | `styled-screen-redraw` | 129,500 | 4,168,500 | 32.2 | 52 | 21,000 | 150,500 | 150,500 |
+  | `unicode-wrapping` | 50,787 | 1,208,250 | 23.8 | 57 | 6,750 | 147,537 | 147,537 |
+  | `incremental-screen-updates` | 300,001 | 2,500,025 | 8.3 | 25 | 0 | 300,001 | 300,001 |
+  | `synchronized-frames` | 50,416 | 614,645 | 12.2 | 177 | 0 | 197,879 | 197,879 |
+
+  Every column matches `F10` exactly. `F10` predicted from a state machine over
+  the byte stream and warned its factor was neither an upper nor a lower bound,
+  because a real implementation might cut in more places; it cuts in exactly the
+  same places. Two independently built counters agreeing to the unit on five
+  corpora is what licenses reading either.
+- Measurements, the paired benchmark, against `63c693da`. **`benchmark-confirm`
+  cannot complete on this change** and the reason is itself a result: it
+  calibrates `terminal-feed`'s fixed execution batch on whichever arm runs first
+  -- the baseline -- and the candidate is fast enough that the same batch no
+  longer fills the harness's 1-second block floor, so the invocation
+  self-invalidates with `block-1-below-duration-floor` and
+  `block-2-below-duration-floor` and issues no verdict for any workload. The
+  retained raw blocks are the diagnostic: **1,425.7 ms baseline against 957.6
+  and 980.0 ms candidate, -32.8%.** `confirm` is all-or-nothing by design, so
+  the per-workload verdicts below are `benchmark-quick` (2 pairs each):
+
+  | workload | verdict | detail |
+  | --- | --- | --- |
+  | `scrollback-stream` | **`faster` -71.08%** | drain 153.2 -> 70.5 ms; 10.0 -> 21.6 MB/s |
+  | `incremental-mixed` | `equivalent` +0.88% | plan +0.56%, uncalibrated |
+  | `retained-browse` | `equivalent` +0.95% | |
+  | `content-churn` | `inconclusive` -2.5 to -3.6% (3 runs) | plan aux **`slower`** +5.7 to +6.8% |
+  | `style-churn` | `inconclusive` -2.47% | plan aux **`slower`** +7.14% |
+  | `terminal-feed` | no verdict, floor | raw blocks -32.8% |
+
+- Observation, the two churn workloads. Their verdict metric is
+  draw-nanoseconds-per-draw and it moved *down* (-2.5% to -3.6%, below the
+  directional threshold), while their calibrated auxiliary plan metric reads
+  `slower` at +4.1% to +7.1% and reproduced in five separate invocations, so it
+  is not noise. The same blocks show `cumulativeFenceStallNanoseconds` falling
+  from **37-39 ms to 4.5-6.5 ms** -- a ~7x reduction -- and total process CPU
+  falling **13-16%**. In absolute terms the block gives up ~1.7 ms of planning
+  and recovers ~33 ms of fence stall. `T8` touches no planner code and the grid
+  it hands the planner is byte-identical, so the mechanism is not slower
+  planning. In three of five invocations the delivery count rose 6.0-6.5% and
+  plan time rose in lock step (plan-per-delivery +0.3%, +0.5%, +0.3%), which is
+  simply more frames planned per draw; in the other two the delivery count was
+  flat and plan-per-delivery rose 5.0-9.4%, which that arithmetic does not
+  explain. The most likely remaining mechanism is contention rather than work:
+  the baseline's main thread sits blocked in the delivery fence for ~38 ms while
+  the terminal-owner queue drains with the cores to itself, and the candidate's
+  does not, so main now plans concurrently with a drain instead of after it.
+  **This is not confirmed** -- see the uncertainty below.
+- Inference: the granularity mismatch `T8` names was real, is now removed, and
+  was worth far more on the clock than this doc predicted. `F10` sized the
+  mechanism and explicitly claimed no wall-clock share; the drain on
+  `scrollback-stream` more than halves. The reason it is this large is that the
+  collapsed sites are not one cost but eight, and two of them --
+  `damageActionSnapshot` construction and its diff, at 1,550,000 and 1,525,000
+  on `scrollback-stream` -- are the largest single counts in `F10`'s table and
+  carry `F15`'s 1,273-byte defensive copy of `Terminal` with them. Deleting 96.8%
+  of the snapshots deletes 96.8% of those copies.
+- Inference, for `T7`: this is the amortization `D5` predicted. The parser's
+  output granularity on plain text is now a 44.8-character run, so the
+  per-token call boundary that cost `T7` 1.7-5.4% is paid 36x less often on
+  `scrollback-stream`. `T7`'s re-gate is the next step and its result is not in
+  this finding.
+- Inference, for `T10`: `F12` measured 4.96 publishes per draw and `T10` exists
+  to bound that. Making the drain 2.2x faster does not reduce the ratio and in
+  three invocations here it raised the delivery count 6%, so `T8` slightly
+  *increases* what `T10` has to recover. The two are complements, not
+  substitutes.
+- Competing interpretations: -71.08% is a very large number from a 2-pair
+  `quick` invocation, and `quick` is the weaker instrument -- `scrollback-stream`
+  carries 4 pairs at `confirm` and a 1.85% directional threshold. The effect is
+  40x that threshold and the drain figure is an independent descriptive
+  measurement of the same block (153.2 -> 70.5 ms), so the direction and rough
+  size are not in question; the exact percentage is a `quick` reading and should
+  be re-taken at `confirm` if anything ever depends on the digits. The reason it
+  was not is that `confirm` refuses to issue any verdict while `terminal-feed`
+  cannot fill a block.
+- Uncertainty: none on any counter -- all are exact tallies of a deterministic
+  replay, and all five corpora reproduce `F10` to the unit. The churn
+  workloads' plan-time increase is **measured and unexplained**: the
+  more-deliveries arithmetic accounts for three of five invocations and not the
+  other two, and the contention hypothesis above is a hypothesis, not an
+  ablation. It is recorded rather than resolved because the same blocks are
+  unambiguously better on fence stall and process CPU and their own verdict
+  metric did not regress. `terminal-feed` has no calibrated verdict at all.
+- Next action: re-gate `T7` on top of this (`D5`), by rebasing
+  `t7-streaming-parser.patch` onto the landed run granularity and re-running both
+  `t7-streaming-parser.py` and the paired benchmark. Separately, the
+  `terminal-feed` floor is now a live harness limitation for any change on the
+  feed path of this size, and nothing in the ladder owns it.

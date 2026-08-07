@@ -398,10 +398,10 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   per token. The spike this deletes is not paid at the 16 KiB delivery size and
   the drain cost is. `D5` re-scopes this as the second half of `T8`, whose runs
   of 8.3 to 44.8 characters (`F10`) amortize exactly the boundary that costs here.
-- [ ] `T8` VETTING -- **Print ASCII runs in bulk.** **Now carries `T7`** (`D5`):
-  the streaming parser is built and gated but costs 1.7-5.4% on the drain at
-  per-token granularity, and this task is what changes that granularity. Land the
-  pair, or neither. An ASCII printable is
+- [x] `T8` **LANDED (first half; `T7`'s re-gate is the remaining half)** --
+  **Print ASCII runs in bulk.** **Carries `T7`** (`D5`): the streaming parser is
+  built and gated but costs 1.7-5.4% on the drain at per-token granularity, and
+  this task is what changes that granularity. An ASCII printable is
   narrow and grapheme-break-`.other` *by construction from the generated table*,
   so a run of them can neither join a cluster nor be wide. One damage record,
   one `invalidateInspection`, one content-identity range, one style id, one
@@ -409,12 +409,27 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   8.3 to 44.8 characters, so the per-character sites collapse 3.9x to 36x and the
   per-action snapshot 2.5x to 16.9x. Subsumes doc 10's parked
   `H1(a)` without its cursor-repaint trap, since the run's start and end rows are
-  both still diffed. Verification: `T2`'s counters must fall from per-character
-  to per-run; correctness rides the existing chunk-invariance replay, which
-  splits feeds mid-token at 7 bytes, extended with fixtures that land a run
-  across a wide-cell overwrite and across the right margin in both `DECAWM`
-  states. Cuts the run at row end, insert mode, wide-cell overwrite, and any
-  non-ASCII byte.
+  both still diffed. Cuts the run at row end, insert mode, wide-cell overwrite,
+  the content-identity wrap, an open Prepend cluster, and any non-ASCII byte.
+  **Result in `F16`, script `scripts/research/33/t8-bulk-ascii-runs.py`. Both
+  gates pass and the second one by far more than the doc predicted:** every
+  counter falls to **exactly `F10`'s predicted count, to the unit, on all five
+  corpora** -- 36.0x on `scrollback-stream`, 3.9x on the worst corpus, and the
+  Unicode table is read **zero** times on `incremental-screen-updates`. Printed
+  characters, cursor, scrollback depth and screen text are identical between the
+  arms, and the full suite passes including the 67-fixture 7-byte-split replay.
+  `scrollback-stream` reads **`faster` -71.08%**, its drain falling 153.2 ->
+  70.5 ms, and `terminal-feed`'s raw blocks -32.8%. Three results ride along.
+  `benchmark-confirm` **cannot issue a verdict on a change this fast**: it
+  calibrates `terminal-feed`'s batch on the baseline arm and the candidate then
+  fails the 1-second block floor, invalidating the whole invocation, so the
+  per-workload readings are `benchmark-quick`. The two churn workloads report a
+  calibrated plan-metric `slower` of +4.1% to +7.1%, reproduced five times,
+  against a **~7x fence-stall reduction and 13-16% less process CPU** in the same
+  blocks -- ~1.7 ms of planning given up for ~33 ms of stall recovered; `F16`
+  records the mechanism as measured and unexplained. And `T10` gets *more* to
+  recover, not less: the faster drain raised the delivery count 6% in three of
+  five invocations.
 - [ ] `T9` VETTING -- **Give damage a shift component.** `moveAndFillRows` marks
   the whole scroll region damaged (`F5`). Ideal: damage carries
   `(region, delta, newlyFilledRows)`; the view realizes the shift as a
@@ -673,7 +688,8 @@ future reopening needs a new rule against new evidence.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
-run. Phase 2 has begun: `T7` is built, gated and parked (`F15`, `D5`).** `T1` sized the parser's
+run. Phase 2 has begun: `T7` is built, gated and parked (`F15`, `D5`), and `T8`
+has landed (`F16`) with `T7`'s re-gate on top of it outstanding.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -766,3 +782,46 @@ a measured 4.96x publish multiplier, and `T7`/`T8` with the parser's array and
 its per-character bookkeeping sized per corpus. `T23` is the phase's one
 rejection, and `H4` is answered for the reconcile sweep and still open for the
 other eight runtime items `F8` named.
+
+**`T8` then landed (`F16`) and it is the largest measured win in the doc.** The
+by-construction premise held exactly: a printable ASCII scalar is narrow and
+grapheme-break-`.other` in the generated table, and Prepend is the only class an
+`.other` scalar does not break from, so one comparison decides whether a run's
+head could join an open cluster and nothing in a run can be wide. Every site
+`F10` counted collapsed to **exactly `F10`'s predicted count, to the unit, on all
+five corpora** -- two independently built counters agreeing on five workloads --
+and `terminalUnicodeClassification` does better than the prediction because the
+bulk path never consults the table at all: on `incremental-screen-updates` it is
+read **zero** times against 2,500,025 before. The clock moved much more than this
+doc expected: `scrollback-stream` reads **`faster` -71.08%** with its drain
+falling 153.2 ms to 70.5 ms and its throughput 10.0 to 21.6 MB/s, and
+`terminal-feed`'s raw blocks read -32.8%. `F10` had claimed no wall-clock share
+at all, correctly, and the reason the share turns out to be this large is that the
+collapsed sites are eight rather than one, and the two biggest are
+`damageActionSnapshot` and its diff -- which carry `F15`'s 1,273-byte defensive
+copy of `Terminal` with them, so deleting 96.8% of the snapshots deletes 96.8% of
+those copies.
+
+Three results ride along and two of them are about the instrument rather than the
+change. **`benchmark-confirm` cannot issue a verdict on a change this fast.** It
+calibrates `terminal-feed`'s fixed execution batch on whichever arm runs first,
+which is the baseline, and the candidate then completes that batch in under the
+harness's 1-second block floor, so the invocation self-invalidates and reports
+nothing for any of the six workloads. `confirm` is all-or-nothing by design, so
+every per-workload verdict in `F16` is a 2-pair `benchmark-quick`. That floor is
+now a live limitation for any feed-path change of this size and nothing in the
+ladder owns it. Second, the two churn workloads return a **calibrated
+plan-metric `slower` of +4.1% to +7.1%, reproduced five times**, so it is not
+noise -- against a ~7x fence-stall reduction (37-39 ms to 4.5-6.5 ms) and 13-16%
+less process CPU in the same blocks. `T8` touches no planner code and hands the
+planner a byte-identical grid; in three of five invocations the delivery count
+rose 6% and plan time rose in lock step with plan-per-delivery flat, and in the
+other two it did not, so `F16` records the mechanism as measured and unexplained
+rather than resolving it. Third, `T10` now has slightly *more* to recover: a
+faster drain does not change the 4.96:1 publish ratio and in three invocations it
+raised the delivery count, so `T8` and `T10` are complements.
+
+What remains of `T8` is `T7`. `D5`'s condition was that the pair land only if
+`scrollback-stream` reads at least `equivalent`, and the amortization it was
+waiting for now exists -- the parser's output granularity on plain text is a
+44.8-character run, so `T7`'s per-token call boundary is paid 36x less often.

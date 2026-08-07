@@ -39,6 +39,15 @@ struct UTF8Decoder: Equatable, Sendable {
     private var accumulator: UInt32 = 0
     private var state = acceptState
 
+    /// True when no partial sequence is buffered, so the next ASCII byte decodes to itself.
+    ///
+    /// This is what lets the parser hand a whole run of printable ASCII to the grid without
+    /// stepping each byte through `next(_:)` (`research/33/T8`): from the accept state an ASCII
+    /// byte takes character class 0, which leaves the accumulator equal to the byte and the state
+    /// equal to accept, so the skipped calls would have produced exactly those scalars and left
+    /// exactly this state.
+    var isIdle: Bool { state == Self.acceptState }
+
     /// Consumes one byte, or asks the caller to retry it after replacing a malformed prefix.
     mutating func next(_ byte: UInt8) -> (scalar: Unicode.Scalar?, consumed: Bool) {
         let characterClass = Self.characterClasses[Int(byte)]

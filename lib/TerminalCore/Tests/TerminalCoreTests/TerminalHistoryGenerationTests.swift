@@ -35,9 +35,14 @@ struct TerminalHistoryGenerationTests {
         //   lone funnel. Both cases still assert the history-text consequence, so a scenario
         //   that silently stopped mutating history would fail rather than pass vacuously.
 
-        // Funnel 1: cell writes routed through `invalidateInspection(inViewportRows:)`.
+        // Funnel 1: cell writes routed through `invalidateInspection(inViewportRows:)`. Both
+        // reducers reach it and they are separate code: a run of printable ASCII is written in
+        // bulk with one invalidation for the whole run, and anything else a character at a time
+        // (`research/33/T8`).
         var printing = try makeScrolledBackTerminal()
-        try expectGenerationAdvances(&printing) { $0.feed(Array("X".utf8)) }
+        try expectGenerationAdvances(&printing) { $0.feed(Array("XYZ".utf8)) }
+        var printingNonASCII = try makeScrolledBackTerminal()
+        try expectGenerationAdvances(&printingNonASCII) { $0.feed(Array("\u{754C}".utf8)) }
 
         // Funnel 2: scrollback wrap-claim rewrite via `invalidateInspection(inScrollbackRow:)`.
         // `ESC[2J` blanks the whole of live row 0, so it severs the last scrollback row's

@@ -17,10 +17,10 @@ struct TerminalInputStreamTests {
         //   Divergence: uses the common `ESC ( B` SCS sequence and asserts parser actions; kitty
         //   probes `ESC . ESC` and diagnostic callbacks that DanTerm deliberately does not expose.
         var unknown = TerminalInputStream()
-        #expect(unknown.feed(Array("\u{1B}xa".utf8)) == [.escape(0x78), .print("a")])
+        #expect(unknown.expandedFeed(Array("\u{1B}xa".utf8)) == [.escape(0x78), .print("a")])
 
         var designation = TerminalInputStream()
-        #expect(designation.feed(Array("\u{1B}(Ba".utf8)) == [
+        #expect(designation.expandedFeed(Array("\u{1B}(Ba".utf8)) == [
             .escapeSequence(EscapeSequence(intermediates: [0x28], final: 0x42)),
             .print("a"),
         ])
@@ -30,7 +30,7 @@ struct TerminalInputStreamTests {
     func wellFormedUTF8() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed(Array("\u{1F604}\u{2724}\u{00C1}A".utf8))
+        let actions = stream.expandedFeed(Array("\u{1F604}\u{2724}\u{00C1}A".utf8))
 
         #expect(actions == [
             .print("\u{1F604}"),
@@ -49,7 +49,7 @@ struct TerminalInputStreamTests {
             0xED, 0xA0, 0x80,
         ]
 
-        let actions = stream.feed(bytes)
+        let actions = stream.expandedFeed(bytes)
 
         #expect(actions == [
             .print("\u{FFFD}"),
@@ -73,7 +73,7 @@ struct TerminalInputStreamTests {
     func malformedUTF8Recovers(fixture: MalformedFixture) {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed(fixture.bytes + [0x41])
+        let actions = stream.expandedFeed(fixture.bytes + [0x41])
 
         #expect(actions.last == .print("A"))
         #expect(actions.dropLast().count == fixture.replacementCount)
@@ -87,8 +87,8 @@ struct TerminalInputStreamTests {
     func truncatedUTF8AcrossChunks(prefix: [UInt8]) {
         var stream = TerminalInputStream()
 
-        let first = stream.feed(prefix)
-        let second = stream.feed([0x41])
+        let first = stream.expandedFeed(prefix)
+        let second = stream.expandedFeed([0x41])
 
         #expect(first.isEmpty)
         #expect(second == [.print("\u{FFFD}"), .print("A")])
@@ -110,7 +110,7 @@ struct TerminalInputStreamTests {
     func sevenBitFamiliesAreAbsorbed(bytes: [UInt8]) {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed(bytes)
+        let actions = stream.expandedFeed(bytes)
 
         let csi = TerminalStreamAction.csi(CSISequence(
             parameters: [31],
@@ -136,7 +136,7 @@ struct TerminalInputStreamTests {
     func cancellationAbortsSequence(byte: UInt8) {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([0x41, 0x1B, 0x5B, 0x33, byte, 0x42])
+        let actions = stream.expandedFeed([0x41, 0x1B, 0x5B, 0x33, byte, 0x42])
 
         #expect(actions == [.print("A"), .execute(byte), .print("B")])
     }
@@ -145,7 +145,7 @@ struct TerminalInputStreamTests {
     func escapeRestartsSequence() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([
+        let actions = stream.expandedFeed([
             0x41,
             0x1B, 0x5B, 0x33, 0x31,
             0x1B, 0x5D, 0x30, 0x3B, 0x78, 0x07,
@@ -159,7 +159,7 @@ struct TerminalInputStreamTests {
     func controlsExecuteInsideSequences() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([
+        let actions = stream.expandedFeed([
             0x1B, 0x00, 0x37,
             0x1B, 0x5B, 0x33, 0x07, 0x31, 0x6D,
             0x41,
@@ -190,7 +190,7 @@ struct TerminalInputStreamTests {
     func payloadControlsAreDiscarded(bytes: [UInt8]) {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed(bytes)
+        let actions = stream.expandedFeed(bytes)
 
         if bytes[1] == 0x5D {
             #expect(actions == [.osc([0x78]), .print("A")])
@@ -206,14 +206,14 @@ struct TerminalInputStreamTests {
         let expected = [TerminalStreamAction.osc(payload)]
 
         var authored = TerminalInputStream()
-        #expect(authored.feed(bytes) == expected)
+        #expect(authored.expandedFeed(bytes) == expected)
 
         var bytewise = TerminalInputStream()
-        #expect(bytes.flatMap { bytewise.feed([$0]) } == expected)
+        #expect(bytes.flatMap { bytewise.expandedFeed([$0]) } == expected)
 
         for offset in 0...bytes.count {
             var split = TerminalInputStream()
-            #expect(split.feed(Array(bytes[..<offset])) + split.feed(Array(bytes[offset...])) == expected)
+            #expect(split.expandedFeed(Array(bytes[..<offset])) + split.expandedFeed(Array(bytes[offset...])) == expected)
         }
     }
 
@@ -236,18 +236,18 @@ struct TerminalInputStreamTests {
                 : [.escape(0x5C), .print("A")]
 
             var authored = TerminalInputStream()
-            #expect(authored.feed(input) == expected, "control string at index \(index)")
+            #expect(authored.expandedFeed(input) == expected, "control string at index \(index)")
 
             var bytewise = TerminalInputStream()
             #expect(
-                input.flatMap { bytewise.feed([$0]) } == expected,
+                input.flatMap { bytewise.expandedFeed([$0]) } == expected,
                 "bytewise control string at index \(index)"
             )
 
             for offset in 0...input.count {
                 var split = TerminalInputStream()
-                let actions = split.feed(Array(input[..<offset]))
-                    + split.feed(Array(input[offset...]))
+                let actions = split.expandedFeed(Array(input[..<offset]))
+                    + split.expandedFeed(Array(input[offset...]))
                 #expect(
                     actions == expected,
                     "control string at index \(index), split at \(offset)"
@@ -268,7 +268,7 @@ struct TerminalInputStreamTests {
 
         for prefix in prefixes {
             var stream = TerminalInputStream()
-            let actions = stream.feed(prefix + [0x1B, 0x37, 0x41])
+            let actions = stream.expandedFeed(prefix + [0x1B, 0x37, 0x41])
             #expect(actions == [.escape(0x37), .print("A")])
         }
     }
@@ -277,7 +277,7 @@ struct TerminalInputStreamTests {
     func bareEscapeFinalsSurface() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([
+        let actions = stream.expandedFeed([
             0x1B, 0x44,
             0x1B, 0x45,
             0x1B, 0x4D,
@@ -296,7 +296,7 @@ struct TerminalInputStreamTests {
     func escapeIntermediatesSurface() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed(Array("\u{1B}#8".utf8))
+        let actions = stream.expandedFeed(Array("\u{1B}#8".utf8))
 
         #expect(actions == [
             .escapeSequence(EscapeSequence(intermediates: [0x23], final: 0x38)),
@@ -329,7 +329,7 @@ struct TerminalInputStreamTests {
     func rawC1TransitionsInsideSequence(fixture: C1Fixture) {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([0x1B, 0x5B, 0x33] + fixture.bytes + [0x41])
+        let actions = stream.expandedFeed([0x1B, 0x5B, 0x33] + fixture.bytes + [0x41])
 
         #expect(actions == fixture.actions + [.print("A")])
     }
@@ -339,8 +339,8 @@ struct TerminalInputStreamTests {
         var colon = TerminalInputStream()
         var establishedIgnore = TerminalInputStream()
 
-        _ = colon.feed([0x1B, 0x5B, 0x3A])
-        _ = establishedIgnore.feed([0x1B, 0x5B, 0x31, 0x3C])
+        _ = colon.expandedFeed([0x1B, 0x5B, 0x3A])
+        _ = establishedIgnore.expandedFeed([0x1B, 0x5B, 0x31, 0x3C])
 
         #expect(colon == establishedIgnore)
     }
@@ -349,7 +349,7 @@ struct TerminalInputStreamTests {
     func rawGroundC1IsMalformedUTF8() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([0x9B, 0x41])
+        let actions = stream.expandedFeed([0x9B, 0x41])
 
         #expect(actions == [.print("\u{FFFD}"), .print("A")])
     }
@@ -358,7 +358,7 @@ struct TerminalInputStreamTests {
     func escapeMidUTF8() {
         var stream = TerminalInputStream()
 
-        let actions = stream.feed([0xE2, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x41])
+        let actions = stream.expandedFeed([0xE2, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x41])
 
         #expect(actions == [
             .print("\u{FFFD}"),
@@ -416,9 +416,9 @@ struct TerminalInputStreamTests {
         var utf8A = TerminalInputStream()
         var utf8B = TerminalInputStream()
         var sequence = TerminalInputStream()
-        _ = utf8A.feed([0xE2])
-        _ = utf8B.feed([0xE3])
-        _ = sequence.feed([0x1B, 0x5B])
+        _ = utf8A.expandedFeed([0xE2])
+        _ = utf8B.expandedFeed([0xE3])
+        _ = sequence.expandedFeed([0x1B, 0x5B])
 
         #expect(utf8A != utf8B)
         #expect(utf8A != sequence)
@@ -431,10 +431,10 @@ struct TerminalInputStreamTests {
         var first = TerminalInputStream()
         var second = TerminalInputStream()
 
-        let firstActions = first.feed(bytes)
-        let secondActions = second.feed(bytes)
+        let firstActions = first.expandedFeed(bytes)
+        let secondActions = second.expandedFeed(bytes)
         let copy = first
-        _ = first.feed([0xE2])
+        _ = first.expandedFeed([0xE2])
 
         #expect(firstActions == secondActions)
         #expect(copy == second)
@@ -457,8 +457,8 @@ struct TerminalInputStreamTests {
             }
 
             var stream = TerminalInputStream()
-            _ = stream.feed(bytes)
-            let recovery = stream.feed([0x18, 0x7C])
+            _ = stream.expandedFeed(bytes)
+            let recovery = stream.expandedFeed([0x18, 0x7C])
 
             #expect(recovery.last == .print("|"))
         }
@@ -468,7 +468,7 @@ struct TerminalInputStreamTests {
         var stream = TerminalInputStream()
         var actions: [TerminalStreamAction] = []
         for chunk in chunks {
-            actions.append(contentsOf: stream.feed(chunk))
+            actions.append(contentsOf: stream.expandedFeed(chunk))
         }
         return (actions, stream)
     }

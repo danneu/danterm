@@ -1176,33 +1176,39 @@ public struct Terminal: Equatable, Sendable {
     public mutating func feed(_ bytes: [UInt8]) {
         let actions = inputStream.feed(bytes)
         guard actions.isEmpty == false else { return }
-        // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
-        // would capture as its "before" -- nothing runs between them, and `recordDamage` writes
-        // only damage bookkeeping, which the snapshot does not read -- so carrying it forward is
-        // the same diff sequence at half the construction cost.
-        var before = damageActionSnapshot
-        for action in actions {
-            switch action {
-            case let .print(scalar):
-                print(scalar)
-            case let .execute(control):
-                if control == 0x07 {
-                    admitDiscreteSemanticEvent(.bell)
-                } else {
-                    execute(control)
+        // The buffer is what `.printASCIIRun` ranges index; it is the same chunk the parser just
+        // recognized, so no action can name a byte outside it.
+        bytes.withUnsafeBufferPointer { buffer in
+            // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
+            // would capture as its "before" -- nothing runs between them, and `recordDamage` writes
+            // only damage bookkeeping, which the snapshot does not read -- so carrying it forward is
+            // the same diff sequence at half the construction cost.
+            var before = damageActionSnapshot
+            for action in actions {
+                switch action {
+                case let .printASCIIRun(range):
+                    printASCIIRun(buffer, range)
+                case let .print(scalar):
+                    print(scalar)
+                case let .execute(control):
+                    if control == 0x07 {
+                        admitDiscreteSemanticEvent(.bell)
+                    } else {
+                        execute(control)
+                    }
+                case let .escape(final):
+                    dispatchEscape(final)
+                case let .escapeSequence(sequence):
+                    dispatchEscape(sequence)
+                case let .csi(sequence):
+                    dispatchCSI(sequence)
+                case let .osc(payload):
+                    dispatchOSC(payload)
                 }
-            case let .escape(final):
-                dispatchEscape(final)
-            case let .escapeSequence(sequence):
-                dispatchEscape(sequence)
-            case let .csi(sequence):
-                dispatchCSI(sequence)
-            case let .osc(payload):
-                dispatchOSC(payload)
+                let after = damageActionSnapshot
+                recordDamage(from: before, to: after)
+                before = after
             }
-            let after = damageActionSnapshot
-            recordDamage(from: before, to: after)
-            before = after
         }
     }
 
@@ -6091,6 +6097,117 @@ public struct Terminal: Equatable, Sendable {
             stack[stack.count - 1] = updated
         }
         activeKittyKeyboardStack = stack
+    }
+
+    /// Prints a run of printable ASCII, taking as much of it in bulk as the grid state allows.
+    ///
+    /// The loop is the whole contract: `printBulkASCII` takes a prefix or declines, and whatever
+    /// it declines goes through `print` one character at a time. So the cut rules live in one
+    /// place, every one of them costs a character rather than the run, and a rule this reducer
+    /// does not know about cannot produce a wrong grid -- only a slower one.
+    private mutating func printASCIIRun(
+        _ bytes: UnsafeBufferPointer<UInt8>,
+        _ range: Range<Int>
+    ) {
+        var index = range.lowerBound
+        while index < range.upperBound {
+            let taken = printBulkASCII(bytes, from: index, limit: range.upperBound)
+            if taken == 0 {
+                print(Unicode.Scalar(bytes[index]))
+                index += 1
+            } else {
+                index += taken
+            }
+        }
+    }
+
+    /// Writes a prefix of the run into one row in a single pass, or returns 0 to decline it.
+    ///
+    /// Everything `print`/`printNarrow` pay per character -- the Unicode classification, the
+    /// cluster-join attempt, `invalidateInspection`, the style-id read, the wrap-spacer repair,
+    /// and `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
+    /// sound, and both are pinned by `TerminalASCIIRunTests`: every scalar in 0x20...0x7E is
+    /// narrow and grapheme-break-`.other` in the generated table, so no character of a run can be
+    /// wide or be joined by the next one; and Prepend is the only class an `.other` scalar does
+    /// not break from, so one comparison decides whether the run's head could join an open
+    /// cluster.
+    ///
+    /// It declines, rather than handling, every state in which a character is not a plain
+    /// same-row cell replacement: a latched pending wrap, insert mode, an open prepend cluster, a
+    /// cell whose overwrite would have to clear a partner, and a content-identity range that
+    /// would straddle the counter's wrap. Declining costs one character and then re-enters, so
+    /// each of those is a cut in the run, not a fallback for the rest of it.
+    private mutating func printBulkASCII(
+        _ bytes: UnsafeBufferPointer<UInt8>,
+        from start: Int,
+        limit: Int
+    ) -> Int {
+        guard isPendingWrap == false, isInsertMode == false else { return 0 }
+        let row = cursor.row
+        let column = cursor.column
+        guard rows.indices.contains(row), rows[row].cells.count == columnCount,
+              column >= 0, column < columnCount
+        else { return 0 }
+        if let context = clusterContext, context.previousClass == .prepend { return 0 }
+
+        // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
+        // a wide pair blanks its other half and a wrap spacer retires the wrap it stands for,
+        // which is `clearCellAndPair`'s job and not this one's.
+        var count = 0
+        let available = min(limit - start, columnCount - column)
+        while count < available {
+            let kind = rows[row].cells[column + count].kind
+            guard kind == .narrow || kind == .padding else { break }
+            count += 1
+        }
+        guard count > 0 else { return 0 }
+
+        // The per-character path issues one identity per cell and resets the counter when it hands
+        // out `ContentIdentity.max`. A run that would straddle that reset is declined so the reset
+        // keeps happening on exactly the character it happens on today.
+        guard ContentIdentity(count - 1) <= ContentIdentity.max - nextContentIdentity else {
+            return 0
+        }
+        let baseIdentity = nextContentIdentity
+        if baseIdentity + ContentIdentity(count - 1) == ContentIdentity.max {
+            nextContentIdentity = 1
+            armedLinkState = nil
+        } else {
+            nextContentIdentity = baseIdentity + ContentIdentity(count)
+        }
+
+        invalidateInspection(inViewportRows: row..<(row + 1))
+        // `clearCellAndPair` would ask this per cell; asking once is the same answer because the
+        // first call retires the spacer and every later one finds nothing to retire. Columns above
+        // 1 never had a spacer to clear.
+        if column <= 1 {
+            clearPreviousSpacer(beforeRow: row, column: column)
+        }
+
+        let styleId = currentStyleId()
+        let hyperlinkId = hyperlinkPen
+        for offset in 0..<count {
+            rows[row].cells[column + offset] = GridCell(
+                scalars: .single(Unicode.Scalar(bytes[start + offset])),
+                kind: .narrow,
+                styleId: styleId,
+                hyperlinkId: hyperlinkId,
+                contentIdentity: baseIdentity + ContentIdentity(offset)
+            )
+        }
+
+        clusterContext = ClusterContext(
+            target: CellPosition(row: row, column: column + count - 1),
+            previousClass: .other
+        )
+        if column + count == columnCount {
+            cursor.column = columnCount - 1
+            isPendingWrap = isAutoWrapMode
+        } else {
+            cursor.column = column + count
+        }
+        rememberOpenCluster()
+        return count
     }
 
     private mutating func print(_ scalar: Unicode.Scalar) {

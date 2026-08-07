@@ -222,8 +222,8 @@ struct CSIParserTests {
         for (index, prefix) in prefixes.enumerated() {
             var one = TerminalInputStream()
             var many = TerminalInputStream()
-            _ = one.feed(prefix + [0x78])
-            _ = many.feed(prefix + Array(repeating: 0x78, count: 4096))
+            _ = one.expandedFeed(prefix + [0x78])
+            _ = many.expandedFeed(prefix + Array(repeating: 0x78, count: 4096))
             #expect((one == many) == (index != 0))
         }
     }
@@ -235,7 +235,7 @@ struct CSIParserTests {
             + Array(repeating: [0x3B] as [UInt8], count: 24).flatMap { $0 }
             + [0x37, 0x70, 0x1B, 0x5C]
 
-        let actions = stream.feed(overflow + Array("\u{1B}[H|".utf8))
+        let actions = stream.expandedFeed(overflow + Array("\u{1B}[H|".utf8))
 
         #expect(Array(actions.suffix(2)) == [
             .csi(CSISequence(parameters: [], colonSeparators: [], intermediates: [], final: 0x48)),
@@ -273,7 +273,7 @@ struct CSIParserTests {
 
     private func dispatches(_ bytes: [UInt8]) -> [CSISequence] {
         var stream = TerminalInputStream()
-        return stream.feed(bytes).compactMap { action in
+        return stream.expandedFeed(bytes).compactMap { action in
             guard case let .csi(sequence) = action else { return nil }
             return sequence
         }
@@ -283,7 +283,7 @@ struct CSIParserTests {
         var stream = TerminalInputStream()
         var actions: [TerminalStreamAction] = []
         for chunk in chunks {
-            actions.append(contentsOf: stream.feed(chunk))
+            actions.append(contentsOf: stream.expandedFeed(chunk))
         }
         return (actions, stream)
     }
