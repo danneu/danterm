@@ -53,10 +53,17 @@ package final class NerdFontSymbolsResource: @unchecked Sendable {
 
     /// Loads and parses one resource without registering or resolving the font by
     /// its process-global name. This uncached seam preserves missing-file tests.
+    ///
+    /// Descriptors come from the file rather than from a `Data` of its contents so
+    /// CoreText maps the resource: the bytes stay clean and file-backed instead of
+    /// leaving a multi-megabyte dirty buffer alive for the life of `packaged`.
+    /// CoreText reports "no usable font here" as either a null array or an empty
+    /// one, so both must fall through to the disabled-feature result.
     package static func load(at url: URL?) -> NerdFontSymbolsResource? {
         guard let url,
-              let data = try? Data(contentsOf: url) as CFData,
-              let descriptor = CTFontManagerCreateFontDescriptorFromData(data)
+              let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL)
+                  as? [CTFontDescriptor],
+              let descriptor = descriptors.first
         else {
             return nil
         }

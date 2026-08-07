@@ -20,7 +20,7 @@ struct NerdFontSymbolsExecutionTests {
         #expect(first === second)
     }
 
-    @Test("The packaged symbols face is loaded from its resource bytes at one-cell em size")
+    @Test("The packaged symbols face is loaded from its resource file at one-cell em size")
     func packagedFaceSourceAndSize() throws {
         let resource = try #require(NerdFontSymbolsResource.packaged)
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
@@ -144,6 +144,42 @@ struct NerdFontSymbolsExecutionTests {
         let secondRow = cellRect(row: 1, column: 0, columnCount: 3, metrics: metrics)
 
         #expect(content.bytes(in: secondRow) == control.bytes(in: secondRow))
+    }
+
+    @Test("The packaged symbols face references its font file rather than a copy of its bytes")
+    func packagedFaceReferencesItsFile() throws {
+        // Intent: every face projected from the packaged resource resolves back to
+        //   the font file on disk.
+        // Why it exists: reading the 2.4 MB resource into a Data and building the
+        //   descriptor from those bytes left one permanently dirty malloc buffer
+        //   alive for the whole process, because the descriptor retains the data
+        //   it was created from and the resource is process-wide. A face built
+        //   from the file instead lets CoreText map it, so the bytes stay clean
+        //   and file-backed. A face carrying no URL is the observable signature of
+        //   the copying path.
+        // Scenario: the packaged resource projects a face, which is asked where it
+        //   came from.
+        let resource = try #require(NerdFontSymbolsResource.packaged)
+        let face = resource.face(pointSize: 12)
+
+        let attribute = try #require(CTFontCopyAttribute(face, kCTFontURLAttribute))
+        #expect((attribute as! NSURL) as URL == resource.sourceURL)
+    }
+
+    @Test("A readable file that is not a font disables the symbols feature")
+    func nonFontFileDisablesSymbols() throws {
+        // Intent: a resource URL that resolves to readable non-font bytes yields no
+        //   resource, exactly like a missing file.
+        // Why it exists: loading from a URL reports failure as either a null or an
+        //   empty descriptor array, so an unchecked first element would trap on
+        //   input that the byte-loading path rejected by returning nil.
+        // Scenario: a temporary file holding plain text is offered as the resource.
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("danterm-not-a-font-\(UUID().uuidString).ttf")
+        try Data("not a font".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(NerdFontSymbolsResource.load(at: url) == nil)
     }
 
     @Test("An unreadable symbols resource preserves the no-symbols rendering path")
