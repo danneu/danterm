@@ -1,0 +1,268 @@
+# Findings -- by-construction performance survey
+
+Append-only. `F1`-`F8` are the survey's directly verified results: a code-read
+in the tree at the stated commit, or a contention-free probe. Everything the
+survey merely *proposed* lives in the task ledger in
+[README.md](README.md), not here.
+
+All entries are dated 2026-08-06 at commit `5391260b` (branch
+`experiment/swift-terminal-engine`), working tree clean apart from an untracked
+plan file. No benchmark and no profiler was run: six read-only agents ran
+concurrently and would have poisoned any timing. Every size below is therefore a
+**structural** claim -- a count, a stride, or a call path -- and none is a
+performance verdict.
+
+### F1 -- the parser materializes one 32-byte enum per input token before the grid is touched
+
+- Status: verified by code-read and layout probe.
+- Commit and worktree state: `5391260b`, clean.
+- Commands, inputs, or reproduction: read
+  `lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift#TerminalInputStream.feed`
+  and `Terminal.swift#Terminal.feed`; separately, a standalone `swiftc -O`
+  program printing `MemoryLayout<TerminalStreamAction>.size/stride`.
+- Measurements or examples: `TerminalStreamAction` is size 26, **stride 32**.
+  `TerminalInputStream.feed` returns `[TerminalStreamAction]`, built by
+  appending one element per recognized token; `Terminal.feed` then iterates the
+  completed array.
+- Observation: for plain text, one array element is produced per printed
+  character. A 620 KB single-shot feed therefore builds roughly 620k x 32 B
+  ~= 19.8 MB live, plus the geometric-growth copies behind it.
+- Inference: this reproduces `15/F7`'s 37.2 MB of `MALLOC_LARGE (empty)` and its
+  coverage-0.35-versus-0.87 discrepancy, which that finding diagnosed as an
+  instrument artifact and worked around with `--chunk`. The allocation is real
+  and is paid in production on every feed, not only by the probe.
+- Competing interpretations: the optimizer could in principle stack-promote or
+  eliminate the array; the layout probe does not prove it survives to runtime in
+  an optimized build. `10/F1`'s profile tree shows an unattributed
+  `Terminal.feed -> _platform_memmove` node at 7.4% of harness root with no
+  callee frame, which is the shape array-growth memmove would take -- suggestive,
+  not conclusive.
+- Uncertainty: high confidence the array exists and its element stride is 32;
+  medium confidence on the CPU magnitude, low confidence on how much of the
+  memory figure survives optimization.
+- Next action: `T1` sizes it per corpus in situ; `T7` removes it.
+
+### F2 -- damage is a bitset, flattened to a `Set<Int>` at the public boundary, then re-coalesced into spans by every consumer
+
+- Status: verified by code-read. **Named independently by four of six survey
+  verticals** (PTY/IO, planning, grid, draw).
+- Commands, inputs, or reproduction: read
+  `lib/TerminalCore/Sources/TerminalCore/TerminalDamage.swift`.
+- Measurements or examples: `TerminalDamageAccumulator` stores
+  `private var words: [UInt64]` under the doc comment *"Keeps hot-path row
+  damage in reusable words until a consumer requests the public set."* The
+  public `TerminalDamage` exposes `public private(set) var rows: Set<Int>`, and
+  `init(rows:)` is `self.rows = Set(rows.filter { $0 >= 0 })` -- a second
+  allocation and a second full rehash of a set the accumulator just built.
+  Downstream, `RenderFramePlanner` asks `damage.rows.contains(row)` per row,
+  `terminalDamageRowsWithGlyphHalo` builds a third set, and
+  `terminalDamageMaximalContiguousSpans` calls `sorted()` to recover ordering the
+  words already had.
+- Observation: the exact, coarse representation exists and is deliberately
+  destroyed at the public seam; three consumers then re-derive it.
+- Inference: textbook flatten/compute/re-coalesce
+  (`agent-docs/perf-granularity-mismatch.md` heuristics 2, 4 and 5). The
+  `>= 0` sanitizer in `init(rows:)` exists only because the type admits
+  arbitrary integers -- with a width-bounded bitset, an out-of-range row is
+  unrepresentable rather than filtered.
+- Competing interpretations: `30/D2` examined this and rejected it, on the
+  grounds that the diff shape did not justify the change and explicitly writing
+  *"do not reopen this for the sort"*. That rejection stands on its own terms;
+  the survey's contribution is that three *other* verticals reached the same
+  representation from unrelated directions, which `30/D2` did not have.
+- Uncertainty: high confidence on the structure, low confidence that it is worth
+  measurable time standalone -- the damaged-row count is bounded by ~66, so this
+  is on the order of a few hundred hash operations and four allocations per
+  frame. It matters mainly as a multiplier under `H2`'s publish rate.
+- Next action: `T3` counts the round trips; `T20` records the disposition, which
+  is provisionally "rider on `T9`/`T14`, not standalone".
+
+### F3 -- `PackedRetainedRow`'s encode/decode surface has no production caller
+
+- Status: verified by code-read.
+- Commands, inputs, or reproduction:
+  `grep -rn "PackedRetainedRow" lib/TerminalCore/Sources/`.
+- Measurements or examples: every `Sources/` reference is to
+  `PackedRetainedRow.Header`'s bit constants (`cellStyleShift`, `cellSpillBit`,
+  `cellScalarMask`, `cellKindShift`, `cellKindMask`), read from
+  `LogicalLineStore.swift` in roughly 19 places. `pack`, `cell(at:)`,
+  `unpacked`, `forEachCell`, `forEachContentCell` and `forEachKind` are reached
+  only from `Tests/`.
+- Observation: a 643-line file whose header comment describes a representation
+  the engine no longer uses, retained in production solely for five integer
+  constants.
+- Inference: not a performance finding. It is a correctness hazard at exactly
+  the seam `T19` would rewrite -- the next reader of the live-to-retained
+  boundary will read a stale description of it. The ideal shape is a small
+  word-layout type owning the constants and the encode/decode pair together, with
+  the reference encoder moved into the test target that is its only consumer.
+- Uncertainty: none on the fact. `28/PO5` already records this as half-retired.
+- Next action: fold into `T19`, which touches the same layout.
+
+### F4 -- the planner builds a whole-viewport geometry projection above its own damage-scoped reuse check
+
+- Status: verified by code-read. **Corrects `17/F5`.**
+- Commands, inputs, or reproduction: read
+  `lib/TerminalCore/Sources/TerminalRenderPlanning/RenderFramePlanner.swift`
+  lines 284-291 and the callers of `Terminal.geometry`.
+- Measurements or examples: `FramePlanner.plan` opens with
+  `let geometry = terminal.geometry` at line 284; the per-row retained-reuse
+  check (`retained.columns == geometry.columns`) is at 291. So the projection is
+  built unconditionally, **before** and therefore outside damage scoping. It
+  allocates one `[TerminalCellGeometry]` of `columnCount` per row -- 66
+  allocations on a 179x66 pane -- and the planner reads exactly one field from
+  it, `.kind`. `PackedRetainedRow.swift:402` carries a comment confirming the
+  projection's purpose: *"`Terminal.geometry` projects kinds and nothing else"*.
+  The kind is already in the same packed `UInt64` word `forEachPaintedCell`
+  decodes. `Terminal.geometry` has no other production caller in the render path;
+  the only other `Sources/` use is a bounds check in
+  `TerminalInteractionPolicy.swift`.
+- Observation: whole-viewport work on a damage-scoped path, to obtain a field
+  that is free at a traversal the planner already runs.
+- Inference: `9/F2` measured this getter at 0.6-0.9% of plan on `content-churn`
+  and **19.5-27.8% on `incremental-mixed`**; `14/F2` put it at 2.0% on live
+  scroll. `17/F5` retired `9/H2` on the grounds that `8188b9a` made planning
+  damage-scoped -- true of the planner, but `8188b9a` did not touch
+  `terminal.geometry`, which is still built whole-viewport every frame. `17/F5`
+  concedes as much in its own "what remains unmeasured" clause. So this is
+  `9/H2`'s live remainder, not a re-proposal of retired work.
+- Competing interpretations: none on the mechanism; the code is unambiguous. The
+  open question is size, and it lands almost entirely in `incremental-mixed`,
+  whose plan-time line carries no verdict (A/A SD 5.75%).
+- Uncertainty: high confidence on the mechanism, high confidence that it is
+  **unscoreable** by any calibrated rule this project owns. Absolute saving is
+  roughly 5-16 us per frame.
+- Next action: `T11`. When it lands, correct doc 9's Phase 5 note and `17/F5`.
+
+### F5 -- a one-row scroll marks the entire scroll region damaged
+
+- Status: verified by code-read.
+- Commands, inputs, or reproduction: read
+  `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#moveAndFillRows` and its
+  `invalidateInspection(inViewportRows:)` call.
+- Measurements or examples: shifting rows in place records damage over the whole
+  shifted range. For an unrestricted scroll region that is every viewport row --
+  66 at the canonical geometry, ~11,800 cells.
+- Observation: the information content of the event is one new row plus a
+  translation; the damage records 66 changed rows.
+- Inference: every published frame during streaming output (`cat`, a build log,
+  `tail -f`, any command producing lines) therefore re-plans, re-classifies,
+  re-submits and lets Core Animation re-measure the whole screen's glyphs. This
+  multiplies every other per-row cost in the planning and draw verticals, which
+  is why `H3` ranks it above findings with larger local shares. `17/F6`'s
+  off-main-thread per-glyph bounds cost scales with glyph occurrences submitted
+  per second, so it is multiplied here too.
+- Competing interpretations: `PaneFramePlanner`'s retained-row reuse may already
+  absorb much of the *planning* half, since a translated row's runs could in
+  principle be copied forward -- but they are copied forward only for rows the
+  damage does not mark, and this marks all of them. The submission half is not
+  absorbed at all. Untested either way.
+- Uncertainty: high confidence on the code path, unmeasured amplification
+  factor.
+- Next action: `T5` measures the amplification; `T9` proposes the shift
+  component. Note the damage-aware frame planning plan
+  (`plans/impl/2026-07-27-1105-damage-aware-frame-planning.md`) lists shift
+  damage as an explicit deferred non-goal, so this is a stated reopening, not an
+  oversight being discovered.
+
+### F6 -- on the shipped font no printable-ASCII ink escapes a cell upward, so one of the glyph halo's two extra rows is unnecessary
+
+- Status: verified by direct probe. This is the survey's only measurement.
+- Commands, inputs, or reproduction: a standalone `CTFontGetBoundingRectsForGlyphs`
+  query over printable ASCII for the shipped faces at the canonical metrics. No
+  app, no timing, no contention -- a static font query, so it is unaffected by
+  the concurrent agents.
+- Measurements or examples, `.AppleSystemUIFontMonospaced-Regular` 13 pt:
+  - 2x scale: cell 31 px, baseline 26 px, ink 20.76 px above / 6.13 px below
+    baseline; overshoot **above the cell -5.24 px (none)**, below **+1.13 px**.
+  - 1x scale: cell 16 px, baseline 13 px, ink 10.38 / 3.07; overshoot above
+    **-2.62 px (none)**, below **+0.07 px**.
+  - Menlo 2x: -3.72 / +0.13. SF Mono 2x: -0.84 / +0.75. Monaco 2x: -4.33 /
+    -3.08 (fully contained).
+- Observation: `terminalDamageRowsWithGlyphHalo` expands every damaged row to
+  three (`row-1`, `row`, `row+1`) unconditionally. `29/F6` records the
+  consequence: 17 engine rows become **50 drawing rows**, and
+  `incremental-mixed`'s 4 rows become 6.
+- Inference: the exact requirement is asymmetric. `row-1` must be redrawn --
+  its descenders spill into `row`. `row+1` must **not** be: its own ink begins
+  5.24 px below its top edge, so extending the fill and clip band ~1.2 px into
+  `row+1` is sufficient and no run of `row+1` need be planned or submitted. The
+  halo becomes `2N` rows plus a sub-pixel band, derived rather than assumed --
+  and this is what discharges `30/R3`'s double-blend objection instead of
+  arguing around it.
+- Competing interpretations: the probe covers printable ASCII on five faces. It
+  does **not** cover the packaged Nerd Font symbols face at cell-width point
+  size, the `CTLine` fallback path for non-BMP and multi-scalar cells, or the
+  sprite families that `docs/terminal-sprites.md` says are *intentionally*
+  overscanned (Powerline contacts cell edges by design). Any of those could
+  escape upward.
+- Uncertainty: high confidence for ASCII on the shipped font; medium that a
+  general derivation stays simple once every contributing face is unioned in.
+- Next action: `T14`, whose safe shape is a per-metrics
+  `verticalInkOvershootRows(above:below:)` that falls back to today's full-row
+  halo whenever any contributing face fails containment -- so the worst case is
+  current behavior.
+
+### F7 -- the style and hyperlink sweeps materialize the entire retained history as `GridRow`s
+
+- Status: verified by code-read.
+- Commands, inputs, or reproduction:
+  `grep -rn "allPaintedDisplayRows" lib/TerminalCore/Sources/`.
+- Measurements or examples: eight call sites. Two of them are the reclamation
+  sweeps -- `Terminal.swift:1098` (`liveStyleIds`) and `:1769`
+  (`liveHyperlinkIds`) -- each calling
+  `LogicalLineStore.allPaintedDisplayRows()`, which per retained display row does
+  one fold, one `[GridCell]` allocation, and a full `GridCell` materialization
+  including scalars and both side-table probes.
+- Observation: at a saturated arena that is tens of thousands of row
+  allocations and millions of cell constructions, run synchronously on the
+  PTY-drain thread, to collect a 4-byte field the arena already holds packed in
+  each cell word.
+- Inference: a latency spike rather than a throughput term -- `internStyle`
+  sweeps on a doubling threshold, so the trigger is distinct-style count, which
+  truecolor output reaches repeatedly. Docs 28 and 31 applied the
+  borrow-don't-materialize split to the frame path (`28/F17`) and to equality
+  (`31/F13`); this is the whole-history reader that never received it.
+- Competing interpretations: the sweep must also cover the live grid, the
+  inactive primary screen, and the *derived* cells the fold synthesizes (a
+  trailing-fill style is a record header field; a derived spacer head inherits
+  its head's style), so a word-scan replacement must be proven to reach all of
+  them. That is a correctness obligation, not a competing interpretation of the
+  cost.
+- Uncertainty: high confidence the work is unnecessary; no calibrated workload
+  contains the path, so the size is unknown. `28/F21` left `style-churn`'s
+  +2.36% unexplained, which this could partly account for.
+- Next action: `T16`, gated on an equality test that the word-walk live set
+  equals the materialized one.
+
+### F8 -- seven of nine app-runtime findings are invisible to every workload on the benchmark ladder
+
+- Status: verified by inspection of the workload contracts.
+- Commands, inputs, or reproduction: compare
+  `agent-docs/terminal-performance.md`'s workload table against the app-runtime
+  code paths.
+- Measurements or examples: all six ladder workloads feed byte corpora into a
+  terminal. None emits an application `Msg`, opens an IPC connection, triggers a
+  checkpoint, or types a key. So no reconcile sweep, no projection, no snapshot
+  encode and no key-monitor pass executes inside a measured block.
+- Observation: any change to the reconcile sweep, container-shape derivation,
+  checkpoint capture, MRU reconciliation, IPC encode, snapshot construction, or
+  the key monitor will read `equivalent` on every workload.
+- Inference: per the guide's own rule, that means "this workload does not
+  contain the cost", **not** "the change did nothing". The one partially covered
+  runtime item is per-frame scroll-chrome resynchronization, and its coverage is
+  weak: it lands in `scrollback-stream`'s drain (~96% of that block, a
+  throughput number wearing a draw metric's name) and in
+  `processCPUNanosecondsPerDraw`, which is explicitly uncalibratable and carries
+  no verdict. It is outside the `draw(_:)` bracket, so the draw verdict cannot
+  see it at any size.
+- Competing interpretations: these costs may be genuinely negligible at the pane
+  and tab counts one user runs. That is a plausible outcome and the point is
+  that nothing currently distinguishes it from the alternative.
+- Uncertainty: none on the coverage gap; complete uncertainty on the magnitudes
+  behind it.
+- Next action: `T6` builds the per-`Msg` counter. Doc 21 hit this identical wall
+  for pointer gestures and answered it with a purpose-built probe rather than a
+  new calibrated workload, which then surfaced a 13.6 ms -> 5.5 us win no
+  workload would have found. Build `T6` so it is capable of returning
+  "negligible".
