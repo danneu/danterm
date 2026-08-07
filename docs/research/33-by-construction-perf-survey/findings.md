@@ -876,3 +876,205 @@ performance verdict.
   measurement worth taking before `T9` starts is live lines-per-delivery, which
   places production on the 1-to-91 curve above and therefore sets the win's real
   size.
+
+### F14 -- every `Msg` pays the whole model, and at the sizes one user runs the whole model costs 61 us
+
+- Status: verified by direct probe. `T6`. **The instrument returns the outcome
+  `H4` said it must be built to be capable of returning:** the reconcile sweep is
+  totally unscoped -- a message naming one pane visits every pane four times,
+  rebuilds every tab's container shape, and runs all twelve projections,
+  identically for seven different messages -- and at 3 tabs that entire sweep
+  costs **61 us**, which is **0.08% of one core** at the 75 ms coalescing rate.
+  The mismatch is real, exact, and small.
+- Date and investigator: 2026-08-06, T6 agent.
+- Commit and worktree state: `e9948475`, clean apart from this task's untracked
+  scripts and an untracked plan file. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t6-msg-work.py` (add `--json` for the raw report,
+  `--iterations N` to change the timed run length; the tables below are the
+  default 2,000 and the whole run takes roughly 15 minutes). The driver copies
+  `lib/DanTermCore/Sources/DanTermCore` **and**
+  `lib/DanTermProtocol/Sources/DanTermProtocol` into a scratch directory, strips
+  the `import DanTermProtocol` lines so the two targets compile as one module,
+  and builds that copy with `swiftc -O` together with the probe. **The core in
+  the repo is never edited**, and every injection is an exact-text anchor that
+  must match exactly once, so a source change that moves a site fails the run
+  rather than silently miscounting -- the same discipline as `F10`, `F11` and
+  `F13`.
+- Method, and why there are two binaries: injecting counter increments perturbs
+  inlining, so a timing taken from the instrumented build would mean nothing.
+  The driver therefore builds the probe **twice** against the same staged
+  sources -- once instrumented, for the counts, and once with no injection at
+  all, for the wall clock -- and joins the two on (layout, message). Every count
+  below comes from the first build and every microsecond from the second.
+- Method, and what "the sweep" means here: `AppRuntime.reconcile()` lives in
+  `app/`, which is AppKit and cannot build headlessly. Its passes split cleanly
+  into a pure projection and a thin executor, so the probe runs every pure half
+  in `reconcile()`'s own order against the same `ReconcilerCaches` discipline
+  (each pass diffs against the value it last applied), then measures one
+  `update()` plus one sweep. Caches are primed with two sweeps before the
+  measured message, because an unprimed cache makes every pass *apply*, which is
+  a first-frame cost rather than the steady state a shell's next title update
+  lands in. **Not measured, and not claimed:** the AppKit executors themselves,
+  `syncPaneVisibility`, and the three popover projections, which return nil while
+  their popover is closed and so are not called in the steady state.
+- Result or artifact paths: `scripts/research/33/t6-msg-work.py`,
+  `t6-msg-work-probe.swift`, `t6-msg-work-counters.swift`. The run writes nothing
+  durable.
+- Measurements, per single `Msg` (`update()` plus one sweep), over four layouts.
+  The first two are what one user runs; the last two exist only so the shape of
+  the growth is visible.
+
+  | layout | tabs | panes | panes visited | `allPanes` walks | projection calls | `containerShapeNode`s | `liveTabIds` sets | us/msg | us/update |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `3-tabs` | 3 | 3 | **13** | **4** | **12** | 3 | **1** | **61.5** | 3.0 |
+  | `8-tabs-2-panes` | 8 | 16 | **66** | **4** | **12** | 24 | **1** | **169.4** | 5.9 |
+  | `24-tabs-4-panes` | 24 | 96 | **388** | **4** | **12** | 168 | **1** | **739.0** | 16.6 |
+  | `60-tabs-8-panes` | 60 | 480 | **1,928** | **4** | **12** | 900 | **1** | **3,076.5** | 36.2 |
+
+  Every row above is `sessionTitle`. **Six other messages produce byte-identical
+  counters** -- `sessionCwd`, `sessionProgress`, `paneBecameFirstResponder`,
+  `splitRatioChanged`, `selectTab`, and (on the sweep half) `sessionBell` -- and
+  their timings agree to within 1.5%, except `sessionBell` and `selectTab`, whose
+  *`update()`* halves differ and whose sweeps do not.
+
+  What the sweep rebuilds from scratch every time, at 60 tabs / 480 panes:
+  **3,615 `[PaneModel]` array allocations** carrying 1,928 pane copies, **1,440
+  per-pane dictionary entries** across the three `allPanes`-keyed projections,
+  **900 `ContainerShapeNode` allocations** (the entire split forest), **900**
+  `sumUnread` node visits, and **500** `paneInNode` walks.
+
+  The one message whose `update()` half is not flat is `sessionBell`, and the
+  cause is in `update()`, not the sweep: `tabForPane` walks every tab building an
+  `allPaneIds` array per tab, so its `allPaneIdsNodeCalls` go 3 / 24 / 168 / 900
+  against **0** for every other message, and its update time goes 8.7 / 15.9 /
+  52.9 / **198.0 us**.
+
+- Measurements, per pure projection, computed alone over the same primed model:
+
+  | projection | 3 tabs / 3 panes | 8 / 16 | 24 / 96 | 60 / 480 |
+  | --- | ---: | ---: | ---: | ---: |
+  | `desiredSidebar` | **17.62** | **47.07** | **143.34** | 362.20 |
+  | `desiredWindowChrome` | **11.85** | 12.43 | 13.34 | 15.03 |
+  | `desiredFocusBorders` | 2.08 | 10.77 | 67.10 | **384.47** |
+  | `sessionsToTearDown` | 1.95 | 9.17 | 62.10 | 312.33 |
+  | `desiredPaneConfig` | 1.69 | 10.41 | 59.74 | 333.86 |
+  | `desiredPaneToolbar` | 1.66 | 9.94 | 60.70 | 343.73 |
+  | `desiredContainerShapes` | 1.20 | 4.78 | 21.05 | 94.08 |
+  | `unreadAlertTally` | 0.99 | 3.54 | 12.77 | 46.36 |
+  | `desiredThemeBrowser` | 0.47 | 0.51 | 0.55 | 0.59 |
+  | `desiredSearchOverlays` | 0.05 | 0.05 | 0.05 | 0.05 |
+  | `desiredPreferencesPanel` / `desiredSwitcher` / `desiredQuitConfirmation` | 0.02 | 0.02 | 0.02 | 0.02 |
+
+- Observation, the mismatch is total and exactly stated. `allPanesWalks` is
+  **4** and `projectionCalls` is **12** in every layout and for every message,
+  including `splitRatioChanged`, whose sweep is an empty diff by construction
+  because `ContainerShape` drops ratios. The sweep's inputs vary at the
+  granularity of one pane; its work is at the granularity of the whole model,
+  and it does not vary with the message at all. This is
+  `agent-docs/perf-granularity-mismatch.md`'s shape in its purest form -- there
+  is no cache to hide it and no fast path, only a fixed whole-model pass.
+- Observation, `liveTabIds` is **1 per message, not N**. The ledger listed it
+  beside the per-pane quantities; it is built exactly once, in `update()`'s
+  `defer` (`reconcileMru`), and no projection builds another. Its insert count
+  equals the tab count, so it is O(tabs) once, and it does not multiply.
+- Observation, the tab-chrome derivation is the constant nobody would predict
+  from a code read. `TabModel.title`, `displayTitle` and `subtitle` are three
+  computed properties over one *private, uncached* `derivedChrome`, and
+  `derivedChrome` costs a `paneInNode` tree walk plus `deriveTabChrome`, which
+  calls `abbreviateHome` twice -- and `abbreviateHome`'s default argument is an
+  `NSHomeDirectory()` call. The counters put it at **2 derivations per tab plus
+  4 for the selected tab** (10 / 20 / 52 / 124) and exactly **twice that many**
+  `abbreviateHome` calls. That is why `desiredWindowChrome`, which reads only the
+  selected tab, costs 11.85 us at three tabs and barely moves at 480 panes: it is
+  a fixed four derivations. At the realistic size, `desiredSidebar` plus
+  `desiredWindowChrome` is **29.5 us of the 58.5 us sweep** -- half the sweep is
+  tab chrome being re-derived.
+- Observation, the absolute cost. `Msg.coalescesReconcile` throttles the
+  shell-driven trio to about 75 ms, so a pane flooding title, cwd and progress
+  updates costs at most ~13.3 sweeps per second:
+
+  | layout | us/msg | ms of CPU per second at 13.3 Hz | share of one core |
+  | --- | ---: | ---: | ---: |
+  | 3 tabs / 3 panes | 61.5 | 0.82 | **0.08%** |
+  | 8 tabs / 16 panes | 169.4 | 2.26 | **0.23%** |
+  | 24 tabs / 96 panes | 739.0 | 9.85 | **0.99%** |
+  | 60 tabs / 480 panes | 3,076.5 | 41.0 | **4.10%** |
+
+  The uncoalesced messages (`selectTab`, `paneBecameFirstResponder`) reconcile
+  inline, but they are human-paced -- a few per second at the very most -- so
+  their contribution is smaller still.
+- Inference, for `T23` (scope the reconcile sweep): **the mechanism is
+  confirmed and the justification for it as a speed task is not.** `T23`'s
+  premise -- "every sweep rebuilds the whole model's view state for an event that
+  named one pane, up to 13 Hz, and boxes a fresh `ContainerShape` tree per tab to
+  compare it" -- is exactly right, and the counters state it to the unit. But the
+  reconciliation ADR's `Projection Scan Cost` section already anticipated this
+  and set the bar: it accepted the rebuild *because* the coalescing policy holds
+  the rate at ~13 Hz, and it wrote that the alert tally was added "only after the
+  hot path had a concrete high-pane/high-tab report" and that the same bar
+  applies "especially [to] `allPanes`". This probe is the measurement that bar
+  asks for, and it does **not** clear it: 0.08% of a core at the size one user
+  runs, and under 1% at 24 tabs and 96 panes. `T23` should therefore be closed as
+  a speed task and, if it is kept at all, kept only as a complexity claim under
+  `D1`, ranked below every item in this doc that has measured evidence. It must
+  not be pitched with a percentage, because the honest percentage is 0.08.
+- Inference, for `H4`: **its competing explanation wins, for this item.** `H4`
+  said the runtime findings are unmeasured rather than small, and that "these
+  costs may be genuinely negligible at the pane and tab counts one user runs, and
+  the instrument would prove it. That is a perfectly good outcome and the probe
+  should be built to be capable of returning it." The probe was, and it did. The
+  first half of `H4` also stands: nothing on the ladder could have produced any
+  of these numbers, and the coverage gap `F8` recorded is real. Doc 21's
+  precedent held in method and not in result -- the same purpose-built-probe
+  answer to the same wall, but where `21` found a 13.6 ms gesture, this finds a
+  61 us message.
+- Inference, one cheap candidate the counters did surface. Memoizing
+  `TabModel.derivedChrome` (or having `desiredSidebar` and `desiredWindowChrome`
+  read it once per tab instead of two to four times) removes half the sweep at
+  the realistic size, and it is not `T23` -- it is a hoist inside two
+  projections, with no change to the sweep's scoping and no context bag. The
+  `NSHomeDirectory()` in `abbreviateHome`'s default argument is a second, even
+  smaller one. Neither is worth a percentage claim either; both are recorded so
+  the next agent does not have to re-derive them. `sessionBell`'s `tabForPane`
+  scan is a third, and it is the only one whose growth is in `update()`.
+- Competing interpretations: the sweep is a restatement, not the app's own
+  `reconcile()`. It runs the pure half of every pass in order against the same
+  cache discipline, but a drift in `app/Reconcile.swift` is not detected by an
+  anchor check the way the engine-side injections are -- the same limitation
+  `F11` records for its restatement of the publish path. It is also an
+  **underestimate** in one direction and an overestimate in another: it omits the
+  AppKit executors (which run only for keys the diff changed, so on a title
+  change that is one pane's toolbar), and it charges a full sweep to every
+  message, where the runtime's `reconcileDecision` coalesces bursts into one.
+- Competing interpretations, the timing: this is a headless single-module `-O`
+  build, not the app, so the microseconds are **diagnostic**, in
+  `agent-docs/measurement-discipline.md`'s sense, and no benchmark verdict is
+  claimed or available -- `F8` is precisely the finding that no ladder workload
+  contains this path. What licenses reading them at all is that they are used
+  only to bound an order of magnitude (0.08% of a core), and a 5x error in either
+  direction does not change that verdict.
+- Competing interpretations, the counters themselves: injecting increments
+  perturbs inlining, which is why the timing comes from a separate uninstrumented
+  build. The counts are exact and the instrumentation only adds statements.
+- Uncertainty: none on any count -- every one is an exact tally of a
+  deterministic replay over a model built from a counter-seeded id factory, and
+  the counts are identical across runs. The timings are best-of-three over 2,000
+  messages; the three `sessionTitle`/`sessionCwd`/`sessionProgress` rows, which
+  do identical work, agree to within 1.5% at every layout, which is the
+  instrument reporting its own repeatability. The four layouts are four points,
+  not two, so the growth shape is measured rather than extrapolated
+  (`agent-docs/measurement-discipline.md`, "measure the middle of the curve").
+- Uncertainty, coverage: this measures **one** of `F8`'s nine runtime items --
+  the reconcile sweep and `update()`, which is the pair `T23` owns. Checkpoint
+  capture, IPC encode, snapshot construction, MRU reconciliation beyond
+  `liveTabIds`, and the key monitor are still uninstrumented, so `H4` is answered
+  for the sweep and open for the rest.
+- Next action: **Phase 1 is complete.** `T23`'s gate has run and it fails as a
+  speed task; re-scope or close it with the number above, and do not open a
+  `decisions.md` entry that argues a percentage. This script is the before/after
+  gate if `T23` is ever taken on complexity grounds: after a scoped sweep,
+  `allPanes` walks and panes visited must fall to the panes the message named,
+  `containerShapeNode` allocations to zero for a message that cannot change a
+  shape, and the wall clock must not rise.

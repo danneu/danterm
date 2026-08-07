@@ -179,7 +179,14 @@ surfaced.
 Supports: `F8`, `21`'s precedent. Competing explanation: these costs are
 genuinely negligible at the pane and tab counts one user runs, and the
 instrument would prove it. That is a perfectly good outcome and the probe should
-be built to be capable of returning it.
+be built to be capable of returning it. **`F14` built it and the competing
+explanation won, for the one item it covers.** The first half of `H4` stands --
+nothing on the ladder could have produced any of `F14`'s numbers, so the coverage
+gap is real -- but the reconcile sweep, the largest of the nine, costs **61 us
+per message at 3 tabs and 169 us at 8 tabs / 16 panes**: 0.08% and 0.23% of one
+core at the 75 ms coalescing rate. `H4` is therefore **answered for the sweep and
+still open for the rest**: checkpoint capture, IPC encode, snapshot construction
+and the key monitor remain uninstrumented.
 
 ## Candidate direction, pending evidence
 
@@ -320,13 +327,27 @@ direction gate; several may kill their own follow-on task, which is the point.
   per delivery (one 16 KiB read turn), so live lines-per-delivery is the number
   that places production on the curve, and the control's residual 2.0x on glyphs
   is `F6`'s halo, which `T14` owns and `T9` cannot remove.
-- [ ] `T6` RESEARCH -- **Build the per-`Msg` work counter the runtime vertical has
+- [x] `T6` DONE -- **Build the per-`Msg` work counter the runtime vertical has
   no instrument for.** Script: a headless `DanTermCore` harness reporting, per
   `Msg`, the number of panes visited, projection calls, `allPanes` walks,
   `containerShapeNode` allocations, and `liveTabIds` set constructions. This is
-  doc 21's answer applied to `H4`, and it is a prerequisite for ranking `T14`,
-  `T15` and `T16` at all. It is legitimate for this to report "negligible at 3
-  tabs" -- build it so it can.
+  doc 21's answer applied to `H4`, and it is the gate on `T23`. (An earlier
+  version of this entry named `T14`-`T16`; a renumbering turned those into
+  draw-side tasks, and the runtime task this actually gates is `T23`.) It is
+  legitimate for this to report "negligible at 3 tabs" -- build it so it can.
+  **Result in `F14`, script `scripts/research/33/t6-msg-work.py`. It reported
+  exactly that, and it reported the mechanism as total:** the sweep visits every
+  pane **4 times**, runs all **12** projections, and rebuilds every tab's
+  `ContainerShapeNode` tree, with **byte-identical counters for seven different
+  messages** -- including `splitRatioChanged`, whose diff is empty by
+  construction. `liveTabIds` is the one quantity the ledger over-counted: it is
+  built **once per message**, in `update()`'s `reconcileMru` defer, not per
+  projection. And the absolute cost at the sizes one user runs is **61 us per
+  message at 3 tabs / 3 panes and 169 us at 8 tabs / 16 panes**, which is
+  **0.08% and 0.23% of one core** at the 75 ms coalescing rate; 480 panes reaches
+  4.1%. So `T23`'s mechanism is confirmed and its speed justification is not --
+  see `F14`'s inference, which measures the reconciliation ADR's own
+  "concrete high-pane report" bar and fails it.
 
 ### Phase 2 -- the three highest-reach structural changes, each behind its Phase 1 gate
 
@@ -530,6 +551,17 @@ reopening condition, and argues that condition is met.
   concrete high-pane report, so this must be pitched as scoped passes and must
   clear that same bar. Verification: `T6`'s counter, plus a debug-only assertion
   that scoped projections equal full projections after every `Msg`.
+  **`T6`'s gate has run and this fails it as a speed task (`F14`).** The
+  mechanism is confirmed exactly -- 4 whole-model pane walks, 12 projections and
+  a rebuilt shape forest per message, identical across seven messages -- and the
+  bar the ADR set is a concrete high-pane report, which 61 us at 3 tabs (0.08% of
+  a core at the coalesced rate) is not. Keep this only as a **complexity claim
+  under `D1`**, ranked below every item with measured evidence, and do not write
+  a percentage into it. Two smaller items `F14` surfaced are independent of the
+  scoping and much cheaper: `TabModel.derivedChrome` is recomputed 2-4 times per
+  tab per sweep (each one a tree walk plus two `NSHomeDirectory()` calls) and is
+  half the sweep at the realistic size, and `sessionBell`'s `tabForPane` scan is
+  the only `update()` half whose cost grows with the model.
 
 ## Rejected
 
@@ -609,7 +641,8 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 has five tasks done. `T1` sized the parser's
+Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
+run.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -657,7 +690,31 @@ useful measurement before `T9` starts is live lines-per-delivery -- it places
 production somewhere on a 66x-to-1x curve. And the control's residual 2.0x on
 glyphs is the glyph halo from `F6`, which `T14` owns and `T9` cannot remove.
 
-So `T9` is unblocked with the largest measured margin in Phase 1, and `T10` with
-a measured 4.96x multiplier. The one Phase 1 task nothing has built is `T6`, the
-per-`Msg` runtime counter that Phase 3's `T23` and the ranking of `T14`-`T16`
-still wait on.
+`T6` (`F14`) then built the per-`Msg` runtime counter `H4` asked for and closed
+the phase. It is the one Phase 1 task whose result is a *negative*, and it is the
+one the ledger explicitly said to build so it could be. The mechanism is
+confirmed and is more total than the ledger claimed: a message naming one pane
+walks every pane **four times**, runs **all twelve** projections, and rebuilds
+every tab's `ContainerShapeNode` tree, and **seven different messages produce
+byte-identical counters** -- including `splitRatioChanged`, whose diff is empty
+by construction. The sweep does not vary with the message at all. But the
+absolute cost is **61 us at 3 tabs / 3 panes and 169 us at 8 tabs / 16 panes** --
+**0.08% and 0.23% of one core** at the 75 ms coalescing rate -- and only reaches
+4.1% at an unrealistic 60 tabs / 480 panes. The reconciliation ADR had already
+accepted this rebuild and named its reopening bar as a concrete high-pane report;
+this is the measurement that bar asked for, and it fails it. So `T23` is
+**closed as a speed task** and survives, if at all, only as a complexity claim
+under `D1`. One correction rides along: `liveTabIds` is built **once per
+message**, in `update()`'s `reconcileMru` defer, not once per projection, so the
+ledger over-counted it. And two cheaper items the counter surfaced are not
+`T23` at all -- `TabModel.derivedChrome` is recomputed 2-4 times per tab per
+sweep, each time a tree walk plus two `NSHomeDirectory()` calls, which is half
+the sweep at the realistic size; and `sessionBell`'s `tabForPane` scan is the
+only `update()` half whose cost grows with the model.
+
+So Phase 1 leaves three tasks with measured mechanisms and one closed. `T9` is
+unblocked with the largest margin in the phase (66x rows, 65x glyphs), `T10` with
+a measured 4.96x publish multiplier, and `T7`/`T8` with the parser's array and
+its per-character bookkeeping sized per corpus. `T23` is the phase's one
+rejection, and `H4` is answered for the reconcile sweep and still open for the
+other eight runtime items `F8` named.
