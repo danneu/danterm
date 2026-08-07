@@ -464,6 +464,50 @@ struct TerminalInputStreamTests {
         }
     }
 
+    @Test("the cursor yields one action per call and consumes the whole chunk")
+    func streamingCursorConsumesTheChunk() {
+        // Intent: `nextAction(in:from:)` hands back exactly one token per call, advances the index
+        //   only over the bytes that token consumed, and reports the chunk exhausted by returning
+        //   nil at `bytes.count` -- including when the chunk ends inside an unfinished sequence.
+        // Why it exists: this is the seam that replaced the eager `[TerminalStreamAction]`
+        //   (`research/33/T7`). The grid reducer mutates the terminal between two calls, so an
+        //   index that ran ahead of the token it returned, or a call that emitted two tokens'
+        //   worth of parser progress, would drop or duplicate a grid mutation with nothing else
+        //   in the suite positioned to see it.
+        // Scenario: a chunk holding a printable ASCII run, a control, a full CSI and a truncated
+        //   CSI is pulled one token at a time.
+        var stream = TerminalInputStream()
+        let bytes: [UInt8] = [0x41, 0x42, 0x0A, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x1B, 0x5B, 0x33]
+
+        let csi31m = CSISequence(
+            parameters: [31],
+            colonSeparators: [false],
+            intermediates: [],
+            final: 0x6D
+        )
+        var index = 0
+        var actions: [TerminalStreamAction] = []
+        var indicesAfterEachAction: [Int] = []
+        bytes.withUnsafeBufferPointer { buffer in
+            while let action = stream.nextAction(in: buffer, from: &index) {
+                actions.append(action)
+                indicesAfterEachAction.append(index)
+            }
+        }
+
+        // The run is one token covering both printables, which is what amortizes the per-token
+        // boundary this seam introduces (`research/33/T8`).
+        #expect(actions == [
+            .printASCIIRun(0..<2),
+            .execute(0x0A),
+            .csi(csi31m),
+        ])
+        #expect(indicesAfterEachAction == [2, 3, 8])
+        #expect(index == bytes.count)
+        // The truncated CSI stayed in the absorber rather than being dropped or emitted.
+        #expect(stream.expandedFeed([0x31, 0x6D]) == [.csi(csi31m)])
+    }
+
     private func run(chunks: [[UInt8]]) -> (actions: [TerminalStreamAction], stream: TerminalInputStream) {
         var stream = TerminalInputStream()
         var actions: [TerminalStreamAction] = []

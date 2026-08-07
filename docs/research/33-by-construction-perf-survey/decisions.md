@@ -204,3 +204,65 @@ rediscovering them.
   equivalence against `F9` at three chunkings, `peakLiveActions == 1`, the full
   1,020-test `TerminalCore` suite including the 67-fixture 7-byte-split replay,
   and chunk-invariant footprint within 2 MB.
+
+### D6 -- the pair lands: `T8`'s run granularity makes `T7` pay, and `T8` alone had already collected `T7`'s memory
+
+- Status: **settled on measurement, and both halves are landed.** `D5` is
+  discharged. `scripts/research/33/t7-streaming-parser.patch` is deleted, because
+  the change it parked is now in the tree.
+- Evidence used: `F16` (`T8` alone -- every counter falls to exactly `F10`'s
+  predicted count on all five corpora, `scrollback-stream` `faster` -71.08%, drain
+  153.2 -> 70.5 ms); `F17` (`T7` on top of `T8` -- 4.4% to 11.2% faster headless on
+  four fixtures, and the chunk-invariance table showing `T8` alone taking the
+  single-shot footprint difference from 30.95 MB to 0.12 MB); `F15` (the same
+  streaming shape cost +1.66% headless and read `slower` +5.43% before the run
+  granularity existed); `D5`, whose condition was that the pair land only if
+  `scrollback-stream` reads at least `equivalent`.
+- Candidate solutions considered:
+  - **Land `T8` alone and leave `T7` parked.** Rejected, but it was the live
+    option until `F17` ran, and it is why the two halves were built and measured
+    separately: landing both and reading one benchmark could not have told which
+    half moved the number, and `F15`'s whole result was that the two move it in
+    opposite directions. With `T8` landed, `T7`'s marginal effect is measurable on
+    its own, and it is a 4-11% improvement rather than the 1.7-5.4% cost that
+    parked it.
+  - **Keep the array as a bounded stack batch.** Not attempted, and now moot.
+    `D5` recorded it as the fallback if the `T8` pairing failed. The pairing did
+    not fail, and a capacity constant on a flatten-then-re-read structure is worse
+    than not having the structure.
+  - **Land the pair.** Selected. `D5`'s condition is met with a very large margin
+    -- the pair reads `faster -69.32%` on `scrollback-stream` against `63c693da`
+    -- and `T7`'s own contribution is positive on the instrument that can resolve
+    it and neutral on the one that cannot.
+- Tradeoffs and correctness risks: the ordering matters and was followed. `T8`
+  landed first as `90731fdc`, with its own counters, its own suite run and its own
+  paired benchmark, and `T7` was then measured against that commit rather than
+  against `63c693da`. Two risks remain recorded rather than removed. `T7`'s
+  marginal sign comes from the **headless** A/B, because
+  `benchmark-confirm` cannot run on a change this fast at all -- it calibrates
+  `terminal-feed`'s batch on the baseline arm and the candidate then fails the
+  1-second block floor, invalidating every workload -- and `benchmark-quick`
+  returns disagreeing signs on a 4% drain effect inside a block that is mostly not
+  drain. That is the reverse of this project's usual ordering of those two
+  instruments and `F17` says so plainly. Separately, the two churn workloads
+  report a calibrated plan-metric `slower` of +6.3% and +8.3% against a ~7x
+  fence-stall reduction and ~15% less process CPU in the same blocks; `F16`
+  records that as measured and unexplained, and it is attributable to `T8`, not to
+  `T7`.
+- Decision and rationale: **both land.** The corrected reading of `F15` is that
+  its memory table was never `T7`'s case -- `T8` collects 99.6% of that footprint
+  difference on its own, because the array it shrinks 36x stops being a spike. So
+  `T7`'s justification is now a measured 4-11% drain win plus the complexity claim
+  `D1` admits: no chunk size can make the intermediate token representation large,
+  because it does not exist. `F15`'s closing inference stands as written -- "the
+  array's deletion is still the right end state; it is the granularity that is
+  wrong, not the direction" -- and this is the measurement that settles it.
+- Behavioral verification, satisfied for both halves together: 1,030
+  `TerminalCore` tests including the 67-fixture replay that splits feeds mid-token
+  at 7 bytes; `just test`'s 75 steps; `TerminalASCIIRunTests`' chunk-invariance
+  sweep replaying each cut rule at seven chunkings, where feeding one byte at a
+  time forces every run to a single character and so compares the bulk path
+  against the character path directly; identical printed-character counts, cursor,
+  scrollback depth and screen text between the arms on all five corpora; a
+  chunk-invariant footprint to 0.00 MB; and zero `[TerminalStreamAction]`
+  occurrences under `lib/*/Sources`.

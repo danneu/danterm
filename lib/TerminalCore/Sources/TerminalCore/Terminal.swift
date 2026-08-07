@@ -873,6 +873,7 @@ public struct Terminal: Equatable, Sendable {
         damage.drain()
     }
 
+    @inline(__always)
     private var damageActionSnapshot: DamageActionSnapshot {
         let projection = scrollProjection
         let cursorStreamRow = isAlternateScreenActive
@@ -1174,42 +1175,65 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reduces a byte chunk synchronously while retaining unfinished stream state.
     public mutating func feed(_ bytes: [UInt8]) {
-        let actions = inputStream.feed(bytes)
-        guard actions.isEmpty == false else { return }
-        // The buffer is what `.printASCIIRun` ranges index; it is the same chunk the parser just
-        // recognized, so no action can name a byte outside it.
+        // The buffer is what `.printASCIIRun` ranges index, and what the parser recognizes from;
+        // it is obtained once per feed rather than per token.
         bytes.withUnsafeBufferPointer { buffer in
-            // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
-            // would capture as its "before" -- nothing runs between them, and `recordDamage` writes
-            // only damage bookkeeping, which the snapshot does not read -- so carrying it forward is
-            // the same diff sequence at half the construction cost.
-            var before = damageActionSnapshot
-            for action in actions {
-                switch action {
-                case let .printASCIIRun(range):
-                    printASCIIRun(buffer, range)
-                case let .print(scalar):
-                    print(scalar)
-                case let .execute(control):
-                    if control == 0x07 {
-                        admitDiscreteSemanticEvent(.bell)
-                    } else {
-                        execute(control)
-                    }
-                case let .escape(final):
-                    dispatchEscape(final)
-                case let .escapeSequence(sequence):
-                    dispatchEscape(sequence)
-                case let .csi(sequence):
-                    dispatchCSI(sequence)
-                case let .osc(payload):
-                    dispatchOSC(payload)
-                }
-                let after = damageActionSnapshot
-                recordDamage(from: before, to: after)
-                before = after
-            }
+            feedBuffer(buffer)
         }
+    }
+
+    /// Pulls one action at a time and applies it before the next is recognized, so the token
+    /// stream is never materialized as an array (`research/33/F9` sized the one this replaced at
+    /// 60-80x the corpus's own byte count in allocator traffic). The first action is pulled before
+    /// the first snapshot because a chunk that ends mid-sequence produces none, and that feed
+    /// should cost nothing.
+    private mutating func feedBuffer(_ bytes: UnsafeBufferPointer<UInt8>) {
+        var index = 0
+        guard var action = inputStream.nextAction(in: bytes, from: &index) else { return }
+        // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
+        // would capture as its "before": the only things that run between them are `recordDamage`,
+        // which writes damage bookkeeping the snapshot does not read, and the parse step, which
+        // touches only the decoder and absorber inside `inputStream` -- and the snapshot reads
+        // neither. So carrying it forward is the same diff sequence at half the construction cost.
+        var before = damageActionSnapshot
+        while true {
+            apply(action, in: bytes, before: &before)
+            guard let next = inputStream.nextAction(in: bytes, from: &index) else { return }
+            action = next
+        }
+    }
+
+    /// `@inline(never)` from measurement, not taste: letting the optimizer inline this dispatch
+    /// into the pull loop cost a further 1.5 points on the drain (`research/33/F15`).
+    @inline(never)
+    private mutating func apply(
+        _ action: TerminalStreamAction,
+        in bytes: UnsafeBufferPointer<UInt8>,
+        before: inout DamageActionSnapshot
+    ) {
+        switch action {
+        case let .printASCIIRun(range):
+            printASCIIRun(bytes, range)
+        case let .print(scalar):
+            print(scalar)
+        case let .execute(control):
+            if control == 0x07 {
+                admitDiscreteSemanticEvent(.bell)
+            } else {
+                execute(control)
+            }
+        case let .escape(final):
+            dispatchEscape(final)
+        case let .escapeSequence(sequence):
+            dispatchEscape(sequence)
+        case let .csi(sequence):
+            dispatchCSI(sequence)
+        case let .osc(payload):
+            dispatchOSC(payload)
+        }
+        let after = damageActionSnapshot
+        recordDamage(from: before, to: after)
+        before = after
     }
 
     private mutating func dispatchOSC(_ payload: [UInt8]) {

@@ -367,8 +367,9 @@ direction gate; several may kill their own follow-on task, which is the point.
 Direction gate: do not start any of these until its Phase 1 counter has run and
 its number is recorded. Each needs a `decisions.md` entry before implementation.
 
-- [x] `T7` **REJECTED as a standalone change; built, gated, and re-scoped as the
-  second half of `T8`** -- **Stream the parser: delete `[TerminalStreamAction]`.**
+- [x] `T7` **LANDED as the second half of `T8`** (rejected as a standalone
+  change first: `F15`, `D5`; re-gated and landed on top of the run granularity:
+  `F17`, `D6`) -- **Stream the parser: delete `[TerminalStreamAction]`.**
   `TerminalInputStream.feed` returns an eager array; `Terminal.feed` iterates it.
   Ideal: the parser pushes each action into the grid reducer as it is
   recognized, so the array never exists. Both types are in the same module, so
@@ -398,8 +399,17 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   per token. The spike this deletes is not paid at the 16 KiB delivery size and
   the drain cost is. `D5` re-scopes this as the second half of `T8`, whose runs
   of 8.3 to 44.8 characters (`F10`) amortize exactly the boundary that costs here.
-- [x] `T8` **LANDED (first half; `T7`'s re-gate is the remaining half)** --
-  **Print ASCII runs in bulk.** **Carries `T7`** (`D5`): the streaming parser is
+  **Re-gated on top of `T8` in `F17` and landed (`D6`): the sign inverted.**
+  Streaming is now **4.4% to 11.2% faster** than the eager array on four
+  fixtures, largest on the two corpora with the *shortest* runs, and the pair
+  reads `faster -69.32%` on `scrollback-stream`. `F17` also corrects why this
+  task existed: **`T8` alone already deleted the 31 MB parse spike**, taking the
+  single-shot footprint difference from 30.95 MB to 0.12 MB, because an array
+  holding one action per 44.8-character run is 36x smaller and is not a spike.
+  So `F15`'s memory table is not `T7`'s case; a measured drain win and `D1`'s
+  complexity claim are.
+- [x] `T8` **LANDED, with `T7` (`D6`)** --
+  **Print ASCII runs in bulk.** **Carried `T7`** (`D5`): the streaming parser is
   built and gated but costs 1.7-5.4% on the drain at per-token granularity, and
   this task is what changes that granularity. An ASCII printable is
   narrow and grapheme-break-`.other` *by construction from the generated table*,
@@ -688,8 +698,8 @@ future reopening needs a new rule against new evidence.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
-run. Phase 2 has begun: `T7` is built, gated and parked (`F15`, `D5`), and `T8`
-has landed (`F16`) with `T7`'s re-gate on top of it outstanding.** `T1` sized the parser's
+run. Phase 2 has begun: `T8` and `T7` have both landed as one change (`F16`,
+`F17`, `D6`), and `T9` and `T10` remain.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -821,7 +831,25 @@ rather than resolving it. Third, `T10` now has slightly *more* to recover: a
 faster drain does not change the 4.96:1 publish ratio and in three invocations it
 raised the delivery count, so `T8` and `T10` are complements.
 
-What remains of `T8` is `T7`. `D5`'s condition was that the pair land only if
-`scrollback-stream` reads at least `equivalent`, and the amortization it was
-waiting for now exists -- the parser's output granularity on plain text is a
-44.8-character run, so `T7`'s per-token call boundary is paid 36x less often.
+**`T7` was then re-gated on top of that and landed with it (`F17`, `D6`), and its
+sign inverted.** `D5` had predicted the run granularity would amortize the
+per-token call boundary and turn a cost into a win; it did, by more than
+break-even. Streaming is now **4.4% to 11.2% faster** than the eager array on
+four fixtures, against the +1.66% it cost before, and the pair reads
+**`faster -69.32%`** on `scrollback-stream`. The gain is *largest on the two
+corpora with the shortest runs* -- -11.2% and -10.2% against -4.4% where runs are
+44.8 characters -- which is the opposite of what pure amortization predicts and
+says the win is not only the boundary: those two corpora are CSI-heavy, so their
+token count stays high under `T8` and the array they no longer build stays large.
+
+`F17` also corrects why `T7` existed at all. **`T8` alone had already deleted the
+31 MB parse spike**, taking the single-shot footprint difference from 30.95 MB to
+0.12 MB, because one 32-byte action per 44.8-character run is 36x smaller than one
+per character and is no longer a spike. So `F15`'s memory table is not `T7`'s
+case; `T7` is justified by a measured 4-11% drain win and by `D1`'s complexity
+claim -- no chunk size can make the intermediate token representation large,
+because it does not exist. One method caveat rides along and is the reverse of
+this project's usual ordering: `T7`'s marginal sign comes from the headless A/B,
+because `benchmark-confirm` cannot run on a change this fast and
+`benchmark-quick` returns disagreeing signs on a 4% drain effect inside a block
+that is mostly not drain.

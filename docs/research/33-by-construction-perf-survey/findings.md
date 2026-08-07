@@ -1364,3 +1364,124 @@ performance verdict.
   `t7-streaming-parser.py` and the paired benchmark. Separately, the
   `terminal-feed` floor is now a live harness limitation for any change on the
   feed path of this size, and nothing in the ladder owns it.
+
+### F17 -- on top of the run granularity the streaming parser inverts: 4-11% faster headless, and `T8` had already deleted its memory spike
+
+- Status: implemented and landed. `T8`, second half -- **`T7` re-gated on top of
+  `T8`**, which is what `D5` parked it for. `F15`'s +1.7-5.4% cost is gone and
+  the sign has flipped: streaming is now **4.4% to 11.2% faster** than the eager
+  array on every corpus measured headlessly. The memory claim it was originally
+  justified by is a separate matter -- **`T8` alone already delivered it**, so
+  `T7` adds nothing there.
+- Date and investigator: 2026-08-07, T8 agent.
+- Commit and worktree state: measured with `T7` in the working tree over
+  `90731fdc` (`T8` landed), which is itself over `63c693da`. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0. Machine: 10 processors, load 0.45 per processor at
+  invocation; the GUI blocks ran with `siriknowledged`, `fseventsd` and
+  `WindowServer` at 27-33%, which is why the GUI readings below are quoted as
+  neutral rather than as a size.
+- Commands, inputs, or reproduction: three baselines built as detached
+  worktrees -- `63c693da` (neither), `90731fdc` (`T8` only), and the working tree
+  (both) -- with `swift build -c release --product TerminalCoreBenchmark` and
+  `--product TerminalMemoryProbe` in each. The headless A/B alternates all three
+  arms ABBA over six runs each and reports medians;
+  `just benchmark-quick baseline=<rev> workload=<w>` supplied the GUI verdicts,
+  and `python3 scripts/research/33/t8-bulk-ascii-runs.py` was re-run with `T7`
+  applied to confirm the counters and the equivalence are unchanged by it.
+- Result or artifact paths: no new script. `t8-bulk-ascii-runs.py` gates both
+  halves -- re-run with `T7` applied, it reports the same counters and the same
+  equivalence -- and `t7-streaming-parser.py`, its probe and its patch are all
+  **deleted**. They existed to build both arms of a change the tree did not
+  contain; the tree contains it now, so the patch would rot against it and the
+  script would fail on the first run. `F15`'s arms are `63c693da..90731fdc` and
+  `90731fdc..HEAD`, and its `.print`-keyed token expectations no longer describe
+  the parser's vocabulary, so re-anchoring the script would mean rewriting the
+  claims rather than preserving them.
+- Measurements, the drain, headless medians of six alternating runs per arm:
+
+  | corpus | `63c693da` | `T8` | `T8`+`T7` | `T7` on top of `T8` |
+  | --- | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 164.08 ms | 82.62 ms | 79.00 ms | **-4.37%** |
+  | `incremental-screen-updates` | 657.70 ms | 563.69 ms | 500.72 ms | **-11.17%** |
+  | `synchronized-frames` | 110.13 ms | 87.31 ms | 78.38 ms | **-10.23%** |
+  | four-stream fixture | 1,421.43 ms | 958.82 ms | 876.59 ms | **-8.58%** |
+
+  `F15` measured the same shape at **+1.66%** on `scrollback-stream` and +2.05%
+  on the four-stream fixture against the same instrument. The pair against
+  `63c693da` is -51.85% / -23.87% / -28.83% / -38.33%.
+- Measurements, the memory claim, `TerminalMemoryProbe` on `scrollback-plain` at
+  179x66:
+
+  | arm | single-shot | 4 KiB chunks | difference |
+  | --- | ---: | ---: | ---: |
+  | `63c693da` | 103.73 MB | 72.78 MB | **30.95 MB** |
+  | `T8` only | 72.67 MB | 72.80 MB | **0.12 MB** |
+  | `T8`+`T7` | 72.61 MB | 72.61 MB | **0.00 MB** |
+
+  This is the finding's second result and it corrects the reason `T7` existed.
+  The 31 MB spike `F15` deleted was one 32-byte action per *character*; under
+  `T8` the array holds one action per 44.8-character run, so it is 36x smaller
+  and is no longer a spike at all. `T8` alone takes the chunk difference to
+  0.12 MB, which is inside `F15`'s own 2 MB tolerance. `T7` closes the last
+  0.12 MB by construction rather than by being small.
+- Measurements, the GUI ladder, `benchmark-quick` on the pair against
+  `63c693da`: `scrollback-stream` **`faster` -69.32%** (drain 155.6 -> 69.1 ms,
+  9.8 -> 22.1 MB/s), `content-churn` `equivalent` -0.90%, `incremental-mixed`
+  `equivalent` +0.77%, `retained-browse` `equivalent` +0.65%, `style-churn`
+  `inconclusive` -2.38%. `T7`'s own marginal effect against `90731fdc` on
+  `scrollback-stream` was measured three times and read `inconclusive` -2.28%,
+  +3.51% and -1.70% -- signs disagreeing, which is the GUI block correctly
+  reporting that a 4% drain change inside a block that is mostly not drain is
+  below what it can resolve. The churn workloads' plan-metric `slower` persists
+  at +6.33% and +8.25% with the same ~15% process-CPU reduction, unchanged from
+  `F16`; `T7` neither causes nor affects it.
+- Measurements, equivalence, unchanged by `T7`: the counters, the printed
+  character counts, the cursor, the scrollback depth and the screen text all
+  match `F16` exactly, and `swift test --package-path lib/TerminalCore` passes
+  **1,030** tests including the 67-fixture 7-byte-split replay. `just test`
+  passes all 75 steps. A grep for `[TerminalStreamAction]` under `lib/*/Sources`
+  returns **0 occurrences**, which is `T7`'s structural claim.
+- Inference: `D5`'s reasoning was right and its size estimate was conservative.
+  It predicted the per-token boundary would amortize by the run length and turn
+  a cost into a win; it did, and by more than break-even, because the pull loop
+  also deletes the array's own store-then-reload of every token. Note where the
+  gain is largest: **`incremental-screen-updates` and `synchronized-frames`, the
+  two corpora with the *shortest* runs**, at -11.2% and -10.2% against -4.4% on
+  the corpus with 44.8-character runs. That is the opposite of what pure
+  amortization predicts and it says the win is not only the boundary: those two
+  corpora are CSI-heavy, so their token count stays high under `T8` and the array
+  they no longer build stays large.
+- Inference, on what justifies `T7` now: not memory. `T8` took the chunk
+  difference from 30.95 MB to 0.12 MB, so anyone reading `F15`'s memory table as
+  `T7`'s case is reading a number `T8` has since absorbed. What is left is a
+  measured speed win of 4-11% on the drain and the complexity claim `D1` admits:
+  the intermediate token representation does not exist, so no chunk size can make
+  it large and no future reader can reintroduce a flatten-then-re-read step
+  without deleting `nextAction`.
+- Competing interpretations: the headless instrument is the one that resolves
+  this and the GUI one is not, which is the reverse of the usual ordering in this
+  project, so it deserves saying plainly rather than being relied on quietly.
+  `F15` used the same headless A/B to establish the +1.66% cost and
+  `benchmark-confirm` to establish direction; here `benchmark-confirm` cannot run
+  at all (`F16`, the `terminal-feed` block floor) and `benchmark-quick` returns
+  disagreeing signs on a 4% effect. The headless series is stable -- six
+  alternating runs per arm, three arms, four fixtures, and every one of the twelve
+  cells points the same way -- and the two largest effects are 10-11%, far outside
+  its noise. But the pair's landing does not rest on `T7`'s marginal sign: the
+  pair reads `faster -69.32%` against `63c693da`, which is `D5`'s stated
+  condition, and `T7`'s worst plausible reading is neutral.
+- Uncertainty: none on the footprints or the counters. `T7`'s marginal effect is
+  directionally certain headlessly and unresolvable on the GUI ladder; no claim
+  is made that a 4% drain improvement is visible to a user. `terminal-feed` still
+  has no calibrated verdict for either half.
+- Observation, two earlier scripts no longer run, by design rather than by
+  neglect: `t1-action-array-size.py` probes an array production no longer builds,
+  and `t2-print-bookkeeping.py` anchors on the eager `for action in actions` loop
+  that no longer exists, so it exits with its own "the engine moved and this probe
+  must be re-anchored" message. Both are kept as the record of `F9` and `F10`,
+  whose numbers `F16` reproduces to the unit from independent anchors. Do not
+  re-anchor them to make them pass; `t8-bulk-ascii-runs.py` is the live counter.
+- Next action: none for `T7` or `T8`; both are landed and `D5` is discharged by
+  `D6`. The `terminal-feed` block floor remains unowned, and `T10` is the next
+  Phase 2 item -- `F16` showed the faster drain slightly *raises* the delivery
+  count, so `T8` enlarged `T10`'s target rather than shrinking it.
