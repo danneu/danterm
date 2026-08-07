@@ -347,3 +347,105 @@ performance verdict.
 - Next action: `T2` (per-printed-cell bookkeeping) is unblocked and its gate is
   met. `T7`/`T8` may proceed to the direction gate; `T7`'s script is this one,
   which must report zero allocations afterward.
+
+### F10 -- every bookkeeping site in the print path runs exactly once per printed character, and ASCII runs are 8-45 characters long
+
+- Status: verified by direct probe. `T2`. **The expected shape held exactly.**
+- Date and investigator: 2026-08-06, T2 agent.
+- Commit and worktree state: `94ef4c14`, clean apart from this task's untracked
+  scripts and an untracked plan file. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0.
+- Commands, inputs, or reproduction:
+  `python3 scripts/research/33/t2-print-bookkeeping.py` (add `--json` for the
+  raw report). The driver copies `lib/TerminalCore/Sources/TerminalCore` into a
+  scratch directory, injects one counter increment at each named site, and
+  compiles the copy with `swiftc -O` as one module together with the probe and
+  the counter shim. **The engine in the repo is never edited.** Every injection
+  is an exact-text anchor that must match exactly once, so a source change that
+  moves a site fails the run rather than silently miscounting. The terminal is a
+  fresh 179x66 per corpus and the framing is the corpus's own, which is what
+  `measureFeedBatch` feeds for `terminal-feed`.
+- Result or artifact paths: `scripts/research/33/t2-print-bookkeeping.py`,
+  `t2-print-bookkeeping-probe.swift`, `t2-print-bookkeeping-counters.swift`. The
+  run writes nothing durable.
+- Measurements or examples. Call counts over the five committed corpora
+  (`T2` said four; the corpus has five and all five were run):
+
+  | corpus | bytes | prints | classify | invalidateInspection | rememberOpenCluster | searchMatchCache.invalidate | damageActionSnapshot | contentIdentity | currentStyleId |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 1,525,000 | 1,500,000 | 1,500,000 | 1,508,333 | 1,500,000 | 1,541,601 | 1,550,000 | 1,500,000 | 1,500,000 |
+  | `styled-screen-redraw` | 5,211,504 | 4,189,500 | 4,189,500 | 4,294,566 | 4,189,500 | 4,294,566 | 4,403,002 | 4,189,500 | 4,189,500 |
+  | `unicode-wrapping` | 1,521,000 | 1,305,000 | 1,305,000 | 1,366,070 | 1,305,000 | 1,382,397 | 1,323,000 | 1,269,000 | 1,269,322 |
+  | `incremental-screen-updates` | 5,700,042 | 2,500,025 | 2,500,025 | 2,800,091 | 2,500,025 | 2,900,091 | 3,300,031 | 2,500,025 | 2,500,025 |
+  | `synchronized-frames` | 3,020,580 | 762,108 | 762,108 | 762,108 | 762,108 | 762,109 | 934,985 | 762,108 | 762,108 |
+
+  ASCII-run structure, cut exactly where `T8` says to cut -- at a non-ASCII
+  scalar, a non-print action, row end (the pending-wrap latch), insert mode, and
+  a wide-or-spacer cell about to be overwritten:
+
+  | corpus | prints | runs | prints in runs | mean run | longest run | units after `T8` | factor | snapshots after `T8` | factor |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 1,500,000 | 33,332 | 1,491,667 | 44.8 | 60 | 41,665 | **36.0x** | 91,665 | 16.9x |
+  | `styled-screen-redraw` | 4,189,500 | 129,500 | 4,168,500 | 32.2 | 52 | 150,500 | **27.8x** | 364,002 | 12.1x |
+  | `unicode-wrapping` | 1,305,000 | 50,787 | 1,208,250 | 23.8 | 57 | 147,537 | **8.8x** | 165,537 | 8.0x |
+  | `incremental-screen-updates` | 2,500,025 | 300,001 | 2,500,025 | 8.3 | 25 | 300,001 | **8.3x** | 1,100,007 | 3.0x |
+  | `synchronized-frames` | 762,108 | 50,416 | 614,645 | 12.2 | 177 | 197,879 | **3.9x** | 370,756 | 2.5x |
+
+  "Units after `T8`" is one per run plus one for every print no run can absorb.
+  "Snapshots after `T8`" adds the non-print actions and the one snapshot `feed`
+  carries in per call, both of which survive.
+- Observation: the four per-character sites are exactly per-character.
+  `terminalUnicodeClassification` and `rememberOpenCluster` equal the print count
+  in **all five** corpora, to the unit. `invalidateInspection` reached from
+  `printNarrow` plus `printWide` equals the *printed-cell* count in all five --
+  `scrollback-stream` 1,500,000 + 0, `unicode-wrapping` 1,215,000 + 54,000 =
+  1,269,000, which is exactly that corpus's `contentIdentity` count. Its other
+  36,000 prints are scalars that joined an open cluster or had zero cell width,
+  so they never occupied a new cell; the cluster-joining ones still reach
+  `invalidateInspection` through `appendToOpenClusterIfJoined`.
+  `contentIdentity` and `currentStyleId` are likewise one per printed cell;
+  `unicode-wrapping`'s 1,269,322 exceeds its 1,269,000 by the 322 wide prints
+  that hit the right-margin spacer branch, which reads the pen twice. The counts
+  above the print count are the
+  rest of the engine using the same funnels: `invalidateInspection` also runs for
+  scrolls and erases, and `searchMatchCache.invalidate` sits in
+  `notePrimaryHistoryDamage`, which every content mutation reaches.
+- Observation, cross-check: `damageActionSnapshot` came out at exactly
+  `tokens + feedCalls` and the snapshot diff at exactly `tokens`, for every
+  corpus, against `F9`'s independently derived token counts (1,525,000 /
+  4,399,501 / 1,314,000 / 3,200,029 / 934,889). Two probes built from different
+  anchors agreeing to the unit is what licenses reading either.
+- Inference: `T8`'s premise is confirmed and sized. On the streaming corpus the
+  five per-character sites collapse **36x**; on the styled redraw **27.8x**; the
+  worst corpus is `synchronized-frames` at 3.9x, because its content is not
+  mostly long ASCII runs. `damageActionSnapshot` construction and its diff -- the
+  largest single count in the table, since `feed` pays one per action -- fall
+  2.5-16.9x, and that is the part `T7` and `T8` compound on: `T7` deletes the
+  array the actions live in, `T8` deletes most of the actions.
+- Inference, one site is already cheap: `currentStyleIdMisses` is **1** on
+  `scrollback-stream`, `unicode-wrapping` and `incremental-screen-updates`, and
+  38,500 / 62,868 on the two styled corpora. So `currentStyleId`'s per-character
+  call is a cache hit almost always and `T8` should not claim an interning win
+  from hoisting it -- only one fewer call.
+- Competing interpretations: the run counts are what the *cut rules* produce, not
+  what an implementation would necessarily achieve. A real `T8` may cut in more
+  places -- an ASCII scalar that could join an open cluster, a scrolled-back
+  viewport, a row-end fill -- and every extra cut lowers the factor. The rule
+  here also assumes the run advances one column per print, which it checks
+  directly (`column == previous + 1`), so a cursor move disguised as a print
+  cannot inflate a run. In the other direction the factor is not an upper bound
+  either: the mean run is capped by the corpora's line lengths (longest observed
+  60 on `scrollback-stream` at 179 columns), so a wider pane or longer lines
+  would raise it.
+- Competing interpretations, the counters themselves: injecting increments
+  perturbs inlining, so this build's *timing* means nothing and none is claimed.
+  The counts are exact and the instrumentation only adds statements -- no engine
+  branch is rewritten.
+- Uncertainty: none on any count; all are exact tallies of a deterministic
+  replay. No timing was taken. The share of `terminal-feed`'s wall clock that
+  these sites represent is still unmeasured, and this finding does not predict
+  one.
+- Next action: `T8` is sized and may proceed to its direction gate; its
+  before/after script is this one, which must show the five per-character
+  counters fall to the "units after `T8`" column. `T3` (damage round trips) is
+  the next Phase 1 counter and is unaffected by this result.

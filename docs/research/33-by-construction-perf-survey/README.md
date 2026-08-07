@@ -233,13 +233,23 @@ direction gate; several may kill their own follow-on task, which is the point.
   The array is confirmed live in an `-O` build -- 275,355 of 275,355 feed calls
   returned the predicted capacity -- and the parser hands the allocator 60-80x
   the corpus's own byte count in total array bytes.
-- [ ] `T2` RESEARCH -- **Count per-printed-cell bookkeeping.** Script: instrument
+- [x] `T2` DONE -- **Count per-printed-cell bookkeeping.** Script: instrument
   `Terminal.print`/`printNarrow` call counts for
   `terminalUnicodeClassification`, `invalidateInspection`,
   `rememberOpenCluster`, `searchMatchCache.invalidate`, and
-  `damageActionSnapshot` construction, over the four corpora. This sizes `T4`'s
-  bulk-run win before it is written. Expected shape: each is called once per
+  `damageActionSnapshot` construction, over the four corpora. This sizes the
+  bulk-run win in `T8` before it is written (the ledger originally said `T4`,
+  which is now the publish-rate counter). Expected shape: each is called once per
   printed character while its inputs are constant across a run within one row.
+  **Result in `F10`, script `scripts/research/33/t2-print-bookkeeping.py`. The
+  expected shape held exactly:** `terminalUnicodeClassification` and
+  `rememberOpenCluster` equal the print count to the unit in all five corpora,
+  and `invalidateInspection` from `printNarrow`/`printWide`, `contentIdentity`
+  and `currentStyleId` equal the printed-cell count. ASCII runs are 8.3 to 44.8
+  characters long, so those sites collapse **3.9x to 36x** under `T8` and the
+  per-action `damageActionSnapshot` falls 2.5x to 16.9x. One caveat for `T8`:
+  `currentStyleId` misses its cache once per corpus on the plain-text workloads,
+  so hoisting it saves a call, not an interning.
 - [ ] `T3` RESEARCH -- **Count damage-representation round trips per frame.**
   Script: per published frame, report damaged-row count, `Set<Int>` allocations
   (drain + `init(rows:)` + halo + union), hash operations, and whether the
@@ -288,7 +298,9 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   narrow and grapheme-break-`.other` *by construction from the generated table*,
   so a run of them can neither join a cluster nor be wide. One damage record,
   one `invalidateInspection`, one content-identity range, one style id, one
-  `rememberOpenCluster`, one snapshot/diff per run. Subsumes doc 10's parked
+  `rememberOpenCluster`, one snapshot/diff per run. `F10` sizes it: runs average
+  8.3 to 44.8 characters, so the per-character sites collapse 3.9x to 36x and the
+  per-action snapshot 2.5x to 16.9x. Subsumes doc 10's parked
   `H1(a)` without its cursor-repaint trap, since the run's start and end rows are
   both still diffed. Verification: `T2`'s counters must fall from per-character
   to per-run; correctness rides the existing chunk-invariance replay, which
@@ -540,7 +552,11 @@ future reopening needs a new rule against new evidence.
 
 ## Outcome
 
-Investigation in progress. Phase 1 has one task done: `T1` sized the parser's
-action array in situ (`F9`) and passed `T2`'s gate, so the ASCII-run premise
-under `T7`/`T8` stands. Every other task in Phases 2-4 is still gated behind a
-counter that does not yet exist.
+Investigation in progress. Phase 1 has two tasks done, and both point the same
+way: `T1` sized the parser's action array in situ (`F9`) and passed `T2`'s gate,
+and `T2` then sized the per-printed-cell bookkeeping (`F10`) and found the
+expected shape exactly -- every named site runs once per printed character, and
+ASCII runs are long enough for `T8` to collapse them 3.9x to 36x. So `T7` and
+`T8` are the two tasks whose mechanism is now measured rather than argued. Every
+other task in Phases 2-4 is still gated behind a counter that does not yet
+exist.
