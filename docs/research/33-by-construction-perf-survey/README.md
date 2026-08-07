@@ -9,6 +9,12 @@ Continues: [18-cpu-renderer-optimization-leads.md](../18-cpu-renderer-optimizati
   survey's directly verified code-reads and probes.
 - [decisions.md](decisions.md) -- the auditable decision log; currently holds
   the three standing tensions this survey inherited rather than resolved.
+- [2026-08-07-stale-wrap-claim-line-fusion.md](2026-08-07-stale-wrap-claim-line-fusion.md) -- session notes
+  for the stale-wrap-claim scrollback fusion found and fixed while this
+  survey ran: the ablated bug, the two refuted fix designs, and the shipped
+  `marginErased` gate (`01cf1eb8`) plus the `pane rows`/`pane zoom` tooling
+  built to find it (`00ab639d`). Not survey evidence -- an incident record that
+  happens to share the campaign.
 
 ## Purpose
 
