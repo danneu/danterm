@@ -884,7 +884,9 @@ class AppRuntime {
                 themeName: model.pane(paneId).map {
                     effectiveTheme(for: $0, config: model.config)
                 },
-                fontSize: model.config.resolvedFontSize,
+                fontSize: model.pane(paneId).map {
+                    effectiveFontSize(for: $0, config: model.config)
+                } ?? model.config.resolvedFontSize,
                 fontFamily: model.resolvedFontFamily
             ) else {
                 send(.sessionCreationFailed(paneId: paneId))
@@ -1688,9 +1690,18 @@ class AppRuntime {
     private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
         var stagedSessions: [PaneId: any TerminalSession] = [:]
         var stagedReplayFiles: [PaneId: URL] = [:]
+        // A snapshot carries structure, not appearance, so the rebuilt model arrives
+        // with its config and resolved font family at the defaults. Carry the live
+        // ones on before anything reads them: sessions below are built from this
+        // model, and it is the one commitRestoreSession installs.
+        let restoredModel = carryingLiveAppearance(
+            loaded.model,
+            config: model.config,
+            resolvedFontFamily: model.resolvedFontFamily
+        )
 
         do {
-            for group in loaded.model.groups {
+            for group in restoredModel.groups {
                 for tab in group.tabs {
                     for paneId in allPaneIds(tab.rootNode) {
                         let ps = loaded.paneSnapshots[paneId]
@@ -1714,11 +1725,13 @@ class AppRuntime {
                             launchCommand: nil,
                             waitAfterCommand: true,
                             envVars: envVars,
-                            themeName: loaded.model.pane(paneId).map {
-                                effectiveTheme(for: $0, config: loaded.model.config)
+                            themeName: restoredModel.pane(paneId).map {
+                                effectiveTheme(for: $0, config: restoredModel.config)
                             },
-                            fontSize: loaded.model.config.resolvedFontSize,
-                            fontFamily: loaded.model.resolvedFontFamily
+                            fontSize: restoredModel.pane(paneId).map {
+                                effectiveFontSize(for: $0, config: restoredModel.config)
+                            } ?? restoredModel.config.resolvedFontSize,
+                            fontFamily: restoredModel.resolvedFontFamily
                         ) else {
                             throw RestoreBuildError.sessionCreationFailed
                         }
@@ -1728,13 +1741,13 @@ class AppRuntime {
             }
 
             return StagedRestoreSession(
-                model: loaded.model,
+                model: restoredModel,
                 sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             )
         } catch {
             discardRestoreSession(StagedRestoreSession(
-                model: loaded.model,
+                model: restoredModel,
                 sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             ))

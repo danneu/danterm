@@ -205,7 +205,7 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
 
 ## Commit progress
 - [x] 1. feat(core): per-pane font-size zoom in model, projection, and snapshot
-- [ ] 2. feat(app): bind per-pane font-size zoom to the View menu
+- [x] 2. feat(app): bind per-pane font-size zoom to the View menu
 
 ## Implementation notes
 
@@ -220,6 +220,14 @@ and `UpdateThemeTests#splitPaneWithoutThemeProjectsDefaults` asserts a whole
   `.toggleZoomPane` rather than one message with an enum payload.
 - `.adjustPaneFontSize` bounds its `steps` argument before adding it to the
   pane's, so no caller can overflow the sum.
+- I9's carry-over lands in `stageValidatedRestore` alone, not also in
+  `commitRestoreSession`: staging builds the sessions and returns the model that
+  commit installs, so carrying once at the top of staging covers both halves of
+  the invariant. `restoredModel` replaces `loaded.model` throughout that
+  function so the two cannot drift apart.
+- Session creation falls back to the configured size when the pane is missing
+  from the model, matching how the adjacent `themeName` argument already
+  degrades.
 
 ## Follow Up
 

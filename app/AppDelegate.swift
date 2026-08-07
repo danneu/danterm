@@ -314,6 +314,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let toggleThemeItem = NSMenuItem(title: "Toggle Theme Browser", action: #selector(toggleThemeBrowser(_:)), keyEquivalent: "B")
         toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(toggleThemeItem)
+
+        // Font size zooms the focused pane only. AppKit matches key equivalents
+        // against charactersIgnoringModifiers, so Cmd-Shift-= arrives as "+" and
+        // plain Cmd-= as "="; one item cannot match both. The visible row binds
+        // "+", and a hidden twin keeps "=" live without showing a second row.
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(withTitle: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "+")
+        let increaseEqualsItem = NSMenuItem(title: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "=")
+        increaseEqualsItem.isHidden = true
+        increaseEqualsItem.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(increaseEqualsItem)
+        viewMenu.addItem(withTitle: "Decrease Font Size", action: #selector(decreasePaneFontSize(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetPaneFontSize(_:)), keyEquivalent: "0")
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -368,7 +382,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             colorSubmenu.addItem(item)
         }
         colorSubmenu.addItem(NSMenuItem.separator())
-        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "0")
+        // Cmd-9, not Cmd-0: "Actual Size" in the View menu owns Cmd-0.
+        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "9")
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
@@ -615,6 +630,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func toggleThemeBrowser(_ sender: Any?) {
         runtime.toggleThemeBrowser()
+    }
+
+    // nil paneId means the focused pane of the selected tab, which is what a
+    // menubar action targets.
+    @objc func increasePaneFontSize(_ sender: Any?) {
+        runtime.send(.adjustPaneFontSize(paneId: nil, steps: 1))
+    }
+
+    @objc func decreasePaneFontSize(_ sender: Any?) {
+        runtime.send(.adjustPaneFontSize(paneId: nil, steps: -1))
+    }
+
+    @objc func resetPaneFontSize(_ sender: Any?) {
+        runtime.send(.resetPaneFontSize(paneId: nil))
     }
 
     @objc func closePane(_ sender: Any?) {
