@@ -15,10 +15,10 @@ Continues: [18-cpu-renderer-optimization-leads.md](../18-cpu-renderer-optimizati
   `marginErased` gate (`01cf1eb8`) plus the `pane rows`/`pane zoom` tooling
   built to find it (`00ab639d`). Not survey evidence -- an incident record that
   happens to share the campaign.
-- [2026-08-08-t25-owned-pane-surface.md](2026-08-08-t25-owned-pane-surface.md) --
-  the `T25` implementation plan (the view owns the pane surface: IOSurface
-  swapchain, one render path), kept here so the route's contract lives next to
-  the `F24` evidence and the `D7` addendum that triggered it.
+- [2026-08-08-t25-owned-pane-surface.md](2026-08-08-t25-owned-pane-surface.md) -- the `T25` implementation plan
+  (the view owns the pane surface: IOSurface swapchain, one render path),
+  kept here so the route's contract lives next to the `F24` evidence and the
+  `D7` addendum that triggered it.
 
 ## Purpose
 
