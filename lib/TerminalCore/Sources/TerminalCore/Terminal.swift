@@ -2109,6 +2109,15 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// The stream row at the top of the local window in absolute, eviction-corrected
+    /// coordinates -- the space text anchors pin. Unlike `scrollProjection.topRow`, which is
+    /// retained-relative and plateaus once history eviction begins, this stays monotone while
+    /// the viewport follows live output, so a delivery-rate sampler can read scrolled lines
+    /// as a plain delta. A hard reset restarts it, like the eviction counter it builds on.
+    public var absoluteViewportTopRow: Int {
+        evictedRowCount + scrollProjection.topRow
+    }
+
     /// Moves the local window by signed visual rows; positive values move toward live output.
     public mutating func scroll(byRows rowDelta: Int) {
         guard isAlternateScreenActive == false else { return }

@@ -77,6 +77,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/TerminalFrameRateSampler.swift" \
+        "$SCRIPT_DIR/app/TerminalDeliveryShapeSampler.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \

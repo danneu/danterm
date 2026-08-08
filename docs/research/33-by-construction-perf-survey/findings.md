@@ -1560,3 +1560,139 @@ performance verdict.
   the churn plan metric's `slower` as expected whenever a change raises
   publishes per draw -- until `T10` bounds the publish rate, which deletes the
   composition effect at its source.
+
+### F19 -- live lines-per-delivery is bimodal: a paced producer pays one whole screen per line, and only a flood amortizes it
+
+- Status: verified by direct measurement in a running app, reproduced across
+  two full runs, with the one surprise confirmed by headless ablation. This is
+  the measurement `F13` named as the one number to take before `T9` starts,
+  and it places production at **both ends** of the amplification curve at
+  once, segregated by producer type: every paced producer measured -- 30, 240
+  and 960 lines/s, the shapes of build logs, test output and a fast logger --
+  publishes **exactly one line per frame** (mean 0.997-1.005, h1 share 99.7%),
+  the 66x end, while a full-speed `cat` publishes **~290 lines per frame**
+  (96% of publishes at >=91 lines), the 1.0x end. Two discoveries ride along:
+  at the history budget a scroll's damage arrives as a **whole-viewport row
+  set instead of `.full`**, which corrects the scope of `F11`'s escalation
+  claim; and the `T4` instrument re-run post-`T8` reads **13.0 publishes per
+  draw**, up from `F12`'s 4.96.
+- Date and investigator: 2026-08-07, T9-vetting agent.
+- Commit and worktree state: `a62637b2` plus this task's own changes -- the
+  `absoluteViewportTopRow` accessor on `Terminal` and
+  `TerminalPaneSessionController` (with its eviction unit test), the
+  `TerminalDeliveryShapeSampler` (`app/TerminalDeliveryShapeSampler.swift`)
+  and its two call sites in `SwiftTerminalSessionView`, and the two launcher
+  allowlist entries. Apple Swift 6.3.3, arm64-apple-macosx26.0, release
+  configuration, 120 Hz display, default slot window at 40 grid rows.
+- Commands, inputs, or reproduction:
+  `scripts/research/33/t9-lines-per-delivery.sh` (the live measurement; four
+  producer regimes in one pane),
+  `scripts/research/33/t9-damage-at-budget-probe.sh` (the headless ablation),
+  and `scripts/research/33/t4-publish-rate.sh --seconds 12 --megabytes 128`
+  (the publish/draw ratio re-run, unchanged script).
+- What the instrument counts: one JSON line per pane per elapsed second from
+  inside `publish(_:)`, carrying publishes, full-damage publishes, scrolled
+  viewport lines, and a lines-per-publish histogram whose buckets bracket
+  `F13`'s curve points (1, 8, 91). Scrolled lines are the per-publish delta of
+  the new `absoluteViewportTopRow` -- `evictedRowCount + topRow` -- because
+  `scrollProjection.topRow` alone plateaus once eviction begins and would
+  under-read a long stream to zero; the unit test pins that behavior. A second
+  env-gated file traces every publish individually. Summaries drop each
+  segment's first window, which by construction carries the previous
+  scenario's unflushed tail (the sampler's windows close on the next publish).
+- Measurements, steady state, both runs (run 2 first, run 1 in parentheses
+  where it differs by more than rounding):
+
+  | scenario | publishes/s | mean lines/publish | h1 share | full-damage share | rows touched per scrolled line |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | `cat` full speed | 1,532 (1,535) | 291.4 (288.7) | 0% | 1.000 | **0.14** |
+  | paced 30/s | 30.2 | **0.997** | 99.7% | 0.51 | **39.9** |
+  | paced 240/s | 239.2 (238.9) | **1.001** | 99.7% | 0.49 | **39.9** |
+  | paced 960/s | 956.4 (953.4) | **1.001** (1.005) | 99.8% | 0.44 (0.42) | **39.9** |
+
+  Publishes equal deliveries to within a handful per thousand in every
+  scenario, and paced publishes/s equal the producer's rate exactly -- so
+  **nothing between the PTY write and the publish coalesces paced lines, up to
+  at least 960 lines per second**. "Rows touched" counts the whole 40-row grid
+  once per scrolling publish (see the damage-shape result below) against the
+  lines the viewport actually moved.
+
+  The `T4` instrument re-run, steady windows: **1,556-1,614 publishes/s
+  against 120-121 draws/s -- 13.0 publishes per draw**, versus `F12`'s 594
+  and 4.96 at `144d3054`. `T8`'s faster drain raised the publish rate ~2.6x
+  while the display stayed at 120 Hz.
+- Observation, the damage shape at the history budget -- found because the
+  live full-damage share read ~0.5 where `F11`/`F13` predicted 1.0, and every
+  "non-full" scrolling publish in the trace carried **exactly 40 rows**, the
+  whole grid. The ablation probe (`t9-damage-at-budget-probe.sh`) settles it:
+  below the budget a one-line scroll escalates to `.full` **200 of 200** times
+  through `recordDamage(from:to:)`'s `topRow` guard, exactly as `F11` read;
+  at the budget the same feed produces `.full` only **9 of 200** times, with
+  the other 191 arriving as a 40-row damage set, because the history append
+  and the arena eviction cancel in `scrollProjection.topRow` and the guard
+  never fires -- while `absoluteViewportTopRow` still advances 200/200, which
+  also validates the sampler's delta. Arena eviction is chunked, so live at
+  budget the two shapes interleave (~0.5 share). The cost is the whole screen
+  either way; only the representation differs. Two scope corrections follow:
+  `F11`'s "streaming publishes `.full` on every frame" is the **below-budget
+  half** of the story, and its "the damage-set apparatus is never on the
+  streaming hot path" inverts at budget, where every scrolling delivery puts
+  40 rows through the set -- `F11`/`F13` measured short-history probes and
+  the benchmark corpora, all below budget.
+- Inference, for `T9` (shift damage): production does not sit at one point on
+  `F13`'s curve; it occupies both ends, split by producer type. The paced
+  regime is `T9`'s entire case, and it is the strongest form of it: at 240
+  lines/s the app plans and submits the whole screen 240 times a second --
+  ~9,570 rows planned per second to express ~240 changed lines, `F13`'s
+  amplification at this 40-row geometry (40x rows, and 2 ideal rows per
+  publish counting the cursor row) sustained continuously. At 30 lines/s
+  every one of those whole-screen plans is also drawn, because the publish
+  rate sits under the display rate -- so unlike the flood, `T10` recovers
+  none of it and `T9` is the only lever on this regime. The flood regime is
+  `T10`'s case instead: at 1,532 publishes/s against 120 draws, 12 of every
+  13 whole-screen plans are overwritten unseen, and shift damage would save
+  little per frame (1.0x amplification) -- so `T9` and `T10` partition the
+  producer space between them, which sharpens the README's "either alone is a
+  win" into a regime split.
+- Inference, for `T9`'s design, and this is the trap the measurement caught:
+  a shift representation **cannot be derived from `topRow` deltas**, because
+  at the history budget `topRow` is constant while the content translates
+  under it -- any "topRow changed, therefore translate" reconstruction reads
+  zero shift exactly where the pane spends its steady state. The shift must be
+  recorded where the scroll happens (`moveAndFillRows`), carried in the
+  damage value as `T9` already proposes. The same fact means `T9`'s
+  verification must run its scenarios **at** the budget as well as below it,
+  and `t9-damage-at-budget-probe.sh` is the seed of that arm.
+- Inference, for `T10` and `H2`: the multiplier is now **13.0**, not 4.96;
+  `F16` predicted `T10` would have "slightly more to recover" and the true
+  factor is 2.6x more publishes at the same 120 Hz ceiling. A `T10` claim
+  should be written against this number, with `F12`'s 4.96 as the pre-`T8`
+  datum.
+- Competing interpretations: the slot window here is 40 grid rows against
+  `F13`'s 66, so the whole-screen cost per paced line is 40 rows, not 66 --
+  the amplification scales with the viewport and the one-line-per-publish
+  behavior is geometry-independent. The paced producer writes each line
+  atomically with a flush, which is the common but not universal shape; a
+  build tool that buffers multi-line bursts lands between the regimes (h2 and
+  h3to8 stay near zero here, so bursts were rare in these runs), and the
+  curve in `F13` interpolates those cases. And `cat`'s 290 lines per publish
+  is the corpus's ~59-byte mean line against the 16 KiB read cap, so a
+  wider-lined corpus floods at proportionally fewer lines per publish but
+  identical bytes.
+- Uncertainty: none on the counts, which are exact tallies, and the paced
+  rows all reproduce to 0.5% or better across the two runs. The `cat`
+  publish rate differs between the two instruments (1,532/s from the shape
+  sampler's scenario, 1,584/s steady from the `T4` re-run) by corpus size and
+  window boundaries; the ratio conclusion does not depend on the digit. The
+  paced scenarios all ran at the history budget because the `cat` scenario
+  precedes them in the same pane and fills the 16 MiB arena; below budget the
+  paced damage shape would be `.full` on every line (the probe's first
+  census), with identical whole-screen cost, so the regime conclusion is
+  unaffected.
+- Next action: `T9` has its production placement and may proceed to its
+  `decisions.md` entry, with two riders from this finding: the shift must be
+  recorded at the scroll site rather than derived from `topRow`, and the
+  verification matrix gains an at-budget arm. `t9-lines-per-delivery.sh` is
+  `T9`'s live before/after gate beside `T5`'s headless one: after the change,
+  paced scenarios must publish O(1) damaged rows per line while
+  `rewrite`-style output stays unmoved. `T10`'s claim updates to 13.0:1.

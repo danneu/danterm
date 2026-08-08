@@ -41,14 +41,22 @@ PREVIOUS_FRONT_APP=""
 DANTERM="$REPO_ROOT/.build/DanTerm Dev.app/Contents/Helpers/danterm"
 
 cleanup() {
+    # Hand the front back before killing: killing the frontmost app makes
+    # launchd relaunch it as an orphan without `--fresh` or a slot lock, which
+    # then squats the slot socket and shows the recovery prompt.
+    if [ -n "$PREVIOUS_FRONT_APP" ]; then
+        open -b "$PREVIOUS_FRONT_APP" 2>/dev/null || true
+        PREVIOUS_FRONT_APP=""
+    fi
     if [ -n "$SLOT_PID" ] && kill -0 "$SLOT_PID" 2>/dev/null; then
         kill "$SLOT_PID" 2>/dev/null || true
         wait "$SLOT_PID" 2>/dev/null || true
     fi
     SLOT_PID=""
-    if [ -n "$PREVIOUS_FRONT_APP" ]; then
-        open -b "$PREVIOUS_FRONT_APP" 2>/dev/null || true
-        PREVIOUS_FRONT_APP=""
+    # Sweep a relaunched orphan anyway, scoped to the slot this run claimed.
+    if [ -n "${SLOT_NUMBER:-}" ]; then
+        sleep 0.5
+        pkill -f "danterm-dev-slots/apps/DanTerm Dev \\($SLOT_NUMBER\\)" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -93,11 +101,15 @@ PANE_ID="$("$DANTERM" --socket "$SOCKET" ls \
     | jq -r 'first(.. | objects | select(.type == "leaf") | .pane.id)')"
 echo "pane: $PANE_ID" >&2
 
-BUNDLE_ID="$(jq -r '.bundleId' "$SLOT_HANDLE")"
+# Activate by process id, not bundle id: the launcher stamps each slot app into
+# a fresh directory, and LaunchServices may resolve the dev bundle id to a stale
+# copy (-609) when asked to `open -b` it.
+APP_PID="$(jq -r '.pid' "$SLOT_HANDLE")"
+SLOT_NUMBER="$(jq -r '.slot' "$SLOT_HANDLE")"
 PREVIOUS_FRONT_APP="$(osascript -e \
     'tell application "System Events" to bundle identifier of first application process whose frontmost is true' \
     2>/dev/null || true)"
-open -b "$BUNDLE_ID"
+osascript -e "tell application \"System Events\" to set frontmost of (first application process whose unix id is $APP_PID) to true"
 
 # Settle first: the frames right after launch are shell startup, not streaming,
 # and the window needs a moment to report itself unoccluded.

@@ -334,6 +334,10 @@ final class TerminalPaneSessionController {
     /// sampler's call sites read. The harness never emits a rate sample, so a
     /// frozen zero is the whole contract.
     let fenceMetrics = TerminalPaneFenceMetrics()
+    /// Stands in for the real controller's absolute viewport top, which the
+    /// delivery-shape sampler's call site reads. Same contract as
+    /// `fenceMetrics`: the harness never samples, so a frozen zero suffices.
+    let absoluteViewportTopRow = 0
     private(set) var renderTheme = RenderTheme.dark
     private(set) var appliedThemes: [RenderTheme] = []
     var viewportState: TerminalPaneViewportState

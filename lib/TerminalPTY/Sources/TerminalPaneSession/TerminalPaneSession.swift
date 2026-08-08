@@ -659,6 +659,12 @@ public final class TerminalPaneSessionController {
         )
     }
 
+    /// The cached snapshot's absolute (eviction-corrected) viewport top row, so the
+    /// delivery-shape sampler can read scrolled lines per publish as a delta.
+    public var absoluteViewportTopRow: Int {
+        cachedTerminal.absoluteViewportTopRow
+    }
+
     /// Returns the latest cached line structure without crossing the host actor boundary.
     public func readRowStructure() -> [TerminalRowStructure] {
         cachedTerminal.rowStructure

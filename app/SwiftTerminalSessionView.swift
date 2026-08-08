@@ -44,6 +44,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
+    /// Non-nil only when `DANTERM_DELIVERY_SHAPE_LOG` asked for lines-per-publish.
+    private let deliveryShapeSampler = TerminalDeliveryShapeSampler.make()
     private var fontSize: CGFloat
     /// The verified-installed family to render, or nil for the system monospace
     /// font. Never a raw name from config -- only a resolved family reaches here.
@@ -826,6 +828,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         }
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
+        deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.detachFenceMetricsController(controller)
         #endif
@@ -970,6 +973,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
         #endif
         frameRateSampler?.recordPublish(deliveryCount: controller.fenceMetrics.delivery.count)
+        deliveryShapeSampler?.recordPublish(
+            absoluteViewportTopRow: controller.absoluteViewportTopRow,
+            isFullDamage: frame.damage.isFull,
+            damagedRowCount: frame.damage.rows.count,
+            deliveryCount: controller.fenceMetrics.delivery.count,
+            gridRows: frame.plan.rows
+        )
         publishedFrame = (frame.plan, metrics)
         if frame.damage.isFull {
             invalidateFullDisplay()

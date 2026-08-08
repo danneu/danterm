@@ -139,6 +139,30 @@ struct TerminalViewportTests {
         #expect(terminal.scrollbackRowCount <= 2)
     }
 
+    @Test("absolute viewport top row stays monotone across history eviction")
+    func absoluteViewportTopRowSurvivesEviction() throws {
+        // Intent: `absoluteViewportTopRow` counts every line the following viewport
+        //   has scrolled past, in the same eviction-corrected coordinates anchors pin.
+        // Why it exists: `scrollProjection.topRow` is retained-relative and plateaus
+        //   once eviction begins, so a sampler diffing it under-reads a long stream;
+        //   the absolute form is what makes scrolled-lines-per-delivery a plain delta.
+        // Scenario: a stream outgrows a two-line budget while the viewport follows.
+        var terminal = try #require(Terminal(
+            columns: 4,
+            rows: 3,
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 4)
+        ))
+        terminal.feed(Array("a\r\nb\r\nc".utf8))
+        #expect(terminal.absoluteViewportTopRow == 0)
+
+        terminal.feed(Array("\r\nd\r\ne".utf8))
+        #expect(terminal.absoluteViewportTopRow == 2)
+
+        terminal.feed(Array("\r\nf\r\ng\r\nh\r\ni".utf8))
+        #expect(terminal.absoluteViewportTopRow == 6)
+        #expect(terminal.scrollProjection.topRow < 6)
+    }
+
     @Test("history wipe returns a displaced browsing viewport to live-bottom follow")
     func historyWipeRestoresBottomFollow() throws {
         // Intent: a history wipe that destroys the browse anchor resumes live-bottom follow.

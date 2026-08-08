@@ -153,7 +153,9 @@ frame.
 
 Supports: `23/F5`, and now `F12`, which measured it live and confirmed the
 direction while correcting the size: a real `cat` publishes 594 frames/s against
-120 draws/s, so the multiplier is **4.96x, not 8x**. Competing explanation: much
+120 draws/s, so the multiplier is **4.96x, not 8x** -- re-measured after `T8`
+landed at **13.0x** (`F19`), because the faster drain publishes ~2.6x more
+frames against the same 120 Hz display. Competing explanation: much
 of the fence stall is main waiting for parsing that must happen regardless, so
 the recoverable part is only the plan + copy-on-write + set churn between
 fences. That one is still open -- `F12` counts frames, not the CPU inside them.
@@ -180,8 +182,11 @@ planner re-inspects all 66 rows and 11,814 cells on every scrolling frame,
 because `reusable` is `nil` whenever `damage.isFull`, against 1 row and 179 cells
 on the non-scrolling control. Remaining qualifier, also from `F13`: the
 amplification is a function of delivery size and reaches 1.0x once a delivery
-scrolls the whole screen, so live lines-per-delivery sets the win's real size and
-is not yet measured.
+scrolls the whole screen, so live lines-per-delivery sets the win's real size.
+**Measured in `F19`, and it is bimodal:** paced producers sit at exactly one
+line per publish (the 66x end) at every rate tried up to 960 lines/s, and a
+full-speed flood sits at ~290 (the 1.0x end) -- so the win is the whole paced
+regime, not a point on the curve.
 
 ### H4 -- the app-runtime vertical has real cost and no instrument, so it has never been ranked
 
@@ -460,6 +465,19 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   row-local under a shift and must be re-derived after it; `scrollRect(_:by:)`
   on a layer-backed view needs verifying against the backing store. A wrong
   shift shows as a torn screen, not a slow one.
+  **Production placement measured (`F19`), so the sizing question `F13` left is
+  answered:** live output is bimodal by producer type. Every paced producer
+  measured (30, 240, 960 lines/s) publishes exactly one line per frame -- the
+  66x end of the curve, sustained, and at rates under the display rate `T10`
+  recovers none of it, so this regime is `T9`'s alone. A full-speed `cat`
+  publishes ~290 lines per frame -- the 1.0x end, where `T9` wins nothing and
+  `T10` owns the cost. Two riders for the design, from the same finding: the
+  shift **cannot be derived from `topRow` deltas**, because at the history
+  budget the append and the eviction cancel in `topRow` while the content
+  still translates (`t9-damage-at-budget-probe.sh` is the ablation), and the
+  verification matrix needs an at-budget arm, where a scroll's damage arrives
+  as a whole-viewport row set rather than `.full`. `T9` may proceed to its
+  `decisions.md` entry.
 - [ ] `T10` VETTING -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.
@@ -719,7 +737,8 @@ future reopening needs a new rule against new evidence.
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
 run. Phase 2 has begun: `T8` and `T7` have both landed as one change (`F16`,
-`F17`, `D6`), and `T9` and `T10` remain.** `T1` sized the parser's
+`F17`, `D6`), and `T9` and `T10` remain -- both now fully vetted (`F19`) and
+awaiting their `decisions.md` entries.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -886,3 +905,24 @@ this project's usual ordering: `T7`'s marginal sign comes from the headless A/B,
 because `benchmark-confirm` cannot run on a change this fast and
 `benchmark-quick` returns disagreeing signs on a 4% drain effect inside a block
 that is mostly not drain.
+
+**`F19` then took the one measurement `F13` said to take before `T9` starts --
+live lines-per-delivery -- and it answers the sizing question for both open
+Phase 2 tasks at once.** Production is bimodal by producer type, not a point on
+`F13`'s curve: every paced producer measured (30, 240 and 960 lines per second,
+with a new per-publish sampler reading an eviction-corrected viewport top the
+engine now exposes) publishes **exactly one line per frame**, the 66x end
+sustained continuously, while a full-speed `cat` publishes ~290 lines per frame,
+the 1.0x end. So `T9` and `T10` partition the producer space: the paced regime
+is `T9`'s alone -- at 30 lines/s every whole-screen plan is also drawn, so rate
+bounding recovers none of it -- and the flood is `T10`'s, re-measured post-`T8`
+at **13.0 publishes per draw** against `F12`'s 4.96, because the faster drain
+publishes 2.6x more frames into the same 120 Hz display. The measurement also
+caught a design trap for `T9`: at the history budget the append and the arena
+eviction cancel in `scrollProjection.topRow` -- 191 of 200 scrolled lines leave
+it unmoved in the ablation probe -- so a scroll's damage arrives there as a
+whole-viewport row set rather than `.full`, and a shift representation derived
+from `topRow` deltas would read zero exactly where a long-running pane spends
+its steady state. The shift must be recorded at the scroll site, and `T9`'s
+verification gains an at-budget arm. Both tasks may proceed to their
+`decisions.md` entries.
