@@ -118,6 +118,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/AppPresentationLifecycleTests.swift" \
         "$SCRIPT_DIR/tests-ui/DanTermConfigStoreTests.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/IOSurfaceLayerContentsTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PreferencesPanelTests.swift" \
         -framework Cocoa

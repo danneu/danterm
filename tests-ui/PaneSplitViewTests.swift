@@ -12,6 +12,7 @@ struct UITestRunner {
         appPresentationLifecycleTests()
         danTermConfigStoreTests()
         swiftTerminalSessionViewTests()
+        ioSurfaceLayerContentsTests()
         paneSplitViewTests()
         linkPreviewViewTests()
         paneWrapperViewTests()
