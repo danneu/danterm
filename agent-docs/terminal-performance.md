@@ -130,6 +130,16 @@ Until these cells are recalibrated, **read them descriptively and issue no
 directional claim from them**; the paired ladder still runs as a non-regression
 check, with that caveat recorded alongside its result.
 
+**The size of the step, so nobody reads it as a regression** (research/33
+`F25`): measured across the move, all three cells read `slower` by about 160%
+-- `content-churn` +163.1%, `style-churn` +163.2%, `incremental-mixed` +159.3%.
+That is the bracket swallowing work that was always being done, not new work.
+The cross-check is the process CPU line beside each of them, which is summed
+over every thread and so *can* see the display-list replay the old bracket
+could not: it moved +18.8%, +18.4%, and -8.7% on the same run. Read those, and
+the workloads whose metric spans a whole replay, until the three draw rules are
+re-screened.
+
 Planning is the **smaller** cost, and it shrinks ~7.6x when damage goes from 66
 rows to 6, because **the planner is damage-scoped**: production planning runs
 through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans only

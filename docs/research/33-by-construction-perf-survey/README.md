@@ -625,7 +625,7 @@ constraint among them except where noted.
   `31/F18`'s directional-verdict-on-identical-source check is the regression
   gate.
 
-- [ ] `T25` READY (direction set in the `D7` addendum; evidence `F24`) --
+- [x] `T25` **DONE (`F25`)** --
   **Own the pane surface: `wantsUpdateLayer` with an IOSurface swapchain.**
   The `D7` addendum parked full store ownership "if the blit shows up in the
   gates", and `F24` is that observation: on the paced stream the mirror blit
@@ -644,6 +644,22 @@ constraint among them except where noted.
   observation move with the seam, per the addendum's risk note. `T14`
   sequences behind this -- it shrinks the damaged-row render, a term `F24`
   measured at 1/20th of the blit.
+  **Landed (`F25`), in five commits behind a viability gate:** the CG queue is
+  not merely quieter, it is absent -- the process carries no `CA::CG::Queue`
+  thread and no `mtl_submission` queue at all, neither attributed stack family
+  appears in a steady-state profile, and the `CABackingStoreGetFrontTexture`
+  main-thread stall reads 0.0% against the mirror's 37%. Paced-stream process
+  CPU falls 65.2% to 38.0%, below the 45.1% of the pre-mirror arm that never
+  had a mirror to pay for, measured interleaved so `F24`'s uncorrected-drift
+  caveat is retired. `scrollback-stream` reads a calibrated `faster` -7.87%.
+  **Two riders the plan did not foresee.** The three serialized-draw cells now
+  read `slower` by ~160% because the bracket moved inside the rasterization,
+  so they carry no directional claim until they are re-screened -- the size of
+  that step is recorded in `agent-docs/terminal-performance.md`. And
+  `incremental-mixed` could not produce a valid block at all until its draw
+  acceptance moved off the rendered rectangle and onto the engine damage that
+  caused it, because a render brings a stale swapchain buffer current over
+  composed damage and never spans the frozen 6 rows.
 
 ### Phase 4 -- gated reopens and larger bets
 

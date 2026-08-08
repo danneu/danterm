@@ -2286,3 +2286,143 @@ performance verdict.
   base. `T14` (derived halo) stays queued behind it: `T14` shrinks the
   mirror's damaged-row render -- the 93-sample term -- not the blit, which
   is the dominant term by 20x.
+
+### F25 -- owning the pane surface deletes both per-frame copies: CoreAnimation's CG queue leaves the process entirely, the main-thread backing-store stall falls to zero, and paced-stream process CPU goes 65.2% -> 38.0%, below the pre-mirror 45.1%
+
+- Status: measured and attributed. The CPU figures are diagnostic only (live
+  process CPU and `sample` profiles, no calibrated verdict); the ladder run is
+  calibrated but its three serialized-draw cells are unreadable directionally
+  for the reason below. This is `T25`'s `PO2` and `PO6`: `F24`'s paired stream
+  measurement re-run with both of its arms rebuilt in the same session, so the
+  new arm is not compared against a number from another day.
+- Date and investigator: 2026-08-08, T25 owned-surface agent.
+- Setup: three isolated optimized slots on one machine session, one at a time,
+  each activated frontmost for its whole window, streams never concurrent.
+  Arms: `630b56e5` (last pre-mirror commit, `F24`'s baseline), `750a98d6` (the
+  T9 mirror, `F24`'s candidate), and `5fd622cf` (T25 landed). Stimulus:
+  `scripts/saturate-scrollback.sh --stream 500` from one checkout in every arm,
+  so the byte stream is identical. 179x66 pane at the slot's default window in
+  all three, confirmed per arm. Metric: whole-process CPU over a 60 s
+  steady-state window (`ps -o cputime` delta over a measured wall interval),
+  then a 10 s `sample`.
+- **This measurement is interleaved, which `F24`'s was not.** `F24`'s own named
+  weakness was that its two arms ran minutes apart, so machine drift was
+  uncorrected. Here the three arms run twice, A-B-C then C-B-A, which brackets
+  each arm's two windows around the other arms'. Drift would show as a spread
+  within an arm; the widest within-arm spread is 0.3 points, against a 27-point
+  difference between arms.
+
+  | arm | process CPU, round 1 | round 2 | `CA::CG::Queue` samples /10 s | `mtl_submission` | main thread blocked in `CABackingStoreGetFrontTexture` |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | pre-mirror `630b56e5` | 45.2% | 44.9% | 1,048 / 1,082 | 85 / 89 | 13.8% / 14.0% |
+  | T9 mirror `750a98d6` | 65.0% | 65.3% | 2,645 / 2,796 | 373 / 360 | 37.1% / 37.8% |
+  | **T25 `5fd622cf`** | **37.9%** | **38.0%** | **queue absent** | **queue absent** | **0.0% / 0.0%** |
+
+  The two reproduced arms land where `F24` put them (44.1% and 64.1% there,
+  45.1% and 65.2% here; CG-queue 836 and 2,626 there, ~1,065 and ~2,720 here),
+  which is what licenses reading the third arm against them.
+- **The deciding evidence, per `PO2`: both attributed stack families are gone.**
+  Neither T25 sample contains `create_image_by_copying`, `CA::Render::copy_image`,
+  `MetalContext::update_image`, or `copy_image_to_texture` -- the CPU frame
+  capture and the GPU upload `F24` attributed the regression to. All four are
+  present in the mirror arm's samples from the same machine session minutes
+  apart. Stronger than the family counts: the T25 process carries **no
+  `CA::CG::Queue` thread and no `mtl_submission` queue at all**, so there is no
+  display list being replayed and no texture being submitted for this pane's
+  content. `CABackingStoreGetFrontTexture` -- `F24`'s main-thread stall waiting
+  on that queue to drain -- occurs nowhere in either T25 sample. The only
+  `CGBlt_copyBytes` samples left in the T25 arm (1 and 2) sit under
+  `RIPLayerBltGlyph` on the main thread: glyph rasterization into our own
+  surface, which is a different stack.
+- **What moved onto the main thread, priced.** The plan's accepted risk was that
+  rasterization moves from CA's queue into the publish path. It did, and it is
+  visible: of 7,418 main-thread samples in 10 s, 1,886 are inside `publish`,
+  1,797 of them the swapchain render (`drawRenderFrame` 508, `draw_glyphs` 324,
+  `RIPLayerBltGlyph` 273). Against that, `CA::Transaction::commit` falls from
+  1,504 samples (pre-mirror) and 2,970 (mirror) to 179.
+- Measurements, the paired calibrated ladder (`benchmark-confirm
+  baseline=750a98d6`, the last pre-T25 commit):
+
+  | workload | verdict | descriptive process CPU |
+  | --- | --- | ---: |
+  | `terminal-feed` | equivalent (-0.09%) | -- |
+  | `scrollback-stream` | **faster (-7.87%**, 4 pairs; draw tail 19.6 -> 12.4 ms) | -- |
+  | `content-churn` | slower (+163.09%) -- bracket moved, see below | +18.82% |
+  | `style-churn` | slower (+163.15%) -- bracket moved, see below | +18.37% |
+  | `incremental-mixed` | slower (+159.31%) -- bracket moved, see below | -8.69% |
+  | `retained-browse` | equivalent (-0.28%) | -- |
+
+  **The three `slower` cells are the bracket, not a regression, and no
+  directional claim is issued from them.** `T25` moved
+  `drawNanosecondsPerDraw` out of `draw(_:)` and onto the surface render site,
+  so it now contains the glyph rasterization CoreAnimation used to replay after
+  the draw returned -- outside the old bracket. The number measures more of a
+  frame than the frozen rules were calibrated against. The honest cross-check is
+  the process CPU line beside each cell, which is summed over every thread and
+  so can see the replay the old bracket could not: +18.8%, +18.4%, -8.7%. The
+  two-digit rise on the full-screen churns is an open descriptive observation,
+  not a verdict, and it sits against a 27-point *fall* on the paced stream that
+  the same instrument measured above -- the two workloads differ in that the
+  churns redraw the whole grid every frame while the stream shifts it.
+  `scrollback-stream` and `retained-browse` are unaffected by the move and
+  carry their verdicts normally.
+- **`PO6` could not run at all until the benchmark's acceptance rule moved off
+  the rendered rectangle.** The first ladder attempt returned no decision:
+  every `incremental-mixed` block on the candidate arm produced 1 of 50
+  serialized draws and then stalled. `TerminalBenchmarkObserver` accepted a draw
+  for that workload only when the drawn rectangle spanned exactly 6 rows -- 4
+  damaged rows plus the glyph halo -- and a render now brings a stale swapchain
+  buffer current over the damage composed since that buffer was last displayed,
+  so it never spans exactly 6. No draw was acknowledged, the serialized producer
+  waited forever, and the whole invocation was invalidated. The rule was moved
+  onto the stimulus, where the sparse-span workloads already select: the app
+  publishes an `acceptedDrawTopology` artifact carrying each accepted draw's
+  engine damage, and both the app and the validator gate on that. The measured
+  contract is 4 rows in 1 span, plus 5 rows in 2 spans for the first update
+  after the settling frame, which also damages the row the cursor vacates. The
+  full-screen workloads keep the rectangle rule, which staleness cannot widen
+  past the whole grid. Coverage for the gate is read from each arm's own source
+  tree rather than inferred from a missing artifact key, so a baseline older
+  than the instrument stays comparable while a candidate whose publish path
+  broke cannot pass as one.
+- Measurements, t5 (`t5-scroll-amplification.py`, 600 events, 179x66): every
+  cell is byte-identical to `F23`'s -- 1,086 glyphs per frame at 1 line per
+  delivery for both `text-line` arms, 76 for `bare-newline`, 11,570 for the
+  91-line flood, 356 for the `rewrite-bottom-row` control. That is the expected
+  reading and it is a coverage statement rather than a null result: t5
+  instruments the engine and the planner, which `T25` did not touch, so it
+  measures the **per-publication** term. The flood arm's region render is
+  intact, which is what that row was there to check.
+  What t5 cannot see is the composed term. A buffer reacquired from a 3-deep
+  swapchain is up to 3 generations stale and its bring-current applies the
+  damage composed since it was last displayed, so a render submits the glyphs of
+  the composed damage rather than of one publication -- which is why the plan
+  recorded that 1,086 is not the ceiling. That bound is structural rather than
+  measured here: the swapchain's headless pins hold every acquisition to
+  applying exactly the composed stale damage or escalating to a full render, and
+  the harness pin "a publish renders exactly the rows its damage names" holds
+  the view side to it. A live per-render row count is not instrumented.
+- Verification: `just test` 75 of 75 steps, `just test-ui` 215 of 215, and a
+  `-DDANTERM_TERMINAL_BENCHMARK` build.
+- Competing interpretations: the CPU figures are uncalibrated process CPU and
+  decide nothing on their own (17/F15) -- they are here because they are
+  `F24`'s own metric, re-run so the two findings are comparable. Interleaving
+  corrects drift between arms, but the session carries no machine-invariant
+  control, so a step change affecting all three arms equally would be invisible;
+  the stack attribution is independent of the wall numbers and is what the
+  conclusion rests on. The T25 arm landing 7 points *below* the pre-mirror arm
+  is the one result no prior finding predicted: the profile attributes it to the
+  display-list replay the pre-mirror arm also paid, but that arm's own CG-queue
+  term (~1,065 samples of 10 s) is smaller than 7 points of a core, so part of
+  the gap is unattributed.
+- Uncertainty: memory was not measured. The plan's accepted risk stands at two
+  to three grid-sized surfaces per displayed pane against one mirror bitmap plus
+  AppKit's backing store, and `benchmark-memory` has not been run to price the
+  net. The +18% descriptive process CPU on the two full-screen churn workloads
+  is unexplained and worth a mechanism pass once the draw rules are re-screened.
+- Next action: none for `T25` -- the task closes. `T14`'s derived halo is the
+  named lever on the residue t5 still measures. Re-screening the three
+  serialized-draw rules against the moved bracket is the follow-up that re-arms
+  those ladder cells, and it is also where `usedDirtyRectFallback` -- now
+  structurally false, since no rectangle AppKit chose can reach a render --
+  should be deleted.

@@ -38,10 +38,10 @@ CANDIDATE_WORKLOADS = (
 # have to change this too, so a block collected under an older shape cannot pass
 # as one collected under the current one.
 RETAINED_BROWSE_IDENTITY = "retained-browse-v1-10000-lines-oldest-row-179x66"
-# The two sparse-span workloads' fixture identities, named here rather than at
-# the runner because the collector validates the same string the runner claims.
-# The topology is in the name: an arm that changed the stimulus would have to
-# change this too, so a block collected under an older shape cannot pass as one
+# The sparse-span workloads' fixture identities, named here rather than at the
+# runner because the collector validates the same string the runner claims. The
+# topology is in the name: an arm that changed the stimulus would have to change
+# this too, so a block collected under an older shape cannot pass as one
 # collected under the current one.
 SPARSE_SPAN_FIXTURE_IDENTITIES = {
     "sparse-spans-few": "sparse-spans-few-v1-two-rows-two-spans-179x66",
@@ -58,7 +58,7 @@ PERSISTENT_DRAW_WORKLOADS = {
     "full-screen-content-churn": "full-screen-content-churn",
     "full-screen-style-churn": "full-screen-style-churn",
     "full-screen-incremental-mixed-churn": (
-        "full-screen-incremental-mixed-churn-v2-four-rows-six-damage-179x66"
+        "full-screen-incremental-mixed-churn-v3-four-rows-one-span-179x66"
     ),
     **SPARSE_SPAN_FIXTURE_IDENTITIES,
 }
@@ -91,11 +91,22 @@ BLOCK_CONTRACTS = {
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
     },
+    # Topology-gated like the sparse-span pair below, and for the same reason
+    # sharpened by research/33/F25: its stimulus is four rows in one span, and no
+    # rule written against the rendered rectangle can see that any more. A render
+    # brings a stale swapchain buffer current over composed damage, so the rows
+    # it touches measure buffer depth rather than the update. The first update
+    # after the settling frame also damages the row the cursor vacates, which is
+    # the second shape -- enumerated, not slack.
     "incremental-mixed": {
         "metric": "draw-nanoseconds-per-draw",
         "measuredUnit": "serialized-completed-draw",
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
+        "engineDamageShapes": [
+            {"damagedRowCount": 4, "spanCount": 1},
+            {"damagedRowCount": 5, "spanCount": 2},
+        ],
     },
     # Same bracket as scrollback-stream, different stimulus. research/20/F10: drawing is
     # suppressed for the whole replay, so this block is ~95% parse and damage
@@ -106,27 +117,25 @@ BLOCK_CONTRACTS = {
         "measuredUnit": "one-95-frame-captured-tui-replay",
         "reset": "fresh-optimized-app-and-terminal-session-per-block",
     },
-    # The two topology-specific workloads, whose contract includes a shape as
-    # well as a count: a block means nothing unless every accepted draw's
-    # published engine damage carried exactly these rows and spans. `metric`
-    # differs between them by design (research/29/D2) -- losing exact sparse clipping
-    # widens the synchronous draw, while per-row rectangle emission moves Core
-    # Animation clip replay, which happens after that bracket closes.
+    # The two sparse-span workloads, whose contract includes a shape as well as a
+    # count: a block means nothing unless every accepted draw's published engine
+    # damage carried exactly these rows and spans. `metric` differs between them
+    # by design (research/29/D2) -- losing exact sparse clipping widens the
+    # synchronous draw, while per-row rectangle emission moves Core Animation
+    # clip replay, which happens after that bracket closes.
     "sparse-spans-few": {
         "metric": "draw-nanoseconds-per-draw",
         "measuredUnit": "serialized-completed-draw",
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
-        "engineDamagedRowCount": 2,
-        "engineSpanCount": 2,
+        "engineDamageShapes": [{"damagedRowCount": 2, "spanCount": 2}],
     },
     "sparse-spans-max": {
         "metric": "process-cpu-nanoseconds-per-draw",
         "measuredUnit": "serialized-completed-draw",
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
-        "engineDamagedRowCount": 17,
-        "engineSpanCount": 17,
+        "engineDamageShapes": [{"damagedRowCount": 17, "spanCount": 17}],
     },
     # The only workload that plans a frame whose rows come out of retained
     # storage. `research/28/D1` pitch 1 admitted it because H1/H3/H4/H5 all make browsing
@@ -1422,7 +1431,7 @@ def make_persistent_draw_runner(
     return run
 
 
-SPARSE_SPAN_TOPOLOGY_SERIES = (
+ACCEPTED_DRAW_TOPOLOGY_SERIES = (
     "engineDamagedRowCounts",
     "engineSpanCounts",
     "haloDamagedRowCounts",
@@ -1432,14 +1441,39 @@ SPARSE_SPAN_TOPOLOGY_SERIES = (
 )
 
 
-def _sparse_span_topology_reasons(prefix, topology, *, workload, draw_count):
+def arm_publishes_accepted_draw_topology(arm_root):
+    """Report whether this arm's source tree contains the topology instrument.
+
+    Coverage is read from the arm's own `app/TerminalBenchmark.swift` rather than
+    inferred from a missing artifact key, and the difference is the whole point.
+    The gate is newer than most baselines, so a block from a revision that
+    predates it has to stay collectable or no comparison against an older
+    revision is possible at all. But treating any absent key as "old arm" would
+    open a silent pass: a candidate whose publish path broke would read exactly
+    like a pre-instrument baseline and sail through the gate. The tree is ground
+    truth, and it cannot be faked by the failure being measured.
+    """
+    source = pathlib.Path(arm_root) / "app" / "TerminalBenchmark.swift"
+    try:
+        return "TerminalBenchmarkDamageTopologyRecorder" in source.read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        return False
+
+
+def _accepted_draw_topology_reasons(
+    prefix, topology, *, workload, artifact_workload, draw_count, instrumented
+):
     """Judge one block's engine-damage topology against its workload's contract.
 
     Reads the published engine damage the app recorded per accepted draw, never
-    the bounding dirty rectangle beside it: the rectangle a compound clip is
-    drawn under is the union of every span, so two spans and seventeen present
-    the same bounding row count and no rule written against it can tell the two
-    workloads apart.
+    the rendered rectangle beside it, for two independent reasons. The rectangle
+    a compound clip is drawn under is the union of every span, so two spans and
+    seventeen present the same bounding row count. And since the pane owns its
+    display surface (research/33/F25), a render brings a stale swapchain buffer
+    current over the damage composed since that buffer was last displayed, so its
+    row span measures buffer depth rather than the stimulus.
 
     Renderer behavior -- dirty-rect fallback, full clip damage -- is carried on
     the block and judged nowhere here. A synthesized known-bad arm deviates
@@ -1447,18 +1481,22 @@ def _sparse_span_topology_reasons(prefix, topology, *, workload, draw_count):
     measured into an unmeasured block.
     """
     contract = BLOCK_CONTRACTS[workload]
+    if topology is None and instrumented is False:
+        # Not measured, and known to be not measured. The block keeps every other
+        # contract; the reader is told which blocks the gate did not cover.
+        return []
     if not isinstance(topology, dict):
-        return [f"{prefix}-missing-sparse-span-topology"]
+        # Present but malformed is never excused on either kind of arm: that is a
+        # broken instrument rather than an absent one.
+        return [f"{prefix}-missing-accepted-draw-topology"]
     reasons = []
-    expected_rows = contract["engineDamagedRowCount"]
-    expected_spans = contract["engineSpanCount"]
+    expected_shapes = contract["engineDamageShapes"]
     if (
-        topology.get("workload") != workload
-        or topology.get("expectedEngineDamagedRowCount") != expected_rows
-        or topology.get("expectedEngineSpanCount") != expected_spans
+        topology.get("workload") != artifact_workload
+        or topology.get("allowedEngineDamageShapes") != expected_shapes
     ):
-        reasons.append(f"{prefix}-wrong-sparse-span-contract")
-    series = {name: topology.get(name) for name in SPARSE_SPAN_TOPOLOGY_SERIES}
+        reasons.append(f"{prefix}-wrong-accepted-draw-topology-contract")
+    series = {name: topology.get(name) for name in ACCEPTED_DRAW_TOPOLOGY_SERIES}
     if (
         topology.get("sampleCount") != draw_count
         or any(
@@ -1470,11 +1508,13 @@ def _sparse_span_topology_reasons(prefix, topology, *, workload, draw_count):
         # unequal lengths mean the block's aggregates describe more draws than
         # its topology evidence covers -- which no reader can see in the number.
         reasons.append(f"{prefix}-incomplete-topology-coverage")
-    elif (
-        any(value != expected_rows for value in series["engineDamagedRowCounts"])
-        or any(value != expected_spans for value in series["engineSpanCounts"])
-    ):
-        reasons.append(f"{prefix}-wrong-engine-damage-topology")
+    else:
+        allowed = {
+            (shape["damagedRowCount"], shape["spanCount"]) for shape in expected_shapes
+        }
+        observed = zip(series["engineDamagedRowCounts"], series["engineSpanCounts"])
+        if any(shape not in allowed for shape in observed):
+            reasons.append(f"{prefix}-wrong-engine-damage-topology")
     return reasons
 
 
@@ -1487,7 +1527,8 @@ def _collect_draw_churn(
     expected_dirty_rows,
     damage_reason,
     run_block,
-    sparse_span_topology=False,
+    accepted_draw_topology=False,
+    topology_instrumented=None,
     require_process_cpu=False,
 ):
     """Enforce the shared serialized-draw contract with workload-specific damage."""
@@ -1501,6 +1542,10 @@ def _collect_draw_churn(
     expected_sequences = list(range(50))
     for index, planned in enumerate(blocks):
         artifact = run_block(planned["physicalArm"])
+        instrumented = (
+            True if topology_instrumented is None
+            else bool(topology_instrumented.get(planned["physicalArm"], True))
+        )
         prefix = f"block-{index}"
         draw = artifact.get("finalDraw", {})
         producer = artifact.get("producerWrite", {})
@@ -1550,12 +1595,17 @@ def _collect_draw_churn(
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }
-        # Present only for the sparse-span workloads: the five calibrated
-        # workloads' frozen rules were screened against blocks with no topology
-        # accounting at all, so their block shape stays exactly what those rules
-        # describe.
-        if sparse_span_topology:
-            block["sparseSpanTopology"] = draw.get("sparseSpanTopology")
+        # Present only for the topology-gated workloads: the ungated workloads'
+        # frozen rules were screened against blocks with no topology accounting at
+        # all, so their block shape stays exactly what those rules describe. The
+        # coverage label rides beside the evidence so a block the gate did not
+        # cover is visibly ungated rather than silently indistinguishable from a
+        # gated one.
+        if accepted_draw_topology:
+            block["acceptedDrawTopology"] = draw.get("acceptedDrawTopology")
+            block["acceptedDrawTopologyCoverage"] = (
+                "measured" if instrumented else "pre-instrument-arm"
+            )
         raw_blocks.append(block)
 
         if artifact.get("backend") != "swift":
@@ -1623,12 +1673,14 @@ def _collect_draw_churn(
         # the reading; where it decides, the same absence leaves nothing to pair.
         if require_process_cpu and normalized_cpu is None:
             _append_reason(reasons, f"{prefix}-incomplete-process-cpu-coverage")
-        if sparse_span_topology:
-            for reason in _sparse_span_topology_reasons(
+        if accepted_draw_topology:
+            for reason in _accepted_draw_topology_reasons(
                 prefix,
-                draw.get("sparseSpanTopology"),
+                draw.get("acceptedDrawTopology"),
                 workload=workload,
+                artifact_workload=artifact_workload,
                 draw_count=50,
+                instrumented=instrumented,
             ):
                 _append_reason(reasons, reason)
         if producer.get("event") != "producer-final-write-returned":
@@ -1688,30 +1740,31 @@ def collect_style_churn(blocks, *, run_block):
     )
 
 
-def collect_incremental_mixed(blocks, *, run_block):
-    """Collect persistent incremental redraws with the fixed glyph-halo damage."""
+def collect_incremental_mixed(blocks, *, run_block, topology_instrumented=None):
+    """Collect persistent incremental redraws gated on their engine damage."""
     return _collect_draw_churn(
         blocks,
         workload="incremental-mixed",
         artifact_workload="full-screen-incremental-mixed-churn",
-        fixture_identity=(
-            "full-screen-incremental-mixed-churn-"
-            "v2-four-rows-six-damage-179x66"
-        ),
-        expected_dirty_rows=6,
-        damage_reason="wrong-damage-row-count",
+        fixture_identity=PERSISTENT_DRAW_WORKLOADS[
+            "full-screen-incremental-mixed-churn"
+        ],
+        expected_dirty_rows=None,
+        damage_reason=None,
         run_block=run_block,
+        accepted_draw_topology=True,
+        topology_instrumented=topology_instrumented,
     )
 
 
-def _collect_sparse_spans(blocks, *, workload, run_block):
+def _collect_sparse_spans(blocks, *, workload, run_block, topology_instrumented=None):
     """Apply the shared serialized-draw contract with an engine-topology gate.
 
-    Deliberately the same collector as the three full-screen draw workloads:
-    these blocks are settled, serialized, and counted by identical rules, and a
-    private copy of that contract would drift from it in ways that pass
-    validation while measuring something else. Only the damage check differs,
-    because only the damage is what these workloads are about.
+    Deliberately the same collector as the full-screen draw workloads: these
+    blocks are settled, serialized, and counted by identical rules, and a private
+    copy of that contract would drift from it in ways that pass validation while
+    measuring something else. Only the damage check differs, because only the
+    damage is what these workloads are about.
     """
     return _collect_draw_churn(
         blocks,
@@ -1721,24 +1774,31 @@ def _collect_sparse_spans(blocks, *, workload, run_block):
         expected_dirty_rows=None,
         damage_reason=None,
         run_block=run_block,
-        sparse_span_topology=True,
+        accepted_draw_topology=True,
+        topology_instrumented=topology_instrumented,
         require_process_cpu=(
             BLOCK_CONTRACTS[workload]["metric"] == "process-cpu-nanoseconds-per-draw"
         ),
     )
 
 
-def collect_sparse_spans_few(blocks, *, run_block):
+def collect_sparse_spans_few(blocks, *, run_block, topology_instrumented=None):
     """Collect the ideal sparse topology: two distant rows in two maximal spans."""
     return _collect_sparse_spans(
-        blocks, workload="sparse-spans-few", run_block=run_block
+        blocks,
+        workload="sparse-spans-few",
+        run_block=run_block,
+        topology_instrumented=topology_instrumented,
     )
 
 
-def collect_sparse_spans_max(blocks, *, run_block):
+def collect_sparse_spans_max(blocks, *, run_block, topology_instrumented=None):
     """Collect the halo maximum: seventeen rows in seventeen spans at 66 rows."""
     return _collect_sparse_spans(
-        blocks, workload="sparse-spans-max", run_block=run_block
+        blocks,
+        workload="sparse-spans-max",
+        run_block=run_block,
+        topology_instrumented=topology_instrumented,
     )
 
 
@@ -1903,6 +1963,13 @@ def make_production_collectors(
                     blocks, run_block=run
                 )
             )
+        # Read once per arm from its own immutable tree, so a block collected from
+        # a revision older than the topology gate is known to be ungated rather
+        # than inferred to be.
+        topology_instrumented = {
+            arm: arm_publishes_accepted_draw_topology(root)
+            for arm, root in arm_roots.items()
+        }
         for planned_workload, (app_workload, collector) in draw_workloads.items():
             if planned_workload not in plan:
                 continue
@@ -1919,8 +1986,12 @@ def make_production_collectors(
                 root=repository_root,
             )
             collectors[planned_workload] = (
-                lambda blocks, collect=collector, run=runner: collect(
-                    blocks, run_block=run
+                lambda blocks, collect=collector, run=runner, gated=(
+                    "engineDamageShapes" in BLOCK_CONTRACTS[planned_workload]
+                ): collect(
+                    blocks,
+                    run_block=run,
+                    **({"topology_instrumented": topology_instrumented} if gated else {}),
                 )
             )
     except BaseException:

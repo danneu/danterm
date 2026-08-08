@@ -126,7 +126,13 @@ grep -q 'benchmark-sample' "$ROOT/justfile"
 grep -q 'benchmark-trace' "$ROOT/justfile"
 grep -q 'observeTitle(title)' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
-grep -q 'profilesIncrementalMixedDamage ? 6 : plan.rows' "$ROOT/app/TerminalBenchmark.swift"
+# A partial-damage workload selects its accepted draws on the stimulus, never on
+# the rendered rectangle: a render brings a stale swapchain buffer current over
+# composed damage, so that rectangle measures buffer depth (research/33/F25).
+# A full-screen workload keeps the rectangle rule, which staleness cannot widen
+# past the whole grid.
+grep -q 'acceptsRedrawDraw = redrawDirtyRowCount == plan.rows' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'damageTopologyRecorder?.recordDrawIfTopologyMatches' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'reopenCompletedBlockIfRequested' "$ROOT/app/TerminalBenchmark.swift"
 # A block is opened only by a marker the frame itself wrote, and re-armed only
 # in the mode that reuses one app across blocks. A reused app keeps the previous

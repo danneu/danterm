@@ -967,20 +967,13 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   than two quantities with different denominators.
         # Scenario: spec-first -- a block whose 50 accepted draws each cost
         #   300us to draw and 900us to plan.
-        for collect, workload, fixture, dirty_rows in (
-            (VALIDATION.collect_content_churn, "full-screen-content-churn",
-             "full-screen-content-churn", 66),
-            (VALIDATION.collect_style_churn, "full-screen-style-churn",
-             "full-screen-style-churn", 66),
-            (VALIDATION.collect_incremental_mixed,
-             "full-screen-incremental-mixed-churn",
-             "full-screen-incremental-mixed-churn-"
-             "v2-four-rows-six-damage-179x66", 6),
+        for collect, workload in (
+            (VALIDATION.collect_content_churn, "content-churn"),
+            (VALIDATION.collect_style_churn, "style-churn"),
+            (VALIDATION.collect_incremental_mixed, "incremental-mixed"),
         ):
             with self.subTest(workload=workload):
-                artifact = self._draw_churn_artifact(
-                    workload=workload, fixture=fixture, dirty_rows=dirty_rows
-                )
+                artifact = self._serialized_draw_artifact(workload)
                 plans = [900_000] * 50
                 artifact["finalDraw"]["planCount"] = 50
                 artifact["finalDraw"]["cumulativePlanNanoseconds"] = sum(plans)
@@ -1008,21 +1001,14 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   CPU per draw while looking perfectly well-formed.
         # Scenario: spec-first -- 50 intervals of 4ms CPU each against a block
         #   whose CPU series came up one interval short.
-        for collect, workload, fixture, dirty_rows in (
-            (VALIDATION.collect_content_churn, "full-screen-content-churn",
-             "full-screen-content-churn", 66),
-            (VALIDATION.collect_style_churn, "full-screen-style-churn",
-             "full-screen-style-churn", 66),
-            (VALIDATION.collect_incremental_mixed,
-             "full-screen-incremental-mixed-churn",
-             "full-screen-incremental-mixed-churn-"
-             "v2-four-rows-six-damage-179x66", 6),
+        for collect, workload in (
+            (VALIDATION.collect_content_churn, "content-churn"),
+            (VALIDATION.collect_style_churn, "style-churn"),
+            (VALIDATION.collect_incremental_mixed, "incremental-mixed"),
         ):
             for count, expected in ((50, 4_000_000), (49, None)):
                 with self.subTest(workload=workload, count=count):
-                    artifact = self._draw_churn_artifact(
-                        workload=workload, fixture=fixture, dirty_rows=dirty_rows
-                    )
+                    artifact = self._serialized_draw_artifact(workload)
                     intervals = [4_000_000] * count
                     artifact["finalDraw"]["processCPUCount"] = count
                     artifact["finalDraw"]["cumulativeProcessCPUNanoseconds"] = sum(
@@ -1090,32 +1076,127 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         self.assertEqual(evidence["invalidationReasons"], [])
         self.assertIsNone(evidence["rawBlocks"][0]["planNanosecondsPerDraw"])
 
-    def test_incremental_mixed_collector_requires_six_row_halo_damage(self):
-        artifact = self._draw_churn_artifact(
-            workload="full-screen-incremental-mixed-churn",
-            fixture=(
-                "full-screen-incremental-mixed-churn-"
-                "v2-four-rows-six-damage-179x66"
-            ),
-            dirty_rows=6,
-        )
+    def test_incremental_mixed_collector_gates_on_its_engine_damage_shapes(self):
+        # Intent: an incremental-mixed block is valid only when every accepted
+        #   draw's published engine damage carried one of the two shapes its
+        #   producer emits, and the rendered row count decides nothing.
+        # Why it exists (research/33/F25): the rule used to require the render to
+        #   cover exactly six rows. Once the pane owned its display surface a
+        #   render brought a stale swapchain buffer current over composed damage,
+        #   never covered six, and the workload stopped producing a valid block at
+        #   all -- taking the whole invocation's verdict with it.
+        # Scenario: spec-first; a settled four-row update rendered under a
+        #   whole-grid clip is valid, and a wider stimulus is not.
+        artifact = self._accepted_draw_topology_artifact("incremental-mixed")
 
         evidence = VALIDATION.collect_incremental_mixed(
             [{"measurementRole": "A", "physicalArm": "a"}],
             run_block=lambda arm: artifact,
         )
 
-        self.assertTrue(evidence["valid"])
+        self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
         self.assertEqual(evidence["workload"], "incremental-mixed")
-        artifact["finalDraw"]["dirtyRowCounts"][-1] = 4
-        invalid = VALIDATION.collect_incremental_mixed(
-            [{"measurementRole": "A", "physicalArm": "a"}],
-            run_block=lambda arm: artifact,
-        )
+        # The whole-grid rendered row count on a valid block is the point: it is
+        # what the retired rule would have rejected.
         self.assertEqual(
-            invalid["invalidationReasons"],
-            ["block-0-wrong-damage-row-count"],
+            evidence["rawBlocks"][0]["acceptedDrawTopology"]["engineDamagedRowCounts"][0], 4
         )
+
+        # The producer's first update after settling also damages the row the
+        # cursor vacates, and that shape is enumerated rather than excluded.
+        first_update = self._accepted_draw_topology_artifact("incremental-mixed")
+        first_update["finalDraw"]["acceptedDrawTopology"]["engineDamagedRowCounts"][0] = 5
+        first_update["finalDraw"]["acceptedDrawTopology"]["engineSpanCounts"][0] = 2
+        self.assertTrue(
+            VALIDATION.collect_incremental_mixed(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: first_update,
+            )["valid"]
+        )
+
+        off_topology = self._accepted_draw_topology_artifact("incremental-mixed")
+        off_topology["finalDraw"]["acceptedDrawTopology"]["engineDamagedRowCounts"][-1] = 9
+        self.assertEqual(
+            VALIDATION.collect_incremental_mixed(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: off_topology,
+            )["invalidationReasons"],
+            ["block-0-wrong-engine-damage-topology"],
+        )
+
+    def test_a_pre_instrument_baseline_arm_is_labeled_rather_than_invalidated(self):
+        # Intent: a block from an arm whose source tree has no topology recorder is
+        #   valid and labeled as ungated, while a block from an arm that does have
+        #   one is invalid when the evidence is absent or malformed.
+        # Why it exists (research/33/F25): the gate is newer than most baselines, so
+        #   requiring it unconditionally would make every comparison against an older
+        #   revision impossible. Inferring "old arm" from the artifact's silence would
+        #   be worse -- a candidate whose publish path broke would read as an old arm
+        #   and sail through. Coverage is therefore read from the arm's own tree.
+        # Scenario: spec-first -- one pre-instrument baseline arm and one instrumented
+        #   arm, each with the evidence absent.
+        pre_instrument = self._accepted_draw_topology_artifact("incremental-mixed")
+        del pre_instrument["finalDraw"]["acceptedDrawTopology"]
+
+        evidence = VALIDATION.collect_incremental_mixed(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: pre_instrument,
+            topology_instrumented={"a": False},
+        )
+
+        self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+        self.assertEqual(
+            evidence["rawBlocks"][0]["acceptedDrawTopologyCoverage"], "pre-instrument-arm"
+        )
+
+        self.assertEqual(
+            VALIDATION.collect_incremental_mixed(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: pre_instrument,
+                topology_instrumented={"a": True},
+            )["invalidationReasons"],
+            ["block-0-missing-accepted-draw-topology"],
+        )
+
+        # Present but malformed is never excused, on either kind of arm: that is a
+        # broken instrument rather than an absent one.
+        malformed = self._accepted_draw_topology_artifact("incremental-mixed")
+        malformed["finalDraw"]["acceptedDrawTopology"] = []
+        self.assertEqual(
+            VALIDATION.collect_incremental_mixed(
+                [{"measurementRole": "A", "physicalArm": "a"}],
+                run_block=lambda arm: malformed,
+                topology_instrumented={"a": False},
+            )["invalidationReasons"],
+            ["block-0-missing-accepted-draw-topology"],
+        )
+
+    def test_arm_topology_coverage_is_read_from_the_arm_source_tree(self):
+        # Intent: whether an arm publishes damage topology is decided by reading that
+        #   arm's own `app/TerminalBenchmark.swift`, not by any artifact it produced.
+        # Why it exists: this is the ground truth that lets a missing artifact key be
+        #   read as "not measured" without opening a silent-pass path.
+        # Scenario: spec-first -- two synthetic arm roots, one carrying the recorder.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            instrumented = root / "instrumented" / "app"
+            instrumented.mkdir(parents=True)
+            (instrumented / "TerminalBenchmark.swift").write_text(
+                "private var damageTopologyRecorder: "
+                "TerminalBenchmarkDamageTopologyRecorder?\n"
+            )
+            older = root / "older" / "app"
+            older.mkdir(parents=True)
+            (older / "TerminalBenchmark.swift").write_text(
+                "private var sparseSpanRecorder: "
+                "TerminalBenchmarkSparseSpanRecorder?\n"
+            )
+
+            self.assertTrue(
+                VALIDATION.arm_publishes_accepted_draw_topology(root / "instrumented")
+            )
+            self.assertFalse(VALIDATION.arm_publishes_accepted_draw_topology(root / "older"))
+            self.assertFalse(VALIDATION.arm_publishes_accepted_draw_topology(root / "absent"))
 
     def test_sparse_span_collectors_accept_only_their_own_engine_topology(self):
         # Intent: a sparse-span block is valid only when every accepted draw's
@@ -1135,7 +1216,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             (VALIDATION.collect_sparse_spans_max, "sparse-spans-max", 17, 17),
         ):
             with self.subTest(workload=workload):
-                artifact = self._sparse_span_artifact(workload)
+                artifact = self._accepted_draw_topology_artifact(workload)
 
                 evidence = collect(
                     [{"measurementRole": "A", "physicalArm": "a"}],
@@ -1148,16 +1229,16 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 self.assertEqual(block["drawNanosecondsPerDraw"], 300_000)
                 self.assertEqual(block["processCPUNanosecondsPerDraw"], 4_000_000)
                 self.assertEqual(
-                    block["sparseSpanTopology"],
-                    artifact["finalDraw"]["sparseSpanTopology"],
+                    block["acceptedDrawTopology"],
+                    artifact["finalDraw"]["acceptedDrawTopology"],
                 )
                 self.assertEqual(
-                    block["sparseSpanTopology"]["expectedEngineDamagedRowCount"],
-                    engine_rows,
+                    block["acceptedDrawTopology"]["allowedEngineDamageShapes"],
+                    [{"damagedRowCount": engine_rows, "spanCount": engine_spans}],
                 )
 
-                off_topology = self._sparse_span_artifact(workload)
-                off_topology["finalDraw"]["sparseSpanTopology"][
+                off_topology = self._accepted_draw_topology_artifact(workload)
+                off_topology["finalDraw"]["acceptedDrawTopology"][
                     "engineSpanCounts"
                 ][-1] = engine_spans - 1
                 self.assertEqual(
@@ -1168,7 +1249,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     ["block-0-wrong-engine-damage-topology"],
                 )
 
-                other = self._sparse_span_artifact(
+                other = self._accepted_draw_topology_artifact(
                     "sparse-spans-max" if workload == "sparse-spans-few"
                     else "sparse-spans-few"
                 )
@@ -1177,7 +1258,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     run_block=lambda arm: other,
                 )["invalidationReasons"]
                 self.assertIn("block-0-wrong-workload", reasons)
-                self.assertIn("block-0-wrong-sparse-span-contract", reasons)
+                self.assertIn("block-0-wrong-accepted-draw-topology-contract", reasons)
 
     def test_a_sparse_span_block_without_complete_topology_coverage_is_invalid(self):
         # Intent: missing topology evidence, or topology series shorter than the
@@ -1190,18 +1271,18 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         # Scenario: spec-first; a block is invalid when draw, primary-metric, engine-
         #   topology, and renderer-behavior counts do not cover the same accepted
         #   draws.
-        missing = self._sparse_span_artifact("sparse-spans-few")
-        del missing["finalDraw"]["sparseSpanTopology"]
+        missing = self._accepted_draw_topology_artifact("sparse-spans-few")
+        del missing["finalDraw"]["acceptedDrawTopology"]
         self.assertEqual(
             VALIDATION.collect_sparse_spans_few(
                 [{"measurementRole": "A", "physicalArm": "a"}],
                 run_block=lambda arm: missing,
             )["invalidationReasons"],
-            ["block-0-missing-sparse-span-topology"],
+            ["block-0-missing-accepted-draw-topology"],
         )
 
-        partial = self._sparse_span_artifact("sparse-spans-few")
-        topology = partial["finalDraw"]["sparseSpanTopology"]
+        partial = self._accepted_draw_topology_artifact("sparse-spans-few")
+        topology = partial["finalDraw"]["acceptedDrawTopology"]
         topology["sampleCount"] = 49
         for series in ("engineDamagedRowCounts", "engineSpanCounts",
                        "haloDamagedRowCounts", "haloSpanCounts",
@@ -1227,7 +1308,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         # Scenario: spec-first; a block is invalid when its primary-metric coverage
         #   does not match its accepted draw set, and research/29/D2 is what makes
         #   whole-process CPU that metric here.
-        short = self._sparse_span_artifact("sparse-spans-max")
+        short = self._accepted_draw_topology_artifact("sparse-spans-max")
         short["finalDraw"]["processCPUCount"] = 49
         short["finalDraw"]["processCPUDurationsNanoseconds"] = [4_000_000] * 49
 
@@ -1241,7 +1322,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             ["block-0-incomplete-process-cpu-coverage"],
         )
 
-        without_cpu = self._sparse_span_artifact("sparse-spans-few")
+        without_cpu = self._accepted_draw_topology_artifact("sparse-spans-few")
         for field in (
             "processCPUCount",
             "cumulativeProcessCPUNanoseconds",
@@ -1266,9 +1347,9 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         #   to observe the only thing it was built to observe.
         # Scenario: spec-first; a synthesized known-bad arm records its declared
         #   renderer deviation in provenance instead of failing stimulus validity.
-        artifact = self._sparse_span_artifact("sparse-spans-max")
-        artifact["finalDraw"]["sparseSpanTopology"]["dirtyRectFallbackCount"] = 50
-        artifact["finalDraw"]["sparseSpanTopology"]["clipFullDamageCount"] = 50
+        artifact = self._accepted_draw_topology_artifact("sparse-spans-max")
+        artifact["finalDraw"]["acceptedDrawTopology"]["dirtyRectFallbackCount"] = 50
+        artifact["finalDraw"]["acceptedDrawTopology"]["clipFullDamageCount"] = 50
 
         evidence = VALIDATION.collect_sparse_spans_max(
             [{"measurementRole": "A", "physicalArm": "a"}],
@@ -1277,31 +1358,32 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
 
         self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
         self.assertEqual(
-            evidence["rawBlocks"][0]["sparseSpanTopology"]["dirtyRectFallbackCount"],
+            evidence["rawBlocks"][0]["acceptedDrawTopology"]["dirtyRectFallbackCount"],
             50,
         )
 
-    def test_the_existing_draw_workloads_carry_no_topology_evidence(self):
-        # Intent: a block from one of the five calibrated workloads keeps exactly
+    def test_the_ungated_draw_workloads_carry_no_topology_evidence(self):
+        # Intent: a block from a workload with no damage contract keeps exactly
         #   the artifact shape its frozen rule was calibrated against.
         # Why it exists: those rules were screened against blocks with no topology
         #   accounting on the measured path, so adding a field or a check to them
         #   would silently change the thing the thresholds describe.
-        # Scenario: spec-first; the existing five workloads publish no topology
-        #   evidence and retain the artifact and metric contract their frozen
-        #   rules cover.
-        evidence = VALIDATION.collect_incremental_mixed(
-            [{"measurementRole": "A", "physicalArm": "a"}],
-            run_block=lambda arm: self._draw_churn_artifact(
-                workload="full-screen-incremental-mixed-churn",
-                fixture="full-screen-incremental-mixed-churn-"
-                        "v2-four-rows-six-damage-179x66",
-                dirty_rows=6,
-            ),
-        )
+        # Scenario: spec-first; the two full-screen churn workloads publish no
+        #   topology evidence and retain the artifact and metric contract their
+        #   frozen rules cover.
+        for collect, workload in (
+            (VALIDATION.collect_content_churn, "content-churn"),
+            (VALIDATION.collect_style_churn, "style-churn"),
+        ):
+            with self.subTest(workload=workload):
+                evidence = collect(
+                    [{"measurementRole": "A", "physicalArm": "a"}],
+                    run_block=lambda arm, workload=workload:
+                        self._serialized_draw_artifact(workload),
+                )
 
-        self.assertTrue(evidence["valid"])
-        self.assertNotIn("sparseSpanTopology", evidence["rawBlocks"][0])
+                self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+                self.assertNotIn("acceptedDrawTopology", evidence["rawBlocks"][0])
 
     def test_attempt_collector_runs_every_planned_workload_without_exposing_condition(self):
         calls = []
@@ -2242,31 +2324,52 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             },
         }
 
-    def _sparse_span_artifact(self, workload):
-        """Spell one on-contract sparse-span block the way the app publishes it.
+    def _serialized_draw_artifact(self, workload):
+        """Build one valid block for any serialized-draw workload by name.
 
-        The bounding dirty row count is deliberately the union of the halo spans
-        rather than the drawn row count: that is what AppKit actually reports for
-        a compound clip, and it is exactly why these workloads validate on the
-        engine topology beside it instead.
+        Three of the five are topology-gated and three are not, and a caller that
+        wants "a valid block for this workload" should not have to know which:
+        that is exactly the distinction these tests keep moving.
         """
+        if "engineDamageShapes" in VALIDATION.BLOCK_CONTRACTS[workload]:
+            return self._accepted_draw_topology_artifact(workload)
+        artifact_workload = f"full-screen-{workload}"
+        return self._draw_churn_artifact(
+            workload=artifact_workload,
+            fixture=VALIDATION.PERSISTENT_DRAW_WORKLOADS[artifact_workload],
+            dirty_rows=66,
+        )
+
+    def _accepted_draw_topology_artifact(self, workload):
+        """Spell one on-contract topology-gated block the way the app publishes it.
+
+        The rendered row count is deliberately not the drawn shape of the
+        stimulus: for a compound clip AppKit reports the union of the halo spans,
+        and since the pane owns its display surface a render also covers whatever
+        damage the acquired buffer was stale by. That is exactly why these
+        workloads validate on the engine topology beside it instead.
+        """
+        artifact_workload = {
+            "incremental-mixed": "full-screen-incremental-mixed-churn",
+        }.get(workload, workload)
         engine, halo, spans, dirty_rows = {
             "sparse-spans-few": (2, 6, 2, 57),
             "sparse-spans-max": (17, 50, 17, 66),
+            "incremental-mixed": (4, 6, 1, 66),
         }[workload]
         artifact = self._draw_churn_artifact(
-            workload=workload,
-            fixture=VALIDATION.SPARSE_SPAN_FIXTURE_IDENTITIES[workload],
+            workload=artifact_workload,
+            fixture=VALIDATION.PERSISTENT_DRAW_WORKLOADS[artifact_workload],
             dirty_rows=dirty_rows,
         )
         intervals = [4_000_000] * 50
         artifact["finalDraw"]["processCPUCount"] = 50
         artifact["finalDraw"]["cumulativeProcessCPUNanoseconds"] = sum(intervals)
         artifact["finalDraw"]["processCPUDurationsNanoseconds"] = intervals
-        artifact["finalDraw"]["sparseSpanTopology"] = {
-            "workload": workload,
-            "expectedEngineDamagedRowCount": engine,
-            "expectedEngineSpanCount": spans,
+        artifact["finalDraw"]["acceptedDrawTopology"] = {
+            "workload": artifact_workload,
+            "allowedEngineDamageShapes":
+                VALIDATION.BLOCK_CONTRACTS[workload]["engineDamageShapes"],
             "sampleCount": 50,
             "engineDamagedRowCounts": [engine] * 50,
             "engineSpanCounts": [spans] * 50,

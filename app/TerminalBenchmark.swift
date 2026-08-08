@@ -264,7 +264,6 @@ final class TerminalBenchmarkObserver {
     private let readyDrawAcknowledgmentPath: String?
     private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
-    private let profilesIncrementalMixedDamage: Bool
     /// True when the producer sends a settling frame before its measured draws.
     private let requiresSettlingDraw: Bool
     /// True when one app serves many blocks and must re-arm between them.
@@ -321,10 +320,10 @@ final class TerminalBenchmarkObserver {
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
-    /// Accepted-draw selection and topology evidence for the two sparse-span
-    /// workloads, and nil for every other one -- which is what keeps this whole
-    /// accounting off the five existing workloads' measured path.
-    private var sparseSpanRecorder: TerminalBenchmarkSparseSpanRecorder?
+    /// Accepted-draw selection and topology evidence for the workloads whose
+    /// stimulus is partial damage, and nil for every other one -- which is what
+    /// keeps this whole accounting off the ungated workloads' measured path.
+    private var damageTopologyRecorder: TerminalBenchmarkDamageTopologyRecorder?
     /// Engine damage published since the current redraw sequence appeared,
     /// unioned rather than latched.
     ///
@@ -394,11 +393,8 @@ final class TerminalBenchmarkObserver {
             completionMarker: completionMarker,
             expectedFinalState: expectedFinalState
         )
-        self.profilesIncrementalMixedDamage =
-            environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
-                == "full-screen-incremental-mixed-churn"
-        self.sparseSpanRecorder = environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
-            .flatMap(TerminalBenchmarkSparseSpanRecorder.init(workload:))
+        self.damageTopologyRecorder = environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
+            .flatMap(TerminalBenchmarkDamageTopologyRecorder.init(workload:))
         let updateCount = { (name: String) in
             environment[name].flatMap(Int.init) ?? 0
         }
@@ -522,7 +518,7 @@ final class TerminalBenchmarkObserver {
                 fenceStallNanoseconds
             )
         }
-        if sparseSpanRecorder != nil {
+        if damageTopologyRecorder != nil {
             // Reset on the frame that carries a new sequence number, union on every
             // frame after it: together those bracket exactly one producer update.
             if pendingRedrawSequence != nil { pendingEngineDamage = .none }
@@ -597,7 +593,7 @@ final class TerminalBenchmarkObserver {
         pendingRedrawSequence = nil
         publishedRedrawSequence = nil
         redrawSequences = []
-        sparseSpanRecorder?.reset()
+        damageTopologyRecorder?.reset()
         pendingEngineDamage = .none
     }
 
@@ -611,13 +607,11 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Tells the view to retry when AppKit merged a published full redraw with older partial damage.
-    /// Excludes the sparse-span workloads for the same reason it excludes
-    /// incremental-mixed: their stimulus is partial damage by construction, and
-    /// forcing a full redraw would replace the exact topology they measure.
+    /// Excludes every topology-gated workload: their stimulus is partial damage
+    /// by construction, and forcing a full redraw would replace the exact
+    /// topology they measure.
     var needsPublishedRedraw: Bool {
-        publishedRedrawSequence != nil
-            && profilesIncrementalMixedDamage == false
-            && sparseSpanRecorder == nil
+        publishedRedrawSequence != nil && damageTopologyRecorder == nil
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
@@ -676,31 +670,40 @@ final class TerminalBenchmarkObserver {
             metrics: metrics,
             rowCount: plan.rows
         )
-        // Two selection rules, one per stimulus family. A dirty-rectangle rule
-        // cannot serve the sparse-span workloads at all: the rectangle a compound
-        // clip draws under is the union of its spans, so 2 spans and 17 spans
-        // present the same bounding row count. Those workloads select on the
-        // engine damage that produced the clip instead, and the topology check is
-        // what makes an off-topology draw fail to acknowledge rather than enter
-        // the series.
+        // Two selection rules, one per stimulus family. A rendered-rectangle rule
+        // cannot serve a partial-damage workload at all, for two reasons: the
+        // rectangle a compound clip draws under is the union of its spans, so 2
+        // spans and 17 present the same bounding row count; and a render brings a
+        // stale swapchain buffer current over the damage composed since that
+        // buffer was last displayed, so its row span measures buffer depth rather
+        // than the stimulus. Those workloads select on the engine damage that
+        // produced the clip instead, and the topology check is what makes an
+        // off-topology draw fail to acknowledge rather than enter the series. A
+        // full-screen workload keeps the rectangle rule, which staleness cannot
+        // widen past the whole grid.
         //
         // The recorder is consulted only for a sequence this block has not
         // accepted yet, because recording is what an accepted draw is: a record
         // written for any other draw would leave the topology series longer than
         // the timing series they must be read against.
+        //
+        // `incremental-mixed` is a calibrated workload that gained this recorder
+        // after its rule was frozen, and that is safe for one reason worth
+        // stating: the caller times the render and passes the duration in, so
+        // every line below runs after that bracket has closed and cannot enter
+        // the number the frozen rule decides on.
         var acceptsRedrawDraw = publishedRedrawSequence
             .map { redrawSequences.contains($0) == false } ?? false
         if acceptsRedrawDraw {
-            if sparseSpanRecorder != nil {
-                acceptsRedrawDraw = sparseSpanRecorder?.recordDrawIfTopologyMatches(
+            if damageTopologyRecorder != nil {
+                acceptsRedrawDraw = damageTopologyRecorder?.recordDrawIfTopologyMatches(
                     engineDamage: pendingEngineDamage,
                     clipDamage: damage,
                     rowCount: plan.rows,
                     usedDirtyRectFallback: usedDirtyRectFallback
                 ) == true
             } else {
-                acceptsRedrawDraw =
-                    redrawDirtyRowCount == (profilesIncrementalMixedDamage ? 6 : plan.rows)
+                acceptsRedrawDraw = redrawDirtyRowCount == plan.rows
             }
         }
         if let sequence = publishedRedrawSequence,
@@ -792,13 +795,13 @@ final class TerminalBenchmarkObserver {
                 object["blockProcessCPUNanoseconds"] =
                     lastAcceptedProcessCPUNanoseconds - blockStartProcessCPUNanoseconds
             }
-            // Present only for the sparse-span workloads, and carrying the same
-            // accepted draws as the timing and CPU series above: their verdicts
-            // are unreadable without proof that every measured draw really
-            // carried the topology the workload names, while the five existing
+            // Present only for the topology-gated workloads, and carrying the
+            // same accepted draws as the timing and CPU series above: their
+            // verdicts are unreadable without proof that every measured draw
+            // really carried the topology the workload names, while the ungated
             // workloads keep the artifact their frozen rules were calibrated on.
-            if let sparseSpanRecorder {
-                object["sparseSpanTopology"] = sparseSpanRecorder.artifact()
+            if let damageTopologyRecorder {
+                object["acceptedDrawTopology"] = damageTopologyRecorder.artifact()
             }
         }
         do {

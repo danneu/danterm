@@ -146,8 +146,8 @@ case "$WORKLOAD" in
         redraw_updates=1000000
         ;;
     full-screen-incremental-mixed-churn)
-        fixture_identity="full-screen-incremental-mixed-churn-v2-four-rows-six-damage-$geometry_label"
-        reset_behavior="dense deterministic setup plus excluded settling draw before four-row content-and-style updates with six-row glyph-halo damage"
+        fixture_identity="full-screen-incremental-mixed-churn-v3-four-rows-one-span-$geometry_label"
+        reset_behavior="dense deterministic setup plus excluded settling draw before four-row content-and-style updates damaging four rows in one span"
         redraw_updates=1000000
         ;;
     btop-scroll)

@@ -220,7 +220,7 @@ current buffer, never require re-rendering.
        trust-breaking inputs, with the headless PO3 pins.
 - [x] 4. Own the pane surface: one render path, draw seam deleted, benchmark
        bracket / harness pins / PO5 counters moved with it (PO4, PO5).
-- [ ] 5. Record the re-measurement and tick the T25 ledger (PO2, PO6).
+- [x] 5. Record the re-measurement and tick the T25 ledger (PO2, PO6).
 
 ## Implementation notes
 
@@ -284,13 +284,48 @@ current buffer, never require re-rendering.
   stream in a slot recorded publishes and renders equal per second with
   zero layer displays and no acquisition skips, and an idle pane recorded
   nothing at all.
+- Commit 5, PO2: the plan asked for `F24`'s paired measurement re-run, and it
+  was run as three arms rather than two -- `F24`'s baseline and candidate
+  rebuilt alongside the new one -- twice, A-B-C then C-B-A. Reproducing both
+  of `F24`'s arms in the same session is what lets the new arm be read against
+  its numbers, and the reversed second round retires the uncorrected-drift
+  caveat `F24` filed against itself.
+- Commit 5, PO6: the ladder could not run as the plan assumed. Every
+  `incremental-mixed` block on the candidate arm produced 1 of 50 serialized
+  draws and stalled, because draw acceptance compared the rendered rectangle
+  against a frozen 6 rows and a render now brings a stale swapchain buffer
+  current over composed damage. The plan non-goals recalibrating benchmark
+  rules, so this was raised rather than absorbed; the user chose to fix
+  acceptance in this commit. Acceptance moved onto the stimulus -- the engine
+  damage the workload's producer emits -- which is where the sparse-span
+  workloads already select, so the failure class is gone rather than retuned.
+  The retired constant is not replaced by a bigger constant.
+- Commit 5: gate coverage is read from each arm's own source tree, not
+  inferred from a missing artifact key. Requiring the new evidence would make
+  every comparison against a baseline older than the instrument impossible;
+  excusing every absence would let a candidate whose publish path broke pass as
+  an old arm. The tree cannot be faked by the failure being measured.
+- Commit 5: the block artifact key is `acceptedDrawTopology`, not
+  `damageTopology`, because the profiling activity artifact already publishes a
+  different `damageTopology` object (per-draw histograms). The first attempt
+  collided with it, and the source-tree probe silently matched the wrong one.
 
 ## Follow Up
 
+- Re-screen the three serialized-draw rules against the moved bracket. All
+  three now read `slower` by ~160% purely because the bracket swallowed the
+  rasterization CoreAnimation used to replay outside it, so those cells carry
+  no directional claim until their thresholds are recalibrated
+  (`scripts/terminal-benchmark-calibration.py`; the caveat and the measured
+  step are in `agent-docs/terminal-performance.md`).
+- Explain the +18.8% and +18.4% descriptive process CPU on `content-churn` and
+  `style-churn`. It is uncalibrated and sits against a 27-point fall on the
+  paced stream, but it is unexplained, and the two workloads differ from the
+  stream in redrawing the whole grid every frame.
 - Retire `usedDirtyRectFallback`. It is structurally false since commit 4 --
   no rectangle AppKit chose can reach a render -- but its consumers reach
   into the benchmark artifact schema (`dirtyRectFallbackCount` in
-  `TerminalBenchmarkSparseSpanTopology`, `app/TerminalBenchmark.swift`, and
+  `TerminalBenchmarkDamageTopology`, `app/TerminalBenchmark.swift`, and
   `scripts/terminal_btop_artifacts.py`), which this plan non-goals. Delete it
   with the benchmark recalibration.
 - `agent-docs/terminal-performance.md`'s "whole-process CPU per accepted
