@@ -621,6 +621,26 @@ constraint among them except where noted.
   `31/F18`'s directional-verdict-on-identical-source check is the regression
   gate.
 
+- [ ] `T25` READY (direction set in the `D7` addendum; evidence `F24`) --
+  **Own the pane surface: `wantsUpdateLayer` with an IOSurface swapchain.**
+  The `D7` addendum parked full store ownership "if the blit shows up in the
+  gates", and `F24` is that observation: on the paced stream the mirror blit
+  costs two full-frame copies per drawn frame inside CoreAnimation (a CPU
+  frame capture plus a GPU upload, ~3x the CG-queue cost of the glyph redraw
+  it replaced), because a layer-backed `draw(_:)` records ops instead of
+  writing pixels, and an op sourcing a mutable CGImage must be captured at
+  render time. Ideal: the mirror becomes IOSurface-backed and is assigned as
+  the layer's `contents`, so the render server textures from it with zero
+  copies; swapchain-style multi-buffering with per-buffer damage generations
+  keeps a surface unwritten while it is scanned. Deletes the blit, both
+  copies, and the `CABackingStoreGetFrontTexture` main-thread stall.
+  Verification: the `FrameBackingStoreTests` byte gates unchanged; `F24`'s
+  paired stream CPU re-run must show the CG-queue term gone; the
+  drawnRowSets/clipRects harness pins and the benchmark's dirty-rect
+  observation move with the seam, per the addendum's risk note. `T14`
+  sequences behind this -- it shrinks the damaged-row render, a term `F24`
+  measured at 1/20th of the blit.
+
 ### Phase 4 -- gated reopens and larger bets
 
 Each of these reopens something a prior doc closed. None may start without a

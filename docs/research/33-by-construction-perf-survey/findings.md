@@ -2197,3 +2197,92 @@ performance verdict.
   from measured ink overshoot (the 6.1x-over-ideal residue), and the
   `wantsUpdateLayer` full-ownership alternative stays parked in the `D7`
   addendum unless the blit ever shows up in a gate.
+
+### F24 -- the blit showed up in a gate: on the paced stream the mirror draw costs two full-frame copies per drawn frame inside CoreAnimation, process CPU 44.1% -> 64.1%, and the D7 addendum's `wantsUpdateLayer` trigger fires
+
+- Status: measured and attributed; diagnostic only (live process CPU and
+  `sample` profiles, no calibrated verdict). This is the re-check `F23`'s
+  competing-interpretations entry ordered for the `incremental-mixed`
+  +8.33% descriptive CPU observation, run instead on the workload where the
+  user felt it: `scripts/saturate-scrollback.sh --stream 500`, the paced
+  shift regime that is the mirror's home.
+- Date and investigator: 2026-08-08, post-T9 blit-cost agent.
+- Setup: two isolated optimized slots on one machine session, windows swapped
+  frontmost one at a time, streams never concurrent. Candidate HEAD
+  (`b7ca3a72`, T9 fully landed) vs baseline `630b56e5` (last pre-mirror
+  commit). 179-column pane at the slot's default window. Metric: whole-process
+  CPU over a 60 s steady-state stream window (`ps -o cputime` delta), then a
+  10 s `sample` per arm. Process CPU is uncalibrated and decides nothing
+  (17/F15); these are paired same-session descriptive numbers plus stack
+  attribution, which is what a mechanism claim needs.
+- The paired numbers:
+
+  | arm | process CPU, 60 s stream | CA::CG::Queue samples /10 s | mtl_submission | main-thread mirror maintenance |
+  | --- | ---: | ---: | ---: | ---: |
+  | baseline `630b56e5` | **44.1%** | 836 | 63 | -- (publish ~8) |
+  | HEAD (T9 mirror) | **64.1%** | 2,626 | 400 | 364 (257 in `translateRows`) |
+
+- The mechanism, read from the stacks. On a layer-backed view, `draw(_:)`
+  does not write pixels into a backing store: it records a display list
+  that CoreAnimation renders asynchronously on its `CA::CG::Queue`, into a
+  Metal-accelerated drawable. The mirror's `blit` therefore records a
+  `DrawImage` op whose source is a fresh `CGImage` wrapping the mirror's
+  mutable memory -- and at render time CA must capture that content:
+  `CA::CG::DrawImage::draw_image` -> `CA::Render::copy_image` ->
+  `create_image_by_copying` -> `CGBlt_copyBytes` -> `_platform_memmove`
+  copies the whole frame (~21 MB at 179x66 @2x) on the CPU, then
+  `MetalContext::update_image` -> `copy_image_to_texture` pays a second
+  full-frame copy into a fresh GPU buffer. 1,923 of the CG queue's 2,626
+  samples are the CPU copy alone (~19% of a core). No caching is possible:
+  the image is a new identity every draw, and reusing one identity would be
+  wrong anyway because the pixels mutate under it. The clip to `dirtyRect`
+  does not shrink the capture, and for a scroll the dirty region is the
+  whole shifted region regardless.
+- What died, and what was misjudged:
+  - **The colorspace hypothesis is dead.** The copy is a raw `memmove`, no
+    ColorSync or `CGColorTransform` frames anywhere hot -- the
+    `window.colorSpace` plumbing works and the blit is conversion-free.
+  - **The "bounded memcpy-scale blit" accepted risk was priced wrong.** The
+    D7 addendum priced the blit as one owned-memory copy. In the real
+    display path it is one recorded op that costs a CPU frame capture plus
+    a GPU upload per drawn frame -- roughly two full-frame copies -- and on
+    this workload that is ~3x the CG-queue cost of the glyph redraw it
+    replaced (836 -> 2,626 samples; the baseline's queue time is the known
+    per-glyph `compute_dod_`/`get_glyph_bboxes` cost, 17/F6).
+  - **The calibrated ladder could not see this, exactly as documented.**
+    The draw verdicts bracket the main thread, where the mirror is cheap
+    (`draw(_:)` fell from ~56 samples of glyph-run recording to ~11 of blit
+    recording; that is the draw-tail improvement `F23` measured). The cost
+    moved to the CG queue -- the same off-main-thread blind spot 17/F6
+    names -- and surfaced only in descriptive process CPU, first as
+    `incremental-mixed` +8.33% (`F23`), now as +20 points of a core here.
+- Also measured: the main thread additionally spends 866/7,087 samples
+  blocked in `CA::Transaction::commit` ->
+  `CABackingStoreGetFrontTexture` -> `_dispatch_sync_f_slow` waiting for
+  the CG queue to drain -- queue backpressure reaching the main thread.
+  The mirror's own maintenance is comparatively small: 364 samples at
+  publish (257 of them the region `memmove` in `translateRows`, ~93 the
+  damaged-row render).
+- Competing interpretations: the two arms' 60 s windows ran minutes apart
+  rather than interleaved, so machine drift is uncorrected -- but the +20
+  point delta is 4x-6x any drift seen in A/A ladder work, and the stack
+  attribution is independent of the wall numbers. The baseline arm's
+  spot-check (40.1%) sat below its measured window (44.1%), consistent with
+  ordinary variation, not a trend.
+- Consequence: the `D7` addendum's parked alternative is un-parked by its
+  own written trigger ("it becomes the follow-up if the blit shows up in
+  the gates" -- this is that observation, in the user-facing gate). The
+  structural fix is full store ownership: `wantsUpdateLayer` with the
+  mirror as the layer's `contents`, IOSurface-backed so CoreAnimation
+  textures from it with zero CPU copies, with swapchain-style
+  multi-buffering and per-buffer damage generations so a surface is never
+  written while the render server scans it. That deletes the blit, both
+  per-frame copies, and the `CABackingStoreGetFrontTexture` stall, and it
+  moves the drawnRowSets/clipRects harness pins and the benchmark's
+  dirty-rect observation, per the addendum's own risk note. It lands
+  behind the existing `FrameBackingStoreTests` byte gates.
+- Next action: write the `wantsUpdateLayer`/IOSurface plan as its own task
+  (`T25` in the README ledger) and treat this finding as its evidence
+  base. `T14` (derived halo) stays queued behind it: `T14` shrinks the
+  mirror's damaged-row render -- the 93-sample term -- not the blit, which
+  is the dominant term by 20x.
