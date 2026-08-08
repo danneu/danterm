@@ -36,6 +36,50 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
     }
 }
 
+/// Rides every host update signal so the urgent classes -- completed clipboard
+/// writes, ordered semantic events, primary-history mutation, and the child's
+/// lifecycle result -- reach the consumer without waiting on a delivery fence
+/// (research 33/D8). Deliberately carries no terminal and no damage: a payload
+/// that carried a frame would reopen the flood the consumer's deadline bounds.
+package struct TerminalPTYUpdateSignal: Sendable {
+    /// The newest completed OSC 52 write drained in the signaling owner turn.
+    package let clipboardWrite: String?
+    /// Ordered semantic output drained in the signaling owner turn.
+    package let semanticEvents: [TerminalSemanticEvent]
+    /// Monotonic primary-history generation at signal time, for payload-free
+    /// mutation classification at the consumer.
+    package let primaryHistoryGeneration: UInt64
+    /// The reported child lifecycle result, so an exit is consumed immediately
+    /// rather than at the deadline.
+    package let result: PaneLifecycleResult?
+
+    package init(
+        clipboardWrite: String?,
+        semanticEvents: [TerminalSemanticEvent],
+        primaryHistoryGeneration: UInt64,
+        result: PaneLifecycleResult?
+    ) {
+        self.clipboardWrite = clipboardWrite
+        self.semanticEvents = semanticEvents
+        self.primaryHistoryGeneration = primaryHistoryGeneration
+        self.result = result
+    }
+
+    /// Coalesces this signal with one emitted later, preserving semantic order,
+    /// the newest clipboard write, and the newest generation and result.
+    package func merging(newer: TerminalPTYUpdateSignal) -> TerminalPTYUpdateSignal {
+        TerminalPTYUpdateSignal(
+            clipboardWrite: newer.clipboardWrite ?? clipboardWrite,
+            semanticEvents: semanticEvents + newer.semanticEvents,
+            primaryHistoryGeneration: max(
+                primaryHistoryGeneration,
+                newer.primaryHistoryGeneration
+            ),
+            result: newer.result ?? result
+        )
+    }
+}
+
 /// Test-support view of owner-ordered terminal, input, and viewport transitions.
 package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case feed([UInt8])
@@ -55,7 +99,7 @@ package enum TerminalPTYProductionFenceOperation: Sendable {
     case consumptionState
     case diagnosticState
     case beginCloseAndSnapshot
-    case installUpdateHandler(@Sendable () -> Void)
+    case installUpdateHandler(@Sendable (TerminalPTYUpdateSignal) -> Void)
 }
 
 /// Carries one production fence's payload together with the host's raw entry census.
@@ -238,7 +282,7 @@ public actor TerminalPTYHost {
     private var emittedUpdateSignalCount = 0
     private var updateSignalsAfterTermination = 0
     private var consumerWorkWasSignaled = false
-    private var updateHandler: (@Sendable () -> Void)?
+    private var updateHandler: (@Sendable (TerminalPTYUpdateSignal) -> Void)?
     private var testUpdateHandler:
         (@Sendable (PaneLifecycleResult?) -> Void)?
     private var productionFenceEntryCount: UInt64 = 0
@@ -1959,7 +2003,19 @@ public actor TerminalPTYHost {
     private func publishPendingUpdate() {
         if updatePending {
             updatePending = false
-            updateHandler?()
+            // The urgent drains happen only when a production consumer exists:
+            // with no handler installed the accumulators stay put, so checkpoint
+            // and test fences still hand them over exactly once. With a handler,
+            // every producing turn ends here before any fence can run, so a
+            // frame-state drain observes them already empty.
+            if let updateHandler {
+                updateHandler(TerminalPTYUpdateSignal(
+                    clipboardWrite: terminal.drainPendingClipboardWrite(),
+                    semanticEvents: terminal.drainSemanticEvents(),
+                    primaryHistoryGeneration: terminal.primaryHistoryGeneration,
+                    result: reportedResult
+                ))
+            }
             testUpdateHandler?(reportedResult)
             emittedUpdateSignalCount += 1
         }

@@ -137,6 +137,15 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         TerminalBenchmarkObserver.shared?.attachFenceMetricsController(controller)
         #endif
 
+        // Read live per fence rather than cached: the publish deadline must
+        // track the pane's actual display (33/D8), and a window can move to a
+        // 60 Hz monitor without any backing-property change firing.
+        controller.displayRefreshIntervalNanoseconds = { [weak self] in
+            guard let framesPerSecond = self?.window?.screen?.maximumFramesPerSecond,
+                  framesPerSecond > 0
+            else { return 8_333_333 }
+            return 1_000_000_000 / UInt64(framesPerSecond)
+        }
         controller.onFrame = { [weak self] frame in
             self?.publish(frame)
         }

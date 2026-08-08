@@ -11,29 +11,51 @@ import TerminalRenderPlanning
 /// Owns the controller's sole main-queue crossing so teardown can stop every delivery at once.
 private final class TerminalPaneDeliveryBoundary: Sendable {
     private struct State {
-        var isFrameScheduled = false
+        var isUpdateScheduled = false
         var isStopped = false
+        /// Signals merged while a main hop is already scheduled, so coalescing
+        /// the hop never drops an urgent payload.
+        var pendingSignal: TerminalPTYUpdateSignal?
     }
 
     private let state = Mutex(State())
 
-    func scheduleFrame(_ delivery: @escaping @MainActor @Sendable () -> Void) {
+    func scheduleUpdate(
+        _ signal: TerminalPTYUpdateSignal,
+        _ delivery: @escaping @MainActor @Sendable (TerminalPTYUpdateSignal) -> Void
+    ) {
         let shouldSchedule = state.withLock { state in
-            guard state.isStopped == false, state.isFrameScheduled == false else { return false }
-            state.isFrameScheduled = true
+            guard state.isStopped == false else { return false }
+            state.pendingSignal = state.pendingSignal.map { $0.merging(newer: signal) } ?? signal
+            guard state.isUpdateScheduled == false else { return false }
+            state.isUpdateScheduled = true
             return true
         }
         guard shouldSchedule else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let shouldDeliver = self.state.withLock { state in
-                state.isFrameScheduled = false
-                return state.isStopped == false
+            let pending: TerminalPTYUpdateSignal? = self.state.withLock { state in
+                state.isUpdateScheduled = false
+                guard state.isStopped == false else { return nil }
+                let signal = state.pendingSignal
+                state.pendingSignal = nil
+                return signal
             }
-            guard shouldDeliver else { return }
+            // Nil means a synchronous fence already flushed this hop's payload.
+            guard let pending else { return }
             MainActor.assumeIsolated {
-                delivery()
+                delivery(pending)
             }
+        }
+    }
+
+    /// Hands a not-yet-delivered payload to a synchronous fence, so a checkpoint
+    /// consume cannot overtake urgent work already signaled toward the main hop.
+    func takePendingSignal() -> TerminalPTYUpdateSignal? {
+        state.withLock { state in
+            let signal = state.pendingSignal
+            state.pendingSignal = nil
+            return signal
         }
     }
 
@@ -240,6 +262,27 @@ public final class TerminalPaneSessionController {
     private var lastEmittedViewportState: TerminalPaneViewportState?
     private var lastPrimaryHistoryGeneration: UInt64
     private let fenceClock: () -> UInt64
+    /// Arms the deferred-fence one-shot and returns its cancellation. Injected
+    /// so the deadline is deterministic under test; production uses a cancellable
+    /// main-queue work item.
+    private let deadlineTimer: @MainActor (
+        UInt64,
+        @escaping @MainActor @Sendable () -> Void
+    ) -> () -> Void
+    /// The consumer's publish deadline (research 33/D8): no delivery fence runs
+    /// before this uptime instant, so a flooding producer is bounded by display
+    /// demand while a paced one never waits. Zero means fence immediately.
+    private var earliestNextFenceNanoseconds: UInt64 = 0
+    /// True between a deferred update signal and the fence that drains it; the
+    /// one-shot timer exists exactly while this is set.
+    private var isAwaitingDeferredFence = false
+    private var cancelDeferredFence: (() -> Void)?
+
+    /// Supplies the owning display's refresh interval for the publish deadline.
+    /// The interval must come from the pane's actual display, not an assumed
+    /// 120 Hz, or an external 60 Hz monitor pays double the fences (33/D8); the
+    /// default stands in only until the view installs the real provider.
+    public var displayRefreshIntervalNanoseconds: () -> UInt64 = { 8_333_333 }
 
     /// Theme retained independently of terminal bytes so configuration can repaint immediately.
     public private(set) var renderTheme: RenderTheme
@@ -412,6 +455,17 @@ public final class TerminalPaneSessionController {
         theme: RenderTheme = .dark,
         fenceClock: @escaping () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
+        },
+        deadlineTimer: @escaping @MainActor (
+            UInt64,
+            @escaping @MainActor @Sendable () -> Void
+        ) -> () -> Void = { delayNanoseconds, fire in
+            let work = DispatchWorkItem { MainActor.assumeIsolated { fire() } }
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + .nanoseconds(Int(delayNanoseconds)),
+                execute: work
+            )
+            return { work.cancel() }
         }
     ) {
         var initialMetrics = TerminalPaneFenceMetrics()
@@ -428,6 +482,7 @@ public final class TerminalPaneSessionController {
 
         self.host = host
         self.fenceClock = fenceClock
+        self.deadlineTimer = deadlineTimer
         renderTheme = theme
         fenceMetrics = initialMetrics
         terminationHandle = TerminalPaneTerminationHandle(host: host)
@@ -446,14 +501,77 @@ public final class TerminalPaneSessionController {
         let deliveryBoundary = deliveryBoundary
         _ = performAccountedFence(
             kind: .initialization,
-            operation: .installUpdateHandler { [weak host] in
-                deliveryBoundary.scheduleFrame { [weak self, weak host] in
-                    guard let self, let host else { return }
-                    self.consumeHostUpdate(host)
+            operation: .installUpdateHandler { signal in
+                deliveryBoundary.scheduleUpdate(signal) { [weak self] merged in
+                    guard let self else { return }
+                    self.receiveUpdateSignal(merged)
                 }
             }
         )
         host.submitStart(launchInput)
+    }
+
+    /// The main-actor end of the host's update signal: delivers the urgent
+    /// payload immediately, then fences now or at the publish deadline. This is
+    /// where 33/D8's bound lives -- the drain and parse never throttle, only
+    /// this fence is deferred, and damage keeps accumulating in the engine's
+    /// own damage value until the deadline drains it.
+    private func receiveUpdateSignal(_ signal: TerminalPTYUpdateSignal) {
+        guard isTornDown == false else { return }
+        deliverUrgent(signal)
+        // A child exit is consumed immediately: the result, the final frame,
+        // and the session-ended callback must never wait on a flood's timer.
+        if signal.result != nil {
+            consumeHostUpdate(host)
+            return
+        }
+        let now = fenceClock()
+        if now >= earliestNextFenceNanoseconds {
+            consumeHostUpdate(host)
+            return
+        }
+        guard isAwaitingDeferredFence == false else { return }
+        isAwaitingDeferredFence = true
+        armDeferredFence(now: now)
+    }
+
+    private func deliverUrgent(_ signal: TerminalPTYUpdateSignal) {
+        if let clipboardWrite = signal.clipboardWrite {
+            onClipboardWrite?(clipboardWrite)
+        }
+        if signal.semanticEvents.isEmpty == false {
+            onSemanticEvents?(signal.semanticEvents)
+        }
+        if signal.primaryHistoryGeneration > lastPrimaryHistoryGeneration {
+            lastPrimaryHistoryGeneration = signal.primaryHistoryGeneration
+            onPrimaryHistoryMutation?()
+        }
+    }
+
+    private func armDeferredFence(now: UInt64) {
+        cancelDeferredFence = deadlineTimer(earliestNextFenceNanoseconds - now) { [weak self] in
+            self?.deferredFenceElapsed()
+        }
+    }
+
+    private func deferredFenceElapsed() {
+        cancelDeferredFence = nil
+        guard isTornDown == false, isAwaitingDeferredFence else { return }
+        let now = fenceClock()
+        // A checkpoint fence advanced the deadline underneath the armed timer;
+        // re-arm for the remainder rather than fencing early or dropping the
+        // pending work.
+        if now < earliestNextFenceNanoseconds {
+            armDeferredFence(now: now)
+            return
+        }
+        consumeHostUpdate(host)
+    }
+
+    private func cancelDeferredFenceIfArmed() {
+        isAwaitingDeferredFence = false
+        cancelDeferredFence?()
+        cancelDeferredFence = nil
     }
 
     private func consumeHostUpdate(_ host: TerminalPTYHost) {
@@ -637,6 +755,7 @@ public final class TerminalPaneSessionController {
     /// flag, because that callback re-enters the controller through a path gated on it.
     private func stopDeliveryAndCacheFinalTerminal() -> Bool {
         guard isTornDown == false else { return false }
+        cancelDeferredFenceIfArmed()
         deliveryBoundary.stop()
         let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
         guard case .closeSnapshot(let terminal) = fence else {
@@ -924,6 +1043,17 @@ public final class TerminalPaneSessionController {
         result: PaneLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
+        // First, so a synchronous checkpoint fence cannot overtake urgent work
+        // already signaled toward the main hop: semantics stay ordered before
+        // the frame and the exit callback that follow them.
+        let flushedSignal = deliveryBoundary.takePendingSignal()
+        if let flushedSignal { deliverUrgent(flushedSignal) }
+        // Any fence drains all pending host work, so it satisfies the deadline:
+        // the armed one-shot dies here and the next signal starts a new cycle.
+        cancelDeferredFenceIfArmed()
+        earliestNextFenceNanoseconds = fenceClock() + displayRefreshIntervalNanoseconds()
+        // A flushed result must not be lost with its hop: this fence adopts it.
+        let result = result ?? flushedSignal?.result
         cachedTerminal = frameState.terminal
         emitPrimaryHistoryMutationIfNeeded()
         pendingDamage.formUnion(frameState.damage)

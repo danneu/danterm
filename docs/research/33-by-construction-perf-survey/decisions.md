@@ -436,8 +436,10 @@ rediscovering them.
 
 ### D8 -- the consumer bounds the publish rate: a delivery deadline, one one-shot timer only while damage is pending, and a bypass for semantic events
 
-- Status: **direction set.** This is `T10`'s Phase 2 direction-gate entry;
-  implementation may start against it. The claim is a **countable one under
+- Status: **implemented and landed; `F20` records the result** -- publishes
+  per draw fell 10.45 to 0.997 live, the paced 30/s scenario unchanged, and
+  `F18`'s churn plan-metric reversed to `faster`. This was `T10`'s Phase 2
+  direction-gate entry. The claim is a **countable one under
   `D1`**: publishes per second fall from ~1,560 to the display rate, so
   publishes per draw fall from **13.0** (`F19`, the post-`T8` figure a `T10`
   claim must be written against; `F12`'s 4.96 is the pre-`T8` datum) to ~1,

@@ -1696,3 +1696,109 @@ performance verdict.
   `T9`'s live before/after gate beside `T5`'s headless one: after the change,
   paced scenarios must publish O(1) damaged rows per line while
   `rewrite`-style output stays unmoved. `T10`'s claim updates to 13.0:1.
+
+### F20 -- the consumer's deadline bounds the publish rate: publishes per draw fall from 10.45 to 0.997 live, the paced regime is untouched, and flood throughput rises 25%
+
+- Status: implemented and verified live; this is `T10` landed against `D8`'s
+  direction. The claim is the countable one `D8` stated: publishes per second
+  fall from drain rate to display demand. On this run's display state the
+  live `cat` fell from **571.9 publishes/s at 10.45 per draw** to **42.2
+  publishes/s at 0.997 per draw** (13.6x fewer publishes), with deliveries,
+  publishes, and draws now equal to within one per few hundred -- every
+  fence produces a plan a display pass actually consumes. The paced 30/s
+  scenario is unchanged to the third digit (30.17 publishes/s, 0.997 lines
+  per publish), so the deadline never binds under the display rate and
+  `F19`'s regime partition holds: the paced regime remains `T9`'s alone.
+- Date and investigator: 2026-08-08, T10 implementation agent.
+- Commit and worktree state: `b29125d0` plus this task's changes -- the
+  `TerminalPTYUpdateSignal` payload on the host's update signal, the deadline
+  and one-shot timer in `TerminalPaneSessionController`, the merging delivery
+  boundary, and the view's display-interval provider. Apple Swift 6.3.3,
+  arm64-apple-macosx26.0, release configuration for every live number,
+  built-in ProMotion display (adaptive, max 120 Hz), default slot window at
+  40 grid rows.
+- Commands, inputs, or reproduction: `scripts/research/33/t4-publish-rate.sh`
+  and `scripts/research/33/t9-lines-per-delivery.sh`, each run before and
+  after on the same display within the same hour; paired
+  `just benchmark-quick baseline=HEAD` on `content-churn`, `style-churn`, and
+  `scrollback-stream`; the deterministic timer and bypass tests in
+  `TerminalPanePublishDeadlineTests.swift`; `just test` (75 steps, all
+  passing).
+- What the mechanism is: the host's update signal now carries a small urgent
+  payload (clipboard write, semantic events, primary-history generation,
+  lifecycle result) drained on the owner queue at signal time, and the
+  controller delivers that payload immediately but will not fence again until
+  `lastDelivery + refreshInterval`, arming exactly one one-shot timer only
+  while host work is pending. Damage accumulates where it always accumulated
+  -- the engine's damage value -- and the deferred fence drains all of it at
+  once. A child exit consumes immediately. The drain and parse never
+  throttle; only the fence is deferred. The interval comes from the pane's
+  actual display via `NSScreen.maximumFramesPerSecond`, read per fence.
+- Measurements, live gates (before -> after, same scripts, same display,
+  same hour):
+
+  | scenario | publishes/s | mean lines/publish | scrolled lines/s |
+  | --- | ---: | ---: | ---: |
+  | `t4` `cat` 64 MB | 571.9 -> 42.2 | -- | -- |
+  | `t4` publishes per draw | 10.45 -> **0.997** | -- | -- |
+  | shape `cat` full speed | 576.2 -> 78.7 | 542.0 -> 4,956.4 | 312,268 -> **390,054** |
+  | paced 30/s | 30.17 -> **30.17** | 0.997 -> **0.997** | 30.1 -> 30.1 |
+  | paced 240/s | 238.4 -> 74.8 | 1.000 -> 3.19 | 238.4 -> 238.4 |
+  | paced 960/s | 712.5 -> 81.4 | 1.343 -> 11.70 | 957.1 -> 951.9 |
+
+  Paired benchmark, `benchmark-quick baseline=HEAD` (2 pairs each), with the
+  composition counters from each comparison's `run.json`
+  (`summary.workloads[].rawBlocks[].artifact.finalDraw`):
+
+  | workload | draw verdict | plan time | planned frames per 50-draw block (A -> B) | in-block fence stall (A -> B) |
+  | --- | --- | --- | ---: | ---: |
+  | `content-churn` | inconclusive -3.11% | **faster -5.67%** | 83, 61 -> **51, 51** | 3.9, 7.6 ms -> 1.1 ms |
+  | `style-churn` | **faster -4.31%** | **faster -8.29%** | 94, 66 -> **51, 51** | 4.6, 8.1 ms -> 1.2 ms |
+  | `scrollback-stream` | inconclusive -2.62% | -- | -- | drain 80.5 -> 72.2 ms (descriptive) |
+
+  `F18`'s expected reading lands exactly: planned frames per accepted draw
+  fall back to one (51 per 50-draw block, both candidate blocks, both
+  workloads), the plan-metric `slower` it measured (+4.83% / +6.70%)
+  reverses to `faster` (-5.67% / -8.29%), and nothing on the ladder
+  regresses.
+- Observation, the draw-bound cycle: after the change the flood's publish
+  rate sits at 42-81/s, not the 120 Hz ceiling, and draws track publishes
+  1:1. The deadline arms at 8.3 ms, but the cycle it bounds serializes fence
+  stall (up to ~1.8 ms behind a 16 KiB parse turn), a whole-screen plan, and
+  a whole-screen draw on the same main thread, so the effective period is
+  ~13-24 ms depending on geometry. The deficit against 120 Hz is exactly the
+  whole-screen cost per scrolled frame that `T9` deletes; post-`T9` the same
+  bound should ride up toward the display ceiling. The baseline's draws
+  (54.7/s on `t4`, against `F19`'s 120) already sat below the ceiling for
+  the same reason plus ProMotion's adaptive rate.
+- Inference: `F12`'s waste is deleted at the source `D8` named -- the
+  pipeline no longer pays plan, copy-on-write, damage-set construction, and
+  fence for frames AppKit will discard; work starts only when a display pass
+  can consume it. The multiplier `F19` warned about (every drain win widens
+  the waste) is structurally capped at ~1 publish per draw. Flood throughput
+  rose 25% (312k -> 390k lines/s) because main-thread cycles that went to
+  discarded plans now go to the drain and the screen.
+- Competing interpretations: the paced-240 and paced-960 scenarios now
+  coalesce (their producers publish above this cycle's effective demand), so
+  their publishes/s falls too -- designed behavior for any producer above
+  display demand, not a regression: their scrolled lines/s is unchanged, so
+  no output is lost and each publish simply carries more lines. The 42 vs 79
+  publishes/s spread between the two flood instruments is corpus and
+  window-boundary difference, as in `F19`.
+- Uncertainty: the benchmark percentages are 2-pair `quick` figures and are
+  not decision-bearing digits; the claim rests on the counts, which are
+  exact tallies. `D8` named `cumulativeFenceStallNanoseconds` falling ~13x
+  as a gate, and `t4`'s sampler does not carry that counter; the stall
+  evidence here is the churn blocks' in-block stall (3.5-6.8x down in a
+  serialized-draw workload that cannot flood) plus the count identity --
+  fences fell 13.6x live with the per-fence cost unchanged in kind, so the
+  cumulative flood stall falls by the same factor. The live absolute rates
+  (42.2 vs `F19`'s 120 draws/s environment) depend on ProMotion's adaptive
+  state; the before/after pairing is same-display and same-hour, so the
+  ratios are unaffected.
+- Next action: `T10` is done; `T9` (shift damage, `D7`) is the remaining
+  Phase 2 task and now owns the whole paced regime plus the draw-bound
+  cycle this finding measured. The README's follow-up question -- whether
+  the 16 KiB read cap keeps any other reason to exist -- is now askable
+  with the deadline in place. `T24` (the `benchmark-confirm` block floor)
+  remains open instrument debt for future feed-path claims.

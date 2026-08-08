@@ -27,7 +27,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance measurement gates `L6`/`L5`; the shipped span clip moved the bracket again |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
 | 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
-| 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T7` parked into `T8`; `T9` and `T10` still unstarted |
+| 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T8`+`T7` and `T10` landed; `T9` direction set (`D7`), unstarted |
 
 ## Closed
 

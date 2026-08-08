@@ -484,7 +484,7 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   (planner translation-aware reuse first, view backing-store translation
   second, each behind a bitmap-equivalence gate), with `T20` riding along per
   `D2`. The claim is countable, not timed.
-- [ ] `T10` VETTING -- **Bound publish rate by consumer demand.** `T4`'s gate is
+- [x] `T10` DONE -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.
   The consumer holds a deadline and will not fence again until
@@ -501,6 +501,13 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   one-shot timer runs only while damage is pending, the urgent classes bypass
   it, and the claim is countable -- 13.0 publishes per draw (`F19`) falling
   to ~1 -- with the paced regime explicitly out of scope as `T9`'s (`F19`).
+  **Result in `F20`:** publishes per draw fell 10.45 -> 0.997 live (13.6x
+  fewer publishes), the paced 30/s scenario is unchanged to the third digit,
+  flood throughput rose 25%, `F18`'s churn plan-metric `slower` reversed to
+  `faster` with candidate blocks planning exactly one frame per draw, and
+  `scrollback-stream` reads non-regressing. The urgent classes ride the
+  update signal as a small payload (`TerminalPTYUpdateSignal`), delivered
+  without a fence.
 
 ### Phase 3 -- well-scoped, independently landable
 
