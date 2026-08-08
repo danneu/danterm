@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# Research doc 33, task T4: count published frames per second and draws per
-# second in a live app, not in a benchmark block.
+# Research doc 33, task T4: count published frames, owned-surface renders and
+# AppKit layer displays per second in a live app, not in a benchmark block.
 #
 # Launches an isolated development slot with DANTERM_FRAME_RATE_LOG set, runs a
 # real `cat` of a large file in a real pane, and reduces the per-second samples
 # the app appended. H2 predicts publishes/s far above the display rate -- 23/F5
-# read roughly 8 publishes per draw. A live ratio near 1:1 closes T10.
+# read roughly 8 publishes per draw. A live ratio near 1:1 closed T10.
+#
+# The publishes-per-draw ratio it used to report is retired (T25 PO5): with the
+# draw seam deleted, every publication that renders shows its own frame, so the
+# ratio would read 1.0 by construction and detect nothing. The three counters
+# are independent instead, and the one live assertion left is that renders never
+# exceed publications -- a render the pane was not asked for is the regression
+# this can still see. The causal claims (a layer display renders nothing; a
+# coalesced burst renders its last plan and goes quiet) are deterministic and
+# live in the UI harness.
 #
 # A hidden pane plans and draws nothing, so the slot's window has to be on
 # screen for the duration: the script activates the slot it launched and hands
@@ -127,20 +136,37 @@ echo
 echo "per-second samples:"
 cat "$RATE_LOG"
 echo
-jq -s '
-    if length == 0 then "no samples: the pane published nothing" else
+SUMMARY="$(jq -s '
+    if length == 0 then {error: "no samples: the pane published nothing"} else
         {
             windows: length,
             seconds: (map(.windowSeconds) | add),
             deliveries: (map(.deliveries) | add),
             publishes: (map(.publishes) | add),
-            draws: (map(.draws) | add)
+            renders: (map(.renders) | add),
+            layerDisplays: (map(.layerDisplays) | add)
         }
         | . + {
             deliveriesPerSecond: (.deliveries / .seconds),
             publishesPerSecond: (.publishes / .seconds),
-            drawsPerSecond: (.draws / .seconds),
-            publishesPerDraw: (if .draws == 0 then null else .publishes / .draws end)
+            rendersPerSecond: (.renders / .seconds),
+            layerDisplaysPerSecond: (.layerDisplays / .seconds)
         }
     end
-' "$RATE_LOG"
+' "$RATE_LOG")"
+echo "$SUMMARY"
+
+if echo "$SUMMARY" | jq -e 'has("error")' > /dev/null; then
+    echo "no samples collected: the pane published nothing, so this run decides nothing" >&2
+    exit 1
+fi
+
+# At most one render per publication (T25 PO5). A render is only ever produced
+# by a publish or by the retry that finishes one, so a surplus means something
+# else started rendering. The one allowance is a single carry: a publish that
+# coalesced just before the log was truncated can have its retry render inside
+# the sampled window, which counts a render whose publication is not in the sum.
+echo "$SUMMARY" | jq -e '.renders <= .publishes + 1' > /dev/null || {
+    echo "PO5 FAILED: renders exceeded publications by more than the one-frame carry" >&2
+    exit 1
+}

@@ -1,21 +1,31 @@
-// Live publish/draw rate sampler for one pane. It exists only to answer "how
-// many frames per second does a real pane actually publish, and how many of
-// those reach `draw(_:)`" in a running app, which no benchmark artifact can
-// report because those capture totals at draw boundaries only.
+// Live presentation-rate sampler for one pane. It exists only to answer, in a
+// running app, "how many frames per second does a real pane publish, how many
+// of those actually render into the owned surface, and how often does AppKit
+// ask the layer to display" -- which no benchmark artifact can report, because
+// those capture totals at draw boundaries only.
 //
-// Not a general metrics facility: it owns one counter the engine does not
-// already keep (draws), reads the delivery count the session controller
-// already keeps, and writes a line per elapsed window. Nothing else belongs
-// here -- a second question wants its own instrument, not a field on this one.
+// The three counters are deliberately independent rather than a ratio
+// (research/33 T25 PO5): with the draw seam deleted, a publishes-per-draw
+// ratio would read 1.0 by construction and detect nothing. Renders above
+// publications, or renders tracking layer displays, are what a regression
+// would look like here.
+//
+// Not a general metrics facility: it owns two counters the engine does not
+// already keep (renders, layer displays), reads the delivery count the session
+// controller already keeps, and writes a line per elapsed window. Nothing else
+// belongs here -- a second question wants its own instrument, not a field on
+// this one.
 import Foundation
 
 /// Appends one JSON line per sampling window so an external script can read
-/// publishes/s and draws/s off a live pane without attaching a profiler.
+/// publishes/s, renders/s and layer displays/s off a live pane without
+/// attaching a profiler.
 ///
 /// Created only when `DANTERM_FRAME_RATE_LOG` names a file, so an ordinary run
-/// pays one optional test per publish and per draw and nothing else. Owned by
-/// the view whose frames it counts, and it starts and stops with that view: it
-/// holds no timer, no observer, and no reference back to its owner.
+/// pays one optional test per publish, render and layer display and nothing
+/// else. Owned by the view whose frames it counts, and it starts and stops with
+/// that view: it holds no timer, no observer, and no reference back to its
+/// owner.
 @MainActor
 final class TerminalFrameRateSampler {
     /// Names the file to append to. Forwarded into a development slot with
@@ -33,7 +43,8 @@ final class TerminalFrameRateSampler {
     /// window reports deliveries measured from its own start, not from zero.
     private var isDeliveryBaselineSet = false
     private var publishes = 0
-    private var draws = 0
+    private var renders = 0
+    private var layerDisplays = 0
 
     /// Returns a sampler only when the environment asked for one, so the call
     /// site stays a single `let sampler = TerminalFrameRateSampler.make()`.
@@ -63,13 +74,18 @@ final class TerminalFrameRateSampler {
         emitIfWindowElapsed(deliveryCount: deliveryCount)
     }
 
-    func recordDraw(deliveryCount: UInt64) {
-        draws += 1
+    func recordRender(deliveryCount: UInt64) {
+        renders += 1
         emitIfWindowElapsed(deliveryCount: deliveryCount)
     }
 
-    /// Flushes the partial window the last publish or draw left open, so a
-    /// stream that stops does not lose its final second.
+    func recordLayerDisplay(deliveryCount: UInt64) {
+        layerDisplays += 1
+        emitIfWindowElapsed(deliveryCount: deliveryCount)
+    }
+
+    /// Flushes the partial window the last sample left open, so a stream that
+    /// stops does not lose its final second.
     func flush(deliveryCount: UInt64) {
         emit(deliveryCount: deliveryCount)
         try? handle.close()
@@ -89,7 +105,7 @@ final class TerminalFrameRateSampler {
         deliveryCount: UInt64,
         now: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) {
-        guard publishes > 0 || draws > 0 else { return }
+        guard publishes > 0 || renders > 0 || layerDisplays > 0 else { return }
         let elapsed = Double(now - windowStartNanoseconds) / 1_000_000_000
         let deliveries = deliveryCount >= windowStartDeliveryCount
             ? deliveryCount - windowStartDeliveryCount
@@ -100,13 +116,15 @@ final class TerminalFrameRateSampler {
         "windowSeconds":\(String(format: "%.3f", elapsed)),\
         "deliveries":\(deliveries),\
         "publishes":\(publishes),\
-        "draws":\(draws)}
+        "renders":\(renders),\
+        "layerDisplays":\(layerDisplays)}
 
         """
         try? handle.write(contentsOf: Data(line.utf8))
         windowStartNanoseconds = now
         windowStartDeliveryCount = deliveryCount
         publishes = 0
-        draws = 0
+        renders = 0
+        layerDisplays = 0
     }
 }

@@ -79,6 +79,13 @@ public final class TerminalFrameSwapchain {
         pendingPlan != nil
     }
 
+    /// What the most recent presentation actually rendered: `.full` when the
+    /// acquired buffer needed a from-scratch render, otherwise the composed
+    /// stale damage it applied. The owner's benchmark bracket reports it, so
+    /// the recorded damage topology is the render's own, not the publish's.
+    /// Nil until the first presentation.
+    public private(set) var lastRenderedDamage: TerminalDamage?
+
     /// Accepts one published frame: every buffer accumulates the damage, and
     /// if a safe buffer exists the plan renders into it -- incrementally when
     /// the buffer's composed stale damage applies, from scratch otherwise.
@@ -123,6 +130,7 @@ public final class TerminalFrameSwapchain {
         if incremental == false {
             buffer.store.renderFull(plan)
         }
+        lastRenderedDamage = incremental ? buffer.staleDamage : .full
         buffer.isCurrent = true
         buffer.staleDamage = .none
     }

@@ -112,12 +112,23 @@ The draw verdict and the plan line are decided separately and can disagree; a
 change that plans faster while drawing slower reports exactly that.
 
 The three serialized-draw workloads decide on `drawNanosecondsPerDraw`, which
-brackets only clipping and drawing inside `draw(_:)`. Frame planning does not
-run there -- `planFrame` runs on the PTY-output path, when a pane applies child
+brackets the pane's render into its owned surface. Frame planning does not run
+there -- `planFrame` runs on the PTY-output path, when a pane applies child
 output -- so **the draw verdict cannot see a planner change at all**. It is not
 that planning is a small term in that number; it is not in that number. So
 judging a planner change means reading the plan line, and a change that moves
 only planning correctly reads `equivalent` on all three draw verdicts.
+
+**That bracket moved, and its rules have not been recalibrated** (research/33
+`T25`). It used to sit inside `draw(_:)` and cover clipping plus glyph
+submission, with CoreAnimation replaying the recorded display list on its own
+queue *after* the draw returned -- outside the bracket. The pane now renders
+into its own IOSurface, so the rasterization that used to run off the bracket
+runs inside it. The number is therefore larger and measures more of a frame
+than it did, and it is not comparable to any figure recorded before the move.
+Until these cells are recalibrated, **read them descriptively and issue no
+directional claim from them**; the paired ladder still runs as a non-regression
+check, with that caveat recorded alongside its result.
 
 Planning is the **smaller** cost, and it shrinks ~7.6x when damage goes from 66
 rows to 6, because **the planner is damage-scoped**: production planning runs

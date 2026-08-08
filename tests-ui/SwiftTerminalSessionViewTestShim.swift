@@ -1,5 +1,6 @@
 // Test-only terminal-engine values and controller used to compile the real Swift pane view.
 import Cocoa
+import IOSurface
 
 enum PaneLifecycleResult {
     case exited
@@ -87,16 +88,20 @@ struct RenderFramePlan {
     static let rowsForTesting = 10
 
     let defaultBackground: RenderColor
-    let columns = 10
-    let rows = RenderFramePlan.rowsForTesting
-    let includedRows: Set<Int>
+    let columns: Int
+    let rows: Int
 
+    /// The grid defaults to the fake viewport, and a test overrides it only to
+    /// stand in for a resize -- the one trust-breaking input that reaches the
+    /// view as a differently-shaped plan rather than as new metrics.
     init(
         defaultBackground: RenderColor,
-        includedRows: Set<Int> = Set(0..<RenderFramePlan.rowsForTesting)
+        columns: Int = 10,
+        rows: Int = RenderFramePlan.rowsForTesting
     ) {
         self.defaultBackground = defaultBackground
-        self.includedRows = includedRows
+        self.columns = columns
+        self.rows = rows
     }
 }
 
@@ -133,58 +138,17 @@ struct TerminalDamage: Equatable {
             self = TerminalDamage(rows: rows.union(other.rows))
         }
     }
-
-    func expandingShift() -> TerminalDamage {
-        guard let shift else { return self }
-        return TerminalDamage(rows: rows.union(shift.region))
-    }
-
-    func withGlyphHalo(rowCount: Int) -> TerminalDamage {
-        guard isFull == false else { return .full }
-        var haloed: Set<Int> = []
-        for row in rows {
-            for neighbor in (row - 1)...(row + 1) where neighbor >= 0 && neighbor < rowCount {
-                haloed.insert(neighbor)
-            }
-        }
-        return TerminalDamage(rows: haloed)
-    }
-
-    func maximalContiguousSpans() -> [Range<Int>] {
-        var spans: [Range<Int>] = []
-        for row in rows.sorted() {
-            if let last = spans.last, last.upperBound == row {
-                spans[spans.count - 1] = last.lowerBound..<(row + 1)
-            } else {
-                spans.append(row..<(row + 1))
-            }
-        }
-        return spans
-    }
 }
 
-/// Records the mirror calls the production view makes so the harness can pin
-/// path selection -- built vs applied vs blitted vs folded -- without pixels.
-/// Blits draw nothing; the byte-level contract lives in the engine's own
-/// FrameBackingStoreTests.
+/// A frame store the harness can attach as layer contents without rendering
+/// anything. Only what the view touches survives here -- the surface it shows
+/// and the geometry it shows it at; the pixel contract lives in the engine's
+/// own FrameBackingStoreTests.
 final class TerminalFrameBackingStore {
-    static var applyReturnsForTesting = true
-    private(set) static var eventsForTesting: [String] = []
-
-    static func resetForTesting() {
-        applyReturnsForTesting = true
-        eventsForTesting = []
-    }
-
     let columns: Int
     let rows: Int
     let metrics: TerminalRenderMetrics
-    var pointSize: CGSize {
-        CGSize(
-            width: metrics.cellSize.width * CGFloat(columns),
-            height: metrics.cellSize.height * CGFloat(rows)
-        )
-    }
+    let ioSurface: IOSurface
 
     init?(
         columns: Int,
@@ -193,35 +157,92 @@ final class TerminalFrameBackingStore {
         colorSpace: CGColorSpace? = nil
     ) {
         guard columns > 0, rows > 0 else { return nil }
+        guard let surface = IOSurface(properties: [
+            .width: columns,
+            .height: rows,
+            .bytesPerElement: 4,
+            .pixelFormat: UInt32(0x4247_5241), // 'BGRA'
+        ]) else { return nil }
         self.columns = columns
         self.rows = rows
         self.metrics = metrics
-    }
-
-    func renderFull(_ plan: RenderFramePlan) {
-        Self.eventsForTesting.append("renderFull")
-    }
-
-    func apply(plan: RenderFramePlan, damage: TerminalDamage) -> Bool {
-        guard Self.applyReturnsForTesting,
-              damage.isFull == false,
-              plan.columns == columns, plan.rows == rows
-        else { return false }
-        Self.eventsForTesting.append("apply")
-        return true
-    }
-
-    func blit(into target: CGContext, rect: CGRect) {
-        Self.eventsForTesting.append("blit")
+        ioSurface = surface
     }
 }
 
-func clipFramePlan(_ plan: RenderFramePlan, to damage: TerminalDamage) -> RenderFramePlan {
-    guard damage.isFull == false else { return plan }
-    return RenderFramePlan(
-        defaultBackground: plan.defaultBackground,
-        includedRows: plan.includedRows.intersection(damage.rows)
-    )
+/// Records what the production view asked the swapchain to present, so the
+/// harness can pin the single render path -- which rows a publish rendered,
+/// which publishes coalesced, which retry finished one -- without pixels or a
+/// compositor. Acquisition is a switch here because the real gate is the render
+/// server's in-use report, which no headless harness can steer.
+final class TerminalFrameSwapchain {
+    /// False stands in for a render server still reading every detached
+    /// surface: no buffer is acquirable, so every publish coalesces.
+    static var canAcquireForTesting = true
+    /// The rows each render covered, in order. `.full` renders record every
+    /// row; an incremental render records the damage composed since the
+    /// acquired buffer was last current.
+    private(set) static var renderedRowSetsForTesting: [Set<Int>] = []
+    /// Counts swapchain construction, so the harness can tell a replacement
+    /// (a trust-breaking input) from a re-render of the same buffers.
+    private(set) static var creationCountForTesting = 0
+
+    static func resetForTesting() {
+        canAcquireForTesting = true
+        renderedRowSetsForTesting = []
+        creationCountForTesting = 0
+    }
+
+    private let store: TerminalFrameBackingStore
+    private let rows: Int
+    private var pendingPlan: RenderFramePlan?
+    private var staleDamage = TerminalDamage.none
+    private var isCurrent = false
+
+    private(set) var lastRenderedDamage: TerminalDamage?
+    var hasPendingPresentation: Bool { pendingPlan != nil }
+
+    init?(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace? = nil
+    ) {
+        guard let store = TerminalFrameBackingStore(
+            columns: columns,
+            rows: rows,
+            metrics: metrics,
+            colorSpace: colorSpace
+        ) else { return nil }
+        self.store = store
+        self.rows = rows
+        Self.creationCountForTesting += 1
+    }
+
+    func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {
+        staleDamage.formUnion(damage)
+        pendingPlan = plan
+        return presentPending()
+    }
+
+    func retryPendingPresentation() -> TerminalFrameBackingStore? {
+        presentPending()
+    }
+
+    private func presentPending() -> TerminalFrameBackingStore? {
+        guard pendingPlan != nil, Self.canAcquireForTesting else { return nil }
+        let rendered: TerminalDamage = isCurrent && staleDamage.isFull == false
+            ? staleDamage
+            : .full
+        Self.renderedRowSetsForTesting.append(
+            rendered.isFull ? Set(0..<rows) : rendered.rows
+        )
+        lastRenderedDamage = rendered
+        isCurrent = true
+        staleDamage = .none
+        pendingPlan = nil
+        return store
+    }
 }
 
 struct TerminalPaneFrame {
@@ -247,11 +268,15 @@ struct TerminalRenderMetrics: Equatable {
     static let wideFamily = "DanTermTestWideFace"
 
     let cellSize: CGSize
+    /// The layer's contents scale rides the surface the view attaches, so the
+    /// harness has to carry a real value here rather than a placeholder.
+    let displayScale: CGFloat
 
     init?(displayScale: CGFloat, fontSize: CGFloat = 13, fontFamily: String? = nil) {
         guard displayScale > 0, fontSize > 0, fontFamily != Self.unusableFamily else { return nil }
         let widthFactor: CGFloat = fontFamily == Self.wideFamily ? 2 : 1
         cellSize = CGSize(width: 8 * widthFactor * fontSize / 13, height: 16 * fontSize / 13)
+        self.displayScale = displayScale
     }
 }
 
@@ -271,23 +296,6 @@ func terminalGridDimensions(
 struct TerminalRenderExecutionSize {
     let width: Double
     let height: Double
-}
-
-func drawRenderFrame(
-    _ plan: RenderFramePlan,
-    metrics: TerminalRenderMetrics,
-    in context: CGContext
-) {}
-
-func terminalRows(
-    intersecting dirtyRect: CGRect,
-    metrics: TerminalRenderMetrics,
-    rowCount: Int
-) -> Range<Int> {
-    guard rowCount > 0, dirtyRect.isEmpty == false else { return 0..<0 }
-    let first = min(rowCount, max(0, Int(floor(dirtyRect.minY / metrics.cellSize.height))))
-    let end = min(rowCount, max(0, Int(ceil(dirtyRect.maxY / metrics.cellSize.height))))
-    return first..<max(first, end)
 }
 
 struct TerminalScrollProjection: Equatable {

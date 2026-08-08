@@ -36,19 +36,22 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var hoveredLink: TerminalHyperlink?
     private var linkPreview: LinkPreviewView?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
-    /// Retains source row damage across publishes because AppKit reduces disjoint
-    /// invalidations to one union rectangle before `draw(_:)` can inspect them.
-    /// Only the folded path reads it; while the mirror is valid it stays `.none`.
-    private var pendingDisplayDamage = TerminalDamage.none
-    /// The owned frame store realizing shift damage as a translation
-    /// (research/33 T9's view half): AppKit's layer store cannot translate
-    /// (33/F22), so scrolled pixels move here and `draw(_:)` blits.
-    private var mirror: TerminalFrameBackingStore?
-    /// The single validity bit the 33/D7 addendum names: true only while
-    /// `mirror` holds exactly the last published frame's pixels. Every
-    /// uncertainty path -- geometry, theme, scale, benchmark redraws -- resolves
-    /// to false through `invalidateFullDisplay()`.
-    private var mirrorIsValid = false
+    /// The pane's display surface (research/33 T25): a rotation of
+    /// IOSurface-backed frame stores the layer shows directly, so displaying a
+    /// frame costs no full-frame copy. Nil until the first publish that has
+    /// geometry, and replaced whole -- never reshaped -- whenever a
+    /// presentation input moves.
+    private var swapchain: TerminalFrameSwapchain?
+    /// The inputs the live swapchain's pixels were rendered under. Any
+    /// inequality is I3's "content cannot be trusted", which is why it decides
+    /// replacement rather than a distrust bit.
+    private var swapchainInputs: SurfaceInputs?
+    /// Retains the store the layer is showing, so replacing the swapchain
+    /// cannot free the frame currently on screen before its successor renders.
+    private var displayedStore: TerminalFrameBackingStore?
+    /// True exactly while a pending-presentation retry is armed, so a publish
+    /// and a retry cannot stack two timers for one pending plan.
+    private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
@@ -102,14 +105,20 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
     }
-    private(set) var drawnRowSetsForTesting: [Set<Int>] = []
-    /// The exact rect list handed to the single clip call, per draw -- the drawn-row sets
-    /// pin which rows the plan carries, this pins the region CoreGraphics actually admits.
-    private(set) var clipRectsForTesting: [[CGRect]] = []
+    /// PO5's three independent counters, read by the harness rather than by a
+    /// live sampler: renders must never exceed publications, and an
+    /// AppKit-initiated layer display must cause none at all.
+    private(set) var publishCountForTesting = 0
+    private(set) var renderCountForTesting = 0
+    private(set) var layerDisplayCountForTesting = 0
+    var hasPendingPresentationForTesting: Bool {
+        swapchain?.hasPendingPresentation == true
+    }
 
-    func resetDrawnRowSetsForTesting() {
-        drawnRowSetsForTesting = []
-        clipRectsForTesting = []
+    func resetSurfaceCountersForTesting() {
+        publishCountForTesting = 0
+        renderCountForTesting = 0
+        layerDisplayCountForTesting = 0
     }
     #endif
     #if DANTERM_TERMINAL_BENCHMARK
@@ -141,20 +150,25 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
+        // The grid surface is placed unscaled at the top-left corner, so the
+        // letterbox strip a non-multiple pane size leaves shows the layer's own
+        // background -- the theme default -- rather than a stretched frame.
+        layerContentsPlacement = .topLeft
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        // No implicit animation on a contents swap. An animation would keep the
+        // replaced surface referenced by a presentation layer past the swap, and
+        // the swapchain acquires a buffer on the premise that a detached surface
+        // reported free stays free. This is the exact mechanism the real-AppKit
+        // pin proves (`tests-ui/IOSurfaceLayerContentsTests.swift`).
+        layer?.actions = ["contents": NSNull()]
         layer?.backgroundColor = Self.cgColor(controller.renderTheme.defaultBackground)
         registerForDraggedTypes([.fileURL, .URL, .string])
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.attachFenceMetricsController(controller)
         #endif
 
-        // Read live per fence rather than cached: the publish deadline must
-        // track the pane's actual display (33/D8), and a window can move to a
-        // 60 Hz monitor without any backing-property change firing.
         controller.displayRefreshIntervalNanoseconds = { [weak self] in
-            guard let framesPerSecond = self?.window?.screen?.maximumFramesPerSecond,
-                  framesPerSecond > 0
-            else { return 8_333_333 }
-            return 1_000_000_000 / UInt64(framesPerSecond)
+            self?.displayRefreshIntervalNanoseconds() ?? Self.assumedRefreshIntervalNanoseconds
         }
         controller.onFrame = { [weak self] frame in
             self?.publish(frame)
@@ -191,196 +205,269 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         tearDown()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        frameRateSampler?.recordDraw(deliveryCount: controller.fenceMetrics.delivery.count)
-        #if DANTERM_TERMINAL_BENCHMARK
-        let drawStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
+    // MARK: - The owned pane surface
+
+    /// Every input that decides a frame store's pixels. An inequality is I3's
+    /// "content cannot be trusted" (research/33 T25), and the answer to that is
+    /// always a fresh swapchain -- a live one never changes shape, so there is
+    /// no distrust state to carry.
+    private struct SurfaceInputs: Equatable {
+        let columns: Int
+        let rows: Int
+        let metrics: TerminalRenderMetrics
+        let colorSpace: NSColorSpace?
+    }
+
+    /// Stands in until the view has a window to read a real display from.
+    private static let assumedRefreshIntervalNanoseconds: UInt64 = 8_333_333
+
+    /// Read live rather than cached: the publish deadline must track the pane's
+    /// actual display (33/D8), and a window can move to a 60 Hz monitor without
+    /// any backing-property change firing. It also paces the pending-presentation
+    /// retry, which is why it is a method and not the controller's closure.
+    private func displayRefreshIntervalNanoseconds() -> UInt64 {
+        guard let framesPerSecond = window?.screen?.maximumFramesPerSecond,
+              framesPerSecond > 0
+        else { return Self.assumedRefreshIntervalNanoseconds }
+        return 1_000_000_000 / UInt64(framesPerSecond)
+    }
+
+    /// Keeps AppKit from allocating a backing store or calling `draw(_:)` at
+    /// all: the pane owns its pixels, and there is no second render path for a
+    /// redisplay to fall back to.
+    override var wantsUpdateLayer: Bool { true }
+
+    /// The whole of what an AppKit-initiated redisplay may do (T25 I4): nothing.
+    /// The buffer on screen is the last presented frame, and no invalidation
+    /// AppKit can raise -- occlusion return, a fresh window, a sibling's
+    /// relayout -- makes those pixels stale. Counted so a regression that
+    /// reintroduced rendering here is visible as a number.
+    override func updateLayer() {
+        frameRateSampler?.recordLayerDisplay(
+            deliveryCount: controller.fenceMetrics.delivery.count
+        )
+        #if DANTERM_UI_TEST
+        layerDisplayCountForTesting += 1
         #endif
-        let frame = publishedFrame
-        let background = frame?.plan.defaultBackground ?? RenderTheme.dark.defaultBackground
-        context.setFillColor(Self.cgColor(background))
-        if let frame {
-            if let mirror, mirrorIsValid,
-               mirror.metrics == frame.metrics,
-               mirror.columns == frame.plan.columns,
-               mirror.rows == frame.plan.rows
-            {
-                // The mirror is the whole current frame, so any dirty rect --
-                // damage spans, AppKit's union coarsening, even a fresh layer
-                // backing store -- is satisfied by one blit, and no glyph run
-                // is submitted at the drawing seam (research/33 T9 view half).
-                context.fill(dirtyRect)
-                mirror.blit(into: context, rect: dirtyRect)
-                #if DANTERM_TERMINAL_BENCHMARK
-                observeCompletedBenchmarkDraw(
-                    frame: frame,
-                    dirtyRect: dirtyRect,
-                    startedAtNanoseconds: drawStartedNanoseconds,
-                    damage: .none,
-                    usedDirtyRectFallback: false
-                )
-                #endif
-                return
-            }
-            let drawingDamageResolution = drawingDamage(
-                fallback: dirtyRect,
-                metrics: frame.metrics,
-                rowCount: frame.plan.rows
+    }
+
+    /// Shows `store`'s surface directly, with no full-frame copy anywhere in
+    /// the path (T25 I2). The layer's `actions` dictionary already refuses a
+    /// contents animation; the transaction here covers `contentsScale`, which
+    /// is animatable too and must land in the same commit as the surface it
+    /// describes.
+    private func attach(_ store: TerminalFrameBackingStore) {
+        displayedStore = store
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.contentsScale = store.metrics.displayScale
+        layer?.contents = store.ioSurface
+        CATransaction.commit()
+    }
+
+    /// The swapchain for these presentation inputs, replacing the live one
+    /// whenever any of them moved. The outgoing buffers are not detached here:
+    /// `displayedStore` keeps the frame on screen valid until its successor
+    /// renders, exactly as the AppKit backing store used to.
+    private func surfaceSwapchain(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics
+    ) -> TerminalFrameSwapchain? {
+        let inputs = SurfaceInputs(
+            columns: columns,
+            rows: rows,
+            metrics: metrics,
+            colorSpace: window?.colorSpace
+        )
+        if let swapchain, swapchainInputs == inputs { return swapchain }
+        swapchain = TerminalFrameSwapchain(
+            columns: columns,
+            rows: rows,
+            metrics: metrics,
+            colorSpace: inputs.colorSpace?.cgColorSpace
+        )
+        swapchainInputs = swapchain == nil ? nil : inputs
+        return swapchain
+    }
+
+    /// Drops the swapchain so the next presentation builds fresh buffers, for
+    /// the trust-breaking input no value comparison can see: a theme change
+    /// repaints every row, including rows this frame's damage does not name.
+    private func discardSwapchain() {
+        swapchain = nil
+        swapchainInputs = nil
+    }
+
+    /// Presents one published frame. This is the single render path (T25 I4):
+    /// paced shift, `.full` flood, first frame, resize and occlusion return all
+    /// arrive here and nowhere else.
+    private func present(
+        plan: RenderFramePlan,
+        damage: TerminalDamage,
+        metrics: TerminalRenderMetrics
+    ) {
+        guard let swapchain = surfaceSwapchain(
+            columns: plan.columns,
+            rows: plan.rows,
+            metrics: metrics
+        ) else { return }
+        presentAttempt(plan: plan, metrics: metrics, using: swapchain) {
+            $0.publish(plan: plan, damage: damage)
+        }
+    }
+
+    /// Re-renders the current plan in full, for the inputs that change a pane's
+    /// pixels without a single terminal byte arriving: a backing-scale or
+    /// color-space move, a font change, a theme swap, the benchmark observer's
+    /// requested redraw.
+    private func rerenderCurrentPlan() {
+        guard let metrics = currentMetrics, let plan = controller.currentPlan else { return }
+        publishedFrame = (plan, metrics)
+        present(plan: plan, damage: .full, metrics: metrics)
+    }
+
+    /// Re-renders when a presentation input has moved under the live swapchain.
+    /// Backing scale and window color space both change without any publish, and
+    /// buffers rendered under the old values cannot be brought current by damage.
+    private func rerenderIfSurfaceInputsChanged() {
+        guard let swapchainInputs, let metrics = currentMetrics else { return }
+        let live = SurfaceInputs(
+            columns: swapchainInputs.columns,
+            rows: swapchainInputs.rows,
+            metrics: metrics,
+            colorSpace: window?.colorSpace
+        )
+        guard live != swapchainInputs else { return }
+        rerenderCurrentPlan()
+    }
+
+    /// One presentation attempt: render if the swapchain can acquire a buffer,
+    /// show it, and arm the retry if the plan is still waiting. Publish and
+    /// retry share it so the two cannot drift apart.
+    private func presentAttempt(
+        plan: RenderFramePlan,
+        metrics: TerminalRenderMetrics,
+        using swapchain: TerminalFrameSwapchain,
+        attempt: (TerminalFrameSwapchain) -> TerminalFrameBackingStore?
+    ) {
+        #if DANTERM_TERMINAL_BENCHMARK
+        let renderStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
+        #endif
+        if let store = attempt(swapchain) {
+            frameRateSampler?.recordRender(
+                deliveryCount: controller.fenceMetrics.delivery.count
             )
-            let drawingDamage = drawingDamageResolution.damage
-            let plan = drawingDamage.isFull
-                ? frame.plan
-                : clipFramePlan(frame.plan, to: drawingDamage)
-            context.saveGState()
-            // One clip for both jobs: bounding the fill to the damaged spans, and bounding
-            // glyph ink to the region this pass just refilled. Clamping each span to
-            // dirtyRect up front makes the second guarantee structural rather than a
-            // second stacked clip, and drops single-span draws onto CoreGraphics'
-            // path-free rect-clip route.
-            let clipRects = drawingDamage.isFull
-                ? [dirtyRect]
-                : spanClipRects(
-                    drawingDamage,
-                    metrics: frame.metrics,
-                    columns: frame.plan.columns,
-                    clampedTo: dirtyRect
-                )
             #if DANTERM_UI_TEST
-            clipRectsForTesting.append(clipRects)
+            renderCountForTesting += 1
             #endif
-            // clip(to:) with an empty list is not documented to clip out everything; an
-            // explicit empty rect is. Reachable when the damage misses dirtyRect entirely.
-            if clipRects.isEmpty {
-                context.clip(to: .zero)
-            } else {
-                context.clip(to: clipRects)
-            }
-            context.fill(dirtyRect)
-            #if DANTERM_UI_TEST
-            drawnRowSetsForTesting.append(plan.includedRows)
-            #endif
-            drawRenderFrame(plan, metrics: frame.metrics, in: context)
-            context.restoreGState()
+            attach(store)
             #if DANTERM_TERMINAL_BENCHMARK
-            observeCompletedBenchmarkDraw(
-                frame: frame,
-                dirtyRect: dirtyRect,
-                startedAtNanoseconds: drawStartedNanoseconds,
-                damage: drawingDamage,
-                usedDirtyRectFallback: drawingDamageResolution.usedDirtyRectFallback
+            observeCompletedBenchmarkRender(
+                plan: plan,
+                metrics: metrics,
+                startedAtNanoseconds: renderStartedNanoseconds,
+                damage: swapchain.lastRenderedDamage ?? .full
             )
             #endif
-        } else {
-            context.fill(dirtyRect)
+        }
+        armPresentationRetryIfPending()
+    }
+
+    /// Arms the pending presentation's only driver: one retry per display
+    /// refresh, without a display link and without waiting on further terminal
+    /// output, so the last published plan reaches the screen even when the
+    /// stream stops on it. Bounded by that pending plan (T25 I6) -- a pane with
+    /// nothing pending arms nothing.
+    private func armPresentationRetryIfPending() {
+        guard isTornDown == false,
+              isPresentationRetryArmed == false,
+              swapchain?.hasPendingPresentation == true
+        else { return }
+        isPresentationRetryArmed = true
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .nanoseconds(Int(displayRefreshIntervalNanoseconds()))
+        ) { [weak self] in
+            self?.retryPendingPresentation()
+        }
+    }
+
+    private func retryPendingPresentation() {
+        isPresentationRetryArmed = false
+        guard isTornDown == false,
+              let swapchain,
+              let frame = publishedFrame
+        else { return }
+        presentAttempt(plan: frame.plan, metrics: frame.metrics, using: swapchain) {
+            $0.retryPendingPresentation()
         }
     }
 
     #if DANTERM_TERMINAL_BENCHMARK
-    /// The benchmark tail both draw paths share: report the completed draw and
-    /// honor the observer's request for a follow-up full redraw.
-    private func observeCompletedBenchmarkDraw(
-        frame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics),
-        dirtyRect: NSRect,
+    /// Reports one completed surface render. This is the bracket that used to
+    /// sit inside `draw(_:)`, moved with the work it measures: it now contains
+    /// the glyph rasterization CoreAnimation used to replay on its own queue
+    /// after the draw returned, so the serialized-draw workloads' deciding
+    /// metric changed meaning (`agent-docs/terminal-performance.md`).
+    private func observeCompletedBenchmarkRender(
+        plan: RenderFramePlan,
+        metrics: TerminalRenderMetrics,
         startedAtNanoseconds: UInt64,
-        damage: TerminalDamage,
-        usedDirtyRectFallback: Bool
+        damage: TerminalDamage
     ) {
-        let drawDurationNanoseconds =
+        let renderDurationNanoseconds =
             DispatchTime.now().uptimeNanoseconds - startedAtNanoseconds
+        let renderedRect = NSRect(
+            x: 0,
+            y: 0,
+            width: CGFloat(plan.columns) * metrics.cellSize.width,
+            height: CGFloat(plan.rows) * metrics.cellSize.height
+        )
         TerminalBenchmarkObserver.shared?.observeCompletedDraw(
-            frame.plan,
-            dirtyRect: dirtyRect,
-            metrics: frame.metrics,
-            drawDurationNanoseconds: drawDurationNanoseconds,
+            plan,
+            dirtyRect: renderedRowBounds(damage, within: renderedRect, metrics: metrics),
+            metrics: metrics,
+            drawDurationNanoseconds: renderDurationNanoseconds,
             damage: damage,
-            usedDirtyRectFallback: usedDirtyRectFallback
+            // Structurally false now: no rectangle AppKit chose can reach the
+            // render, because an AppKit redisplay never renders. The parameter
+            // stays until the benchmark rules it feeds are recalibrated.
+            usedDirtyRectFallback: false
         )
         if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
-            let redrawRect = NSRect(
-                x: 0,
-                y: 0,
-                width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
-                height: CGFloat(frame.plan.rows) * frame.metrics.cellSize.height
-            )
             DispatchQueue.main.async { [weak self] in
-                self?.invalidateFullDisplay(redrawRect)
+                self?.rerenderCurrentPlan()
             }
         }
+    }
+
+    /// The rect the observer reads a dirty-row count from: the frame for a full
+    /// render, otherwise the band spanning the rendered damage's first through
+    /// last row. The observer selects full-redraw draws on that count, so it
+    /// must describe the render, not the pane.
+    private func renderedRowBounds(
+        _ damage: TerminalDamage,
+        within frameRect: NSRect,
+        metrics: TerminalRenderMetrics
+    ) -> NSRect {
+        guard damage.isFull == false else { return frameRect }
+        let spans = damage.maximalContiguousSpans()
+        guard let first = spans.first, let last = spans.last else { return .zero }
+        return NSRect(
+            x: 0,
+            y: CGFloat(first.lowerBound) * metrics.cellSize.height,
+            width: frameRect.width,
+            height: CGFloat(last.upperBound - first.lowerBound) * metrics.cellSize.height
+        )
     }
     #endif
 
-    /// The clip region for a partial draw: one rect per maximal damage span, each clamped to
-    /// the rect being drawn. Empty results are dropped, so the rect count can fall below the
-    /// span count -- and an all-empty result means the damage lies entirely outside this draw.
-    private func spanClipRects(
-        _ damage: TerminalDamage,
-        metrics: TerminalRenderMetrics,
-        columns: Int,
-        clampedTo dirtyRect: NSRect
-    ) -> [NSRect] {
-        var rects: [NSRect] = []
-        for span in damage.maximalContiguousSpans() {
-            let spanRect = NSRect(
-                x: 0,
-                y: CGFloat(span.lowerBound) * metrics.cellSize.height,
-                width: CGFloat(columns) * metrics.cellSize.width,
-                height: CGFloat(span.count) * metrics.cellSize.height
-            )
-            let clamped = spanRect.intersection(dirtyRect)
-            if clamped.isEmpty == false {
-                rects.append(clamped)
-            }
-        }
-        return rects
-    }
-
-    /// Consumes exact engine damage when available and preserves AppKit-driven redraws as fallback.
-    private func drawingDamage(
-        fallback dirtyRect: NSRect,
-        metrics: TerminalRenderMetrics,
-        rowCount: Int
-    ) -> (damage: TerminalDamage, usedDirtyRectFallback: Bool) {
-        if pendingDisplayDamage != .none {
-            let damage = pendingDisplayDamage
-            pendingDisplayDamage = .none
-            return (damage, false)
-        }
-        let rows = terminalRows(
-            intersecting: dirtyRect,
-            metrics: metrics,
-            rowCount: rowCount
-        )
-        let damage: TerminalDamage = rows == 0..<rowCount
-            ? .full
-            : TerminalDamage(rows: rows, rowCount: rowCount)
-        return (damage, true)
-    }
-
-    /// Prevents geometry, theme, and benchmark invalidations from inheriting stale partial
-    /// damage. Also the sole stale transition for the mirror: anything that must repaint
-    /// everything is exactly anything the mirror can no longer vouch for.
-    private func invalidateFullDisplay(_ rect: NSRect? = nil) {
-        mirrorIsValid = false
-        pendingDisplayDamage = .full
-        if let rect {
-            setNeedsDisplay(rect)
-        } else {
-            needsDisplay = true
-        }
-    }
-
     override func setFrameSize(_ newSize: NSSize) {
-        let sizeChanged = newSize != frame.size
         super.setFrameSize(newSize)
-        // A resized layer gets a fresh backing store with no contents, so draw(_:)'s
-        // sparse-damage clip has no previous frame left to preserve: every row it clips
-        // away shows the bare layer background instead. Gate on the view's size rather
-        // than on the grid dimensions -- a sub-cell resize discards the contents just the
-        // same while leaving the column and row counts identical.
-        if sizeChanged {
-            invalidateFullDisplay()
-        }
+        // No invalidation to raise: the pane owns its pixels, so a resize can
+        // neither discard them nor leave a clipped-away row showing bare layer
+        // background. A grid resize republishes through the engine, and a
+        // sub-cell resize only moves where the letterbox strip falls.
         synchronizeGeometry()
     }
 
@@ -397,11 +484,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         synchronizeGeometry()
+        rerenderIfSurfaceInputsChanged()
     }
 
+    // Backing scale and window color space both arrive here, and a color-space
+    // move at unchanged scale changes no metric -- so the surface inputs are
+    // checked directly rather than inferred from a geometry change.
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         synchronizeGeometry()
+        rerenderIfSurfaceInputsChanged()
     }
 
     override func updateTrackingAreas() {
@@ -972,15 +1064,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         currentDimensions = dimensions
         controller.setGridDimensions(dimensions)
         if metricsChanged {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer?.contentsScale = scale
-            CATransaction.commit()
-            if let plan = controller.currentPlan {
-                publishedFrame = (plan, metrics)
-            }
             emitStateIfNeeded()
-            invalidateFullDisplay()
+            // New cell geometry means new pixel geometry, and no publish need
+            // follow: a scale or font change leaves the terminal's content
+            // untouched, so the view re-renders the current plan itself. The
+            // layer's contents scale rides the surface it shows, set in
+            // `attach`, so nothing is set here.
+            rerenderCurrentPlan()
         }
     }
 
@@ -1004,10 +1094,18 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize)
     }
 
+    /// A theme change repaints every row, including rows no damage will name,
+    /// so the buffers rendered under the old theme cannot be trusted and the
+    /// swapchain goes with it. Discarding before the controller sees the theme
+    /// matters: `setTheme` republishes synchronously on a visible pane, and
+    /// that publish should land in the fresh buffers rather than in buffers
+    /// this method is about to throw away. A swapchain still absent afterwards
+    /// means no publish followed, so the view renders the frame itself.
     private func applyResolvedTheme(_ theme: RenderTheme) {
-        controller.setTheme(theme)
         layer?.backgroundColor = Self.cgColor(theme.defaultBackground)
-        invalidateFullDisplay()
+        discardSwapchain()
+        controller.setTheme(theme)
+        if swapchain == nil { rerenderCurrentPlan() }
     }
 
     private func emitStateIfNeeded() {
@@ -1045,70 +1143,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             deliveryCount: controller.fenceMetrics.delivery.count,
             gridRows: frame.plan.rows
         )
+        #if DANTERM_UI_TEST
+        publishCountForTesting += 1
+        #endif
         publishedFrame = (frame.plan, metrics)
-        if frame.damage.isFull {
-            invalidateFullDisplay()
-        } else {
-            // The invalidated spans are the same on both paths -- AppKit's
-            // store cannot translate (33/F22), so the whole shifted region
-            // must repaint either way. What the mirror changes is the cost of
-            // that repaint: a blit of moved pixels instead of a region-wide
-            // glyph redraw.
-            let display = frame.damage
-                .expandingShift()
-                .withGlyphHalo(rowCount: frame.plan.rows)
-            if updateMirror(plan: frame.plan, damage: frame.damage, metrics: metrics) == false {
-                pendingDisplayDamage.formUnion(display)
-            }
-            for span in display.maximalContiguousSpans() {
-                setNeedsDisplay(NSRect(
-                    x: 0,
-                    y: CGFloat(span.lowerBound) * metrics.cellSize.height,
-                    width: CGFloat(frame.plan.columns) * metrics.cellSize.width,
-                    height: CGFloat(span.count) * metrics.cellSize.height
-                ))
-            }
-        }
-    }
-
-    /// Maintains the mirror per the 33/D7 addendum's containment policy: apply
-    /// while valid, build or rebuild only at a shift-carrying publish (one full
-    /// render at the flood-to-paced transition), and touch nothing otherwise --
-    /// so `.full` floods and churn never pay for mirror machinery. Returns true
-    /// when the mirror now holds exactly this frame and the draw may blit.
-    private func updateMirror(
-        plan: RenderFramePlan,
-        damage: TerminalDamage,
-        metrics: TerminalRenderMetrics
-    ) -> Bool {
-        if let mirror, mirrorIsValid,
-           mirror.metrics == metrics,
-           mirror.columns == plan.columns,
-           mirror.rows == plan.rows,
-           mirror.apply(plan: plan, damage: damage)
-        {
-            return true
-        }
-        mirrorIsValid = false
-        guard damage.shift != nil else { return false }
-        if mirror == nil
-            || mirror?.metrics != metrics
-            || mirror?.columns != plan.columns
-            || mirror?.rows != plan.rows
-        {
-            mirror = TerminalFrameBackingStore(
-                columns: plan.columns,
-                rows: plan.rows,
-                metrics: metrics,
-                colorSpace: window?.colorSpace?.cgColorSpace
-            )
-        }
-        guard let mirror else { return false }
-        mirror.renderFull(plan)
-        mirrorIsValid = true
-        // A full mirror subsumes whatever the folded path still owed.
-        pendingDisplayDamage = .none
-        return true
+        // No invalidation and no damage bookkeeping: the publish either renders
+        // into a buffer and shows it, or coalesces into the pending
+        // presentation. There is no second consumer of this damage.
+        present(plan: frame.plan, damage: frame.damage, metrics: metrics)
     }
 
     private func forwardFocusIfChanged(_ focused: Bool) {

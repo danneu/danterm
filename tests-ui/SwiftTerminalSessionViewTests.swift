@@ -279,353 +279,319 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.textInputs.isEmpty, "empty drop wrote raw text")
     }
 
-    uiTest("scattered terminal damage submits only its disjoint row halos") {
-        // Intent: distant damaged rows stay sparse when AppKit coalesces their invalidations.
-        // Why it exists: using draw(_:)'s union dirtyRect submitted every untouched row between
-        //   two damaged regions, turning small scattered updates into near-full redraws.
-        // Scenario: a TUI updates status rows near the top and bottom of a ten-row viewport.
+    uiTest("a mounted pane renders one complete frame and submits nothing at a draw seam") {
+        // Intent: the first frame reaches the screen through the owned surface --
+        //   one render covering every row -- and no AppKit drawing happens at all.
+        // Why it exists: research/33 T25 I4. The draw seam is deleted, so a pane
+        //   that came up blank, or one that quietly regrew a second render path,
+        //   would both show here and nowhere else.
+        // Scenario: a pane is mounted in a window, which is the first moment it
+        //   has geometry to render at.
+        TerminalFrameSwapchain.resetForTesting()
         let controller = TerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let pane = SwiftTerminalSessionView(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
+
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "mounting did not render exactly one complete frame: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 1,
+            "expected one render, got \(pane.renderCountForTesting)"
+        )
+        try uiExpect(
+            pane.hasPendingPresentationForTesting == false,
+            "the pane kept a pending presentation after its frame rendered"
+        )
+    }
+
+    uiTest("a publish renders exactly the rows its damage names") {
+        // Intent: the damage a publish carries is what the render covers, and
+        //   scattered rows stay scattered.
+        // Why it exists: this is the drawn-row pin from the deleted draw seam,
+        //   restated where the rows are now decided. AppKit used to coalesce
+        //   disjoint invalidations into one union rectangle, which turned small
+        //   scattered updates into near-full redraws; nothing may reintroduce
+        //   that widening on the way to the surface.
+        // Scenario: a TUI updates a status row near the top of a ten-row
+        //   viewport, then one near the bottom, then a flood -- or an occlusion
+        //   return -- publishes `.full`.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        TerminalFrameSwapchain.resetForTesting()
+        pane.resetSurfaceCountersForTesting()
 
         controller.emitFrameForTest(damage: .init(rows: [1]))
         controller.emitFrameForTest(damage: .init(rows: [8]))
-        pane.displayIfNeeded()
-
-        try uiExpect(
-            pane.drawnRowSetsForTesting == [[0, 1, 2, 7, 8, 9]],
-            "scattered damage submitted contiguous rows: \(pane.drawnRowSetsForTesting)"
-        )
-    }
-
-    uiTest("sparse damage clips through one rect list carrying one rect per span") {
-        // Intent: a partial draw installs a single clip whose rect list has one entry per
-        //   maximal damage span, instead of a built path plus a second stacked clip.
-        // Why it exists: the fold to one clip(to:) call must not merge disjoint spans into
-        //   their bounding rect -- that would repaint every untouched row between them, the
-        //   exact regression doc 29 fixed. One rect per span is what keeps the clip exact.
-        // Scenario: a TUI updates status rows near the top and bottom of a ten-row viewport,
-        //   the same stimulus as the drawn-row test above, read at the clip instead.
-        let controller = TerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = SwiftTerminalSessionView(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-
-        controller.emitFrameForTest(damage: .init(rows: [1]))
-        controller.emitFrameForTest(damage: .init(rows: [8]))
-        pane.displayIfNeeded()
-
-        try uiExpect(
-            pane.clipRectsForTesting.count == 1,
-            "expected one clipped draw: \(pane.clipRectsForTesting)"
-        )
-        let rects = pane.clipRectsForTesting[0]
-        try uiExpect(rects.count == 2, "disjoint spans did not clip as two rects: \(rects)")
-        try uiExpect(
-            rects[0].maxY < rects[1].minY,
-            "span rects were not disjoint and ascending: \(rects)"
-        )
-        try uiExpect(
-            rects[0].height == rects[1].height,
-            "equal three-row halo spans produced unequal rects: \(rects)"
-        )
-        try uiExpect(
-            rects.allSatisfy { $0.minX == 0 && $0.width >= pane.bounds.width },
-            "span rects did not span the full row width: \(rects)"
-        )
-    }
-
-    uiTest("clip rects are clamped to the drawn rect") {
-        // Intent: each span rect is intersected with the rect being drawn before clipping, so
-        //   the single clip bounds glyphs to the region whose background this pass refilled.
-        // Why it exists: folding away the separate clip(to: dirtyRect) would silently drop that
-        //   guarantee if the spans were installed unclamped; an AppKit rect narrower than the
-        //   pending damage would then let antialiased glyph edges blend over unrefilled pixels.
-        // Scenario: AppKit asks for the top quarter of the view while damage spans its full
-        //   height -- the multi-callback case where a dirty rect is narrower than the damage.
-        let controller = TerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = SwiftTerminalSessionView(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-
-        controller.emitFrameForTest(damage: .init(rows: [1]))
-        controller.emitFrameForTest(damage: .init(rows: [8]))
-        // Drawn through an explicit bitmap context rather than display(_:) so the test owns the
-        // dirty rect: AppKit coalesces its own invalid regions to their union, which is exactly
-        // the narrower-than-damage case this test needs to construct.
-        let drawnRect = NSRect(x: 0, y: 0, width: 80, height: 40)
-        try drawPane(pane, dirtyRect: drawnRect)
-
-        let rects = pane.clipRectsForTesting.flatMap { $0 }
-        try uiExpect(rects.isEmpty == false, "narrowed draw installed no clip rects")
-        try uiExpect(
-            rects.allSatisfy { drawnRect.contains($0) },
-            "clip rects escaped the drawn rect \(drawnRect): \(rects)"
-        )
-        try uiExpect(
-            rects.allSatisfy { $0.isEmpty == false },
-            "an empty clamped rect was submitted to the clip: \(rects)"
-        )
-    }
-
-    uiTest("a shift publish builds the mirror and draws blit from it") {
-        // Intent: the first shift-carrying publish establishes the mirror with one
-        //   full render, later shifts apply incrementally, and every draw while the
-        //   mirror is valid is a blit -- no plan rows reach the folded path.
-        // Why it exists: research/33 T9's view half. F22 proved AppKit's store
-        //   cannot translate, so the paced scroll regime must ride the owned
-        //   mirror; a silent fall back to folded redraw would erase the win
-        //   without failing any pixel test.
-        // Scenario: a paced producer scrolls one line per publish, twice.
-        TerminalFrameBackingStore.resetForTesting()
-        let controller = TerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = SwiftTerminalSessionView(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-
-        controller.emitFrameForTest(
-            damage: .init(rows: [8, 9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
-            "first shift did not build then blit: \(TerminalFrameBackingStore.eventsForTesting)"
-        )
-        try uiExpect(
-            pane.drawnRowSetsForTesting.isEmpty,
-            "the blit draw also ran the folded path: \(pane.drawnRowSetsForTesting)"
-        )
-
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit", "apply", "blit"],
-            "second shift did not apply incrementally: \(TerminalFrameBackingStore.eventsForTesting)"
-        )
-    }
-
-    uiTest("full damage stales the mirror and the folded path resumes") {
-        // Intent: a `.full` publish does zero mirror work and returns the pane to
-        //   the folded path; row-only damage afterwards must not rebuild the
-        //   mirror either -- only a shift is allowed to pay for a build.
-        // Why it exists: the flood regime's non-regression rests on `.full`
-        //   publishes never touching mirror machinery (D7 addendum's containment
-        //   policy), and churn must not thrash mirror builds.
-        // Scenario: paced scroll establishes the mirror, a flood burst goes
-        //   `.full`, then a status row repaints.
-        TerminalFrameBackingStore.resetForTesting()
-        let controller = TerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = SwiftTerminalSessionView(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-        TerminalFrameBackingStore.resetForTesting()
-
         controller.emitFrameForTest(damage: .full)
-        pane.displayIfNeeded()
-        try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting.isEmpty,
-            "a full publish touched the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
-        )
-        try uiExpect(
-            pane.drawnRowSetsForTesting.count == 1,
-            "the full publish did not fold: \(pane.drawnRowSetsForTesting)"
-        )
 
-        controller.emitFrameForTest(damage: .init(rows: [3]))
-        pane.displayIfNeeded()
         try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting.isEmpty,
-            "row-only damage rebuilt the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [[1], [8], Set(0..<RenderFramePlan.rowsForTesting)],
+            "publishes did not render exactly their own damage: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
         )
         try uiExpect(
-            pane.drawnRowSetsForTesting.count == 2,
-            "row-only damage after a fold did not draw folded: \(pane.drawnRowSetsForTesting)"
+            pane.renderCountForTesting == pane.publishCountForTesting,
+            "renders (\(pane.renderCountForTesting)) diverged from publications "
+                + "(\(pane.publishCountForTesting))"
         )
     }
 
-    uiTest("row-only damage maintains a valid mirror") {
-        // Intent: while the mirror is valid, non-scroll damage renders into it
-        //   and the draw stays a blit, so alternating scroll and cursor traffic
-        //   cannot flap between paths.
-        // Why it exists: a mirror that only shifts would go stale on the first
-        //   cursor blink and surrender the paced win it exists for.
-        // Scenario: a scroll establishes the mirror, then a cursor row repaints.
-        TerminalFrameBackingStore.resetForTesting()
+    uiTest("an AppKit-initiated redisplay renders nothing") {
+        // Intent: a layer display callback reattaches and returns; it never
+        //   renders and never asks the engine for anything.
+        // Why it exists: research/33 T25 PO5's second assertion. The old draw
+        //   path rendered whatever AppKit asked for, which is how an occlusion
+        //   return or a sibling's relayout could bill a full glyph redraw to
+        //   nobody's frame. With the pane owning its pixels there is nothing
+        //   for AppKit to ask for, and this is what proves it stayed that way.
+        // Scenario: a mounted pane is invalidated the way AppKit invalidates it.
+        TerminalFrameSwapchain.resetForTesting()
         let controller = TerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let pane = SwiftTerminalSessionView(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-        TerminalFrameBackingStore.resetForTesting()
+        pane.resetSurfaceCountersForTesting()
+        TerminalFrameSwapchain.resetForTesting()
 
+        pane.needsDisplay = true
+        pane.displayIfNeeded()
+
+        try uiExpect(
+            pane.layerDisplayCountForTesting >= 1,
+            "AppKit never reached the layer display callback, so this pins nothing"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "an AppKit redisplay caused \(pane.renderCountForTesting) render(s)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting.isEmpty,
+            "an AppKit redisplay reached the surface: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+    }
+
+    uiTest("a coalesced burst renders its last plan on a retry, then goes quiet") {
+        // Intent: publishes that find no acquirable buffer render nothing and
+        //   coalesce into one pending presentation; when a buffer frees, one
+        //   retry renders the composed damage of the whole burst, and the pane
+        //   then stops on its own with nothing pending.
+        // Why it exists: I3's last-frame guarantee and I6's power contract meet
+        //   here. Without the retry the final published plan would never reach
+        //   the screen when output stops right after it; without the stop
+        //   condition the retry would be periodic work on an idle pane.
+        // Scenario: three publishes arrive while the render server still holds
+        //   every detached buffer, then the buffers free and no further output
+        //   comes.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.resetSurfaceCountersForTesting()
+        TerminalFrameSwapchain.resetForTesting()
+
+        TerminalFrameSwapchain.canAcquireForTesting = false
+        controller.emitFrameForTest(damage: .init(rows: [2]))
         controller.emitFrameForTest(damage: .init(rows: [4]))
-        pane.displayIfNeeded()
+        controller.emitFrameForTest(damage: .init(rows: [6]))
         try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting == ["apply", "blit"],
-            "row damage on a valid mirror did not apply+blit: \(TerminalFrameBackingStore.eventsForTesting)"
+            pane.renderCountForTesting == 0,
+            "an unacquirable swapchain still rendered \(pane.renderCountForTesting) time(s)"
         )
         try uiExpect(
-            pane.drawnRowSetsForTesting.isEmpty,
-            "row damage on a valid mirror drew folded: \(pane.drawnRowSetsForTesting)"
+            pane.hasPendingPresentationForTesting,
+            "the coalesced burst left no pending presentation to retry"
+        )
+
+        TerminalFrameSwapchain.canAcquireForTesting = true
+        pumpRunLoop(untilTrue: { pane.hasPendingPresentationForTesting == false })
+
+        try uiExpect(
+            pane.hasPendingPresentationForTesting == false,
+            "the pending presentation never rendered after buffers freed"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting == [[2, 4, 6]],
+            "the retry did not render the burst's composed damage once: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+
+        // No further output arrives; the pane must stop retrying by itself.
+        let rendersAfterRetry = pane.renderCountForTesting
+        pumpRunLoop(seconds: 0.15)
+        try uiExpect(
+            pane.renderCountForTesting == rendersAfterRetry,
+            "a quiet pane kept rendering: \(pane.renderCountForTesting) vs \(rendersAfterRetry)"
         )
     }
 
-    uiTest("an apply refusal rebuilds the mirror at a shift and folds otherwise") {
-        // Intent: when the store cannot realize a value, a shift-carrying publish
-        //   pays one full mirror render and stays on the blit path, while a
-        //   row-only publish degrades to the folded redraw.
-        // Why it exists: the refusal path is the store's safety valve; the view
-        //   must never blit a store that declined the frame.
-        // Scenario: the store refuses two frames in a row -- one with a shift,
-        //   one without.
-        TerminalFrameBackingStore.resetForTesting()
+    uiTest("a metrics change replaces the swapchain and re-renders the current plan") {
+        // Intent: cell geometry moving -- through a font change here, through a
+        //   backing-scale change on a display move, through a resize -- discards
+        //   the buffers and renders the current plan afresh.
+        // Why it exists: I3's trust rule. Those buffers hold pixels at the old
+        //   pixel geometry; no damage value can bring them current, and bringing
+        //   them current is exactly what the swapchain would otherwise try.
+        //   Nothing publishes on a scale change either, so the view has to
+        //   re-render on its own or the pane freezes on the old frame.
+        // Scenario: a mounted pane's font size changes.
+        TerminalFrameSwapchain.resetForTesting()
         let controller = TerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let pane = SwiftTerminalSessionView(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-        TerminalFrameBackingStore.resetForTesting()
-        TerminalFrameBackingStore.applyReturnsForTesting = false
+        let swapchainsAtMount = TerminalFrameSwapchain.creationCountForTesting
+        TerminalFrameSwapchain.resetForTesting()
+        pane.resetSurfaceCountersForTesting()
 
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
-            "a refused shift did not rebuild: \(TerminalFrameBackingStore.eventsForTesting)"
-        )
+        try uiExpect(swapchainsAtMount == 1, "mounting built \(swapchainsAtMount) swapchains")
+        pane.setFontSize(26)
 
-        controller.emitFrameForTest(damage: .init(rows: [4]))
-        pane.displayIfNeeded()
         try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
-            "a refused row-only frame touched the mirror again: \(TerminalFrameBackingStore.eventsForTesting)"
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the metrics change did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
         )
         try uiExpect(
-            pane.drawnRowSetsForTesting.count == 1,
-            "the refused row-only frame did not fold: \(pane.drawnRowSetsForTesting)"
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the replacement did not render a complete frame: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
         )
     }
 
-    uiTest("a resize stales the mirror until the next shift") {
-        // Intent: any full-display invalidation -- resize above all -- drops
-        //   mirror validity, and the folded path serves until a shift rebuilds.
-        // Why it exists: a resized layer gets a fresh backing store and a
-        //   resized grid gets a differently-sized mirror; blitting a stale one
-        //   is the tearing failure D7 names.
-        // Scenario: scroll, then widen the pane, then repaint one row.
-        TerminalFrameBackingStore.resetForTesting()
+    uiTest("a resized grid replaces the swapchain") {
+        // Intent: a publish carrying a differently-shaped grid builds new
+        //   buffers instead of trying to bring the old ones current.
+        // Why it exists: I3's trust rule again, through the door a resize
+        //   actually uses. Metrics are unchanged across a plain resize -- the
+        //   cell box is the same -- so the shape has to be read off the plan,
+        //   and a swapchain sized to the old grid would refuse or misplace
+        //   every row of the new one.
+        // Scenario: the engine republishes after a SIGWINCH added two rows.
+        TerminalFrameSwapchain.resetForTesting()
         let controller = TerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let pane = SwiftTerminalSessionView(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        controller.emitFrameForTest(
-            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
-        )
-        pane.displayIfNeeded()
-        TerminalFrameBackingStore.resetForTesting()
-        pane.resetDrawnRowSetsForTesting()
+        TerminalFrameSwapchain.resetForTesting()
 
-        pane.setFrameSize(NSSize(width: 88, height: 160))
-        pane.displayIfNeeded()
-        controller.emitFrameForTest(damage: .init(rows: [4]))
-        pane.displayIfNeeded()
+        let resizedRows = RenderFramePlan.rowsForTesting + 2
+        controller.currentPlan = RenderFramePlan(
+            defaultBackground: RenderTheme.dark.defaultBackground,
+            rows: resizedRows
+        )
+        controller.emitFrameForTest(damage: .full)
+
         try uiExpect(
-            TerminalFrameBackingStore.eventsForTesting.isEmpty,
-            "a resized pane still used the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the resized grid did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
         )
         try uiExpect(
-            pane.drawnRowSetsForTesting.count == 2,
-            "folded draws did not resume after the resize: \(pane.drawnRowSetsForTesting)"
+            TerminalFrameSwapchain.renderedRowSetsForTesting == [Set(0..<resizedRows)],
+            "the resized grid did not render a complete frame at its new height: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
         )
     }
 
-    uiTest("the first draw after a resize fills every row") {
-        // Intent: once the pane's size changes, the next draw fills the whole viewport even
-        //   when the engine reports damage for a single row.
-        // Why it exists: a resize hands the layer a new backing store with no contents, so
-        //   clipping the fill to sparse damage leaves every other row showing the bare
-        //   layer background rather than the previous frame. Bounding the fill to the
-        //   damaged spans is only sound while the layer still holds what the last draw put
-        //   there, and a resize is exactly when it does not.
-        // Scenario: widening a pane by one column. The shell repaints its two prompt rows
-        //   after SIGWINCH, and every row above them stopped being painted -- staying blank
-        //   because nothing further damaged them (docs/research/32, `F1`/`F5`/`F8`).
+    uiTest("a theme change replaces the swapchain") {
+        // Intent: applying a theme discards the buffers rather than trusting
+        //   them for a later incremental render.
+        // Why it exists: a theme repaints every row, including rows no damage
+        //   will ever name. A detached buffer brought current by damage alone
+        //   would keep the old theme's colors in every quiet row -- the one
+        //   trust-breaking input no value comparison on geometry can see.
+        // Scenario: a mounted pane is given a theme with a different background.
+        TerminalFrameSwapchain.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let pane = SwiftTerminalSessionView(
+            controller: controller,
+            resolveTheme: { $0 == "Known" ? resolved : nil }
+        )
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        TerminalFrameSwapchain.resetForTesting()
+
+        pane.applyTheme("Known")
+
+        try uiExpect(
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the theme change did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the theme change did not render a complete frame: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
+        )
+    }
+
+    uiTest("a window color-space change replaces the swapchain at unchanged geometry") {
+        // Intent: the window moving to a display with a different profile
+        //   discards the buffers, even though every cell metric is identical.
+        // Why it exists: the stores render into memory tagged with the window's
+        //   color space so the compositor never converts. Keep the old buffers
+        //   and the pane shows the previous profile's colors until something
+        //   damages each row -- which for a quiet row is never. This is the one
+        //   trust-breaking input that changes no geometry at all, so a
+        //   metrics-only check would miss it entirely.
+        // Scenario: a mounted pane's window changes color space at the same
+        //   backing scale and the same grid.
+        TerminalFrameSwapchain.resetForTesting()
         let controller = TerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
         )
         let pane = SwiftTerminalSessionView(controller: controller)
         pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
         mountInTestWindow(pane, frame: pane.frame)
-        pane.displayIfNeeded()
-        pane.resetDrawnRowSetsForTesting()
-
-        // Width only, so cell metrics are untouched and just the column count moves. That is
-        // the widen case, and the one that reaches draw without a full invalidation.
-        pane.setFrameSize(NSSize(width: 96, height: 160))
-        // Stands in for the shell's post-SIGWINCH redraw: a small write on the very next
-        // frame, which is what makes the loss stick instead of being repainted.
-        controller.emitFrameForTest(damage: .init(rows: [8]))
-        try drawPane(pane, dirtyRect: pane.bounds)
-
-        let rects = pane.clipRectsForTesting.flatMap { $0 }
-        try uiExpect(rects.isEmpty == false, "the post-resize draw installed no clip rects")
-        let rowHeight = pane.bounds.height / CGFloat(RenderFramePlan.rowsForTesting)
-        let unfilled = (0..<RenderFramePlan.rowsForTesting).filter { row in
-            let middle = CGPoint(
-                x: pane.bounds.midX,
-                y: (CGFloat(row) + 0.5) * rowHeight
-            )
-            return rects.contains { $0.contains(middle) } == false
+        guard let window = pane.window else {
+            throw UITestFailure(message: "the mounted pane has no window")
         }
+        let before = window.colorSpace
+        TerminalFrameSwapchain.resetForTesting()
+
+        window.colorSpace = before == NSColorSpace.displayP3
+            ? NSColorSpace.sRGB
+            : NSColorSpace.displayP3
+        pane.viewDidChangeBackingProperties()
+
         try uiExpect(
-            unfilled.isEmpty,
-            "rows the first draw after a resize left unfilled: \(unfilled)"
+            TerminalFrameSwapchain.creationCountForTesting == 1,
+            "the color-space change did not replace the swapchain: "
+                + "\(TerminalFrameSwapchain.creationCountForTesting)"
+        )
+        try uiExpect(
+            TerminalFrameSwapchain.renderedRowSetsForTesting
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the color-space change did not render a complete frame: "
+                + "\(TerminalFrameSwapchain.renderedRowSetsForTesting)"
         )
     }
 
@@ -1594,27 +1560,25 @@ private func momentumPhaseCode(_ phase: NSEvent.Phase) -> Int64 {
     return 0
 }
 
-@discardableResult
-/// Runs one `draw(_:)` pass against a bitmap context with a caller-chosen dirty rect, which
-/// AppKit's own display path will not do -- it always redraws the union of its invalid regions.
+/// Runs the main run loop for `seconds`, so main-queue work the pane scheduled
+/// -- the pending-presentation retry above all -- actually gets to run.
 @MainActor
-private func drawPane(_ pane: SwiftTerminalSessionView, dirtyRect: NSRect) throws {
-    guard let context = CGContext(
-        data: nil,
-        width: Int(pane.bounds.width),
-        height: Int(pane.bounds.height),
-        bitsPerComponent: 8,
-        bytesPerRow: 0,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-    ) else {
-        throw UITestFailure(message: "could not create the bitmap draw context")
+private func pumpRunLoop(seconds: TimeInterval) {
+    let end = Date().addingTimeInterval(seconds)
+    while Date() < end {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
     }
-    let graphicsContext = NSGraphicsContext(cgContext: context, flipped: pane.isFlipped)
-    let previous = NSGraphicsContext.current
-    NSGraphicsContext.current = graphicsContext
-    defer { NSGraphicsContext.current = previous }
-    pane.draw(dirtyRect)
+}
+
+/// Pumps until `condition` holds, or gives up after a deadline generous enough
+/// that a slow machine cannot fail the test while a genuinely stalled retry
+/// still does.
+@MainActor
+private func pumpRunLoop(untilTrue condition: () -> Bool, deadline: TimeInterval = 2.0) {
+    let end = Date().addingTimeInterval(deadline)
+    while Date() < end && condition() == false {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+    }
 }
 
 @MainActor

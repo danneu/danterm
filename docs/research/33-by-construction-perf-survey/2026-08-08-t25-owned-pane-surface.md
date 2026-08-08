@@ -218,7 +218,7 @@ current buffer, never require re-rendering.
 - [x] 2. IOSurface-backed frame store behind the byte-equality gates (PO1).
 - [x] 3. Surface swapchain: acquisition, coalescing, pending presentation,
        trust-breaking inputs, with the headless PO3 pins.
-- [ ] 4. Own the pane surface: one render path, draw seam deleted, benchmark
+- [x] 4. Own the pane surface: one render path, draw seam deleted, benchmark
        bracket / harness pins / PO5 counters moved with it (PO4, PO5).
 - [ ] 5. Record the re-measurement and tick the T25 ledger (PO2, PO6).
 
@@ -254,3 +254,47 @@ current buffer, never require re-rendering.
   pins land with commit 4, where those inputs arrive. Acquisition prefers
   the least-stale free buffer so bring-current redraws the fewest exposed
   rows.
+- Commit 4: the view shows the surface as its own layer's contents rather
+  than through a dedicated sublayer, with `wantsUpdateLayer` true so AppKit
+  allocates no backing store and never calls `draw(_:)`. `updateLayer()` --
+  AppKit's redisplay entry point -- is the counted, do-nothing site I4
+  demands. `layerContentsPlacement = .topLeft` is what keeps the grid
+  unscaled at the top-left with the theme background in the letterbox
+  strip; a probe measured the composed result before the code was written,
+  because a wrong gravity, flip, or contents scale fails no other gate in
+  this plan (every other gate stops at the store's memory). That probe is
+  now PO4's pin, in `tests-ui/IOSurfaceLayerContentsTests.swift`, reading
+  back through `CALayer.render(in:)` -- not the render server's path, but
+  the same layer geometry rules, and it needs no screen-recording grant.
+- Commit 4: trust-breaking inputs split two ways. Geometry, backing scale
+  and window color space are compared as values (`SurfaceInputs`), so the
+  swapchain is replaced wherever a presentation arrives; a theme change is
+  an explicit discard, because no value the view holds distinguishes two
+  themes that share a background. Scale and color space also re-render on
+  their own, since neither produces a publish and buffers rendered under
+  the old values cannot be brought current by damage.
+- Commit 4: `TerminalFrameSwapchain` gained `lastRenderedDamage` rather
+  than a richer return type, so the benchmark bracket can report the
+  render's own damage topology without churning commit 3's pins.
+  `usedDirtyRectFallback` is now structurally false and was kept rather
+  than deleted: its consumers reach into the artifact schema and the
+  Python validators, which is benchmark-rule territory this plan
+  non-goals.
+- Commit 4 live check (ahead of PO2's real measurement): a paced ~59 Hz
+  stream in a slot recorded publishes and renders equal per second with
+  zero layer displays and no acquisition skips, and an idle pane recorded
+  nothing at all.
+
+## Follow Up
+
+- Retire `usedDirtyRectFallback`. It is structurally false since commit 4 --
+  no rectangle AppKit chose can reach a render -- but its consumers reach
+  into the benchmark artifact schema (`dirtyRectFallbackCount` in
+  `TerminalBenchmarkSparseSpanTopology`, `app/TerminalBenchmark.swift`, and
+  `scripts/terminal_btop_artifacts.py`), which this plan non-goals. Delete it
+  with the benchmark recalibration.
+- `agent-docs/terminal-performance.md`'s "whole-process CPU per accepted
+  draw" section still describes CoreAnimation's asynchronous display-list
+  replay as a live blind spot the draw bracket cannot see. Owning the
+  surface removes that replay, so the section's framing needs revisiting
+  when the serialized-draw cells are recalibrated.
