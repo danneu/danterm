@@ -7,6 +7,7 @@
 // live pixel proof F22 showed macOS can no longer offer.
 
 import CoreGraphics
+import IOSurface
 import Testing
 
 // @testable for the budget-bounded Terminal initializer the at-budget arm
@@ -224,6 +225,127 @@ struct FrameBackingStoreTests {
             damage: TerminalDamage(rows: [0], rowCount: 8)
         ) == false)
 
+        let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
+        let direct = try renderBitmap(plan: plan, metrics: metrics)
+        #expect(blitted.bytes == direct.bytes)
+    }
+
+    @Test("the surface memory itself holds the rendered frame")
+    func surfaceMemoryHoldsTheFrame() throws {
+        // Intent: the IOSurface the store owns is the frame -- reading its
+        //   memory directly (BGRA, stride-aware) matches a direct render
+        //   pixel-for-pixel.
+        // Why it exists: the owned-surface route displays this memory as
+        //   layer contents; a store that was only blit-correct could hide a
+        //   wrong stride or byte order behind CoreGraphics' tolerant blit.
+        // Scenario: asymmetric content rendered full; every pixel of the
+        //   surface compared against the direct render, BGRA against RGBA.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 24, rows: 6))
+        prefill(&terminal, rows: 6)
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        let store = try #require(TerminalFrameBackingStore(
+            columns: plan.columns,
+            rows: plan.rows,
+            metrics: metrics
+        ))
+        store.renderFull(plan)
+        let direct = try renderBitmap(plan: plan, metrics: metrics)
+
+        let surface = store.ioSurface
+        surface.lock(options: [.readOnly], seed: nil)
+        defer { surface.unlock(options: [.readOnly], seed: nil) }
+        let base = surface.baseAddress
+        let stride = surface.bytesPerRow
+        var mismatches = 0
+        for y in 0..<direct.height {
+            let row = base + y * stride
+            for x in 0..<direct.width {
+                let blue = row.load(fromByteOffset: x * 4, as: UInt8.self)
+                let green = row.load(fromByteOffset: x * 4 + 1, as: UInt8.self)
+                let red = row.load(fromByteOffset: x * 4 + 2, as: UInt8.self)
+                let alpha = row.load(fromByteOffset: x * 4 + 3, as: UInt8.self)
+                let expected = direct.pixel(x: x, yFromTop: y)
+                if Pixel(red: red, green: green, blue: blue, alpha: alpha) != expected {
+                    mismatches += 1
+                }
+            }
+        }
+        #expect(mismatches == 0)
+    }
+
+    @Test("a stride-padded surface stays byte-identical through applied shifts")
+    func stridePaddedSurfaceHoldsGates() throws {
+        // Intent: the byte-equality gate holds when the surface's row stride
+        //   exceeds the tight width*4, including through translateRows.
+        // Why it exists: IOSurface aligns bytesPerRow (128 bytes at time of
+        //   writing); a store that assumed tight rows would shear every row
+        //   after the first on almost every real grid width.
+        // Scenario: a column count chosen so tight row bytes miss the
+        //   platform's row alignment; streaming shifts apply on the padded
+        //   store and every frame blits equal to a direct render.
+        let metrics = try metrics
+        let alignment = max(
+            IOSurfaceGetPropertyAlignment(IOSurfacePropertyKey.bytesPerRow.rawValue as CFString),
+            1
+        )
+        let columns = try #require(
+            (20...27).first { ($0 * metrics.cellWidthPixels * 4) % alignment != 0 },
+            "every candidate width is row-aligned; padding cannot be exercised"
+        )
+        var terminal = try #require(Terminal(columns: columns, rows: 8))
+        prefill(&terminal, rows: 8)
+        _ = terminal.drainDamage()
+        let initial = planFrame(for: terminal, presentation: blockCursor)
+        let store = try #require(TerminalFrameBackingStore(
+            columns: columns,
+            rows: 8,
+            metrics: metrics
+        ))
+        #expect(store.ioSurface.bytesPerRow > columns * metrics.cellWidthPixels * 4)
+        store.renderFull(initial)
+
+        for step in 0..<10 {
+            terminal.feed(Array((line + "\r\n").utf8))
+            let damage = terminal.drainDamage()
+            let plan = planFrame(for: terminal, presentation: blockCursor)
+            #expect(store.apply(plan: plan, damage: damage), "step \(step) refused")
+            let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
+            let direct = try renderBitmap(plan: plan, metrics: metrics)
+            #expect(blitted.bytes == direct.bytes, "step \(step) diverged")
+        }
+    }
+
+    @Test("a store brought current across missed generations equals a from-scratch render")
+    func broughtCurrentAcrossMissedGenerations() throws {
+        // Intent: damage the engine composed across several undisplayed
+        //   frames applies to a stale store byte-exactly.
+        // Why it exists: a swapchain buffer is generations stale when
+        //   reacquired; bringing it current rides between-drain damage
+        //   composition, and a composition error would show as a band of the
+        //   old generation surviving under the new frame.
+        // Scenario: the store renders frame 0; three two-line bursts feed
+        //   with no drain between; the single composed drain applies and the
+        //   store equals a from-scratch render of the final frame.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        prefill(&terminal, rows: 20)
+        _ = terminal.drainDamage()
+        let initial = planFrame(for: terminal, presentation: blockCursor)
+        let store = try #require(TerminalFrameBackingStore(
+            columns: initial.columns,
+            rows: initial.rows,
+            metrics: metrics
+        ))
+        store.renderFull(initial)
+
+        for _ in 0..<3 {
+            terminal.feed(Array((line + "\r\n" + line + "\r\n").utf8))
+        }
+        let damage = terminal.drainDamage()
+        #expect(damage.shift != nil)
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        #expect(store.apply(plan: plan, damage: damage))
         let blitted = try blitBitmap(store, plan: plan, metrics: metrics)
         let direct = try renderBitmap(plan: plan, metrics: metrics)
         #expect(blitted.bytes == direct.bytes)

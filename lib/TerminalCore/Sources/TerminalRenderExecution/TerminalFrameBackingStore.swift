@@ -5,12 +5,18 @@
 // store is only ever a blit target. Validity policy stays with the view; this
 // type holds pixels and geometry, nothing about when they may be trusted.
 import CoreGraphics
+import IOSurface
 import TerminalCore
 import TerminalRenderPlanning
 
 /// Owns the pixels of one rendered frame at backing resolution so a recorded
 /// scroll shift is realized as an exact row translation instead of a
 /// region-wide glyph repaint.
+///
+/// The pixels live in an IOSurface so the render server can texture from
+/// them directly when a layer displays the store as contents (research/33
+/// T25); the row stride is therefore the surface's aligned `bytesPerRow`,
+/// not the tight `width * 4`.
 ///
 /// Main-thread only, like the drawing seam it mirrors. The store never tracks
 /// whether its contents are current -- the owning view keeps that single
@@ -24,6 +30,11 @@ public final class TerminalFrameBackingStore {
     /// Frame extent in point space, for callers clipping or invalidating.
     public let pointSize: CGSize
 
+    /// The pixel memory itself. Callers may attach it as layer contents;
+    /// they must never write it -- all mutation goes through this store, on
+    /// the main thread, and only while the surface is detached and free.
+    public let ioSurface: IOSurface
+
     private let pixelWidth: Int
     private let pixelHeight: Int
     private let bytesPerRow: Int
@@ -32,11 +43,13 @@ public final class TerminalFrameBackingStore {
     private let context: CGContext
     private let colorSpace: CGColorSpace
 
-    /// Fails on non-positive geometry or a backing allocation CoreGraphics
-    /// refuses, mirroring `renderFrameSize`'s overflow refusals.
+    /// Fails on non-positive geometry, an allocation IOSurface refuses, or a
+    /// context CoreGraphics refuses, mirroring `renderFrameSize`'s overflow
+    /// refusals.
     ///
     /// `colorSpace` defaults to sRGB; the view passes its window's space so
-    /// the blit is conversion-free and byte-equal to direct drawing.
+    /// displaying the surface is conversion-free and byte-equal to direct
+    /// drawing.
     public init?(
         columns: Int,
         rows: Int,
@@ -49,38 +62,28 @@ public final class TerminalFrameBackingStore {
         guard width.overflow == false, height.overflow == false,
               width.partialValue > 0, height.partialValue > 0
         else { return nil }
-        let rowBytes = width.partialValue.multipliedReportingOverflow(by: 4)
-        guard rowBytes.overflow == false else { return nil }
-        let totalBytes = rowBytes.partialValue.multipliedReportingOverflow(
-            by: height.partialValue
-        )
-        guard totalBytes.overflow == false else { return nil }
         guard let space = colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) else {
             return nil
         }
+        guard let surface = IOSurface(properties: [
+            .width: width.partialValue,
+            .height: height.partialValue,
+            .bytesPerElement: 4,
+            .pixelFormat: UInt32(0x4247_5241), // 'BGRA'
+        ]) else { return nil }
 
-        let allocated = UnsafeMutableRawPointer.allocate(
-            byteCount: totalBytes.partialValue,
-            alignment: MemoryLayout<UInt32>.alignment
-        )
-        allocated.initializeMemory(
-            as: UInt8.self,
-            repeating: 0,
-            count: totalBytes.partialValue
-        )
+        // BGRA in memory: premultiplied-first components in little-endian
+        // 32-bit words, matching the surface's declared pixel format.
         guard let context = CGContext(
-            data: allocated,
+            data: surface.baseAddress,
             width: width.partialValue,
             height: height.partialValue,
             bitsPerComponent: 8,
-            bytesPerRow: rowBytes.partialValue,
+            bytesPerRow: surface.bytesPerRow,
             space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                 | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            allocated.deallocate()
-            return nil
-        }
+        ) else { return nil }
         // Same flip as the view's AppKit context: top-left origin, y down,
         // point units -- so `drawRenderFrame` produces identical geometry here
         // and memory row 0 is the top pixel row.
@@ -96,15 +99,16 @@ public final class TerminalFrameBackingStore {
         )
         pixelWidth = width.partialValue
         pixelHeight = height.partialValue
-        bytesPerRow = rowBytes.partialValue
-        byteCount = totalBytes.partialValue
-        data = allocated
+        bytesPerRow = surface.bytesPerRow
+        byteCount = surface.bytesPerRow * height.partialValue
+        ioSurface = surface
+        data = surface.baseAddress
         self.context = context
         self.colorSpace = space
-    }
 
-    deinit {
-        data.deallocate()
+        surface.lock(options: [], seed: nil)
+        memset(data, 0, byteCount)
+        surface.unlock(options: [], seed: nil)
     }
 
     /// Renders the complete plan, making every pixel current.
@@ -113,6 +117,8 @@ public final class TerminalFrameBackingStore {
             plan.columns == columns && plan.rows == rows,
             "full render of a \(plan.columns)x\(plan.rows) plan into a \(columns)x\(rows) store"
         )
+        ioSurface.lock(options: [], seed: nil)
+        defer { ioSurface.unlock(options: [], seed: nil) }
         drawRenderFrame(plan, metrics: metrics, in: context)
     }
 
@@ -126,6 +132,12 @@ public final class TerminalFrameBackingStore {
         guard damage.isFull == false else { return false }
         var indices = damage.rowIndices
         guard indices.allSatisfy({ $0 < rows }) else { return false }
+        // CPU writes to IOSurface memory sit between lock and unlock so the
+        // surface's seed advances and coherency with a later texture read
+        // holds. `translateRows`'s refusal paths return before any mutation,
+        // so unlocking through the defer is still a no-write unlock.
+        ioSurface.lock(options: [], seed: nil)
+        defer { ioSurface.unlock(options: [], seed: nil) }
         if let shift = damage.shift {
             guard translateRows(region: shift.region, delta: shift.delta) else {
                 return false
@@ -217,6 +229,8 @@ public final class TerminalFrameBackingStore {
             intent: .defaultIntent
         ) else { return }
 
+        ioSurface.lock(options: [.readOnly], seed: nil)
+        defer { ioSurface.unlock(options: [.readOnly], seed: nil) }
         target.saveGState()
         target.clip(to: rect)
         // The target is flipped (top-left origin, y down); CGImage rows draw

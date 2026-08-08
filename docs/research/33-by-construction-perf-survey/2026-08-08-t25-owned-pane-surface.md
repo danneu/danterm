@@ -215,7 +215,7 @@ current buffer, never require re-rendering.
 - [x] 1. Viability gate: PO3's two real-AppKit pins for IOSurface layer
        contents (no implicit contents animation; a detached surface reported
        free stays free). If the gate fails, the route stops here.
-- [ ] 2. IOSurface-backed frame store behind the byte-equality gates (PO1).
+- [x] 2. IOSurface-backed frame store behind the byte-equality gates (PO1).
 - [ ] 3. Surface swapchain: acquisition, coalescing, pending presentation,
        trust-breaking inputs, with the headless PO3 pins.
 - [ ] 4. Own the pane surface: one render path, draw seam deleted, benchmark
