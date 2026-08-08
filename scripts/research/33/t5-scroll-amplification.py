@@ -31,9 +31,11 @@ SOURCE_TREES = [
 
 # `text-line` writes 178 characters plus CR LF, so 91 of them is the 16 KiB read turn the
 # PTY host caps a delivery at -- the live batch size. 1 is one line per delivery, which is
-# the amplification's worst case, and 8 is the middle of the curve.
+# the amplification's worst case, and 8 is the middle of the curve. The `-at-budget` arm
+# is D7's frozen-topRow regime: the probe saturates a small scrollback budget first, so
+# eviction cancels the append in `scrollProjection.topRow` on most scrolled lines.
 BATCHES = (1, 8, 91)
-SCENARIOS = ("bare-newline", "text-line", "rewrite-bottom-row")
+SCENARIOS = ("bare-newline", "text-line", "rewrite-bottom-row", "text-line-at-budget")
 
 # (file, anchor, replacement). The anchor is the unmodified text at the site; the
 # replacement is that same text with one counter increment added. Each anchor must occur
@@ -76,12 +78,9 @@ PATCHES = [
         "            t5Counters.fullFromNotFollowingAfter += 1\n"
         "            recordPresentationFullDamage()\n",
     ),
-    (
-        "TerminalDamage.swift",
-        "                rows.insert(wordIndex * 64 + bit)\n",
-        "                t5Counters.drainRowInserts += 1\n"
-        "                rows.insert(wordIndex * 64 + bit)\n",
-    ),
+    # The old drain-site injection (`rows.insert` into the public Set) is gone with the
+    # representation: the drain builds no set at all, so the probe counts drained rows
+    # from the drained value itself instead of patching the engine.
     (
         "RenderFramePlanner.swift",
         "                cells.append(cell)\n",
@@ -165,29 +164,31 @@ def render(report):
     lines = [
         f"grid {report['columns']}x{rows}, line width {report['lineWidth']}",
         "",
-        f"{'scenario':<20}{'lines/dlv':>10}{'dlv':>6}{'frames':>8}{'full':>6}"
-        f"{'rows/f':>8}{'ideal/f':>9}{'rowAmp':>8}"
+        f"{'scenario':<24}{'lines/dlv':>10}{'dlv':>6}{'frames':>8}{'full':>6}{'shift':>7}"
+        f"{'rows/f':>8}{'ideal/f':>9}{'rowAmp':>8}{'foldRows/f':>11}"
         f"{'glyphs/f':>10}{'idealG/f':>10}{'glyphAmp':>10}",
     ]
     for scenario in report["scenarios"]:
         frames = scenario["publishedFrames"]
         per = lambda key: scenario[key] / frames if frames else 0.0  # noqa: E731
         lines.append(
-            f"{scenario['name']:<20}"
+            f"{scenario['name']:<24}"
             f"{scenario['linesPerDelivery']:>10}"
             f"{scenario['deliveries']:>6}"
             f"{frames:>8}"
             f"{scenario['fullDamageFrames']:>6}"
+            f"{scenario['shiftFrames']:>7}"
             f"{per('damagedRows'):>8.1f}"
             f"{per('idealDamagedRows'):>9.1f}"
             f"{ratio(scenario['damagedRows'], scenario['idealDamagedRows']):>8}"
+            f"{per('foldedDamagedRows'):>11.1f}"
             f"{per('submittedGlyphOccurrences'):>10.0f}"
             f"{per('idealGlyphOccurrences'):>10.0f}"
             f"{ratio(scenario['submittedGlyphOccurrences'], scenario['idealGlyphOccurrences']):>10}"
         )
     lines.append("")
     lines.append(
-        f"{'scenario':<20}{'lines/dlv':>10}{'scrollDlv':>10}{'fullCalls':>10}{'fullEscal':>10}"
+        f"{'scenario':<24}{'lines/dlv':>10}{'scrollDlv':>10}{'fullCalls':>10}{'fullEscal':>10}"
         f"{'topRow/scr':>11}{'otherSite':>10}{'drainIns':>9}"
         f"{'planRows/f':>11}{'planCells/f':>12}"
     )
@@ -200,7 +201,7 @@ def render(report):
             + scenario["fullFromNotFollowingAfter"]
         )
         lines.append(
-            f"{scenario['name']:<20}"
+            f"{scenario['name']:<24}"
             f"{scenario['linesPerDelivery']:>10}"
             f"{scenario['scrollingDeliveries']:>10}"
             f"{scenario['fullDamageCalls']:>10}"

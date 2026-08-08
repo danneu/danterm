@@ -207,17 +207,33 @@ run_scenario() {
                      else .scrolledLines / (.publishes - .histogram.h0) end),
                 fullDamageShare:
                     (if .publishes == 0 then null
-                     else .fullDamagePublishes / .publishes end),
-                # Every scrolling publish touches the whole grid: below the
-                # history budget it escalates to `.full`, and at the budget the
-                # append and the eviction cancel in `topRow` so the scroll
-                # arrives as a damage set covering every viewport row instead.
-                rowsTouchedPerScrolledLine:
-                    (if .scrolledLines == 0 then null
-                     else .gridRows * (.publishes - .histogram.h0) / .scrolledLines end)
+                     else .fullDamagePublishes / .publishes end)
             }
         end
     ' "$segment"
+    # Damaged rows are measured from the per-publish trace, not derived: before
+    # research/33 T9 every scrolling publish touched the whole grid (escalated
+    # `.full` below the history budget, a whole-viewport row set at it), and
+    # after T9 the seam carries a shift plus O(1) rows -- the vacated strip and
+    # the cursor pair -- so this number is the live half of that claim.
+    jq -s '
+        if length == 0 then "no trace: the pane published nothing" else
+            {
+                tracePublishes: length,
+                traceFullPublishes: (map(select(.full)) | length),
+                traceDamagedRows: (map(.rows) | add),
+                traceScrolledLines: (map(.lines) | add)
+            }
+            | . + {
+                damagedRowsPerPublish:
+                    (if .tracePublishes == 0 then null
+                     else .traceDamagedRows / .tracePublishes end),
+                damagedRowsPerScrolledLine:
+                    (if .traceScrolledLines == 0 then null
+                     else .traceDamagedRows / .traceScrolledLines end)
+            }
+        end
+    ' "$WORK_DIR/$1-trace.jsonl"
 }
 
 run_scenario "cat-full-speed" "cat $CORPUS"

@@ -24,8 +24,9 @@ struct T5Counters {
     var fullFromTopRowOrScreenChange = 0
     var fullFromNotFollowingAfter = 0
 
-    // Engine, `TerminalDamageAccumulator.drain()`: rows the accumulator actually held, for
-    // the frames that did not escalate.
+    // Rows carried by drained non-full damage values. Counted by the probe at its own
+    // drain call rather than injected: the word-backed drain builds no per-row set, so
+    // there is no engine site left to patch.
     var drainRowInserts = 0
 
     // Planner, `FramePlanner.inspectedCells`: rows the traversal re-inspected and cells it

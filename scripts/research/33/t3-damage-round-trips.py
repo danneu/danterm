@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Research doc 33, task T3: count the damage representation's round trips per frame.
 
+RETIRED by T9/T20 (research/33 D7): the sites this script counted -- the drain's
+Set<Int> construction, `init(rows:)`'s sanitizer, `formUnion`'s set union, the
+span sort -- were deleted with the word-backed shift-carrying representation, so
+the anchors below no longer match and this script fails loudly by design. Its
+successor is t9-shift-damage-structure.sh (structural absence) plus
+t5-scroll-amplification.py (per-frame sizing). The F11 numbers this produced
+remain the pre-change baseline.
+
 Copies `lib/TerminalCore/Sources/TerminalCore` and `.../TerminalRenderPlanning` into a
 scratch directory, injects one counter increment at each site on the damage path, compiles
 the copy as a single optimized module with the probe, and reports per corpus what one

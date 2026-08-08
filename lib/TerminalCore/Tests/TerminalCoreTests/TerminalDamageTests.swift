@@ -152,7 +152,12 @@ struct TerminalDamageTests {
         terminal.feed(Array("\u{1B}[2;4r\u{1B}[2;1H".utf8))
         _ = terminal.drainDamage()
         terminal.feed(Array("\u{1B}[1M".utf8))
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [1, 2, 3]))
+        // Delete-line is a scroll of rows 1..<4: since research/33 T9 the drained
+        // value carries the translation plus the vacated row and the cursor row,
+        // not the whole moved range.
+        let deleted = terminal.drainDamage()
+        #expect(deleted.shift == TerminalDamageShift(region: 1..<4, delta: -1))
+        #expect(deleted.rowIndices == [1, 3])
     }
 
     @Test("mapping and whole-screen mutations escalate to full damage")
@@ -223,24 +228,8 @@ struct TerminalDamageTests {
         #expect(byteChunks.drainDamage() == TerminalDamage(rows: [0, 2]))
     }
 
-    @Test("row damage never carries a negative index, however it is built")
-    func negativeRowsCannotEnterDamage() {
-        // Intent: no `TerminalDamage` a consumer can construct or accumulate holds a
-        //   negative row index.
-        // Why it exists: `rows` is `private(set)`, so this filter plus `formUnion` are
-        //   the only two ways rows enter -- and downstream consumers rely on it rather
-        //   than re-checking. `terminalDamageMaximalContiguousSpanCount` used to guard
-        //   `row == Int.min` before computing `row - 1`; that guard was deleted on the
-        //   strength of this invariant, so if this test ever fails, the span helpers
-        //   trap on overflow rather than merely miscounting.
-        // Scenario: spec-first; no incident. The negative index is not a value any
-        //   engine path produces, which is exactly why the invariant needs pinning
-        //   rather than assuming.
-        #expect(TerminalDamage(rows: [-1, 0, 3]).rows == [0, 3])
-        #expect(TerminalDamage(rows: [Int.min]).rows.isEmpty)
-
-        var accumulated = TerminalDamage(rows: [2])
-        accumulated.formUnion(TerminalDamage(rows: [-5, 7]))
-        #expect(accumulated.rows == [2, 7])
-    }
+    // The negative-row sanitizer test that used to close this suite is gone with the
+    // sanitizer itself: the word-backed representation cannot hold an out-of-range row,
+    // and `TerminalShiftDamageTests.outOfRangeRowsAreUnrepresentable` pins the traps
+    // that replaced the silent filter.
 }

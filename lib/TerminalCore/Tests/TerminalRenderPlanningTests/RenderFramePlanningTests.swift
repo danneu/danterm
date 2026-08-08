@@ -72,7 +72,7 @@ struct RenderFramePlanningTests {
             )
         )
 
-        let damage = TerminalDamage(rows: [-1, 1, 5])
+        let damage = TerminalDamage(rows: [1, 5])
         let first = clipFramePlan(plan, to: damage)
         let second = clipFramePlan(plan, to: damage)
 

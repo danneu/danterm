@@ -33,15 +33,19 @@ public struct TerminalDamageTopology: Equatable, Sendable {
     public let isFull: Bool
 
     /// Reduces damage against the frame's row count, which is what makes full
-    /// damage comparable to an enumerated row set.
+    /// damage comparable to an enumerated row set. A carried shift is folded to
+    /// region rows first: topology is a drawing-cost measure, and the drawer
+    /// repaints every row a translation touched until the view half of
+    /// research/33 T9 lands.
     public init(_ damage: TerminalDamage, rowCount: Int) {
         if damage.isFull {
             damagedRowCount = rowCount
             spanCount = rowCount > 0 ? 1 : 0
             isFull = true
         } else {
-            damagedRowCount = damage.rows.count
-            spanCount = terminalDamageMaximalContiguousSpanCount(damage.rows)
+            let folded = damage.expandingShift()
+            damagedRowCount = folded.damagedRowCount
+            spanCount = folded.maximalContiguousSpanCount
             isFull = false
         }
     }
@@ -106,9 +110,7 @@ public struct TerminalBenchmarkSparseSpanRecorder {
               engine.spanCount == expectedEngineSpanCount
         else { return false }
         let halo = TerminalDamageTopology(
-            TerminalDamage(
-                rows: terminalDamageRowsWithGlyphHalo(engineDamage.rows, rowCount: rowCount)
-            ),
+            engineDamage.expandingShift().withGlyphHalo(rowCount: rowCount),
             rowCount: rowCount
         )
         let clip = TerminalDamageTopology(clipDamage, rowCount: rowCount)

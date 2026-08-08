@@ -919,10 +919,11 @@ final class TerminalBenchmarkObserver {
         rowCount: Int,
         usedDirtyRectFallback: Bool
     ) {
-        let damagedRowCount = damage.isFull ? rowCount : damage.rows.count
+        let folded = damage.expandingShift()
+        let damagedRowCount = damage.isFull ? rowCount : folded.damagedRowCount
         let spanCount = damage.isFull
             ? (rowCount > 0 ? 1 : 0)
-            : terminalDamageMaximalContiguousSpanCount(damage.rows)
+            : folded.maximalContiguousSpanCount
         observedDamageTopologySampleCount += 1
         let topologyKey = DamageTopologyKey(
             damagedRowCount: damagedRowCount,
@@ -1069,7 +1070,13 @@ final class TerminalBenchmarkObserver {
         _ plan: RenderFramePlan,
         damage: TerminalDamage
     ) -> TerminalBenchmarkMarkerScan {
-        markerScanner.scan(plan, limitedToRows: damage.isFull ? nil : damage.rows)
+        // A shift's region rows all changed as far as a marker scan is
+        // concerned: a marker printed at the bottom of a scrolling frame sits on
+        // a translated row, not necessarily a row-damaged one.
+        markerScanner.scan(
+            plan,
+            limitedToRows: damage.isFull ? nil : Set(damage.expandingShift().rowIndices)
+        )
     }
 
     private func dirtyRowCount(

@@ -319,7 +319,15 @@ public struct Terminal: Equatable, Sendable {
         var searchMatch: TerminalTextRange?
         var hoveredLinkRange: TerminalTextRange?
         var hoveredLinkRevision: UInt64
-        var topRow: Int
+        /// Eviction-corrected top row, not `scrollProjection.topRow`: at the
+        /// history budget an append and the arena eviction cancel in the
+        /// retained-relative value while the content still translates
+        /// (`research/33/F19`), and the guard below must see the same advance in
+        /// both regimes to match it against `scrollShiftAccountedAdvance`.
+        var absoluteTopRow: Int
+        /// `Terminal.scrollShiftAccountedAdvance` at capture time, so the diff
+        /// can subtract the viewport advance a recorded shift already describes.
+        var scrollShiftAdvance: UInt64
         var isFollowing: Bool
         var isAlternateScreenActive: Bool
         var cursorPresentation: TerminalPresentation
@@ -703,6 +711,15 @@ public struct Terminal: Equatable, Sendable {
     private var hasContentInspectionState = false
     private var viewportState = ViewportState.following
     private var damage: TerminalDamageAccumulator
+
+    /// Total following-viewport rows advanced by scrolls recorded as damage
+    /// shifts, in the same eviction-corrected units as `absoluteViewportTopRow`.
+    /// Monotone forever; only ever read as a within-action delta by
+    /// `recordDamage(from:to:)`, where it cancels exactly the topRow motion the
+    /// recorded shift describes so the guard escalates only unaccounted moves.
+    /// Wrapped in `ObservationGeneration` so path-dependent bookkeeping stays
+    /// out of value equality, like every other observation counter here.
+    private var scrollShiftAccountedAdvance = ObservationGeneration()
     private var hyperlinkTargets: [HyperlinkId: TerminalHyperlink] = [:]
     private var hyperlinkPen: HyperlinkId?
     private var nextHyperlinkId: HyperlinkId = 1
@@ -919,7 +936,8 @@ public struct Terminal: Equatable, Sendable {
             searchMatch: activeSearchMatchRange,
             hoveredLinkRange: hoveredLinkState.flatMap { publicRange($0.range) },
             hoveredLinkRevision: hoveredLinkRevisionCounter.value,
-            topRow: projection.topRow,
+            absoluteTopRow: evictedRowCount + projection.topRow,
+            scrollShiftAdvance: scrollShiftAccountedAdvance.value,
             isFollowing: projection.isFollowing,
             isAlternateScreenActive: isAlternateScreenActive,
             cursorPresentation: presentation
@@ -958,7 +976,14 @@ public struct Terminal: Equatable, Sendable {
             recordPresentationFullDamage()
             return
         }
-        guard before.topRow == after.topRow,
+        // A viewport advance is escalated only when nothing describes it: the
+        // scroll site records each following-viewport push as a shift and bumps
+        // the accounted advance by the same amount, so a scroll's topRow motion
+        // cancels out here in both history regimes, while every unaccounted
+        // move -- resize reflow, scrollback clears, anything new -- still
+        // escalates exactly as before (research/33 T9, D7's guard narrowing).
+        let accountedAdvance = Int(after.scrollShiftAdvance &- before.scrollShiftAdvance)
+        guard before.absoluteTopRow + accountedAdvance == after.absoluteTopRow,
               before.isAlternateScreenActive == after.isAlternateScreenActive
         else {
             recordPresentationFullDamage()
@@ -4033,7 +4058,16 @@ public struct Terminal: Equatable, Sendable {
         } else {
             recordFullDamage()
         }
-        guard hasContentInspectionState else { return }
+        invalidateInspectionState(inViewportRows: range)
+    }
+
+    /// The state half of `invalidateInspection(inViewportRows:)` alone, for the
+    /// row-scroll path whose damage is the shift `recordScrollDamage` records:
+    /// content still leaves the range in absolute coordinates, so search and
+    /// link state anchored there must drop, but the whole-range row damage the
+    /// combined form records is exactly what the shift representation deletes.
+    private mutating func invalidateInspectionState(inViewportRows range: Range<Int>) {
+        guard range.isEmpty == false, hasContentInspectionState else { return }
         let lower = evictedRowCount + historyRowCount + range.lowerBound
         let upper = evictedRowCount + historyRowCount + range.upperBound - 1
         invalidateInspection(inAbsoluteRows: lower...upper)
@@ -6692,7 +6726,6 @@ public struct Terminal: Equatable, Sendable {
         // inline-viewport TUIs that pin a footer with `CSI 1;N r` and print below it.
         let advanced: Bool
         if cursor.row == region.upperBound - 1 {
-            recordDamage(rows: region)
             moveAndFillRows(
                 in: region,
                 by: -1,
@@ -6844,6 +6877,83 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Records the damage one row scroll implies, at the site that knows the
+    /// exact permutation (research/33 T9, direction D7): a `(region, delta)`
+    /// shift plus O(1) rows -- the vacated strip, and the two rows the baked
+    /// cursor touches -- instead of the whole moved range.
+    ///
+    /// The fallbacks are the contract's worst cases, never worse than the
+    /// pre-shift representation. A non-following viewport escalates to `.full`
+    /// as before. A move that vacates its whole range is plain range damage. An
+    /// active overlay refuses translation: retained planner rows bake
+    /// selection, search and hover into their runs, and only a whole-viewport
+    /// scrollback push moves those anchors together with the content -- for it
+    /// the shift stands; a non-pushing scroll falls back to range rows (the
+    /// highlight must stay while content moves), and a partial-region push
+    /// escalates to `.full` (stream anchors move against rows the shift does
+    /// not translate).
+    private mutating func recordScrollDamage(
+        range: Range<Int>,
+        delta signedAmount: Int,
+        pushesToScrollback: Bool
+    ) {
+        notePrimaryHistoryDamage()
+        guard viewportState == .following else {
+            recordPresentationFullDamage()
+            return
+        }
+        // The flood fast path: once pending damage already covers the whole
+        // viewport, a further shift carries no information any consumer can
+        // act on, and `.full` is the same value spelled in one bit -- which
+        // restores the pre-shift zero-cost tail for the rest of a 16 KiB
+        // delivery (the un-bumped advance makes the snapshot diff escalate and
+        // early-return per action, exactly as it did before `T9`). The paced
+        // regime never accumulates whole-viewport rows, so it never gets here.
+        if damage.coversViewport(rowCount: rowCount) {
+            recordPresentationFullDamage()
+            return
+        }
+        let amount = abs(signedAmount)
+        if amount >= range.count {
+            recordPresentationDamage(rows: range)
+            return
+        }
+        let overlayActive = selection != nil
+            || search?.range != nil
+            || hoveredLinkState != nil
+            || armedLinkState != nil
+        let wholeViewport = range == 0..<rowCount
+        if overlayActive, pushesToScrollback == false {
+            recordPresentationDamage(rows: range)
+            return
+        }
+        if overlayActive, pushesToScrollback, wholeViewport == false {
+            recordPresentationFullDamage()
+            return
+        }
+        if damage.recordShift(region: range, delta: signedAmount) {
+            pendingConsumerWork.noteDamageChanged()
+        }
+        if pushesToScrollback {
+            scrollShiftAccountedAdvance.value &+= UInt64(amount)
+        }
+        let vacated = signedAmount < 0
+            ? (range.upperBound - amount)..<range.upperBound
+            : range.lowerBound..<(range.lowerBound + amount)
+        recordPresentationDamage(rows: vacated)
+        // The retained planner bakes the block cursor into its row's runs, so
+        // the previous frame's cursor image rides the translation to
+        // `cursor.row + delta` and the cursor's own row needs a fresh bake.
+        // These two rows are D7's "at most two cursor rows above the ideal".
+        if range.contains(cursor.row) {
+            recordPresentationDamage(row: cursor.row)
+            let translated = cursor.row + signedAmount
+            if range.contains(translated) {
+                recordPresentationDamage(row: translated)
+            }
+        }
+    }
+
     private mutating func moveAndFillRows(
         in range: Range<Int>,
         by delta: Int,
@@ -6852,10 +6962,15 @@ public struct Terminal: Equatable, Sendable {
         invalidatesInspection: Bool = true
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
-        if invalidatesInspection {
-            invalidateInspection(inViewportRows: range)
-        }
         let amount = min(abs(delta), range.count)
+        recordScrollDamage(
+            range: range,
+            delta: delta < 0 ? -amount : amount,
+            pushesToScrollback: pushesToScrollback
+        )
+        if invalidatesInspection {
+            invalidateInspectionState(inViewportRows: range)
+        }
         let styleId = backgroundEraseStyleId()
 
         if delta < 0, pushesToScrollback {

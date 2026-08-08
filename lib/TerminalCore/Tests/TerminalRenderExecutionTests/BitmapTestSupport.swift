@@ -163,7 +163,11 @@ func renderIncrementalBitmap(
     let context = try #require(surface.context)
     drawRenderFrame(previous, metrics: metrics, in: context)
     context.saveGState()
-    for row in damage.rows where current.rows > row {
+    // The incremental consumer here models the view before research/33 T9's view
+    // half: it cannot translate its backing store, so a carried shift folds into
+    // region-wide row damage before clipping.
+    damage.expandingShift().forEachRow { row in
+        guard current.rows > row else { return }
         context.addRect(CGRect(
             x: 0,
             y: CGFloat(row) * metrics.cellSize.height,

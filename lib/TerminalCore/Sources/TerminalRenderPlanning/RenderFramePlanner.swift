@@ -14,28 +14,88 @@ public func planFrame(
 }
 
 /// Narrows a complete retained frame to the visible rows a damage pass must draw.
+///
+/// A carried shift is folded into region-wide row damage first: this is the
+/// drawing seam, and the drawer does not translate its backing store yet, so
+/// every row the translation touched must be repainted here. (The view half of
+/// research/33 T9 is what retires that fold.)
 public func clipFramePlan(
     _ plan: RenderFramePlan,
     to damage: TerminalDamage
 ) -> RenderFramePlan {
     guard damage.isFull == false else { return plan }
-    // `damage.rows` is queried as-is: every row a run or the cursor can carry is inside
-    // `0..<plan.rows` by construction (`FramePlanner.plan` is the only producer), so
-    // pre-filtering the set could only drop rows nothing below asks about.
-    let rows = damage.rows
-    if rows.count == plan.rows, rows.allSatisfy({ 0..<plan.rows ~= $0 }) {
+    let rows = damage.expandingShift()
+    // One span anchored at row 0 covering the plan's height is exactly the
+    // whole viewport, so nothing below could be filtered out.
+    if rows.damagedRowCount == plan.rows,
+       rows.contains(row: 0),
+       rows.maximalContiguousSpanCount == 1
+    {
         return plan
     }
     return RenderFramePlan(
         columns: plan.columns,
         rows: plan.rows,
         defaultBackground: plan.defaultBackground,
-        backgroundRuns: plan.backgroundRuns.filter { rows.contains($0.row) },
-        overlayRuns: plan.overlayRuns.filter { rows.contains($0.row) },
-        textRuns: plan.textRuns.filter { rows.contains($0.row) },
-        decorationRuns: plan.decorationRuns.filter { rows.contains($0.row) },
-        cursor: plan.cursor.flatMap { rows.contains($0.row) ? $0 : nil }
+        backgroundRuns: plan.backgroundRuns.filter { rows.contains(row: $0.row) },
+        overlayRuns: plan.overlayRuns.filter { rows.contains(row: $0.row) },
+        textRuns: plan.textRuns.filter { rows.contains(row: $0.row) },
+        decorationRuns: plan.decorationRuns.filter { rows.contains(row: $0.row) },
+        cursor: plan.cursor.flatMap { rows.contains(row: $0.row) ? $0 : nil }
     )
+}
+
+// Row rewrites for translated reuse: a run copied across a shift is identical
+// except for the row it names, and each run's payload arrays ride along by
+// reference. Fileprivate because only `FramePlanner.plan`'s reuse loop may
+// relocate a run -- everywhere else a run's row is an invariant.
+extension RenderBackgroundRun {
+    fileprivate func translated(to row: Int) -> RenderBackgroundRun {
+        RenderBackgroundRun(
+            row: row,
+            startColumn: startColumn,
+            columnCount: columnCount,
+            color: color
+        )
+    }
+}
+
+extension RenderOverlayRun {
+    fileprivate func translated(to row: Int) -> RenderOverlayRun {
+        RenderOverlayRun(
+            row: row,
+            startColumn: startColumn,
+            columnCount: columnCount,
+            state: state,
+            color: color
+        )
+    }
+}
+
+extension RenderTextRun {
+    fileprivate func translated(to row: Int) -> RenderTextRun {
+        RenderTextRun(
+            row: row,
+            startColumn: startColumn,
+            cells: cells,
+            foreground: foreground,
+            bold: bold,
+            italic: italic
+        )
+    }
+}
+
+extension RenderDecorationRun {
+    fileprivate func translated(to row: Int) -> RenderDecorationRun {
+        RenderDecorationRun(
+            row: row,
+            startColumn: startColumn,
+            columnCount: columnCount,
+            kinds: kinds,
+            color: color,
+            strikethroughColor: strikethroughColor
+        )
+    }
 }
 
 /// Retains the four cell-derived layers split per viewport row so a later frame
@@ -303,6 +363,23 @@ struct FramePlanner {
         text.reserveCapacity(rowCount)
         decorations.reserveCapacity(rowCount)
 
+        // The retained row viewport row `row` may copy instead of re-inspecting,
+        // or nil to replan it. Identity for undamaged rows the shift does not
+        // cover; `row - delta` inside a shifted region, which is what keeps row
+        // reuse alive across a scroll (research/33 T9): the recorded shift is
+        // exactly the permutation the grid applied, so the translated copy is
+        // the row a fresh inspection would produce, and every row that claim
+        // does not hold for (the vacated strip, wrap seams, the cursor rows) is
+        // in the damage set and replans.
+        let shift = damage.shift
+        func reuseSource(_ row: Int) -> Int? {
+            guard reusable != nil else { return nil }
+            if damage.contains(row: row) { return nil }
+            guard let shift, shift.region.contains(row) else { return row }
+            let source = row - shift.delta
+            return shift.region.contains(source) ? source : nil
+        }
+
         // One traversal for every replanned row rather than one per row: retained history is
         // addressed once and carried forward, which is the contract `31/I7` states and the
         // mechanism `research/31/D3` Decision 1 rule 2 requires of a frame.
@@ -310,7 +387,7 @@ struct FramePlanner {
         let searchMatchRange = terminal.activeSearchMatchRange
         var cells = inspectedCells(
             rowCount: rowCount,
-            replanning: { reusable == nil || damage.rows.contains($0) },
+            replanning: { reuseSource($0) == nil },
             geometry: geometry,
             selectionRange: selectionRange
         )
@@ -320,11 +397,18 @@ struct FramePlanner {
         overlays?.reserveCapacity(rowCount)
         var cursorStyle: ResolvedCursorStyle?
         for row in 0..<rowCount {
-            if let reusable, damage.rows.contains(row) == false {
-                background.append(reusable.background[row])
-                overlays?.append(reusable.overlays?[row] ?? [])
-                text.append(reusable.text[row])
-                decorations.append(reusable.decorations[row])
+            if let reusable, let source = reuseSource(row) {
+                if source == row {
+                    background.append(reusable.background[row])
+                    overlays?.append(reusable.overlays?[row] ?? [])
+                    text.append(reusable.text[row])
+                    decorations.append(reusable.decorations[row])
+                } else {
+                    background.append(reusable.background[source].map { $0.translated(to: row) })
+                    overlays?.append((reusable.overlays?[source] ?? []).map { $0.translated(to: row) })
+                    text.append(reusable.text[source].map { $0.translated(to: row) })
+                    decorations.append(reusable.decorations[source].map { $0.translated(to: row) })
+                }
                 continue
             }
             // Colorize before the cursor rewrite, so every fill resolves against the cell's own

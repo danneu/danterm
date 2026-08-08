@@ -127,7 +127,7 @@ struct RenderCorpusPlanningTests {
             // mergeable, out-of-order, or out-of-bounds runs.
             let damageDescription = damage.isFull
                 ? "full"
-                : String(describing: damage.rows.sorted())
+                : "rows \(damage.rowIndices), shift \(String(describing: damage.shift))"
             let context = "Fixture: \(fixtureName), event: \(eventIndex), "
                 + "damage: \(damageDescription)"
             assertCanonical(completePlan, "\(context)")
@@ -196,7 +196,11 @@ struct RenderCorpusPlanningTests {
         else {
             return clipped
         }
-        let rows = damage.rows
+        // This consumer overlays clipped rows without translating what it
+        // retained -- the view before research/33 T9's view half -- so the
+        // shift folds into region-wide row damage, exactly as `clipFramePlan`
+        // folds it for the drawer.
+        let rows = Set(damage.expandingShift().rowIndices)
         // Each run array is a hoisted local with fully spelled-out closure signatures.
         // Written as five inline `flatMap { row in cond ? a.filter { $0.row == row } : ... }`
         // arguments, this one function cost ~1s of typecheck time: the solver had to infer

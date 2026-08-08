@@ -1,6 +1,7 @@
 // Behavioral proofs for coalescing sparse terminal row damage into exact clip spans.
 import Testing
 
+import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct TerminalDamageSpanTests {
@@ -13,13 +14,13 @@ struct TerminalDamageSpanTests {
         ]
     )
     func maximalContiguousSpanCount(example: (rows: Set<Int>, expected: Int)) {
-        #expect(terminalDamageMaximalContiguousSpanCount(example.rows) == example.expected)
+        #expect(TerminalDamage(rows: example.rows).maximalContiguousSpanCount == example.expected)
     }
 
     @Test("Damage rows coalesce into ordered maximal contiguous spans")
     func maximalContiguousSpans() {
         #expect(
-            terminalDamageMaximalContiguousSpans([9, 1, 2, 6])
+            TerminalDamage(rows: [9, 1, 2, 6]).maximalContiguousSpans()
                 == [1..<3, 6..<7, 9..<10]
         )
     }
@@ -31,29 +32,27 @@ struct TerminalDamageSpanTests {
         //   than one row leaves artifacts, while one that escapes the viewport would
         //   invalidate rows the plan cannot describe.
         // Scenario: a TUI rewrites its top, middle, and bottom status rows.
-        #expect(terminalDamageRowsWithGlyphHalo([0], rowCount: 4) == [0, 1])
-        #expect(terminalDamageRowsWithGlyphHalo([2], rowCount: 4) == [1, 2, 3])
-        #expect(terminalDamageRowsWithGlyphHalo([3], rowCount: 4) == [2, 3])
-        #expect(terminalDamageRowsWithGlyphHalo([], rowCount: 4).isEmpty)
+        #expect(TerminalDamage(rows: [0], rowCount: 4).withGlyphHalo(rowCount: 4).rowIndices == [0, 1])
+        #expect(TerminalDamage(rows: [2], rowCount: 4).withGlyphHalo(rowCount: 4).rowIndices == [1, 2, 3])
+        #expect(TerminalDamage(rows: [3], rowCount: 4).withGlyphHalo(rowCount: 4).rowIndices == [2, 3])
+        #expect(TerminalDamage(rows: [], rowCount: 4).withGlyphHalo(rowCount: 4).rowIndices.isEmpty)
     }
 
-    @Test("The halo clamps out-of-grid rows and an empty grid rather than expanding them")
+    @Test("The halo truncates to the target grid rather than expanding past it")
     func glyphHaloClampsRowsOutsideTheGrid() {
-        // Intent: rows outside `0..<rowCount`, and any row at all when the grid has no
-        //   rows, contribute nothing to the expanded set.
-        // Why it exists: this is the documented contract of a `public` helper that takes a
-        //   raw `Set<Int>` rather than a `TerminalDamage`, so nothing upstream of an
-        //   arbitrary caller enforces in-range rows. Both guards were previously unpinned,
-        //   which is what lets a "simplification" delete them silently -- and an out-of-grid
-        //   row reaching the drawing clip invalidates a row no plan can describe.
-        #expect(terminalDamageRowsWithGlyphHalo([-1, 4, 9], rowCount: 4).isEmpty)
-        #expect(terminalDamageRowsWithGlyphHalo([0], rowCount: 0).isEmpty)
-        #expect(terminalDamageRowsWithGlyphHalo([-1, 2, 7], rowCount: 4) == [1, 2, 3])
+        // Intent: a halo computed against a shorter grid than the damage was recorded
+        //   for contributes nothing outside `0..<rowCount`.
+        // Why it exists: an out-of-grid row reaching the drawing clip invalidates a row
+        //   no plan can describe. The bounded representation already refuses out-of-grid
+        //   rows at construction; this pins the remaining seam, the halo's own bound.
+        #expect(TerminalDamage(rows: [7], rowCount: 10).withGlyphHalo(rowCount: 4).rowIndices.isEmpty)
+        #expect(TerminalDamage(rows: [2, 7], rowCount: 10).withGlyphHalo(rowCount: 4).rowIndices == [1, 2, 3])
+        #expect(TerminalDamage(rows: [], rowCount: 1).withGlyphHalo(rowCount: 0).rowIndices.isEmpty)
     }
 
     @Test("Empty damage coalesces into no spans at all")
     func emptyDamageHasNoSpans() {
-        #expect(terminalDamageMaximalContiguousSpans([]).isEmpty)
+        #expect(TerminalDamage.none.maximalContiguousSpans().isEmpty)
     }
 
     @Test("Two distant interior rows derive the six-row, two-span drawing topology")
@@ -63,10 +62,10 @@ struct TerminalDamageSpanTests {
         // Why it exists: this is the ideal-case topology the `sparse-spans-few`
         //   benchmark exists to protect, and its verdict is impossible unless the
         //   transform derives exactly this shape from the published engine damage.
-        let drawn = terminalDamageRowsWithGlyphHalo([5, 60], rowCount: 66)
-        #expect(drawn.count == 6)
-        #expect(terminalDamageMaximalContiguousSpanCount(drawn) == 2)
-        #expect(terminalDamageMaximalContiguousSpans(drawn) == [4..<7, 59..<62])
+        let drawn = TerminalDamage(rows: [5, 60], rowCount: 66).withGlyphHalo(rowCount: 66)
+        #expect(drawn.damagedRowCount == 6)
+        #expect(drawn.maximalContiguousSpanCount == 2)
+        #expect(drawn.maximalContiguousSpans() == [4..<7, 59..<62])
     }
 
     @Test("Stride-four engine damage derives the 50-row, 17-span drawing topology")
@@ -78,8 +77,8 @@ struct TerminalDamageSpanTests {
         //   bound, and the count is what the plan's `ceil(rows / 4)` risk note rests on.
         let sourceRows = Set(stride(from: 0, to: 66, by: 4))
         #expect(sourceRows.count == 17)
-        let drawn = terminalDamageRowsWithGlyphHalo(sourceRows, rowCount: 66)
-        #expect(drawn.count == 50)
-        #expect(terminalDamageMaximalContiguousSpanCount(drawn) == 17)
+        let drawn = TerminalDamage(rows: sourceRows, rowCount: 66).withGlyphHalo(rowCount: 66)
+        #expect(drawn.damagedRowCount == 50)
+        #expect(drawn.maximalContiguousSpanCount == 17)
     }
 }

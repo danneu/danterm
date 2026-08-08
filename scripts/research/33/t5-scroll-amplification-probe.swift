@@ -45,9 +45,11 @@ struct ScenarioReport: Encodable {
     let suppressedPublishes: Int
     let fullDamageFrames: Int
     let rowDamagedFrames: Int
+    let shiftFrames: Int
     let scrollingDeliveries: Int
 
     let damagedRows: Int
+    let foldedDamagedRows: Int
     let idealDamagedRows: Int
     let maximumIdealDamagedRows: Int
 
@@ -83,7 +85,10 @@ func snapshot(_ terminal: Terminal) -> [[CellSnapshot]] {
 ///
 /// This is the damage a shift-carrying representation would publish: the viewport moved by
 /// `afterTop - beforeTop`, so a row matching its source row across that shift changed
-/// nothing a translation cannot express.
+/// nothing a translation cannot express. The tops must be `absoluteViewportTopRow`, not
+/// `scrollProjection.topRow`: at the history budget the append and the eviction cancel in
+/// the retained-relative value while the content still translates (research/33 F19), and a
+/// retained-relative delta would misread the whole at-budget arm as 66 changed rows.
 func idealDamagedRows(
     before: [[CellSnapshot]],
     beforeTop: Int,
@@ -148,12 +153,26 @@ func prefill(_ terminal: inout Terminal) {
 }
 
 func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioReport {
-    guard var terminal = Terminal(columns: columns, rows: viewportRows) else {
+    // The `-at-budget` arm saturates a small scrollback budget first, so every
+    // measured scroll runs in the frozen-topRow eviction regime a long-running
+    // pane occupies (research/33 F19's second rider).
+    let atBudget = scenario.hasSuffix("-at-budget")
+    let stimulus = atBudget ? String(scenario.dropLast("-at-budget".count)) : scenario
+    let made = atBudget
+        ? Terminal(columns: columns, rows: viewportRows, scrollbackBudgetBytes: 64 * 1024)
+        : Terminal(columns: columns, rows: viewportRows)
+    guard var terminal = made else {
         fatalError("fixed benchmark geometry must be valid")
     }
     var planner = PaneFramePlanner()
     let theme = RenderTheme.dark
     prefill(&terminal)
+    if atBudget {
+        for index in 0..<600 {
+            terminal.feed(eventBytes(scenario: "text-line", index: index))
+        }
+        _ = terminal.drainDamage()
+    }
 
     // The prefill is not the measurement: plan one frame from it so the planner holds a
     // retained generation, exactly as it does mid-stream, and reset the counters after.
@@ -179,8 +198,10 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
     var suppressedPublishes = 0
     var fullDamageFrames = 0
     var rowDamagedFrames = 0
+    var shiftFrames = 0
     var scrollingDeliveries = 0
     var damagedRows = 0
+    var foldedDamagedRows = 0
     var idealRowTotal = 0
     var maximumIdealRows = 0
     var submittedGlyphs = 0
@@ -191,15 +212,15 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
     while index < events {
         let batch = min(linesPerDelivery, events - index)
         var chunk: [UInt8] = []
-        for offset in 0..<batch { chunk += eventBytes(scenario: scenario, index: index + offset) }
+        for offset in 0..<batch { chunk += eventBytes(scenario: stimulus, index: index + offset) }
         index += batch
 
         let before = snapshot(terminal)
-        let beforeTop = terminal.scrollProjection.topRow
+        let beforeTop = terminal.absoluteViewportTopRow
         bytes += chunk.count
         deliveries += 1
         terminal.feed(chunk)
-        let afterTop = terminal.scrollProjection.topRow
+        let afterTop = terminal.absoluteViewportTopRow
         if afterTop != beforeTop { scrollingDeliveries += 1 }
         pendingIdealRows.formUnion(idealDamagedRows(
             before: before,
@@ -209,7 +230,9 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         ))
 
         // `TerminalPaneSession.consume` and `planIfNeeded`, gate for gate.
-        pendingDamage.formUnion(terminal.drainDamage())
+        let drained = terminal.drainDamage()
+        if drained.isFull == false { t5Counters.drainRowInserts += drained.damagedRowCount }
+        pendingDamage.formUnion(drained)
         guard pendingDamage != .none else { continue }
         guard terminal != lastPlannedTerminal else { suppressedPublishes += 1; continue }
         let presentation = terminal.presentation
@@ -236,9 +259,12 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         if frameDamage.isFull {
             fullDamageFrames += 1
             damagedRows += viewportRows
+            foldedDamagedRows += viewportRows
         } else {
             rowDamagedFrames += 1
-            damagedRows += frameDamage.rows.count
+            if frameDamage.shift != nil { shiftFrames += 1 }
+            damagedRows += frameDamage.damagedRowCount
+            foldedDamagedRows += frameDamage.expandingShift().damagedRowCount
         }
         idealRowTotal += frameIdealRows.count
         maximumIdealRows = max(maximumIdealRows, frameIdealRows.count)
@@ -246,12 +272,14 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         planGlyphs += glyphOccurrences(plan)
 
         // `SwiftTerminalSessionView.publish`, then its draw at one draw per publish.
+        // The view is not translation-aware yet, so it folds the shift to region
+        // rows before the halo -- the same fold `publish` performs.
         if frameDamage.isFull {
             pendingDisplayDamage = .full
         } else {
-            pendingDisplayDamage.formUnion(TerminalDamage(
-                rows: terminalDamageRowsWithGlyphHalo(frameDamage.rows, rowCount: plan.rows)
-            ))
+            pendingDisplayDamage.formUnion(
+                frameDamage.expandingShift().withGlyphHalo(rowCount: plan.rows)
+            )
         }
         let drawingDamage = pendingDisplayDamage
         pendingDisplayDamage = .none
@@ -270,8 +298,10 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         suppressedPublishes: suppressedPublishes,
         fullDamageFrames: fullDamageFrames,
         rowDamagedFrames: rowDamagedFrames,
+        shiftFrames: shiftFrames,
         scrollingDeliveries: scrollingDeliveries,
         damagedRows: damagedRows,
+        foldedDamagedRows: foldedDamagedRows,
         idealDamagedRows: idealRowTotal,
         maximumIdealDamagedRows: maximumIdealRows,
         submittedGlyphOccurrences: submittedGlyphs,

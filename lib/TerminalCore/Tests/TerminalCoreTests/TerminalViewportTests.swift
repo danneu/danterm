@@ -65,6 +65,11 @@ struct TerminalViewportTests {
         #expect(browsing.pendingReplyBytes == following.pendingReplyBytes)
 
         browsing.scrollToBottom()
+        // Pending damage is path-dependent since research/33 T9: the following
+        // copy accumulated its scrolls as a shift while the browsing copy
+        // escalated to `.full`, so the lens proof compares drained values.
+        _ = browsing.drainDamage()
+        _ = following.drainDamage()
         #expect(browsing == following)
     }
 

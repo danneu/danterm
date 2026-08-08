@@ -39,6 +39,55 @@ struct ExecutorContractTests {
         #expect(incremental.bytes == full.bytes)
     }
 
+    @Test("Shift-damage redraw of a scrolled screen is pixel-identical to a fresh full frame")
+    func shiftDamageRedrawMatchesFullFrame() throws {
+        // Intent: research/33 T9's bitmap-equivalence gate at the drawing seam --
+        //   an incrementally redrawn scrolled screen matches a full redraw bit
+        //   for bit, for a whole-viewport scroll and a DECSTBM sub-region one.
+        // Why it exists: the drained value now carries `(region, delta)` instead
+        //   of whole-region rows, and the drawer (pre view-half) must recover the
+        //   full repaint by folding the shift; a fold that under-covers shows up
+        //   here as stale pixels, not as a test-only inequality.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: true,
+            cursorShape: .block
+        )
+        let scripts: [(name: String, prefix: [UInt8], scroll: [UInt8])] = [
+            (
+                name: "whole-viewport",
+                prefix: Array("one\r\ntwo\r\nthree".utf8),
+                scroll: Array("\r\nfour".utf8)
+            ),
+            (
+                name: "sub-region",
+                prefix: Array("one\r\ntwo\r\nthree\u{1B}[1;2r\u{1B}[2;1H".utf8),
+                scroll: Array("\r\nmid".utf8)
+            ),
+        ]
+        for script in scripts {
+            var terminal = try #require(Terminal(columns: 5, rows: 3))
+            terminal.feed(script.prefix)
+            let previous = planFrame(for: terminal, presentation: presentation)
+
+            _ = terminal.drainDamage()
+            terminal.feed(script.scroll)
+            let damage = terminal.drainDamage()
+            #expect(damage.shift != nil, "\(script.name) did not scroll")
+            let current = planFrame(for: terminal, presentation: presentation)
+
+            let incremental = try renderIncrementalBitmap(
+                previous: previous,
+                current: current,
+                damage: damage,
+                metrics: metrics
+            )
+            let full = try renderBitmap(plan: current, metrics: metrics)
+            #expect(incremental.bytes == full.bytes, "\(script.name)")
+        }
+    }
+
     @Test("Dirty-rect row clipping is pixel-identical to a fresh full frame")
     func dirtyRectRedrawMatchesFullFrame() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))

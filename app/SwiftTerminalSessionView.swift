@@ -268,7 +268,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         clampedTo dirtyRect: NSRect
     ) -> [NSRect] {
         var rects: [NSRect] = []
-        for span in terminalDamageMaximalContiguousSpans(damage.rows) {
+        for span in damage.maximalContiguousSpans() {
             let spanRect = NSRect(
                 x: 0,
                 y: CGFloat(span.lowerBound) * metrics.cellSize.height,
@@ -301,7 +301,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
         let damage: TerminalDamage = rows == 0..<rowCount
             ? .full
-            : TerminalDamage(rows: Set(rows))
+            : TerminalDamage(rows: rows, rowCount: rowCount)
         return (damage, true)
     }
 
@@ -986,7 +986,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         deliveryShapeSampler?.recordPublish(
             absoluteViewportTopRow: controller.absoluteViewportTopRow,
             isFullDamage: frame.damage.isFull,
-            damagedRowCount: frame.damage.rows.count,
+            damagedRowCount: frame.damage.damagedRowCount,
             deliveryCount: controller.fenceMetrics.delivery.count,
             gridRows: frame.plan.rows
         )
@@ -994,17 +994,20 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         if frame.damage.isFull {
             invalidateFullDisplay()
         } else {
-            let rows = terminalDamageRowsWithGlyphHalo(
-                frame.damage.rows,
-                rowCount: frame.plan.rows
-            )
-            pendingDisplayDamage.formUnion(TerminalDamage(rows: rows))
-            for row in rows {
+            // The view half of research/33 T9 is not built: this backing store
+            // cannot translate, so a carried shift folds into region-wide row
+            // damage here and every translated row repaints. The planner above
+            // has already banked its half; retiring this fold is the follow-up.
+            let display = frame.damage
+                .expandingShift()
+                .withGlyphHalo(rowCount: frame.plan.rows)
+            pendingDisplayDamage.formUnion(display)
+            for span in display.maximalContiguousSpans() {
                 setNeedsDisplay(NSRect(
                     x: 0,
-                    y: CGFloat(row) * metrics.cellSize.height,
+                    y: CGFloat(span.lowerBound) * metrics.cellSize.height,
                     width: CGFloat(frame.plan.columns) * metrics.cellSize.width,
-                    height: metrics.cellSize.height
+                    height: CGFloat(span.count) * metrics.cellSize.height
                 ))
             }
         }
