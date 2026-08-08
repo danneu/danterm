@@ -266,3 +266,170 @@ rediscovering them.
   scrollback depth and screen text between the arms on all five corpora; a
   chunk-invariant footprint to 0.00 MB; and zero `[TerminalStreamAction]`
   occurrences under `lib/*/Sources`.
+
+### D7 -- shift damage is recorded at the scroll site, carried in the damage value, and realized in two independently gated halves
+
+- Status: **direction set.** This is `T9`'s Phase 2 direction-gate entry;
+  implementation may start against it. The claim is a **countable one under
+  `D1`**, stated per regime: in the paced regime, damaged rows per scrolled line
+  fall from the whole viewport (66 at the canonical geometry, 40 at `F19`'s) to
+  O(1), and submitted glyph occurrences approach the changed cells plus the
+  halo. **No wall-clock percentage is claimed**, because the ladder corpora at
+  their live 16 KiB framing sit at the flood end of `F13`'s curve (1.0x
+  amplification at 91 lines per delivery), so no benchmark workload can contain
+  the mechanism -- the paired benchmark is the non-regression check only.
+- Evidence used: `F5` (code path: `moveAndFillRows` damages the whole shifted
+  range via `invalidateInspection(inViewportRows:)`); `F11` (below the history
+  budget, 100% of streaming escalation is `recordDamage(from:to:)`'s `topRow`
+  guard, and zero rows reach the damage set); `F13` (the sizing: 66 rows damaged
+  to express 1, 11,570 glyph occurrences to express 178 changed cells, planner
+  re-inspecting all 66 rows and 11,814 cells because `reusable` is `nil` under
+  `.full`; the control shows the row-scoped path intact at 1 row / 356 glyphs;
+  the ideal is measured by viewport diff, not assumed); `F19` (production
+  placement: paced producers publish exactly one line per frame at every rate
+  tried up to 960 lines/s, so the 66x end is the sustained steady state of build
+  logs, test output and loggers, and it is `T9`'s alone because those publishes
+  sit under the display rate where `T10` recovers nothing; plus the two riders
+  folded in below); `17/F6` (the off-main-thread per-glyph bounds cost scales
+  with glyph occurrences submitted, so the 65x is a draw-vertical multiplier,
+  not just a planning one); `D2` and `30/D2` (the `T20` rider condition).
+- Prior decision, quoted and answered: the damage-aware frame planning plan
+  (`plans/impl/2026-07-27-1105-damage-aware-frame-planning.md`) listed
+  "teaching `TerminalDamage` a scroll delta" as an explicit non-goal, *"not
+  justified until a profile shows scroll planning still dominant afterwards"*,
+  and grounded row-reuse soundness in `TerminalDamage` escalating to `.full`
+  *"for every event where viewport row identity is unstable."* The evidence bar
+  it set is now met, in this doc's preferred counter form rather than a profile:
+  `F13` shows the planner's whole-grid re-inspection surviving that plan intact
+  (its reuse is disabled by exactly the escalation that makes it sound), and
+  `F19` shows production paying it once per line, continuously, in the regime
+  no other task reaches. The soundness argument is answered structurally, not
+  waived: a shift makes row-identity instability *exact* instead of
+  unrepresentable, and every identity change the shift does not fully describe
+  keeps escalating to `.full`, so the worst case remains current behavior.
+- Candidate solutions considered:
+  - **Record the shift at the scroll site and carry it in the damage value.**
+    Selected. `moveAndFillRows` records `(region: Range<Int>, delta: Int)`
+    alongside ordinary row damage for the rows the shift does not describe: the
+    vacated strip it blank-fills, and the wrap-seam rows `severWrapClaim`
+    rewrites. The ledger's sketch named a third field, `newlyFilledRows`; it is
+    not needed -- filled rows are content changes and enter the existing row
+    set, so the representation is `rows` plus one optional shift. The drained
+    value means: translate the previously presented frame by `delta` within
+    `region`, then the rows are damaged in post-shift coordinates.
+  - **Derive the shift at the consumer from `topRow` deltas**, leaving the
+    representation alone. Rejected by measurement -- this is `F19`'s first
+    rider. At the history budget the append and the arena eviction cancel in
+    `scrollProjection.topRow` (191 of 200 scrolled lines leave it unmoved in
+    `t9-damage-at-budget-probe.sh`), so a `topRow`-derived shift reads zero
+    exactly where a long-running pane spends its steady state; a `DECSTBM`
+    region scroll never moves `topRow` at all.
+  - **Detect the translation by diffing the new grid against the planner's
+    retained rows.** Rejected: it re-derives at the consumer a fact the
+    producer held exactly and threw away, which is the granularity mismatch
+    this survey exists to delete; it costs a whole-grid scan on precisely the
+    hot frames; and it is ambiguous on self-similar screens (a viewport of
+    repeated lines matches at many deltas), so it is a heuristic where the
+    scroll site is exact.
+  - **Planner-only shift**: translate the retained rows so reuse survives a
+    scroll, but leave the view's full redraw. Rejected as the end state -- it
+    recovers the planning half (66 rows inspected to O(1)) and none of the
+    submission half, and `17/F6` prices the submission half per glyph
+    occurrence. Retained as the explicit fallback for the view half: it is the
+    first landable slice, and it stands on its own if the backing-store
+    translation fails verification.
+  - **Leave the regime to `T10`.** Rejected by `F19`'s partition: paced
+    producers publish under the display rate, so every whole-screen plan is
+    also drawn and rate bounding recovers none of it. The paced regime is
+    `T9`'s alone, and it is the common producer shape.
+- Composition semantics, stated here because they are the contract, not an
+  implementation detail. Recording a shift into an accumulator holding row
+  damage translates the pending rows within `region` by `delta` (on the word
+  representation this is a bit shift) and drops rows the shift pushes out of
+  the region. A second shift with the same region composes by summing deltas
+  and translating again; once `|delta|` reaches the region height nothing
+  survives and the shift collapses to region-wide row damage (still cheaper
+  than `.full`: rows outside the scroll region stay reusable). A shift with a
+  *different* region than one already pending escalates to `.full` -- correct
+  by the same argument as today, and rare enough that no cleverness is owed.
+  Anything already `.full` stays `.full`.
+- Tradeoffs and correctness risks, each named in the ledger and answered:
+  - **Row-reuse soundness.** Reuse becomes translation-aware: viewport row `r`
+    may reuse retained row `r - delta` when `r - delta` lies in the shifted
+    region and is not in the damage set. This is sound iff the recorded shift
+    is exactly the permutation the grid applied, which is not arguable in
+    prose; the bitmap-equivalence gate below asserts it per frame. A wrong
+    shift shows as a torn or stale screen, not a slow one, which is why the
+    gate is equivalence against a full redraw of the same state, not a spot
+    check.
+  - **Overlays.** Selection, search match, cursor and hover damage is computed
+    as row diffs in `recordDamage(from:to:)` against anchors that are not
+    row-content; under a shift the same anchors name different viewport rows,
+    a case `.full` currently hides. The hover branch already handles exactly
+    this for eviction reindexing (its `hoveredLinkRange` compare fires when
+    the projection moves under an unchanged link) and is the template: after a
+    shift, each overlay's before/after viewport rows are re-derived and
+    damaged as ordinary rows. The cursor is the overlay always present, and
+    `F13` already prices it -- at most two rows above the content ideal, which
+    lowers the worst-case 66x toward 22x and leaves the glyph figure
+    untouched.
+  - **The backing-store translation.** `SwiftTerminalSessionView` is
+    layer-backed and its sparse-damage clip already depends on the backing
+    store preserving undamaged rows (`setFrameSize` documents the
+    fresh-backing-store hazard). `scrollRect(_:by:)` is not trusted on a
+    layer-backed view until proven: the view half lands only behind a live
+    verification that translated content is bit-preserved, and it falls back
+    to a full redraw of the shifted region -- degrading to the planner-only
+    win, never below current behavior -- whenever the store's contents are not
+    known-good (first frame, dirty-rect fallback, occlusion, any of
+    `invalidateFullDisplay`'s callers).
+  - **The `topRow` guard.** With the shift recorded at the scroll site,
+    `recordDamage(from:to:)`'s `topRow` escalation must stop swallowing the
+    case the shift already describes, while continuing to escalate everything
+    it does not: not-following, alternate-screen flips, resize, scrolled-back
+    mutation. This is `F19`'s second rider made structural -- below budget the
+    guard fires on every scroll and at budget it never fires, and after `T9`
+    both regimes must drain the *same* shift-carrying value. The at-budget
+    verification arm exists to pin that.
+  - **`T20` rides along.** Changing `TerminalDamage`'s representation is
+    exactly the reopening condition `30/D2` wrote ("the damage representation
+    is being changed for another reason") and `D2` recommended this seat. The
+    shift-translation of pending damage is a word shift, so the ordered form
+    falls out for free: the public seam carries the accumulator's words plus
+    the optional shift, and `init(rows:)`'s sanitizer, its pinning test, the
+    `sorted()` and the redundant per-frame `Set` constructions delete, per
+    `T20`'s own entry. `T20`'s structural counters (`T3`'s script reaching
+    zero allocations and zero hash operations on the damage path) ride the
+    same commits.
+- Decision and rationale: **`moveAndFillRows` records the shift; the damage
+  value carries it; consumers realize it in two independently landable halves,
+  each behind the bitmap gate.** First the engine and planner: the
+  representation change, the accumulator's composition rules, the guard
+  narrowing, and translation-aware reuse -- countable as inspected rows per
+  scrolling frame falling to O(1). Then the view: the backing-store
+  translation, redrawing only damaged rows plus the halo boundary -- countable
+  as submitted glyph occurrences falling to the ideal plus halo. The ordering
+  is chosen so the riskier half (the one whose failure mode is visual tearing)
+  lands second, smallest, and separately revertible, with the planner win
+  already banked.
+- Behavioral verification, all named before implementation:
+  - `scripts/research/33/t5-scroll-amplification.py` before and after:
+    `rows/frame` must equal `ideal rows/frame` (plus at most two cursor rows),
+    `glyphs/frame` must approach `ideal glyphs/frame` plus the halo, at all
+    three delivery sizes, with the `rewrite-bottom-row` control unmoved at 1.0
+    rows and 356 glyphs.
+  - An **at-budget arm** added to that matrix, seeded from
+    `t9-damage-at-budget-probe.sh`: the same O(1) readings where `topRow` is
+    frozen by eviction, so the shift is proven at the steady state a
+    long-running pane actually occupies.
+  - `scripts/research/33/t9-lines-per-delivery.sh` live, before and after:
+    paced scenarios must publish O(1) damaged rows per line with the flood
+    scenario unchanged.
+  - **Bitmap equivalence**: an incrementally scrolled screen byte-identical to
+    a full redraw of the same state, across below-budget, at-budget, `DECSTBM`
+    sub-region, alternate-screen and overlay-active scenarios.
+  - The existing reuse-equals-scratch equality in
+    `RenderCorpusPlanningTests`, extended to shifted frames.
+  - Paired benchmark on `scrollback-stream` as the non-regression check,
+    expected `equivalent`, and read as nothing more: its 16 KiB framing is the
+    1.0x end of the curve and cannot contain the win.

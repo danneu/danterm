@@ -476,8 +476,14 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   budget the append and the eviction cancel in `topRow` while the content
   still translates (`t9-damage-at-budget-probe.sh` is the ablation), and the
   verification matrix needs an at-budget arm, where a scroll's damage arrives
-  as a whole-viewport row set rather than `.full`. `T9` may proceed to its
-  `decisions.md` entry.
+  as a whole-viewport row set rather than `.full`.
+  **Direction set in `D7`:** the shift is recorded in `moveAndFillRows` and
+  carried in the damage value as `rows` plus one optional `(region, delta)` --
+  the filled rows are ordinary row damage, so the sketch's `newlyFilledRows`
+  field is not needed -- realized in two independently landable halves
+  (planner translation-aware reuse first, view backing-store translation
+  second, each behind a bitmap-equivalence gate), with `T20` riding along per
+  `D2`. The claim is countable, not timed.
 - [ ] `T10` VETTING -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.
@@ -737,8 +743,8 @@ future reopening needs a new rule against new evidence.
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
 run. Phase 2 has begun: `T8` and `T7` have both landed as one change (`F16`,
-`F17`, `D6`), and `T9` and `T10` remain -- both now fully vetted (`F19`) and
-awaiting their `decisions.md` entries.** `T1` sized the parser's
+`F17`, `D6`), and `T9` and `T10` remain -- both fully vetted (`F19`); `T9`'s
+direction is set in `D7` and `T10` still awaits its entry.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -926,3 +932,21 @@ from `topRow` deltas would read zero exactly where a long-running pane spends
 its steady state. The shift must be recorded at the scroll site, and `T9`'s
 verification gains an at-budget arm. Both tasks may proceed to their
 `decisions.md` entries.
+
+**`T9`'s direction is now set (`D7`), with both of `F19`'s riders folded in.**
+The shift is recorded in `moveAndFillRows` -- never derived from `topRow` --
+and carried in the damage value as `rows` plus one optional `(region, delta)`;
+the vacated rows are ordinary row damage, so the ledger's `newlyFilledRows`
+field is not needed. Composition is part of the contract: recording a shift
+translates pending row damage by a word shift, same-region shifts sum, a
+region mismatch escalates to `.full`, and every identity change the shift does
+not describe keeps escalating, so the worst case remains current behavior.
+Realization is two independently landable halves, planner translation-aware
+reuse first and the view's backing-store translation second, each behind a
+bitmap-equivalence gate, with the riskier visual half landing last and
+separately revertible. `T20` rides along, per `D2` and `30/D2`'s own reopening
+clause. The claim is countable under `D1`, not timed: `t5-scroll-amplification.py`
+(with a new at-budget arm) and `t9-lines-per-delivery.sh` are the before/after
+gates, and the paired benchmark is only the non-regression check, because the
+ladder corpora sit at the 1.0x end of `F13`'s curve. `T10`'s entry, written
+against the 13.0:1 ratio, is the natural follow-up.
