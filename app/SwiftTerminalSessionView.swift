@@ -38,7 +38,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
     /// Retains source row damage across publishes because AppKit reduces disjoint
     /// invalidations to one union rectangle before `draw(_:)` can inspect them.
+    /// Only the folded path reads it; while the mirror is valid it stays `.none`.
     private var pendingDisplayDamage = TerminalDamage.none
+    /// The owned frame store realizing shift damage as a translation
+    /// (research/33 T9's view half): AppKit's layer store cannot translate
+    /// (33/F22), so scrolled pixels move here and `draw(_:)` blits.
+    private var mirror: TerminalFrameBackingStore?
+    /// The single validity bit the 33/D7 addendum names: true only while
+    /// `mirror` holds exactly the last published frame's pixels. Every
+    /// uncertainty path -- geometry, theme, scale, benchmark redraws -- resolves
+    /// to false through `invalidateFullDisplay()`.
+    private var mirrorIsValid = false
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
@@ -191,6 +201,28 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         let background = frame?.plan.defaultBackground ?? RenderTheme.dark.defaultBackground
         context.setFillColor(Self.cgColor(background))
         if let frame {
+            if let mirror, mirrorIsValid,
+               mirror.metrics == frame.metrics,
+               mirror.columns == frame.plan.columns,
+               mirror.rows == frame.plan.rows
+            {
+                // The mirror is the whole current frame, so any dirty rect --
+                // damage spans, AppKit's union coarsening, even a fresh layer
+                // backing store -- is satisfied by one blit, and no glyph run
+                // is submitted at the drawing seam (research/33 T9 view half).
+                context.fill(dirtyRect)
+                mirror.blit(into: context, rect: dirtyRect)
+                #if DANTERM_TERMINAL_BENCHMARK
+                observeCompletedBenchmarkDraw(
+                    frame: frame,
+                    dirtyRect: dirtyRect,
+                    startedAtNanoseconds: drawStartedNanoseconds,
+                    damage: .none,
+                    usedDirtyRectFallback: false
+                )
+                #endif
+                return
+            }
             let drawingDamageResolution = drawingDamage(
                 fallback: dirtyRect,
                 metrics: frame.metrics,
@@ -231,32 +263,52 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             drawRenderFrame(plan, metrics: frame.metrics, in: context)
             context.restoreGState()
             #if DANTERM_TERMINAL_BENCHMARK
-            let drawDurationNanoseconds =
-                DispatchTime.now().uptimeNanoseconds - drawStartedNanoseconds
-            TerminalBenchmarkObserver.shared?.observeCompletedDraw(
-                frame.plan,
+            observeCompletedBenchmarkDraw(
+                frame: frame,
                 dirtyRect: dirtyRect,
-                metrics: frame.metrics,
-                drawDurationNanoseconds: drawDurationNanoseconds,
+                startedAtNanoseconds: drawStartedNanoseconds,
                 damage: drawingDamage,
                 usedDirtyRectFallback: drawingDamageResolution.usedDirtyRectFallback
             )
-            if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
-                let redrawRect = NSRect(
-                    x: 0,
-                    y: 0,
-                    width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
-                    height: CGFloat(frame.plan.rows) * frame.metrics.cellSize.height
-                )
-                DispatchQueue.main.async { [weak self] in
-                    self?.invalidateFullDisplay(redrawRect)
-                }
-            }
             #endif
         } else {
             context.fill(dirtyRect)
         }
     }
+
+    #if DANTERM_TERMINAL_BENCHMARK
+    /// The benchmark tail both draw paths share: report the completed draw and
+    /// honor the observer's request for a follow-up full redraw.
+    private func observeCompletedBenchmarkDraw(
+        frame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics),
+        dirtyRect: NSRect,
+        startedAtNanoseconds: UInt64,
+        damage: TerminalDamage,
+        usedDirtyRectFallback: Bool
+    ) {
+        let drawDurationNanoseconds =
+            DispatchTime.now().uptimeNanoseconds - startedAtNanoseconds
+        TerminalBenchmarkObserver.shared?.observeCompletedDraw(
+            frame.plan,
+            dirtyRect: dirtyRect,
+            metrics: frame.metrics,
+            drawDurationNanoseconds: drawDurationNanoseconds,
+            damage: damage,
+            usedDirtyRectFallback: usedDirtyRectFallback
+        )
+        if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
+            let redrawRect = NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
+                height: CGFloat(frame.plan.rows) * frame.metrics.cellSize.height
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.invalidateFullDisplay(redrawRect)
+            }
+        }
+    }
+    #endif
 
     /// The clip region for a partial draw: one rect per maximal damage span, each clamped to
     /// the rect being drawn. Empty results are dropped, so the rect count can fall below the
@@ -305,8 +357,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         return (damage, true)
     }
 
-    /// Prevents geometry, theme, and benchmark invalidations from inheriting stale partial damage.
+    /// Prevents geometry, theme, and benchmark invalidations from inheriting stale partial
+    /// damage. Also the sole stale transition for the mirror: anything that must repaint
+    /// everything is exactly anything the mirror can no longer vouch for.
     private func invalidateFullDisplay(_ rect: NSRect? = nil) {
+        mirrorIsValid = false
         pendingDisplayDamage = .full
         if let rect {
             setNeedsDisplay(rect)
@@ -994,14 +1049,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         if frame.damage.isFull {
             invalidateFullDisplay()
         } else {
-            // The view half of research/33 T9 is not built: this backing store
-            // cannot translate, so a carried shift folds into region-wide row
-            // damage here and every translated row repaints. The planner above
-            // has already banked its half; retiring this fold is the follow-up.
+            // The invalidated spans are the same on both paths -- AppKit's
+            // store cannot translate (33/F22), so the whole shifted region
+            // must repaint either way. What the mirror changes is the cost of
+            // that repaint: a blit of moved pixels instead of a region-wide
+            // glyph redraw.
             let display = frame.damage
                 .expandingShift()
                 .withGlyphHalo(rowCount: frame.plan.rows)
-            pendingDisplayDamage.formUnion(display)
+            if updateMirror(plan: frame.plan, damage: frame.damage, metrics: metrics) == false {
+                pendingDisplayDamage.formUnion(display)
+            }
             for span in display.maximalContiguousSpans() {
                 setNeedsDisplay(NSRect(
                     x: 0,
@@ -1011,6 +1069,46 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 ))
             }
         }
+    }
+
+    /// Maintains the mirror per the 33/D7 addendum's containment policy: apply
+    /// while valid, build or rebuild only at a shift-carrying publish (one full
+    /// render at the flood-to-paced transition), and touch nothing otherwise --
+    /// so `.full` floods and churn never pay for mirror machinery. Returns true
+    /// when the mirror now holds exactly this frame and the draw may blit.
+    private func updateMirror(
+        plan: RenderFramePlan,
+        damage: TerminalDamage,
+        metrics: TerminalRenderMetrics
+    ) -> Bool {
+        if let mirror, mirrorIsValid,
+           mirror.metrics == metrics,
+           mirror.columns == plan.columns,
+           mirror.rows == plan.rows,
+           mirror.apply(plan: plan, damage: damage)
+        {
+            return true
+        }
+        mirrorIsValid = false
+        guard damage.shift != nil else { return false }
+        if mirror == nil
+            || mirror?.metrics != metrics
+            || mirror?.columns != plan.columns
+            || mirror?.rows != plan.rows
+        {
+            mirror = TerminalFrameBackingStore(
+                columns: plan.columns,
+                rows: plan.rows,
+                metrics: metrics,
+                colorSpace: window?.colorSpace?.cgColorSpace
+            )
+        }
+        guard let mirror else { return false }
+        mirror.renderFull(plan)
+        mirrorIsValid = true
+        // A full mirror subsumes whatever the folded path still owed.
+        pendingDisplayDamage = .none
+        return true
     }
 
     private func forwardFocusIfChanged(_ focused: Bool) {

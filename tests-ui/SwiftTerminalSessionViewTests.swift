@@ -381,6 +381,210 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("a shift publish builds the mirror and draws blit from it") {
+        // Intent: the first shift-carrying publish establishes the mirror with one
+        //   full render, later shifts apply incrementally, and every draw while the
+        //   mirror is valid is a blit -- no plan rows reach the folded path.
+        // Why it exists: research/33 T9's view half. F22 proved AppKit's store
+        //   cannot translate, so the paced scroll regime must ride the owned
+        //   mirror; a silent fall back to folded redraw would erase the win
+        //   without failing any pixel test.
+        // Scenario: a paced producer scrolls one line per publish, twice.
+        TerminalFrameBackingStore.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+
+        controller.emitFrameForTest(
+            damage: .init(rows: [8, 9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
+            "first shift did not build then blit: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.isEmpty,
+            "the blit draw also ran the folded path: \(pane.drawnRowSetsForTesting)"
+        )
+
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit", "apply", "blit"],
+            "second shift did not apply incrementally: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+    }
+
+    uiTest("full damage stales the mirror and the folded path resumes") {
+        // Intent: a `.full` publish does zero mirror work and returns the pane to
+        //   the folded path; row-only damage afterwards must not rebuild the
+        //   mirror either -- only a shift is allowed to pay for a build.
+        // Why it exists: the flood regime's non-regression rests on `.full`
+        //   publishes never touching mirror machinery (D7 addendum's containment
+        //   policy), and churn must not thrash mirror builds.
+        // Scenario: paced scroll establishes the mirror, a flood burst goes
+        //   `.full`, then a status row repaints.
+        TerminalFrameBackingStore.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+        TerminalFrameBackingStore.resetForTesting()
+
+        controller.emitFrameForTest(damage: .full)
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting.isEmpty,
+            "a full publish touched the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.count == 1,
+            "the full publish did not fold: \(pane.drawnRowSetsForTesting)"
+        )
+
+        controller.emitFrameForTest(damage: .init(rows: [3]))
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting.isEmpty,
+            "row-only damage rebuilt the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.count == 2,
+            "row-only damage after a fold did not draw folded: \(pane.drawnRowSetsForTesting)"
+        )
+    }
+
+    uiTest("row-only damage maintains a valid mirror") {
+        // Intent: while the mirror is valid, non-scroll damage renders into it
+        //   and the draw stays a blit, so alternating scroll and cursor traffic
+        //   cannot flap between paths.
+        // Why it exists: a mirror that only shifts would go stale on the first
+        //   cursor blink and surrender the paced win it exists for.
+        // Scenario: a scroll establishes the mirror, then a cursor row repaints.
+        TerminalFrameBackingStore.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+        TerminalFrameBackingStore.resetForTesting()
+
+        controller.emitFrameForTest(damage: .init(rows: [4]))
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting == ["apply", "blit"],
+            "row damage on a valid mirror did not apply+blit: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.isEmpty,
+            "row damage on a valid mirror drew folded: \(pane.drawnRowSetsForTesting)"
+        )
+    }
+
+    uiTest("an apply refusal rebuilds the mirror at a shift and folds otherwise") {
+        // Intent: when the store cannot realize a value, a shift-carrying publish
+        //   pays one full mirror render and stays on the blit path, while a
+        //   row-only publish degrades to the folded redraw.
+        // Why it exists: the refusal path is the store's safety valve; the view
+        //   must never blit a store that declined the frame.
+        // Scenario: the store refuses two frames in a row -- one with a shift,
+        //   one without.
+        TerminalFrameBackingStore.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        pane.resetDrawnRowSetsForTesting()
+        TerminalFrameBackingStore.resetForTesting()
+        TerminalFrameBackingStore.applyReturnsForTesting = false
+
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
+            "a refused shift did not rebuild: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+
+        controller.emitFrameForTest(damage: .init(rows: [4]))
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting == ["renderFull", "blit"],
+            "a refused row-only frame touched the mirror again: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.count == 1,
+            "the refused row-only frame did not fold: \(pane.drawnRowSetsForTesting)"
+        )
+    }
+
+    uiTest("a resize stales the mirror until the next shift") {
+        // Intent: any full-display invalidation -- resize above all -- drops
+        //   mirror validity, and the folded path serves until a shift rebuilds.
+        // Why it exists: a resized layer gets a fresh backing store and a
+        //   resized grid gets a differently-sized mirror; blitting a stale one
+        //   is the tearing failure D7 names.
+        // Scenario: scroll, then widen the pane, then repaint one row.
+        TerminalFrameBackingStore.resetForTesting()
+        let controller = TerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.displayIfNeeded()
+        controller.emitFrameForTest(
+            damage: .init(rows: [9], shift: .init(region: 0..<10, delta: -1))
+        )
+        pane.displayIfNeeded()
+        TerminalFrameBackingStore.resetForTesting()
+        pane.resetDrawnRowSetsForTesting()
+
+        pane.setFrameSize(NSSize(width: 88, height: 160))
+        pane.displayIfNeeded()
+        controller.emitFrameForTest(damage: .init(rows: [4]))
+        pane.displayIfNeeded()
+        try uiExpect(
+            TerminalFrameBackingStore.eventsForTesting.isEmpty,
+            "a resized pane still used the mirror: \(TerminalFrameBackingStore.eventsForTesting)"
+        )
+        try uiExpect(
+            pane.drawnRowSetsForTesting.count == 2,
+            "folded draws did not resume after the resize: \(pane.drawnRowSetsForTesting)"
+        )
+    }
+
     uiTest("the first draw after a resize fills every row") {
         // Intent: once the pane's size changes, the next draw fills the whole viewport even
         //   when the engine reports damage for a single row.

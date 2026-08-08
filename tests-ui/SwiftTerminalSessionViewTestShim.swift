@@ -163,6 +163,59 @@ struct TerminalDamage: Equatable {
     }
 }
 
+/// Records the mirror calls the production view makes so the harness can pin
+/// path selection -- built vs applied vs blitted vs folded -- without pixels.
+/// Blits draw nothing; the byte-level contract lives in the engine's own
+/// FrameBackingStoreTests.
+final class TerminalFrameBackingStore {
+    static var applyReturnsForTesting = true
+    private(set) static var eventsForTesting: [String] = []
+
+    static func resetForTesting() {
+        applyReturnsForTesting = true
+        eventsForTesting = []
+    }
+
+    let columns: Int
+    let rows: Int
+    let metrics: TerminalRenderMetrics
+    var pointSize: CGSize {
+        CGSize(
+            width: metrics.cellSize.width * CGFloat(columns),
+            height: metrics.cellSize.height * CGFloat(rows)
+        )
+    }
+
+    init?(
+        columns: Int,
+        rows: Int,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace? = nil
+    ) {
+        guard columns > 0, rows > 0 else { return nil }
+        self.columns = columns
+        self.rows = rows
+        self.metrics = metrics
+    }
+
+    func renderFull(_ plan: RenderFramePlan) {
+        Self.eventsForTesting.append("renderFull")
+    }
+
+    func apply(plan: RenderFramePlan, damage: TerminalDamage) -> Bool {
+        guard Self.applyReturnsForTesting,
+              damage.isFull == false,
+              plan.columns == columns, plan.rows == rows
+        else { return false }
+        Self.eventsForTesting.append("apply")
+        return true
+    }
+
+    func blit(into target: CGContext, rect: CGRect) {
+        Self.eventsForTesting.append("blit")
+    }
+}
+
 func clipFramePlan(_ plan: RenderFramePlan, to damage: TerminalDamage) -> RenderFramePlan {
     guard damage.isFull == false else { return plan }
     return RenderFramePlan(
