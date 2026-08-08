@@ -100,17 +100,30 @@ struct RenderFramePlan {
     }
 }
 
+struct TerminalDamageShift: Equatable {
+    let region: Range<Int>
+    let delta: Int
+}
+
 struct TerminalDamage: Equatable {
     static let full = TerminalDamage(isFull: true)
     let isFull: Bool
     let rows: Set<Int>
+    let shift: TerminalDamageShift?
 
-    init(isFull: Bool = false, rows: Set<Int> = []) {
+    init(isFull: Bool = false, rows: Set<Int> = [], shift: TerminalDamageShift? = nil) {
         self.isFull = isFull
         self.rows = rows
+        self.shift = shift
+    }
+
+    init(rows: Range<Int>, rowCount: Int) {
+        self.init(rows: Set(rows))
     }
 
     static let none = TerminalDamage()
+
+    var damagedRowCount: Int { rows.count }
 
     mutating func formUnion(_ other: TerminalDamage) {
         guard isFull == false else { return }
@@ -119,6 +132,34 @@ struct TerminalDamage: Equatable {
         } else {
             self = TerminalDamage(rows: rows.union(other.rows))
         }
+    }
+
+    func expandingShift() -> TerminalDamage {
+        guard let shift else { return self }
+        return TerminalDamage(rows: rows.union(shift.region))
+    }
+
+    func withGlyphHalo(rowCount: Int) -> TerminalDamage {
+        guard isFull == false else { return .full }
+        var haloed: Set<Int> = []
+        for row in rows {
+            for neighbor in (row - 1)...(row + 1) where neighbor >= 0 && neighbor < rowCount {
+                haloed.insert(neighbor)
+            }
+        }
+        return TerminalDamage(rows: haloed)
+    }
+
+    func maximalContiguousSpans() -> [Range<Int>] {
+        var spans: [Range<Int>] = []
+        for row in rows.sorted() {
+            if let last = spans.last, last.upperBound == row {
+                spans[spans.count - 1] = last.lowerBound..<(row + 1)
+            } else {
+                spans.append(row..<(row + 1))
+            }
+        }
+        return spans
     }
 }
 
@@ -329,6 +370,9 @@ final class TerminalPaneSessionController {
     var onOpenLink: ((TerminalHyperlink) -> Void)?
     var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
+    /// Stands in for the real controller's per-fence display-interval read
+    /// (research/33 D8); the harness never fences, so it is write-only here.
+    var displayRefreshIntervalNanoseconds: (() -> UInt64)?
     var currentPlan: RenderFramePlan?
     /// Stands in for the real controller's fence census, which the frame-rate
     /// sampler's call sites read. The harness never emits a rate sample, so a
