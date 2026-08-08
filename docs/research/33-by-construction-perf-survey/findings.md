@@ -1801,4 +1801,6 @@ performance verdict.
   cycle this finding measured. The README's follow-up question -- whether
   the 16 KiB read cap keeps any other reason to exist -- is now askable
   with the deadline in place. `T24` (the `benchmark-confirm` block floor)
-  remains open instrument debt for future feed-path claims.
+  remains open instrument debt for future feed-path claims. `F18`'s parked
+  instrumentation (`bench/plan-thread-cpu`) landed by cherry-pick in the
+  commit after this task's, discharging its "once the tree is clean" wait.
