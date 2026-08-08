@@ -216,7 +216,7 @@ current buffer, never require re-rendering.
        contents (no implicit contents animation; a detached surface reported
        free stays free). If the gate fails, the route stops here.
 - [x] 2. IOSurface-backed frame store behind the byte-equality gates (PO1).
-- [ ] 3. Surface swapchain: acquisition, coalescing, pending presentation,
+- [x] 3. Surface swapchain: acquisition, coalescing, pending presentation,
        trust-breaking inputs, with the headless PO3 pins.
 - [ ] 4. Own the pane surface: one render path, draw seam deleted, benchmark
        bracket / harness pins / PO5 counters moved with it (PO4, PO5).
@@ -246,3 +246,11 @@ current buffer, never require re-rendering.
 - The animation pin disables implicit contents animation via the layer's
   `actions` dictionary (`["contents": NSNull()]`); commit 4 uses the same
   mechanism the pin proves.
+- Commit 3: trust-breaking inputs are realized as whole-swapchain
+  replacement -- the owner discards the swapchain on geometry, backing
+  scale, theme, or window color-space change, and fresh buffers force full
+  renders by construction (`isCurrent`). The swapchain therefore has no
+  distrust API and never changes shape in place; the view-side replacement
+  pins land with commit 4, where those inputs arrive. Acquisition prefers
+  the least-stale free buffer so bring-current redraws the fewest exposed
+  rows.
