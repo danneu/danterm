@@ -497,6 +497,12 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   `faster -6.12%` but `scrollback-stream` `slower +2.46%` at the flood end
   (headless interleaved A/B +1.6%, only 0.66% attributable to new code) --
   recorded in `F21` as an open trade rather than silently accepted.
+  **View-half mechanism settled by probe (`F22`):** `scroll(_:by:)` preserves
+  no bits on a layer-backed view -- it silently repaints the copy-destination
+  region -- so the translation moves to a mirror frame store the view owns,
+  with AppKit's store demoted to a blit target; the `D7` addendum records the
+  selected shape, the flood-tax containment policy, and the
+  `wantsUpdateLayer` ownership alternative kept on the table.
 - [x] `T10` DONE -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.

@@ -2016,3 +2016,71 @@ performance verdict.
   an earlier flood cutover in `recordScrollDamage` (escalate at half the
   region height instead of full coverage, trading the tail of `F13`'s
   decaying curve for drain cycles).
+
+### F22 -- `scroll(_:by:)` on a layer-backed view preserves no bits: it schedules a silent repaint of the copy-destination region and the rest of the store is not guaranteed either
+
+- Status: measured and decisive; this is the live trust probe `D7` required
+  before the view half could build on an AppKit backing-store copy. The
+  verdict is negative in every reading, so the view half cannot be realized
+  with `scrollRect` and must own its pixel persistence instead (see the
+  `D7` addendum).
+- Date and investigator: 2026-08-08, T9 view-half implementation agent.
+- Commit and worktree state: working tree on `558a8103`, macOS 26.5.2
+  (25F84), backing scale 2.0.
+- Commands, inputs, or reproduction:
+  `xcrun swift scripts/research/33/t9-scrollrect-trust-probe.swift` from a
+  logged-in GUI session. The probe builds the view the way
+  `SwiftTerminalSessionView` is built (`wantsLayer = true`, flipped, layer
+  background color, buffered window), draws eight 40 pt color bands, lets
+  AppKit commit, then calls `scroll(bounds, by:)` (the Swift name of
+  `scrollRect:by:`, deprecated since macOS 10.14) with no redraw of its
+  own. After the first display every further `draw(_:)` paints a solid
+  sentinel, so a post-scroll repaint cannot repaint the band pattern and
+  masquerade as "the scroll was a no-op" -- the first, sentinel-free run
+  did exactly that and read as UNCHANGED. Readback is `CALayer.render(in:)`
+  of the view's layer (`NSViewBackingLayerContents`);
+  `CGWindowListCreateImage` is obsoleted in macOS 15 and ScreenCaptureKit
+  needs a TCC grant an unattended probe cannot give, so the WindowServer
+  channel is unavailable.
+- Measurements or examples, two deltas, both with the sentinel armed:
+  - delta -1 band (the terminal scroll shape, content up): the view's
+    `needsDisplay` stays false, yet one `draw(_:)` arrives on the next
+    runloop turn with dirty rect `(0, 0, 320, 280)` -- exactly
+    `bounds.offsetBy(delta) intersect bounds`, the copy-destination
+    region. After it, every band row including band 7 (`280..<320`, which
+    neither the "copy" nor the repaint touched) reads as background, not
+    as its pre-scroll color.
+  - delta +2 bands: same shape -- silent repaint of `(0, 80, 320, 240)`,
+    the destination region again, and every row outside it reads as
+    background too.
+- Observation: three facts, each individually disqualifying. (1) No bits
+  move: the layer contents never show translated bands. (2) The scroll
+  schedules a repaint of the whole copy-destination region -- the region
+  the optimization exists to avoid repainting -- so "trusting" it costs a
+  region-wide redraw per scroll, the folded behavior with extra steps.
+  (3) The repaint is invisible to the view's own `needsDisplay` flag, and
+  rows outside the repainted rect do not retain their previous contents,
+  which in production paints stale or undefined rows -- the tearing
+  failure mode `D7` named.
+- Inference: the AppKit-managed backing store of a layer-backed view
+  cannot be translated by any public API on this macOS: `scrollRect:by:`
+  is deprecated redraw-based compatibility shimming, and
+  `translateRectsNeedingDisplayInRect:by:` only shifts dirty rects by
+  contract. A view-half translation therefore requires the view to own a
+  frame store it can translate itself; AppKit's store can only ever be a
+  blit target.
+- Competing interpretations: the band-7 background reading fits a store
+  reallocation (scroll discards the contents and schedules a partial
+  repaint) better than a pure no-op-plus-invalidate, which would have left
+  band 7 purple; the probe cannot distinguish the two, and neither
+  changes the verdict -- under both, bits are not preserved.
+- Uncertainty: one readback channel. `CALayer.render(in:)` reads the
+  layer's committed contents object, which is the same store the
+  WindowServer composites, but a WindowServer-side capture was not
+  available to corroborate. The sentinel design removes the main way this
+  channel could lie (a repaint reproducing the old pattern).
+- Next action: realize the view half on an owned, translatable frame
+  store (the `D7` addendum records the selected shape and the named
+  alternative), gated by byte-level equivalence tests against a full
+  redraw -- which an owned store makes possible headlessly, strictly
+  stronger than the live pixel proof this probe could offer.

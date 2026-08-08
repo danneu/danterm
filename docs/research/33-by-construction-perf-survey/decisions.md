@@ -436,6 +436,55 @@ rediscovering them.
   - Paired benchmark on `scrollback-stream` as the non-regression check,
     expected `equivalent`, and read as nothing more: its 16 KiB framing is the
     1.0x end of the curve and cannot contain the win.
+- **Addendum (2026-08-08), after `F22`: the view half's mechanism pivots from
+  `scrollRect` to an owned frame store; the contract above is unchanged.**
+  `F22` ran the live trust probe this decision required and the verdict is
+  negative in every reading: `scroll(_:by:)` preserves no bits on a
+  layer-backed view, schedules a silent repaint of the exact region the copy
+  exists to avoid repainting, and leaves the rest of the store unguaranteed.
+  So AppKit's backing store can only ever be a blit target, and the
+  translation must happen in memory the view owns.
+  - **Selected realization: a mirror frame store.** The view keeps one
+    grid-sized bitmap at backing-pixel resolution
+    (`TerminalRenderMetrics.cellHeightPixels` makes a row shift integral in
+    backing pixels by construction). At a shift-carrying publish the mirror
+    translates its region with a row-range copy, damaged rows render into it
+    through the existing executor, and `draw(_:)` blits the dirty rect from
+    the mirror instead of re-executing glyph runs. Glyph submission per
+    scrolled frame falls from region-wide to damaged-rows-plus-halo -- the
+    countable claim above, unchanged.
+  - **The flood tax is contained by policy, not hope.** The mirror is
+    maintained only while it pays: a `.full` publish marks it stale at zero
+    cost and the draw path is byte-for-byte today's, so the flood regime and
+    the churn ladder never touch mirror machinery. The mirror is built or
+    rebuilt only at a shift-carrying publish (one full-plan render at the
+    flood-to-paced transition), and row-damage publishes maintain it only
+    while it is already valid.
+  - **Fallback ledger, now structural instead of enumerated.** The mirror is
+    the whole current frame, so any AppKit-initiated draw -- first frame,
+    dirty-rect fallback, occlusion return, a fresh backing store after
+    `setFrameSize` -- is satisfied by a blit whenever the mirror is valid,
+    and falls back to the folded redraw exactly when it is stale. The
+    known-good question `D7` had to enumerate per caller collapses into one
+    validity bit the view owns.
+  - **Named alternative, kept on the table: full store ownership via
+    `wantsUpdateLayer`.** Assigning the mirror as the layer's `contents`
+    would delete the blit entirely and make the owned store *the* display
+    surface. Rejected for this slice, not on effort but on risk placement:
+    it swaps the pane's entire presentation contract (draw-seam
+    instrumentation, the UI harness's drawn-row and clip-rect pins, the
+    benchmark's dirty-rect observation) and requires swapchain-style
+    multi-buffering with per-buffer damage generations to avoid writing a
+    surface CoreAnimation is scanning. That is a rearchitecture of the
+    display seam, while `D7` ordered the view half to land smallest and
+    separately revertible. It becomes the follow-up if the blit shows up in
+    the gates.
+  - **Verification upgrade.** The bitmap-equivalence gate moves from a live
+    pixel proof (which macOS 15+ makes nearly unreadable for an unattended
+    probe, per `F22`) to headless byte-equality on the owned store:
+    translate-plus-damaged-render must equal a from-scratch full render,
+    byte for byte, across the same scenario matrix named above. The live
+    scripts and the paired benchmark stay as stated.
 
 ### D8 -- the consumer bounds the publish rate: a delivery deadline, one one-shot timer only while damage is pending, and a bypass for semantic events
 
