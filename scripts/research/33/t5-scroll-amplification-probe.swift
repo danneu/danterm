@@ -57,6 +57,10 @@ struct ScenarioReport: Encodable {
     let idealGlyphOccurrences: Int
     let planGlyphOccurrences: Int
 
+    let mirrorEstablishRenders: Int
+    let mirrorAppliedFrames: Int
+    let mirrorBlitRowTotal: Int
+
     let plannerRowsInspected: Int
     let plannerCellsInspected: Int
 
@@ -207,6 +211,10 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
     var submittedGlyphs = 0
     var idealGlyphs = 0
     var planGlyphs = 0
+    var mirrorValid = false
+    var mirrorEstablishRenders = 0
+    var mirrorAppliedFrames = 0
+    var mirrorBlitRows = 0
 
     var index = 0
     while index < events {
@@ -271,20 +279,51 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         idealGlyphs += glyphOccurrences(plan, in: frameIdealRows)
         planGlyphs += glyphOccurrences(plan)
 
-        // `SwiftTerminalSessionView.publish`, then its draw at one draw per publish.
-        // The view is not translation-aware yet, so it folds the shift to region
-        // rows before the halo -- the same fold `publish` performs.
+        // `SwiftTerminalSessionView.publish` with the T9 view half: while the
+        // mirror is valid the shift is a translation in owned memory, glyph
+        // submission happens at the mirror render (damage plus region boundary
+        // rows, erase-haloed, planned at the erase set's own halo -- gate for
+        // gate with `TerminalFrameBackingStore.apply`), and the draw is a blit
+        // that submits nothing. `.full` stales the mirror at zero cost, a
+        // shift-carrying frame on a stale mirror pays one full establish
+        // render, and row damage on a stale mirror folds exactly as before.
         if frameDamage.isFull {
+            mirrorValid = false
             pendingDisplayDamage = .full
+            let drawingDamage = pendingDisplayDamage
+            pendingDisplayDamage = .none
+            _ = drawingDamage
+            submittedGlyphs += glyphOccurrences(plan)
+        } else if mirrorValid || frameDamage.shift != nil {
+            if mirrorValid {
+                var renderRows = Set(frameDamage.rowIndices)
+                if let shift = frameDamage.shift {
+                    renderRows.insert(shift.region.lowerBound)
+                    renderRows.insert(shift.region.upperBound - 1)
+                }
+                let erase = TerminalDamage(rows: renderRows, rowCount: viewportRows)
+                    .withGlyphHalo(rowCount: viewportRows)
+                let planRows = erase.withGlyphHalo(rowCount: viewportRows)
+                submittedGlyphs += glyphOccurrences(clipFramePlan(plan, to: planRows))
+                mirrorAppliedFrames += 1
+            } else {
+                submittedGlyphs += glyphOccurrences(plan)
+                mirrorEstablishRenders += 1
+                mirrorValid = true
+            }
+            mirrorBlitRows += frameDamage
+                .expandingShift()
+                .withGlyphHalo(rowCount: plan.rows)
+                .damagedRowCount
         } else {
             pendingDisplayDamage.formUnion(
                 frameDamage.expandingShift().withGlyphHalo(rowCount: plan.rows)
             )
+            let drawingDamage = pendingDisplayDamage
+            pendingDisplayDamage = .none
+            let drawn = drawingDamage.isFull ? plan : clipFramePlan(plan, to: drawingDamage)
+            submittedGlyphs += glyphOccurrences(drawn)
         }
-        let drawingDamage = pendingDisplayDamage
-        pendingDisplayDamage = .none
-        let drawn = drawingDamage.isFull ? plan : clipFramePlan(plan, to: drawingDamage)
-        submittedGlyphs += glyphOccurrences(drawn)
     }
 
     let counters = t5Counters
@@ -307,6 +346,9 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         submittedGlyphOccurrences: submittedGlyphs,
         idealGlyphOccurrences: idealGlyphs,
         planGlyphOccurrences: planGlyphs,
+        mirrorEstablishRenders: mirrorEstablishRenders,
+        mirrorAppliedFrames: mirrorAppliedFrames,
+        mirrorBlitRowTotal: mirrorBlitRows,
         plannerRowsInspected: counters.plannerRowsInspected,
         plannerCellsInspected: counters.plannerCellsInspected,
         fullDamageCalls: counters.fullDamageCalls,
