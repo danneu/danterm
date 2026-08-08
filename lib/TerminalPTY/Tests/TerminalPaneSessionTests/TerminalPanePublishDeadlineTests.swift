@@ -38,15 +38,23 @@ private final class ManualDeadlineTimer {
 @MainActor
 @Suite(.serialized)
 struct TerminalPanePublishDeadlineTests {
-    /// Drains the launch's own PTY noise -- the shell echoing `exec sleep 30` --
-    /// so the assertions that follow count only the test's synthetic feeds.
-    /// The child produces nothing further, and the caller then moves its
-    /// injected clock past any deadline this settle started.
+    /// The launch command for tests that need a quiescent pane: the marker is
+    /// printed after the shell's own echo of the command line, so once it is
+    /// observed, every launch byte is already applied on the owner -- and the
+    /// `exec sleep 30` that follows emits nothing further, ever.
+    static let settledLaunchCommand = "\(printMarker("READY", newline: false)); exec sleep 30"
+
+    /// Drains the launch's own PTY noise so the assertions that follow count
+    /// only the test's synthetic feeds. Waiting on the runtime-assembled marker
+    /// (not the echo text) is what makes this airtight: a trailing echo chunk
+    /// arriving after the checkpoint would defer against the injected clock
+    /// and silently swallow the next feed's signal. The caller then moves its
+    /// clock past any deadline this settle started.
     private func settleLaunchEcho(
         host: TerminalPTYHost,
         controller: TerminalPaneSessionController
     ) async {
-        #expect(await host.waitForOutput(containing: Array("exec sleep 30".utf8)))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
         await drainMainQueue()
     }
@@ -64,7 +72,7 @@ struct TerminalPanePublishDeadlineTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -110,7 +118,7 @@ struct TerminalPanePublishDeadlineTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -154,7 +162,7 @@ struct TerminalPanePublishDeadlineTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -195,7 +203,7 @@ struct TerminalPanePublishDeadlineTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -250,7 +258,7 @@ struct TerminalPanePublishDeadlineTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            launchInput: makeLaunchInput(command: Self.settledLaunchCommand)
         )
         var order: [String] = []
         controller.onSemanticEvents = { events in
