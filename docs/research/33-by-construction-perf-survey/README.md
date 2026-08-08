@@ -497,6 +497,10 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   urgent-only tier: semantic events, clipboard, child exit and
   `onPrimaryHistoryMutation` reach the runtime only through delivery and must
   bypass the deadline as a separate small payload, not a full frame publish.
+  **Direction set in `D8`:** the deadline lives at the consumer's fence, one
+  one-shot timer runs only while damage is pending, the urgent classes bypass
+  it, and the claim is countable -- 13.0 publishes per draw (`F19`) falling
+  to ~1 -- with the paced regime explicitly out of scope as `T9`'s (`F19`).
 
 ### Phase 3 -- well-scoped, independently landable
 
@@ -743,8 +747,8 @@ future reopening needs a new rule against new evidence.
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
 run. Phase 2 has begun: `T8` and `T7` have both landed as one change (`F16`,
-`F17`, `D6`), and `T9` and `T10` remain -- both fully vetted (`F19`); `T9`'s
-direction is set in `D7` and `T10` still awaits its entry.** `T1` sized the parser's
+`F17`, `D6`), and `T9` and `T10` remain -- both fully vetted (`F19`), with
+directions set in `D7` and `D8`.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -948,5 +952,19 @@ separately revertible. `T20` rides along, per `D2` and `30/D2`'s own reopening
 clause. The claim is countable under `D1`, not timed: `t5-scroll-amplification.py`
 (with a new at-budget arm) and `t9-lines-per-delivery.sh` are the before/after
 gates, and the paired benchmark is only the non-regression check, because the
-ladder corpora sit at the 1.0x end of `F13`'s curve. `T10`'s entry, written
-against the 13.0:1 ratio, is the natural follow-up.
+ladder corpora sit at the 1.0x end of `F13`'s curve.
+
+**`T10`'s direction is set too (`D8`), written against the 13.0:1 ratio as
+`F19` required.** The consumer holds a deadline and will not fence again until
+`lastDelivery + refreshInterval`; damage arriving early accumulates where it
+already does and arms exactly one one-shot timer, damage arriving late
+publishes immediately, and the drain never throttles -- so a producer under
+the display rate is untouched and an idle pane still arms nothing, preserving
+`25/F1`'s no-poll rule. The semantic classes that reach the runtime only
+through delivery -- bell, clipboard, child exit, `onPrimaryHistoryMutation` --
+bypass the deadline as a small payload, which is how the design answers doc
+25's occluded-tier rejection rather than reintroducing it. The claim is
+countable under `D1`: `t4-publish-rate.sh` must read ~120 publishes/s against
+a held 120 draws/s, fence stall must fall by the same ~13x, and `F18`'s churn
+plan-metric `slower` -- composition, not cost -- should reverse, because the
+extra plans it counted are exactly the publishes the deadline deletes.

@@ -433,3 +433,143 @@ rediscovering them.
   - Paired benchmark on `scrollback-stream` as the non-regression check,
     expected `equivalent`, and read as nothing more: its 16 KiB framing is the
     1.0x end of the curve and cannot contain the win.
+
+### D8 -- the consumer bounds the publish rate: a delivery deadline, one one-shot timer only while damage is pending, and a bypass for semantic events
+
+- Status: **direction set.** This is `T10`'s Phase 2 direction-gate entry;
+  implementation may start against it. The claim is a **countable one under
+  `D1`**: publishes per second fall from ~1,560 to the display rate, so
+  publishes per draw fall from **13.0** (`F19`, the post-`T8` figure a `T10`
+  claim must be written against; `F12`'s 4.96 is the pre-`T8` datum) to ~1,
+  measured by `T4`'s own sampler. No wall-clock percentage is claimed. The
+  scope is stated plainly up front: **`T10` helps only producers above the
+  display rate** -- the flood regime. A paced producer publishing under
+  ~120/s never touches the deadline, its whole-screen cost per line is
+  untouched, and that regime is `T9`'s alone (`F19`'s partition). `T10` is
+  not a substitute for shift damage; the two are complements that split the
+  producer space.
+- Evidence used: `F12` (a real `cat` publishes **594 frames/s against 120
+  draws/s**, reproduced to 0.2%; deliveries equal publishes to within two
+  frames across 7,000, so nothing coalesces before the publish -- the only
+  coalescing in the pipeline is AppKit's, between publish and draw, *after*
+  every per-frame cost has been paid; a debug build reads 1.07:1, so any
+  publish-rate reading must be release configuration; an occluded pane
+  publishes nothing, so visibility gating already covers the hidden case);
+  `F19` (the re-run post-`T8`: **13.0 publishes per draw**, because the
+  faster drain publishes 2.6x more frames into the same 120 Hz display -- so
+  every future drain win raises this multiplier, and 12 of every 13
+  whole-screen plans are overwritten unseen); `F18` (the wasted work made
+  visible on the calibrated instrument: the churn workloads plan 55-63% more
+  frames per draw at 30-35% less per frame, the planner is never off-CPU, and
+  the finding's own inference is that *"the extra plans are exactly the
+  publishes a demand-bounded rate would not perform"*); `F16` (`T8` raised the
+  delivery count and cut fence stall ~7x, recording `T8` and `T10` as
+  complements); `25/F1` (rendering is event-driven with no display link and no
+  periodic timer on the render path, by construction); doc 25's Rejected list
+  (the occluded urgent-only tier, and read-side PTY throttling).
+- Prior decision, quoted and answered: doc 25 rejected a separate occluded
+  "urgent-only" tier because *"primary-history mutation reaches the runtime
+  only through delivery ... so a mode with no bounded delivery interval
+  silently stops recovery checkpoints for a long-running occluded build that
+  rings no bell, writes no clipboard, and does not exit."* `T10` must not
+  reintroduce that failure through the back door, and its design differs in
+  both of the ways that rejection turned on. First, the deadline **bounds**
+  delivery -- at most one display interval, ~8.3 ms at 120 Hz -- and never
+  suspends it, so the recovery boundary holds with orders of magnitude to
+  spare against the ~500 ms cadence doc 25 itself considered acceptable.
+  Second, the event classes that reach the runtime only through delivery --
+  bell and other semantic events, clipboard writes, child exit, and
+  `onPrimaryHistoryMutation` -- **bypass the deadline outright**, delivered as
+  a separate small payload rather than riding a full frame publish. The bypass
+  must not carry a frame, or the flood returns through it. Separately,
+  `25/F1`'s rule -- no display link, no poll on the hot path -- survives by
+  construction: the design arms **exactly one one-shot timer, and only while
+  damage is pending**. No damage means no timer and no wakeup, so an idle
+  pane's zero-wakeup steady state is unchanged.
+- Candidate solutions considered:
+  - **Leave it: AppKit already coalesces publishes into draws.** Rejected by
+    `F12`'s measurement: that coalescing happens after the plan, the
+    copy-on-write, the damage-set construction and the delivery fence have all
+    been paid, which is exactly the work being discarded 12 times out of 13.
+    And the ratio is not stable -- `T8` alone raised it from 4.96 to 13.0, so
+    doing nothing means every drain improvement widens the waste.
+  - **Throttle the read side.** Rejected in doc 25 (read-side PTY throttling
+    while hidden), and `F12`'s debug observation shows why it is the wrong
+    lever even when visible: drain speed flow-controls the child, so slowing
+    the reads slows the program in the pane. Parsing must also stay current
+    for OSC and bell semantics regardless of display demand, so the bound
+    belongs after the parse, not before it.
+  - **Raise the 16 KiB read cap so each delivery carries more.** Rejected: it
+    tunes a constant toward the flood end of `F13`'s curve instead of bounding
+    anything -- publishes still track drain speed, only in bigger steps, and
+    the paced regime is untouched. The deadline inverts the dependency: the
+    display's demand sets the rate, and the read cap stops being the
+    accidental rate governor. (Whether the cap keeps any other reason to
+    exist is a follow-up once `T10` lands, per the README's candidate
+    direction, not part of this decision.)
+  - **Drive frames from a display link or periodic timer.** Rejected: a timer
+    that ticks regardless of damage is the poll `25/F1` rules out, and it
+    charges every idle pane a wakeup stream to fix a cost only flooding panes
+    pay.
+  - **The consumer holds a deadline.** Selected. The consumer will not fence
+    again until `lastDelivery + refreshInterval`. Damage arriving before the
+    deadline accumulates where it already accumulates today -- in the engine's
+    damage value -- and arms the one one-shot timer if it is not armed; when
+    the timer fires, the newest frame is published with the accumulated
+    damage. Damage arriving after the deadline has passed publishes
+    immediately, so a producer slower than the display rate never waits and
+    the event-driven path is byte-for-byte today's. The drain never throttles;
+    only the fence is deferred.
+- Tradeoffs and correctness risks:
+  - **A stale final frame is the failure mode.** If the timer is not armed, or
+    is cancelled without a publish, the last burst of a flood never reaches
+    the screen and the pane freezes one frame in the past -- silent and
+    visual, like `T9`'s risks, not slow. The invariant is that any damage is
+    published within one `refreshInterval` of arriving, and it is
+    deterministic, so it gets a deterministic test rather than an eyeball.
+  - **Added latency is bounded by what the display already imposes.** A
+    deferred publish waits at most one display interval, which is time the
+    frame would have spent invisible anyway; no producer under the display
+    rate is delayed at all. The interval must come from the pane's actual
+    display, not a hardcoded 120 Hz, or an external 60 Hz monitor pays double.
+  - **The bypass is a second delivery path and must stay small.** Its contract
+    is exactly doc 25's urgent list plus `onPrimaryHistoryMutation`; anything
+    more and it becomes the unbounded path again, anything less and a
+    clipboard write or an exit status waits on a flood's deadline.
+  - **The benchmark's plan metric will move and should.** `F18` established
+    that the churn workloads' plan-metric `slower` is composition -- more
+    plans per draw, each cheaper -- and its closing note says `T10` deletes
+    the effect at its source. After `T10`, plans per draw on those workloads
+    should fall back toward 1; a reading that stays at 1.6 means the deadline
+    is not binding where `F18` measured it.
+- Decision and rationale: **the consumer holds the deadline; the publish rate
+  is bounded by display demand; the drain and the parse never throttle; the
+  urgent classes bypass.** The rationale is `F12`'s one-line observation
+  sharpened by `F19`: the pipeline pays full per-frame cost for every 16 KiB
+  read turn and then lets AppKit discard 12 of every 13 results, and the
+  discard ratio grows with every drain improvement. Moving the bound to the
+  consumer makes the wasted plan **unrepresentable in the steady state**:
+  work is only started when a display pass can consume it. This is the last
+  of the three Phase 2 structural changes, and with `D7` it completes the
+  regime partition -- `T9` deletes the per-publish amplification the paced
+  regime pays, `T10` deletes the publishes the flood regime wastes.
+- Behavioral verification, all named before implementation:
+  - `scripts/research/33/t4-publish-rate.sh` before and after, release
+    configuration, window frontmost: `publishesPerSecond` must fall from
+    ~1,560 to the display rate (~120) while `drawsPerSecond` holds, and
+    `cumulativeFenceStallNanoseconds` must fall by roughly the same ~13x
+    factor.
+  - `scripts/research/33/t9-lines-per-delivery.sh`: the 30 lines/s paced
+    scenario must be unchanged -- 30 publishes/s at ~1 line per publish,
+    proving the deadline never binds under the display rate -- while the
+    flood scenario's publishes/s falls to the display rate with mean lines
+    per publish rising to match.
+  - Deterministic timer tests: damage arriving mid-interval is published
+    within one `refreshInterval` (no stale final frame); no timer is armed
+    when no damage is pending, per doc 25's `T1` idle-wakeup shape.
+  - Bypass tests: bell, clipboard, child exit and `onPrimaryHistoryMutation`
+    each observed at the runtime without waiting for the deadline while a
+    flood's frame publishes are being deferred.
+  - Paired benchmark as the non-regression check, with `F18`'s expected
+    reading recorded alongside it: the churn workloads' planned frames per
+    draw fall back toward 1, and their plan-metric `slower` reverses.
