@@ -15,10 +15,12 @@ public func planFrame(
 
 /// Narrows a complete retained frame to the visible rows a damage pass must draw.
 ///
-/// A carried shift is folded into region-wide row damage first: this is the
-/// drawing seam, and the drawer does not translate its backing store yet, so
-/// every row the translation touched must be repainted here. (The view half of
-/// research/33 T9 is what retires that fold.)
+/// A carried shift is folded into region-wide row damage first. This serves the
+/// consumers that cannot realize a translation: the view's folded path (a stale
+/// mirror, research/33 T9), the dirty-rect fallback, and the benchmark
+/// topology's view-facing model. The mirror path never calls this with a
+/// shift-carrying value -- `TerminalFrameBackingStore.apply` realizes the
+/// translation and clips to shift-free row sets.
 public func clipFramePlan(
     _ plan: RenderFramePlan,
     to damage: TerminalDamage
