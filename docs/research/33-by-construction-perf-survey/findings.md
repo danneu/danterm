@@ -2084,3 +2084,116 @@ performance verdict.
   alternative), gated by byte-level equivalence tests against a full
   redraw -- which an owned store makes possible headlessly, strictly
   stronger than the live pixel proof this probe could offer.
+
+### F23 -- the view half lands on the owned mirror store: paced-scroll glyph submission falls 11,570 to 1,086 per frame, the flood is untouched by policy, and the F21 flood-drain trade reverses to a calibrated `faster`
+
+- Status: implemented and verified; this completes `T9` against `D7` and its
+  `F22` addendum. Both halves are now landed, each separately revertible:
+  reverting the view half restores the folded seam and keeps the planner win.
+  Every claim below is a count or a calibrated ladder verdict.
+- Date and investigator: 2026-08-08, T9 view-half implementation agent.
+- Commit and worktree state: store `0e92778d`, harness repair `630b56e5`,
+  view integration `10eff94a`, probe update `fa99391a`; macOS 26.5.2,
+  release configuration for the live samplers, calibrated
+  `benchmark-confirm baseline=630b56e5` for the ladder.
+- What the mechanism is, in the shape the `D7` addendum prescribed:
+  - **The store.** `TerminalFrameBackingStore` (TerminalRenderExecution)
+    owns one grid-sized bitmap at backing-pixel resolution. `apply` realizes
+    a drained shift as a row-range move in owned memory (integral by
+    `cellHeightPixels`' construction), then renders the damaged rows through
+    the existing executor; `blit` hands any dirty rect to the window context
+    as one no-copy image draw. The window's store is only ever a blit
+    target, which is all `F22` left it fit for.
+  - **Exactness mechanics, stricter than the folded seam.** Byte-equality
+    against a from-scratch render surfaced a latent sub-pixel defect in the
+    folded path's halo use: erasing the haloed bands while planning only the
+    haloed rows drops an undamaged neighbor's overhanging descender ink
+    (about one pixel row at 2x on the shipped font, `F6`'s +1.13 px). The
+    store instead erases the haloed bands and plans the erase set's own
+    halo, so every erased band is rebuilt from all rows whose ink reaches
+    it; and a translation additionally redraws the region's two boundary
+    rows, whose imported and outward spill a pixel move cannot keep
+    correct. The folded path keeps its historical behavior, unchanged.
+  - **The view.** `publish` maintains one validity bit: apply while valid,
+    build only at a shift-carrying publish (one full render at the
+    flood-to-paced transition), zero mirror work on `.full`, and
+    `invalidateFullDisplay()` as the sole stale transition. `draw(_:)`
+    serves any dirty rect -- damage spans, AppKit's union coarsening, a
+    fresh layer store -- with one blit while valid, submitting no glyph
+    runs; every other state draws the folded path byte-for-byte as before.
+- Measurements, t5 probe (600 events, 179x66; before figures `F21`):
+
+  | scenario, 1 line/delivery | glyphs/frame before | glyphs/frame after | ideal |
+  | --- | ---: | ---: | ---: |
+  | `text-line` | 11,570 | **1,086** | 178 |
+  | `text-line-at-budget` | 11,570 | **1,086** | 178 |
+  | `bare-newline` | 636 | **76** | 0 |
+  | `rewrite-bottom-row` control | 356 | 356 | 178 |
+  | `text-line` at 91/delivery (flood) | 11,570 | 11,570 | 11,290 |
+
+  The 10.7x fall stops 6.1x above the ideal because exactness costs rows:
+  the damage pair plus two boundary rows, erase-haloed, planned at the
+  erase set's halo, is seven full-width run rows per scrolled frame. `T14`'s
+  derived-overshoot halo (`F6`: no upward ink escape on the shipped font)
+  is the named lever for most of that residue. The flood row is the
+  containment policy working: `.full` frames never touch the mirror, and
+  the control never builds one.
+- Measurements, live (`t9-lines-per-delivery.sh --seconds 10`, release):
+  paced 30/s publishes 0 full-damage frames at 2.0 damaged rows per
+  scrolled line (240/s: 1.42, 960/s: 1.11, both `T10` batching); the `cat`
+  flood stays `.full` on 854 of 858 publishes. `t4-publish-rate.sh`:
+  publishes per draw hold at exactly 1.0 with draws at the pane's display
+  cadence -- `F20`'s deadline is undisturbed by the new draw path.
+- Measurements, the paired benchmark (`benchmark-confirm
+  baseline=630b56e5`, the last pre-mirror commit):
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | inconclusive (+0.76%) |
+  | `scrollback-stream` | **faster (-3.55%**, 4 pairs; draw tail 18.7 -> 17.0 ms) |
+  | `content-churn` | inconclusive (-1.20%) |
+  | `style-churn` | **faster (-6.33%**, 4 pairs) |
+  | `incremental-mixed` | inconclusive (+1.39%; process CPU +8.33% descriptive) |
+  | `retained-browse` | equivalent (+0.08%) |
+
+  `F21` recorded a +2.46% calibrated `scrollback-stream` cost as an open
+  trade; this change reverses it to a calibrated `faster`. The mechanism is
+  consistent with the flood's rare shift-carrying frames: the one frame per
+  region-height that used to fold a region-wide glyph redraw into the draw
+  now renders into the mirror at publish and blits at draw, and the draw
+  tail is what moved. The trade `F21` left open is closed.
+- Verification:
+  - `FrameBackingStoreTests`: byte-equality of translate-plus-damaged-render
+    against a from-scratch render, blitted, across below-budget streaming,
+    at-budget streaming (eviction-frozen `topRow`), composed multi-line
+    deliveries, `DECSTBM` sub-region scrolls, row-only damage, refusal
+    no-ops, and clipped blits. This is the gate that replaced `D7`'s live
+    pixel proof after `F22` showed macOS 15+ leaves an unattended probe no
+    readback channel.
+  - UI harness path-selection pins: build-then-blit, incremental apply,
+    `.full` staleness, no build without a shift, refusal rebuild, resize
+    staleness. (The harness itself had not compiled since `F21` landed --
+    `630b56e5` repairs the file list and the shim's damage API; it is
+    excluded from the local gate, which is how the break went unnoticed.)
+  - `just test`: 75 of 75 steps; `test-ui`: 213 of 213.
+- Competing interpretations: the `scrollback-stream` `faster` could be code
+  layout rather than the draw-tail mechanism, exactly as `F21`'s cost was
+  majority-unattributable in the other direction; the draw-tail move
+  (18.7 -> 17.0 ms) is the measured component. The `incremental-mixed`
+  +8.33% descriptive process CPU is the one number consistent with mirror
+  maintenance cost (publish-side render plus blit in a mixed workload);
+  its calibrated wall-clock verdict is inconclusive, so it is an
+  observation to re-check, not a regression.
+- Uncertainty: the mirror adds one grid-sized bitmap per pane that enters
+  the paced-scroll regime (~28 MB for a full-screen 2x pane), retained for
+  the pane's lifetime; `benchmark-memory` was not run in this change and
+  the plan's accepted-risk entry carries the number. Byte parity live
+  depends on the mirror sharing the window's color space (the view passes
+  `window.colorSpace`); a window migrating across differently-profiled
+  displays goes through `viewDidChangeBackingProperties`'s full
+  invalidation, which stales and rebuilds the mirror.
+- Next action: none for `T9` -- both halves are landed and the task closes.
+  The named follow-ups now live with their owners: `T14` derives the halo
+  from measured ink overshoot (the 6.1x-over-ideal residue), and the
+  `wantsUpdateLayer` full-ownership alternative stays parked in the `D7`
+  addendum unless the blit ever shows up in a gate.

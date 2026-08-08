@@ -451,7 +451,7 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   records the mechanism as measured and unexplained. And `T10` gets *more* to
   recover, not less: the faster drain raised the delivery count 6% in three of
   five invocations.
-- [x] `T9` **ENGINE/PLANNER HALF LANDED (`F21`); view half open** -- **Give damage a shift component.** `moveAndFillRows` marks
+- [x] `T9` **DONE -- engine/planner half landed (`F21`), view half landed (`F23`)** -- **Give damage a shift component.** `moveAndFillRows` marks
   the whole scroll region damaged (`F5`). Ideal: damage carries
   `(region, delta, newlyFilledRows)`; the view realizes the shift as a
   backing-store translation and draws only the newly filled rows plus rows whose
@@ -503,6 +503,17 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   with AppKit's store demoted to a blit target; the `D7` addendum records the
   selected shape, the flood-tax containment policy, and the
   `wantsUpdateLayer` ownership alternative kept on the table.
+  **View half landed (`F23`):** paced-scroll glyph submission fell 11,570 to
+  1,086 per frame (ideal 178; the residue is exactness rows `T14`'s derived
+  halo can reclaim), the flood and the control are untouched by policy and
+  by counter, the paced live shape holds at 2.0 damaged rows per scrolled
+  line with publishes per draw at 1.0, and the calibrated ladder reads
+  `scrollback-stream` **`faster` -3.55%** -- the +2.46% open trade above is
+  closed, reversed -- with `style-churn` `faster` -6.33% and nothing
+  regressing. The byte-equality gate also surfaced a latent sub-pixel halo
+  defect in the folded seam (an undamaged neighbor's descender ink is
+  erased and not redrawn); the mirror path fixes it structurally, the
+  folded path keeps its historical behavior.
 - [x] `T10` DONE -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.
@@ -779,10 +790,11 @@ future reopening needs a new rule against new evidence.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
-run. Phase 2 is nearly banked: `T8` and `T7` landed as one change (`F16`,
-`F17`, `D6`), `T10` landed against `D8` (`F20`), and `T9`'s engine/planner
-half landed against `D7` with `T20` riding along (`F21`) -- its view half is
-the one Phase 2 slice still open.** `T1` sized the parser's
+run. Phase 2 is banked: `T8` and `T7` landed as one change (`F16`,
+`F17`, `D6`), `T10` landed against `D8` (`F20`), and `T9` landed against `D7`
+in both halves with `T20` riding along -- the engine/planner half in `F21`,
+the view half on the owned mirror store in `F23` after `F22` disqualified
+`scrollRect`.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough

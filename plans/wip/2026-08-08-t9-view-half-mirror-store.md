@@ -101,11 +101,13 @@ reverted.
 
 ## Commit progress
 
-- [ ] Mirror store type in the render-execution module with PO1's
-  byte-equality suite (green headless).
-- [ ] View integration: publish-side maintenance, draw-side blit, validity
-  transitions; PO4's harness pins.
-- [ ] Instrumentation reconciled (benchmark draw observation, t5 probe's
-  view-facing model) and PO2/PO3 recorded.
-- [ ] Live PO5 runs, calibrated ladder, research ledger closure (finding,
-  README `T9` entry, `D7` status).
+- [x] Mirror store type in the render-execution module with PO1's
+  byte-equality suite (green headless). (`0e92778d`)
+- [x] View integration: publish-side maintenance, draw-side blit, validity
+  transitions; PO4's harness pins. (`10eff94a`, harness repair `630b56e5`)
+- [x] Instrumentation reconciled (benchmark draw observation, t5 probe's
+  view-facing model) and PO2/PO3 recorded. (`fa99391a`; PO2 glyphs/frame
+  11,570 -> 1,086, PO3 ladder non-regressing with `scrollback-stream`
+  `faster` -3.55%)
+- [x] Live PO5 runs, calibrated ladder, research ledger closure (finding
+  `33/F23`, README `T9` entry, `D7` status).
