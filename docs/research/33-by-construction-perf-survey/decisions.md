@@ -269,9 +269,12 @@ rediscovering them.
 
 ### D7 -- shift damage is recorded at the scroll site, carried in the damage value, and realized in two independently gated halves
 
-- Status: **direction set.** This is `T9`'s Phase 2 direction-gate entry;
-  implementation may start against it. The claim is a **countable one under
-  `D1`**, stated per regime: in the paced regime, damaged rows per scrolled line
+- Status: **direction set; the engine/planner half is implemented and landed
+  against it, with the `T20` rider -- `F21` records the result** (damaged rows
+  per scrolled line 66 -> 2, planner inspection 33x down, zero escalations,
+  both regimes draining the same shift value). The view half -- the
+  backing-store translation -- remains open and is the next slice. The claim
+  is a **countable one under `D1`**, stated per regime: in the paced regime, damaged rows per scrolled line
   fall from the whole viewport (66 at the canonical geometry, 40 at `F19`'s) to
   O(1), and submitted glyph occurrences approach the changed cells plus the
   halo. **No wall-clock percentage is claimed**, because the ladder corpora at

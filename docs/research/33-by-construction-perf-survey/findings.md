@@ -1804,3 +1804,215 @@ performance verdict.
   remains open instrument debt for future feed-path claims. `F18`'s parked
   instrumentation (`bench/plan-thread-cpu`) landed by cherry-pick in the
   commit after this task's, discharging its "once the tree is clean" wait.
+
+### F21 -- the scroll site records the shift and the planner translates across it: damaged rows per scrolled line fall 66 to 2, planner inspection falls 33x, and the escalation rate falls to zero in both history regimes
+
+- Status: implemented and verified; this is the engine/planner half of `T9`
+  landed against `D7`, with `T20` riding along as `D2` and `30/D2`'s
+  reopening clause required. The claim is the countable one `D7` stated, per
+  regime, and every number below is a count. The view half -- the
+  backing-store translation that would take submitted glyphs from 11,570
+  toward the ideal -- is deliberately not in this change: the drawing seam
+  folds the shift into region-wide row damage (`clipFramePlan`,
+  `SwiftTerminalSessionView.publish`), so drawn pixels are byte-identical to
+  before while the planner's half is banked and separately revertible.
+- Date and investigator: 2026-08-08, T9 engine/planner implementation agent.
+- Commit and worktree state: working tree on `ea6ea661` (post-`T10`), Apple
+  Swift 6.3.3, arm64-apple-macosx26.0; release configuration for the live
+  sampler, `-O` single-module build for the t5 probe.
+- Commands, inputs, or reproduction:
+  `scripts/research/33/t5-scroll-amplification.py --events 600` (now with a
+  `text-line-at-budget` arm and an eviction-corrected ideal);
+  `scripts/research/33/t9-lines-per-delivery.sh --seconds 10` (now reporting
+  measured `damagedRowsPerScrolledLine` from the per-publish trace instead
+  of the pre-`T9` whole-grid assumption);
+  `scripts/research/33/t9-shift-damage-structure.sh` (the `T20` rider's
+  structural gate); `just test` (75 steps); the four new suites named below.
+- What the mechanism is, in the shape `D7` prescribed:
+  - **Representation (`T20` rider).** `TerminalDamage` carries a
+    width-bounded word bitset end to end plus at most one
+    `TerminalDamageShift(region:delta:)`; `.full` carries neither. The
+    drain builds no `Set`, spans and row walks come out canonical from the
+    word scan with no sort, `init(rows:)`'s negative-row sanitizer is a
+    precondition (an out-of-range row fails to construct; the pinning test
+    is replaced by an exit test), and the halo is `w | w<<1 | w>>1` with a
+    tail mask. Composition is `D7`'s contract verbatim: a later shift
+    translates pending rows within its region and drops rows pushed out,
+    same-region deltas sum and collapse to region rows at the region
+    height, a region mismatch escalates to `.full`, and `.full` absorbs
+    everything -- implemented identically in the accumulator and in the
+    public `formUnion` the pane session coalesces with.
+  - **Scroll site.** `moveAndFillRows` owns damage recording
+    (`recordScrollDamage`): a shift plus the vacated strip plus at most two
+    cursor rows (the retained planner bakes the block cursor into its row's
+    runs, so the previous frame's cursor image rides the translation to
+    `cursor.row + delta` and the cursor's own row needs a fresh bake --
+    `D7`'s "at most two cursor rows above the ideal", measured below as
+    exactly the bare-newline residue). Fallbacks are the contract's worst
+    cases and never exceed the pre-shift representation: not-following
+    escalates `.full` as before; a full-turnover move records range rows;
+    an active overlay (selection, search occurrence, hovered or armed
+    link) refuses translation except for the one scroll whose overlays are
+    content-anchored in the direction content moves -- a whole-viewport
+    scrollback push -- falling back to range rows for non-pushing scrolls
+    and to `.full` for a partial-region push.
+  - **Guard narrowing.** `DamageActionSnapshot` now carries the
+    eviction-corrected `absoluteViewportTopRow` plus a monotone
+    shift-accounted advance counter (an `ObservationGeneration`, outside
+    value equality); `recordDamage(from:to:)` escalates only a viewport
+    advance the recorded shifts do not account for. Because the absolute
+    top advances by exactly the pushed amount in both regimes, below-budget
+    and at-budget scrolls drain the same shift-carrying value -- `F19`'s
+    second rider made structural -- while resize, alternate-screen flips,
+    not-following, and any unaccounted move still escalate exactly as
+    before.
+  - **Planner.** `FramePlanner.plan` reuse is translation-aware: viewport
+    row `r` replans when damaged, reuses retained row `r - delta` (runs
+    rewritten to name `r`) inside the shifted region, and reuses `r`
+    untranslated outside it.
+- Measurements, t5 probe (600 events, 179x66, before figures from `F13`):
+
+  | scenario, 1 line/delivery | rows/frame | ideal | planner rows/frame | planner cells/frame | `.full` frames | glyphs/frame |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `text-line` before (`F13`) | 66 (`.full`) | 2.0 | 66 | 11,814 | 100% | 11,570 |
+  | `text-line` after | **2.0** | 2.0 | **2.0** | **358** | **0%** | 11,570 |
+  | `text-line-at-budget` after | **2.0** | 2.0 | **2.0** | **358** | **0%** | 11,570 |
+  | `bare-newline` after | 2.0 | 1.0 | 2.0 | 358 | 0% | 636 |
+  | `rewrite-bottom-row` control | 1.0 | 1.0 | 1.0 | 179 | 0% | 356 |
+
+  At 8 lines per delivery the after reads 9.0 rows against ideal 9.0; at 91
+  (one 16 KiB turn) it reads 64.4 against ideal 64.4 with 6 of 7 frames
+  `.full` -- `F13`'s 1.0x flood end, where the composition collapses at the
+  region height and the flood fast path deliberately returns to `.full`
+  once pending damage covers the viewport, restoring the pre-`T9`
+  zero-cost delivery tail. The control is unmoved at 1.0 rows and
+  356 glyphs, and the at-budget arm is byte-identical to below-budget at
+  every delivery size. Glyphs per frame stay at 11,570 with the folded
+  (view-facing) rows at 66: that is the view half, intact by design.
+- Measurements, live (`t9-lines-per-delivery.sh`, release, 40-row grid,
+  per-publish trace; the before arm is `F19`'s retained capture, which
+  predates `T10` as well -- publish counts differ for that reason, but the
+  per-line damage shape is `T9`'s dimension alone):
+
+  | scenario | full-damage publishes (before -> after) | damaged rows per scrolled line (before -> after) |
+  | --- | ---: | ---: |
+  | paced 30/s | 184 of 369 -> **0** of 307 | 39.7 -> **2.0** |
+  | paced 240/s | 1,416 of 2,880 -> 0 of 945 | 39.9 -> 1.39 |
+  | paced 960/s | 5,096 of 11,497 -> 0 of 1,049 | 39.9 -> 1.11 |
+  | `cat` full speed | 18,410 of 18,415 -> 782 of 787 | whole grid -> whole grid (`.full`, by the flood fast path) |
+
+  Before, a scrolled line touched the whole 40-row grid however it was
+  expressed -- `.full` below the budget, a whole-viewport row set at it
+  (the 0.5 full-damage share is eviction's chunking flipping between the
+  two). After, the paced steady state -- the regime `F19` measured at one
+  whole screen per line -- publishes exactly the vacated row plus the
+  cursor pair. The flood deliberately stays `.full`: `F13` measured its
+  amplification at 1.0x, so once accumulated damage covers the viewport
+  the fast path stops paying shift bookkeeping for a translation no
+  consumer can exploit, and the drained shape there is byte-for-byte the
+  pre-`T9` one.
+- Verification, equivalence gates (all passing):
+  - `TerminalShiftDamageTests` (value/composition semantics, the exit test
+    that replaces the sanitizer pin) and `TerminalScrollShiftDamageTests`
+    (scroll-site behavior in nine scenarios, including the at-budget arm
+    asserting the identical drained value across 200 eviction-frozen
+    scrolls).
+  - `ShiftDamagePlanningTests`: reused plan equals from-scratch plan on
+    every frame across below-budget, at-budget, DECSTBM-footer,
+    alternate-screen, selection-over-push, overlay-fallback, and
+    IL/DL-around-cursor scenarios, each asserting its shifted-frame count
+    so it cannot pass vacuously.
+  - `RenderCorpusPlanningTests`: the corpus-wide overlay and row-reuse
+    equalities now run with shift-carrying damage over every danterm and
+    libvterm fixture.
+  - `ExecutorContractTests.shiftDamageRedrawMatchesFullFrame`: bitmap
+    equivalence at the drawing seam -- an incrementally redrawn scrolled
+    screen is byte-identical to a full redraw, whole-viewport and
+    `DECSTBM` sub-region.
+  - `just test`: 75 of 75 steps; 1,067 TerminalCore and 187 TerminalPTY
+    tests.
+- Measurements, the paired benchmark -- and this is the one gate that did
+  not land where `D7` expected. `D7` scoped the ladder as a non-regression
+  check "expected `equivalent`" because its 16 KiB framing sits at the 1.0x
+  flood end; the calibrated `benchmark-confirm baseline=HEAD` read:
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | equivalent (+0.09%) |
+  | `scrollback-stream` | **slower (+2.46%**, 4 pairs) |
+  | `content-churn` | inconclusive (+0.77%; process CPU -4.22%, descriptive) |
+  | `style-churn` | inconclusive (-0.83%; process CPU -3.63%, descriptive) |
+  | `incremental-mixed` | **faster (-6.12%**, 6 pairs; plan time -7.08%) |
+  | `retained-browse` | equivalent (-0.20%) |
+
+  The `scrollback-stream` cost was chased before being accepted as real.
+  The first implementation translated pending rows with a per-row loop and
+  read `slower` +19% (`quick`); replacing it with the word-level barrel
+  shift `D7`'s sketch named took the GUI drain to +0.4%, and a flood fast
+  path (once pending damage covers the whole viewport, a further shift
+  carries no information, so the site records `.full` and restores the
+  pre-`T9` zero-cost delivery tail) removed the rest of the drain delta.
+  What remains is sized by the committed
+  `t9-headless-drain-ab.py` (interleaved arms, the instrument `F17`'s
+  precedent trusts for drain-sized effects): **+1.60% median** across five
+  rounds, with an A/A control at -0.79% showing the ordering if anything
+  understates it -- so the true flood-drain cost is ~2%, agreeing with the
+  calibrated +2.46%. Attribution: every new symbol on the path
+  (`recordScrollDamage`, the shift compose, the guard, the drain) totals
+  0.66% of 11,293 feed samples, and the two arms' profile shapes are
+  identical frame for frame at sampling resolution -- the majority of the
+  cost is unattributable there, consistent with feed-loop code layout
+  shifting under the rewrite. The `quick` invocations along the way read
+  +10% to +19% on the same change, driven by a draw-tail metric that
+  swung 11.9-24.9 ms across four runs of both arms -- `18/D7`'s unbuilt
+  variance study, visible live.
+- Structural result (`T20`, measured as absence by
+  `t9-shift-damage-structure.sh`): the damage path holds no `Set`, no
+  hashing, and no sort anywhere from accumulator to consumer;
+  `TerminalDamageSpans.swift` and its free functions are deleted with
+  spans/halo as methods on the bounded value; `init(rows:)`'s
+  `filter { $0 >= 0 }` and `negativeRowsCannotEnterDamage` are deleted,
+  replaced by construction traps. `F11`'s per-frame apparatus -- 4 `Set`
+  allocations, 3 array allocations, 386-721 hash operations, the
+  never-needed `sorted()` -- is not zero-count at runtime; the sites are
+  gone from the source. One allocation honestly remains: the drain copies
+  the accumulator's word array (one or two words at these geometries) into
+  the drained value, so `T3`'s "zero allocations" is met for sets and
+  hashing but not to the last array; `t3-damage-round-trips.py` is retired
+  with a pointer to its successors.
+- Competing interpretations: the 2.0-rows figure could be read as the probe
+  measuring its own stimulus rather than production; the live trace is the
+  answer -- real paced producers in a real pane publish the same 2.0. The
+  planner-half glyph number (11,570 unchanged) could be read as the change
+  not paying; it is the scoped seam -- `17/F6` prices glyph submission per
+  occurrence, and that is exactly the view half `D7` ordered second.
+- Uncertainty: the modified t5 script cannot run against the pre-change
+  engine (its probe consumes the new seam API), so the before column is
+  `F13`'s recorded run rather than a same-day re-run; both are exact counts
+  of deterministic stimuli, so the comparison is not timing-sensitive. The
+  live sampler's paced-240/960 rows-per-line below 2.0 reflect `T10`'s
+  batching (several lines share one publish's vacated-plus-cursor rows),
+  not additional `T9` machinery.
+- Inference, and the open trade this half leaves on the table: the paced
+  regime -- `F19`'s common producer shape -- stops paying a whole screen of
+  planning per line, `incremental-mixed` reads a calibrated `faster`
+  -6.12%, and the flood end pays a calibrated +2.46% on
+  `scrollback-stream`, two thirds of it unattributable to any new symbol.
+  `D7` predicted `equivalent` there and was wrong by that margin; the
+  README's task entry carries the deviation so the decision to keep, spend
+  further effort on, or revert the flood cost is made in the open rather
+  than defaulted. The precedent that parked `T7` at +1.7% differs in one
+  material way: `T7`'s win was unpaid at the time, while `T9`'s is counted,
+  live, and in a regime no ladder workload can contain.
+- Next action: the view half -- `scrollRect`-style backing-store
+  translation behind the same bitmap gate, retiring the fold in
+  `clipFramePlan` and `publish` -- is now the smallest remaining slice of
+  `T9` and owns the glyph dimension (11,570 to ~178 plus halo). `F20`'s
+  draw-bound-cycle observation predicts the flood's publish rate rides up
+  toward the display ceiling once whole-screen planning stops being the
+  cycle's cost; re-run `t4-publish-rate.sh` after the view half to check.
+  If the flood-drain +2.46% is judged worth further work before that, the
+  two named leads are the feed-loop layout (the unattributed majority) and
+  an earlier flood cutover in `recordScrollDamage` (escalate at half the
+  region height instead of full coverage, trading the tail of `F13`'s
+  decaying curve for drain cycles).

@@ -451,7 +451,7 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   records the mechanism as measured and unexplained. And `T10` gets *more* to
   recover, not less: the faster drain raised the delivery count 6% in three of
   five invocations.
-- [ ] `T9` VETTING -- **Give damage a shift component.** `moveAndFillRows` marks
+- [x] `T9` **ENGINE/PLANNER HALF LANDED (`F21`); view half open** -- **Give damage a shift component.** `moveAndFillRows` marks
   the whole scroll region damaged (`F5`). Ideal: damage carries
   `(region, delta, newlyFilledRows)`; the view realizes the shift as a
   backing-store translation and draws only the newly filled rows plus rows whose
@@ -484,6 +484,19 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
   (planner translation-aware reuse first, view backing-store translation
   second, each behind a bitmap-equivalence gate), with `T20` riding along per
   `D2`. The claim is countable, not timed.
+  **Engine/planner half landed (`F21`):** damaged rows per scrolled line fell
+  66 to 2 (the vacated row plus the cursor pair), planner inspection fell
+  33x (66 rows / 11,814 cells to 2 / 358 per scrolling frame), the topRow
+  escalation rate fell to zero, and the at-budget arm drains a value
+  byte-identical to below-budget -- verified live at 2.0 damaged rows per
+  scrolled line on a real paced pane. The view still repaints the folded
+  region (glyphs unchanged at 11,570), which is the remaining half: the
+  backing-store translation that retires the fold in `clipFramePlan` and
+  `SwiftTerminalSessionView.publish`. **One gate deviated from `D7`'s
+  expectation:** the calibrated ladder reads `incremental-mixed`
+  `faster -6.12%` but `scrollback-stream` `slower +2.46%` at the flood end
+  (headless interleaved A/B +1.6%, only 0.66% attributable to new code) --
+  recorded in `F21` as an open trade rather than silently accepted.
 - [x] `T10` DONE -- **Bound publish rate by consumer demand.** `T4`'s gate is
   passed: `F12` measured 594 publishes/s against 120 draws/s live, so five of
   every six published frames are overwritten before any display pass sees them.
@@ -617,7 +630,7 @@ reopening condition, and argues that condition is met.
   **Do not pitch this as "a smaller cell"** -- `28/D10` and `16/D1` settled
   stride-for-its-own-sake, and this competes with `28/H8`, which moves *when* the
   encode runs where this deletes *what* it encodes.
-- [ ] `T20` RESEARCH -- **Damage carries words end to end.** Named independently
+- [x] `T20` **LANDED as `T9`'s rider (`F21`)** -- **Damage carries words end to end.** Named independently
   by four of six verticals (`F2`). Claims **complexity, not speed**, and that is
   sufficient under `D1`: a width-bounded bitset makes an out-of-range row
   unrepresentable, so `init(rows:)`'s `filter { $0 >= 0 }`, the test that pins
@@ -633,6 +646,13 @@ reopening condition, and argues that condition is met.
   a rider on `T9` or `T14`, which do exactly that. Do not claim a percentage:
   `17/F5` measured `clipFramePlan` at 0.05% and 0.00%, and `31/F18` rates
   `incremental-mixed` at 4.9 points. See `D2`.
+  **Landed with `T9`'s engine/planner half (`F21`):** the seam carries words
+  plus the optional shift end to end, the sanitizer/sort/`Set` apparatus is
+  deleted rather than zero-counted (`t9-shift-damage-structure.sh` measures
+  the absence), and out-of-range rows fail to construct. One honest residue:
+  the drain still copies the accumulator's one-or-two-word array into the
+  drained value, so "zero allocations" holds for sets and hashing, not to
+  the last array.
 - [ ] `T21` RESEARCH -- **Stop retaining `lastPlannedTerminal`.** `planIfNeeded`
   runs a deep whole-`Terminal` equality one line after `pendingDamage != .none`,
   and retaining the previous generation holds a second reference to every arena
@@ -753,9 +773,10 @@ future reopening needs a new rule against new evidence.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
-run. Phase 2 has begun: `T8` and `T7` have both landed as one change (`F16`,
-`F17`, `D6`), and `T9` and `T10` remain -- both fully vetted (`F19`), with
-directions set in `D7` and `D8`.** `T1` sized the parser's
+run. Phase 2 is nearly banked: `T8` and `T7` landed as one change (`F16`,
+`F17`, `D6`), `T10` landed against `D8` (`F20`), and `T9`'s engine/planner
+half landed against `D7` with `T20` riding along (`F21`) -- its view half is
+the one Phase 2 slice still open.** `T1` sized the parser's
 action array in situ (`F9`) and passed `T2`'s gate, and `T2` then sized the
 per-printed-cell bookkeeping (`F10`) and found the expected shape exactly --
 every named site runs once per printed character, and ASCII runs are long enough
@@ -975,3 +996,41 @@ countable under `D1`: `t4-publish-rate.sh` must read ~120 publishes/s against
 a held 120 draws/s, fence stall must fall by the same ~13x, and `F18`'s churn
 plan-metric `slower` -- composition, not cost -- should reverse, because the
 extra plans it counted are exactly the publishes the deadline deletes.
+
+**`T10` then landed against that direction (`F20`)**: publishes per draw fell
+10.45 to 0.997 live with the paced 30/s scenario unchanged to the third
+digit, flood throughput rose 25%, and `F18`'s churn plan-metric `slower`
+reversed to `faster` with candidate blocks planning exactly one frame per
+draw. The urgent classes ride the update signal as a small payload, so doc
+25's occluded-tier rejection stays answered rather than reintroduced.
+
+**`T9`'s engine/planner half then landed against `D7`, with `T20` riding
+along (`F21`).** The scroll site records `(region, delta)` at
+`moveAndFillRows`; the damage value carries it end to end over a
+width-bounded word bitset; the accumulator and the session's `formUnion`
+implement `D7`'s composition contract identically; the `topRow` guard
+escalates only viewport advances no recorded shift accounts for, which is
+what makes both history regimes drain the same value; and the planner reuses
+retained rows across the translation. The counts land where `D7` said they
+must: damaged rows per scrolled line fall 66 to 2 (vacated row plus the
+cursor pair), planner inspection falls 66 rows / 11,814 cells to 2 / 358 per
+scrolling frame, the escalation rate falls to zero at every delivery size,
+the at-budget arm is byte-identical to below-budget, and a real paced pane
+publishes 2.0 damaged rows per scrolled line with zero full-damage
+publishes. `T20`'s deletion is measured as absence by
+`t9-shift-damage-structure.sh` -- no set, no hashing, no sort anywhere on
+the damage path, out-of-range rows unconstructable -- with one honest
+residue (the drain still copies its one-or-two-word array). The equivalence
+gates are the corpus-wide reuse equality, seven directed scenario suites
+including at-budget and overlay arms, and a bitmap-identity test at the
+drawing seam. The calibrated ladder splits: `incremental-mixed` reads
+`faster -6.12%`, `terminal-feed` and `retained-browse` `equivalent`, and
+`scrollback-stream` -- the flood end, where `T9` claims nothing -- reads
+`slower +2.46%`, of which only 0.66% attributes to any new symbol; `F21`
+records the chase (a 19% per-row-loop mistake fixed by the word-level
+shift, a flood fast path back to `.full`) and leaves the residue as an
+open trade with two named leads. What remains of `T9` is the view half:
+the drawing seam still folds the shift into region rows (glyphs per
+scrolling frame unchanged at 11,570), and the backing-store translation
+that retires that fold -- behind the same bitmap gate, separately
+revertible -- is the doc's next slice.
