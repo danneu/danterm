@@ -120,9 +120,9 @@ BLOCK_CONTRACTS = {
     # The two sparse-span workloads, whose contract includes a shape as well as a
     # count: a block means nothing unless every accepted draw's published engine
     # damage carried exactly these rows and spans. `metric` differs between them
-    # by design (research/29/D2) -- losing exact sparse clipping widens the
-    # synchronous draw, while per-row rectangle emission moves Core Animation
-    # clip replay, which happens after that bracket closes.
+    # by design (research/29/D2). Losing exact sparse clipping widens the
+    # synchronous draw; the max-span candidate retains its historical all-thread
+    # CPU quantity but has no frozen rule.
     "sparse-spans-few": {
         "metric": "draw-nanoseconds-per-draw",
         "measuredUnit": "serialized-completed-draw",
@@ -150,6 +150,16 @@ BLOCK_CONTRACTS = {
         "stimulusIdentity": RETAINED_BROWSE_IDENTITY,
     },
 }
+
+# T25 moved software rasterization into the serialized draw bracket. The draw
+# cells below were re-screened on the post-T25 bracket at tree cb0b9d233d49
+# (research/33/F28), using 24 A/A pairs and a separate 100,000-trial freeze:
+#   content-churn  median -0.42%, SD 1.34%, range -3.55%..+2.40%
+#   style-churn    median +0.46%, SD 1.45%, range -4.20%..+2.60%
+# Incremental-mixed had SD 15.14% and no eligible cell through 160 pairs, so it
+# deliberately keeps a schedule but no threshold and therefore issues no
+# verdict. That preserves the coverage split in
+# docs/design/2026-07-27-damage-render-benchmark-routing.md#D2.
 DECISION_RULES = {
     "quick": {
         "effectPercent": 5,
@@ -166,15 +176,14 @@ DECISION_RULES = {
             },
             "content-churn": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 4.05,
+                "directionalThresholdPercent": 2.0,
             },
             "style-churn": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 4.05,
+                "directionalThresholdPercent": 2.0,
             },
             "incremental-mixed": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 3.8,
             },
             # Source: two independent A/A screens (research/28/F5, research/28/F6), 24 pairs each,
             # 50,000 resampling trials per condition. Both proposed exactly this
@@ -232,15 +241,14 @@ DECISION_RULES = {
             },
             "content-churn": {
                 "pairCount": 4,
-                "directionalThresholdPercent": 2.15,
+                "directionalThresholdPercent": 1.5,
             },
             "style-churn": {
                 "pairCount": 4,
-                "directionalThresholdPercent": 2.0,
+                "directionalThresholdPercent": 1.75,
             },
             "incremental-mixed": {
                 "pairCount": 6,
-                "directionalThresholdPercent": 1.85,
             },
             # Source: the same two screens (research/28/F5, research/28/F6). This is the
             # *conservative envelope* across them, not either one's proposal --
@@ -1380,6 +1388,7 @@ def make_persistent_draw_runner(
             "start-ack",
             "start-draw-ack",
             "ready-draw-ack",
+            "swapchain-ready-ack",
             "final-draw.json",
             "block-state.json",
             "producer-write.json",
@@ -1423,6 +1432,8 @@ def make_persistent_draw_runner(
                     (artifacts / "start-draw-ack").exists(),
                 "settlingDrawCompleted":
                     (artifacts / "ready-draw-ack").exists(),
+                "surfaceBuffersSettled":
+                    (artifacts / "swapchain-ready-ack").exists(),
             },
             "producerWrite": producer,
             "finalDraw": {**draw, "available": "waitExpired" not in draw},
@@ -1434,8 +1445,6 @@ def make_persistent_draw_runner(
 ACCEPTED_DRAW_TOPOLOGY_SERIES = (
     "engineDamagedRowCounts",
     "engineSpanCounts",
-    "haloDamagedRowCounts",
-    "haloSpanCounts",
     "clipDamagedRowCounts",
     "clipSpanCounts",
 )
@@ -1475,10 +1484,10 @@ def _accepted_draw_topology_reasons(
     current over the damage composed since that buffer was last displayed, so its
     row span measures buffer depth rather than the stimulus.
 
-    Renderer behavior -- dirty-rect fallback, full clip damage -- is carried on
-    the block and judged nowhere here. A synthesized known-bad arm deviates
-    exactly there, and rejecting its draws would turn the regression being
-    measured into an unmeasured block.
+    Renderer behavior -- including full clip damage -- is carried on the block
+    and judged nowhere here. A synthesized known-bad arm deviates exactly there,
+    and rejecting its draws would turn the regression being measured into an
+    unmeasured block.
     """
     contract = BLOCK_CONTRACTS[workload]
     if topology is None and instrumented is False:
@@ -1570,11 +1579,10 @@ def _collect_draw_churn(
             else None
         )
         # Reported, never validated, on the same terms as plan time above -- and
-        # uncalibrated on top of that, so nothing may classify against it yet. It
-        # is CPU summed over every thread, which is the only quantity here that
-        # can see work the main-thread draw timer structurally cannot: doc 17's
-        # `F6` found the app's largest single cost on the display-list replay
-        # threads, invisible to `drawNanosecondsPerDraw` at any size.
+        # uncalibrated on top of that, so nothing may classify against it. It is
+        # CPU summed over every thread and can expose work outside the main-thread
+        # owned-surface render. T25 removed the asynchronous replay that originally
+        # motivated the quantity.
         cumulative_cpu = draw.get("cumulativeProcessCPUNanoseconds")
         normalized_cpu = (
             cumulative_cpu // 50
@@ -1638,6 +1646,7 @@ def _collect_draw_churn(
         if not all((
             reset.get("denseSetupAndStartDrawCompleted") is True,
             reset.get("settlingDrawCompleted") is True,
+            reset.get("surfaceBuffersSettled") is True,
         )):
             _append_reason(reasons, f"{prefix}-reset-not-settled")
         if (
@@ -1660,7 +1669,7 @@ def _collect_draw_churn(
             _append_reason(reasons, f"{prefix}-cumulative-draw-mismatch")
         # `expected_dirty_rows` (and with it `damage_reason`) is None exactly for
         # the sparse-span workloads, whose bounding dirty rectangle spans the
-        # union of their halo spans and so cannot describe their topology; the
+        # union of their damaged rows and so cannot describe their topology; the
         # engine-damage check below is what stands in its place.
         if expected_dirty_rows is not None and (
             len(dirty_rows) != 50
@@ -1793,7 +1802,7 @@ def collect_sparse_spans_few(blocks, *, run_block, topology_instrumented=None):
 
 
 def collect_sparse_spans_max(blocks, *, run_block, topology_instrumented=None):
-    """Collect the halo maximum: seventeen rows in seventeen spans at 66 rows."""
+    """Collect seventeen damaged rows in seventeen spans at 66 rows."""
     return _collect_sparse_spans(
         blocks,
         workload="sparse-spans-max",

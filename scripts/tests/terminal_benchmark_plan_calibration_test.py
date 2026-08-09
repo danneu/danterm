@@ -125,11 +125,21 @@ class MetricSelectionTests(unittest.TestCase):
                 "content-churn", _blocks([100, 100, 100, 100]), metric="process-cpu"
             )
 
-    def test_an_unknown_metric_is_refused_before_any_blocks_are_collected(self):
-        with self.assertRaises(ValueError):
-            PLAN_CALIBRATION.make_aa_schedule(("content-churn",), 1, metric="draw")
-        with self.assertRaises(ValueError):
-            PLAN_CALIBRATION.metric_workloads("draw")
+    def test_the_serialized_draw_metric_can_be_scheduled_for_calibration(self):
+        schedule = PLAN_CALIBRATION.make_aa_schedule(
+            ("content-churn", "style-churn", "incremental-mixed"),
+            1,
+            metric="draw",
+        )
+
+        self.assertEqual(
+            set(schedule),
+            {"content-churn", "style-churn", "incremental-mixed"},
+        )
+        self.assertEqual(
+            [block["measurementRole"] for block in schedule["content-churn"]],
+            list("ABBA"),
+        )
 
     def test_a_workload_is_refused_against_a_metric_it_does_not_carry(self):
         # `scrollback-stream` reports one final draw and never a per-draw CPU

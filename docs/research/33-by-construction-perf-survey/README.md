@@ -589,15 +589,15 @@ constraint among them except where noted.
   per frame against the ideal 178 (`bare-newline` 76 to 20; flood and control
   byte-stable), the byte-equality suite plus new mixed-content, decorated-
   neighbor, class-transition, and region-edge arms all hold, and the
-  calibrated ladder reads `incremental-mixed` **`faster` -13.23%** and
-  `scrollback-stream` `faster` -2.15% with everything else `equivalent` --
+  the then-current ladder observed `incremental-mixed` -13.23% descriptively
+  and `scrollback-stream` `faster` -2.15% with everything else `equivalent` --
   and the exact derivation surfaced a **latent edge-strip defect** in the
   boundary-row scheme (ghost spill under cursor-neutral `CSI S`/`CSI T`
   beside cell-escaping ink), pinned red-first and fixed by the strips. The ledger's
   original `sparse-spans-max` 50-to-34 gate predates T25's deletion of the
   view seam it measured and was retired with it; the benchmark topology's
-  `haloDamagedRowCounts` series is now a model of a deleted mechanism and
-  retires with the serialized-draw recalibration.
+  halo-derived series modeled a deleted mechanism and retired in `F28` with
+  the serialized-draw recalibration.
 - [ ] `T15` VETTING -- **Build sprite cell geometry once per metrics.** Geometry
   is a pure function of `(pattern, cellWidth, cellHeight, strokeWidth)` over a
   closed finite pattern domain, recomputed and reallocated per cell per draw.
@@ -667,14 +667,29 @@ constraint among them except where noted.
   CPU falls 65.2% to 38.0%, below the 45.1% of the pre-mirror arm that never
   had a mirror to pay for, measured interleaved so `F24`'s uncorrected-drift
   caveat is retired. `scrollback-stream` reads a calibrated `faster` -7.87%.
-  **Two riders the plan did not foresee.** The three serialized-draw cells now
-  read `slower` by ~160% because the bracket moved inside the rasterization,
-  so they carry no directional claim until they are re-screened -- the size of
-  that step is recorded in `agent-docs/terminal-performance.md`. And
+  **Two riders the plan did not foresee.** The three serialized-draw cells read
+  `slower` by ~160% because the bracket moved inside the rasterization; `F28`
+  re-screened that new bracket, freezing content/style rules and making
+  incremental descriptive by construction. And
   `incremental-mixed` could not produce a valid block at all until its draw
   acceptance moved off the rendered rectangle and onto the engine damage that
   caused it, because a render brings a stale swapchain buffer current over
   composed damage and never spans the frozen 6 rows.
+
+- [x] `T26` **DONE (`F28`)** -- **Re-arm serialized draw after T25 moved the
+  bracket.** A 24-pair post-T25 A/A screen plus an independent 100,000-trial
+  freeze set `content-churn` to quick 2p@2.0% / confirm 4p@1.5% and
+  `style-churn` to quick 2p@2.0% / confirm 4p@1.75%. `incremental-mixed` found
+  no eligible rule through 160 pairs, so it still collects its fixed blocks but
+  cannot issue a directional verdict; damage drawing stays routed to the
+  headless comparison under `docs/design/2026-07-27-damage-render-benchmark-routing.md#D2`.
+  The screen exposed a reset defect in which a cold swapchain buffer could
+  surface delayed setup damage. The producer and app now handshake until every
+  buffer has rendered the latest whole-frame generation, and validation rejects
+  a block without that proof. Eight full identical-source `confirm` invocations
+  made no false directional claim on any serialized-draw cell. The same change
+  deletes `usedDirtyRectFallback`, both halo-derived topology series, and the
+  obsolete Core Animation replay blind-spot guidance.
 
 ### Phase 4 -- gated reopens and larger bets
 

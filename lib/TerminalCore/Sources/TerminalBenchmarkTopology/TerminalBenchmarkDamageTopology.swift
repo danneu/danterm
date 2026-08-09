@@ -122,12 +122,9 @@ public struct TerminalBenchmarkDamageTopologyRecorder {
     public private(set) var acceptedDrawCount = 0
     public private(set) var engineDamagedRowCounts: [Int] = []
     public private(set) var engineSpanCounts: [Int] = []
-    public private(set) var haloDamagedRowCounts: [Int] = []
-    public private(set) var haloSpanCounts: [Int] = []
     public private(set) var clipDamagedRowCounts: [Int] = []
     public private(set) var clipSpanCounts: [Int] = []
     public private(set) var clipFullDamageCount = 0
-    public private(set) var dirtyRectFallbackCount = 0
 
     public init?(workload: String) {
         guard let shapes = Self.contracts[workload] else { return nil }
@@ -145,8 +142,7 @@ public struct TerminalBenchmarkDamageTopologyRecorder {
     public mutating func recordDrawIfTopologyMatches(
         engineDamage: TerminalDamage,
         clipDamage: TerminalDamage,
-        rowCount: Int,
-        usedDirtyRectFallback: Bool
+        rowCount: Int
     ) -> Bool {
         let engine = TerminalDamageTopology(engineDamage, rowCount: rowCount)
         guard engine.isFull == false,
@@ -157,20 +153,13 @@ public struct TerminalBenchmarkDamageTopologyRecorder {
                   )
               )
         else { return false }
-        let halo = TerminalDamageTopology(
-            engineDamage.expandingShift().withGlyphHalo(rowCount: rowCount),
-            rowCount: rowCount
-        )
         let clip = TerminalDamageTopology(clipDamage, rowCount: rowCount)
         acceptedDrawCount += 1
         engineDamagedRowCounts.append(engine.damagedRowCount)
         engineSpanCounts.append(engine.spanCount)
-        haloDamagedRowCounts.append(halo.damagedRowCount)
-        haloSpanCounts.append(halo.spanCount)
         clipDamagedRowCounts.append(clip.damagedRowCount)
         clipSpanCounts.append(clip.spanCount)
         if clip.isFull { clipFullDamageCount += 1 }
-        if usedDirtyRectFallback { dirtyRectFallbackCount += 1 }
         return true
     }
 
@@ -180,12 +169,9 @@ public struct TerminalBenchmarkDamageTopologyRecorder {
         acceptedDrawCount = 0
         engineDamagedRowCounts = []
         engineSpanCounts = []
-        haloDamagedRowCounts = []
-        haloSpanCounts = []
         clipDamagedRowCounts = []
         clipSpanCounts = []
         clipFullDamageCount = 0
-        dirtyRectFallbackCount = 0
     }
 
     /// Publishes the series in the block artifact's own shape, so the JSON keys
@@ -197,12 +183,9 @@ public struct TerminalBenchmarkDamageTopologyRecorder {
             "sampleCount": acceptedDrawCount,
             "engineDamagedRowCounts": engineDamagedRowCounts,
             "engineSpanCounts": engineSpanCounts,
-            "haloDamagedRowCounts": haloDamagedRowCounts,
-            "haloSpanCounts": haloSpanCounts,
             "clipDamagedRowCounts": clipDamagedRowCounts,
             "clipSpanCounts": clipSpanCounts,
             "clipFullDamageCount": clipFullDamageCount,
-            "dirtyRectFallbackCount": dirtyRectFallbackCount,
         ]
     }
 }

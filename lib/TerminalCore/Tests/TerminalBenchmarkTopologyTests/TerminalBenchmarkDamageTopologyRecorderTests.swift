@@ -39,15 +39,12 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let accepted = recorder!.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.fewSpanRows),
             clipDamage: Self.clip(for: Self.fewSpanRows),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(accepted)
         #expect(recorder!.acceptedDrawCount == 1)
         #expect(recorder!.engineDamagedRowCounts == [2])
         #expect(recorder!.engineSpanCounts == [2])
-        #expect(recorder!.haloDamagedRowCounts == [6])
-        #expect(recorder!.haloSpanCounts == [2])
         #expect(recorder!.clipDamagedRowCounts == [6])
         #expect(recorder!.clipSpanCounts == [2])
     }
@@ -64,14 +61,11 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let accepted = recorder!.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.maxSpanRows),
             clipDamage: Self.clip(for: Self.maxSpanRows),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(accepted)
         #expect(recorder!.engineDamagedRowCounts == [17])
         #expect(recorder!.engineSpanCounts == [17])
-        #expect(recorder!.haloDamagedRowCounts == [50])
-        #expect(recorder!.haloSpanCounts == [17])
         #expect(recorder!.clipSpanCounts == [17])
     }
 
@@ -96,15 +90,13 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let acceptedFirstUpdate = recorder!.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: firstUpdateRows),
             clipDamage: Self.clip(for: firstUpdateRows),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(acceptedFirstUpdate)
         let acceptedSettled = recorder!.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.incrementalMixedRows),
             clipDamage: Self.clip(for: Self.incrementalMixedRows),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(acceptedSettled)
         #expect(recorder!.engineDamagedRowCounts == [5, 4])
@@ -112,8 +104,7 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let acceptedWider = recorder!.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.incrementalMixedRows.union([10, 20])),
             clipDamage: .full,
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(acceptedWider == false)
         #expect(recorder!.acceptedDrawCount == 2)
@@ -135,8 +126,7 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let accepted = recorder.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.incrementalMixedRows),
             clipDamage: .full,
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         )
         #expect(accepted)
         #expect(recorder.engineDamagedRowCounts == [4])
@@ -155,32 +145,27 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         #expect(recorder.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: [5]),
             clipDamage: Self.clip(for: [5]),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         ) == false)
         #expect(recorder.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: [5, 6]),
             clipDamage: Self.clip(for: [5, 6]),
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         ) == false)
         #expect(recorder.recordDrawIfTopologyMatches(
             engineDamage: .full,
             clipDamage: .full,
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: false
+            rowCount: Self.rowCount
         ) == false)
         #expect(recorder.acceptedDrawCount == 0)
         #expect(recorder.engineSpanCounts.isEmpty)
-        #expect(recorder.haloSpanCounts.isEmpty)
         #expect(recorder.clipSpanCounts.isEmpty)
     }
 
-    @Test("Renderer fallback is recorded as measured behavior rather than rejecting the draw")
-    func rendererFallbackIsRecordedWithoutGatingAcceptance() {
-        // Intent: a draw whose stimulus topology is correct but whose renderer resolved
-        //   damage from the bounding dirty rectangle is still accepted, with the fallback
-        //   and the resulting clip topology recorded.
+    @Test("Full clip damage is recorded without gating acceptance")
+    func fullClipDamageIsRecordedWithoutGatingAcceptance() {
+        // Intent: a draw whose stimulus topology is correct but whose renderer used full
+        //   clip damage is still accepted, with the resulting clip topology recorded.
         // Why it exists: a synthesized known-bad arm deviates exactly at renderer damage
         //   resolution, so gating acceptance there would turn the regression this
         //   workload is meant to measure into an unmeasured block instead.
@@ -188,15 +173,13 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         let accepted = recorder.recordDrawIfTopologyMatches(
             engineDamage: TerminalDamage(rows: Self.fewSpanRows),
             clipDamage: .full,
-            rowCount: Self.rowCount,
-            usedDirtyRectFallback: true
+            rowCount: Self.rowCount
         )
         #expect(accepted)
         #expect(recorder.engineSpanCounts == [2])
         #expect(recorder.clipDamagedRowCounts == [66])
         #expect(recorder.clipSpanCounts == [1])
         #expect(recorder.clipFullDamageCount == 1)
-        #expect(recorder.dirtyRectFallbackCount == 1)
     }
 
     @Test("Every published series covers exactly the accepted draws")
@@ -212,8 +195,7 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
             _ = recorder.recordDrawIfTopologyMatches(
                 engineDamage: TerminalDamage(rows: engineRows),
                 clipDamage: Self.clip(for: engineRows),
-                rowCount: Self.rowCount,
-                usedDirtyRectFallback: false
+                rowCount: Self.rowCount
             )
         }
         #expect(recorder.acceptedDrawCount == 3)
@@ -226,7 +208,6 @@ struct TerminalBenchmarkDamageTopologyRecorderTests {
         )
         for key in [
             "engineDamagedRowCounts", "engineSpanCounts",
-            "haloDamagedRowCounts", "haloSpanCounts",
             "clipDamagedRowCounts", "clipSpanCounts",
         ] {
             #expect((artifact[key] as? [Int])?.count == 3, "\(key) lost accepted-draw coverage")

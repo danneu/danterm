@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Collect an A/A series for one auxiliary per-block metric and choose fixed-N rules from it.
+"""Collect an A/A series for one per-block metric and choose fixed-N rules from it.
 
-The paired comparison decides `faster`/`slower`/`equivalent` from the serialized
-draw metric alone. That metric brackets clipping and drawing on the main thread,
-so it structurally cannot observe `planFrame`, which runs on the PTY-output path,
-nor any work on another thread at all; those quantities are therefore reported
-beside the verdict as descriptive evidence with no thresholds behind them. Giving
-one a verdict needs exactly what the draw rules already have: an A/A series
-measuring the same tree against itself, and thresholds chosen so that series' own
+The same collector screens the serialized draw metric and the auxiliary plan or
+process-CPU quantities that ride its blocks. Every rule needs an A/A series
+measuring one tree against itself, with thresholds chosen so that the series' own
 noise almost never reads as a direction.
 
 Which quantity is screened is chosen per run by `--metric`, from
@@ -59,8 +55,8 @@ METRIC_TABLES = COMPARE.CALIBRATABLE_METRIC_TABLES
 DEFAULT_METRIC = "plan"
 QUARTET_PATTERNS = COMPARE.QUARTET_PATTERNS
 # The thresholds a rule may claim. Only the threshold is searched; the pair count
-# comes from the mode's existing draw rule, because an auxiliary metric is
-# measured on the same blocks and cannot buy itself more of them.
+# comes from the mode's existing workload schedule. An auxiliary metric rides
+# those blocks, while the deciding draw metric is what owns the schedule.
 THRESHOLD_GRID = tuple(round(1.0 + 0.25 * step, 2) for step in range(37))
 
 
@@ -68,9 +64,7 @@ def metric_workloads(metric):
     """Name the workloads whose blocks carry one metric, refusing an unknown metric by name.
 
     Only the workloads whose blocks carry a measurement can calibrate a rule for
-    it: `terminal-feed` never plans a frame and `scrollback-stream` reports one
-    final draw rather than a normalized per-draw series, so neither appears in any
-    auxiliary table. Refusing here rather than at pairing time is the point: an
+    it. Refusing here rather than at pairing time is the point: an
     unknown metric and a workload that never reports it are both mistakes that
     would otherwise surface only after the machine has spent an hour collecting.
     """
@@ -235,15 +229,14 @@ def propose_rule(
 ):
     """Choose the tightest threshold clearing every accuracy gate at a fixed pair count.
 
-    The pair count is not free to choose. Plan time is measured on the very same
-    blocks as the draw metric, so a plan rule can only ever be applied at the pair
-    count that mode's draw rule already collects; proposing a rule that needs more
-    would describe a schedule the comparison never runs.
+    The pair count is not free to choose. The mode owns one workload schedule,
+    so proposing a rule that needs more would describe blocks the comparison
+    never runs.
 
     Returns None when no threshold clears the gates at that pair count. That is a
-    real answer, not a failure to search harder: it says this workload's plan
-    timer is too noisy to decide with the blocks the mode collects, and the honest
-    response is to keep reporting its plan time descriptively.
+    real answer, not a failure to search harder: it says this quantity is too
+    noisy to decide with the blocks the mode collects, and the honest response is
+    to keep reporting it descriptively.
     """
     eligible = [
         threshold for threshold in thresholds
@@ -478,7 +471,7 @@ def main(argv=None):
         "--metric",
         choices=sorted(METRIC_TABLES),
         default=DEFAULT_METRIC,
-        help="which auxiliary per-block quantity to screen",
+        help="which per-block quantity to screen",
     )
     parser.add_argument(
         "--reanalyze",

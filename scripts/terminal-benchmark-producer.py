@@ -21,11 +21,12 @@ def localized_draw_update(sequence, row):
     ).encode()
 
 
-def localized_draw_ready(row):
+def localized_draw_ready(row, sequence=None):
     """Build the excluded settling update that drains setup invalidation."""
+    suffix = "" if sequence is None else f"-{sequence:02d}"
     return (
         f"\x1b[{row};1H"
-        "\x1b[38;2;129;202;191mDANTERM-BENCH-LOCALIZED-READY"
+        f"\x1b[38;2;129;202;191mDANTERM-BENCH-LOCALIZED-READY{suffix}"
         "\x1b[0m\x1b[K"
     ).encode()
 
@@ -195,6 +196,22 @@ def run_redraw_workload(*, workload, update_count, write, await_draw):
     for sequence in range(update_count):
         write(redraw_screen(workload, sequence))
         await_draw(sequence)
+
+
+def run_redraw_settling(*, row, write, prepare_ack, await_draw, is_ready):
+    """Serialize excluded renders until the app proves every surface is current.
+
+    Each update carries distinct visible content so the terminal must publish a
+    new frame; replaying identical bytes could be elided and falsely satisfy only
+    the per-draw acknowledgment. The app owns the stopping condition because only
+    it can inspect the swapchain.
+    """
+    sequence = 0
+    while not is_ready():
+        prepare_ack()
+        write(localized_draw_ready(row, sequence=sequence))
+        await_draw()
+        sequence += 1
 
 
 def wait_for_target_geometry(
@@ -426,12 +443,29 @@ def main():
                 environment["DANTERM_TERMINAL_BENCHMARK_START_DRAW_ACK"],
                 "timed out waiting for start frame draw",
             )
-            write_all(1, localized_draw_ready(max(1, target.lines // 2)))
-            acknowledgments.await_path(
-                "ready-draw-ack",
-                environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"],
-                "timed out waiting for localized settling draw",
-            )
+            ready_ack = environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"]
+            if redraw_update_count > 0:
+                swapchain_ready_ack = environment[
+                    "DANTERM_TERMINAL_BENCHMARK_SWAPCHAIN_READY_ACK"
+                ]
+                run_redraw_settling(
+                    row=max(1, target.lines // 2),
+                    write=lambda chunk: write_all(1, chunk),
+                    prepare_ack=lambda: Path(ready_ack).unlink(missing_ok=True),
+                    await_draw=lambda: acknowledgments.await_path(
+                        "ready-draw-ack",
+                        ready_ack,
+                        "timed out waiting for redraw settling draw",
+                    ),
+                    is_ready=lambda: Path(swapchain_ready_ack).exists(),
+                )
+            else:
+                write_all(1, localized_draw_ready(max(1, target.lines // 2)))
+                acknowledgments.await_path(
+                    "ready-draw-ack",
+                    ready_ack,
+                    "timed out waiting for localized settling draw",
+                )
             started = time.monotonic_ns()
             acknowledgment_prefix = environment[
                 "DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"

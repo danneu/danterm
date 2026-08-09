@@ -314,16 +314,16 @@ class FrozenDecisionTests(unittest.TestCase):
             "quick": (1.0, {
                 "terminal-feed": (2, 4.5),
                 "scrollback-stream": (2, 4.05),
-                "content-churn": (2, 4.05),
-                "style-churn": (2, 4.05),
-                "incremental-mixed": (2, 3.8),
+                "content-churn": (2, 2.0),
+                "style-churn": (2, 2.0),
+                "incremental-mixed": (2, None),
             }),
             "confirm": (0.75, {
                 "terminal-feed": (2, 2.5),
                 "scrollback-stream": (4, 1.85),
-                "content-churn": (4, 2.15),
-                "style-churn": (4, 2.0),
-                "incremental-mixed": (6, 1.85),
+                "content-churn": (4, 1.5),
+                "style-churn": (4, 1.75),
+                "incremental-mixed": (6, None),
             }),
         }
         for mode, (equivalence, workloads) in expected.items():
@@ -334,7 +334,7 @@ class FrozenDecisionTests(unittest.TestCase):
                 self.assertEqual(
                     (
                         rule["workloads"][workload]["pairCount"],
-                        rule["workloads"][workload]["directionalThresholdPercent"],
+                        rule["workloads"][workload].get("directionalThresholdPercent"),
                     ),
                     (pairs, threshold),
                     f"{mode}/{workload}",
@@ -351,6 +351,8 @@ class FrozenDecisionTests(unittest.TestCase):
             rule = COMPARE.decision_rule(mode)
             equivalence = rule["equivalenceBandPercent"]
             for workload, workload_rule in rule["workloads"].items():
+                if "directionalThresholdPercent" not in workload_rule:
+                    continue
                 threshold = workload_rule["directionalThresholdPercent"]
                 pair_count = workload_rule["pairCount"]
                 midpoint = (equivalence + threshold) / 2
@@ -382,13 +384,18 @@ class FrozenDecisionTests(unittest.TestCase):
         # Why it exists: completed comparisons forbid early stopping and selective
         #   extension; the fixed-N rule is only fixed if the runner refuses any
         #   other N.
-        # Scenario: a confirm incremental-mixed decision is attempted with five
-        #   and seven pairs instead of the frozen six.
-        for pair_count in (5, 7):
+        # Scenario: a confirm content-churn decision is attempted with three
+        #   and five pairs instead of the frozen four.
+        for pair_count in (3, 5):
             with self.assertRaises(ValueError):
                 COMPARE.decide_workload(
-                    "confirm", "incremental-mixed", [0.0] * pair_count
+                    "confirm", "content-churn", [0.0] * pair_count
                 )
+
+    def test_incremental_mixed_reports_no_directional_decision(self):
+        self.assertIsNone(
+            COMPARE.decide_workload("confirm", "incremental-mixed", [12.0] * 6)
+        )
 
     def test_detected_outliers_are_reported_without_being_deleted(self):
         # Intent: an extreme pair is flagged but still counted in the estimate.
@@ -1193,9 +1200,11 @@ class UncalibratedProcessCPUMetricTests(unittest.TestCase):
 
                 self.assertEqual(reported["metric"], "processCPUNanosecondsPerDraw")
                 self.assertAlmostEqual(reported["estimatePercent"], -30.0)
-                self.assertEqual(
-                    summary["workloads"][workload]["decision"]["decision"], "equivalent"
-                )
+                decision = summary["workloads"][workload]["decision"]
+                if workload == "incremental-mixed":
+                    self.assertIsNone(decision)
+                else:
+                    self.assertEqual(decision["decision"], "equivalent")
 
     def test_process_cpu_never_carries_a_verdict_in_either_mode(self):
         # Intent: the process-CPU summary reports `decision: None` and renders as

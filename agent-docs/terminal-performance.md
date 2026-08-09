@@ -119,26 +119,20 @@ that planning is a small term in that number; it is not in that number. So
 judging a planner change means reading the plan line, and a change that moves
 only planning correctly reads `equivalent` on all three draw verdicts.
 
-**That bracket moved, and its rules have not been recalibrated** (research/33
-`T25`). It used to sit inside `draw(_:)` and cover clipping plus glyph
-submission, with CoreAnimation replaying the recorded display list on its own
-queue *after* the draw returned -- outside the bracket. The pane now renders
-into its own IOSurface, so the rasterization that used to run off the bracket
-runs inside it. The number is therefore larger and measures more of a frame
-than it did, and it is not comparable to any figure recorded before the move.
-Until these cells are recalibrated, **read them descriptively and issue no
-directional claim from them**; the paired ladder still runs as a non-regression
-check, with that caveat recorded alongside its result.
+**T25 moved this bracket, and F28 recalibrated it on the new meaning.** The old
+bracket covered clipping and display-list submission; Core Animation replayed
+the list after `draw(_:)` returned. The pane now rasterizes into its own
+IOSurface inside the bracket. Post-T25 measurements are therefore not comparable
+to pre-T25 draw figures. The operational rules below apply only to the owned-
+surface bracket.
 
-**The size of the step, so nobody reads it as a regression** (research/33
-`F25`): measured across the move, all three cells read `slower` by about 160%
--- `content-churn` +163.1%, `style-churn` +163.2%, `incremental-mixed` +159.3%.
-That is the bracket swallowing work that was always being done, not new work.
-The cross-check is the process CPU line beside each of them, which is summed
-over every thread and so *can* see the display-list replay the old bracket
-could not: it moved +18.8%, +18.4%, and -8.7% on the same run. Read those, and
-the workloads whose metric spans a whole replay, until the three draw rules are
-re-screened.
+The post-move A/A screen retained directional rules for `content-churn` and
+`style-churn`. It found no eligible rule for `incremental-mixed`, even when the
+screen searched through 160 pairs. That cell still runs its six confirm pairs
+for diagnostic comparison, but it always prints `descriptive, no verdict --
+uncalibratable`. Use `benchmark-headless-draw` for a directional claim about
+small-damage drawing, per
+`docs/design/2026-07-27-damage-render-benchmark-routing.md#D2`.
 
 The churn rise is itself explained (research/33 `F26`): before the move,
 CoreAnimation shaded the full grid on the GPU, so no CPU account anywhere
@@ -255,10 +249,10 @@ auxiliary metric cannot do (`research/17/F15`). It writes a report and never a r
 ### `sparse-spans-max` is a topology diagnostic and issues no verdict
 
 This candidate serializes 50 draws at 179x66 whose engine damage is exactly 17
-rows in 17 maximal spans, expanded by the glyph halo to 50 drawing rows in the
-same 17 spans. Its primary reported quantity is whole-process CPU per accepted
-draw because the historical per-row renderer regression lived in asynchronous
-Core Animation work outside the synchronous draw bracket.
+rows in 17 maximal spans. Its primary reported quantity remains whole-process
+CPU per accepted draw for continuity with the candidate screen that admitted
+it. The old halo-derived topology series and asynchronous Core Animation replay
+it once diagnosed no longer exist.
 
 Do not promote that CPU quantity into a verdict. Three valid 24-pair A/A screens
 on 2026-08-06 produced incompatible calibration outcomes: two selected no cell,
@@ -271,27 +265,14 @@ make the CPU difference decision-bearing. See `research/29/D3`.
 
 ### The third reported quantity: whole-process CPU per accepted draw
 
-The draw verdict times elapsed work between two points on the **main thread**, so
-work on any other thread is invisible to it at any size. That is not a corner
-case: `research/17/F6` found the largest single cost
-in the app -- Core Animation recomputing every glyph's bounds while replaying the
-display list -- living entirely in that blind spot.
-
-So the three serialized-draw workloads also report
+The three serialized-draw workloads also report
 `processCPUNanosecondsPerDraw`: CPU time summed over **every thread**, taken from
 `task_info(TASK_ABSOLUTETIME_INFO)` and charged to each accepted draw as the delta
-since the previously accepted one. Measured at `4ecb032` (`research/17/F12`):
-
-| workload | draw (main thread) | process CPU (all threads) | ratio |
-| --- | ---: | ---: | ---: |
-| `content-churn` | ~540k ns | ~4.9M-5.2M ns | ~9.0x-9.5x |
-| `style-churn` | ~546k ns | ~5.2M ns | ~9.4x |
-| `incremental-mixed` | ~86k ns | ~2.0M ns | **~23x** |
-
-**The draw verdict therefore constrains about one ninth of what a frame costs on
-the churn workloads, and about one twenty-third on `incremental-mixed`.** An
-`equivalent` draw verdict is a true statement about the draw bracket and a nearly
-empty one about total cost. Read this line before concluding a change was free.
+since the previously accepted one. T25 removed the known asynchronous display-
+list replay that originally justified this quantity: software rasterization is
+now inside the main-thread draw bracket. Process CPU remains useful because it
+also includes parsing, planning, observer work, and any other process thread.
+It is a broad diagnostic, not a better draw timer.
 
 **And the churn workloads are frame-rate-capped, not CPU-bound.** `research/17/F16` traced
 `full-screen-content-churn` at 179x66 and at 80x25 -- a 5.9x change in per-frame
@@ -308,11 +289,9 @@ Four things it is not, each of which invites a misreading:
    as neutral. It answers "did we stop doing work" -- the right question for
    replay cost and the only one that maps to battery.
 2. **It is not a per-draw bracket.** The interval between two accepted draws
-   contains everything the process did in it: this draw, the *previous* draw's
-   asynchronous replay, parsing, planning, and the observer's own acknowledgment
-   writes. That width is deliberate -- replay does not finish inside the draw that
-   queued it, so any narrower bracket would exclude the thing worth measuring --
-   but it means the series is meaningful in aggregate, not at a single index.
+   contains everything the process did in it: this draw, parsing, planning, and
+   the observer's own acknowledgment writes. The series is meaningful in
+   aggregate, not at a single index.
 3. **It cannot be calibrated, so it never carries a verdict.** It is reported
    through `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no
    code path by which it can classify. That is settled, not pending: the A/A
@@ -324,7 +303,7 @@ Four things it is not, each of which invites a misreading:
    draw verdict -- if plan time and CPU shift by the same amount on a change with
    no causal path to planning, that is arm-level drift, and `research/17/F14` caught a
    spurious `faster` exactly this way. Use a CPU move with no draw move as a reason
-   to profile for off-main-thread work. Never use it to *confirm* a win, and never
+   to profile for work outside the render bracket. Never use it to *confirm* a win, and never
    quote a difference as an effect: on `style-churn`, 5 of 24 pure-noise pairs sit
    at or below -3.02%.
 4. **It includes the instrument**, which on `incremental-mixed` is a large term --
@@ -379,32 +358,27 @@ stronger six-workload evidence.
 
 ### What this instrument does on identical source (A/A), per workload
 
-Measured 2026-08-05 as `docs/research/31-logical-line-scrollback/findings.md`
-`F18`: **eight complete `confirm` invocations with both arms at byte-identical
-source**, one MacBookPro18,1, AC power, 179x66, no invalidated block. Read that
-entry for the evidence, the per-invocation pair series, and the caveats; what
-follows is the operational half.
+The non-draw cells below come from the 2026-08-05 control in `research/31/F18`.
+The three serialized-draw cells come from the post-T25 control in
+`research/33/F28`: eight complete `confirm` invocations whose source differed
+only by a Markdown marker, after a 24-pair screen and an independent 100,000-
+trial freeze. Both ran on one MacBookPro18,1 at 179x66.
 
 | workload | frozen threshold | worst A/A estimate seen | reading rule | directional A/A verdicts |
 | --- | ---: | ---: | --- | ---: |
 | `terminal-feed` | 2.50% | 0.86 | distrust differences under **0.9 points** | 0 / 8 |
 | `scrollback-stream` | 1.85% | 3.48 | distrust differences under **3.5 points** | **3 / 8** |
-| `content-churn` | 2.15% | 2.14 | distrust differences under **2.2 points** | 0 / 8 |
-| `style-churn` | 2.00% | 3.43 | distrust differences under **3.5 points** | **2 / 8** |
-| `incremental-mixed` | 1.85% | 4.85 | distrust differences under **4.9 points** | **3 / 8** |
+| `content-churn` | 1.50% | 0.99 | distrust differences under **1.0 point** | 0 / 8 |
+| `style-churn` | 1.75% | 1.75 | distrust differences under **1.8 points** | 0 / 8 |
+| `incremental-mixed` | none | 5.55 | descriptive only; no directional claim | 0 / 8 by construction |
 | `retained-browse` | 1.05% | 0.89 | **0.3 points** with the arm slot held fixed; **0.9** across slots | 0 / 8 |
 
-Three things to carry away, and none of them changes a threshold -- the frozen
-rules in `scripts/terminal-benchmark-validation.py#DECISION_RULES` are untouched
-and this table proposes no replacement.
+Three things to carry away:
 
-1. **The three draw workloads returned `faster`/`slower` verdicts on code that
-   could not differ.** `incremental-mixed` answered in *both* directions across
-   two adjacent invocations (+4.85% `slower`, then -4.43% `faster`). Treat a bare
-   directional verdict on `scrollback-stream`, `style-churn` or
-   `incremental-mixed` as a reason to look for a mechanism, never as the evidence
-   itself. If no mechanism in the diff can reach the workload, it did not move --
-   `research/31/F17` Observation 5 caught the same shape from the other side.
+1. **The re-armed content and style rules made no false directional call across
+   eight whole invocations.** Incremental estimates still ranged widely and
+   changed sign, so refusing that rule is the useful result, not unfinished
+   calibration. It cannot emit `faster` or `slower`.
 2. **`retained-browse` is the ladder's most repeatable cell and its margin is
    still mostly spent.** Run-to-run scatter is 0.06-0.28 points, the best here --
    but the *physical arm slot*, which `physical_candidate_arm` derives from the
@@ -412,13 +386,13 @@ and this table proposes no replacement.
    1.05% threshold. Re-running the same candidate tree measures the same thing to
    within 0.3 points; changing the tree can move the cell by 0.6 with no code
    change at all.
-3. **This is between-invocation noise, which is a wider quantity than the frozen
-   rules were screened against.** Those screens (`research/28/F5`, `research/28/F6`, doc 8) resample
-   a single 24-pair series, so they measure scatter *inside* one collection; this
-   table adds two arm builds, two app launch cycles, the slot assignment, and the
-   host's own drift. The larger number is expected, not contradictory. One host,
-   one session, and the host was lightly loaded rather than idle -- `research/31/F18` says
-   how much and in which direction that cuts.
+3. **This is between-invocation noise, which is wider than a frozen rule's
+   within-series screen.** The eight-run gate adds app launches, slot assignment,
+   and host drift. F28's content/style result is the held-out check that the
+   post-T25 cells survive that wider quantity. The same run also produced one
+   false directional result each on `scrollback-stream` and `retained-browse`;
+   those unrelated rules retain F18's caveat and are not evidence for the draw
+   recalibration.
 
 ## When to measure
 
@@ -426,8 +400,8 @@ Running a comparison on your own initiative is welcome -- you do not need to be
 asked. What follows is about reading the result honestly, not about permission.
 
 Know what each mode can see before you spend one. `quick` decides at 2 pairs per
-workload with directional thresholds of 3.8-4.5% and a 1.0% equivalence band;
-`confirm` uses 2-6 pairs at 1.85-2.5% with a 0.75% band. So `quick` cannot
+workload with directional thresholds of 2.0-4.5% and a 1.0% equivalence band;
+`confirm` uses 2-6 pairs at 1.5-2.5% with a 0.75% band. So `quick` cannot
 distinguish a 2% regression from noise -- it reports `inconclusive`, which is the
 absence of an answer. Neither mode can license "no regression"; they can only
 license "no regression above my threshold."

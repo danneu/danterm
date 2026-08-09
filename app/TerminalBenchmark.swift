@@ -253,7 +253,6 @@ final class TerminalBenchmarkObserver {
         let damagedRowCount: Int
         let spanCount: Int
         let isFull: Bool
-        let usedDirtyRectFallback: Bool
     }
 
     private let startMarker: String
@@ -262,6 +261,10 @@ final class TerminalBenchmarkObserver {
     private let startAcknowledgmentPath: String
     private let startDrawAcknowledgmentPath: String?
     private let readyDrawAcknowledgmentPath: String?
+    /// Cross-process latch written only after every swapchain buffer has rendered
+    /// past this block's start frame, so the producer cannot begin measurements
+    /// while a cold buffer still carries setup damage.
+    private let swapchainReadyAcknowledgmentPath: String?
     private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
     /// True when the producer sends a settling frame before its measured draws.
@@ -276,6 +279,12 @@ final class TerminalBenchmarkObserver {
     private var completed = false
     private var localizedSequences = Set<Int>()
     private var observedSettlingDraw = false
+    /// Prevents repeated start-marker renders from moving the convergence barrier
+    /// forward forever within one persistent benchmark block.
+    private var hasRequestedSurfaceConvergenceForBlock = false
+    /// Transfers the start-marker request to the view after the current render;
+    /// only the view owns the swapchain that can install the barrier.
+    private var surfaceConvergenceRequestPending = false
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
     /// Planning cost published since the last accepted draw, and how many
@@ -303,13 +312,11 @@ final class TerminalBenchmarkObserver {
     /// Whole-process CPU time, summed over every thread, charged to each accepted
     /// draw as the delta since the previously accepted one.
     ///
-    /// Exists because `drawDurationNanoseconds` measures elapsed time between two
-    /// points on the main thread, so work done on any other thread is invisible
-    /// to it at any size. Doc 17's `F6` found the single largest cost in the app
-    /// -- Core Animation recomputing per-glyph bounds during display-list replay,
-    /// 16.8% of one workload's on-CPU total -- sitting in exactly that blind
-    /// spot, visible only to a diagnostic-only profiler. This is the same
-    /// quantity a decision block can carry.
+    /// Exists because `drawDurationNanoseconds` measures elapsed time on the main
+    /// thread, while this diagnostic also catches work on other threads. T25
+    /// removed the asynchronous Core Animation replay that originally exposed
+    /// the distinction, but the all-thread quantity remains useful for detecting
+    /// arm drift or finding work outside the owned-surface render.
     ///
     /// It measures CPU consumed, not latency: work moved onto an otherwise idle
     /// core reads as neutral here. That makes it the right metric for "did we
@@ -353,7 +360,6 @@ final class TerminalBenchmarkObserver {
     private var observedDamagedRowCountHistogram: [Int: Int] = [:]
     private var observedContiguousSpanCountHistogram: [Int: Int] = [:]
     private var observedFullDamageCount = 0
-    private var observedDirtyRectFallbackCount = 0
     private var lastActivityWriteNanoseconds: UInt64 = 0
     /// Lifetime foreground/presentation samples, taken on a wall-clock cadence so
     /// a profiling window can be shown to have been attributable.
@@ -385,6 +391,8 @@ final class TerminalBenchmarkObserver {
             environment["DANTERM_TERMINAL_BENCHMARK_START_DRAW_ACK"]
         self.readyDrawAcknowledgmentPath =
             environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"]
+        self.swapchainReadyAcknowledgmentPath =
+            environment["DANTERM_TERMINAL_BENCHMARK_SWAPCHAIN_READY_ACK"]
         self.localizedDrawAcknowledgmentPrefix =
             environment["DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"]
         self.resultPath = resultPath
@@ -574,6 +582,8 @@ final class TerminalBenchmarkObserver {
         completed = false
         localizedSequences = []
         observedSettlingDraw = false
+        hasRequestedSurfaceConvergenceForBlock = false
+        surfaceConvergenceRequestPending = false
         localizedDrawDurations = []
         localizedDirtyRowCounts = []
         pendingPlanNanoseconds = 0
@@ -615,13 +625,15 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
+    /// A settling marker also acknowledges swapchain readiness, but only when the
+    /// view reports that every buffer crossed this block's convergence barrier.
     func observeCompletedDraw(
         _ plan: RenderFramePlan,
         dirtyRect: CGRect,
         metrics: TerminalRenderMetrics,
         drawDurationNanoseconds: UInt64,
         damage: TerminalDamage,
-        usedDirtyRectFallback: Bool
+        allSurfaceBuffersCurrent: Bool
     ) {
         // Counted before every gate below, because a profile contains every draw
         // the app performed -- not only the ones a measured block accepts. In
@@ -633,16 +645,16 @@ final class TerminalBenchmarkObserver {
         // `publishActivity` for why the write must not happen here.
         if activityPath != nil {
             observedDrawCount += 1
-            observeDamageTopology(
-                damage,
-                rowCount: plan.rows,
-                usedDirtyRectFallback: usedDirtyRectFallback
-            )
+            observeDamageTopology(damage, rowCount: plan.rows)
         }
         guard completed == false, let startNanoseconds else { return }
         stateRecorder?.observeDrawState()
         let markers = scanMarkers(plan)
         if markers.containsStartMarker, let startDrawAcknowledgmentPath {
+            if hasRequestedSurfaceConvergenceForBlock == false {
+                hasRequestedSurfaceConvergenceForBlock = true
+                surfaceConvergenceRequestPending = true
+            }
             writeAcknowledgment(atPath: startDrawAcknowledgmentPath)
         }
         if markers.containsLocalizedReady,
@@ -650,6 +662,11 @@ final class TerminalBenchmarkObserver {
         {
             observedSettlingDraw = true
             writeAcknowledgment(atPath: readyDrawAcknowledgmentPath)
+            if allSurfaceBuffersCurrent,
+               let swapchainReadyAcknowledgmentPath
+            {
+                writeAcknowledgment(atPath: swapchainReadyAcknowledgmentPath)
+            }
         }
         if let sequence = markers.localizedSequence,
            localizedSequences.insert(sequence).inserted
@@ -699,8 +716,7 @@ final class TerminalBenchmarkObserver {
                 acceptsRedrawDraw = damageTopologyRecorder?.recordDrawIfTopologyMatches(
                     engineDamage: pendingEngineDamage,
                     clipDamage: damage,
-                    rowCount: plan.rows,
-                    usedDirtyRectFallback: usedDirtyRectFallback
+                    rowCount: plan.rows
                 ) == true
             } else {
                 acceptsRedrawDraw = redrawDirtyRowCount == plan.rows
@@ -812,6 +828,13 @@ final class TerminalBenchmarkObserver {
         }
     }
 
+    /// Transfers this block's one convergence request to the swapchain-owning view.
+    func consumeSurfaceConvergenceRequest() -> Bool {
+        guard surfaceConvergenceRequestPending else { return false }
+        surfaceConvergenceRequestPending = false
+        return true
+    }
+
     private func fenceMetricsArtifact(
         _ metrics: TerminalPaneFenceMetrics
     ) -> [String: Any] {
@@ -897,7 +920,6 @@ final class TerminalBenchmarkObserver {
                     observedContiguousSpanCountHistogram
                 ),
                 "fullDamageCount": observedFullDamageCount,
-                "dirtyRectFallbackCount": observedDirtyRectFallbackCount,
             ],
         ]
         // Present only when something sampled it. An absent key says "not
@@ -917,11 +939,7 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Records the exact post-coalescing damage topology submitted to Core Graphics.
-    private func observeDamageTopology(
-        _ damage: TerminalDamage,
-        rowCount: Int,
-        usedDirtyRectFallback: Bool
-    ) {
+    private func observeDamageTopology(_ damage: TerminalDamage, rowCount: Int) {
         let folded = damage.expandingShift()
         let damagedRowCount = damage.isFull ? rowCount : folded.damagedRowCount
         let spanCount = damage.isFull
@@ -931,14 +949,12 @@ final class TerminalBenchmarkObserver {
         let topologyKey = DamageTopologyKey(
             damagedRowCount: damagedRowCount,
             spanCount: spanCount,
-            isFull: damage.isFull,
-            usedDirtyRectFallback: usedDirtyRectFallback
+            isFull: damage.isFull
         )
         observedDamageTopologyHistogram[topologyKey, default: 0] += 1
         observedDamagedRowCountHistogram[damagedRowCount, default: 0] += 1
         observedContiguousSpanCountHistogram[spanCount, default: 0] += 1
         if damage.isFull { observedFullDamageCount += 1 }
-        if usedDirtyRectFallback { observedDirtyRectFallbackCount += 1 }
     }
 
     private func histogramArtifact(_ histogram: [Int: Int]) -> [String: Int] {
@@ -953,7 +969,6 @@ final class TerminalBenchmarkObserver {
                 "rows=\(key.damagedRowCount)",
                 "spans=\(key.spanCount)",
                 "full=\(key.isFull)",
-                "dirtyRectFallback=\(key.usedDirtyRectFallback)",
             ].joined(separator: ",")
             return (label, count)
         })
@@ -994,14 +1009,10 @@ final class TerminalBenchmarkObserver {
     /// emitted, not by a single shared accepted-draw count.
     ///
     /// The CPU delta covers the whole interval between two accepted draws, so it
-    /// charges this draw with everything the process did in it -- this draw's
-    /// synchronous work, the *previous* draw's asynchronous display-list replay,
-    /// parsing, planning, and the observer itself. That is deliberate: replay is
-    /// the cost being hunted and it does not finish inside the draw that queued
-    /// it, so any bracket narrow enough to exclude the neighbours would also
-    /// exclude the thing worth measuring. It makes the series an interval series,
-    /// not a per-draw one -- meaningful in aggregate over a block, not for a
-    /// single index.
+    /// charges this draw with everything the process did in it -- the render,
+    /// parsing, planning, and the observer itself. It is therefore an interval
+    /// series, not a per-draw bracket: meaningful in aggregate over a block, not
+    /// for a single index.
     private func acceptPendingWork() {
         acceptedPlanDurations.append(pendingPlanNanoseconds)
         acceptedPlanThreadCPUDurations.append(pendingPlanThreadCPUNanoseconds)

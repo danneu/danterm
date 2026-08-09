@@ -41,7 +41,6 @@ def activity_snapshot(
         snapshot["damageTopology"] = {
             "sampleCount": topology_samples,
             "fullDamageCount": 0,
-            "dirtyRectFallbackCount": 0,
             "jointHistogram": joint if joint is not None else {"rows=4,spans=2": topology_samples},
             "damagedRowCountHistogram": {"4": topology_samples},
             "maximalContiguousSpanCountHistogram": {"2": topology_samples},

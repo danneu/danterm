@@ -95,9 +95,11 @@ the 3% question has a better instrument.
 | `clipFramePlan`'s own cost, and anything on the published-frame path outside `drawRenderFrame` | `just benchmark-quick` on `incremental-mixed` | **degraded, and staying that way** |
 
 **This decision accepts a coverage gap; it does not close one.** A change that
-alters which rows get marked dirty has no healthy instrument. Treat a
-`benchmark-quick` verdict on such a change as weak evidence, pair it with an A/A
-control, and do not report a directional result from a single invocation.
+alters which rows get marked dirty has no healthy directional instrument. Since
+the post-T25 recalibration (`research/33/F28`), `incremental-mixed` runs its
+blocks but issues no verdict. Use its topology and percentage descriptively,
+pair mechanism claims with direct structural evidence, and route drawing cost
+to the headless comparison.
 
 ### Constraints any user of the headless comparison inherits
 

@@ -662,9 +662,9 @@ rediscovering them.
   was a per-metrics `verticalInkOvershootRows(above:below:)` falling back to
   today's halo *globally* when any contributing face fails containment. Two
   things moved. First, T25 deleted the folded view seam, so the halo's
-  production consumers collapsed to `TerminalFrameBackingStore.apply` (the
-  benchmark topology's `haloDamagedRowCounts` series still models the deleted
-  seam and is recorded evidence, not a gate). Second, the containment audit
+  production consumers collapsed to `TerminalFrameBackingStore.apply`; `F28`
+  later retired the benchmark topology's halo-derived series because it modeled
+  that deleted seam. Second, the containment audit
   found the fallback-face and sprite cautions are discharged by clipping --
   but also that the unclipped batch submits *any* BMP scalar the styled face
   maps, not just ASCII, and an accented capital can legitimately exceed the

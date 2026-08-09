@@ -66,6 +66,35 @@ struct FrameSwapchainTests {
         }
     }
 
+    @Test("readiness requires every buffer to be reusable after the latest full publish")
+    func readinessCoversEveryBuffer() throws {
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let swapchain = try #require(
+            BusyBox().makeSwapchain(columns: 40, rows: 10, metrics: metrics)
+        )
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .full))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
+
+        swapchain.requireEveryBufferToRenderAgain()
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage == false)
+        _ = try #require(swapchain.publish(plan: plan, damage: .none))
+        #expect(swapchain.allBuffersHaveRenderedLatestWholeFrameDamage)
+    }
+
     @Test("every presented buffer equals a from-scratch render across rotation")
     func rotationStaysByteIdentical() throws {
         // Intent: streaming publishes rotate the swapchain's buffers and every

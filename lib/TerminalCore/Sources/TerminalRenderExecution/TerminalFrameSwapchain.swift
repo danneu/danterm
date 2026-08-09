@@ -46,6 +46,9 @@ public final class TerminalFrameSwapchain {
     private var attachedIndex: Int?
     private var pendingPlan: RenderFramePlan?
     private var generation = 0
+    /// The publish generation every buffer must have rendered at or after before
+    /// an old whole-frame setup can no longer surface on later acquisition.
+    private var latestWholeFrameDamageGeneration = 0
     private let isStoreInUse: (TerminalFrameBackingStore) -> Bool
 
     /// Fails when any store allocation fails. `isStoreInUse` exists for the
@@ -79,6 +82,27 @@ public final class TerminalFrameSwapchain {
         pendingPlan != nil
     }
 
+    /// Reports when no buffer can surface work from before the latest explicit
+    /// convergence barrier or whole-frame render.
+    ///
+    /// The benchmark producer uses this to keep settling frames outside its
+    /// measured sequence. Production presentation does not wait on it.
+    public var allBuffersHaveRenderedLatestWholeFrameDamage: Bool {
+        buffers.allSatisfy {
+            $0.lastPresented >= latestWholeFrameDamageGeneration
+        }
+    }
+
+    /// Installs a convergence barrier at the next generation boundary.
+    ///
+    /// The currently attached buffer must cycle through again too. This proves
+    /// every member of the swapchain observed state no older than the caller's
+    /// request, rather than assuming the buffer attached at that instant already
+    /// contains the block's complete setup.
+    public func requireEveryBufferToRenderAgain() {
+        latestWholeFrameDamageGeneration = generation
+    }
+
     /// What the most recent presentation actually rendered: `.full` when the
     /// acquired buffer needed a from-scratch render, otherwise the composed
     /// stale damage it applied. The owner's benchmark bracket reports it, so
@@ -92,6 +116,9 @@ public final class TerminalFrameSwapchain {
     /// Returns the store to attach, or nil when the publish coalesced into
     /// the pending presentation.
     public func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore? {
+        if damage.isFull || damage.expandingShift().damagedRowCount == plan.rows {
+            latestWholeFrameDamageGeneration = generation
+        }
         for index in buffers.indices {
             buffers[index].staleDamage.formUnion(damage)
         }
@@ -116,11 +143,19 @@ public final class TerminalFrameSwapchain {
         return buffers[index].store
     }
 
-    /// The least-stale buffer that is both detached and reported free --
-    /// least stale so bring-current redraws the fewest exposed rows.
+    /// A buffer predating the latest whole-frame damage first, then the
+    /// least-stale current buffer that is detached and reported free. Catching
+    /// every buffer up eagerly prevents an arbitrary later publish from paying
+    /// old setup damage when the compositor exposes a long-cold buffer.
     private func acquireIndex() -> Int? {
-        buffers.indices
+        let candidates = buffers.indices
             .filter { $0 != attachedIndex && isStoreInUse(buffers[$0].store) == false }
+        if let outdated = candidates.first(where: {
+            buffers[$0].lastPresented < latestWholeFrameDamageGeneration
+        }) {
+            return outdated
+        }
+        return candidates
             .max { buffers[$0].lastPresented < buffers[$1].lastPresented }
     }
 

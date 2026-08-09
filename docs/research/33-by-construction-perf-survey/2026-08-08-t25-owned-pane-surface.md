@@ -312,12 +312,11 @@ current buffer, never require re-rendering.
 
 ## Follow Up
 
-- Re-screen the three serialized-draw rules against the moved bracket. All
-  three now read `slower` by ~160% purely because the bracket swallowed the
-  rasterization CoreAnimation used to replay outside it, so those cells carry
-  no directional claim until their thresholds are recalibrated
-  (`scripts/terminal-benchmark-calibration.py`; the caveat and the measured
-  step are in `agent-docs/terminal-performance.md`).
+- ~~Re-screen the three serialized-draw rules against the moved bracket.~~ Done
+  (`F28`): `content-churn` and `style-churn` have post-T25 rules; the screen
+  found no defensible `incremental-mixed` rule through 160 pairs, so that cell
+  now issues no verdict. Eight identical-source confirm invocations made no
+  false directional claim on any of the three cells.
 - ~~Explain the +18.8% and +18.4% descriptive process CPU on `content-churn`
   and `style-churn`.~~ Done (`F26`): the baseline shaded the full grid on the
   GPU through CoreAnimation's display-list renderer, so its raster was in no
@@ -326,14 +325,8 @@ current buffer, never require re-rendering.
   machinery it deleted. Work changing account, not new frame work, and the
   sign flips with redrawn area -- which is why `incremental-mixed` and the
   paced stream fell on the same instrument.
-- Retire `usedDirtyRectFallback`. It is structurally false since commit 4 --
-  no rectangle AppKit chose can reach a render -- but its consumers reach
-  into the benchmark artifact schema (`dirtyRectFallbackCount` in
-  `TerminalBenchmarkDamageTopology`, `app/TerminalBenchmark.swift`, and
-  `scripts/terminal_btop_artifacts.py`), which this plan non-goals. Delete it
-  with the benchmark recalibration.
-- `agent-docs/terminal-performance.md`'s "whole-process CPU per accepted
-  draw" section still describes CoreAnimation's asynchronous display-list
-  replay as a live blind spot the draw bracket cannot see. Owning the
-  surface removes that replay, so the section's framing needs revisiting
-  when the serialized-draw cells are recalibrated.
+- ~~Retire `usedDirtyRectFallback`.~~ Done (`F28`), together with the topology's
+  two halo-derived series. All three described mechanisms deleted by T25/T14.
+- ~~Remove the performance guide's live Core Animation replay blind spot.~~
+  Done (`F28`): process CPU remains an all-thread diagnostic, while the owned-
+  surface raster is measured by the draw bracket itself.

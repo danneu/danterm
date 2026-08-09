@@ -273,6 +273,31 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             for event in events if event[0] == "write"
         ))
 
+    def test_redraw_settling_warms_both_detached_swapchain_buffers(self):
+        # Intent: a redraw block serializes two excluded settling renders before
+        #   its measured sequence starts.
+        # Why it exists: the view owns a three-buffer swapchain. The start frame
+        #   initializes the attached buffer, so both detached buffers must render
+        #   once or the first measured update may pay an unpredictable full render.
+        events = []
+
+        readiness = iter((False, False, True))
+        PRODUCER.run_redraw_settling(
+            row=12,
+            write=lambda chunk: events.append(("write", chunk)),
+            prepare_ack=lambda: events.append(("prepare", None)),
+            await_draw=lambda: events.append(("draw", None)),
+            is_ready=lambda: next(readiness),
+        )
+
+        self.assertEqual(
+            [event[0] for event in events],
+            ["prepare", "write", "draw", "prepare", "write", "draw"],
+        )
+        writes = [event[1] for event in events if event[0] == "write"]
+        self.assertNotEqual(writes[0], writes[1])
+        self.assertTrue(all(b"DANTERM-BENCH-LOCALIZED-READY" in value for value in writes))
+
     def test_geometry_gate_accepts_a_late_match_before_measurement(self):
         observations = iter((os.terminal_size((94, 35)), os.terminal_size((90, 30)), os.terminal_size((80, 24))))
         events = []

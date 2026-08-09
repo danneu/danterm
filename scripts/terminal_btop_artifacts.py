@@ -52,7 +52,7 @@ WORKLOAD_NAME = "btop-scroll"
 # block, the coverage sections, and the capture verdict to the same record.
 IDENTITY_SCHEMA_VERSION = 3
 
-TOPOLOGY_COUNTERS = ("sampleCount", "fullDamageCount", "dirtyRectFallbackCount")
+TOPOLOGY_COUNTERS = ("sampleCount", "fullDamageCount")
 TOPOLOGY_HISTOGRAMS = (
     "jointHistogram",
     "damagedRowCountHistogram",

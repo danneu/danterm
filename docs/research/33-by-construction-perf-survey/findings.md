@@ -2421,11 +2421,9 @@ performance verdict.
   net. The +18% descriptive process CPU on the two full-screen churn workloads
   was unexplained here; `F26` attributes it.
 - Next action: none for `T25` -- the task closes. `T14`'s derived halo is the
-  named lever on the residue t5 still measures. Re-screening the three
-  serialized-draw rules against the moved bracket is the follow-up that re-arms
-  those ladder cells, and it is also where `usedDirtyRectFallback` -- now
-  structurally false, since no rectangle AppKit chose can reach a render --
-  should be deleted.
+  named lever on the residue t5 still measures. `F28` subsequently re-screened
+  the three serialized-draw rules and deleted the structurally false dirty-rect
+  fallback evidence.
 
 ### F26 -- the churn CPU rise is rasterization coming on-CPU: the old path shaded the full grid on the GPU through CoreAnimation's display-list renderer, and T25's software render costs more process CPU than the machinery it deleted
 
@@ -2636,10 +2634,8 @@ performance verdict.
   coverage; antialiasing cannot paint outside the outline's box, and the
   offsets round only outward, so the trust is one-directional -- and the
   byte gate over descender-bearing content is the check that would catch a
-  violation. The benchmark topology's `haloDamagedRowCounts` series still
-  models the deleted `withGlyphHalo` shape; it is recorded evidence with no
-  production consumer left, and its retirement belongs to the
-  serialized-draw recalibration that already owns `usedDirtyRectFallback`.
+  violation. `F28` retired the topology's halo-derived series because they
+  modeled the deleted `withGlyphHalo` shape and had no production consumer.
 - Uncertainty: the reach ledger is derived state with a one-line invariant
   (it describes the rows the store's pixels currently show); a
   stale-conservative entry costs rows, never correctness. A configured
@@ -2648,3 +2644,83 @@ performance verdict.
 - Next action: none for `T14` -- the task closes. The background-identity
   refinement above is the only named lever on the 2.1x residue, unowned
   and unjustified at current cost.
+
+### F28 -- the post-T25 draw bracket re-arms content and style, refuses an incremental rule, and exposes a swapchain reset defect
+
+- Status: implemented and verified; this closes the standing T25 follow-up and
+  `T26`.
+- Date and investigator: 2026-08-08, serialized-draw recalibration agent.
+- Commands and inputs:
+  - Collected 24 production ABBA A/A pairs per workload with
+    `scripts/terminal-benchmark-plan-calibration.py --metric draw` against one
+    immutable post-T25 source snapshot. Screened them with
+    `scripts/terminal-benchmark-calibration.py` at the ladder's fixed pair
+    counts and accuracy gates.
+  - Re-ran the four frozen content/style cells with 100,000 resampling trials
+    and disjoint seeds (`20260816`, `20260817`).
+  - Searched `incremental-mixed` through 160 pairs in both modes rather than
+    treating the fixed schedule as evidence that some threshold must exist.
+  - Ran `just benchmark-confirm baseline=188d2c030104247d2ffe962f516bd2afece622e4`
+    eight times. The unreferenced baseline commit captured the implementation;
+    the candidate differed only by a one-line Markdown marker. Artifacts are
+    `.build/terminal-benchmark-comparisons/confirm/bf140e0954a6-0000` through
+    `-0007`.
+- The first screen was not calibration evidence. Its
+  `incremental-mixed` blocks unpredictably included one wide or full render:
+  only the most recently used swapchain buffer had absorbed setup damage, so a
+  later block could acquire a cold buffer and pay old whole-frame work inside
+  a supposedly settled four-row draw. The initial artifact is
+  `.build/terminal-benchmark-draw-calibration/ff7a70d2d145-0000`; intermediate
+  artifacts are diagnostic only.
+- The ideal reset is now structural. `TerminalFrameSwapchain` tracks the latest
+  whole-frame damage generation, can require every buffer to render again, and
+  prioritizes buffers that have not crossed that convergence barrier. At the
+  first marker draw, the benchmark requests one barrier. The producer then
+  serializes distinct settling frames until the app acknowledges that all
+  surface buffers have rendered the latest whole-frame generation. Each block
+  records `surfaceBuffersSettled`, and validation rejects the block when it is
+  absent or false. The final topology probe accepted exactly 400 of 400
+  incremental draws at four damaged rows, with no wider draw.
+- Final 24-pair screen at tree `cb0b9d233d49`, zero discarded quartets:
+
+  | workload | median | SD | range | frozen quick | frozen confirm |
+  | --- | ---: | ---: | ---: | --- | --- |
+  | `content-churn` | -0.42% | 1.34% | -3.55%..+2.40% | 2 pairs, +/-2.0% | 4 pairs, +/-1.5% |
+  | `style-churn` | +0.46% | 1.45% | -4.20%..+2.60% | 2 pairs, +/-2.0% | 4 pairs, +/-1.75% |
+  | `incremental-mixed` | +2.64% | 15.14% | -27.21%..+32.36% | no rule | no rule |
+
+  The 100,000-trial freeze measured zero quick false positives and 1.0000
+  detection for both workloads. Confirm measured 0.00683 false positives and
+  0.99654 detection for content, and 0.00662 / 0.95801 for style. Each clears
+  the under-1% false-positive and at-least-90% detection gates.
+- `incremental-mixed` has no defensible directional cell. No threshold cleared
+  either mode even at 160 pairs. Keeping its old threshold would turn measured
+  noise into authority; lengthening every routine comparison would spend much
+  more time without repairing the GUI regime. The robust route already exists:
+  damage drawing uses `benchmark-headless-draw`, while the GUI cell keeps its
+  topology and percentage as descriptive evidence under
+  `docs/design/2026-07-27-damage-render-benchmark-routing.md#D2`.
+- Held-out whole-invocation gate: all eight content results were `equivalent`
+  or `inconclusive` (largest magnitude 0.99%); all eight style results were
+  `equivalent` or `inconclusive` (largest magnitude 1.75%); incremental emitted
+  no verdict in every invocation while estimates ranged from -5.16% to +5.55%.
+  Therefore none of the three serialized-draw cells made a false directional
+  claim. The same noisy session produced one false `faster` call each on
+  `scrollback-stream` and `retained-browse`; those unrelated pre-T25 rules keep
+  `research/31/F18`'s warning and do not weaken this draw-specific gate.
+- Dead machinery deleted in the same schema change:
+  `usedDirtyRectFallback`/`dirtyRectFallbackCount`, which T25 made structurally
+  false; `haloDamagedRowCounts` and `haloSpanCounts`, which modeled the T14-
+  deleted view halo; and the performance guide's live Core Animation replay
+  blind-spot framing. Process CPU remains a descriptive all-thread diagnostic,
+  but owned-surface rasterization is now inside the deciding draw bracket.
+- Verification: focused Python suites (133, 79, and 85 tests across the
+  validator, comparator, producer, calibration, and topology artifact paths),
+  `FrameSwapchainTests` (6 tests), and
+  `TerminalBenchmarkDamageTopologyRecorderTests` (8 tests) pass. `just test`
+  passes all 75 steps. `just test-ui` passes 215/215 on the confirming run; its
+  first run passed 214/215 when the existing IOSurface release-timing viability
+  check transiently reported the swapped-out surface still in use, while the
+  companion detached-surface safety check passed on both runs.
+- Next action: none for the serialized-draw recalibration. `T24` remains the
+  independent confirm block-floor debt.

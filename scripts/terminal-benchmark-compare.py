@@ -61,14 +61,10 @@ BLOCK_METRICS = {
     # collectable and undecidable, which is the state a screen resolves.
     "synchronized-frames": "finalDrawNanoseconds",
     # Two more candidates, and the only place a workload's deciding metric is
-    # not draw time or replay time. Each names the quantity that can observe its
-    # own regression (research/29/D2): losing exact sparse clipping widens the
-    # synchronous draw and is fully inside that bracket, while per-row rectangle
-    # emission moves Core Animation's clip replay, which happens after the
-    # bracket closes and is invisible to it at any size. The routing is
-    # workload-local -- no existing workload gains CPU verdict authority from
-    # it, and both entries stay out of DECISION_RULES until a screen freezes a
-    # threshold for them.
+    # not draw time or replay time. Each names the quantity screened for its own
+    # regression (research/29/D2). The routing is workload-local -- no existing
+    # workload gains CPU verdict authority from it, and both entries stay out of
+    # DECISION_RULES until a screen freezes a threshold for them.
     "sparse-spans-few": "drawNanosecondsPerDraw",
     "sparse-spans-max": "processCPUNanosecondsPerDraw",
     # The browsing candidate, and the only deciding metric on the ladder that is
@@ -92,11 +88,9 @@ AUXILIARY_BLOCK_METRICS = {
     "incremental-mixed": "planNanosecondsPerDraw",
 }
 # A second quantity reported beside the same blocks, and deliberately not in the
-# table above: whole-process CPU summed over every thread. It is here because the
-# draw metric measures elapsed time between two points on the main thread, so
-# work on any other thread is invisible to it at any size -- and `research/17/F6`
-# found the app's largest single cost, Core Animation recomputing per-glyph
-# bounds during display-list replay, living precisely there.
+# table above: whole-process CPU summed over every thread. T25 removed the known
+# asynchronous Core Animation replay that motivated it, but this remains a useful
+# all-thread diagnostic beside the main-thread render bracket.
 #
 # Kept out of `AUXILIARY_BLOCK_METRICS` rather than added to it because that table
 # drives the `planWorkloads` rule lookup, and this metric has no rule to look up.
@@ -134,15 +128,15 @@ UNCALIBRATED_BLOCK_METRICS = {
 # the handshake rather than throughput, and a rate derived from it would invite a
 # comparison the number cannot support.
 COMPOSITION_WORKLOADS = {"scrollback-stream"}
-# The auxiliary tables an A/A calibration run may screen, keyed by the name its
-# operator types. It exists so the calibrator names a metric instead of reaching
-# into one hardcoded table: the two above ride the very same blocks, so one
-# collection can screen either, and a run that meant CPU must not be able to
-# quietly report plan-time noise instead. Adding an entry here is what makes a
-# new auxiliary quantity screenable; moving that quantity from
-# `UNCALIBRATED_BLOCK_METRICS` into `AUXILIARY_BLOCK_METRICS` is what freezing
-# its rule means.
+# The metric tables an A/A calibration run may screen, keyed by the name its
+# operator types. Naming the table prevents a run intended for one quantity from
+# quietly reporting another. Draw owns the blocks; plan and process CPU ride the
+# same collection as auxiliary quantities.
 CALIBRATABLE_METRIC_TABLES = {
+    "draw": {
+        workload: BLOCK_METRICS[workload]
+        for workload in ("content-churn", "style-churn", "incremental-mixed")
+    },
     "plan": AUXILIARY_BLOCK_METRICS,
     "process-cpu": UNCALIBRATED_BLOCK_METRICS,
 }
@@ -407,6 +401,8 @@ def decide_workload(mode, workload, differences):
             f"{mode}/{workload} decides on exactly "
             f"{workload_rule['pairCount']} pairs, received {len(differences)}"
         )
+    if "directionalThresholdPercent" not in workload_rule:
+        return None
     return CALIBRATION.decide(
         differences,
         workload_rule["directionalThresholdPercent"],
@@ -600,16 +596,24 @@ def render_decisions(summary):
     lines = [f"{summary['mode']}: candidate versus baseline"]
     for workload, result in summary["workloads"].items():
         decision = result["decision"]
-        lines.append(
-            f"  {workload}: {decision['decision']} "
-            f"({decision['estimatePercent']:+.2f}% symmetric median of "
-            f"{decision['sampleCount']} pairs)"
-        )
-        if decision["outlierIndices"]:
+        if decision is None:
+            differences = result["pairedSymmetricPercent"]
             lines.append(
-                "    flagged outlier pairs (retained in the estimate): "
-                + ", ".join(str(index) for index in decision["outlierIndices"])
+                f"  {workload}: {statistics.median(differences):+.2f}% symmetric "
+                f"median of {len(differences)} pairs "
+                "(descriptive, no verdict -- uncalibratable)"
             )
+        else:
+            lines.append(
+                f"  {workload}: {decision['decision']} "
+                f"({decision['estimatePercent']:+.2f}% symmetric median of "
+                f"{decision['sampleCount']} pairs)"
+            )
+            if decision["outlierIndices"]:
+                lines.append(
+                    "    flagged outlier pairs (retained in the estimate): "
+                    + ", ".join(str(index) for index in decision["outlierIndices"])
+                )
         auxiliary = result.get("auxiliary")
         if auxiliary:
             plan_decision = auxiliary.get("decision")

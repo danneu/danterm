@@ -147,15 +147,31 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         self.assertEqual(rules["quick"]["equivalenceBandPercent"], 1.0)
         self.assertEqual(
             rules["quick"]["workloads"]["content-churn"],
-            {"pairCount": 2, "directionalThresholdPercent": 4.05},
+            {"pairCount": 2, "directionalThresholdPercent": 2.0},
+        )
+        self.assertEqual(
+            rules["quick"]["workloads"]["style-churn"],
+            {"pairCount": 2, "directionalThresholdPercent": 2.0},
+        )
+        self.assertEqual(
+            rules["quick"]["workloads"]["incremental-mixed"],
+            {"pairCount": 2},
         )
         self.assertEqual(
             rules["confirm"]["estimator"], "median",
         )
         self.assertEqual(rules["confirm"]["equivalenceBandPercent"], 0.75)
         self.assertEqual(
+            rules["confirm"]["workloads"]["content-churn"],
+            {"pairCount": 4, "directionalThresholdPercent": 1.5},
+        )
+        self.assertEqual(
+            rules["confirm"]["workloads"]["style-churn"],
+            {"pairCount": 4, "directionalThresholdPercent": 1.75},
+        )
+        self.assertEqual(
             rules["confirm"]["workloads"]["incremental-mixed"],
-            {"pairCount": 6, "directionalThresholdPercent": 1.85},
+            {"pairCount": 6},
         )
 
     def test_quick_cell_applies_frozen_acceptance_counts(self):
@@ -841,6 +857,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "resetEvidence": {
                     "denseSetupAndStartDrawCompleted": True,
                     "settlingDrawCompleted": True,
+                    "surfaceBuffersSettled": True,
                 },
                 "producerWrite": {
                     "event": "producer-final-write-returned",
@@ -899,6 +916,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "resetEvidence": {
                 "denseSetupAndStartDrawCompleted": True,
                 "settlingDrawCompleted": False,
+                "surfaceBuffersSettled": False,
             },
             "producerWrite": {
                 "event": "producer-final-write-returned",
@@ -1285,7 +1303,6 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         topology = partial["finalDraw"]["acceptedDrawTopology"]
         topology["sampleCount"] = 49
         for series in ("engineDamagedRowCounts", "engineSpanCounts",
-                       "haloDamagedRowCounts", "haloSpanCounts",
                        "clipDamagedRowCounts", "clipSpanCounts"):
             topology[series] = topology[series][:49]
         self.assertEqual(
@@ -1348,7 +1365,6 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         # Scenario: spec-first; a synthesized known-bad arm records its declared
         #   renderer deviation in provenance instead of failing stimulus validity.
         artifact = self._accepted_draw_topology_artifact("sparse-spans-max")
-        artifact["finalDraw"]["acceptedDrawTopology"]["dirtyRectFallbackCount"] = 50
         artifact["finalDraw"]["acceptedDrawTopology"]["clipFullDamageCount"] = 50
 
         evidence = VALIDATION.collect_sparse_spans_max(
@@ -1358,7 +1374,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
 
         self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
         self.assertEqual(
-            evidence["rawBlocks"][0]["acceptedDrawTopology"]["dirtyRectFallbackCount"],
+            evidence["rawBlocks"][0]["acceptedDrawTopology"]["clipFullDamageCount"],
             50,
         )
 
@@ -1840,6 +1856,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "start-ack",
                 "start-draw-ack",
                 "ready-draw-ack",
+                "swapchain-ready-ack",
                 "final-draw.json",
                 "block-state.json",
                 "producer-write.json",
@@ -1860,6 +1877,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 if arguments == ["--", "Enter"]:
                     (artifacts / "start-draw-ack").touch()
                     (artifacts / "ready-draw-ack").touch()
+                    (artifacts / "swapchain-ready-ack").touch()
                     (artifacts / "producer-write.json").write_text(json.dumps({
                         "event": "producer-final-write-returned",
                         "elapsedNanoseconds": 20,
@@ -1890,6 +1908,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 {
                     "denseSetupAndStartDrawCompleted": True,
                     "settlingDrawCompleted": True,
+                    "surfaceBuffersSettled": True,
                 },
             )
             self.assertTrue(artifact["finalDraw"]["available"])
@@ -2302,6 +2321,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "resetEvidence": {
                 "denseSetupAndStartDrawCompleted": True,
                 "settlingDrawCompleted": True,
+                "surfaceBuffersSettled": True,
             },
             "producerWrite": {
                 "event": "producer-final-write-returned",
@@ -2352,7 +2372,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         artifact_workload = {
             "incremental-mixed": "full-screen-incremental-mixed-churn",
         }.get(workload, workload)
-        engine, halo, spans, dirty_rows = {
+        engine, clip, spans, dirty_rows = {
             "sparse-spans-few": (2, 6, 2, 57),
             "sparse-spans-max": (17, 50, 17, 66),
             "incremental-mixed": (4, 6, 1, 66),
@@ -2373,12 +2393,9 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "sampleCount": 50,
             "engineDamagedRowCounts": [engine] * 50,
             "engineSpanCounts": [spans] * 50,
-            "haloDamagedRowCounts": [halo] * 50,
-            "haloSpanCounts": [spans] * 50,
-            "clipDamagedRowCounts": [halo] * 50,
+            "clipDamagedRowCounts": [clip] * 50,
             "clipSpanCounts": [spans] * 50,
             "clipFullDamageCount": 0,
-            "dirtyRectFallbackCount": 0,
         }
         return artifact
 

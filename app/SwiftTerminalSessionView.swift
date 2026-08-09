@@ -363,12 +363,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             #endif
             attach(store)
             #if DANTERM_TERMINAL_BENCHMARK
-            observeCompletedBenchmarkRender(
+            let beginSurfaceConvergence = observeCompletedBenchmarkRender(
                 plan: plan,
                 metrics: metrics,
                 startedAtNanoseconds: renderStartedNanoseconds,
-                damage: swapchain.lastRenderedDamage ?? .full
+                damage: swapchain.lastRenderedDamage ?? .full,
+                allSurfaceBuffersCurrent:
+                    swapchain.allBuffersHaveRenderedLatestWholeFrameDamage
             )
+            if beginSurfaceConvergence {
+                swapchain.requireEveryBufferToRenderAgain()
+            }
             #endif
         }
         armPresentationRetryIfPending()
@@ -409,12 +414,15 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     /// the glyph rasterization CoreAnimation used to replay on its own queue
     /// after the draw returned, so the serialized-draw workloads' deciding
     /// metric changed meaning (`agent-docs/terminal-performance.md`).
+    /// Returns true exactly once per block when the observer asks the owning
+    /// view to make every swapchain buffer render past the block's start frame.
     private func observeCompletedBenchmarkRender(
         plan: RenderFramePlan,
         metrics: TerminalRenderMetrics,
         startedAtNanoseconds: UInt64,
-        damage: TerminalDamage
-    ) {
+        damage: TerminalDamage,
+        allSurfaceBuffersCurrent: Bool
+    ) -> Bool {
         let renderDurationNanoseconds =
             DispatchTime.now().uptimeNanoseconds - startedAtNanoseconds
         let renderedRect = NSRect(
@@ -429,16 +437,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             metrics: metrics,
             drawDurationNanoseconds: renderDurationNanoseconds,
             damage: damage,
-            // Structurally false now: no rectangle AppKit chose can reach the
-            // render, because an AppKit redisplay never renders. The parameter
-            // stays until the benchmark rules it feeds are recalibrated.
-            usedDirtyRectFallback: false
+            allSurfaceBuffersCurrent: allSurfaceBuffersCurrent
         )
         if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
             DispatchQueue.main.async { [weak self] in
                 self?.rerenderCurrentPlan()
             }
         }
+        return TerminalBenchmarkObserver.shared?.consumeSurfaceConvergenceRequest() == true
     }
 
     /// The rect the observer reads a dirty-row count from: the frame for a full
