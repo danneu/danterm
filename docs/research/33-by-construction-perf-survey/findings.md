@@ -3082,8 +3082,7 @@ performance verdict.
   observations do not resolve T18's performance. They establish neither a
   speedup nor a regression and do not satisfy the outstanding variance study.
   The exact submitted-area equality is the task's decision-bearing result.
-- Next action: none for T18. T15 still needs its sprite-corpus applicability
-  check before it can be ranked or implemented.
+- Next action: none for T18. T15 was later vetted and parked in `F37`.
 
 ### F36 -- CoreGraphics clips before filling bytes: exact fill rectangles leave the btop fill stack unchanged and duplicate the render region
 
@@ -3126,5 +3125,62 @@ performance verdict.
   the ordinary renderer under its already-installed clip. The 15 remaining
   backing-store tests retain the byte-equivalence coverage for incremental and
   full rendering.
-- Next action: none for T18. T15 still needs its sprite-corpus applicability
-  check before it can be ranked or implemented.
+- Next action: none for T18. T15 was later vetted and parked in `F37`.
+
+### F37 -- box geometry repeats finite allocating inputs, but the measured ceiling is too small to schedule T15
+
+- Status: `T15` vetted and parked; no cache was implemented.
+- Date, baseline, and investigator: 2026-08-09, `945894b4`, Codex. The
+  worktree contained an unrelated untracked plan throughout; this task did not
+  modify it.
+- Ephemeral test-first instrument: a benchmark-only recorder counted one
+  production `btop-shaped` draw and cumulative sustained-workload snapshots.
+  Its focused test first failed because no recorder existed. The counter
+  reports geometry calls, a conservative lower bound on allocations owned by
+  returned nonempty arrays, and distinct `(pattern, cellWidthPixels,
+  cellHeightPixels, lightStrokePixels)` inputs. A zero therefore means measured
+  path absence, not an allocator inference; every report carries a draw count.
+  The recorder, its tests and its script were removed after capture: their
+  per-call lock, string and dictionary work deliberately made the instrumented
+  binary unsuitable for later sprite-path timing, and no T15 implementation
+  remains for a before/after probe to verify.
+- Synthetic sprite ceiling: one 179x66 `btop-shaped` full draw reports 5,907
+  box-geometry calls, at least 5,907 owned heap allocations, and 6 distinct
+  inputs. Every call in this corpus repeats one of those six inputs.
+- Calibrated corpus coverage: a 451-draw `full-screen-content-churn` profile
+  reports zero box-geometry calls. The producer source shows the other
+  calibrated full-screen draw corpora use the same printable-ASCII content
+  vocabulary or printable-ASCII localized updates, so they cannot enter the
+  U+2500...U+257F classifier range. The committed 95-frame btop capture,
+  `synchronized-frames-v1-btop-95-frames`, also reports zero calls in its final
+  draw. That fixture is a parse/coalescing workload, not a sprite-draw proxy.
+  Artifacts: `.build/terminal-benchmark-profiles/2026-08-09-141610-81041` and
+  `.build/terminal-benchmark-runs/2026-08-09-141823-82290`.
+- Live applicability: a valid official 20-second `btop-scroll` sample held its
+  Down-arrow stimulus for the profiling window. Across the activity snapshots'
+  23.200-second counted window, 676 draws made 867,305 geometry calls and owned
+  at least 880,961 returned-array allocations: 1,283.0 calls and 1,303.2
+  allocations per draw. Only 14 distinct inputs occurred, all at 17x31 pixels
+  with a 2-pixel light stroke. This proves finite repetition and allocation on
+  the admitted live workload. The counter adds dictionary and lock work to each
+  geometry call, so this capture makes no timing claim; its purpose is exact
+  applicability only. Artifact:
+  `.build/terminal-benchmark-profiles/2026-08-09-145443-307`.
+- Materiality gate: `11/F9-F10` already measured the denser all-sprite case
+  directly. Geometry recomputation was 5.2% gross and 3.8% net of that draw,
+  while `CGContextFillRects` was 71.5%. The live window makes about one fifth as
+  many box-geometry calls per draw as that synthetic ceiling, and no calibrated
+  draw workload reaches the path at all. Allocation is therefore real, but it
+  does not overturn the existing direct result that raster work dominates and
+  the cache is an ordinary small win on a path under no measured pressure.
+- Decision: park T15. Reopen only when a current direct measurement on a real
+  workload assigns geometry construction a material share. Repetition plus
+  allocation alone is not a reopening condition; treating it as one would
+  repeat T18's mistake of optimizing a representation after the downstream
+  system had already made its cost negligible.
+- Verification: before removal, the focused recorder test and one-off probe
+  passed, and the instrumented `content-churn`, captured btop corpus, and valid
+  official `btop-scroll` run all emitted the counter rather than silently
+  reading a missing field as zero. After removal, the compile-only app build
+  and the full local gate pass on the ordinary uninstrumented benchmark path.
+- Next action: none for T15. Return to the larger research candidates.

@@ -619,13 +619,19 @@ constraint among them except where noted.
   view seam it measured and was retired with it; the benchmark topology's
   halo-derived series modeled a deleted mechanism and retired in `F28` with
   the serialized-draw recalibration.
-- [ ] `T15` VETTING -- **Build sprite cell geometry once per metrics.** Geometry
-  is a pure function of `(pattern, cellWidth, cellHeight, strokeWidth)` over a
-  closed finite pattern domain, recomputed and reallocated per cell per draw.
-  The file's own `brailleLayout` hoist is the precedent. Verification:
-  allocation count under `BoxDrawingSpriteGeometry.geometry` per draw must reach
-  zero. Check first that the corpora actually contain sprites, or the workload
-  cannot contain the mechanism.
+- [x] `T15` **VETTED AND PARKED (`F37`)** -- **Build sprite cell geometry once
+  per metrics.** The mechanism is real but small. One 179x66 `btop-shaped`
+  full draw makes 5,907 geometry calls, owns at least 5,907 returned-array heap
+  allocations, and repeats only 6 `(pattern, metrics)` combinations. A valid
+  official `btop-scroll` capture made 1,283.0 calls and at least 1,303.2 owned
+  allocations per draw across 14 combinations; the committed
+  `synchronized-frames` btop corpus reached the path zero times in its final
+  draw. The old direct ablation already measured the denser all-sprite ceiling
+  at 3.8% net while `CGContextFillRects` held 71.5% of the draw (`11/F9-F10`).
+  That is an ordinary small win on a path under no measured pressure, not the
+  next task. Parked rather than implemented. Reopen only if a current direct
+  timing gives geometry construction a material share of a real workload; the
+  allocation count alone is not enough.
 - [x] `T16` DONE -- **Scan arena words for the style and hyperlink sweeps.**
   `liveStyleIds`/`liveHyperlinkIds` call `allPaintedDisplayRows`, materializing
   every retained display row as a `GridRow` with full cell construction, to
@@ -660,7 +666,8 @@ constraint among them except where noted.
   reaches `CGBlt_fillBytes` only after applying the clip, so the experiment did
   not remove full-surface writes. It instead duplicated the render region,
   added a second executor mode, and issued about two fill calls where one
-  sufficed. Reverted. T15 still requires its sprite-corpus applicability gate.
+  sufficed. Reverted. T15's later applicability gate passed but its materiality
+  gate parked the work (`F37`).
 
 - [x] `T24` **DONE (`F29`)** -- **Own the `benchmark-confirm` block floor.**
   `terminal-feed` now calibrates each physical arm independently and uses that
