@@ -373,9 +373,10 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   That would make the redundancy an artifact of profiling mode rather than of the
   workloads. Not distinguished here; it does not change the ranking.
 
-### F5 -- the planner is already damage-scoped, and `agent-docs` says otherwise
+### F5 -- cell inspection is damage-scoped; geometry remained viewport-wide until `33/F30`
 
-- Status: recorded. **Rejects `H1` and retires `9/H2`.**
+- Status: recorded. **Rejects the cell-inspection part of `H1`; its retirement
+  of `9/H2` was incorrect and is corrected by `33/F30`.**
 - Evidence, in the order it actually decided the question:
   1. `lib/TerminalCore/Sources/TerminalRenderPlanning/RenderFramePlanner.swift:38-52`
      defines `RetainedFrameRows`, which exists so "a later frame can copy an
@@ -395,24 +396,25 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   that "the planner plans the whole viewport regardless" and that planning is the
   larger cost in both workloads. **The first clause is false and the second is
   unsupported.**
-- Inference 1: **`9/H2` ("whole-viewport geometry per plan"), parked in doc 9's
-  Phase 5 backlog as evidenced and unrefuted, is retired.** It was implemented
-  two days after doc 9 closed and nobody updated either document.
-- Inference 2: this file expected `9/H2` to be its leading candidate. It was the
-  single strongest a-priori hypothesis and it was already fixed -- which is the
-  argument for the sweep rather than against it.
+- Inference 1, corrected by `33/F4` and closed by `33/F30`: **`9/H2`
+  ("whole-viewport geometry per plan") was not retired here.** `8188b9a`
+  skipped cell inspection for reusable rows but left `let geometry =
+  terminal.geometry` above that check, so every frame still projected all rows.
+  T11 removed that remaining traversal on 2026-08-09.
+- Inference 2: this file expected `9/H2` to be its leading candidate. Its
+  cell-inspection half was already fixed, but its geometry half remained live;
+  the sweep was still needed to separate the two mechanisms.
 - Competing interpretation, and why it does not rescue `H1`: point 4's absolute ms
   are not per-draw normalized, and `F2` shows they cannot be. So the trace alone
   could be explained by `incremental-mixed` simply running fewer frames. Points
   1-3 do not depend on frame counts, and they are decisive on their own.
-- Uncertainty: what remains unmeasured is *how much* plan work is still
-  viewport-wide. Selection, search-match and cursor runs are recomputed every
+- Uncertainty at the time: how much plan work remained viewport-wide was
+  unmeasured. `33/F30` later removed the geometry traversal exactly; selection,
+  search-match and cursor runs are recomputed every
   frame by design (`RenderFramePlanner.swift:38-44`), and `clipFramePlan` is a
   set of `filter` passes over the whole plan (`:17-36`) -- it appears at 0.05% on
   `incremental-mixed` and 0.00% elsewhere, so it is not currently a cost.
-- Next action: correct `agent-docs/terminal-performance.md` and doc 9's Phase 5
-  note. Neither is this file's to edit unilaterally; both are listed in `D1` as
-  the zero-risk item.
+- Next action: completed by `33/F30`, including doc 9's Phase 5 correction.
 
 ### F6 -- CoreAnimation recomputes every glyph's bounds on every frame, and it is the largest cost in the app
 

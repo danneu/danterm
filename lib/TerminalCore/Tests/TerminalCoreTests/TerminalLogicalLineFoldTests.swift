@@ -563,8 +563,8 @@ struct TerminalLogicalLineFoldTests {
                     let cursor = try #require(store.locate(displayRow: index))
                     let expected = store.paintedRow(at: cursor)
 
-                    var painted: [(Int, TerminalScalars, Terminal.StyleId)] = []
-                    store.forEachPaintedCell(at: cursor) { painted.append(($0, $1, $2)) }
+                    var painted: [(Int, TerminalCellKind, TerminalScalars, Terminal.StyleId)] = []
+                    store.forEachPaintedCell(at: cursor) { painted.append(($0, $1, $2, $3)) }
                     var kinds: [(Int, TerminalCellKind)] = []
                     store.forEachKind(at: cursor) { kinds.append(($0, $1)) }
 
@@ -575,11 +575,15 @@ struct TerminalLogicalLineFoldTests {
                     where offset < expected.cells.count {
                         #expect(visited.0 == offset, "\(label) column \(offset): order")
                         #expect(
-                            visited.1 == expected.cells[offset].scalars,
+                            visited.1 == expected.cells[offset].kind,
+                            "\(label) column \(offset): painted kind"
+                        )
+                        #expect(
+                            visited.2 == expected.cells[offset].scalars,
                             "\(label) column \(offset): scalars"
                         )
                         #expect(
-                            visited.2 == expected.cells[offset].styleId,
+                            visited.3 == expected.cells[offset].styleId,
                             "\(label) column \(offset): style"
                         )
                     }

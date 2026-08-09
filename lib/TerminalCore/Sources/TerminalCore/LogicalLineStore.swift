@@ -1500,7 +1500,12 @@ extension Terminal {
         /// extent; the caller pads the rest, exactly as the packed-row reader's contract did.
         func forEachPaintedCell(
             at cursor: DisplayRowCursor,
-            _ body: (_ column: Int, _ scalars: TerminalScalars, _ styleId: Terminal.StyleId) -> Void
+            _ body: (
+                _ column: Int,
+                _ kind: TerminalCellKind,
+                _ scalars: TerminalScalars,
+                _ styleId: Terminal.StyleId
+            ) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
             let sequence = firstRecordSequence + cursor.recordIndex
@@ -1525,17 +1530,24 @@ extension Terminal {
                     let styleId = Terminal.StyleId(
                         truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
                     )
+                    let kind = TerminalCellKind(
+                        packedCode: UInt8(
+                            (word >> PackedRetainedRow.Header.cellKindShift)
+                                & PackedRetainedRow.Header.cellKindMask
+                        )
+                    )
                     let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
                     if word & PackedRetainedRow.Header.cellSpillBit != 0 {
                         body(
                             column,
+                            kind,
                             TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? []),
                             styleId
                         )
                     } else if field != 0, let scalar = Unicode.Scalar(field) {
-                        body(column, TerminalScalars(scalar), styleId)
+                        body(column, kind, TerminalScalars(scalar), styleId)
                     } else {
-                        body(column, .empty, styleId)
+                        body(column, kind, .empty, styleId)
                     }
                     column += 1
                 }
@@ -1548,6 +1560,7 @@ extension Terminal {
                 )
                 body(
                     column,
+                    .spacerHead,
                     .empty,
                     Terminal.StyleId(
                         truncatingIfNeeded: head >> PackedRetainedRow.Header.cellStyleShift
@@ -1557,7 +1570,7 @@ extension Terminal {
             }
             guard let fill = shape.fillStyle else { return }
             for filled in fillColumns(shape) {
-                body(filled, .empty, fill)
+                body(filled, .padding, .empty, fill)
             }
         }
 

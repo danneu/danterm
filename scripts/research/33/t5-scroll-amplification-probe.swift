@@ -77,7 +77,7 @@ func snapshot(_ terminal: Terminal) -> [[CellSnapshot]] {
     terminal.forEachViewportRow(rows: 0..<viewportRows) { row, visit in
         var cells: [CellSnapshot] = []
         cells.reserveCapacity(columns)
-        visit { _, scalars, style in
+        visit { _, _, scalars, style in
             cells.append(CellSnapshot(scalars: scalars, style: style))
         }
         rows[row] = cells

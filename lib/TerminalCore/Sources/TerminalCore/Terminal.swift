@@ -4234,6 +4234,39 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Exposes the viewport width without constructing the test and interaction projection.
+    public var viewportColumnCount: Int {
+        columnCount
+    }
+
+    /// Places the visible cursor on the complete narrow or wide span a frame must render.
+    public var cursorPlacement: TerminalCursorPlacement? {
+        let projection = scrollProjection
+        let cursorStreamRow = isAlternateScreenActive
+            ? cursor.row
+            : historyRowCount + cursor.row
+        let cursorWindowRow = cursorStreamRow - projection.topRow
+        guard (0..<rowCount).contains(cursorWindowRow),
+              let row = viewportStreamRow(at: cursorStreamRow)
+        else { return nil }
+
+        let kind = row.cell(at: cursor.column).kind
+        if kind == .wideTail, cursor.column > 0,
+           row.cell(at: cursor.column - 1).kind == .wideHead
+        {
+            return TerminalCursorPlacement(
+                row: cursorWindowRow,
+                column: cursor.column - 1,
+                columnWidth: 2
+            )
+        }
+        return TerminalCursorPlacement(
+            row: cursorWindowRow,
+            column: cursor.column,
+            columnWidth: kind == .wideHead && cursor.column + 1 < columnCount ? 2 : 1
+        )
+    }
+
     /// Returns scalar-exact content for a valid viewport coordinate.
     public func cell(row: Int, column: Int) -> TerminalCell? {
         let streamRow = scrollProjection.topRow + row
@@ -4255,11 +4288,11 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Visits one viewport row's content in a single row resolution, passing each
-    /// column the two fields a renderer actually consumes.
+    /// column the three fields a renderer actually consumes.
     ///
     /// `cell(row:column:)` answers the same question per coordinate, but it re-resolves
     /// the row on every call and materializes a whole `TerminalCell` -- and the render
-    /// planner, which reads a full row per frame, uses two of that value's four fields
+    /// planner, which reads a full row per frame, uses three of that value's four fields
     /// and never reads `hyperlink` at all. Resolving once per row drops the per-column
     /// `GridRow` copy, the unread hyperlink lookup, and the `TerminalCell?`
     /// construct/destroy pair out of the planner's inner loop.
@@ -4307,7 +4340,7 @@ public struct Terminal: Equatable, Sendable {
         // non-escaping level; nothing here outlives the call.
         withoutActuallyEscaping(body) { forward in
             forEachViewportRow(rows: requested, where: includesRow) { row, visit in
-                visit { column, scalars, style in forward(row, column, scalars, style) }
+                visit { column, _, scalars, style in forward(row, column, scalars, style) }
             }
         }
     }
@@ -4321,8 +4354,8 @@ public struct Terminal: Equatable, Sendable {
     /// only for what it redraws. Out-of-viewport indices visit nothing.
     ///
     /// **Row-scoped rather than cell-scoped on purpose.** A caller that plans a row needs three
-    /// things resolved per row and read per column -- the row's cell kinds, its hovered span and
-    /// its selected span. Under a single per-cell closure those become captured mutable variables
+    /// things resolved per row and read per column -- its hovered span, selected span, and cells.
+    /// Under a single per-cell closure the row-scoped values become captured mutable variables
     /// that the closure re-reads on every column, and `research/31/F13` measured the result at 60% of the
     /// browsing regression; handing the row out first lets the caller hold them as ordinary
     /// locals, which is what the pre-plural spelling did. Calling `visit` is the caller's choice:
@@ -4333,7 +4366,12 @@ public struct Terminal: Equatable, Sendable {
         _ body: (
             _ row: Int,
             _ visit: (
-                (_ column: Int, _ scalars: TerminalScalars, _ style: TerminalStyle) -> Void
+                (
+                    _ column: Int,
+                    _ kind: TerminalCellKind,
+                    _ scalars: TerminalScalars,
+                    _ style: TerminalStyle
+                ) -> Void
             ) -> Void
         ) -> Void
     ) {
@@ -4371,12 +4409,12 @@ public struct Terminal: Equatable, Sendable {
                 // funnelled through a nested function: a local function called from inside the
                 // fold's own closure is one more indirect call per cell, on the frame path.
                 if let at {
-                    history.forEachPaintedCell(at: at) { column, scalars, styleId in
+                    history.forEachPaintedCell(at: at) { column, kind, scalars, styleId in
                         if styleId != lastId {
                             lastStyle = self.style(for: styleId)
                             lastId = styleId
                         }
-                        cellBody(column, scalars, lastStyle)
+                        cellBody(column, kind, scalars, lastStyle)
                         storedCount = column + 1
                     }
                     if cursor == nil, storedCount == columnCount - 1,
@@ -4387,7 +4425,7 @@ public struct Terminal: Equatable, Sendable {
                             lastStyle = self.style(for: head.styleId)
                             lastId = head.styleId
                         }
-                        cellBody(storedCount, .empty, lastStyle)
+                        cellBody(storedCount, .spacerHead, .empty, lastStyle)
                         storedCount += 1
                     }
                 } else if let windowRow = viewportStreamRow(at: streamRow) {
@@ -4397,7 +4435,7 @@ public struct Terminal: Equatable, Sendable {
                             lastStyle = self.style(for: cell.styleId)
                             lastId = cell.styleId
                         }
-                        cellBody(column, cell.scalars, lastStyle)
+                        cellBody(column, cell.kind, cell.scalars, lastStyle)
                         storedCount = column + 1
                     }
                 }
@@ -4409,7 +4447,7 @@ public struct Terminal: Equatable, Sendable {
                     lastId = padding.styleId
                 }
                 for column in storedCount..<columnCount {
-                    cellBody(column, padding.scalars, lastStyle)
+                    cellBody(column, padding.kind, padding.scalars, lastStyle)
                 }
             }
         }

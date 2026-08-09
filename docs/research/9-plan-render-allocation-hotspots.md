@@ -267,10 +267,11 @@ These are tidy single-digit wins on a path with no deadline pressure -- take one
 on its merits, and do not present any of them, or the list as a whole, as a
 route to a large win.
 
-- [ ] H2 (whole-viewport geometry construction per plan). The second incremental
-      profile is in; H2 is evidenced and unblocked, still unscheduled. The
-      blocker to confront first is scoring, not evidence -- see the open question
-      on `incremental-mixed` having no calibrated plan-time verdict.
+- [x] H2 (whole-viewport geometry construction per plan). **Done 2026-08-09 in
+      `research/33/F30`.** One canonical 179x66 `planFrame` moved from one
+      `presentedRowGeometry` call and 66 geometry-row allocations to zero and
+      zero. This is a structural result; `incremental-mixed` still has no
+      calibrated plan-time verdict, so no timing win is claimed.
 - [ ] H3 (per-draw font construction; no glyph cache). Two separable changes;
       both live in the region the draw verdict can actually see.
       - [x] **Per-draw font construction. Done 2026-07-28** in `5d32054`; result
@@ -1057,14 +1058,15 @@ discount on `sample` shares is real and was earned twice.
 
 ### Why Phase 5 closes as a backlog rather than as work
 
-**Amendment 2026-07-29, from [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md)
-(`17/F5`): H2 is retired -- it was implemented two days after this file closed.**
-`8188b9a` ("plan only the rows the terminal damaged", 2026-07-27) gave the planner
-per-row retained reuse, so the planner no longer plans the whole viewport
-regardless of damage. `17/F3` sizes the remaining glyph cache (H3) at 1.67% of
-`content-churn` and the sprite geometry cache at 0.37%, both on an on-CPU
-instrument. The paragraph below stands as written for H3 and the sprite cache; its
-H2 clause does not. This pointer does not reopen this file.
+**Amendment 2026-08-09, from `research/33/F30`: the 2026-07-29 amendment was
+wrong about H2.** `8188b9a` made cell inspection damage-scoped, but every plan
+still constructed the whole `TerminalGeometry` before its retained-row reuse
+check. T11 removed that remaining traversal on 2026-08-09: one canonical
+179x66 plan moved from one `presentedRowGeometry` call and 66 geometry-row
+allocations to zero and zero. `17/F3` still sizes the remaining glyph cache at
+1.67% of `content-churn` and the sprite geometry cache at 0.37%, both on an
+on-CPU instrument. The paragraph below now stands as the pre-T11 backlog record,
+not as the current state.
 
 H2 (whole-viewport geometry per plan), H3's remaining glyph cache, and the
 sprite geometry cache handed over by `11/F6` are all evidenced and unrefuted.

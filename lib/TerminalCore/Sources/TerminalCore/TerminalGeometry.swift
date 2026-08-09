@@ -245,6 +245,18 @@ public struct TerminalCursor: Equatable, Sendable {
     }
 }
 
+/// Places the visible cursor on the leading cell of the grid span the renderer must draw.
+public struct TerminalCursorPlacement: Equatable, Sendable {
+    /// Zero-based viewport row.
+    public let row: Int
+
+    /// Zero-based leading column, including when the engine cursor occupies a wide tail.
+    public let column: Int
+
+    /// Number of grid columns covered by the cursor.
+    public let columnWidth: Int
+}
+
 /// Captures one viewport row's cell classes and logical continuation identity.
 public struct TerminalRowGeometry: Equatable, Sendable {
     /// Cell roles distinguish written content from padding and wide-cell structure.

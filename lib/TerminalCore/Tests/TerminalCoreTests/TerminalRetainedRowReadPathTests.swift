@@ -2,7 +2,7 @@
 // every exception table a packed row can carry.
 //
 // Belongs here: assertions that the browsing render walk
-// (`forEachViewportCell(row:_:)`), the geometry projection (`geometry`), and the
+// (`forEachViewportRow(rows:where:_:)`), the geometry projection (`geometry`), and the
 // public row reader (`scrollbackRow(at:)`) report the same cells for the same
 // retained row. Does not belong here: anything about how the row is stored --
 // stride, table layout, or byte counts are `TerminalPackedRetainedRowTests`'
@@ -42,8 +42,8 @@ struct TerminalRetainedRowReadPathTests {
 
     @Test("The render walk reports the same cells the public row reader does")
     func renderWalkAgreesWithRowReader() throws {
-        // Intent: `forEachViewportCell` yields, for a retained row, exactly the scalars and
-        //   styles `scrollbackRow(at:)` reports for the same columns -- across wide glyphs,
+        // Intent: `forEachViewportRow` yields, for a retained row, exactly the kinds, scalars,
+        //   and styles `scrollbackRow(at:)` reports for the same columns -- across wide glyphs,
         //   a spilled cluster, a style change, and a hyperlink.
         // Why it exists: these two readers reach the same bytes by different routes, and
         //   after `F17` they no longer share `unpacked()` as a common decoder. Nothing else
@@ -54,14 +54,22 @@ struct TerminalRetainedRowReadPathTests {
         let terminal = try browsedTerminal(columns: columns)
         let expected = try #require(terminal.scrollbackRow(at: 0))
 
-        var rendered: [(column: Int, scalars: TerminalScalars, style: TerminalStyle)] = []
-        terminal.forEachViewportCell(row: 0) {
-            rendered.append((column: $0, scalars: $1, style: $2))
+        var rendered: [(
+            column: Int,
+            kind: TerminalCellKind,
+            scalars: TerminalScalars,
+            style: TerminalStyle
+        )] = []
+        terminal.forEachViewportRow(rows: 0..<1) { _, visit in
+            visit { column, kind, scalars, style in
+                rendered.append((column, kind, scalars, style))
+            }
         }
 
         #expect(rendered.count == columns)
         #expect(rendered.map(\.column) == Array(0..<columns))
         for entry in rendered {
+            #expect(entry.kind == expected.cells[entry.column].kind)
             #expect(entry.scalars == expected.cells[entry.column].scalars)
             #expect(entry.style == expected.cells[entry.column].style)
         }

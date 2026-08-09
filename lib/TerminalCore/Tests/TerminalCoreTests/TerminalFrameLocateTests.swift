@@ -22,9 +22,8 @@ import Testing
 struct TerminalFrameLocateTests {
     @Test("Planning one frame locates at most once per viewport traversal, at any depth")
     func frameLocateCountIsConstantInHistoryDepth() throws {
-        // Intent: the reads a frame makes of retained history -- the geometry projection and the
-        //   cell walk -- each convert one display row to a record and then advance, and the
-        //   number they spend does not move when history gets 100x deeper.
+        // Intent: the retained-history cell walk a frame makes converts one display row to a
+        //   record and then advances, and the count does not move when history gets 100x deeper.
         // Why it exists: `31/PO7`. The depth-invariance half is the load-bearing one: a count
         //   that grows with retained rows is the exact shape of `research/31/HR1`'s hazard, and it is
         //   invisible to every other test in the suite.
@@ -37,11 +36,9 @@ struct TerminalFrameLocateTests {
             terminal.scroll(toTopRow: 0)
             // Warm the read paths once, so the count measures a steady frame rather than
             // whatever the first one happens to fault in.
-            _ = terminal.geometry
             terminal.forEachViewportCell(rows: 0..<24) { _, _, _, _ in }
 
             return LocateCounter.measure {
-                _ = terminal.geometry
                 terminal.forEachViewportCell(rows: 0..<24) { _, _, _, _ in }
             }
         }
@@ -56,10 +53,10 @@ struct TerminalFrameLocateTests {
         // "instrument that cannot say *not measured*" `agent-docs/measurement-discipline.md`
         // rules out.
         #expect(shallow >= 1)
-        // One per traversal, and a frame makes two: the geometry pass and the cell pass. Both
-        // then advance a cursor row by row, which is the contract `research/31/D3` Decision 1 rule 2
-        // states and the thing a per-row binary search would break.
-        #expect(shallow <= 2)
+        // One for the frame's only viewport traversal. It then advances a cursor row by row,
+        // which is the contract `research/31/D3` Decision 1 rule 2 states and the thing a
+        // per-row binary search would break.
+        #expect(shallow == 1)
         #expect(deep == shallow)
     }
 

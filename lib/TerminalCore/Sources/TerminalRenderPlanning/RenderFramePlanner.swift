@@ -229,14 +229,6 @@ private func overlayStateSegments(
     }
 }
 
-/// Records the cursor's normalized grid span once so both layer overrides and
-/// the executor-facing cursor record use identical wide-cell policy.
-private struct CursorSpan {
-    let row: Int
-    let column: Int
-    let columnWidth: Int
-}
-
 /// Accumulates the text run currently being coalesced so extending it appends a
 /// cell in place instead of rebuilding the whole run per cell, which made
 /// both the copying and the width measurement quadratic in row length.
@@ -343,14 +335,14 @@ struct FramePlanner {
     /// Callers own the lineage and presentation checks; this only refuses reuse
     /// on the shape mismatches it can see for itself (full damage, changed grid).
     func plan(reusing retained: RetainedFrameRows?, damage: TerminalDamage) -> PlannedFrame {
-        let geometry = terminal.geometry
-        let cursorSpan = normalizedCursor(in: geometry)
-        let rowCount = geometry.rows.count
+        let columnCount = terminal.viewportColumnCount
+        let rowCount = terminal.scrollProjection.windowRows
+        let cursorSpan = presentation.isCursorVisible ? terminal.cursorPlacement : nil
 
         let reusable: RetainedFrameRows? =
             if let retained,
                damage.isFull == false,
-               retained.columns == geometry.columns,
+               retained.columns == columnCount,
                retained.rowCount == rowCount
             {
                 retained
@@ -390,7 +382,7 @@ struct FramePlanner {
         var cells = inspectedCells(
             rowCount: rowCount,
             replanning: { reuseSource($0) == nil },
-            geometry: geometry,
+            columnCount: columnCount,
             selectionRange: selectionRange
         )
         let overlaysActive = selectionRange != nil || searchMatchRange != nil
@@ -417,8 +409,8 @@ struct FramePlanner {
             // background rather than the one the cursor is about to bake into its span.
             let fragments = overlayFragments(
                 cells: cells[row],
-                selected: columns(for: selectionRange, row: row, columns: geometry.columns),
-                matched: columns(for: searchMatchRange, row: row, columns: geometry.columns)
+                selected: columns(for: selectionRange, row: row, columns: columnCount),
+                matched: columns(for: searchMatchRange, row: row, columns: columnCount)
             )
             var pushes = fragments.map { OverlayPush(columns: $0.columns, fill: $0.fill) }
             if let cursorSpan, cursorSpan.row == row,
@@ -459,7 +451,7 @@ struct FramePlanner {
 
         let resolvedCursorStyle = cursorStyle ?? reusable?.cursorStyle
         let plan = RenderFramePlan(
-            columns: geometry.columns,
+            columns: columnCount,
             rows: rowCount,
             defaultBackground: presentation.theme.defaultBackground,
             backgroundRuns: Array(background.joined()),
@@ -479,7 +471,7 @@ struct FramePlanner {
         return PlannedFrame(
             plan: plan,
             retained: RetainedFrameRows(
-                columns: geometry.columns,
+                columns: columnCount,
                 background: background,
                 overlays: overlays,
                 text: text,
@@ -487,26 +479,6 @@ struct FramePlanner {
                 cursorStyle: resolvedCursorStyle
             )
         )
-    }
-
-    private func normalizedCursor(in geometry: TerminalGeometry) -> CursorSpan? {
-        guard presentation.isCursorVisible, let cursor = geometry.cursor else { return nil }
-        guard geometry.rows.indices.contains(cursor.row),
-              geometry.rows[cursor.row].cells.indices.contains(cursor.column)
-        else {
-            return nil
-        }
-
-        let kind = geometry.rows[cursor.row].cells[cursor.column].kind
-        switch kind {
-        case .wideHead where cursor.column + 1 < geometry.columns:
-            return CursorSpan(row: cursor.row, column: cursor.column, columnWidth: 2)
-        case .wideTail where cursor.column > 0
-            && geometry.rows[cursor.row].cells[cursor.column - 1].kind == .wideHead:
-            return CursorSpan(row: cursor.row, column: cursor.column - 1, columnWidth: 2)
-        default:
-            return CursorSpan(row: cursor.row, column: cursor.column, columnWidth: 1)
-        }
     }
 
     /// Inspects every row `replanning` selects, in one traversal of the terminal's viewport.
@@ -521,7 +493,7 @@ struct FramePlanner {
     private func inspectedCells(
         rowCount: Int,
         replanning: (Int) -> Bool,
-        geometry: TerminalGeometry,
+        columnCount: Int,
         selectionRange: TerminalTextRange?
     ) -> [[PlannedCell]] {
         // Every row-scoped lookup is hoisted deliberately, and staying hoisted is what the
@@ -529,26 +501,24 @@ struct FramePlanner {
         // on every column and `isHovered` re-read `hoveredLink` and `scrollProjection` on every
         // column; a profile put that per-cell traffic at ~20% of `planFrame` (see
         // `research/14/F10`). Making the traversal plural put three of them back inside a
-        // single per-cell closure -- the row's kind array, which is an array *extraction* and
-        // so a retain/release pair per cell, and the two overlay spans -- and
+        // single per-cell closure -- the kind array and the two overlay spans -- and
         // `research/31/F13` measured the result at 60% of the browsing regression.
-        // `forEachViewportRow` hands the row out first precisely so all three can be `let`s of
-        // this closure's own frame again, which is what the per-row spelling had. The overlay
-        // spans are gone from here entirely now: colorize resolves them per row, so this pass
-        // carries only the selection foreground override, which is not an overlay color.
+        // `forEachViewportRow` now supplies kind with the other cell fields and hands the row out
+        // first so the two remaining spans can be `let`s of this closure's own frame. Colorize
+        // resolves overlay fills per row, so this pass carries only the selection foreground
+        // override, which is not an overlay color.
         var result = [[PlannedCell]](repeating: [], count: rowCount)
         terminal.forEachViewportRow(rows: 0..<rowCount, where: replanning) { row, visit in
-            let kinds = geometry.rows[row].cells
-            let hovered = hoveredColumns(row: row, columns: geometry.columns)
-            let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
+            let hovered = hoveredColumns(row: row, columns: columnCount)
+            let selected = columns(for: selectionRange, row: row, columns: columnCount)
             var cells: [PlannedCell] = []
-            cells.reserveCapacity(kinds.count)
-            visit { column, scalars, semanticStyle in
-                guard column < kinds.count else { return }
+            cells.reserveCapacity(columnCount)
+            visit { column, kind, scalars, semanticStyle in
+                guard column < columnCount else { return }
                 let cell = plannedCell(
                     row: row,
                     column: column,
-                    kind: kinds[column].kind,
+                    kind: kind,
                     scalars: scalars,
                     semanticStyle: semanticStyle,
                     hovered: hovered,
@@ -566,17 +536,16 @@ struct FramePlanner {
         // column count -- but it deliberately covers a short visited row too, so the padding
         // rule stays in one place instead of being duplicated inside the traversal closure.
         for row in 0..<rowCount where replanning(row)
-            && result[row].count < geometry.rows[row].cells.count
+            && result[row].count < columnCount
         {
-            let kinds = geometry.rows[row].cells
-            let hovered = hoveredColumns(row: row, columns: geometry.columns)
-            let selected = columns(for: selectionRange, row: row, columns: geometry.columns)
-            while result[row].count < kinds.count {
+            let hovered = hoveredColumns(row: row, columns: columnCount)
+            let selected = columns(for: selectionRange, row: row, columns: columnCount)
+            while result[row].count < columnCount {
                 let column = result[row].count
                 let cell = plannedCell(
                     row: row,
                     column: column,
-                    kind: kinds[column].kind,
+                    kind: .padding,
                     scalars: .empty,
                     semanticStyle: TerminalStyle(),
                     hovered: hovered,

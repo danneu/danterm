@@ -548,7 +548,7 @@ its number is recorded. Each needs a `decisions.md` entry before implementation.
 Each is small enough to verify with one script and revert cleanly. No ordering
 constraint among them except where noted.
 
-- [ ] `T11` VETTING -- **Take `terminal.geometry` off the frame path.** Verified
+- [x] `T11` VETTING -- **Take `terminal.geometry` off the frame path.** Verified
   in `F4`. Add `kind` to `forEachViewportRow`'s per-cell callback (free: same
   packed word, one shift and mask) and a small cursor-placement accessor; the
   planner then never constructs a `TerminalGeometry`. Verification: a script
@@ -556,6 +556,10 @@ constraint among them except where noted.
   row-allocation count per frame. `TerminalGeometry` survives as the test
   projection it now is. **Also correct `9`'s Phase 5 note and `17/F5` when this
   lands** -- both imply this was retired with `9/H2`, and `F4` shows it was not.
+  **Done in `F30`:** the canonical 179x66 probe moved from one
+  `presentedRowGeometry` call and 66 geometry-row allocations per `planFrame` to
+  zero and zero. The packed/live row traversal now supplies `kind`, and a small
+  cursor-placement projection replaces the planner's last geometry dependency.
 - [ ] `T12` VETTING -- **Fuse the planner's five per-row passes into one.**
   `inspectedCells` materializes a `[PlannedCell]` per row that four further
   passes re-read, then `colorized` rebuilds every text run it touches. Ideal:

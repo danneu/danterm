@@ -2807,3 +2807,48 @@ performance verdict.
   58 validator tests, and `just test` (75/75 steps) pass.
 - Next action: none for the block floor. Large feed-path improvements can now
   receive a confirm verdict without weakening the measurement contract.
+
+### F30 -- frame planning no longer constructs `TerminalGeometry`: projection calls and geometry-row allocations are both zero
+
+- Status: implemented and verified; this closes `T11`.
+- Date, baseline, and investigator: 2026-08-09, `8a939139`, Codex. The worktree
+  contained the unrelated untracked selection-provenance plan throughout; this
+  task did not read or modify it.
+- Test-first probe: `scripts/research/33/t11-geometry-frame-path.py` copies
+  `TerminalCore` and `TerminalRenderPlanning` into a scratch directory, injects
+  counters at `Terminal.presentedRowGeometry` and its per-row cell-array
+  allocation, compiles the instrumented copy, and plans one 179x66 frame. Every
+  source anchor must match exactly once, so movement cannot silently read as
+  zero. The script requires both counters to be zero.
+- Before: at `8a939139`, the probe failed as registered:
+  `presentedRowGeometryCalls=1`, `geometryRowAllocations=66` for one
+  `planFrame`.
+- Change: `LogicalLineStore.forEachPaintedCell` now decodes `TerminalCellKind`
+  from the packed word it already holds, including the retained spacer and fill
+  cases, and `Terminal.forEachViewportRow` carries that kind beside scalars and
+  style. Live rows and synthesized padding supply their stored kinds through the
+  same callback. `FramePlanner.inspectedCells` consumes the callback value, so
+  it no longer needs a parallel kind array. `Terminal.cursorPlacement` provides
+  only the visible cursor's normalized narrow or wide span; `viewportColumnCount`
+  and `scrollProjection.windowRows` provide the frame bounds. `Terminal.geometry`
+  and `presentedRowGeometry` remain available to tests and interaction policy.
+- After: the same probe passes with `presentedRowGeometryCalls=0` and
+  `geometryRowAllocations=0` for one `planFrame`. This proves the structural
+  claim only; no timing win is claimed because `incremental-mixed` has no
+  calibrated plan-time verdict (`F4`).
+- Behavioral coverage: the retained-row borrowing-walk test now asserts that
+  the new kind value agrees with the materialized row on every content class and
+  a second width. The public retained-row read-path test checks kind, scalars,
+  and style together. The frame locate gate now pins the sole retained-history
+  traversal at one locate. The 37 focused planner tests pass, including
+  retained windows, wide-head/tail cursor snapping, damage reuse, translated
+  reuse, overlays, selection, and search.
+- Documentation correction: doc 9's Phase 5 entry now records H2 as completed by
+  T11, and its 2026-07-29 amendment no longer says `8188b9a` retired the work.
+  `17/F5` now distinguishes the damage-scoped cell traversal that commit did
+  ship from the viewport-wide geometry projection it did not touch.
+- Verification: `t11-geometry-frame-path.py` passes; the focused planner suite
+  passes 37 tests, the expanded planner/read-path/locate selection passes 57,
+  and `just test` passes all 75 steps.
+- Next action: none for T11. `TerminalGeometry` remains an explicit
+  test/interaction projection and is no longer part of frame planning.
