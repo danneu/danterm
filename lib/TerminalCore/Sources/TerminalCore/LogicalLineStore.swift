@@ -126,6 +126,34 @@ enum WholeProjectionCounter {
     }
 }
 
+/// Counts retained display rows constructed by whole-history materializations.
+///
+/// Reclamation only needs packed metadata ids, so this counter makes its zero-row structural
+/// contract testable independently of wall-clock noise.
+enum RetainedRowMaterializationCounter {
+    /// The tally one `measure` is collecting.
+    final class Tally: @unchecked Sendable {
+        var rows = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records the rows one whole-history read is about to construct.
+    @inline(__always)
+    static func record(rows: Int) {
+        active?.rows += rows
+    }
+
+    /// Runs `body` and reports the retained rows materialized inside it.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.rows
+        }
+    }
+}
+
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///
@@ -1479,6 +1507,7 @@ extension Terminal {
         /// Select All and history export all read all of history, and this walks the records once
         /// instead of paying `locate(displayRow:)` per row the way a subscript would.
         func allPaintedDisplayRows() -> [Terminal.GridRow] {
+            RetainedRowMaterializationCounter.record(rows: grandDisplayRowTotal)
             var result: [Terminal.GridRow] = []
             result.reserveCapacity(grandDisplayRowTotal)
             for index in 0..<offsets.count {
@@ -1489,6 +1518,58 @@ extension Terminal {
                 }
             }
             return result
+        }
+
+        /// Visits every style id retained by the arena without constructing display rows or cells.
+        ///
+        /// Cell words own ordinary and spacer-head styles. A trailing background-erase fill is
+        /// record metadata rather than a cell, so the walk includes that side table explicitly.
+        func forEachStyleId(_ body: (Terminal.StyleId) -> Void) {
+            for index in 0..<offsets.count {
+                let offset = offsets[index]
+                let record = self.record(at: offset)
+                let chunk = chunks[chunkIndex(of: offset)]
+                let cellsBase = chunkWordIndex(of: offset) + 1
+                chunk.withUnsafeBufferPointer { words in
+                    for cell in 0..<record.cellCount {
+                        body(
+                            Terminal.StyleId(
+                                truncatingIfNeeded:
+                                    words[cellsBase + cell]
+                                        >> PackedRetainedRow.Header.cellStyleShift
+                            )
+                        )
+                    }
+                }
+                if let fill = trailingFillStyle(at: index) { body(fill) }
+            }
+        }
+
+        /// Visits every hyperlink id retained by the arena's compact per-record tables.
+        ///
+        /// A trimmed head keeps its table in place and advances the cells beneath its header, so
+        /// entries for the evicted prefix must be skipped just as cell decoding skips them.
+        func forEachHyperlinkId(_ body: (Terminal.HyperlinkId) -> Void) {
+            for index in 0..<offsets.count {
+                let offset = offsets[index]
+                let record = self.record(at: offset)
+                let retainedStart = index == 0 ? headTrimmedCells : 0
+                let retainedEnd = retainedStart + record.cellCount
+                if record.isOpen {
+                    for entry in openHyperlinks
+                    where entry.offset >= retainedStart && entry.offset < retainedEnd {
+                        body(entry.id)
+                    }
+                    continue
+                }
+                let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
+                for entryIndex in 0..<record.hyperlinkCount {
+                    let entry = base + entryIndex * LogicalLineRecord.hyperlinkEntryBytes
+                    let cellOffset = u16(entry)
+                    guard cellOffset >= retainedStart, cellOffset < retainedEnd else { continue }
+                    body(Terminal.HyperlinkId(u16(entry + 2)))
+                }
+            }
         }
 
         /// Borrows one display row's painted cells without materializing a `GridRow`.

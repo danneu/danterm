@@ -624,13 +624,16 @@ constraint among them except where noted.
   allocation count under `BoxDrawingSpriteGeometry.geometry` per draw must reach
   zero. Check first that the corpora actually contain sprites, or the workload
   cannot contain the mechanism.
-- [ ] `T16` VETTING -- **Scan arena words for the style and hyperlink sweeps.**
+- [x] `T16` DONE -- **Scan arena words for the style and hyperlink sweeps.**
   `liveStyleIds`/`liveHyperlinkIds` call `allPaintedDisplayRows`, materializing
   every retained display row as a `GridRow` with full cell construction, to
   collect a 4-byte field the arena already holds packed (`F7` context). Ideal:
   `forEachStyleId` scanning words directly. Verification: rows materialized per
   sweep must reach zero, plus an equality test that the word-walk live set equals
-  the `allPaintedDisplayRows`-derived one.
+  the `allPaintedDisplayRows`-derived one. **Result in `F33`, script
+  `scripts/research/33/t16-arena-live-id-sweeps.sh`: both live sets equal the
+  materialized oracle across stored cells, a derived spacer head, trailing fill,
+  and a trimmed head; both reclamation sweeps materialize zero retained rows.**
 - [ ] `T17` VETTING -- **Inline the CSI/escape sequence collections.** Capacities
   are already compile-time constants (24 parameters, 4 intermediates), yet
   `clearCollection`'s `removeAll(keepingCapacity: true)` reallocates all three

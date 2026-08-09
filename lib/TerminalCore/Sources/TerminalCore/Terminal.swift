@@ -1148,7 +1148,7 @@ public struct Terminal: Equatable, Sendable {
                 for cell in row.cells { live.insert(cell.styleId) }
             }
         }
-        collect(history.allPaintedDisplayRows(), into: &live)
+        history.forEachStyleId { live.insert($0) }
         collect(rows, into: &live)
         if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
         return live
@@ -1848,7 +1848,7 @@ public struct Terminal: Equatable, Sendable {
                 }
             }
         }
-        collect(history.allPaintedDisplayRows(), into: &live)
+        history.forEachHyperlinkId { live.insert($0) }
         collect(rows, into: &live)
         if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
@@ -2375,6 +2375,12 @@ public struct Terminal: Equatable, Sendable {
     /// store's contracts are assertable through the terminal that drives it.
     func retainedRecordSummaryForTesting(at index: Int) -> LogicalLineStore.RecordSummary? {
         history.recordSummary(at: index)
+    }
+
+    /// Runs both metadata reclamation passes so their retained-row cost can be measured directly.
+    mutating func reclaimMetadataForTesting() {
+        reclaimDeadStyleEntries()
+        reclaimDeadHyperlinkTargets()
     }
 
     /// Drives the content-identity counter to the last value before it wraps, so a test can reach

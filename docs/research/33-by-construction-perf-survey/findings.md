@@ -2954,3 +2954,38 @@ performance verdict.
   browsing regression; `retained-browse` was `faster` at -17.33%. Artifact:
   `.build/terminal-benchmark-comparisons/quick/40276bd5c7f6-0002`.
 - Next action: none for T13.
+
+### F33 -- metadata reclamation scans retained arena metadata directly and materializes zero display rows
+
+- Status: implemented and verified; this closes `T16`.
+- Date, baseline, and investigator: 2026-08-09, `8a0c83d1`, Codex. The
+  worktree contained an unrelated untracked plan throughout; this task did not
+  read or modify it.
+- Test-first probe: `scripts/research/33/t16-arena-live-id-sweeps.sh` runs the
+  packed-versus-materialized live-set oracle and the exact retained-row counter,
+  then rejects either reclamation function if it reaches
+  `allPaintedDisplayRows`. Before the implementation, its focused test build
+  failed as registered because `LogicalLineStore` had no `forEachStyleId` or
+  `forEachHyperlinkId`; both sweeps still called the materializing reader.
+- Change: `LogicalLineStore.forEachStyleId` reads style ids from stored cell
+  words and visits each record's trailing-fill style explicitly.
+  `forEachHyperlinkId` reads the compact per-record hyperlink table. For a
+  trimmed head it filters table entries belonging to the evicted prefix: those
+  bytes deliberately stay in place after the header advances, but the painted
+  projection no longer exposes them. Live-grid, inactive-primary-screen, style
+  default, and hyperlink-pen coverage remain in `Terminal`, unchanged.
+- Equality gate: the packed live sets equal the old materialized live sets for
+  retained wrapped content containing ordinary styled cells, a wide cell whose
+  fold synthesizes a spacer head, two hyperlink ids, and a trailing-fill style.
+  The hyperlink equality is repeated after one display-row head trim and proves
+  the stale side-table entry for the evicted prefix is excluded.
+- Structural result: `RetainedRowMaterializationCounter` reports **0 retained
+  rows materialized** while the style and hyperlink reclamation passes run back
+  to back over nonempty history. The same probe passes its source-path guard.
+- Scope: this is the complexity claim `D1` admits and no speed claim. `F7`
+  established that no calibrated workload contains the sweep trigger, so no
+  paired benchmark was run.
+- Verification: `t16-arena-live-id-sweeps.sh` passes both directed tests and
+  its source guard. The full `TerminalCore` package passes 1,106 tests in 140
+  suites with one pre-existing known issue, and `just test` passes all 75 steps.
+- Next action: none for T16.

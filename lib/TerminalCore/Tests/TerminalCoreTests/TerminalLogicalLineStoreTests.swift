@@ -625,6 +625,69 @@ struct TerminalLogicalLineStoreTests {
 
     // MARK: - The trailing fill as a record attribute
 
+    @Test("Packed live-id walks equal painted-row materialization")
+    func packedLiveIdsEqualPaintedRows() {
+        // Intent: direct retained-arena walks report exactly the style and hyperlink ids that
+        //   the existing painted-row projection reports.
+        // Why it exists: reclamation may only stop materializing retained rows if it still sees
+        //   stored cells, a derived spacer head, and a trailing-fill style. Missing any one can
+        //   reclaim metadata that a retained row still needs.
+        // Scenario: retained wrapped content carries two links and several styles, then ends in
+        //   a short background-erased row whose fill exists only in the record side table.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
+        var wrapped = Self.filledRow(width: 6, seed: 0, softWrapped: true)
+        wrapped.cells[0] = Self.narrow("a", styleId: 3, hyperlinkId: 11)
+        wrapped.cells[5] = Terminal.GridCell(
+            scalars: TerminalScalars("\u{1F600}"),
+            kind: .wideHead,
+            styleId: 5,
+            hyperlinkId: 12
+        )
+        store.admit(wrapped)
+        var ending = Self.backgroundErasedRow(width: 6, count: 2, seed: 1, fillStyle: 7)
+        ending.cells[0] = Terminal.GridCell(kind: .wideTail, styleId: 5, hyperlinkId: 12)
+        store.admit(ending)
+
+        var materializedStyles = Set<Terminal.StyleId>()
+        var materializedLinks = Set<Terminal.HyperlinkId>()
+        for row in store.allPaintedDisplayRows() {
+            for cell in row.cells {
+                materializedStyles.insert(cell.styleId)
+                if let id = cell.hyperlinkId { materializedLinks.insert(id) }
+            }
+        }
+
+        var packedStyles = Set<Terminal.StyleId>()
+        store.forEachStyleId { packedStyles.insert($0) }
+        var packedLinks = Set<Terminal.HyperlinkId>()
+        store.forEachHyperlinkId { packedLinks.insert($0) }
+
+        #expect(packedStyles == materializedStyles)
+        #expect(packedLinks == materializedLinks)
+        #expect(packedStyles.contains(7))
+        #expect(packedLinks == [11, 12])
+        #expect(
+            store.allPaintedDisplayRows().contains { row in
+                row.cells.contains { $0.kind == .spacerHead && $0.styleId == 5 }
+            }
+        )
+
+        // A head trim deliberately leaves the closed record's side table in place. The packed
+        // walk must ignore the dead prefix entries even though their bytes remain in the arena.
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        materializedLinks.removeAll(keepingCapacity: true)
+        for row in store.allPaintedDisplayRows() {
+            for cell in row.cells where cell.hyperlinkId != nil {
+                materializedLinks.insert(cell.hyperlinkId!)
+            }
+        }
+        packedLinks.removeAll(keepingCapacity: true)
+        store.forEachHyperlinkId { packedLinks.insert($0) }
+        #expect(packedLinks == materializedLinks)
+        #expect(packedLinks == [12])
+    }
+
     @Test("The trailing fill is charged as a side-table slot and released when its record goes")
     func trailingFillIsChargedAndReleased() {
         // Intent: records carrying a trailing fill charge more side-table bytes than records

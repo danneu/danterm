@@ -159,4 +159,27 @@ struct TerminalStyleTableTests {
         }
         expectValidGrid(terminal)
     }
+
+    @Test("metadata reclamation materializes no retained rows")
+    func reclamationSweepsMaterializeNoRetainedRows() {
+        // Intent: style and hyperlink reclamation scan retained metadata without constructing a
+        //   single retained display row.
+        // Why it exists: both sweeps run synchronously on the PTY-drain thread and used to decode
+        //   the whole arena into `GridRow` values merely to read compact ids.
+        // Scenario: a pane has accumulated enough history that a whole-history read has a
+        //   nonzero cost, then both reclamation passes run back to back.
+        var terminal = Terminal(columns: 8, rows: 2)!
+        for line in 0..<32 {
+            terminal.feed(trueColor(line + 1))
+            terminal.feed(Array("line\(line)\r\n".utf8))
+        }
+        #expect(terminal.retainedRowForTesting(at: 0) != nil)
+
+        let rows = RetainedRowMaterializationCounter.measure {
+            terminal.reclaimMetadataForTesting()
+        }
+
+        #expect(rows == 0)
+        expectValidGrid(terminal)
+    }
 }
