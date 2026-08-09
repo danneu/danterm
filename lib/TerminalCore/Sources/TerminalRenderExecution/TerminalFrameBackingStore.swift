@@ -43,6 +43,13 @@ public final class TerminalFrameBackingStore {
     private let context: CGContext
     private let colorSpace: CGColorSpace
 
+    /// The vertical reach of the content each row's pixels currently show,
+    /// kept in lockstep with the pixels (full renders reset it, applies update
+    /// the damaged rows, translations move it with the memmove) so an
+    /// incremental erase can cover the stale ink it is removing without
+    /// assuming a full-row halo (research/33 T14, D9).
+    private var rowReaches: [RenderRowReach?]
+
     /// Fails on non-positive geometry, an allocation IOSurface refuses, or a
     /// context CoreGraphics refuses, mirroring `renderFrameSize`'s overflow
     /// refusals.
@@ -105,6 +112,7 @@ public final class TerminalFrameBackingStore {
         data = surface.baseAddress
         self.context = context
         self.colorSpace = space
+        rowReaches = Array(repeating: nil, count: rows)
 
         surface.lock(options: [], seed: nil)
         memset(data, 0, byteCount)
@@ -120,17 +128,23 @@ public final class TerminalFrameBackingStore {
         ioSurface.lock(options: [], seed: nil)
         defer { ioSurface.unlock(options: [], seed: nil) }
         drawRenderFrame(plan, metrics: metrics, in: context)
+        rowReaches = renderRowReaches(
+            of: plan,
+            envelope: metrics.asciiInkEnvelope,
+            cellHeightPixels: metrics.cellHeightPixels
+        )
     }
 
     /// Applies one published frame on top of pixels that hold the previous
-    /// one: realizes the recorded shift as a row translation, then renders the
-    /// damaged rows plus the glyph halo. Returns false without touching the
-    /// store when the value cannot be realized exactly (full damage, grid
-    /// mismatch, an out-of-range shift); the caller treats that as stale.
+    /// one: realizes the recorded shift as a row translation, then erases and
+    /// re-renders exactly the pixels the damaged rows' bands and measured ink
+    /// reach can occupy. Returns false without touching the store when the
+    /// value cannot be realized exactly (full damage, grid mismatch, an
+    /// out-of-range shift); the caller treats that as stale.
     public func apply(plan: RenderFramePlan, damage: TerminalDamage) -> Bool {
         guard plan.columns == columns, plan.rows == rows else { return false }
         guard damage.isFull == false else { return false }
-        var indices = damage.rowIndices
+        let indices = damage.rowIndices
         guard indices.allSatisfy({ $0 < rows }) else { return false }
         // CPU writes to IOSurface memory sit between lock and unlock so the
         // surface's seed advances and coherency with a later texture read
@@ -138,42 +152,61 @@ public final class TerminalFrameBackingStore {
         // so unlocking through the defer is still a no-write unlock.
         ioSurface.lock(options: [], seed: nil)
         defer { ioSurface.unlock(options: [], seed: nil) }
+        var staleStrips: [Range<Int>] = []
         if let shift = damage.shift {
+            // A translation is exact for interior bands -- overhanging glyph
+            // ink rides the moved pixels -- but at the moved block's edges it
+            // imports the old neighborhood's spill and leaves its own spill
+            // stale in unmoved neighbors. The strips price those four edges
+            // exactly, from the reach ledger as it stands before the move.
+            staleStrips = renderTranslationStaleStrips(
+                region: shift.region,
+                delta: shift.delta,
+                cellHeightPixels: metrics.cellHeightPixels,
+                reaches: rowReaches
+            )
             guard translateRows(region: shift.region, delta: shift.delta) else {
                 return false
             }
-            // A translation is exact for interior bands -- overhanging glyph
-            // ink rides the moved pixels -- but at the region's edges it
-            // imports the wrong neighbor's spill and leaves the boundary
-            // rows' own outward spill stale. Redrawing the two boundary rows
-            // restores both, at the same O(1) cost as the cursor pair.
-            indices.append(shift.region.lowerBound)
-            indices.append(shift.region.upperBound - 1)
         }
-        guard indices.isEmpty == false else { return true }
+        guard indices.isEmpty == false || staleStrips.isEmpty == false else { return true }
 
-        // Byte-exactness needs two distinct row sets. The *erase* set is the
-        // damage plus glyph halo: every band a damaged row's ink can reach is
-        // refilled. The *plan* set is the erase set's own halo: every erased
-        // band is rebuilt from all rows whose ink reaches it, so an undamaged
-        // neighbor's overhang is redrawn rather than lost. (The folded view
-        // seam erases and plans the same haloed set, which drops a neighbor's
-        // sub-pixel spill; this store is held to the stricter contract.)
-        let eraseDamage = TerminalDamage(rows: indices, rowCount: rows)
-            .withGlyphHalo(rowCount: rows)
-        let planDamage = eraseDamage.withGlyphHalo(rowCount: rows)
+        // Byte-exactness in two derived sets (research/33 T14, D9). The erase
+        // spans cover every pixel a damaged row's band, its stale ink (the
+        // ledger), or its new ink (the plan) can occupy; the plan set is every
+        // row whose ink reaches an erased pixel, so an undamaged neighbor's
+        // overhang is redrawn rather than lost. On all-ASCII rows that is the
+        // damaged rows plus a measured sub-cell band and the one neighbor
+        // above; a row the envelope cannot vouch for falls back to the
+        // full-row reach, so the worst case is the pre-T14 halo shape.
+        let newReaches = renderRowReaches(
+            of: plan,
+            envelope: metrics.asciiInkEnvelope,
+            cellHeightPixels: metrics.cellHeightPixels
+        )
+        let shape = renderApplyShape(
+            damagedRows: indices,
+            rowCount: rows,
+            cellHeightPixels: metrics.cellHeightPixels,
+            oldReaches: rowReaches,
+            newReaches: newReaches,
+            extraEraseIntervals: staleStrips
+        )
         context.saveGState()
-        for span in eraseDamage.maximalContiguousSpans() {
+        for span in shape.erasePixelSpans {
             context.addRect(CGRect(
                 x: 0,
-                y: CGFloat(span.lowerBound) * metrics.cellSize.height,
+                y: CGFloat(span.lowerBound) / metrics.displayScale,
                 width: pointSize.width,
-                height: CGFloat(span.count) * metrics.cellSize.height
+                height: CGFloat(span.count) / metrics.displayScale
             ))
         }
         context.clip()
-        drawRenderFrame(clipFramePlan(plan, to: planDamage), metrics: metrics, in: context)
+        drawRenderFrame(clipFramePlan(plan, to: shape.planDamage), metrics: metrics, in: context)
         context.restoreGState()
+        for row in indices {
+            rowReaches[row] = newReaches[row]
+        }
         return true
     }
 
@@ -195,6 +228,14 @@ public final class TerminalFrameBackingStore {
             data + destinationRow * rowBytes,
             data + sourceRow * rowBytes,
             survivorRows * rowBytes
+        )
+        // The reach ledger moves with the pixels it describes; the vacated
+        // strip keeps its stale entries, exactly as its pixels do, and both
+        // are rebuilt by the damaged-row render that follows.
+        let moved = Array(rowReaches[sourceRow..<(sourceRow + survivorRows)])
+        rowReaches.replaceSubrange(
+            destinationRow..<(destinationRow + survivorRows),
+            with: moved
         )
         return true
     }

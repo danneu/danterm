@@ -44,6 +44,14 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     /// The styled faces every draw served by these metrics reuses.
     let fonts: TerminalFontSet
 
+    /// Measured union ink envelope of the four styled faces' printable-ASCII
+    /// tables, in backing pixels, or nil when any face's table is incomplete
+    /// or the measurement is degenerate -- the derived glyph halo then stays
+    /// at the full-row fallback (research/33 T14, D9). The symbols face and
+    /// the CTLine fallback are excluded because `drawTextCell` clips them to
+    /// their cell; the styled faces' glyph batch is the only unclipped path.
+    public let asciiInkEnvelope: RenderInkEnvelope?
+
     let baseFontName: String
     let baseFontSize: CGFloat
     let unquantizedLineHeight: CGFloat
@@ -133,9 +141,60 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             symbolsResource: symbolsResource,
             symbolsSize: self.cellSize.width
         )
+        self.asciiInkEnvelope = Self.measuredInkEnvelope(
+            fonts: self.fonts,
+            baselineOffset: self.baselineOffset,
+            cellHeightPixels: cellHeightPixels,
+            displayScale: displayScale
+        )
         self.baseFontName = baseName
         self.baseFontSize = fontSize
         self.unquantizedLineHeight = lineHeight
+    }
+
+    /// Unions the styled faces' measured ASCII ink boxes into cell-relative
+    /// pixel offsets, rounding only outward (the margin floors, the overshoot
+    /// ceils) so quantization can widen the derived reach but never narrow it.
+    /// Clamped to one cell past either edge, which is the reach the derivation
+    /// assumes as its worst case and the pre-T14 halo assumed globally.
+    private static func measuredInkEnvelope(
+        fonts: TerminalFontSet,
+        baselineOffset: CGFloat,
+        cellHeightPixels: Int,
+        displayScale: CGFloat
+    ) -> RenderInkEnvelope? {
+        let faces = [fonts.regular, fonts.bold, fonts.italic, fonts.boldItalic]
+        guard faces.allSatisfy(\.asciiTableComplete) else { return nil }
+        guard let above = faces.map(\.asciiInkAboveBaseline).max(),
+              let below = faces.map(\.asciiInkBelowBaseline).max(),
+              above.isFinite, below.isFinite
+        else { return nil }
+        let baselinePixels = baselineOffset * displayScale
+        let cellHeight = CGFloat(cellHeightPixels)
+        let topOffset = (baselinePixels - above * displayScale).rounded(.down)
+        let bottomOffset = (baselinePixels + below * displayScale - cellHeight).rounded(.up)
+        guard topOffset.isFinite, bottomOffset.isFinite else { return nil }
+        // Clamp before converting: a degenerate face (a test's astronomically
+        // sized font) can produce finite offsets beyond Int's range, and
+        // Int(_:) traps on those. The derivation never needs more than one
+        // cell of reach in either direction anyway, and the boundary branches
+        // return the already-valid Int rather than round-tripping a CGFloat
+        // that may exceed exact integer range.
+        func clamped(_ offset: CGFloat) -> Int {
+            if offset <= -cellHeight { return -cellHeightPixels }
+            if offset >= cellHeight { return cellHeightPixels }
+            return Int(offset)
+        }
+        let clampedTop = clamped(topOffset)
+        let clampedBottom = clamped(bottomOffset)
+        // The non-degeneracy guard stays in floating point: the equivalent
+        // integer sum can overflow at the same astronomical cell sizes the
+        // clamp above exists for.
+        guard CGFloat(clampedTop) < cellHeight + CGFloat(clampedBottom) else { return nil }
+        return RenderInkEnvelope(
+            inkTopOffsetPixels: clampedTop,
+            inkBottomOffsetPixels: clampedBottom
+        )
     }
 }
 
@@ -183,6 +242,20 @@ struct TerminalFace: @unchecked Sendable {
     /// existing meaning of glyph zero: send the cell to the fallback path.
     private let glyphs: [CGGlyph]
 
+    /// Union ink extent of the table's mapped glyphs above the baseline, in
+    /// font space (y up), for the derived glyph halo (research/33 T14). Zero
+    /// glyphs are excluded so a `.notdef` box cannot enter the envelope.
+    let asciiInkAboveBaseline: CGFloat
+
+    /// Union ink extent below the baseline; see `asciiInkAboveBaseline`.
+    let asciiInkBelowBaseline: CGFloat
+
+    /// True when every scalar of `asciiGlyphTableRange` maps to a real glyph,
+    /// so every printable-ASCII cell this face serves is submitted from the
+    /// measured table and none reroutes to the clipped fallback. The measured
+    /// ink envelope is only trusted when all styled faces hold this.
+    let asciiTableComplete: Bool
+
     init(font: CTFont) {
         self.font = font
         self.pointSize = CTFontGetSize(font)
@@ -195,6 +268,22 @@ struct TerminalFace: @unchecked Sendable {
         // stand in for a per-entry check; the zeroed buffer already carries that.
         _ = CTFontGetGlyphsForCharacters(font, &characters, &resolved, characters.count)
         glyphs = resolved
+
+        var boundingRects = [CGRect](repeating: .zero, count: resolved.count)
+        var measured = resolved
+        _ = CTFontGetBoundingRectsForGlyphs(
+            font, .horizontal, &measured, &boundingRects, resolved.count
+        )
+        var above = -CGFloat.infinity
+        var below = -CGFloat.infinity
+        for (glyph, rect) in zip(resolved, boundingRects)
+        where glyph != 0 && rect.isEmpty == false {
+            above = max(above, rect.maxY)
+            below = max(below, -rect.minY)
+        }
+        asciiInkAboveBaseline = above
+        asciiInkBelowBaseline = below
+        asciiTableComplete = resolved.allSatisfy { $0 != 0 }
     }
 
     /// The precomputed glyph, or nil when the scalar is outside the table and the

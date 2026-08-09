@@ -197,6 +197,133 @@ struct FrameBackingStoreTests {
         #expect(result.applied == 10)
     }
 
+    @Test("streaming mixed sprite, accent, and ASCII rows stays byte-identical")
+    func mixedContentStreaming() throws {
+        // Intent: the derived halo's per-row reach classes (research/33 T14)
+        //   hold byte-exact when general-class rows -- accents from the wider
+        //   cmap, sprite scalars -- scroll past ASCII rows and sit beside
+        //   damage.
+        // Why it exists: a reach classifier that under-reads a non-ASCII
+        //   row's ink would drop that ink exactly at the class boundary, a
+        //   defect only content mixing can surface.
+        // Scenario: alternating ASCII and mixed lines (e-acute, box drawing,
+        //   blocks) stream through a full screen, one line per step.
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        prefill(&terminal, rows: 20)
+        let mixed = "caf\u{E9} \u{2500}\u{2500}\u{2502} \u{2588}\u{2593} gjpqy \u{E9}\u{E8}"
+        let steps = (0..<20).map { index in
+            Array(((index.isMultiple(of: 2) ? line : mixed) + "\r\n").utf8)
+        }
+        let result = try assertStoreEqualsFullRender(
+            terminal: &terminal,
+            steps: steps,
+            context: "mixed-content streaming"
+        )
+        #expect(result.shifted == 20)
+        #expect(result.applied == 20)
+    }
+
+    @Test("colored backgrounds and underlines beside damage stay byte-identical")
+    func decoratedNeighborsOfDamage() throws {
+        // Intent: a row whose only content is a band layer -- background
+        //   fill, underline -- is replanned whenever the erase region
+        //   touches its band, including the sub-cell descender band below a
+        //   damaged ASCII row.
+        // Why it exists: T14's erase can end a few pixels inside a
+        //   neighbor's band; refilling those pixels with default background
+        //   instead of the neighbor's own layers would show as a pinstripe
+        //   under exactly this content.
+        // Scenario: a colored-background row and an underlined row bracket a
+        //   plain row; the plain row and each neighbor are edited in turn.
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        prefill(&terminal, rows: 20)
+        let steps: [[UInt8]] = [
+            Array("\u{1B}[10;1H\u{1B}[44mblue background row\u{1B}[49m\u{1B}[K".utf8),
+            Array("\u{1B}[12;1H\u{1B}[4munderlined gjpqy row\u{1B}[24m\u{1B}[K".utf8),
+            Array("\u{1B}[11;1Hedited between decorated rows gjpqy".utf8),
+            Array("\u{1B}[10;24H\u{1B}[44m more\u{1B}[49m".utf8),
+            Array("\u{1B}[12;24H\u{1B}[4m more\u{1B}[24m".utf8),
+            Array("\u{1B}[13;1Hrow below the underline gjpqy".utf8),
+        ]
+        let result = try assertStoreEqualsFullRender(
+            terminal: &terminal,
+            steps: steps,
+            context: "decorated neighbors"
+        )
+        #expect(result.shifted == 0)
+        #expect(result.applied == 6)
+    }
+
+    @Test("a row transitioning between ASCII and accented content stays byte-identical")
+    func reachClassTransitions() throws {
+        // Intent: the store's reach ledger follows content transitions, so a
+        //   row rewritten from accented to ASCII still erases the stale
+        //   accent's full-cell reach, and back again.
+        // Why it exists: deriving the erase from the new content alone would
+        //   leave the old class's ink outside the new class's band -- the
+        //   ledger exists for exactly this step.
+        // Scenario: one row alternates ASCII, accented, box-drawing, ASCII;
+        //   each rewrite is a row-damage apply on the previous content.
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        prefill(&terminal, rows: 20)
+        let rewrites = [
+            "plain gjpqy start",
+            "\u{C0}\u{C9} accented \u{E9}\u{E8} tall",
+            "\u{2554}\u{2550}\u{2550} box \u{2550}\u{2557}",
+            "plain gjpqy again",
+        ]
+        let steps = rewrites.map { Array("\u{1B}[8;1H\($0)\u{1B}[K".utf8) }
+        let result = try assertStoreEqualsFullRender(
+            terminal: &terminal,
+            steps: steps,
+            context: "reach class transitions"
+        )
+        #expect(result.shifted == 0)
+        #expect(result.applied == 4)
+    }
+
+    @Test("accented rows bracketing a DECSTBM region survive both scroll directions")
+    func generalNeighborsOfRegionScroll() throws {
+        // Intent: a translation beside general-class rows leaves no stale
+        //   spill at the moved block's edges -- the imported and outward
+        //   strips the pre-move reach ledger prices (research/33 T14).
+        // Why it exists: an accented row just outside a scroll region paints
+        //   up to a full cell into the region's edge band; a translation that
+        //   only re-rendered the region's boundary rows would ghost that ink
+        //   one row over in four distinct edge cases (each scroll direction,
+        //   each region edge).
+        // Scenario: rows 3 and 11 (1-based) hold ink that measurably escapes
+        //   the cell on the shipped font (U+01FA +1.4 px above at 2x,
+        //   U+1E01 +2.35 px below), the region is rows 4..10, escaping rows
+        //   also feed through the region, and the region scrolls up (newline
+        //   at its bottom) then down (RI at its top) repeatedly.
+        var terminal = try #require(Terminal(columns: 60, rows: 12))
+        prefill(&terminal, rows: 12)
+        let tall = "\u{01FA}\u{1EAA} tall \u{1E01} deep gjpqy \u{01FA}\u{1E01}"
+        terminal.feed(Array("\u{1B}[3;1H\(tall)\u{1B}[K".utf8))
+        terminal.feed(Array("\u{1B}[11;1H\(tall)\u{1B}[K".utf8))
+        terminal.feed(Array("\u{1B}[4;10r".utf8))
+        var steps: [[UInt8]] = []
+        for index in 0..<8 {
+            let fed = index.isMultiple(of: 2) ? tall : "up \(index) gjpqy"
+            steps.append(Array("\u{1B}[10;1H\(fed)\u{1B}[K\r\n".utf8))
+            // Cursor-neutral scrolls (SU/SD with the cursor parked
+            // mid-region): neither the vacated row's rewrite nor the cursor
+            // pair's damage can mask a stale strip at the moved block's
+            // edges, so escaped ink left there survives to the comparison.
+            steps.append(Array("\u{1B}[7;1H\u{1B}[S".utf8))
+            steps.append(Array("\u{1B}[T".utf8))
+            steps.append(Array("\u{1B}[4;1H\u{1B}Mdown \(index) gjpqy\u{1B}[K".utf8))
+        }
+        let result = try assertStoreEqualsFullRender(
+            terminal: &terminal,
+            steps: steps,
+            context: "general neighbors of a region scroll"
+        )
+        #expect(result.shifted == 32)
+        #expect(result.applied == 32)
+    }
+
     @Test("full damage and grid mismatch are refused with the store untouched")
     func refusalLeavesStoreIntact() throws {
         // Intent: apply's false return is a no-op, not a partial write.

@@ -1,0 +1,221 @@
+// Behavioral proofs for the derived glyph halo's two pure halves (research/33
+// T14, D9): per-row ink reach classified from a plan's runs, and the
+// erase-span/plan-row shape an incremental render derives from damage plus
+// old and new reaches. Byte-level correctness lives in FrameBackingStoreTests;
+// these pin the countable shape the task claims.
+import Testing
+
+import TerminalCore
+@testable import TerminalRenderPlanning
+
+struct RenderInkReachTests {
+    /// The canonical 2x geometry: 31 px cell, measured ASCII envelope of a
+    /// 4 px top margin and 2 px descender overshoot (t14-ink-envelope-probe).
+    private let cellHeight = 31
+    private let envelope = RenderInkEnvelope(inkTopOffsetPixels: 4, inkBottomOffsetPixels: 2)
+
+    private func plan(
+        rows: Int = 6,
+        columns: Int = 20,
+        feeding bytes: [UInt8],
+        cursorVisible: Bool = false
+    ) throws -> RenderFramePlan {
+        var terminal = try #require(Terminal(columns: columns, rows: rows))
+        terminal.feed(bytes)
+        return planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: cursorVisible,
+                cursorShape: .block
+            )
+        )
+    }
+
+    @Test("an all-ASCII row reaches exactly the measured envelope")
+    func asciiRowReach() throws {
+        let plan = try plan(feeding: Array("ascii gjpqy\r\n".utf8))
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
+    }
+
+    @Test("a single-scalar non-ASCII cell widens its row to the full-cell reach")
+    func generalRowReach() throws {
+        // U+00E9 is mapped by the styled face's wider cmap and submitted
+        // unclipped, so its extents are not vouched for by the ASCII envelope.
+        let plan = try plan(feeding: Array("caf\u{E9}\r\n".utf8))
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62))
+    }
+
+    @Test("a multi-scalar cluster contributes only its clipped cell band")
+    func clusterRowReach() throws {
+        // e + combining acute draws through drawTextCell, which clips to the
+        // cell; beside ASCII the row's reach is the union of band and envelope.
+        let plan = try plan(feeding: Array("e\u{0301}x\r\n".utf8))
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 33))
+    }
+
+    @Test("rows with no drawing have no reach, and band layers contribute the band")
+    func emptyAndBandRows() throws {
+        // Row 0 text, row 2 colored background via SGR, rows 1 and 3+ empty.
+        let bytes = Array("text\r\n\r\n\u{1B}[44m    \u{1B}[0m\r\n".utf8)
+        let plan = try plan(feeding: bytes)
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] != nil)
+        #expect(reaches[1] == nil)
+        // The background run pins the row's reach to start at its band top,
+        // whether or not the planner also emits text runs for the spaces.
+        #expect(reaches[2]?.lowerOffsetPixels == 0)
+        #expect((reaches[2]?.upperOffsetPixels ?? 0) >= 31)
+        #expect(reaches[4] == nil)
+    }
+
+    @Test("the cursor row carries at least its band even with no text")
+    func cursorRowReach() throws {
+        let plan = try plan(feeding: [], cursorVisible: true)
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 31))
+    }
+
+    @Test("a nil envelope degrades ASCII rows to the full-cell reach")
+    func nilEnvelopeDegrades() throws {
+        let plan = try plan(feeding: Array("ascii\r\n".utf8))
+        let reaches = renderRowReaches(of: plan, envelope: nil, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62))
+    }
+
+    private func asciiReaches(rows: Int) -> [RenderRowReach?] {
+        Array(
+            repeating: RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33),
+            count: rows
+        )
+    }
+
+    @Test("an ASCII damaged row erases its band plus the overshoot and plans itself and the neighbor above")
+    func asciiSteadyStateShape() {
+        // Intent: the countable claim -- 2 planned rows and a sub-cell erase
+        //   band where the pre-T14 shape erased 3 full rows and planned 5.
+        // Why it exists: this is the shape the t5 gate's glyph fall rests on.
+        // Scenario: one damaged row mid-grid, every row all-ASCII.
+        let reaches = asciiReaches(rows: 20)
+        let shape = renderApplyShape(
+            damagedRows: [10],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(shape.erasePixelSpans == [310..<343])
+        #expect(shape.planDamage.rowIndices == [9, 10])
+    }
+
+    @Test("a general damaged row reproduces the pre-T14 reach as its worst case")
+    func generalDamagedRowShape() {
+        var reaches = asciiReaches(rows: 20)
+        reaches[10] = RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62)
+        let shape = renderApplyShape(
+            damagedRows: [10],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        // Erase covers rows 9 through 11 whole; every row whose ink reaches
+        // that region is planned. Row 12's ink starts 4 px below the erase
+        // edge, so the halo-of-halo's fifth row is gone even in the worst case.
+        #expect(shape.erasePixelSpans == [279..<372])
+        #expect(shape.planDamage.rowIndices == [8, 9, 10, 11])
+    }
+
+    @Test("stale general ink forces the wide erase through the old reach alone")
+    func classTransitionUsesOldReach() {
+        // Intent: a row rewritten from non-ASCII to ASCII still erases the
+        //   full-cell band its stale ink may occupy.
+        // Why it exists: the ledger is what makes the derived halo sound
+        //   across content transitions; using only the new reach would leave
+        //   the old accent's ink above the row.
+        var old = asciiReaches(rows: 20)
+        old[10] = RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62)
+        let new = asciiReaches(rows: 20)
+        let shape = renderApplyShape(
+            damagedRows: [10],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: old,
+            newReaches: new
+        )
+        #expect(shape.erasePixelSpans == [279..<372])
+        #expect(shape.planDamage.rowIndices == [8, 9, 10, 11])
+    }
+
+    @Test("an empty damaged row still erases its band and replans the descenders above")
+    func emptyDamagedRow() {
+        var reaches = asciiReaches(rows: 20)
+        reaches[10] = nil
+        let shape = renderApplyShape(
+            damagedRows: [10],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(shape.erasePixelSpans == [310..<341])
+        #expect(shape.planDamage.rowIndices == [9])
+    }
+
+    @Test("adjacent damaged rows merge into one erase span")
+    func adjacentSpansMerge() {
+        let reaches = asciiReaches(rows: 20)
+        let shape = renderApplyShape(
+            damagedRows: [4, 3],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(shape.erasePixelSpans == [93..<157])
+        #expect(shape.planDamage.rowIndices == [2, 3, 4])
+    }
+
+    @Test("erase spans clamp to the frame at both edges")
+    func edgeRowsClamp() {
+        let reaches = asciiReaches(rows: 4)
+        let top = renderApplyShape(
+            damagedRows: [0],
+            rowCount: 4,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(top.erasePixelSpans == [0..<33])
+        #expect(top.planDamage.rowIndices == [0])
+        let bottom = renderApplyShape(
+            damagedRows: [3],
+            rowCount: 4,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(bottom.erasePixelSpans == [93..<124])
+        #expect(bottom.planDamage.rowIndices == [2, 3])
+    }
+
+    @Test("a colored-background neighbor below is replanned when the overshoot band bites it")
+    func backgroundNeighborIsPlanned() {
+        // Intent: a sub-pixel erase intrusion into a row with band content
+        //   replans that row instead of refilling it with default background.
+        var reaches = asciiReaches(rows: 20)
+        reaches[11] = RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 31)
+        let shape = renderApplyShape(
+            damagedRows: [10],
+            rowCount: 20,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(shape.erasePixelSpans == [310..<343])
+        #expect(shape.planDamage.rowIndices == [9, 10, 11])
+    }
+}
