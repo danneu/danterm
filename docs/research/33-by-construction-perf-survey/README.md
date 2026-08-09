@@ -560,7 +560,7 @@ constraint among them except where noted.
   `presentedRowGeometry` call and 66 geometry-row allocations per `planFrame` to
   zero and zero. The packed/live row traversal now supplies `kind`, and a small
   cursor-placement projection replaces the planner's last geometry dependency.
-- [ ] `T12` VETTING -- **Fuse the planner's five per-row passes into one.**
+- [x] `T12` **DONE (`F31`)** -- **Fuse the planner's five per-row passes into one.**
   `inspectedCells` materializes a `[PlannedCell]` per row that four further
   passes re-read, then `colorized` rebuilds every text run it touches. Ideal:
   four open-run accumulators inside the single existing cell visit; text runs
@@ -568,7 +568,13 @@ constraint among them except where noted.
   `DecorationCandidate` are deleted rather than optimized. Verification: per-row
   allocation count and passes-per-row count. **Heed `31/F13`:** the accumulators
   must be locals of the row body, not captures re-read per column -- that
-  mistake cost 60% of a browsing regression once.
+  mistake cost 60% of a browsing regression once. **Done in `F31`:** the
+  canonical 179x66 selected-frame probe moved from 66 transient planned-cell
+  row allocations and 330 cell-row passes to zero and 66. Four open runs now
+  produce the retained layers directly inside each row body; text and
+  decorations reach the plan already overlay-adjusted and coalesced, and both
+  `colorized` overloads plus `DecorationCandidate` are gone. A paired
+  `retained-browse` quick check was `equivalent` at +0.62%.
 - [ ] `T13` VETTING -- **Resolve cell style at style-run granularity.**
   `forEachViewportRow` already holds `lastId`/`lastStyle` and hands the same
   `TerminalStyle` to every column of a run, then discards that knowledge at the
@@ -1158,3 +1164,18 @@ T8 pair now returns all six confirm results, with `terminal-feed` `faster
 -41.63%`; eight byte-identical-source whole-invocation controls produced zero
 directional feed calls across both slots without changing the 1-second floor or
 any frozen threshold.
+
+**`T12` then fused frame planning at the row boundary (`F31`).** On the
+canonical 179x66 selected frame, the dedicated probe counts 66 transient
+`[PlannedCell]` row allocations and 330 cell-row passes before the change,
+against zero and 66 after it. Each row now owns four open-run accumulators while
+its cells stream past once. They emit background, overlay, text, and decoration
+runs directly; text foregrounds and decoration colors are overlay-adjusted
+before admission, so the later `colorized` rebuilds and
+`DecorationCandidate` materialization no longer exist. The accumulators stay in
+the row callback's frame, preserving the locality constraint `31/F13` measured.
+The focused planner suites preserve overlay/cursor ordering, wide-cell text and
+decoration boundaries, and retained-row translation equality. A position-
+balanced two-pair `retained-browse` quick comparison against the T11 tree read
+`equivalent` at +0.62%; the structural count, not that descriptive timing, is
+the task's gate.

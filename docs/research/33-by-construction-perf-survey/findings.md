@@ -2852,3 +2852,52 @@ performance verdict.
   and `just test` passes all 75 steps.
 - Next action: none for T11. `TerminalGeometry` remains an explicit
   test/interaction projection and is no longer part of frame planning.
+
+### F31 -- frame planning emits all four row layers in one cell pass: transient planned-cell rows fall 66 to zero and cell-row passes fall 330 to 66
+
+- Status: implemented and verified; this closes `T12`.
+- Date, baseline, and investigator: 2026-08-09, `8e0b603a`, Codex. The
+  worktree contained an unrelated untracked plan throughout; this task did not
+  read or modify it.
+- Test-first probe: `scripts/research/33/t12-row-fusion.py` copies
+  `TerminalCore` and `TerminalRenderPlanning` into a scratch directory, injects
+  counters into the viewport row body, the transient `[PlannedCell]` row
+  allocation, and each later cell-row derivation, then compiles the instrumented
+  copy and plans one selected 179x66 frame. Every applicable source anchor must
+  match exactly once, so movement cannot silently read as zero. The script
+  requires zero transient planned-cell row allocations and exactly one cell
+  pass per viewport row.
+- Before: at `8e0b603a`, the probe failed as registered. One `planFrame`
+  allocated 66 transient `[PlannedCell]` rows and made 330 cell-row passes: one
+  inspection plus overlay, background, text, and decoration derivation for each
+  of 66 rows.
+- Change: each visited row now owns four open-run accumulators for background,
+  overlay, text, and decoration. The single cell visit resolves presentation,
+  cursor priority, and overlay foregrounds before admitting a cell to those
+  accumulators. Text and decoration runs therefore reach the retained plan
+  already overlay-adjusted and maximally coalesced. `PlannedCell`,
+  `inspectedCells`, both `colorized` overloads, `DecorationCandidate`, and the
+  fragment/push reread machinery are deleted rather than cached or bypassed by
+  a fast path.
+- Locality constraint: all four accumulator values and their finished row arrays
+  are locals of the row callback's frame. None is stored outside the row and
+  indexed or reloaded by the per-cell callback. This preserves the row-scoped
+  shape required by `31/F13`, where moving row state into the plural traversal's
+  outer capture accounted for 60% of the browsing regression.
+- After: the same probe passes with
+  `plannedCellRowAllocations=0` and `cellRowPasses=66` for one `planFrame`.
+  Thus every planned row is visited once and no transient cell row exists.
+- Behavioral coverage: the complete `TerminalRenderPlanningTests` target passes
+  94 tests across 13 suites. The directed coverage includes overlay fill versus
+  block-cursor ordering, equal-color coalescing, selection edges inside wide
+  glyphs, text continuity across wide cells and gaps, accumulator reset at row
+  boundaries, retained-row reuse, translated shift reuse, and at-budget history
+  streaming. The task probe passes, and `just test` passes all 75 steps.
+- Paired performance check: a position-balanced two-pair
+  `retained-browse` quick comparison against the immutable T11 source reads
+  `equivalent` at +0.62%. Artifact:
+  `.build/terminal-benchmark-comparisons/quick/3a99bbb86ee7-0000`. This checks
+  the `31/F13` browsing risk; the task's deciding evidence remains the exact
+  allocation and pass counts rather than descriptive timing.
+- Next action: none for T12. `T13` separately owns moving style resolution from
+  cell granularity to the distinct style runs the traversal already observes.
