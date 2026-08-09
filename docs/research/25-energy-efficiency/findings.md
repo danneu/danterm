@@ -208,3 +208,44 @@ external-guidance survey; every claim in it carries the URL it came from.
   the libghostty backend's Metal + CVDisplayLink pipeline also blocked nap is
   not documented; claim scoped accordingly.)
 - Next action: feeds every ledger task; no direct follow-up of its own.
+
+### F7 -- pane-tape follow is a scoped exception to the idle-by-construction result
+
+- Status: established by a focused process-wakeup counter; `33/T22` is now
+  implemented and the exception is closed. The broader Phase 1 T1-T4
+  measurements remain open.
+- Date, baseline, and investigator: 2026-08-09, `23137e82`, Codex. The only
+  pre-existing worktree change was an unrelated untracked WIP plan, untouched
+  by this investigation.
+- Reproduction: `scripts/research/33/t22-pane-tape-follow-idle-wakeups.sh
+  --seconds 15`. The one subscribed interval follows a silent pane from now and
+  emitted exactly one start record; two unsubscribed intervals in the same
+  isolated release-build process bracket it. The probe reads cumulative
+  `proc_pid_rusage(RUSAGE_INFO_V0)` process wakeup counters, so it needs no root
+  privileges and does not infer wakeups from CPU time.
+- Measurements: 20.126535 interrupt wakeups/s with one silent subscription;
+  0.533153/s before it and 0.066643/s after it; 0.299898/s mean baseline;
+  19.826637/s incremental. Package-idle wakeups were zero in every arm, so no
+  package-residency or total-energy claim is made.
+- Observation: F1 was accurate but too easy to read broadly. The render path is
+  event-driven, but `app/AppRuntime.swift#ensurePaneTapeFollowTimer` adds a
+  50 ms repeating main-queue poll whenever at least one pane-tape follow
+  subscription exists. Its tick fences each idle subscription's terminal owner
+  through `app/SwiftTerminalSessionView.swift#paneTapeFollowBatch`. The 302
+  wakeups observed over 15.005067 seconds match the expected 300 timer periods.
+- Inference: one idle debugging subscriber raises the app from below Apple's
+  documented <=1 wakeup/s idle target in both baseline arms to about 20/s. This
+  is material even without an energy-impact A/B because removing a periodic
+  idle wakeup source is the structural requirement F6 cites; the probe measures
+  its exact opportunity count.
+- Implementation result: `33/F39` records the edge-triggered recorder notice,
+  atomic owner-queue rearm, one pending edge during socket delivery, and stable
+  terminal-owner cancellation on teardown. The same 15-second measurement now
+  reads 0.333067 interrupt wakeups/s subscribed against a 0.266326/s mean
+  baseline, incremental 0.066741/s. The enhanced probe also observes feed and
+  resize events after the idle arm, proving the follower still wakes on both
+  recorder append kinds without periodic work.
+- Conclusion: the focused exception to F1 is closed. Do not broaden this result
+  into completion of T1: multi-tab idle wakeups and App Nap engagement remain
+  unmeasured.
+- Next action: continue doc 25's broader Phase 1 independently.

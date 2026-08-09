@@ -1,6 +1,7 @@
 // Main-actor pane policy that turns one PTY host's conflated updates into cached
 // inspection text, complete render plans, child-ended evidence, and one exit notification.
 import Dispatch
+import Foundation
 import PaneLifecycle
 import Synchronization
 import TerminalCore
@@ -931,6 +932,43 @@ public final class TerminalPaneSessionController {
             nextSequence: nextSequence,
             payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
         ))
+    }
+
+    /// Arms one append edge without carrying recorder events across the owner boundary.
+    public func addFlightRecordingFollowNotice(
+        id: UUID,
+        nextSequence: UInt64,
+        payloadBytesBeforeNextSequence: Int,
+        notify: @escaping @Sendable () -> Void
+    ) -> Bool {
+        host.addFlightRecordingFollowNotice(
+            id: id,
+            from: .init(
+                nextSequence: nextSequence,
+                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+            ),
+            notify: notify
+        )
+    }
+
+    /// Removes one append edge before the app releases its subscription state.
+    public func removeFlightRecordingFollowNotice(id: UUID) {
+        host.removeFlightRecordingFollowNotice(id: id)
+    }
+
+    /// Fences one followed suffix and rearms that subscriber's next append edge atomically.
+    public func flightRecordingFollowSnapshot(
+        subscriptionId: UUID,
+        nextSequence: UInt64,
+        payloadBytesBeforeNextSequence: Int
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        host.fencedFlightRecordingFollowSnapshot(
+            subscriptionId: subscriptionId,
+            from: .init(
+                nextSequence: nextSequence,
+                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+            )
+        )
     }
 
     /// Fences current geometry with the first cursor for a tail-only follow stream.

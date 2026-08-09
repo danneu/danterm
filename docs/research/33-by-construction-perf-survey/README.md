@@ -794,15 +794,19 @@ reopening condition, and argues that condition is met.
   the benchmark recording whether the equality check ever disagrees with
   `pendingDamage != .none` -- if it never does, the check is provably redundant
   and its deletion is evidence-backed rather than argued.
-- [ ] `T22` RESEARCH -- **Push, don't poll, for `pane tape --follow`.** A 50 ms
-  repeating timer fences the terminal owner queue per tick per subscription
-  regardless of pane activity, so a silent pane costs the same as a flooding one
-  (~20 main-thread wakeups/s against Apple's ~1/s idle target). The tape
-  recorder already has an append point to signal from; keep the existing
-  one-in-flight rule as the rate limit. Verification: idle wakeups with one
-  subscription open on a silent pane, per doc 25's `T1` shape. **Add this to doc
-  25's ledger** -- its `F1` idle survey concluded no periodic timer exists on the
-  render path, which is true and missed this one.
+- [x] `T22` DONE -- **Push, don't poll, for `pane tape --follow`.** `F38`
+  measured the 50 ms timer adding 19.83 process interrupt wakeups/s to one
+  silent follower. `F39` replaces it with a per-subscription edge notice from
+  `TerminalFlightRecorder.record`; the recorder ring remains the only event
+  buffer, its owner-queue snapshot rearms the edge, and app state merges one
+  edge arriving during the existing one socket batch in flight. A stable
+  terminal-owner registration removes the notice on disconnect, pane teardown,
+  and runtime shutdown without retaining an AppKit view. The same 15-second
+  probe now reads 0.33 wakeups/s subscribed against a 0.27/s mean baseline,
+  incremental 0.07/s. An enhanced 3-second rerun confirms its feed and resize
+  arms both arrive without a timer. The compile-only app build and all 75 local
+  gate steps pass. Doc 25 records the energy-side correction and result in
+  `25/F7` and its Phase 1 ledger.
 - [ ] `T23` RESEARCH -- **Scope the reconcile sweep.** Gated on `T6`. Every
   sweep rebuilds the whole model's view state for an event that named one pane,
   up to 13 Hz under shell-driven title/cwd/progress messages, and boxes a fresh

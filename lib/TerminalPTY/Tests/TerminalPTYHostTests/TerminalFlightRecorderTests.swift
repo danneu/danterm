@@ -7,6 +7,68 @@ import Synchronization
 import Testing
 
 struct TerminalFlightRecorderTests {
+    @Test("follow notices stay coalesced until their cursor snapshot rearms them")
+    func followNoticesCoalesceUntilSnapshot() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        let subscriptionId = UUID()
+        let noticeCount = Mutex(0)
+        recorder.addFollowNotice(
+            id: subscriptionId,
+            from: .beginning,
+            notify: { noticeCount.withLock { $0 += 1 } }
+        )
+
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2]))
+        #expect(noticeCount.withLock { $0 } == 1)
+
+        let first = recorder.followCursorSnapshot(
+            subscriptionId: subscriptionId,
+            from: .beginning
+        )
+        #expect(first?.events.map(\.sequence) == [0, 1])
+        recorder.record(.resize(columns: 100, rows: 30))
+        recorder.record(.feed([3]))
+        #expect(noticeCount.withLock { $0 } == 2)
+
+        let second = recorder.followCursorSnapshot(
+            subscriptionId: subscriptionId,
+            from: first?.nextCursor ?? .beginning
+        )
+        #expect(second?.events.map(\.sequence) == [2, 3])
+    }
+
+    @Test("follow registration signals backlog and removal stops later notices")
+    func followNoticeBacklogAndRemoval() {
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+        let subscriptionId = UUID()
+        let noticeCount = Mutex(0)
+
+        recorder.addFollowNotice(
+            id: subscriptionId,
+            from: .beginning,
+            notify: { noticeCount.withLock { $0 += 1 } }
+        )
+        #expect(noticeCount.withLock { $0 } == 1)
+
+        recorder.removeFollowNotice(id: subscriptionId)
+        recorder.record(.feed([2]))
+        #expect(noticeCount.withLock { $0 } == 1)
+        #expect(recorder.followCursorSnapshot(
+            subscriptionId: subscriptionId,
+            from: .beginning
+        ) == nil)
+    }
+
     @Test("retains ordered events with monotonic elapsed timestamps")
     func retainsOrderedTimedEvents() {
         let clock = TestFlightClock([100, 112, 111, 140])

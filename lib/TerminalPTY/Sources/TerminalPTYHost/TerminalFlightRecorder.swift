@@ -140,6 +140,16 @@ public struct TerminalFlightRecordingSnapshot: Equatable, Sendable {
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
 package final class TerminalFlightRecorder {
+    /// Owner-queue state for one edge-triggered subscriber; the ring remains the event buffer.
+    private final class FollowNotice {
+        let notify: @Sendable () -> Void
+        var isOutstanding = false
+
+        init(notify: @escaping @Sendable () -> Void) {
+            self.notify = notify
+        }
+    }
+
     /// Keeps retention accounting beside each event without allocating an object per entry.
     private struct Slot {
         let event: TerminalFlightRecordingEvent
@@ -164,6 +174,7 @@ package final class TerminalFlightRecorder {
     private var droppedPayloadBytes = 0
     private var nextSequence: UInt64 = 0
     private var totalPayloadBytes = 0
+    private var followNotices: [UUID: FollowNotice] = [:]
 
     package init(
         initialDimensions: TerminalDimensions,
@@ -204,6 +215,42 @@ package final class TerminalFlightRecorder {
                 || slots[slots.count - 1].event.sequence
                     == slots[0].event.sequence + UInt64(slots.count - 1)
         )
+        for notice in followNotices.values where notice.isOutstanding == false {
+            notice.isOutstanding = true
+            notice.notify()
+        }
+    }
+
+    /// Arms one subscriber at its established cursor and signals immediately when it trails.
+    package func addFollowNotice(
+        id: UUID,
+        from cursor: TerminalFlightRecordingCursor,
+        notify: @escaping @Sendable () -> Void
+    ) {
+        precondition(followNotices[id] == nil)
+        precondition(cursor.nextSequence <= nextSequence)
+        let notice = FollowNotice(notify: notify)
+        followNotices[id] = notice
+        if cursor.nextSequence < nextSequence {
+            notice.isOutstanding = true
+            notice.notify()
+        }
+    }
+
+    /// Removes the append edge before its subscription or callback owner can disappear.
+    package func removeFollowNotice(id: UUID) {
+        followNotices.removeValue(forKey: id)
+    }
+
+    /// Takes one cursored suffix and atomically rearms the next append edge for this subscriber.
+    package func followCursorSnapshot(
+        subscriptionId: UUID,
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        guard let notice = followNotices[subscriptionId] else { return nil }
+        let snapshot = cursorSnapshot(from: cursor)
+        notice.isOutstanding = false
+        return snapshot
     }
 
     package func snapshot() -> TerminalFlightRecordingSnapshot {

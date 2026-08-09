@@ -2,6 +2,7 @@
 // headless Terminal mutation. Dispatch sources run on the actor's own executor.
 import Darwin
 import Dispatch
+import Foundation
 import PaneLifecycle
 import TerminalCore
 import TerminalCoreRecording
@@ -803,6 +804,39 @@ public actor TerminalPTYHost {
     ) -> TerminalFlightRecordingCursorSnapshot? {
         fence(countsAsProduction: false) { owner in
             owner.flightTape?.cursorSnapshot(from: cursor)
+        }.value
+    }
+
+    /// Registers one edge-triggered recorder notice at an already-fenced stream cursor.
+    package nonisolated func addFlightRecordingFollowNotice(
+        id: UUID,
+        from cursor: TerminalFlightRecordingCursor,
+        notify: @escaping @Sendable () -> Void
+    ) -> Bool {
+        fence(countsAsProduction: false) { owner in
+            guard let recorder = owner.flightTape else { return false }
+            recorder.addFollowNotice(id: id, from: cursor, notify: notify)
+            return true
+        }.value
+    }
+
+    /// Removes one recorder notice on the same owner queue that may invoke it.
+    package nonisolated func removeFlightRecordingFollowNotice(id: UUID) {
+        _ = fence(countsAsProduction: false) { owner in
+            owner.flightTape?.removeFollowNotice(id: id)
+        }
+    }
+
+    /// Copies one followed suffix and rearms its append edge in the same owner transaction.
+    package nonisolated func fencedFlightRecordingFollowSnapshot(
+        subscriptionId: UUID,
+        from cursor: TerminalFlightRecordingCursor
+    ) -> TerminalFlightRecordingCursorSnapshot? {
+        fence(countsAsProduction: false) { owner in
+            owner.flightTape?.followCursorSnapshot(
+                subscriptionId: subscriptionId,
+                from: cursor
+            )
         }.value
     }
 

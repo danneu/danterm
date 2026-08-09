@@ -3184,3 +3184,142 @@ performance verdict.
   reading a missing field as zero. After removal, the compile-only app build
   and the full local gate pass on the ordinary uninstrumented benchmark path.
 - Next action: none for T15. Return to the larger research candidates.
+
+### F38 -- a silent pane-tape follower costs one process wakeup per polling tick
+
+- Status: `T22` vetted; recommend implementation at the direction gate. No
+  production change was made.
+- Date, baseline, and investigator: 2026-08-09, `23137e82`, Codex. The
+  worktree started with one unrelated untracked WIP plan and this investigation
+  did not touch it.
+- Probe: `scripts/research/33/t22-pane-tape-follow-idle-wakeups.sh` launches an
+  isolated release-build development slot, lets shell startup settle, and reads
+  the app process's cumulative `proc_pid_rusage(RUSAGE_INFO_V0)` interrupt and
+  package-idle wakeup counters. A 15-second `pane tape --follow --from-now`
+  interval is bracketed by two 15-second intervals without a subscription in
+  the same process. The subscribed arm is accepted only when its JSON Lines
+  output contains exactly the one start record, proving that the pane emitted
+  no feed or resize event during the sample. Command:
+  `scripts/research/33/t22-pane-tape-follow-idle-wakeups.sh --seconds 15`.
+- Measurement:
+  - baseline before: 8 interrupt wakeups / 15.005068 s = 0.533153/s;
+  - one silent follow: 302 / 15.005067 s = 20.126535/s;
+  - baseline after: 1 / 15.005231 s = 0.066643/s;
+  - mean baseline: 0.299898/s; subscribed-minus-baseline: 19.826637/s;
+  - package-idle wakeups were zero in all three arms; this finding is about the
+    process interrupt-wakeup counter, the same per-process class Activity
+    Monitor exposes, not a package residency or energy-impact measurement.
+- Observation: `app/AppRuntime.swift#ensurePaneTapeFollowTimer` schedules a
+  main-queue timer immediately and every 50 ms while any subscription exists.
+  Each tick claims every idle subscription and
+  `app/SwiftTerminalSessionView.swift#paneTapeFollowBatch` fences the terminal
+  owner queue even when the returned suffix is empty. The measured 302 wakeups
+  are within two of the 300 timer periods in the sample and disappear when the
+  subscription closes. The prediction was correct to measurement precision.
+- Materiality: the timer adds 19.83 idle wakeups/s to a process otherwise below
+  1/s in both bracketing intervals. This is not a marginal CPU optimization;
+  it defeats the idle-by-construction posture `25/F1` recorded for as long as a
+  debugging follower remains connected.
+- Push design assessment:
+  - Keep `TerminalFlightRecorder`'s existing sequence-numbered ring and cursor
+    snapshots as the only event buffer. A push notice says only "the cursor may
+    have advanced"; it does not carry events or duplicate eviction/gap logic.
+  - Register one edge-triggered notice per subscription at
+    `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalFlightRecorder.swift#record`.
+    The recorder marks that notice outstanding before scheduling its callback,
+    so further appends do not schedule more callbacks while the subscription's
+    fetch or socket batch is in flight. The no-subscriber append path only sees
+    an empty observer collection.
+  - After the current socket write completes, acknowledge the delivered cursor
+    on the terminal owner queue. Atomically compare it with `nextSequence`: if
+    the recorder advanced during the fetch or write, keep the notice
+    outstanding and schedule exactly one more delivery; otherwise disarm it so
+    the next append supplies the edge. This handshake prevents the classic
+    append-between-snapshot-and-rearm lost wakeup while retaining
+    `PaneTapeFollowSubscriptions`'s one-batch-in-flight backpressure and exact
+    gap behavior for slow clients.
+  - The callback must target a `Sendable` boundary with synchronized active
+    state and only then hop weakly to the main-actor runtime. On connection
+    close, pane teardown, and runtime shutdown, stop that boundary first, then
+    remove the recorder registration through the owner queue, then release the
+    subscription/socket state. A callback already queued after `stop()` becomes
+    a no-op and cannot message a shorter-lived AppKit session. This follows
+    `docs/design/2026-06-09-appkit-lifetime-safety.md`'s stored-callback rule.
+- Competing designs: piggybacking on frame/update delivery is not correct
+  because the tape records raw feed and resize events, including input that may
+  produce no frame-visible state change. A per-append main-queue dispatch is
+  also not the push design: it merely replaces 20 idle wakeups/s with an
+  unbounded flood-rate wakeup stream. A second bounded queue or `AsyncStream`
+  remains unnecessary because the recorder ring already owns retention and
+  exact loss accounting.
+- Proof obligations for implementation: deterministic recorder/boundary tests
+  must pin one notice until acknowledgement, append-during-flight causing one
+  immediate follow-up after acknowledgement, no follow-up when caught up,
+  registration from a cursor that already trails, and stopped/removed notices
+  never calling back. Existing portable subscription tests continue to pin one
+  batch in flight, disconnect, pane-close termination, and gap behavior. Rerun
+  this probe before and after; the post-change silent-follow arm must return to
+  the bracketing idle range, while a feed and a resize must each wake a caught-up
+  follower without waiting for a timer.
+- Decision: T22 is material and should be implemented with the cursor-rearmed
+  edge notification above. Stop here for direction approval.
+- Next action: implementation only after the direction gate is accepted.
+
+### F39 -- recorder append edges return a silent follower to the idle baseline
+
+- Status: `T22` implemented and verified in the working tree; not committed in
+  this session.
+- Date, baseline, and investigator: 2026-08-09, implementation based on
+  `23137e82`, Codex. The unrelated untracked WIP plan remained untouched.
+- Production shape:
+  - `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalFlightRecorder.swift#record`
+    owns one edge state per active subscription. The first append marks it
+    outstanding and invokes its availability callback; later appends do no
+    callback work until the subscription takes a cursor snapshot.
+  - `#followCursorSnapshot` copies the existing ring suffix and rearms that
+    subscription in the same terminal owner-queue transaction. An append before
+    the snapshot is included; an append after it supplies the next edge, so
+    there is no snapshot/rearm gap in which an event can be lost.
+  - `lib/DanTermSupport/Sources/DanTermSupport/PaneTapeFollow.swift#PaneTapeFollowSubscriptions`
+    retains the existing one-batch-in-flight bound and adds one pending-edge
+    bit. An edge arriving during adaptation or socket delivery therefore starts
+    exactly one follow-up fetch when that delivery completes, independent of
+    how many events the recorder merged behind it.
+  - `app/AppRuntime.swift#finishPaneTapeFollowStart` retains a cancellation
+    registration that owns only the terminal controller, not the AppKit view.
+    Disconnect, pane teardown, app termination, and runtime shutdown cancel it
+    through the owner queue before releasing subscription state. The recorder's
+    callback captures the runtime weakly and queued callbacks validate the live
+    subscription on the main actor.
+  - The repeating timer, its scheduling-lifecycle token, the 50 ms interval,
+    and the all-subscription polling sweep are deleted from `AppRuntime`.
+- Deterministic behavior:
+  - recorder tests pin immediate backlog signaling, one notice across multiple
+    appends, atomic rearming at the cursor snapshot, a later append creating one
+    new notice, and removal preventing every later notice;
+  - portable subscription tests pin an append during delivery becoming one
+    follow-up fetch at the advanced cursor and a completion with no pending
+    append returning to idle;
+  - the existing gap, cursor, pane-close, connection-close, socket ordering,
+    and JSON dialect tests remain unchanged and pass.
+- Post-change measurement: the same command and 15-second contract from `F38`
+  reports 5 interrupt wakeups / 15.011977 s = 0.333067/s with one silent
+  follower, against 7 / 15.021422 s = 0.466001/s before and 1 / 15.003574 s =
+  0.066651/s after. The mean baseline is 0.266326/s and the subscribed increment
+  is 0.066741/s, down from 19.826637/s before the change. The stream again held
+  exactly one start record during the idle arm. Package-idle wakeups remained
+  zero in every arm, so the measurement retains `F38`'s scope.
+- Push correctness probe: after the idle arm,
+  `scripts/research/33/t22-pane-tape-follow-idle-wakeups.sh` now writes one
+  command to the pane and splits it. It requires the caught-up stream to receive
+  a feed event and a resize event before continuing. Both passed without a
+  repeating timer. A second 3-second run reconfirmed the behavioral arms and
+  read 1.00/s subscribed against a 0.66/s short-window baseline; that noisy
+  short run is behavioral corroboration, not the decision measurement.
+- Verification: the focused `TerminalFlightRecorderTests` and
+  `PaneTapeFollowTests`, the compile-only app build, the enhanced live probe,
+  and all 75 `just test` steps pass. `git diff --check` passes.
+- Decision: T22 is complete. The implementation achieves the structural goal:
+  no pane-tape follower means no append observer, a silent follower has no
+  scheduled work, and an active follower is bounded by its socket delivery.
+- Next action: none for T22.

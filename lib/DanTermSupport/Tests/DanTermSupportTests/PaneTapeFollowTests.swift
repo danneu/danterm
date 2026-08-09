@@ -92,8 +92,8 @@ struct PaneTapeFollowTests {
         #expect(second.nextCursor.nextSequence == 4)
     }
 
-    @Test("in-flight subscriptions are fetched once until delivery completes")
-    func inFlightSubscriptionWaitsForDelivery() throws {
+    @Test("an append during delivery starts one follow-up fetch after completion")
+    func appendDuringDeliveryStartsOneFollowUpFetch() throws {
         let subscriptionId = UUID()
         var subscriptions = PaneTapeFollowSubscriptions()
         subscriptions.add(
@@ -103,9 +103,10 @@ struct PaneTapeFollowTests {
             cursor: .beginning
         )
 
-        let firstFetch = try #require(subscriptions.beginFetches().first)
+        let availableFetch = subscriptions.eventsAvailable(subscriptionId)
+        let firstFetch = try #require(availableFetch)
         #expect(firstFetch.subscriptionId == subscriptionId)
-        #expect(subscriptions.beginFetches().isEmpty)
+        #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
 
         let preparedBatch = makePaneTapeFollowBatch(
             from: snapshot(sequences: [0], nextSequence: 1)
@@ -116,10 +117,27 @@ struct PaneTapeFollowTests {
         )
         let batch = try #require(finishedBatch)
         #expect(batch.records.compactMap(sequence) == [0])
-        #expect(subscriptions.beginFetches().isEmpty)
 
-        subscriptions.completeDelivery(subscriptionId: subscriptionId, succeeded: true)
-        #expect(subscriptions.beginFetches().first?.cursor.nextSequence == 1)
+        let pendingFetch = subscriptions.completeDelivery(subscriptionId: subscriptionId)
+        let followUp = try #require(pendingFetch)
+        #expect(followUp.cursor.nextSequence == 1)
+        #expect(subscriptions.eventsAvailable(subscriptionId) == nil)
+    }
+
+    @Test("delivery completion stays idle when no append arrived in flight")
+    func deliveryCompletionWithoutPendingAppendStaysIdle() throws {
+        let subscriptionId = UUID()
+        var subscriptions = PaneTapeFollowSubscriptions()
+        subscriptions.add(
+            id: subscriptionId,
+            connectionId: UUID(),
+            paneId: UUID(),
+            cursor: .beginning
+        )
+
+        let availableFetch = subscriptions.eventsAvailable(subscriptionId)
+        _ = try #require(availableFetch)
+        #expect(subscriptions.completeDelivery(subscriptionId: subscriptionId) == nil)
     }
 
     @Test("pane close ends each matching stream once and connection close removes ownership")
@@ -146,9 +164,10 @@ struct PaneTapeFollowTests {
         ]) })
         #expect(subscriptions.paneClosed(paneId).isEmpty)
 
-        #expect(subscriptions.connectionClosed(firstConnection) == [remainingSubscriptionId])
+        let removals = subscriptions.connectionClosed(firstConnection)
+        #expect(removals.map(\.subscriptionId) == [remainingSubscriptionId])
         #expect(subscriptions.count == 0)
-        #expect(subscriptions.beginFetches().isEmpty)
+        #expect(subscriptions.eventsAvailable(remainingSubscriptionId) == nil)
     }
 
     private func snapshot(

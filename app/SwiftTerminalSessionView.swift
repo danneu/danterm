@@ -877,9 +877,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     func paneTapeFollowBatch(
+        subscriptionId: UUID,
         from cursor: PaneTapeFollowCursor
     ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? {
-        guard let snapshot = controller.flightRecordingSnapshot(
+        guard let snapshot = controller.flightRecordingFollowSnapshot(
+            subscriptionId: subscriptionId,
             nextSequence: cursor.nextSequence,
             payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence
         ) else {
@@ -903,6 +905,23 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                         snapshot.nextCursor.payloadBytesBeforeNextSequence
                 )
             )
+        }
+    }
+
+    func addPaneTapeFollowNotice(
+        id: UUID,
+        cursor: PaneTapeFollowCursor,
+        notify: @escaping @Sendable () -> Void
+    ) -> PaneTapeFollowNoticeRegistration? {
+        guard controller.addFlightRecordingFollowNotice(
+            id: id,
+            nextSequence: cursor.nextSequence,
+            payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence,
+            notify: notify
+        ) else { return nil }
+        let controller = controller
+        return PaneTapeFollowNoticeRegistration {
+            controller.removeFlightRecordingFollowNotice(id: id)
         }
     }
     #endif

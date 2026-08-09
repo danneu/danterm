@@ -192,8 +192,9 @@ class AppRuntime {
     private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
     private var paneTapeFollowConnections: [UUID: IpcConnection] = [:]
     private var paneTapeFollowSubscriptionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
-    private var paneTapeFollowTimer: DispatchSourceTimer?
-    private var paneTapeFollowTimerToken: AppRuntimeSchedulingToken?
+    private var paneTapeFollowNoticeRegistrations: [
+        UUID: PaneTapeFollowNoticeRegistration
+    ] = [:]
     private var ipcServer: IpcServer?
     private var ipcServerToken: AppRuntimeSchedulingToken?
     private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
@@ -204,7 +205,6 @@ class AppRuntime {
     // instant to a human, and it collapses a burst of title writes into one chrome
     // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
-    private static let paneTapeFollowInterval: TimeInterval = 0.05
 
     init(
         terminalBackend: SwiftTerminalBackend,
@@ -522,7 +522,7 @@ class AppRuntime {
         }
     }
 
-    /// Drops all streams owned by a closed socket before another polling fence can start.
+    /// Drops all streams owned by a closed socket before another append edge can fetch.
     func ipcConnectionClosed(_ connectionId: UUID) {
         guard schedulingLifecycle.isActive else { return }
         let requestIds = ipcConnections.compactMap { reqId, connection in
@@ -532,13 +532,13 @@ class AppRuntime {
             ipcConnections.removeValue(forKey: reqId)
             schedulingLifecycle.cancel(ipcConnectionTokens.removeValue(forKey: reqId))
         }
-        for subscriptionId in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
+        for removal in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
+            removePaneTapeFollowNotice(removal)
             schedulingLifecycle.cancel(
-                paneTapeFollowSubscriptionTokens.removeValue(forKey: subscriptionId)
+                paneTapeFollowSubscriptionTokens.removeValue(forKey: removal.subscriptionId)
             )
         }
         paneTapeFollowConnections.removeValue(forKey: connectionId)
-        stopPaneTapeFollowTimerIfIdle()
     }
 
     private func beginPaneTapeFollow(
@@ -605,7 +605,7 @@ class AppRuntime {
     ) {
         guard schedulingLifecycle.isActive else { return }
         guard succeeded else { return }
-        guard sessions[paneId] != nil else {
+        guard let session = sessions[paneId] else {
             writePaneTapeFollowNotification(
                 connection: connection,
                 subscriptionId: subscriptionId,
@@ -625,111 +625,79 @@ class AppRuntime {
             .subscription,
             cancel: { connection.close() }
         )
-        ensurePaneTapeFollowTimer()
-    }
-
-    private func ensurePaneTapeFollowTimer() {
-        guard paneTapeFollowTimer == nil,
-              schedulingLifecycle.isActive
-        else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(
-            deadline: .now(),
-            repeating: Self.paneTapeFollowInterval,
-            leeway: .milliseconds(10)
-        )
-        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
-            timer.cancel()
+        guard let noticeRegistration = session.addPaneTapeFollowNotice(
+            id: subscriptionId,
+            cursor: start.cursor,
+            notify: { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    MainActor.assumeIsolated {
+                        self.paneTapeFollowEventsAvailable(subscriptionId)
+                    }
+                }
+            }
+        ) else {
+            discardPaneTapeFollow(subscriptionId, closeConnection: true)
             return
         }
-        paneTapeFollowTimerToken = token
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.schedulingLifecycle.runRepeating(token) {
-                self.pollPaneTapeFollowers()
-            }
-        }
-        paneTapeFollowTimer = timer
-        timer.resume()
+        paneTapeFollowNoticeRegistrations[subscriptionId] = noticeRegistration
     }
 
-    private func stopPaneTapeFollowTimerIfIdle() {
-        guard paneTapeFollowSubscriptions.count == 0 else { return }
-        schedulingLifecycle.cancel(paneTapeFollowTimerToken)
-        paneTapeFollowTimerToken = nil
-        paneTapeFollowTimer = nil
-    }
-
-    private func pollPaneTapeFollowers() {
+    private func paneTapeFollowEventsAvailable(_ subscriptionId: UUID) {
         guard schedulingLifecycle.isActive else { return }
-        for fetch in paneTapeFollowSubscriptions.beginFetches() {
-            guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
-                paneTapeFollowSubscriptions.completeDelivery(
-                    subscriptionId: fetch.subscriptionId,
-                    succeeded: false
-                )
-                schedulingLifecycle.cancel(
-                    paneTapeFollowSubscriptionTokens.removeValue(forKey: fetch.subscriptionId)
-                )
-                continue
-            }
-            let paneId = PaneId(rawValue: fetch.paneId)
-            guard let session = sessions[paneId] else {
-                endPaneTapeFollowers(for: paneId)
-                continue
-            }
-            guard let prepareBatch = session.paneTapeFollowBatch(from: fetch.cursor) else {
-                paneTapeFollowSubscriptions.completeDelivery(
-                    subscriptionId: fetch.subscriptionId,
-                    succeeded: false
-                )
-                schedulingLifecycle.cancel(
-                    paneTapeFollowSubscriptionTokens.removeValue(forKey: fetch.subscriptionId)
-                )
-                paneTapeFollowConnections.removeValue(forKey: connection.id)
-                connection.close()
-                continue
-            }
-            guard let callbackToken = schedulingLifecycle.arm(
-                .deferredCallback,
-                cancel: {}
-            ) else { continue }
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                do {
-                    let snapshot = try prepareBatch()
-                    let batch = makePaneTapeFollowBatch(from: snapshot)
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.schedulingLifecycle.run(callbackToken) {
-                            self.deliverPaneTapeFollowBatch(
-                                subscriptionId: fetch.subscriptionId,
-                                connection: connection,
-                                batch: batch
-                            )
-                        }
+        guard let fetch = paneTapeFollowSubscriptions.eventsAvailable(subscriptionId) else {
+            return
+        }
+        fetchPaneTapeFollow(fetch)
+    }
+
+    private func fetchPaneTapeFollow(_ fetch: PaneTapeFollowFetch) {
+        guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
+            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: false)
+            return
+        }
+        let paneId = PaneId(rawValue: fetch.paneId)
+        guard let session = sessions[paneId] else {
+            endPaneTapeFollowers(for: paneId)
+            return
+        }
+        guard let prepareBatch = session.paneTapeFollowBatch(
+            subscriptionId: fetch.subscriptionId,
+            from: fetch.cursor
+        ) else {
+            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: true)
+            return
+        }
+        guard let callbackToken = schedulingLifecycle.arm(
+            .deferredCallback,
+            cancel: {}
+        ) else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                let snapshot = try prepareBatch()
+                let batch = makePaneTapeFollowBatch(from: snapshot)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken) {
+                        self.deliverPaneTapeFollowBatch(
+                            subscriptionId: fetch.subscriptionId,
+                            connection: connection,
+                            batch: batch
+                        )
                     }
-                } catch {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.schedulingLifecycle.run(callbackToken) {
-                            self.paneTapeFollowSubscriptions.completeDelivery(
-                                subscriptionId: fetch.subscriptionId,
-                                succeeded: false
-                            )
-                            self.schedulingLifecycle.cancel(
-                                self.paneTapeFollowSubscriptionTokens.removeValue(
-                                    forKey: fetch.subscriptionId
-                                )
-                            )
-                            self.paneTapeFollowConnections.removeValue(forKey: connection.id)
-                            self.stopPaneTapeFollowTimerIfIdle()
-                            connection.close()
-                        }
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken) {
+                        self.discardPaneTapeFollow(
+                            fetch.subscriptionId,
+                            closeConnection: true
+                        )
                     }
                 }
             }
         }
-        stopPaneTapeFollowTimerIfIdle()
     }
 
     private func deliverPaneTapeFollowBatch(
@@ -743,10 +711,11 @@ class AppRuntime {
             batch: batch
         ) else { return }
         guard accepted.records.isEmpty == false else {
-            paneTapeFollowSubscriptions.completeDelivery(
-                subscriptionId: subscriptionId,
-                succeeded: true
-            )
+            if let fetch = paneTapeFollowSubscriptions.completeDelivery(
+                subscriptionId: subscriptionId
+            ) {
+                fetchPaneTapeFollow(fetch)
+            }
             return
         }
         guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
@@ -761,26 +730,51 @@ class AppRuntime {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.schedulingLifecycle.run(callbackToken) {
-                    self.paneTapeFollowSubscriptions.completeDelivery(
-                        subscriptionId: subscriptionId,
-                        succeeded: succeeded
-                    )
-                    if succeeded == false {
-                        self.schedulingLifecycle.cancel(
-                            self.paneTapeFollowSubscriptionTokens.removeValue(
-                                forKey: subscriptionId
-                            )
+                    guard succeeded else {
+                        self.discardPaneTapeFollow(
+                            subscriptionId,
+                            closeConnection: false
                         )
-                        self.paneTapeFollowConnections.removeValue(forKey: connection.id)
+                        return
                     }
-                    self.stopPaneTapeFollowTimerIfIdle()
+                    if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
+                        subscriptionId: subscriptionId
+                    ) {
+                        self.fetchPaneTapeFollow(fetch)
+                    }
                 }
             }
         }
     }
 
+    private func discardPaneTapeFollow(
+        _ subscriptionId: UUID,
+        closeConnection: Bool
+    ) {
+        guard let removal = paneTapeFollowSubscriptions.remove(subscriptionId) else { return }
+        removePaneTapeFollowNotice(removal)
+        schedulingLifecycle.cancel(
+            paneTapeFollowSubscriptionTokens.removeValue(forKey: subscriptionId)
+        )
+        guard let connection = paneTapeFollowConnections.removeValue(
+            forKey: removal.connectionId
+        ) else { return }
+        if closeConnection {
+            connection.close()
+        }
+    }
+
+    private func removePaneTapeFollowNotice(_ removal: PaneTapeFollowRemoval) {
+        paneTapeFollowNoticeRegistrations.removeValue(
+            forKey: removal.subscriptionId
+        )?.cancel()
+    }
+
     private func endPaneTapeFollowers(for paneId: PaneId) {
         for end in paneTapeFollowSubscriptions.paneClosed(paneId.rawValue) {
+            paneTapeFollowNoticeRegistrations.removeValue(
+                forKey: end.subscriptionId
+            )?.cancel()
             if let token = paneTapeFollowSubscriptionTokens.removeValue(
                 forKey: end.subscriptionId
             ) {
@@ -796,7 +790,6 @@ class AppRuntime {
                 closeAfterWrite: true
             )
         }
-        stopPaneTapeFollowTimerIfIdle()
     }
 
     private func writePaneTapeFollowNotification(
@@ -837,9 +830,12 @@ class AppRuntime {
         guard schedulingLifecycle.isActive else { return }
 
         checkpointPending = false
-        paneTapeFollowSubscriptions.removeAll()
+        for removal in paneTapeFollowSubscriptions.removeAll() {
+            removePaneTapeFollowNotice(removal)
+        }
         paneTapeFollowConnections.removeAll()
         paneTapeFollowSubscriptionTokens.removeAll()
+        paneTapeFollowNoticeRegistrations.removeAll()
         ipcConnections.removeAll()
         ipcConnectionTokens.removeAll()
         for session in sessions.values {
@@ -859,8 +855,6 @@ class AppRuntime {
         coalescedReconcileTimerToken = nil
         searchDebouncers.removeAll()
         searchDebouncerTokens.removeAll()
-        paneTapeFollowTimer = nil
-        paneTapeFollowTimerToken = nil
         ipcServer = nil
         ipcServerToken = nil
     }
@@ -1099,15 +1093,15 @@ class AppRuntime {
 
         case .terminate:
             cancelCoalescedReconcile()
-            schedulingLifecycle.cancel(paneTapeFollowTimerToken)
-            paneTapeFollowTimerToken = nil
-            paneTapeFollowTimer = nil
-            paneTapeFollowSubscriptions.removeAll()
+            for removal in paneTapeFollowSubscriptions.removeAll() {
+                removePaneTapeFollowNotice(removal)
+            }
             paneTapeFollowConnections.removeAll()
             for token in paneTapeFollowSubscriptionTokens.values {
                 schedulingLifecycle.cancel(token)
             }
             paneTapeFollowSubscriptionTokens.removeAll()
+            paneTapeFollowNoticeRegistrations.removeAll()
             schedulingLifecycle.cancel(checkpointDebouncerToken)
             checkpointDebouncerToken = nil
             schedulingLifecycle.cancel(enrichedCheckpointTimerToken)

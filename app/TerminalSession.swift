@@ -32,6 +32,20 @@ struct TerminalSessionState: Equatable {
     let scrollPosition: TerminalScrollPosition?
 }
 
+/// Retains only the terminal owner needed to disarm one recorder append edge safely.
+@MainActor
+struct PaneTapeFollowNoticeRegistration {
+    private let cancelAction: @MainActor () -> Void
+
+    init(cancel: @escaping @MainActor () -> Void) {
+        cancelAction = cancel
+    }
+
+    func cancel() {
+        cancelAction()
+    }
+}
+
 /// Receives main-actor session state without routing view-only data through AppModel.
 @MainActor
 protocol TerminalSessionStateObserver: AnyObject {
@@ -135,8 +149,15 @@ protocol TerminalSession: AnyObject {
     func paneTapeFollowStart(
         fromNow: Bool
     ) -> (@Sendable () throws -> PaneTapeFollowStart)?
+    /// Arms one append edge at the start cursor without moving recorder events across queues.
+    func addPaneTapeFollowNotice(
+        id: UUID,
+        cursor: PaneTapeFollowCursor,
+        notify: @escaping @Sendable () -> Void
+    ) -> PaneTapeFollowNoticeRegistration?
     /// Fences one retained suffix and defers event adaptation off the main actor.
     func paneTapeFollowBatch(
+        subscriptionId: UUID,
         from cursor: PaneTapeFollowCursor
     ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)?
     func scroll(toRow row: Int)
@@ -157,8 +178,15 @@ extension TerminalSession {
     func paneTapeFollowStart(
         fromNow: Bool
     ) -> (@Sendable () throws -> PaneTapeFollowStart)? { nil }
+    /// A backend without a tape cannot install an append edge.
+    func addPaneTapeFollowNotice(
+        id: UUID,
+        cursor: PaneTapeFollowCursor,
+        notify: @escaping @Sendable () -> Void
+    ) -> PaneTapeFollowNoticeRegistration? { nil }
     /// Without a follow origin there can never be a later cursor batch.
     func paneTapeFollowBatch(
+        subscriptionId: UUID,
         from cursor: PaneTapeFollowCursor
     ) -> (@Sendable () throws -> PaneTapeFollowSnapshot)? { nil }
 }

@@ -194,6 +194,16 @@ activates only if Phase 1-2 evidence justifies it.
   repeated runs. Occluded-vs-visible is not the comparison; it confounds nap
   state with planning/draw cost. Record in F8. Begin only after T1 confirms
   nap actually engages, else the null result is unarguable.
+- [x] T13 Pane-tape follow idle wakeups: `33/T22` bracketed one silent
+  `pane tape --follow --from-now` subscription with unsubscribed intervals in
+  the same isolated process. `25/F7` records 20.13 interrupt wakeups/s while
+  subscribed against a 0.30/s mean baseline, with one start record and no pane
+  events. `33/F39` then replaces the poll with an edge-triggered recorder
+  notice; the same 15-second arm falls to 0.33/s against a 0.27/s baseline,
+  incremental 0.07/s. An enhanced 3-second rerun confirms feed and resize still
+  wake the follower. This corrects F1's render-path-scoped idle conclusion and
+  closes the focused exception. It does not complete T1's broad multi-tab or
+  App Nap checks.
 
 ### Phase 2 -- high-confidence changes and ceiling probes
 

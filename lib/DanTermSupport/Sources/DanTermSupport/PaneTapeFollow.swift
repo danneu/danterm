@@ -43,7 +43,7 @@ struct PaneTapeFollowStart: Equatable, Sendable {
     let cursor: PaneTapeFollowCursor
 }
 
-/// Identifies the exact owner-fenced suffix a polling tick may fetch.
+/// Identifies the exact owner-fenced suffix an append edge may fetch.
 struct PaneTapeFollowFetch: Equatable, Sendable {
     let subscriptionId: UUID
     let connectionId: UUID
@@ -56,6 +56,13 @@ struct PaneTapeFollowEnd: Equatable, Sendable {
     let subscriptionId: UUID
     let connectionId: UUID
     let record: JSONValue
+}
+
+/// Carries the owner coordinates needed to remove a disconnected recorder notice.
+struct PaneTapeFollowRemoval: Equatable, Sendable {
+    let subscriptionId: UUID
+    let connectionId: UUID
+    let paneId: UUID
 }
 
 /// Builds the result record that establishes a stream before notifications begin.
@@ -116,6 +123,7 @@ struct PaneTapeFollowSubscriptions {
         let paneId: UUID
         var cursor: PaneTapeFollowCursor
         var isInFlight = false
+        var hasPendingEvents = false
     }
 
     private var subscriptions: [UUID: Subscription] = [:]
@@ -136,23 +144,12 @@ struct PaneTapeFollowSubscriptions {
         )
     }
 
-    /// Claims every idle subscription so no later tick can overlap its fetch or write.
-    mutating func beginFetches() -> [PaneTapeFollowFetch] {
-        var fetches: [PaneTapeFollowFetch] = []
-        for id in subscriptions.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
-            guard var subscription = subscriptions[id], subscription.isInFlight == false else {
-                continue
-            }
-            subscription.isInFlight = true
-            subscriptions[id] = subscription
-            fetches.append(PaneTapeFollowFetch(
-                subscriptionId: id,
-                connectionId: subscription.connectionId,
-                paneId: subscription.paneId,
-                cursor: subscription.cursor
-            ))
-        }
-        return fetches
+    /// Records one append edge and claims it immediately only when no batch is in flight.
+    mutating func eventsAvailable(_ subscriptionId: UUID) -> PaneTapeFollowFetch? {
+        guard var subscription = subscriptions[subscriptionId] else { return nil }
+        subscription.hasPendingEvents = true
+        subscriptions[subscriptionId] = subscription
+        return claimPendingFetch(subscriptionId)
     }
 
     /// Advances a claimed stream through the exact suffix that will be handed to its socket.
@@ -168,15 +165,24 @@ struct PaneTapeFollowSubscriptions {
         return batch
     }
 
-    /// Releases a successful stream for polling or forgets it after a failed socket delivery.
-    mutating func completeDelivery(subscriptionId: UUID, succeeded: Bool) {
-        guard var subscription = subscriptions[subscriptionId] else { return }
-        guard succeeded else {
-            subscriptions.removeValue(forKey: subscriptionId)
-            return
-        }
+    /// Releases one delivered batch and claims the single append edge merged behind it.
+    mutating func completeDelivery(subscriptionId: UUID) -> PaneTapeFollowFetch? {
+        guard var subscription = subscriptions[subscriptionId] else { return nil }
         subscription.isInFlight = false
         subscriptions[subscriptionId] = subscription
+        return claimPendingFetch(subscriptionId)
+    }
+
+    /// Removes one failed stream while preserving the coordinates needed to disarm its recorder.
+    mutating func remove(_ subscriptionId: UUID) -> PaneTapeFollowRemoval? {
+        guard let subscription = subscriptions.removeValue(forKey: subscriptionId) else {
+            return nil
+        }
+        return PaneTapeFollowRemoval(
+            subscriptionId: subscriptionId,
+            connectionId: subscription.connectionId,
+            paneId: subscription.paneId
+        )
     }
 
     /// Removes all streams for a vanished pane and returns their one promised terminator.
@@ -195,16 +201,47 @@ struct PaneTapeFollowSubscriptions {
     }
 
     /// Ensures a disconnected socket can never trigger another owner-queue fence.
-    mutating func connectionClosed(_ connectionId: UUID) -> [UUID] {
-        let removed = subscriptions.compactMap { id, subscription in
-            subscription.connectionId == connectionId ? id : nil
+    mutating func connectionClosed(_ connectionId: UUID) -> [PaneTapeFollowRemoval] {
+        let removed = subscriptions.compactMap { id, subscription -> PaneTapeFollowRemoval? in
+            guard subscription.connectionId == connectionId else { return nil }
+            return PaneTapeFollowRemoval(
+                subscriptionId: id,
+                connectionId: connectionId,
+                paneId: subscription.paneId
+            )
         }
         subscriptions = subscriptions.filter { $0.value.connectionId != connectionId }
         return removed
     }
 
-    /// Drops process-ending streams without manufacturing an end record the app cannot flush.
-    mutating func removeAll() {
+    /// Drops process-ending streams and returns the recorder notices teardown must disarm.
+    mutating func removeAll() -> [PaneTapeFollowRemoval] {
+        let removals = subscriptions.map { id, subscription in
+            PaneTapeFollowRemoval(
+                subscriptionId: id,
+                connectionId: subscription.connectionId,
+                paneId: subscription.paneId
+            )
+        }
         subscriptions.removeAll()
+        return removals
+    }
+
+    private mutating func claimPendingFetch(
+        _ subscriptionId: UUID
+    ) -> PaneTapeFollowFetch? {
+        guard var subscription = subscriptions[subscriptionId],
+              subscription.hasPendingEvents,
+              subscription.isInFlight == false
+        else { return nil }
+        subscription.hasPendingEvents = false
+        subscription.isInFlight = true
+        subscriptions[subscriptionId] = subscription
+        return PaneTapeFollowFetch(
+            subscriptionId: subscriptionId,
+            connectionId: subscription.connectionId,
+            paneId: subscription.paneId,
+            cursor: subscription.cursor
+        )
     }
 }
