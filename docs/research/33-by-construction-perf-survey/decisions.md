@@ -630,3 +630,117 @@ rediscovering them.
   - Paired benchmark as the non-regression check, with `F18`'s expected
     reading recorded alongside it: the churn workloads' planned frames per
     draw fall back toward 1, and their plan-metric `slower` reverses.
+
+### D9 -- the glyph halo is derived per row from a measured ink envelope, with the full-row halo as the per-row fallback
+
+- Status: **direction set; implementation follows this entry.** The claim is a
+  **countable one under `D1`**: on an all-ASCII paced scroll, the store's apply
+  shape falls from three erased and five planned full-width rows per damaged
+  row (halo of the damage, halo of the halo) to the damaged rows themselves
+  plus a 2-pixel erase band and the one neighbor above whose descenders reach
+  it -- `t5-scroll-amplification.py`'s glyphs-per-frame is the gate, 1,086
+  today against an ideal of 178 (`F23`, reconfirmed post-T25 in `F25`). No
+  wall-clock percentage is claimed; the paired benchmark is the non-regression
+  check, with the three serialized-draw cells carrying `F25`'s bracket caveat.
+- Evidence used: `F6` (no printable-ASCII ink escapes a cell upward on the
+  shipped font; descenders overshoot ~1.13 px at 2x; the asymmetric exact
+  requirement and the fallback shape); the T14 ink-envelope probe
+  (`scripts/research/33/t14-ink-envelope-probe.swift`, run 2026-08-08: all four
+  styled faces map every glyph of `0x20...0x7E`, worst-face top margin +4.98 px
+  and bottom overshoot +1.13 px at 2x, union envelope top margin 4 px floored /
+  bottom overshoot 2 px ceiled, so the margin exceeds the overshoot at both
+  scales); a code-read of every non-batch draw path (`drawTextCell` clips
+  symbols-face and CTLine-fallback cells to their cell; every sprite family
+  either clips to its cell at the render boundary or is geometry-contained per
+  `docs/terminal-sprites.md`'s contract) -- which leaves the four styled faces'
+  unclipped glyph batch as the *only* ink source that can cross a cell
+  boundary; `F23` (the store's stricter erase-set/plan-set contract and the
+  latent sub-pixel defect byte-equality caught in the folded seam, since
+  deleted with that seam by T25); `F25` (the swapchain applies composed damage
+  through the same `apply`, so this shape is now on the one render path).
+- What `F6`'s sketch said, and what changed under it: the ledger's safe shape
+  was a per-metrics `verticalInkOvershootRows(above:below:)` falling back to
+  today's halo *globally* when any contributing face fails containment. Two
+  things moved. First, T25 deleted the folded view seam, so the halo's
+  production consumers collapsed to `TerminalFrameBackingStore.apply` (the
+  benchmark topology's `haloDamagedRowCounts` series still models the deleted
+  seam and is recorded evidence, not a gate). Second, the containment audit
+  found the fallback-face and sprite cautions are discharged by clipping --
+  but also that the unclipped batch submits *any* BMP scalar the styled face
+  maps, not just ASCII, and an accented capital can legitimately exceed the
+  ascent. A per-metrics-only envelope is therefore unsound for non-ASCII rows
+  and a global fallback would surrender the win to one such row anywhere on
+  screen. The granularity rubric points at the fix: classify per row, which is
+  the granularity the input actually varies at.
+- Candidate solutions considered:
+  - **Per-row ink classes over a per-metrics measured envelope.** Selected.
+    Each plan row classifies from its text runs: `empty` (no ink), `ascii`
+    (every cell single-scalar in `0x20...0x7E` -- exactly the cells the
+    measured table batch submits), `general` (anything else; assumed to reach
+    one full cell beyond both edges, today's global assumption). The metrics
+    measure the ASCII envelope once per face set -- signed ink-top and
+    ink-bottom offsets in backing pixels, unioned over the four styled faces,
+    valid only when every face maps the whole table -- and `apply` derives:
+    the erase region is each damaged row's band extended by the old and new
+    ink reach of that row, and the plan set is every row whose ink or band
+    footprint intersects the erase region. Rows with background, overlay, or
+    decoration runs, and the cursor row, contribute their band as footprint,
+    so a sub-pixel erase intrusion into a colored-background neighbor replans
+    it rather than refilling it with the default background.
+  - **Per-metrics envelope with a global (frame-level) fallback**, `F6`'s
+    literal sketch. Rejected: one box-drawing prompt glyph or one accented
+    character anywhere on screen would surrender the entire win, and modern
+    shell prompts and TUIs make that the common screen, not the edge case.
+    Work at iteration granularity for input varying at change granularity is
+    the smell this survey exists to delete.
+  - **Measure the whole BMP repertoire per face** so non-ASCII batch rows get
+    a measured envelope too. Rejected: the union box over a face's repertoire
+    legitimately exceeds the line box (accented capitals), so the measurement
+    would return the full-row answer anyway; per-glyph tables scale with the
+    repertoire for a row class that is rare on real screens.
+  - **Clip the batch to the row band** so every draw path is contained and the
+    halo dies entirely. Rejected: clipping changes rendering -- it would cut
+    legitimate descenders and accents at cell boundaries, which is exactly the
+    ink the halo exists to preserve.
+- Placement, stated here because the probe depends on it: the classification
+  and the erase/plan derivation are pure functions in `TerminalRenderPlanning`
+  (plan in, pixel offsets in, row sets out), the measured envelope lives on
+  `TerminalRenderMetrics` beside the faces it measures, and the store holds a
+  small per-row class ledger describing the ink it last rendered -- updated by
+  full renders and applies, translated with shifts -- because the erase must
+  cover the *old* content's reach, which only the store knows. The t5 probe
+  compiles `TerminalRenderPlanning` already, so it calls the real derivation
+  instead of modeling it gate-for-gate.
+- Tradeoffs and correctness risks, named:
+  - **A wrong envelope shows as dropped ink, not slowness.** The gate is the
+    existing `FrameBackingStoreTests` byte-equality suite -- the instrument
+    that caught the folded seam's latent halo defect -- extended with
+    general-class neighbors, colored-background and decorated neighbors,
+    class transitions, and translations over mixed classes.
+  - **Rounding is directional.** The ink-top margin floors and the
+    ink-bottom overshoot ceils, so quantization can only widen the derived
+    reach, never narrow it; AA cannot paint outside the outline's bounding
+    box, so pixel-snapped outward bounds cover rasterized coverage.
+  - **The worst case is current behavior, per row.** A `general` row's reach
+    is exactly today's +-1-row assumption, and a nil envelope (an incomplete
+    ASCII table on any face, or degenerate geometry) makes every row
+    `general`, reproducing today's shape byte-for-byte.
+  - **The class ledger is new state.** It is derived state with a one-line
+    invariant -- it describes the rows the store's pixels currently show --
+    and it fails safe: a stale-conservative entry (general where ascii would
+    do) costs rows, never correctness; the byte gates cover the transitions.
+- Behavioral verification, named before implementation:
+  - `FrameBackingStoreTests` byte-equality across the arms above, unchanged
+    and extended; this replaces no gate and weakens none.
+  - `t5-scroll-amplification.py` re-run with the probe calling the real
+    derivation: `text-line` and `text-line-at-budget` glyphs per frame must
+    fall from 1,086 toward the low hundreds, `bare-newline` from 76 toward
+    zero, with the flood row and the `rewrite-bottom-row` control unchanged
+    by policy (`.full` never touches the store's incremental path; the
+    control's 2.0x halo residue is exactly what this task deletes, so the
+    control is expected to fall toward ~178 -- record both).
+  - The ink-envelope probe's output recorded in the finding, per face, both
+    scales, with the completeness bits.
+  - `just test`, `just test-ui`, and `benchmark-confirm` against the pre-T14
+    commit as the non-regression check with `F25`'s caveat on the three
+    serialized-draw cells.

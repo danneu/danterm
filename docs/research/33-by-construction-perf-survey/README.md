@@ -573,16 +573,31 @@ constraint among them except where noted.
   Verification: `resolveCellStyle` call count per frame must fall to the
   distinct-style-run count. Predicts a *divergence* between `content-churn` and
   `style-churn`, which is the mechanism confirming itself.
-- [ ] `T14` VETTING -- **Derive the glyph halo from font ink extents.** `F6`
-  measured that no printable-ASCII ink escapes a cell upward on the shipped font,
-  so `row+1` need never be planned or submitted -- 3N haloed rows become 2N plus
-  a sub-pixel band. Verification: `sparse-spans-max`'s topology contract must
-  report 34 drawing rows where it reports 50 today, at the same 17 spans; plus
-  bitmap redraw-equivalence. **Must union over every contributing face** (four
-  styled faces, the packaged symbols face at cell-width point size, and the
-  `CTLine` fallback whose extents are not tabulated) and fall back to today's
-  full-row halo whenever any face fails containment, so the worst case is
-  current behavior.
+- [x] `T14` **DONE (`D9`, `F27`)** -- **Derive the glyph halo from measured ink
+  extents.** `F6` measured that no printable-ASCII ink escapes a cell upward on
+  the shipped font; the t14 probe extended that to all four styled faces
+  (union: +4 px top margin, +2 px descender overshoot at 2x, tables complete),
+  and the containment audit found the ledger's other cautions discharged by
+  clipping -- `drawTextCell` clips the symbols face and the `CTLine` fallback,
+  and every sprite family clips or is geometry-contained -- leaving the styled
+  faces' glyph batch as the only unclipped path. Landed per `D9` as per-row
+  reach classes over a per-metrics measured envelope (a non-ASCII cell keeps
+  the full-cell reach per row; a nil envelope reproduces the old shape
+  everywhere), a store-held reach ledger for stale ink, and exact
+  translation-edge strips that replaced the `F23` boundary-row redraws.
+  Verification (`F27`): paced-scroll glyph submission fell **1,086 to 375**
+  per frame against the ideal 178 (`bare-newline` 76 to 20; flood and control
+  byte-stable), the byte-equality suite plus new mixed-content, decorated-
+  neighbor, class-transition, and region-edge arms all hold, and the
+  calibrated ladder reads `incremental-mixed` **`faster` -13.23%** and
+  `scrollback-stream` `faster` -2.15% with everything else `equivalent` --
+  and the exact derivation surfaced a **latent edge-strip defect** in the
+  boundary-row scheme (ghost spill under cursor-neutral `CSI S`/`CSI T`
+  beside cell-escaping ink), pinned red-first and fixed by the strips. The ledger's
+  original `sparse-spans-max` 50-to-34 gate predates T25's deletion of the
+  view seam it measured and was retired with it; the benchmark topology's
+  `haloDamagedRowCounts` series is now a model of a deleted mechanism and
+  retires with the serialized-draw recalibration.
 - [ ] `T15` VETTING -- **Build sprite cell geometry once per metrics.** Geometry
   is a pure function of `(pattern, cellWidth, cellHeight, strokeWidth)` over a
   closed finite pattern domain, recomputed and reallocated per cell per draw.
@@ -805,8 +820,9 @@ future reopening needs a new rule against new evidence.
 - **`18/D7`'s variance measurement is still unbuilt and still gates several draw
   items.** Three captures of one unchanged build, no code change. Doc 18 ranks it
   above its own remaining leads because the profiler contradicted the calibrated
-  benchmark in opposite directions twice. `T14`, `T15` and `T18` all rest on
+  benchmark in opposite directions twice. `T15` and `T18` rest on
   profiler-sourced shares; treat their sizes as unscored until this exists.
+  (`T14` no longer does -- it landed on the t5 glyph counter, `F27`.)
 - **Two candidates are unscoreable by any rule this project owns.** An
   `updateLayer`-owned bitmap (`18/L14`) would score `slower` on the only
   calibrated instrument while reducing total process CPU, and `18/L9`'s subpixel
@@ -1092,3 +1108,25 @@ the drawing seam still folds the shift into region rows (glyphs per
 scrolling frame unchanged at 11,570), and the backing-store translation
 that retires that fold -- behind the same bitmap gate, separately
 revertible -- is the doc's next slice.
+
+**`T14` then derived the halo the residue pointed at (`D9`, `F27`).** The t14
+probe extended `F6` to all four styled faces (union: +4 px top margin, +2 px
+descender overshoot at 2x, every ASCII glyph mapped), and the containment
+audit found the ledger's other cautions discharged by clipping, leaving the
+styled faces' glyph batch as the only ink source that can cross a cell
+boundary. The landing is per-row: reach classes from the plan's runs over a
+per-metrics measured envelope, a store-held ledger for the reach of the ink
+the pixels currently show, and exact translation-edge strips from the
+pre-move ledger that replaced `F23`'s boundary-row redraws. Paced-scroll
+glyph submission fell **1,086 to 375** per frame against the ideal 178, with
+`bare-newline` 76 to 20 and the flood and control byte-stable; the remaining
+2.1x is exactness -- the cursor pair and the one neighbor above whose
+measured descenders sit in each erased band -- with per-row
+background-identity tracking recorded as the only named lever on it. The
+derivation also did what `F23`'s stricter contract did one level down: made
+exact what the full-row halo had been masking, surfacing a latent
+edge-strip defect (ghost spill under cursor-neutral `CSI S`/`CSI T` beside
+cell-escaping ink like U+01FA), pinned red-first and fixed by the strips.
+The calibrated ladder reads `incremental-mixed` **`faster` -13.23%** --
+the derived halo shrinking exactly the software-raster term `F26` priced --
+with `scrollback-stream` `faster` -2.15% and every other cell `equivalent`.

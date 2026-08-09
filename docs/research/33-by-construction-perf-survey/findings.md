@@ -2520,3 +2520,131 @@ performance verdict.
   profile names the lever: background fills are one memset family at 34% of
   the process, ahead of any glyph cost.
 
+### F27 -- the derived halo lands: paced-scroll glyph submission falls 1,086 to 375 per frame on a measured ink envelope, and the byte gate catches a latent edge-strip defect the full-row halo had been masking
+
+- Status: implemented and verified; this closes `T14` against `D9`. Every
+  claim below is a count, a byte-equality verdict, or a calibrated ladder
+  verdict with `F25`'s bracket caveat where it applies.
+- Date and investigator: 2026-08-08, T14 derived-halo agent.
+- Commands, inputs, or reproduction:
+  `swift scripts/research/33/t14-ink-envelope-probe.swift` (the measurement),
+  `python3 scripts/research/33/t5-scroll-amplification.py` (the gate),
+  `swift test --package-path lib/TerminalCore --filter
+  "FrameBackingStoreTests|RenderInkReachTests"` (the byte and shape gates).
+- What the mechanism is, in the shape `D9` prescribed:
+  - **The envelope.** Each styled face measures its printable-ASCII table's
+    ink box at construction (`CTFontGetBoundingRectsForGlyphs`, zero glyphs
+    excluded); `TerminalRenderMetrics` unions the four faces into signed
+    cell-relative pixel offsets, floored on the margin and ceiled on the
+    overshoot, nil unless every face maps the whole table. Measured on the
+    shipped font: top margin +4 px and descender overshoot +2 px at 2x
+    (worst faces +4.98 / +1.13 before rounding), +2 / +1 at 1x -- `F6`
+    reconfirmed and extended to all four faces.
+  - **Per-row reach.** `renderRowReaches` classifies each plan row from its
+    runs: ASCII cells reach the envelope; any other single-scalar cell
+    reaches one full cell past both edges (the styled face's wider cmap is
+    unclipped and untabulated -- the pre-T14 assumption, kept per row as
+    the worst case); multi-scalar cells, background, overlay, decoration,
+    and the cursor contribute the clipped cell band. The containment audit
+    behind those classes: `drawTextCell` clips the symbols face and the
+    CTLine fallback, and every sprite family clips or is
+    geometry-contained.
+  - **The apply shape.** `TerminalFrameBackingStore` keeps a per-row reach
+    ledger describing the ink its pixels currently show (full renders reset
+    it, applies update damaged rows, translations move it with the
+    memmove). `renderApplyShape` erases each damaged row's band extended by
+    its old and new reach, and plans every row whose reach intersects the
+    erased region -- so an all-ASCII damaged row erases one band plus 2 px
+    and replans itself and the one neighbor above whose descenders cross
+    it, where the pre-T14 shape erased three full rows and planned five.
+  - **Translation edge strips.** `renderTranslationStaleStrips` prices the
+    four stale strips a row translation leaves at the moved block's edges
+    (imported ghost spill inside the block's edge bands, outward spill left
+    in unmoved neighbors), sized from the pre-move ledger, and the two
+    boundary-row redraws the mirror had carried since `F23` are deleted --
+    the strips are exact where the boundary rows were approximate.
+- **The byte gate caught a latent defect in the boundary-row scheme while
+  the strips were being derived.** Working the reach model through the edge
+  cases showed the boundary-row redraw does not cover ghost spill when a
+  general-class row's ink crosses a moved block's edge and neither the
+  cursor pair nor a same-delivery rewrite blankets the strip. The exposure
+  needs a cursor-neutral scroll: `CSI S`/`CSI T` with the cursor parked
+  mid-region, general-reach ink beside the region edge, and content that
+  physically escapes its cell -- U+01FA overshoots the cell top by +1.4 px
+  at 2x and U+1E01 descends +2.35 px on the shipped font, found by a
+  repertoire scan after A-grave-class capitals proved to stay inside the
+  cell. The new `generalNeighborsOfRegionScroll` arm reproduced it (red at
+  step 2, the bare `CSI T`) against the boundary-row implementation and is
+  green on the strips. The pre-T14 halo-of-halo masked the whole class by
+  redrawing edge+-1 rows unconditionally; the derivation, being exact,
+  found it structurally -- this is `F23`'s "stricter contract" observation
+  repeating one level up.
+- Measurements, t5 probe (600 events, 179x66; before figures `F23`/`F25`):
+
+  | scenario, 1 line/delivery | glyphs/frame before | after | ideal |
+  | --- | ---: | ---: | ---: |
+  | `text-line` | 1,086 | **375** | 178 |
+  | `text-line-at-budget` | 1,086 | **375** | 178 |
+  | `bare-newline` | 76 | **20** | 0 |
+  | `rewrite-bottom-row` control | 356 | 356 | 178 |
+  | `text-line` at 91/delivery (flood) | 11,570 | 11,570 | 11,290 |
+
+  The residue is 2.1x over ideal and is now exactness, not assumption: the
+  fresh line, the cursor pair, and the one neighbor above whose measured
+  descenders sit in each erased band's top 2 px. The control holds at 356
+  for the same reason -- its neighbor's descenders really do live in the
+  erased band, so `D9`'s "expected to fall toward ~178" was wrong about the
+  control and the recorded value stands. The named lever on what remains is
+  per-row background-identity tracking (skip erasing a damaged band's top
+  overshoot strip when the background is provably unchanged), which would
+  drop the above-neighbor replan; nothing currently justifies it.
+  The probe now calls the production derivation (`renderRowReaches`,
+  `renderTranslationStaleStrips`, `renderApplyShape`) instead of modeling
+  the store gate for gate.
+- Verification: `RenderInkReachTests` pins the reach classes and the
+  countable shape (13 tests); `FrameBackingStoreTests` byte-equality across
+  the full `D7` matrix plus the new mixed-content streaming,
+  decorated-neighbor, class-transition, and region-edge arms (15 tests);
+  an ablation run (plan membership widened to band-only) confirmed the
+  byte gate fails when the derivation is wrong. `just test` 75 of 75
+  steps; `just test-ui` 215 of 215.
+- Measurements, the paired benchmark (`benchmark-confirm
+  baseline=8c52d6e4`, both arms post-T25 so the moved bracket is the same
+  on each; the serialized-draw thresholds are still the pre-move
+  calibration, so those cells' magnitudes carry that caveat):
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | equivalent (+0.24%) |
+  | `scrollback-stream` | **faster (-2.15%**, 4 pairs) |
+  | `content-churn` | equivalent (-0.23%; process CPU +0.05% descriptive) |
+  | `style-churn` | equivalent (-0.43%; process CPU -0.18% descriptive) |
+  | `incremental-mixed` | **faster (-13.23%**, 6 pairs; process CPU -1.97% descriptive) |
+  | `retained-browse` | equivalent (+0.18%) |
+
+  The `incremental-mixed` cell is the derived halo working on the term
+  `F26` priced: its 4-row damage previously became 6 erased and 8 planned
+  full-width rows in the owned store's software render, and now becomes
+  the damaged bands plus 2 px and the neighbors whose measured ink
+  reaches them -- less area for the memset family that `F26` measured at
+  34% of process CPU on full-grid work, on the workload where damage is
+  small enough for the difference to dominate the render. The full-grid
+  churns are untouched (their damage is `.full`, which never enters
+  `apply`), which is what their `equivalent` cells confirm.
+- Competing interpretations: the envelope trusts
+  `CTFontGetBoundingRectsForGlyphs` as an outer bound on rasterized
+  coverage; antialiasing cannot paint outside the outline's box, and the
+  offsets round only outward, so the trust is one-directional -- and the
+  byte gate over descender-bearing content is the check that would catch a
+  violation. The benchmark topology's `haloDamagedRowCounts` series still
+  models the deleted `withGlyphHalo` shape; it is recorded evidence with no
+  production consumer left, and its retirement belongs to the
+  serialized-draw recalibration that already owns `usedDirtyRectFallback`.
+- Uncertainty: the reach ledger is derived state with a one-line invariant
+  (it describes the rows the store's pixels currently show); a
+  stale-conservative entry costs rows, never correctness. A configured
+  font whose ASCII table is incomplete, or whose measurement is degenerate,
+  reads a nil envelope and reproduces the pre-T14 shape everywhere.
+- Next action: none for `T14` -- the task closes. The background-identity
+  refinement above is the only named lever on the 2.1x residue, unowned
+  and unjustified at current cost.
