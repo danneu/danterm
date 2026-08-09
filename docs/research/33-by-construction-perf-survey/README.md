@@ -249,7 +249,9 @@ either way:
   rather than optimizing them -- compute-then-dedupe scaffolding.
 - `T17` inline CSI storage: `keepingCapacity: true` currently does nothing by
   construction, which is the structure apologizing in one line.
-- `T18` exact fills: over-draw stops being a thing the clip must prevent.
+- `T18` exact fills was rejected by `F36`: the clip already prevents the
+  raster work, and spelling the same region again as fill rectangles adds a
+  second representation without deleting the clip.
 - `F3`'s `PackedRetainedRow` retirement: a 643-line file describing a
   representation the engine no longer uses.
 
@@ -647,11 +649,18 @@ constraint among them except where noted.
   private CSI values fell from 30,003 live heap blocks to zero; 10,000 retained
   ESC-intermediate values also hold zero. The parser and terminal dispatch
   contracts pass, and `terminal-feed` is `faster` at -17.70%.**
-- [ ] `T18` VETTING -- **Make the fills exact.** Two full-surface background
-  fills per draw (one in `draw(_:)`, one in `drawRenderFrame`), correct only
-  because both are clipped, while the exact span rects sit on the stack one line
-  above. Verification: fill-rect area per draw compared against damaged area.
-  Sequence before any fill-batching lead, since this decides the fill topology.
+- [x] `T18` **REJECTED (`F36`; experiment in `F35`)** -- **Keep one clipped
+  default-background fill.** T25 deleted the old `draw(_:)` fill, leaving one
+  full-surface rectangle in `drawRenderFrame`. Incremental `apply` already
+  installs its exact `erasePixelSpans` as the shared clip required by every
+  later layer. The experiment submitted those spans again as separate default-
+  background rectangles. The direct before/after btop traces found the fill
+  stack effectively unchanged: 1.521 to 1.474 samples per draw, below sampling
+  resolution, with nearly identical cadence and damage topology. CoreGraphics
+  reaches `CGBlt_fillBytes` only after applying the clip, so the experiment did
+  not remove full-surface writes. It instead duplicated the render region,
+  added a second executor mode, and issued about two fill calls where one
+  sufficed. Reverted. T15 still requires its sprite-corpus applicability gate.
 
 - [x] `T24` **DONE (`F29`)** -- **Own the `benchmark-confirm` block floor.**
   `terminal-feed` now calibrates each physical arm independently and uses that
@@ -863,9 +872,11 @@ future reopening needs a new rule against new evidence.
 - **`18/D7`'s variance measurement is still unbuilt and still gates several draw
   items.** Three captures of one unchanged build, no code change. Doc 18 ranks it
   above its own remaining leads because the profiler contradicted the calibrated
-  benchmark in opposite directions twice. `T15` and `T18` rest on
-  profiler-sourced shares; treat their sizes as unscored until this exists.
-  (`T14` no longer does -- it landed on the t5 glyph counter, `F27`.)
+  benchmark in opposite directions twice. `T15` rests on a profiler-sourced
+  share; treat its size as unscored until this exists. `T18` no longer does --
+  `F36` rejected it after the direct trace comparison showed that clipping
+  already scopes the byte fill. (`T14` also no longer does -- it landed on the
+  t5 glyph counter, `F27`.)
 - **Two candidates are unscoreable by any rule this project owns.** An
   `updateLayer`-owned bitmap (`18/L14`) would score `slower` on the only
   calibrated instrument while reducing total process CPU, and `18/L9`'s subpixel

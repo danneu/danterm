@@ -3033,3 +3033,98 @@ performance verdict.
   path directly. Artifact:
   `.build/terminal-benchmark-comparisons/quick/d5425738592a-0000`.
 - Next action: none for T17.
+
+### F35 -- incremental default-background fills submit exactly the erased pixel area; full renders keep their full-surface fill
+
+- Status: implemented and verified; this closes `T18`.
+- Date, baseline, and investigator: 2026-08-09, `0ede91de`, Codex. The
+  worktree contained an unrelated untracked selection-provenance plan
+  throughout; this task did not modify it.
+- Ledger correction: T25 deleted the `draw(_:)` seam and its background fill.
+  The remaining mismatch was one default-background fill in
+  `drawRenderFrame`: full-surface submission is correct for `renderFull`, while
+  incremental `apply` already holds the exact `erasePixelSpans` and previously
+  relied on its backing-store clip to constrain that full rectangle.
+- Test-first gate: `scripts/research/33/t18-exact-incremental-fills.sh` requires
+  `TerminalFrameBackingStore.apply` to pass the derived `erasePixelSpans` into
+  the incremental executor, then runs the exact-area Swift test. Before the
+  change, two disjoint synthetic spans required 3,264 backing pixels while the
+  executor reported the full frame's 75,888 submitted pixels; both equality
+  and proper-subset assertions failed for the expected reason.
+- Change: public `drawRenderFrame` remains the full-render seam and issues one
+  full-surface default-background rectangle. The separate internal
+  `drawRenderFrameIncrementally` fills each supplied vertical backing-pixel
+  span across the frame width, then shares the unchanged background-run,
+  overlay, glyph, decoration, and cursor execution. `apply` compares the area
+  the executor reports from those actual fill submissions with
+  `pixelWidth * sum(erasePixelSpans.count)` and traps on any mismatch. The mode
+  split keeps a sparse caller from selecting the full-fill route accidentally
+  and does not turn full rendering into a sparse special case.
+- After: the same probe passes at 3,264 submitted pixels for 3,264 required
+  pixels. The directed full-render test renders an empty plan through
+  `TerminalFrameBackingStore.renderFull` and remains byte-identical to direct
+  full drawing. All 17 backing-store tests pass, covering sparse row damage,
+  composed and regional shifts, mixed ink reaches, class transitions,
+  stride-padded IOSurfaces, and refusal paths. `just test` passes all 75 steps.
+- Descriptive performance only: the first `benchmark-quick` comparison on
+  `incremental-mixed` read +10.16% draw time, +9.03% plan time, and +2.64%
+  process CPU. Its host began at 2.78 load per processor, and its snapshot
+  preceded the final mode-naming and full-path cleanup. Artifact:
+  `.build/terminal-benchmark-comparisons/quick/a7af52dab739-0000`.
+- A requested rerun on the final tree, after the machine became more idle,
+  read -18.93% draw time, -22.32% plan time, and -14.51% process CPU. Invocation
+  load fell to 0.61 per processor, though the pre-block sample still found an
+  unrelated `xpcproxy_sim` at 61.2% CPU. Artifact:
+  `.build/terminal-benchmark-comparisons/quick/9d5db3fe9973-0000`.
+- The instrument labels every quantity in both runs `descriptive, no verdict`.
+  The untouched planner moving +9.03% in one run and -22.32% in the next, while
+  draw time reverses by about 29 percentage points, demonstrates that these
+  observations do not resolve T18's performance. They establish neither a
+  speedup nor a regression and do not satisfy the outstanding variance study.
+  The exact submitted-area equality is the task's decision-bearing result.
+- Next action: none for T18. T15 still needs its sprite-corpus applicability
+  check before it can be ranked or implemented.
+
+### F36 -- CoreGraphics clips before filling bytes: exact fill rectangles leave the btop fill stack unchanged and duplicate the render region
+
+- Status: `T18` refuted and reverted.
+- Date, baseline, and investigator: 2026-08-09, `0ede91de`, Codex. The
+  worktree contained an unrelated untracked selection-provenance plan
+  throughout; this task did not modify it.
+- Direct evidence: the valid 20-second btop traces immediately before and
+  after T18 use the same live-process-list fixture at 179x66 and about 29
+  draws/s. Their damage topology is nearly identical: 798 versus 797 frames at
+  43 damaged rows, 35 versus 36 at 64, and 834 frames with two maximal damage
+  spans in both. The estimated profiler windows contain 577.24 versus 579.93
+  draws. Artifacts:
+  `.build/terminal-benchmark-profiles/2026-08-09-130727-25194` before and
+  `.build/terminal-benchmark-profiles/2026-08-09-134457-63193` after.
+- Result, normalized by estimated draws in each profiler window: total samples
+  per draw moved 8.503 to 8.268; `_platform_memset_pattern16` fill samples per
+  draw moved 1.521 to 1.474; glyph-mask samples moved 0.651 to 0.688; and shape-
+  raster samples moved 0.289 to 0.283. The fill difference is 23 samples across
+  roughly 800, below the trace's approximate square-root sampling uncertainty
+  of 29 samples. The identities mark both traces diagnostic only, and live btop
+  content has no reset or historical comparability, so none of these movements
+  is a performance verdict.
+- Mechanism: both fill stacks reach `_platform_memset_pattern16` through
+  `ripc_Render -> RIPLayerBltShape -> argb32_mark -> CGBlt_fillBytes`. Before
+  T18 that stack followed the full rectangle under the exact backing-store
+  clip; after T18 it followed the exact rectangles under the same clip. The
+  stable byte-fill cost supports the direct stack reading: CoreGraphics
+  applies the clip before it writes pixels, so submitting a full-frame
+  rectangle did not cause full-surface memory work.
+- Adjudication: T18 fails the survey's structural bar as well as its performance
+  lead. The clip cannot be deleted because background runs, overlays, glyphs,
+  decorations, and cursors all need the same incremental boundary. Exact fill
+  rectangles therefore represent that boundary a second time, add a separate
+  executor mode and area ledger, and turn the usual two-span btop damage into
+  about two fill calls instead of one. One exact clip followed by one default-
+  background fill is the simpler structure with a single region authority.
+- Revert: delete `drawRenderFrameIncrementally`, its area return and
+  precondition, and the T18-only test/probe. Restore incremental `apply` to call
+  the ordinary renderer under its already-installed clip. The 15 remaining
+  backing-store tests retain the byte-equivalence coverage for incremental and
+  full rendering.
+- Next action: none for T18. T15 still needs its sprite-corpus applicability
+  check before it can be ranked or implemented.
