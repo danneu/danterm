@@ -215,6 +215,13 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
     var mirrorEstablishRenders = 0
     var mirrorAppliedFrames = 0
     var mirrorBlitRows = 0
+    // The store's reach ledger, tracked gate for gate with
+    // `TerminalFrameBackingStore` at the canonical 2x metrics: 31 px cell,
+    // ASCII ink from 4 px below the row top to 2 px past its bottom
+    // (`t14-ink-envelope-probe.swift`, research/33 D9).
+    let cellHeightPixels = 31
+    let inkEnvelope = RenderInkEnvelope(inkTopOffsetPixels: 4, inkBottomOffsetPixels: 2)
+    var reachLedger = [RenderRowReach?](repeating: nil, count: viewportRows)
 
     var index = 0
     while index < events {
@@ -279,14 +286,16 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
         idealGlyphs += glyphOccurrences(plan, in: frameIdealRows)
         planGlyphs += glyphOccurrences(plan)
 
-        // `SwiftTerminalSessionView.publish` with the T9 view half: while the
-        // mirror is valid the shift is a translation in owned memory, glyph
-        // submission happens at the mirror render (damage plus region boundary
-        // rows, erase-haloed, planned at the erase set's own halo -- gate for
-        // gate with `TerminalFrameBackingStore.apply`), and the draw is a blit
-        // that submits nothing. `.full` stales the mirror at zero cost, a
-        // shift-carrying frame on a stale mirror pays one full establish
-        // render, and row damage on a stale mirror folds exactly as before.
+        // The owned frame store's render, gate for gate with
+        // `TerminalFrameBackingStore.apply` (research/33 T9 view half, T14
+        // derived halo): while the store is current a shift is a translation
+        // in owned memory, glyph submission is the derived apply shape --
+        // erase spans from the damaged rows' bands plus their old and new ink
+        // reach, plan rows from reach intersection, through the *same*
+        // `renderApplyShape` the store calls -- and displaying submits
+        // nothing. `.full` stales the store at zero cost, a shift-carrying
+        // frame on a stale store pays one full establish render, and row
+        // damage on a stale store folds exactly as before.
         if frameDamage.isFull {
             mirrorValid = false
             pendingDisplayDamage = .full
@@ -296,18 +305,57 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
             submittedGlyphs += glyphOccurrences(plan)
         } else if mirrorValid || frameDamage.shift != nil {
             if mirrorValid {
-                var renderRows = Set(frameDamage.rowIndices)
+                let indices = frameDamage.rowIndices
+                var staleStrips: [Range<Int>] = []
                 if let shift = frameDamage.shift {
-                    renderRows.insert(shift.region.lowerBound)
-                    renderRows.insert(shift.region.upperBound - 1)
+                    // Strips on the pre-move ledger, then the ledger rides
+                    // the translation exactly as the store's pixel memmove
+                    // does; vacated entries stay stale and are rebuilt by
+                    // the damaged-row render below.
+                    staleStrips = renderTranslationStaleStrips(
+                        region: shift.region,
+                        delta: shift.delta,
+                        cellHeightPixels: cellHeightPixels,
+                        reaches: reachLedger
+                    )
+                    let survivors = shift.region.count - abs(shift.delta)
+                    let destination = shift.delta > 0
+                        ? shift.region.lowerBound + shift.delta
+                        : shift.region.lowerBound
+                    let source = shift.delta > 0
+                        ? shift.region.lowerBound
+                        : shift.region.lowerBound - shift.delta
+                    let moved = Array(reachLedger[source..<(source + survivors)])
+                    reachLedger.replaceSubrange(
+                        destination..<(destination + survivors),
+                        with: moved
+                    )
                 }
-                let erase = TerminalDamage(rows: renderRows, rowCount: viewportRows)
-                    .withGlyphHalo(rowCount: viewportRows)
-                let planRows = erase.withGlyphHalo(rowCount: viewportRows)
-                submittedGlyphs += glyphOccurrences(clipFramePlan(plan, to: planRows))
+                let newReaches = renderRowReaches(
+                    of: plan,
+                    envelope: inkEnvelope,
+                    cellHeightPixels: cellHeightPixels
+                )
+                let shape = renderApplyShape(
+                    damagedRows: indices,
+                    rowCount: viewportRows,
+                    cellHeightPixels: cellHeightPixels,
+                    oldReaches: reachLedger,
+                    newReaches: newReaches,
+                    extraEraseIntervals: staleStrips
+                )
+                submittedGlyphs += glyphOccurrences(clipFramePlan(plan, to: shape.planDamage))
+                for row in indices where row < viewportRows {
+                    reachLedger[row] = newReaches[row]
+                }
                 mirrorAppliedFrames += 1
             } else {
                 submittedGlyphs += glyphOccurrences(plan)
+                reachLedger = renderRowReaches(
+                    of: plan,
+                    envelope: inkEnvelope,
+                    cellHeightPixels: cellHeightPixels
+                )
                 mirrorEstablishRenders += 1
                 mirrorValid = true
             }
