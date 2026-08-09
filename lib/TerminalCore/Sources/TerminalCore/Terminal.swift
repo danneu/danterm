@@ -4340,13 +4340,17 @@ public struct Terminal: Equatable, Sendable {
         // non-escaping level; nothing here outlives the call.
         withoutActuallyEscaping(body) { forward in
             forEachViewportRow(rows: requested, where: includesRow) { row, visit in
-                visit { column, _, scalars, style in forward(row, column, scalars, style) }
+                visit { _, style, visitCells in
+                    visitCells { column, _, scalars in
+                        forward(row, column, scalars, style)
+                    }
+                }
             }
         }
     }
 
     /// Visits every viewport row `rows` names in ascending order, handing each one a visitor for
-    /// its own columns.
+    /// its style segments and the cells inside each segment.
     ///
     /// The frame path's entry point, and the shape `31/I7` needs: retained history is addressed
     /// once, at the first row the traversal touches, and carried forward record by record for the
@@ -4367,10 +4371,15 @@ public struct Terminal: Equatable, Sendable {
             _ row: Int,
             _ visit: (
                 (
-                    _ column: Int,
-                    _ kind: TerminalCellKind,
-                    _ scalars: TerminalScalars,
-                    _ style: TerminalStyle
+                    _ columns: Range<Int>,
+                    _ style: TerminalStyle,
+                    _ visitCells: (
+                        (
+                            _ column: Int,
+                            _ kind: TerminalCellKind,
+                            _ scalars: TerminalScalars
+                        ) -> Void
+                    ) -> Void
                 ) -> Void
             ) -> Void
         ) -> Void
@@ -4380,9 +4389,8 @@ public struct Terminal: Equatable, Sendable {
         let topRow = scrollProjection.topRow
         var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
 
-        // Memoized because a row is a handful of style runs, not `columnCount` distinct styles:
-        // without it every column would pay a dictionary lookup that the previous column already
-        // did. Correct for any content -- a miss just re-resolves.
+        // Memoized across segments because adjacent rows often repeat the same handful of style
+        // ids. Correct for any content -- a miss just re-resolves.
         var lastId: StyleId?
         var lastStyle = TerminalStyle()
 
@@ -4398,9 +4406,7 @@ public struct Terminal: Equatable, Sendable {
             cursor = at.flatMap { history.advance($0) }
             if at == nil, viewportStreamRow(at: streamRow) == nil { continue }
 
-            body(row) { cellBody in
-                var storedCount = 0
-
+            body(row) { styleRunBody in
                 // Retained rows stream out of the arena rather than being materialized first.
                 // A frame reads every visible row once and discards it, so folding a `GridRow`
                 // here would buy an allocation and a full `GridCell` write per cell that nothing
@@ -4409,45 +4415,88 @@ public struct Terminal: Equatable, Sendable {
                 // funnelled through a nested function: a local function called from inside the
                 // fold's own closure is one more indirect call per cell, on the frame path.
                 if let at {
-                    history.forEachPaintedCell(at: at) { column, kind, scalars, styleId in
+                    history.withPaintedCells(at: at) { storedCount, storedStyleId, storedCell in
+                        // The segment visitor hands the borrowed packed-cell accessor down one
+                        // more non-escaping level; nothing here outlives this row traversal.
+                        withoutActuallyEscaping(storedCell) { forwardStoredCell in
+                            let head = rows.first?.cells.first
+                            let hasOpenTailSpacer = cursor == nil
+                                && storedCount == columnCount - 1
+                                && history.hasOpenTailRecord
+                                && head?.kind == .wideHead
+                            let padding = GridCell()
+                            var start = 0
+                            while start < columnCount {
+                                let styleId: StyleId
+                                if start < storedCount {
+                                    styleId = storedStyleId(start)
+                                } else if start == storedCount, hasOpenTailSpacer, let head {
+                                    styleId = head.styleId
+                                } else {
+                                    styleId = padding.styleId
+                                }
+                                var end = start + 1
+                                while end < columnCount {
+                                    let nextId: StyleId
+                                    if end < storedCount {
+                                        nextId = storedStyleId(end)
+                                    } else if end == storedCount, hasOpenTailSpacer, let head {
+                                        nextId = head.styleId
+                                    } else {
+                                        nextId = padding.styleId
+                                    }
+                                    guard nextId == styleId else { break }
+                                    end += 1
+                                }
+                                if styleId != lastId {
+                                    lastStyle = self.style(for: styleId)
+                                    lastId = styleId
+                                }
+                                styleRunBody(start..<end, lastStyle) { cellBody in
+                                    for column in start..<end {
+                                        if column < storedCount {
+                                            let cell = forwardStoredCell(column)
+                                            cellBody(column, cell.kind, cell.scalars)
+                                        } else if column == storedCount, hasOpenTailSpacer {
+                                            cellBody(column, .spacerHead, .empty)
+                                        } else {
+                                            cellBody(column, padding.kind, padding.scalars)
+                                        }
+                                    }
+                                }
+                                start = end
+                            }
+                        }
+                    }
+                } else if let windowRow = viewportStreamRow(at: streamRow) {
+                    let padding = GridCell()
+                    var start = 0
+                    while start < columnCount {
+                        let styleId = start < windowRow.cells.count
+                            ? windowRow.cells[start].styleId
+                            : padding.styleId
+                        var end = start + 1
+                        while end < columnCount {
+                            let nextId = end < windowRow.cells.count
+                                ? windowRow.cells[end].styleId
+                                : padding.styleId
+                            guard nextId == styleId else { break }
+                            end += 1
+                        }
                         if styleId != lastId {
                             lastStyle = self.style(for: styleId)
                             lastId = styleId
                         }
-                        cellBody(column, kind, scalars, lastStyle)
-                        storedCount = column + 1
-                    }
-                    if cursor == nil, storedCount == columnCount - 1,
-                       history.hasOpenTailRecord,
-                       let head = rows.first?.cells.first, head.kind == .wideHead
-                    {
-                        if head.styleId != lastId {
-                            lastStyle = self.style(for: head.styleId)
-                            lastId = head.styleId
+                        styleRunBody(start..<end, lastStyle) { cellBody in
+                            for column in start..<end {
+                                let cell = column < windowRow.cells.count
+                                    ? windowRow.cells[column]
+                                    : padding
+                                cellBody(column, cell.kind, cell.scalars)
+                            }
                         }
-                        cellBody(storedCount, .spacerHead, .empty, lastStyle)
-                        storedCount += 1
+                        start = end
                     }
-                } else if let windowRow = viewportStreamRow(at: streamRow) {
-                    for column in windowRow.cells.indices {
-                        let cell = windowRow.cells[column]
-                        if cell.styleId != lastId {
-                            lastStyle = self.style(for: cell.styleId)
-                            lastId = cell.styleId
-                        }
-                        cellBody(column, cell.kind, cell.scalars, lastStyle)
-                        storedCount = column + 1
-                    }
-                }
-
-                guard storedCount < columnCount else { return }
-                let padding = GridCell()
-                if padding.styleId != lastId {
-                    lastStyle = self.style(for: padding.styleId)
-                    lastId = padding.styleId
-                }
-                for column in storedCount..<columnCount {
-                    cellBody(column, padding.kind, padding.scalars, lastStyle)
                 }
             }
         }

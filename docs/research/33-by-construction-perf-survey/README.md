@@ -575,14 +575,23 @@ constraint among them except where noted.
   decorations reach the plan already overlay-adjusted and coalesced, and both
   `colorized` overloads plus `DecorationCandidate` are gone. A paired
   `retained-browse` quick check was `equivalent` at +0.62%.
-- [ ] `T13` VETTING -- **Resolve cell style at style-run granularity.**
+- [x] `T13` **DONE (`F32`)** -- **Resolve cell style at style-run granularity.**
   `forEachViewportRow` already holds `lastId`/`lastStyle` and hands the same
   `TerminalStyle` to every column of a run, then discards that knowledge at the
   callback boundary; `resolveCellStyle` re-derives it ~11,800 times per full
   frame. Ideal: the visit yields `(columns: Range<Int>, style:)` segments.
   Verification: `resolveCellStyle` call count per frame must fall to the
   distinct-style-run count. Predicts a *divergence* between `content-churn` and
-  `style-churn`, which is the mechanism confirming itself.
+  `style-churn`, which is the mechanism confirming itself. **Done in `F32`:**
+  the canonical 179x66 selected frame moved from 11,814
+  `resolveCellStyle` calls for 66 style runs to 66 calls for 66 runs.
+  `forEachViewportRow` now exposes each `(columns, style)` segment with one
+  nested cell visit; the four T12 accumulators remain row-local, and the T12
+  probe still counts zero transient rows and 66 cell passes. Quick comparisons
+  separated in the predicted direction: `content-churn` was `inconclusive` at
+  +1.73% while `style-churn` was `equivalent` at +0.55%; their diagnostic plan
+  metrics were `faster` at -10.30% and -11.60%. `retained-browse` was `faster`
+  at -17.33%.
 - [x] `T14` **DONE (`D9`, `F27`)** -- **Derive the glyph halo from measured ink
   extents.** `F6` measured that no printable-ASCII ink escapes a cell upward on
   the shipped font; the t14 probe extended that to all four styled faces
@@ -1179,3 +1188,17 @@ decoration boundaries, and retained-row translation equality. A position-
 balanced two-pair `retained-browse` quick comparison against the T11 tree read
 `equivalent` at +0.62%; the structural count, not that descriptive timing, is
 the task's gate.
+
+**`T13` then moved presentation resolution to the style segment (`F32`).** The
+canonical 179x66 selected-frame probe counted 11,814 `resolveCellStyle` calls
+for 66 distinct style runs before the change and 66 calls for those same 66
+runs after it. `forEachViewportRow` now exposes a segment's half-open column
+range and semantic style before visiting its cells, so the planner resolves
+once and streams the segment through T12's unchanged row-local accumulators.
+The T12 probe still reports zero transient planned-cell rows and 66 cell-row
+passes. Position-balanced quick comparisons put `content-churn` at
+`inconclusive` +1.73% and `style-churn` at `equivalent` +0.55%, while their
+diagnostic plan metrics were `faster` at -10.30% and -11.60%; the attribute arm
+moved farther in the predicted direction even though the primary draw metric
+did not resolve a speedup. The packed-row risk moved the other way:
+`retained-browse` was `faster` at -17.33%.

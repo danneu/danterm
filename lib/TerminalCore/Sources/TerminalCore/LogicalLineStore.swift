@@ -1491,20 +1491,22 @@ extension Terminal {
             return result
         }
 
-        /// Visits one display row's painted cells without materializing a `GridRow`.
+        /// Borrows one display row's painted cells without materializing a `GridRow`.
         ///
         /// The frame path's read, and the reason milestone 1 lands the arena on exactly the path
         /// `research/31/F1` measured (`research/31/D3` Decision 5): `research/28/F17` found the per-row `GridRow` allocation
         /// to be the dominant term of the browsing regression, and a facade that materialized here
         /// would put it straight back. Columns ascend from zero and stop at the row's painted
         /// extent; the caller pads the rest, exactly as the packed-row reader's contract did.
-        func forEachPaintedCell(
+        func withPaintedCells(
             at cursor: DisplayRowCursor,
             _ body: (
-                _ column: Int,
-                _ kind: TerminalCellKind,
-                _ scalars: TerminalScalars,
-                _ styleId: Terminal.StyleId
+                _ count: Int,
+                _ styleIdAt: (_ column: Int) -> Terminal.StyleId,
+                _ cellAt: (_ column: Int) -> (
+                    kind: TerminalCellKind,
+                    scalars: TerminalScalars
+                )
             ) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
@@ -1523,54 +1525,79 @@ extension Terminal {
             // rejected nested-closure shape measured that enforcement at about 210 us per frame.
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
-            var column = 0
-            chunk.withUnsafeBufferPointer { words in
-                for cellOffset in shape.start..<shape.end {
-                    let word = words[cellsBase + cellOffset]
-                    let styleId = Terminal.StyleId(
-                        truncatingIfNeeded: word >> PackedRetainedRow.Header.cellStyleShift
-                    )
-                    let kind = TerminalCellKind(
-                        packedCode: UInt8(
-                            (word >> PackedRetainedRow.Header.cellKindShift)
-                                & PackedRetainedRow.Header.cellKindMask
-                        )
-                    )
-                    let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
-                    if word & PackedRetainedRow.Header.cellSpillBit != 0 {
-                        body(
-                            column,
-                            kind,
-                            TerminalScalars(spillsBySequence[sequence]?[Int(field)] ?? []),
-                            styleId
-                        )
-                    } else if field != 0, let scalar = Unicode.Scalar(field) {
-                        body(column, kind, TerminalScalars(scalar), styleId)
-                    } else {
-                        body(column, kind, .empty, styleId)
-                    }
-                    column += 1
-                }
-            }
-            if shape.spacerRecordIndex >= 0 {
-                // The spacer inherits the head it defers, and a renderer reads its style alone.
-                let head = cellWord(
+            let storedCount = shape.end - shape.start
+            let spacerWord = shape.spacerRecordIndex >= 0
+                ? cellWord(
                     recordAt: offsets[shape.spacerRecordIndex],
                     cell: shape.spacerOffset
                 )
+                : nil
+            let paintedCount = storedCount + (spacerWord == nil ? 0 : 1)
+            let count = shape.fillStyle == nil ? paintedCount : width
+            chunk.withUnsafeBufferPointer { words in
                 body(
-                    column,
-                    .spacerHead,
-                    .empty,
-                    Terminal.StyleId(
-                        truncatingIfNeeded: head >> PackedRetainedRow.Header.cellStyleShift
-                    )
+                    count,
+                    { column in
+                        if column < storedCount {
+                            return Terminal.StyleId(
+                                truncatingIfNeeded:
+                                    words[cellsBase + shape.start + column]
+                                        >> PackedRetainedRow.Header.cellStyleShift
+                            )
+                        }
+                        if column == storedCount, let spacerWord {
+                            return Terminal.StyleId(
+                                truncatingIfNeeded:
+                                    spacerWord >> PackedRetainedRow.Header.cellStyleShift
+                            )
+                        }
+                        return shape.fillStyle ?? Terminal.defaultStyleId
+                    },
+                    { column in
+                        if column == storedCount, spacerWord != nil {
+                            return (.spacerHead, .empty)
+                        }
+                        guard column < storedCount else { return (.padding, .empty) }
+                        let word = words[cellsBase + shape.start + column]
+                        let kind = TerminalCellKind(
+                            packedCode: UInt8(
+                                (word >> PackedRetainedRow.Header.cellKindShift)
+                                    & PackedRetainedRow.Header.cellKindMask
+                            )
+                        )
+                        let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
+                        if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                            return (
+                                kind,
+                                TerminalScalars(
+                                    spillsBySequence[sequence]?[Int(field)] ?? []
+                                )
+                            )
+                        }
+                        if field != 0, let scalar = Unicode.Scalar(field) {
+                            return (kind, TerminalScalars(scalar))
+                        }
+                        return (kind, .empty)
+                    }
                 )
-                column += 1
             }
-            guard let fill = shape.fillStyle else { return }
-            for filled in fillColumns(shape) {
-                body(filled, .padding, .empty, fill)
+        }
+
+        /// Visits painted cells for representation tests that compare the packed walk directly.
+        func forEachPaintedCell(
+            at cursor: DisplayRowCursor,
+            _ body: (
+                _ column: Int,
+                _ kind: TerminalCellKind,
+                _ scalars: TerminalScalars,
+                _ styleId: Terminal.StyleId
+            ) -> Void
+        ) {
+            withPaintedCells(at: cursor) { count, styleIdAt, cellAt in
+                for column in 0..<count {
+                    let cell = cellAt(column)
+                    body(column, cell.kind, cell.scalars, styleIdAt(column))
+                }
             }
         }
 
@@ -1580,7 +1607,7 @@ extension Terminal {
             _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
-            // Same borrow as `forEachPaintedCell`, for the same reason.
+            // Same borrow as `withPaintedCells`, for the same reason.
             let chunk = chunks[chunkIndex(of: shape.recordOffset)]
             let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
@@ -1826,7 +1853,7 @@ extension Terminal {
         }
 
         /// The materializing walk: one whole `GridCell` per column, for the readers that build a
-        /// `GridRow`. `forEachPaintedCell` and `forEachKind` deliberately do not come through here.
+        /// `GridRow`. `withPaintedCells` and `forEachKind` deliberately do not come through here.
         private func forEachFoldedCell(
             at cursor: DisplayRowCursor,
             includeFill: Bool,

@@ -376,146 +376,152 @@ struct FramePlanner {
             var openDecoration: OpenDecorationRun?
             var rowCursorStyle: ResolvedCursorStyle?
 
-            visit { column, kind, scalars, semanticStyle in
-                guard column < columnCount else { return }
-                var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
-                if style.underline == .none, hovered?.contains(column) == true {
-                    style.underline = .single
-                    style.underlineColor = style.foreground
-                }
-                if selected?.contains(column) == true {
-                    style.foreground = presentation.theme.selectionForeground
-                }
+            visit { columns, semanticStyle, visitCells in
+                guard columns.lowerBound < columnCount else { return }
+                let resolvedStyle = resolveCellStyle(
+                    semanticStyle,
+                    theme: presentation.theme
+                )
+                visitCells { column, kind, scalars in
+                    var style = resolvedStyle
+                    if style.underline == .none, hovered?.contains(column) == true {
+                        style.underline = .single
+                        style.underlineColor = style.foreground
+                    }
+                    if selected?.contains(column) == true {
+                        style.foreground = presentation.theme.selectionForeground
+                    }
 
-                // Resolve the overlay against the cell's own background before a block cursor
-                // bakes its colors into the same column.
-                let state = rowHasOverlays
-                    ? overlayState(at: column, selected: selected, matched: matched)
-                    : nil
-                let overlayFill: RenderColor?
-                if let state {
-                    if let run = openOverlay,
-                       run.startColumn + run.columnCount == column,
-                       run.state == state,
-                       run.sourceBackground == style.background
-                    {
-                        overlayFill = run.fill
-                        openOverlay?.extend(sourceBackground: style.background)
-                    } else {
-                        let resolvedFill = resolveOverlayFill(
-                            state: state,
-                            background: style.background,
-                            theme: presentation.theme
-                        )
-                        overlayFill = resolvedFill
+                    // Resolve the overlay against the cell's own background before a block cursor
+                    // bakes its colors into the same column.
+                    let state = rowHasOverlays
+                        ? overlayState(at: column, selected: selected, matched: matched)
+                        : nil
+                    let overlayFill: RenderColor?
+                    if let state {
                         if let run = openOverlay,
                            run.startColumn + run.columnCount == column,
                            run.state == state,
-                           run.fill == resolvedFill
+                           run.sourceBackground == style.background
                         {
+                            overlayFill = run.fill
                             openOverlay?.extend(sourceBackground: style.background)
                         } else {
-                            if let openOverlay {
-                                overlayRuns.append(openOverlay.finished(row: row))
-                            }
-                            openOverlay = OpenOverlayRun(
-                                startColumn: column,
+                            let resolvedFill = resolveOverlayFill(
                                 state: state,
-                                fill: resolvedFill,
-                                sourceBackground: style.background
+                                background: style.background,
+                                theme: presentation.theme
+                            )
+                            overlayFill = resolvedFill
+                            if let run = openOverlay,
+                               run.startColumn + run.columnCount == column,
+                               run.state == state,
+                               run.fill == resolvedFill
+                            {
+                                openOverlay?.extend(sourceBackground: style.background)
+                            } else {
+                                if let openOverlay {
+                                    overlayRuns.append(openOverlay.finished(row: row))
+                                }
+                                openOverlay = OpenOverlayRun(
+                                    startColumn: column,
+                                    state: state,
+                                    fill: resolvedFill,
+                                    sourceBackground: style.background
+                                )
+                            }
+                        }
+                    } else if let run = openOverlay {
+                        overlayFill = nil
+                        overlayRuns.append(run.finished(row: row))
+                        openOverlay = nil
+                    } else {
+                        overlayFill = nil
+                    }
+
+                    if rowCursor?.column == column {
+                        rowCursorStyle = resolveCursorStyle(
+                            background: overlayFill ?? style.background,
+                            theme: presentation.theme
+                        )
+                        cursorStyle = rowCursorStyle
+                    }
+                    let cursorCoversColumn = blockCursorColumns?.contains(column) == true
+                    if cursorCoversColumn, let rowCursorStyle {
+                        style.foreground = rowCursorStyle.foreground
+                        style.background = rowCursorStyle.fill
+                        style.underlineColor = rowCursorStyle.foreground
+                    } else if let overlayFill {
+                        style.foreground = overlayForeground(style.foreground, over: overlayFill)
+                    }
+
+                    if style.background == presentation.theme.defaultBackground {
+                        if let run = openBackground {
+                            backgroundRuns.append(run.finished(row: row))
+                            openBackground = nil
+                        }
+                    } else if let run = openBackground,
+                              run.startColumn + run.columnCount == column,
+                              run.color == style.background
+                    {
+                        openBackground?.extend()
+                    } else {
+                        if let openBackground {
+                            backgroundRuns.append(openBackground.finished(row: row))
+                        }
+                        openBackground = OpenBackgroundRun(
+                            startColumn: column,
+                            color: style.background
+                        )
+                    }
+
+                    let textWidth: Int? = switch kind {
+                    case .narrow: 1
+                    case .wideHead: 2
+                    case .padding, .wideTail, .spacerHead: nil
+                    }
+                    if style.hidden == false, scalars.isEmpty == false, let textWidth {
+                        let cell = RenderTextCell(scalars: scalars, columnWidth: textWidth)
+                        if let run = openText, run.continues(at: column, style: style) {
+                            openText?.extend(with: cell)
+                        } else {
+                            if let openText { textRuns.append(openText.finished(row: row)) }
+                            openText = OpenTextRun(startColumn: column, cell: cell, style: style)
+                        }
+                    }
+
+                    let decoratable = switch kind {
+                    case .narrow, .wideHead, .wideTail: true
+                    case .padding, .spacerHead: false
+                    }
+                    let kinds = style.hidden || decoratable == false ? [] : decorationKinds(for: style)
+                    if kinds.isEmpty {
+                        if let run = openDecoration {
+                            decorationRuns.append(run.finished(row: row))
+                            openDecoration = nil
+                        }
+                    } else {
+                        let underlined = style.underline != .none
+                        let strikethroughColor = style.foreground
+                        let color = underlined ? style.underlineColor : strikethroughColor
+                        if let run = openDecoration,
+                           run.startColumn + run.columnCount == column,
+                           run.kinds == kinds,
+                           run.color == color,
+                           run.strikethroughColor == strikethroughColor
+                        {
+                            openDecoration?.extend()
+                        } else {
+                            if let openDecoration {
+                                decorationRuns.append(openDecoration.finished(row: row))
+                            }
+                            openDecoration = OpenDecorationRun(
+                                startColumn: column,
+                                kinds: kinds,
+                                color: color,
+                                strikethroughColor: strikethroughColor
                             )
                         }
-                    }
-                } else if let run = openOverlay {
-                    overlayFill = nil
-                    overlayRuns.append(run.finished(row: row))
-                    openOverlay = nil
-                } else {
-                    overlayFill = nil
-                }
-
-                if rowCursor?.column == column {
-                    rowCursorStyle = resolveCursorStyle(
-                        background: overlayFill ?? style.background,
-                        theme: presentation.theme
-                    )
-                    cursorStyle = rowCursorStyle
-                }
-                let cursorCoversColumn = blockCursorColumns?.contains(column) == true
-                if cursorCoversColumn, let rowCursorStyle {
-                    style.foreground = rowCursorStyle.foreground
-                    style.background = rowCursorStyle.fill
-                    style.underlineColor = rowCursorStyle.foreground
-                } else if let overlayFill {
-                    style.foreground = overlayForeground(style.foreground, over: overlayFill)
-                }
-
-                if style.background == presentation.theme.defaultBackground {
-                    if let run = openBackground {
-                        backgroundRuns.append(run.finished(row: row))
-                        openBackground = nil
-                    }
-                } else if let run = openBackground,
-                          run.startColumn + run.columnCount == column,
-                          run.color == style.background
-                {
-                    openBackground?.extend()
-                } else {
-                    if let openBackground {
-                        backgroundRuns.append(openBackground.finished(row: row))
-                    }
-                    openBackground = OpenBackgroundRun(
-                        startColumn: column,
-                        color: style.background
-                    )
-                }
-
-                let textWidth: Int? = switch kind {
-                case .narrow: 1
-                case .wideHead: 2
-                case .padding, .wideTail, .spacerHead: nil
-                }
-                if style.hidden == false, scalars.isEmpty == false, let textWidth {
-                    let cell = RenderTextCell(scalars: scalars, columnWidth: textWidth)
-                    if let run = openText, run.continues(at: column, style: style) {
-                        openText?.extend(with: cell)
-                    } else {
-                        if let openText { textRuns.append(openText.finished(row: row)) }
-                        openText = OpenTextRun(startColumn: column, cell: cell, style: style)
-                    }
-                }
-
-                let decoratable = switch kind {
-                case .narrow, .wideHead, .wideTail: true
-                case .padding, .spacerHead: false
-                }
-                let kinds = style.hidden || decoratable == false ? [] : decorationKinds(for: style)
-                if kinds.isEmpty {
-                    if let run = openDecoration {
-                        decorationRuns.append(run.finished(row: row))
-                        openDecoration = nil
-                    }
-                } else {
-                    let underlined = style.underline != .none
-                    let strikethroughColor = style.foreground
-                    let color = underlined ? style.underlineColor : strikethroughColor
-                    if let run = openDecoration,
-                       run.startColumn + run.columnCount == column,
-                       run.kinds == kinds,
-                       run.color == color,
-                       run.strikethroughColor == strikethroughColor
-                    {
-                        openDecoration?.extend()
-                    } else {
-                        if let openDecoration {
-                            decorationRuns.append(openDecoration.finished(row: row))
-                        }
-                        openDecoration = OpenDecorationRun(
-                            startColumn: column,
-                            kinds: kinds,
-                            color: color,
-                            strikethroughColor: strikethroughColor
-                        )
                     }
                 }
             }

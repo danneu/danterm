@@ -2901,3 +2901,56 @@ performance verdict.
   allocation and pass counts rather than descriptive timing.
 - Next action: none for T12. `T13` separately owns moving style resolution from
   cell granularity to the distinct style runs the traversal already observes.
+
+### F32 -- style resolution follows style segments: 11,814 cell resolutions fall to 66 run resolutions per canonical frame
+
+- Status: implemented and verified; this closes `T13`.
+- Date, baseline, and investigator: 2026-08-09, `fafe0180`, Codex. The
+  worktree contained an unrelated untracked plan throughout; this task did not
+  read or modify it.
+- Test-first probe: `scripts/research/33/t13-style-run-resolution.py` copies
+  `TerminalCore` and `TerminalRenderPlanning` into a scratch directory, injects
+  counters at `resolveCellStyle` and the planner's semantic-style segment
+  callback, then compiles the instrumented copy and plans one selected 179x66
+  frame. Both anchors must match exactly once. The script requires the
+  resolution count to equal the distinct segment count.
+- Before: at `fafe0180`, the probe failed as registered. One `planFrame`
+  visited 11,814 cells, observed 66 distinct style runs, and called
+  `resolveCellStyle` 11,814 times.
+- Change: `Terminal.forEachViewportRow` now yields each row as
+  `(columns: Range<Int>, style: TerminalStyle)` segments. Each segment supplies
+  one nested cell visitor, so callers can do segment work before streaming its
+  cells. Live rows scan their interned style ids directly. Retained rows borrow
+  packed words through separate style-id and cell-field accessors, which keeps
+  the row unmaterialized while coalescing stored content, a deferred wide-head
+  spacer, fill, and default padding into exact segments. The compatibility
+  `forEachViewportCell` projection flattens those segments for its existing
+  callers.
+- Planner locality: `FramePlanner` resolves the semantic style once before it
+  visits a segment's cells, then copies that resolved value for per-cell hover,
+  selection, search, cursor, and overlay changes. T12's background, overlay,
+  text, and decoration accumulators remain locals of the row callback. The T12
+  probe still reports `plannedCellRowAllocations=0` and `cellRowPasses=66`, so
+  the new segment boundary preserves the single cell pass and does not move row
+  state into the per-cell capture.
+- After: the T13 probe passes with `distinctStyleRuns=66` and
+  `resolveCellStyleCalls=66` for the same 11,814-cell frame. This is a 179x
+  reduction in presentation-style resolutions on that frame, and every call is
+  accounted for by one exposed segment.
+- Behavioral coverage: the live-row and retained-row tests assert exact segment
+  ranges and styles across style boundaries, including the merge from stored
+  default content into synthesized padding. The complete `TerminalRenderPlanningTests`
+  target passes 94 tests across 13 suites. Both structural probes pass, and
+  `just test` passes all 75 steps.
+- Paired performance checks: position-balanced two-pair quick comparisons
+  against immutable T12 `fafe0180` separated in the predicted direction.
+  `content-churn` was `inconclusive` at +1.73% while `style-churn` was
+  `equivalent` at +0.55%; their auxiliary plan metrics were both `faster`, at
+  -10.30% and -11.60% respectively. The attribute-only arm therefore moved
+  farther, though the primary draw metric did not resolve a speedup. Artifacts:
+  `.build/terminal-benchmark-comparisons/quick/40276bd5c7f6-0000` and
+  `.build/terminal-benchmark-comparisons/quick/40276bd5c7f6-0001`.
+- Retained-path check: the nested packed-row traversal did not revive the
+  browsing regression; `retained-browse` was `faster` at -17.33%. Artifact:
+  `.build/terminal-benchmark-comparisons/quick/40276bd5c7f6-0002`.
+- Next action: none for T13.

@@ -5,6 +5,24 @@ import Testing
 
 /// Locks presentation-state parsing to semantic colors and independent attributes.
 struct TerminalStyleTests {
+    @Test("viewport traversal exposes maximally coalesced live style segments")
+    func viewportStyleSegments() throws {
+        var terminal = try #require(Terminal(columns: 6, rows: 1))
+        terminal.feed(Array("\u{1B}[31mab\u{1B}[0mcd".utf8))
+
+        var segments: [(columns: Range<Int>, style: TerminalStyle)] = []
+        terminal.forEachViewportRow(rows: 0..<1) { _, visit in
+            visit { columns, style, visitCells in
+                segments.append((columns, style))
+                visitCells { _, _, _ in }
+            }
+        }
+
+        #expect(segments.map(\.columns) == [0..<2, 2..<6])
+        #expect(segments[0].style == TerminalStyle(foreground: .indexed(1)))
+        #expect(segments[1].style == TerminalStyle())
+    }
+
     @Test("SGR empty and zero parameters reset the current style")
     func reset() throws {
         var terminal = try #require(Terminal(columns: 2, rows: 1))

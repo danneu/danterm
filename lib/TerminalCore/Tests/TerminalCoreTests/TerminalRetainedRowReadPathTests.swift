@@ -60,9 +60,13 @@ struct TerminalRetainedRowReadPathTests {
             scalars: TerminalScalars,
             style: TerminalStyle
         )] = []
+        var styleRuns: [(columns: Range<Int>, style: TerminalStyle)] = []
         terminal.forEachViewportRow(rows: 0..<1) { _, visit in
-            visit { column, kind, scalars, style in
-                rendered.append((column, kind, scalars, style))
+            visit { columns, style, visitCells in
+                styleRuns.append((columns, style))
+                visitCells { column, kind, scalars in
+                    rendered.append((column, kind, scalars, style))
+                }
             }
         }
 
@@ -73,6 +77,9 @@ struct TerminalRetainedRowReadPathTests {
             #expect(entry.scalars == expected.cells[entry.column].scalars)
             #expect(entry.style == expected.cells[entry.column].style)
         }
+        #expect(styleRuns.map(\.columns) == [0..<2, 2..<columns])
+        #expect(styleRuns[0].style == expected.cells[0].style)
+        #expect(styleRuns[1].style == expected.cells[2].style)
     }
 
     @Test("Geometry reports the same cell kinds the public row reader does")
