@@ -2419,10 +2419,104 @@ performance verdict.
   to three grid-sized surfaces per displayed pane against one mirror bitmap plus
   AppKit's backing store, and `benchmark-memory` has not been run to price the
   net. The +18% descriptive process CPU on the two full-screen churn workloads
-  is unexplained and worth a mechanism pass once the draw rules are re-screened.
+  was unexplained here; `F26` attributes it.
 - Next action: none for `T25` -- the task closes. `T14`'s derived halo is the
   named lever on the residue t5 still measures. Re-screening the three
   serialized-draw rules against the moved bracket is the follow-up that re-arms
   those ladder cells, and it is also where `usedDirtyRectFallback` -- now
   structurally false, since no rectangle AppKit chose can reach a render --
   should be deleted.
+
+### F26 -- the churn CPU rise is rasterization coming on-CPU: the old path shaded the full grid on the GPU through CoreAnimation's display-list renderer, and T25's software render costs more process CPU than the machinery it deleted
+
+- Status: measured and attributed. Diagnostic only -- Time Profiler traces and
+  unpaired `ps` deltas; process CPU carries no verdict (17/F15). This is the
+  mechanism pass `F25` left open on its +18.8%/+18.4% descriptive churn cells.
+- Date and investigator: 2026-08-08, T25 follow-up agent.
+- Commit and worktree state: candidate `8c52d6e4` (tracked tree clean, one
+  untracked plan file); baseline `750a98d6` (`F25`'s ladder baseline, the last
+  pre-T25 commit) in a linked worktree. One machine session, arms alternated.
+- Commands, inputs, or reproduction: `just benchmark-trace
+  full-screen-content-churn "Time Profiler" 20` twice per arm plus one
+  `full-screen-style-churn` trace per arm, six traces total; then
+  `terminal-benchmark-profile.sh loop full-screen-content-churn` per arm with
+  30 s `ps -o cputime` deltas on the app and on WindowServer, bracketed by a
+  30 s idle-desktop control.
+- Result or artifact paths: `.build/terminal-benchmark-profiles/`
+  `2026-08-08-19{2316,2547,2629}-*` (candidate) and the worktree's
+  `2026-08-08-19{2715,2852,3111}-*` (baseline), each with `profile-report.json`
+  and `profile-folded.txt`.
+- Measurements, whole-process on-CPU totals per 20 s trace (accepted-draw
+  rates matched across all six runs, 104.3-106.2/s, so the totals compare
+  per-frame work):
+
+  | run | baseline | T25 | delta |
+  | --- | ---: | ---: | ---: |
+  | content-churn, round 1 | 8.59 s | 10.60 s | +23.3% |
+  | content-churn, round 2 | 8.63 s | 10.41 s | +20.7% |
+  | style-churn | 8.98 s | 10.52 s | +17.1% |
+
+  Composition of the content-churn round-1 pair (inclusive seconds of CPU;
+  folded-stack sums):
+
+  | term | baseline | T25 |
+  | --- | ---: | ---: |
+  | main thread | 4.54 | 9.71 |
+  | all other threads | 4.05 | 0.89 |
+  | render seam, inclusive (`draw(_:)` / `publish`) | 1.22 | 7.47 |
+  | `drawRenderFrame` inside it | 0.62 | 6.25 |
+  | `CA::Transaction::commit` | 2.33 | 0.65 |
+  | `CA::CG::Queue` | 2.94 | absent |
+  | -- of which `compute_dod_` glyph-bounds recompute (`17/F6`) | 2.12 | -- |
+  | -- of which `draw_glyph_bitmaps` mask preparation | 0.44 | -- |
+  | -- of which `MetalContext` submission | 0.23 | -- |
+  | solid fills (`memset_pattern16` under `CGContextFillRect`) | 0 | 3.62 |
+  | glyph colorize/blit (`CGSColorMaskCopyARGB8888` / `RIPLayerBltGlyph`) | 0 / 0.01 | 1.33 / 1.51 |
+
+  Live 30 s `ps` deltas under the sustained content-churn loop: app 13.02 s
+  (baseline) against 15.06 s (T25), +15.7%; WindowServer 12.86 s against
+  14.70 s, from an idle-desktop 0.57 s.
+- **Observation: the baseline pays no CPU anywhere to fill or shade pixels.**
+  Its in-process profile has zero samples in every fill/blit family
+  (`memset_pattern16`, `argb32_mark`, `CGSColorMaskCopyARGB8888`;
+  `RIPLayerBltGlyph` at 0.01 s), and WindowServer's CPU is the same
+  compositing-sized cost under both arms, so the raster is not out-of-process
+  CPU either. The only raster-adjacent CPU the baseline carries is glyph-mask
+  preparation (0.44 s) and Metal submission (0.23 s) on the `CA::CG::Queue`,
+  alongside `CA::OGL`/`MetalContext` frames that T25's profile lacks entirely.
+  The full-grid shading therefore ran on the GPU, inside CoreAnimation's
+  display-list renderer. T25 rasterizes the same grid in software inside
+  `publish`: 6.25 s of `drawRenderFrame`, over half of it one memset family
+  filling background rects (34% of the whole process), plus glyph mask
+  colorize-and-blit.
+- Inference: the +18% is work changing account, not new frame work. Per 20 s,
+  T25 deletes ~5.2 s of in-process machinery -- display-list encode (0.62),
+  the CG queue (2.94, mostly `17/F6`'s per-glyph bounds recompute), and most
+  of the commit (2.33 to 0.65) -- and adds ~6.2 s of software raster, so
+  full-grid workloads net +1 to +2 s. The sign flips with redrawn area
+  because the added term scales with pixels shaded per frame while the
+  deleted terms scale with glyph count and per-frame machinery:
+  `incremental-mixed` shades ~6 rows and reads -8.7%, and the paced stream
+  shades ~2 rows plus a memmove and fell 27 points (`F25`). On the churns the
+  trade is CPU up, GPU down by an unmeasured amount -- and `17/F16` still
+  holds: the churns are frame-rate-capped, so none of this is throughput.
+- Competing interpretations: the GPU attribution is indirect -- GPU
+  utilization was not measured (`powermetrics` needs root). The supporting
+  evidence is the raster's absence from both processes' CPU plus the
+  baseline-only Metal/`CA::OGL` submission frames; a render-server-private
+  raster thread hiding inside WindowServer's compositing budget would produce
+  the same reading, and would not change the conclusion that T25 moved the
+  raster into the app's own CPU account. The WindowServer numbers are single
+  unpaired runs on a live desktop; the T25 arm reading 1.8 s *higher* is an
+  unexplained residue this finding does not lean on. The traces include the
+  instrument (`__open` 0.25 vs 0.28 s -- equal across arms).
+- Uncertainty: the bucket ledger attributes ~1.4 s of the ~2.0 s round-1
+  delta; the remainder is scattered main-thread cost below the named
+  families. `planFrame` also read 1.28 vs 1.00 s across the arms, unclaimed
+  and within these runs' noise.
+- Next action: none on the ladder -- the churn process-CPU cells stay
+  descriptive and are now explained, and the serialized-draw re-screen
+  already owns re-arming the draw rules. If full-grid CPU ever matters, the
+  profile names the lever: background fills are one memset family at 34% of
+  the process, ahead of any glyph cost.
+

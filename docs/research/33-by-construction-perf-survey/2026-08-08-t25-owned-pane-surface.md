@@ -318,10 +318,14 @@ current buffer, never require re-rendering.
   no directional claim until their thresholds are recalibrated
   (`scripts/terminal-benchmark-calibration.py`; the caveat and the measured
   step are in `agent-docs/terminal-performance.md`).
-- Explain the +18.8% and +18.4% descriptive process CPU on `content-churn` and
-  `style-churn`. It is uncalibrated and sits against a 27-point fall on the
-  paced stream, but it is unexplained, and the two workloads differ from the
-  stream in redrawing the whole grid every frame.
+- ~~Explain the +18.8% and +18.4% descriptive process CPU on `content-churn`
+  and `style-churn`.~~ Done (`F26`): the baseline shaded the full grid on the
+  GPU through CoreAnimation's display-list renderer, so its raster was in no
+  CPU account at all; T25's software render (~6.2 s per 20 s, over half of it
+  background fills) outweighs the ~5.2 s of encode, glyph-bounds, and commit
+  machinery it deleted. Work changing account, not new frame work, and the
+  sign flips with redrawn area -- which is why `incremental-mixed` and the
+  paced stream fell on the same instrument.
 - Retire `usedDirtyRectFallback`. It is structurally false since commit 4 --
   no rectangle AppKit chose can reach a render -- but its consumers reach
   into the benchmark artifact schema (`dirtyRectFallbackCount` in

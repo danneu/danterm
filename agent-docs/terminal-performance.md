@@ -140,6 +140,14 @@ could not: it moved +18.8%, +18.4%, and -8.7% on the same run. Read those, and
 the workloads whose metric spans a whole replay, until the three draw rules are
 re-screened.
 
+The churn rise is itself explained (research/33 `F26`): before the move,
+CoreAnimation shaded the full grid on the GPU, so no CPU account anywhere
+contained the raster; the owned surface renders it in software on the main
+thread. Process CPU on the full-grid workloads therefore *contains* the raster
+now, and any comparison whose baseline predates the move will read high on
+them for that structural reason, not from a regression in the change being
+measured.
+
 Planning is the **smaller** cost, and it shrinks ~7.6x when damage goes from 66
 rows to 6, because **the planner is damage-scoped**: production planning runs
 through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans only
