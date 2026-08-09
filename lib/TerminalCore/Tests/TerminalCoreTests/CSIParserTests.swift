@@ -145,7 +145,10 @@ struct CSIParserTests {
 
     @Test("CSI numeric accumulation saturates at UInt16.max")
     func parameterSaturation() {
-        #expect(dispatches("\u{1B}[999999999999999999999C").first?.parameters == [UInt16.max])
+        let parameters = dispatches("\u{1B}[999999999999999999999C").first.map {
+            Array($0.parameters)
+        }
+        #expect(parameters == [UInt16.max])
     }
 
     @Test("a fifth intermediate is discarded without dropping the dispatch")
@@ -153,7 +156,8 @@ struct CSIParserTests {
         let four: [UInt8] = [0x1B, 0x5B, 0x20, 0x21, 0x22, 0x23, 0x71]
         let five: [UInt8] = [0x1B, 0x5B, 0x20, 0x21, 0x22, 0x23, 0x24, 0x71]
 
-        #expect(dispatches(four).first?.intermediates == [0x20, 0x21, 0x22, 0x23])
+        let intermediates = dispatches(four).first.map { Array($0.intermediates) }
+        #expect(intermediates == [0x20, 0x21, 0x22, 0x23])
         #expect(dispatches(five) == dispatches(four))
     }
 

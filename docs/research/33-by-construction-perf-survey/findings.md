@@ -2989,3 +2989,47 @@ performance verdict.
   its source guard. The full `TerminalCore` package passes 1,106 tests in 140
   suites with one pre-existing known issue, and `just test` passes all 75 steps.
 - Next action: none for T16.
+
+### F34 -- CSI and ESC collection values own zero heap blocks
+
+- Status: implemented and verified; this closes `T17`.
+- Date, baseline, and investigator: 2026-08-09, `2a5ec730`, Codex. The
+  worktree contained an unrelated untracked plan throughout; this task did not
+  read or modify it.
+- Test-first probe: `scripts/research/33/t17-inline-sequence-collections.sh`
+  compiles `EscapeAbsorber` with a standalone optimized probe, disables the
+  nano allocator, reserves the result arrays before measurement, and retains
+  10,000 complete private CSI values plus 10,000 ESC-intermediate values. It
+  differences `malloc_zone_statistics`'s live block count around each parse
+  loop, requires both differences to be zero, and rejects any return to
+  intermediate collection comparisons in `dispatchCSI`.
+- Before: the first probe run failed as registered. Retaining 10,000
+  `CSI ?1;2h` values added 30,003 live heap blocks, or 3.0003 per CSI: the
+  parameter, separator, and intermediate arrays shared with the dispatched
+  value made the absorber's next append allocate fresh storage.
+- Change: `CSIParameters` stores 24 `UInt16` values in an `InlineArray`;
+  `CSIColonSeparators` stores 24 separator flags in a `UInt32`; and
+  `SequenceIntermediates` packs four bytes into a `UInt32` dispatch key. CSI
+  and ESC values now contain those values directly. Clearing only resets their
+  counts and words. `dispatchCSI` routes every private and intermediate family
+  through one switch on the packed key, and colon SGR handling borrows an
+  inline parameter slice instead of materializing another array.
+- After: the same probe reports `csiLiveHeapBlocks=0`,
+  `allocationsPerCSI=0.0`, `escapeLiveHeapBlocks=0`, and
+  `allocationsPerEscape=0.0`. This is the exact structural gate; the sequence
+  collections cannot allocate because their stored representations contain no
+  reference-backed collection.
+- Behavioral contract: the existing directed parser tests still prove that 24
+  parameters dispatch while a 25th drops the sequence, numeric accumulation
+  saturates at `UInt16.max`, a fifth intermediate is discarded without
+  dropping dispatch, malformed input recovers, and every chunk split produces
+  the same actions and pending state. The SGR suite covers colon groups from
+  nonzero parameter offsets, including underline colors and both RGB forms.
+  The complete `TerminalCore` package passes 1,106 tests in 140 suites with one
+  pre-existing known issue, and `just test` passes all 75 steps.
+- Paired performance check: the calibrated `terminal-feed` quick comparison
+  against the immutable baseline is **`faster` at -17.70%**, the symmetric
+  median of two pairs. The workload contains the parser and terminal dispatch
+  path directly. Artifact:
+  `.build/terminal-benchmark-comparisons/quick/d5425738592a-0000`.
+- Next action: none for T17.

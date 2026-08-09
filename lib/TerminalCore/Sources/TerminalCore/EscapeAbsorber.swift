@@ -11,16 +11,177 @@ enum EscapeEvent: Equatable, Sendable {
 
 /// Preserves an ESC intermediate and final when terminal dispatch depends on both.
 struct EscapeSequence: Equatable, Sendable {
-    let intermediates: [UInt8]
+    let intermediates: SequenceIntermediates
     let final: UInt8
+
+    init(intermediates: SequenceIntermediates, final: UInt8) {
+        self.intermediates = intermediates
+        self.final = final
+    }
+
+    init(intermediates: [UInt8], final: UInt8) {
+        self.init(intermediates: SequenceIntermediates(intermediates), final: final)
+    }
 }
 
 /// Preserves the syntactic CSI payload needed by terminal dispatch without interpreting it.
 struct CSISequence: Equatable, Sendable {
-    let parameters: [UInt16]
-    let colonSeparators: [Bool]
-    let intermediates: [UInt8]
+    let parameters: CSIParameters
+    let colonSeparators: CSIColonSeparators
+    let intermediates: SequenceIntermediates
     let final: UInt8
+
+    init(
+        parameters: CSIParameters,
+        colonSeparators: CSIColonSeparators,
+        intermediates: SequenceIntermediates,
+        final: UInt8
+    ) {
+        self.parameters = parameters
+        self.colonSeparators = colonSeparators
+        self.intermediates = intermediates
+        self.final = final
+    }
+
+    init(
+        parameters: [UInt16],
+        colonSeparators: [Bool],
+        intermediates: [UInt8],
+        final: UInt8
+    ) {
+        self.init(
+            parameters: CSIParameters(parameters),
+            colonSeparators: CSIColonSeparators(colonSeparators),
+            intermediates: SequenceIntermediates(intermediates),
+            final: final
+        )
+    }
+}
+
+/// Stores the parser's bounded parameter payload inside each CSI value.
+struct CSIParameters: Equatable, RandomAccessCollection, Sendable {
+    typealias Element = UInt16
+    typealias Index = Int
+
+    static let capacity = 24
+
+    private var storage = InlineArray<24, UInt16>(repeating: 0)
+    private var storageCount: UInt8 = 0
+
+    init() {}
+
+    init(_ values: [UInt16]) {
+        precondition(values.count <= Self.capacity)
+        for value in values {
+            append(value)
+        }
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { Int(storageCount) }
+
+    subscript(index: Int) -> UInt16 {
+        precondition(indices.contains(index))
+        return storage[index]
+    }
+
+    mutating func append(_ value: UInt16) {
+        precondition(endIndex < Self.capacity)
+        storage[endIndex] = value
+        storageCount += 1
+    }
+
+    mutating func removeAll() {
+        storageCount = 0
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.elementsEqual(rhs)
+    }
+}
+
+/// Stores whether each bounded CSI parameter ended with a colon in one bit mask.
+struct CSIColonSeparators: Equatable, RandomAccessCollection, Sendable {
+    typealias Element = Bool
+    typealias Index = Int
+
+    private var bits: UInt32 = 0
+    private var storageCount: UInt8 = 0
+
+    init() {}
+
+    init(_ values: [Bool]) {
+        precondition(values.count <= CSIParameters.capacity)
+        for value in values {
+            append(value)
+        }
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { Int(storageCount) }
+
+    subscript(index: Int) -> Bool {
+        precondition(indices.contains(index))
+        return bits & (1 << UInt32(index)) != 0
+    }
+
+    mutating func append(_ value: Bool) {
+        precondition(endIndex < CSIParameters.capacity)
+        if value {
+            bits |= 1 << UInt32(endIndex)
+        }
+        storageCount += 1
+    }
+
+    mutating func removeAll() {
+        bits = 0
+        storageCount = 0
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.storageCount == rhs.storageCount && lhs.bits == rhs.bits
+    }
+}
+
+/// Packs the parser's at-most-four intermediate bytes into one dispatch key.
+struct SequenceIntermediates: Equatable, RandomAccessCollection, Sendable {
+    typealias Element = UInt8
+    typealias Index = Int
+
+    private(set) var key: UInt32 = 0
+    private var storageCount: UInt8 = 0
+
+    init() {}
+
+    init(_ values: [UInt8]) {
+        precondition(values.count <= 4)
+        for value in values {
+            append(value)
+        }
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { Int(storageCount) }
+
+    subscript(index: Int) -> UInt8 {
+        precondition(indices.contains(index))
+        return UInt8(truncatingIfNeeded: key >> UInt32(index * 8))
+    }
+
+    mutating func append(_ value: UInt8) {
+        precondition(endIndex < 4)
+        key |= UInt32(value) << UInt32(endIndex * 8)
+        storageCount += 1
+    }
+
+    mutating func removeAll() {
+        key = 0
+        storageCount = 0
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.storageCount == rhs.storageCount && lhs.key == rhs.key
+    }
 }
 
 /// Recognizes VT sequence families while retaining only bounded CSI and DCS collection state.
@@ -44,14 +205,12 @@ struct EscapeAbsorber: Equatable, Sendable {
         case sosPmApcString
     }
 
-    private static let parameterCapacity = 24
-    private static let intermediateCapacity = 4
     private static let oscPayloadCapacity = 2 * 1_024 * 1_024
 
     private var state = State.ground
-    private var parameters: [UInt16] = []
-    private var colonSeparators: [Bool] = []
-    private var intermediates: [UInt8] = []
+    private var parameters = CSIParameters()
+    private var colonSeparators = CSIColonSeparators()
+    private var intermediates = SequenceIntermediates()
     private var parameterAccumulator: UInt16 = 0
     private var hasParameterDigits = false
     private var oscPayload: [UInt8] = []
@@ -311,9 +470,9 @@ struct EscapeAbsorber: Equatable, Sendable {
     }
 
     private mutating func clearCollection() {
-        parameters.removeAll(keepingCapacity: true)
-        colonSeparators.removeAll(keepingCapacity: true)
-        intermediates.removeAll(keepingCapacity: true)
+        parameters.removeAll()
+        colonSeparators.removeAll()
+        intermediates.removeAll()
         parameterAccumulator = 0
         hasParameterDigits = false
         oscPayload.removeAll(keepingCapacity: true)
@@ -331,13 +490,13 @@ struct EscapeAbsorber: Equatable, Sendable {
     }
 
     private mutating func collectIntermediate(_ byte: UInt8) {
-        guard intermediates.count < Self.intermediateCapacity else { return }
+        guard intermediates.count < 4 else { return }
         intermediates.append(byte)
     }
 
     private mutating func collectParameter(_ byte: UInt8) {
         if byte == 0x3A || byte == 0x3B {
-            guard parameters.count < Self.parameterCapacity else { return }
+            guard parameters.count < CSIParameters.capacity else { return }
             parameters.append(parameterAccumulator)
             colonSeparators.append(byte == 0x3A)
             parameterAccumulator = 0
@@ -354,7 +513,7 @@ struct EscapeAbsorber: Equatable, Sendable {
 
     private mutating func dispatchCSI(final: UInt8) -> EscapeEvent? {
         defer { clearCollection() }
-        guard parameters.count < Self.parameterCapacity else { return nil }
+        guard parameters.count < CSIParameters.capacity else { return nil }
         if hasParameterDigits || parameters.isEmpty == false {
             parameters.append(parameterAccumulator)
             colonSeparators.append(false)

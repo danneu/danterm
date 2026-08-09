@@ -634,7 +634,7 @@ constraint among them except where noted.
   `scripts/research/33/t16-arena-live-id-sweeps.sh`: both live sets equal the
   materialized oracle across stored cells, a derived spacer head, trailing fill,
   and a trimmed head; both reclamation sweeps materialize zero retained rows.**
-- [ ] `T17` VETTING -- **Inline the CSI/escape sequence collections.** Capacities
+- [x] `T17` DONE -- **Inline the CSI/escape sequence collections.** Capacities
   are already compile-time constants (24 parameters, 4 intermediates), yet
   `clearCollection`'s `removeAll(keepingCapacity: true)` reallocates all three
   buffers per sequence because copy-on-write sees them non-uniquely referenced --
@@ -642,6 +642,11 @@ constraint among them except where noted.
   types POD and the eight array-literal intermediate comparisons in `dispatchCSI`
   collapse to one integer switch. Verification: allocations per CSI must reach
   zero. Preserve the parameter-overflow drop and saturating `.max` verbatim.
+  **Result in `F34`, script
+  `scripts/research/33/t17-inline-sequence-collections.sh`: 10,000 retained
+  private CSI values fell from 30,003 live heap blocks to zero; 10,000 retained
+  ESC-intermediate values also hold zero. The parser and terminal dispatch
+  contracts pass, and `terminal-feed` is `faster` at -17.70%.**
 - [ ] `T18` VETTING -- **Make the fills exact.** Two full-surface background
   fills per draw (one in `draw(_:)`, one in `drawRenderFrame`), correct only
   because both are clipped, while the exact span rects sit on the stack one line

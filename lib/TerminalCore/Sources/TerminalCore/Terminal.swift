@@ -5348,12 +5348,12 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
-        if sequence.intermediates == [0x21] {
+        switch sequence.intermediates.key {
+        case 0x21:
             guard sequence.final == 0x70, sequence.parameters.isEmpty else { return }
             softReset()
             return
-        }
-        if sequence.intermediates == [0x3F] {
+        case 0x3F:
             switch sequence.final {
             case 0x68:
                 applyDECPrivateModes(sequence.parameters, enabled: true)
@@ -5368,10 +5368,10 @@ public struct Terminal: Equatable, Sendable {
                 break
             }
             return
-        }
-        if sequence.intermediates == [0x3E] {
+        case 0x3E:
             if sequence.final == 0x71,
-               sequence.parameters.isEmpty || sequence.parameters == [0]
+               sequence.parameters.isEmpty
+                   || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
             {
                 appendReply("\u{1B}P>|DanTerm \(programVersion)\u{1B}\\")
                 return
@@ -5379,40 +5379,40 @@ public struct Terminal: Equatable, Sendable {
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
             pushKittyKeyboardFlags(sequence.parameters.first ?? 0)
             return
-        }
-        if sequence.intermediates == [0x3C] {
+        case 0x3C:
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
             popKittyKeyboardFlags(sequence.parameters.first ?? 1)
             return
-        }
-        if sequence.intermediates == [0x3D] {
+        case 0x3D:
             guard sequence.final == 0x75, sequence.parameters.count <= 2 else { return }
             setKittyKeyboardFlags(
                 sequence.parameters.first ?? 0,
                 mode: sequence.parameters.dropFirst().first ?? 1
             )
             return
-        }
-        if sequence.intermediates == [0x3F, 0x24] {
+        case 0x243F:
             guard sequence.final == 0x70 else { return }
             replyToModeQuery(sequence.parameters, isDECPrivate: true)
             return
-        }
-        if sequence.intermediates == [0x24] {
+        case 0x24:
             guard sequence.final == 0x70 else { return }
             replyToModeQuery(sequence.parameters, isDECPrivate: false)
             return
-        }
-        if sequence.intermediates == [0x20] {
+        case 0x20:
             guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
             applyCursorStyle(sequence.parameters.first ?? 0)
             return
+        case 0:
+            break
+        default:
+            return
         }
-        guard sequence.intermediates.isEmpty else { return }
 
         switch sequence.final {
         case 0x63:
-            guard sequence.parameters.isEmpty || sequence.parameters == [0] else { return }
+            guard sequence.parameters.isEmpty
+                      || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
+            else { return }
             appendReply("\u{1B}[?1;2c")
         case 0x6E:
             replyToStatusQuery(sequence.parameters, isDECPrivate: false)
@@ -5511,7 +5511,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func replyToStatusQuery(
-        _ parameters: [UInt16],
+        _ parameters: CSIParameters,
         isDECPrivate: Bool
     ) {
         guard parameters.count == 1 else { return }
@@ -5528,7 +5528,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func replyToModeQuery(
-        _ parameters: [UInt16],
+        _ parameters: CSIParameters,
         isDECPrivate: Bool
     ) {
         guard parameters.count == 1 else { return }
@@ -5586,7 +5586,7 @@ public struct Terminal: Equatable, Sendable {
         replyBytes.append(contentsOf: bytes)
     }
 
-    private mutating func applyANSIModes(_ parameters: [UInt16], enabled: Bool) {
+    private mutating func applyANSIModes(_ parameters: CSIParameters, enabled: Bool) {
         var recognized = false
         for parameter in parameters {
             switch parameter {
@@ -5605,7 +5605,7 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func applyDECPrivateModes(_ parameters: [UInt16], enabled: Bool) {
+    private mutating func applyDECPrivateModes(_ parameters: CSIParameters, enabled: Bool) {
         var shouldClearPendingMotion = false
         for parameter in parameters {
             switch parameter {
@@ -5712,7 +5712,7 @@ public struct Terminal: Equatable, Sendable {
             }
 
             if groupEnd > index + 1 {
-                applyColonSGR(Array(sequence.parameters[index..<groupEnd]))
+                applyColonSGR(sequence.parameters[index..<groupEnd])
                 index = groupEnd
                 continue
             }
@@ -5738,7 +5738,7 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func applyColonSGR(_ group: [UInt16]) {
+    private mutating func applyColonSGR(_ group: Slice<CSIParameters>) {
         guard let leading = group.first else { return }
         switch leading {
         case 4:
@@ -5821,24 +5821,25 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private func colonColor(in group: [UInt16]) -> TerminalColor? {
+    private func colonColor(in group: Slice<CSIParameters>) -> TerminalColor? {
         guard group.count >= 3 else { return nil }
-        switch group[1] {
+        let start = group.startIndex
+        switch group[start + 1] {
         case 5:
-            return .indexed(UInt8(truncatingIfNeeded: group[2]))
+            return .indexed(UInt8(truncatingIfNeeded: group[start + 2]))
         case 2:
             if group.count >= 6 {
                 return .rgb(
-                    red: UInt8(truncatingIfNeeded: group[3]),
-                    green: UInt8(truncatingIfNeeded: group[4]),
-                    blue: UInt8(truncatingIfNeeded: group[5])
+                    red: UInt8(truncatingIfNeeded: group[start + 3]),
+                    green: UInt8(truncatingIfNeeded: group[start + 4]),
+                    blue: UInt8(truncatingIfNeeded: group[start + 5])
                 )
             }
             guard group.count >= 5 else { return nil }
             return .rgb(
-                red: UInt8(truncatingIfNeeded: group[2]),
-                green: UInt8(truncatingIfNeeded: group[3]),
-                blue: UInt8(truncatingIfNeeded: group[4])
+                red: UInt8(truncatingIfNeeded: group[start + 2]),
+                green: UInt8(truncatingIfNeeded: group[start + 3]),
+                blue: UInt8(truncatingIfNeeded: group[start + 4])
             )
         default:
             return nil
@@ -5846,7 +5847,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func semicolonColor(
-        in parameters: [UInt16],
+        in parameters: CSIParameters,
         selectorIndex: Int
     ) -> (color: TerminalColor?, nextIndex: Int) {
         guard parameters.indices.contains(selectorIndex) else {
@@ -5979,7 +5980,7 @@ public struct Terminal: Equatable, Sendable {
         rows[row].semanticPrompt = .none
     }
 
-    private func movementAmount(_ parameters: [UInt16]) -> Int? {
+    private func movementAmount(_ parameters: CSIParameters) -> Int? {
         guard parameters.count <= 1 else { return nil }
         return max(Int(parameters.first ?? 1), 1)
     }
@@ -6045,7 +6046,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
-        guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
+        guard sequence.intermediates.key == 0x23, sequence.final == 0x38 else { return }
         invalidateInspection(inViewportRows: rows.indices)
         // DECALN replaces every row, row 0 included, so history's claim on it must end first.
         severHistoryWrapClaimForRowZeroErase()
@@ -6101,7 +6102,7 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func clearTabStop(_ parameters: [UInt16]) {
+    private mutating func clearTabStop(_ parameters: CSIParameters) {
         guard parameters.count <= 1 else { return }
         switch parameters.first ?? 0 {
         case 0:
@@ -6212,7 +6213,7 @@ public struct Terminal: Equatable, Sendable {
         position.column = max(0, position.column - 1)
     }
 
-    private mutating func repeatLastPrintedCluster(_ parameters: [UInt16]) {
+    private mutating func repeatLastPrintedCluster(_ parameters: CSIParameters) {
         guard parameters.count <= 1,
               let cluster = lastPrintedCluster,
               isPendingWrap == false
@@ -6853,7 +6854,7 @@ public struct Terminal: Equatable, Sendable {
         activeScrollRegion.lowerBound == 0 && isAlternateScreenActive == false
     }
 
-    private mutating func setScrollRegion(_ parameters: [UInt16]) {
+    private mutating func setScrollRegion(_ parameters: CSIParameters) {
         guard parameters.count <= 2 else { return }
 
         let top = max(Int(parameters.first ?? 1), 1)
