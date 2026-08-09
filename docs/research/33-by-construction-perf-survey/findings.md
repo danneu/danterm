@@ -2724,3 +2724,86 @@ performance verdict.
   companion detached-surface safety check passed on both runs.
 - Next action: none for the serialized-draw recalibration. `T24` remains the
   independent confirm block-floor debt.
+
+### F29 -- per-arm feed calibration keeps both sources above the block floor: T8 now completes confirm at -41.63%, and eight identical-source invocations make no directional feed call
+
+- Status: implemented and verified; this closes `T24`. The 1-second block
+  floor, normalized metric, schedule, pair counts, equivalence band, and every
+  directional threshold are unchanged.
+- Date and investigator: 2026-08-09, Codex.
+- Root cause, reproduced before the change with the exact `F16` pair:
+  `just benchmark-confirm baseline=63c693da` from candidate `90731fdc`.
+  `terminal-feed` calibrated one execution on the first scheduled arm and
+  reused that count for both sources. Baseline blocks took 1,468.7 and 1,488.5
+  ms; candidate blocks took 967.9 and 969.9 ms. The latter produced
+  `block-1-below-duration-floor` and `block-2-below-duration-floor`, invalidated
+  the complete invocation, and left all six workloads without a decision.
+  Artifact:
+  `.build/terminal-benchmark-comparisons/confirm/39a426ea2adf-0000`.
+- The fix gives calibration the same ownership as execution: each physical arm
+  runs one discarded duration-stable calibration, and every measured block
+  looks up that arm's fixed execution count. Raw blocks retain their own count
+  and total duration; pairing still reads only the normalized
+  `feedDurationNanoseconds`. A faster arm therefore does more terminal-feed work
+  to meet the floor rather than borrowing a slow arm's insufficient count.
+- The task-specific deterministic gate is
+  `scripts/research/33/t24-benchmark-confirm-floor.py`. Against the old
+  implementation its large-improvement case used count 4 on both arms, measured
+  the faster arm at 800 ms, and failed with the same two floor reasons. Against
+  the new implementation it uses counts 4 and 5, every block reaches at least
+  1,000 ms, and the comparison reads `faster -40.00%`. Its identical-source
+  case uses count 4 on both arms, reads exactly 0.00%, and is `equivalent`.
+  Two Python unit tests pin the same large-improvement and identical-source
+  behaviors at the collector boundary; both failed first because only arm `a`
+  calibrated, then passed after the ownership change.
+- The exact historical rerun, again `63c693da` against terminal source
+  `90731fdc`, is a valid complete `confirm`. The baseline arm calibrates to one
+  execution (1,467.1 and 1,485.3 ms measured); the faster candidate calibrates
+  to two (1,925.6 and 1,944.4 ms total, normalized to 962.8 and 972.2 ms).
+  Artifact:
+  `.build/terminal-benchmark-comparisons/confirm/1405f467405c-0000`.
+
+  | workload | confirm result |
+  | --- | --- |
+  | `terminal-feed` | **`faster` -41.63%** |
+  | `scrollback-stream` | **`faster` -63.39%** |
+  | `content-churn` | `inconclusive` -1.92% |
+  | `style-churn` | `inconclusive` -0.94% |
+  | `incremental-mixed` | **`faster` -2.68%** |
+  | `retained-browse` | `equivalent` +0.38% |
+
+  Thus every workload issues its ordinary confirm result; no invalid block
+  suppresses the ladder. These percentages measure all source differences
+  between the two historical revisions, not the harness change.
+- The `31/F18` whole-invocation A/A gate used one disposable baseline containing
+  the harness fix and candidate snapshots differing only by
+  `docs/t24-aa-marker.md`. A source-tree diff excluding generated build output
+  found only that marker. Both arms built separately. Eight complete valid
+  `benchmark-confirm` invocations split 4/4 across physical candidate slots
+  `a` and `b`; artifacts are
+  `.build/terminal-benchmark-comparisons/confirm/6f0468450055-0000` through
+  `-0003` and
+  `.build/terminal-benchmark-comparisons/confirm/ee780a2dedd0-0000` through
+  `-0003`.
+
+  | workload | A/A estimate range | directional calls |
+  | --- | ---: | ---: |
+  | `terminal-feed` | **+0.05%..+1.22%** | **0/8** |
+  | `scrollback-stream` | -7.26%..+1.99% | 4/8 |
+  | `content-churn` | -0.16%..+4.86% | 3/8 |
+  | `style-churn` | +1.02%..+5.75% | 6/8 |
+  | `incremental-mixed` | -2.28%..+4.38% | 7/8 |
+  | `retained-browse` | -0.83%..+0.04% | 0/8 |
+
+  Every feed block used two executions and the shortest took 1,920.7 ms, so the
+  changed cell had both floor coverage and verdict coverage. It made no false
+  directional call in either slot. The other four cells' false calls reproduce
+  `31/F18`, more strongly under this session's 0.39-0.93 load per processor;
+  they are existing rule noise on code the harness change cannot reach. This
+  gate therefore supports the scoped claim that per-arm feed sizing creates no
+  false feed direction. It does not claim the whole ladder has stopped making
+  false directional calls.
+- Verification: `t24-benchmark-confirm-floor.py`, all 62 comparator tests, all
+  58 validator tests, and `just test` (75/75 steps) pass.
+- Next action: none for the block floor. Large feed-path improvements can now
+  receive a confirm verdict without weakening the measurement contract.

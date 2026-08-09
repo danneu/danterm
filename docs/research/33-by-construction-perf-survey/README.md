@@ -626,19 +626,20 @@ constraint among them except where noted.
   above. Verification: fill-rect area per draw compared against damaged area.
   Sequence before any fill-batching lead, since this decides the fill topology.
 
-- [ ] `T24` VETTING -- **Own the `benchmark-confirm` block floor.** `F16`
-  discovered that `confirm` calibrates `terminal-feed`'s fixed execution batch
-  on whichever arm runs first, so a candidate that finishes the batch under the
-  1-second block floor self-invalidates the whole invocation and no workload
-  gets a verdict -- which is why the largest win in this doc carries only
-  `quick` digits. Ideal: calibrate the batch per arm (each arm fills its own
-  floor) or size the batch on the faster arm, so a big win lengthens the
-  baseline's block instead of invalidating the candidate's. Verification: an
-  A/A run on byte-identical arms must still read `equivalent` with unchanged
-  thresholds, and a re-run of `F16`'s pair (`63c693da` against `90731fdc`) must
-  issue a `confirm` verdict for all six workloads. Harness change, so
-  `31/F18`'s directional-verdict-on-identical-source check is the regression
-  gate.
+- [x] `T24` **DONE (`F29`)** -- **Own the `benchmark-confirm` block floor.**
+  `terminal-feed` now calibrates each physical arm independently and uses that
+  arm's fixed execution count for every measured block. The 1-second floor,
+  normalized per-execution metric, position-balanced schedule, pair counts, and
+  frozen thresholds are unchanged. The exact `F16` pair (`63c693da` against
+  `90731fdc`) moved from two 968-970 ms candidate blocks invalidating the whole
+  invocation to a valid six-workload `confirm`: baseline uses one execution,
+  the faster candidate uses two, and `terminal-feed` reads `faster -41.63%`.
+  Eight byte-identical-source whole-invocation controls, split 4/4 across both
+  physical candidate slots, produced zero directional `terminal-feed` calls
+  (+0.05%..+1.22%) and no sub-floor block. The other cells reproduced
+  `31/F18`'s existing false directional calls on the loaded host; `F29` records
+  them rather than laundering a cell-specific pass into a claim that the whole
+  ladder is sound.
 
 - [x] `T25` **DONE (`F25`)** --
   **Own the pane surface: `wantsUpdateLayer` with an IOSurface swapchain.**
@@ -1145,3 +1146,11 @@ cell-escaping ink like U+01FA), pinned red-first and fixed by the strips.
 The calibrated ladder reads `incremental-mixed` **`faster` -13.23%** --
 the derived halo shrinking exactly the software-raster term `F26` priced --
 with `scrollback-stream` `faster` -2.15% and every other cell `equivalent`.
+
+**`T24` then closed the remaining confirm-floor debt (`F29`).** Feed batch
+sizing is now owned per physical arm, so a large speedup lengthens only the
+faster arm's measured block instead of invalidating the comparison. The exact
+T8 pair now returns all six confirm results, with `terminal-feed` `faster
+-41.63%`; eight byte-identical-source whole-invocation controls produced zero
+directional feed calls across both slots without changing the 1-second floor or
+any frozen threshold.

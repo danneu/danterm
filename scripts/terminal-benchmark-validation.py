@@ -619,21 +619,26 @@ def collect_terminal_feed(
     run_benchmark,
     sample_state,
 ):
-    """Collect one planned feed series with a single discarded calibration."""
+    """Collect one planned feed series with one discarded calibration per arm."""
     if not blocks:
         raise ValueError("terminal-feed collection requires at least one block")
-    calibration_arm = blocks[0]["physicalArm"]
-    calibration = run_benchmark(calibration_arm, execution_count=None)
-    batch_count = calibration["batchCount"]
-    if batch_count < 1:
-        raise ValueError("terminal-feed calibration returned an invalid batch count")
+    calibrations = {}
+    for arm in dict.fromkeys(block["physicalArm"] for block in blocks):
+        calibration = run_benchmark(arm, execution_count=None)
+        if calibration["batchCount"] < 1:
+            raise ValueError(
+                f"terminal-feed arm {arm} calibration returned an invalid batch count"
+            )
+        calibrations[arm] = calibration
 
     raw_blocks = []
     reasons = []
     for index, planned in enumerate(blocks):
+        arm = planned["physicalArm"]
+        batch_count = calibrations[arm]["batchCount"]
         start_state = sample_state()
         measured = run_benchmark(
-            planned["physicalArm"], execution_count=batch_count
+            arm, execution_count=batch_count
         )
         completion_state = sample_state()
         if measured["batchCount"] != batch_count:
@@ -672,18 +677,22 @@ def collect_terminal_feed(
     return {
         "workload": "terminal-feed",
         "calibration": {
-            "physicalArm": calibration_arm,
-            "batchCount": batch_count,
-            "discardedSamples": [
-                {
-                    "feedDurationNanoseconds": feed,
-                    "sampleDurationNanoseconds": duration,
+            "arms": {
+                arm: {
+                    "batchCount": calibration["batchCount"],
+                    "discardedSamples": [
+                        {
+                            "feedDurationNanoseconds": feed,
+                            "sampleDurationNanoseconds": duration,
+                        }
+                        for feed, duration in zip(
+                            calibration["feedDurationNanoseconds"],
+                            calibration["sampleDurationNanoseconds"],
+                        )
+                    ],
                 }
-                for feed, duration in zip(
-                    calibration["feedDurationNanoseconds"],
-                    calibration["sampleDurationNanoseconds"],
-                )
-            ],
+                for arm, calibration in calibrations.items()
+            },
         },
         "rawBlocks": raw_blocks,
         "valid": not reasons,

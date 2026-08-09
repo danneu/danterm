@@ -369,7 +369,15 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected seed"):
                 VALIDATION.load_collection(manifest_path, ledger_path)
 
-    def test_terminal_feed_collector_calibrates_once_and_retains_raw_block_evidence(self):
+    def test_terminal_feed_collector_sizes_each_arm_for_a_large_improvement(self):
+        # Intent: every source receives enough feed executions to clear the
+        #   duration floor even when one source is substantially faster.
+        # Why it exists: research/33/F16 is the incident -- candidate 90731fdc
+        #   ran baseline 63c693da's fixed batch in under one second and voided
+        #   the complete confirm invocation.
+        # Scenario: the candidate needs six executions where the baseline needs
+        #   four, and the position-balanced measured blocks use those arm-local
+        #   counts while preserving normalized per-execution durations.
         blocks = [
             {"measurementRole": "A", "physicalArm": "a"},
             {"measurementRole": "B", "physicalArm": "b"},
@@ -377,21 +385,25 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             {"measurementRole": "A", "physicalArm": "a"},
         ]
         calls = []
-        totals = iter((1_200_000_000, 1_100_000_000, 1_300_000_000,
-                       1_250_000_000))
 
         def run_benchmark(arm, *, execution_count):
             calls.append((arm, execution_count))
             if execution_count is None:
+                batch_count = 4 if arm == "a" else 6
+                per_execution = 300_000_000 if arm == "a" else 200_000_000
                 return {
-                    "batchCount": 4,
-                    "feedDurationNanoseconds": [300_000_000, 310_000_000],
-                    "sampleDurationNanoseconds": [1_200_000_000, 1_240_000_000],
+                    "batchCount": batch_count,
+                    "feedDurationNanoseconds": [per_execution, per_execution],
+                    "sampleDurationNanoseconds": [
+                        batch_count * per_execution,
+                        batch_count * per_execution,
+                    ],
                 }
-            total = next(totals)
+            per_execution = 300_000_000 if arm == "a" else 200_000_000
+            total = execution_count * per_execution
             return {
                 "batchCount": execution_count,
-                "feedDurationNanoseconds": [total // execution_count],
+                "feedDurationNanoseconds": [per_execution],
                 "sampleDurationNanoseconds": [total],
             }
 
@@ -406,15 +418,69 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(calls[0], ("a", None))
-        self.assertEqual(calls[1:], [("a", 4), ("b", 4), ("b", 4), ("a", 4)])
-        self.assertEqual(len(evidence["calibration"]["discardedSamples"]), 2)
+        self.assertEqual(calls[:2], [("a", None), ("b", None)])
+        self.assertEqual(calls[2:], [("a", 4), ("b", 6), ("b", 6), ("a", 4)])
         self.assertEqual(
-            [block["sampleDurationNanoseconds"] for block in evidence["rawBlocks"]],
-            [1_200_000_000, 1_100_000_000, 1_300_000_000, 1_250_000_000],
+            {
+                arm: entry["batchCount"]
+                for arm, entry in evidence["calibration"]["arms"].items()
+            },
+            {"a": 4, "b": 6},
+        )
+        self.assertEqual(
+            [block["batchCount"] for block in evidence["rawBlocks"]],
+            [4, 6, 6, 4],
+        )
+        self.assertEqual(
+            [block["feedDurationNanoseconds"] for block in evidence["rawBlocks"]],
+            [300_000_000, 200_000_000, 200_000_000, 300_000_000],
         )
         self.assertTrue(evidence["valid"])
         self.assertEqual(evidence["invalidationReasons"], [])
+
+    def test_terminal_feed_collector_keeps_identical_sources_identical(self):
+        # Intent: arm-local sizing does not manufacture a directional difference
+        #   when both physical arms execute byte-identical source.
+        # Why it exists: research/31/F18 requires a whole-invocation A/A gate for
+        #   every harness change that can affect directional verdicts.
+        # Scenario: both arms calibrate to the same count and report the same
+        #   normalized duration throughout an ABBA series.
+        blocks = [
+            {"measurementRole": "A", "physicalArm": "a"},
+            {"measurementRole": "B", "physicalArm": "b"},
+            {"measurementRole": "B", "physicalArm": "b"},
+            {"measurementRole": "A", "physicalArm": "a"},
+        ]
+        calls = []
+
+        def run_benchmark(arm, *, execution_count):
+            calls.append((arm, execution_count))
+            batch_count = 5 if execution_count is None else execution_count
+            samples = 2 if execution_count is None else 1
+            return {
+                "batchCount": batch_count,
+                "feedDurationNanoseconds": [250_000_000] * samples,
+                "sampleDurationNanoseconds": [batch_count * 250_000_000] * samples,
+            }
+
+        evidence = VALIDATION.collect_terminal_feed(
+            blocks,
+            minimum_block_nanoseconds=1_000_000_000,
+            run_benchmark=run_benchmark,
+            sample_state=lambda: {
+                "powerSource": "AC Power",
+                "lowPowerMode": False,
+                "thermalState": "nominal",
+            },
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(calls[:2], [("a", None), ("b", None)])
+        self.assertEqual(set(evidence["calibration"]["arms"]), {"a", "b"})
+        self.assertEqual(
+            [block["feedDurationNanoseconds"] for block in evidence["rawBlocks"]],
+            [250_000_000] * 4,
+        )
 
     def test_terminal_feed_collector_keeps_short_and_state_changed_blocks_invalid(self):
         states = iter((
