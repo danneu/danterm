@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#282c34",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#dcdfe4",
+    "#5d677a",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#dcdfe4"
+  ],
+  "background": "#282c34",
+  "cursor": "#a3b3cc",
+  "cursorText": "#e9ecf1",
+  "foreground": "#dcdfe4",
+  "name": "One Half Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#474e5d",
+  "selectionForeground": "#dcdfe4"
+}

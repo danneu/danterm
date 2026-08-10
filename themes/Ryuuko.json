@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2c3941",
+    "#865f5b",
+    "#66907d",
+    "#b1a990",
+    "#6a8e95",
+    "#b18a73",
+    "#88b2ac",
+    "#ececec",
+    "#5d7079",
+    "#865f5b",
+    "#66907d",
+    "#b1a990",
+    "#6a8e95",
+    "#b18a73",
+    "#88b2ac",
+    "#ececec"
+  ],
+  "background": "#2c3941",
+  "cursor": "#ececec",
+  "cursorText": "#002831",
+  "foreground": "#ececec",
+  "name": "Ryuuko",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#002831",
+  "selectionForeground": "#819090"
+}

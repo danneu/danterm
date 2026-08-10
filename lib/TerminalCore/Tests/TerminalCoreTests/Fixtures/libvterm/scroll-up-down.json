@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Scroll Down; Scroll Up",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "The upstream titles are inverted relative to the SU (CSI S) and SD (CSI T) mnemonics."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "A\r\nB\r\nC\u001b[S" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "B   \nC   \n    ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 1
+      }
+    },
+    { "type": "feed", "text": "\u001b[2S" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \n    \n    ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 3
+      }
+    },
+    { "type": "feed", "text": "\u001b[100S" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \n    \n    ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 6
+      }
+    },
+    { "type": "feed", "text": "\u001b[H1\u001b[2;1H2\u001b[3;1H3\u001b[T" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \n1   \n2   ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 6
+      }
+    },
+    { "type": "feed", "text": "\u001b[2T\u001b[100T" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \n    \n    ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#080200",
+    "#fa5e5b",
+    "#16c98d",
+    "#ffc83f",
+    "#288ad6",
+    "#d34590",
+    "#28ddde",
+    "#e7e7e7",
+    "#6f6b68",
+    "#fa5e5b",
+    "#16c98d",
+    "#feef6d",
+    "#278ad6",
+    "#d34590",
+    "#27dede",
+    "#ffffff"
+  ],
+  "background": "#2c3643",
+  "cursor": "#b4b1b1",
+  "cursorText": "#000000",
+  "foreground": "#ffffff",
+  "name": "Chester",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#67747c",
+  "selectionForeground": "#ffffff"
+}

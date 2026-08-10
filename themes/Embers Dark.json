@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#16130f",
+    "#826d57",
+    "#57826d",
+    "#6d8257",
+    "#6d5782",
+    "#82576d",
+    "#576d82",
+    "#a39a90",
+    "#5a5047",
+    "#828257",
+    "#464039",
+    "#50483f",
+    "#8a8075",
+    "#beb6ae",
+    "#825757",
+    "#dbd6d1"
+  ],
+  "background": "#16130f",
+  "cursor": "#a39a90",
+  "cursorText": "#16130f",
+  "foreground": "#a39a90",
+  "name": "Embers Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#433b32",
+  "selectionForeground": "#a39a90"
+}

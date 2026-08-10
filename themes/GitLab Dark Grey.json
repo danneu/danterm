@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#f57f6c",
+    "#52b87a",
+    "#d99530",
+    "#7fb6ed",
+    "#f88aaf",
+    "#32c5d2",
+    "#ffffff",
+    "#666666",
+    "#fcb5aa",
+    "#91d4a8",
+    "#e9be74",
+    "#498dd1",
+    "#fcacc5",
+    "#5edee3",
+    "#ffffff"
+  ],
+  "background": "#222222",
+  "cursor": "#ffffff",
+  "cursorText": "#bfbfbf",
+  "foreground": "#ffffff",
+  "name": "GitLab Dark Grey",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ad95e9",
+  "selectionForeground": "#222222"
+}

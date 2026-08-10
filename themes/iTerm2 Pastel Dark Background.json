@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#626262",
+    "#ff8373",
+    "#b4fb73",
+    "#fffdc3",
+    "#a5d5fe",
+    "#ff90fe",
+    "#d1d1fe",
+    "#f1f1f1",
+    "#8f8f8f",
+    "#ffc4be",
+    "#d6fcba",
+    "#fffed5",
+    "#c2e3ff",
+    "#ffb2fe",
+    "#e6e6fe",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#ffb473",
+  "cursorText": "#8c8c8c",
+  "foreground": "#c7c7c7",
+  "name": "iTerm2 Pastel Dark Background",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#454d96",
+  "selectionForeground": "#f4f4f4"
+}

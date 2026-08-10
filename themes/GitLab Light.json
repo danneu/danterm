@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#303030",
+    "#a31700",
+    "#0a7f3d",
+    "#af551d",
+    "#006cd8",
+    "#583cac",
+    "#00798a",
+    "#303030",
+    "#303030",
+    "#a31700",
+    "#0a7f3d",
+    "#af551d",
+    "#006cd8",
+    "#583cac",
+    "#00798a",
+    "#303030"
+  ],
+  "background": "#fafaff",
+  "cursor": "#303030",
+  "cursorText": "#565656",
+  "foreground": "#303030",
+  "name": "GitLab Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ad95e9",
+  "selectionForeground": "#fafaff"
+}

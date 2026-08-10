@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#16161d",
+    "#fc4777",
+    "#00ca86",
+    "#f2a682",
+    "#00bedd",
+    "#ff58b1",
+    "#00cdcb",
+    "#bfafac",
+    "#1a1c24",
+    "#fe5f87",
+    "#00d193",
+    "#e5a688",
+    "#00c9e2",
+    "#ff6cba",
+    "#00c3c2",
+    "#fff2ef"
+  ],
+  "background": "#fdf0ed",
+  "cursor": "#d3a89d",
+  "cursorText": "#ffe8dc",
+  "foreground": "#16161d",
+  "name": "Horizon Bright",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f9cec3",
+  "selectionForeground": "#16161d"
+}

@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/64screen_pen.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Plain; Bold; Italic; Underline; Reset; Foreground; Background; EL sets only colours to end of line, not other attrs",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "Dimensions are reduced from 80 columns to 8.",
+      "Default and indexed colors remain semantic rather than resolving through libvterm's palette."
+    ]
+  },
+  "initial": { "columns": 8, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "A\u001b[1mB\u001b[3mC\u001b[4mD\u001b[mE\u001b[31mG\u001b[m\u001b[42mH\u001b[m" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ABCDEGH \n        ",
+        "cellStyles": [
+          {
+            "row": 0,
+            "column": 0,
+            "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 1,
+            "style": { "foreground": "default", "background": "default", "attributes": ["bold"], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 2,
+            "style": { "foreground": "default", "background": "default", "attributes": ["bold", "italic"], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 3,
+            "style": { "foreground": "default", "background": "default", "attributes": ["bold", "italic"], "underline": "single" }
+          },
+          {
+            "row": 0,
+            "column": 4,
+            "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 5,
+            "style": { "foreground": "indexed:1", "background": "default", "attributes": [], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 6,
+            "style": { "foreground": "default", "background": "indexed:2", "attributes": [], "underline": "none" }
+          }
+        ]
+      }
+    },
+    { "type": "feed", "text": "\u001b[H\u001b[7;33;44m\u001b[K" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "        \n        ",
+        "cellKinds": [
+          ["padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"],
+          ["padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"]
+        ],
+        "cellStyles": [
+          {
+            "row": 0,
+            "column": 0,
+            "style": { "foreground": "indexed:3", "background": "indexed:4", "attributes": [], "underline": "none" }
+          },
+          {
+            "row": 0,
+            "column": 7,
+            "style": { "foreground": "indexed:3", "background": "indexed:4", "attributes": [], "underline": "none" }
+          }
+        ]
+      }
+    }
+  ]
+}

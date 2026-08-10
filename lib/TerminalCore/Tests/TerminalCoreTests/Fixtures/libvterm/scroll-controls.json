@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Linefeed; Index; Reverse Index",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 4, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "a\r\nb\r\nc" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "a   \nb   \nc   ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\r\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "b   \nc   \n    ",
+        "cursor": { "row": 2, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 1
+      }
+    },
+    { "type": "feed", "text": "d\u001bD" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "c   \nd   \n    ",
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 2
+      }
+    },
+    { "type": "feed", "text": "\u001b[H\u001bM" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \nc   \nd   ",
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 2
+      }
+    }
+  ]
+}

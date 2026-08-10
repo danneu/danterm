@@ -7,7 +7,7 @@
 // template point at, and the unit-test boundary for the reconcile layer: derive view
 // state from `AppModel` here (purely), apply it to Cocoa there. Keep it
 // `import Foundation` only -- no AppKit -- which is what keeps the projection layer
-// testable without Cocoa or GhosttyKit. Cross-layer model helpers these call back into
+// testable without Cocoa or the terminal engine. Cross-layer model helpers these call back into
 // (queries, alert counts, container shapes) stay in ModelOperations.swift; this earns
 // its own file as the named pure peer of Reconcile.swift.
 import Foundation
@@ -30,15 +30,32 @@ func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
 
 // MARK: - Preferences Panel
 
+/// The font picker's one entry that is not a font: it stands for "no
+/// `font.family` key", i.e. the built-in monospace face. It is a reserved
+/// sentinel on the draft -- `resolveFontFamilyDraft` normalizes it back to nil --
+/// which is what lets the combo box write its selected title straight into the
+/// draft with no AppKit-side special case.
+let systemMonospaceFontChoiceTitle = "System Monospace (Default)"
+
 /// Pure value describing the visible preferences panel state.
 struct PreferencesPanelProjection: Equatable {
     var selectedAlertClearMode: AlertClearMode
     var remoteThemeText: String
-    var ghosttyThemeText: String
+    var themeText: String
     var fontSizeText: String
-    var ghosttyThemeDirtyLabel: String?
+    var fontFamilyText: String
+    var copyOnSelect: Bool
+    /// Every family the picker offers, system monospace first. Sourced from the
+    /// catalog injected on open, never from an ambient CoreText query.
+    var fontFamilyChoices: [String]
+    /// Inline, non-modal report that the committed family is not installed.
+    /// Non-nil only while the field still holds the name it describes.
+    var fontFamilyWarning: String?
+    var themeDirtyLabel: String?
     var fontSizeDirtyLabel: String?
+    var fontFamilyDirtyLabel: String?
     var alertClearModeDirtyLabel: String?
+    var copyOnSelectDirtyLabel: String?
     var remoteThemeDirtyLabel: String?
     var saveEnabled: Bool
 }
@@ -49,23 +66,48 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     guard let draft = model.preferencesDraft else { return nil }
 
     let committed = model.config
-    let ghostty = model.committedGhosttyPrefs
-    let ghosttyThemeDirty = draft.theme != ghostty?.theme
-    let fontSizeDirty = draft.fontSize != ghostty?.fontSize
+    // The draft holds what the user typed, so the committed size is rendered to
+    // text to compare with it: "13" and 13.0 are the same setting, and normalizing
+    // the other direction would have to guess at half-typed input.
+    let committedFontSizeText = committed.fontSize.map(configFontSizeText)
+    let themeDirty = draft.theme != committed.defaultTheme
+    let fontSizeDirty = draft.fontSize != committedFontSizeText
+    let fontFamilyDirty = resolveFontFamilyDraft(draft.fontFamily) != committed.fontFamily
     let alertDirty = draft.alertClearMode != committed.alertClearMode
+    let copyOnSelectDirty = draft.copyOnSelect != committed.copyOnSelect
     let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
 
     let alertDisplayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
+    // Warn only while the field still holds the unresolved name: once the user
+    // edits it, the warning would be describing text no longer on screen, and the
+    // new name has not been resolved against the installed families yet.
+    let unresolvedFamily = committed.fontFamily.flatMap {
+        model.resolvedFontFamily == nil && resolveFontFamilyDraft(draft.fontFamily) == $0 ? $0 : nil
+    }
     return PreferencesPanelProjection(
         selectedAlertClearMode: draft.alertClearMode,
         remoteThemeText: draft.remoteTheme,
-        ghosttyThemeText: draft.theme ?? "",
+        themeText: draft.theme ?? "",
         fontSizeText: draft.fontSize ?? "",
-        ghosttyThemeDirtyLabel: ghosttyThemeDirty ? "Prev: \(ghostty?.theme ?? "(default)")" : nil,
-        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(ghostty?.fontSize ?? "(default)")" : nil,
+        // Raw draft text, like the other fields: normalizing here would rewrite
+        // the field under the user mid-edit. Absent means the sentinel choice, so
+        // the picker always displays a selected entry.
+        fontFamilyText: draft.fontFamily ?? systemMonospaceFontChoiceTitle,
+        copyOnSelect: draft.copyOnSelect,
+        fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
+        fontFamilyWarning: unresolvedFamily.map {
+            "Font \"\($0)\" is not installed -- using the system monospace font."
+        },
+        themeDirtyLabel: themeDirty ? "Prev: \(committed.defaultTheme ?? "(default)")" : nil,
+        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(committedFontSizeText ?? "(default)")" : nil,
+        fontFamilyDirtyLabel: fontFamilyDirty
+            ? "Prev: \(committed.fontFamily ?? systemMonospaceFontChoiceTitle)" : nil,
         alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
+        copyOnSelectDirtyLabel: copyOnSelectDirty
+            ? "Prev: \(committed.copyOnSelect ? "On" : "Off")" : nil,
         remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
-        saveEnabled: ghosttyThemeDirty || fontSizeDirty || alertDirty || remoteThemeDirty
+        saveEnabled: themeDirty || fontSizeDirty || fontFamilyDirty
+            || alertDirty || copyOnSelectDirty || remoteThemeDirty
     )
 }
 
@@ -250,8 +292,7 @@ func desiredPaneToolbar(in model: AppModel, tally: UnreadAlertTally) -> [PaneId:
 /// overlays.
 struct SearchOverlayRender: Equatable {
   let needle: String
-  let total: Int?
-  let selected: Int?
+  let status: SearchMatchStatus?
 }
 
 /// Search-overlay projection: one `SearchOverlayRender` per pane *with active search*
@@ -261,28 +302,47 @@ struct SearchOverlayRender: Equatable {
 func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] {
   var result: [PaneId: SearchOverlayRender] = [:]
   for (paneId, search) in model.searchState {
-    result[paneId] = SearchOverlayRender(needle: search.needle, total: search.total, selected: search.selected)
+    result[paneId] = SearchOverlayRender(needle: search.needle, status: search.status)
   }
   return result
 }
 
-/// Per-pane Ghostty config render the reconciler diffs and pushes to the surface.
-/// The theme is keyed iff a pane has a non-nil effective theme; generation changes
-/// when the app's base Ghostty config reloads, forcing themed panes to re-layer.
+/// Per-pane terminal config render the reconciler diffs and pushes to the session.
+/// Every live pane is keyed because the JSON defaults always resolve both values.
 struct PaneConfigKey: Equatable {
   let theme: String
-  let generation: Int
+  let fontSize: Double
+  /// The verified-installed family, or nil for the system monospace font. The raw
+  /// name from config never reaches rendering; only a canonical resolved family may.
+  let fontFamily: String?
+  /// Whether the pane arms copy-on-select. Carried in the key so a reload retargets
+  /// already-mounted panes through the same diff as theme and font.
+  let copyOnSelect: Bool
+
+  init(
+    theme: String,
+    fontSize: Double = DanTermConfig.default.resolvedFontSize,
+    fontFamily: String? = nil,
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect
+  ) {
+    self.theme = theme
+    self.fontSize = fontSize
+    self.fontFamily = fontFamily
+    self.copyOnSelect = copyOnSelect
+  }
 }
 
-/// Pane-config projection: one key per live themed pane. Unthemed panes are absent,
-/// so removing a theme makes the key disappear and the reconciler reloads base config
-/// while the surface host survives.
+/// Projects the resolved theme, per-pane effective font size, resolved font
+/// family, and copy-on-select onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
-    if let theme = effectiveTheme(for: pane) {
-      result[pane.id] = PaneConfigKey(theme: theme, generation: model.ghosttyConfigGeneration)
-    }
+    result[pane.id] = PaneConfigKey(
+      theme: effectiveTheme(for: pane, config: model.config),
+      fontSize: effectiveFontSize(for: pane, config: model.config),
+      fontFamily: model.resolvedFontFamily,
+      copyOnSelect: model.config.copyOnSelect
+    )
   }
   return result
 }
@@ -764,13 +824,13 @@ func chromeInvalidation(ops: [ContainerOp], newShapes: [TabId: ContainerShape]) 
   return result
 }
 
-/// Surfaces to tear down: live surfaces whose pane no longer exists in the model.
-/// With tree-owns-panes, "desired surfaces" is exactly `model.allPaneIds`, so a pure
-/// set difference selects the dead ones. `reconcileSurfaceExistence` runs this over
-/// `Set(surfaces.keys)` and tears down each selected pane. Surface *creation* stays a
+/// Sessions to tear down: live sessions whose pane no longer exists in the model.
+/// With tree-owns-panes, "desired sessions" is exactly `model.allPaneIds`, so a pure
+/// set difference selects the dead ones. `reconcileSessionExistence` runs this over
+/// `Set(sessions.keys)` and tears down each selected pane. Session *creation* stays a
 /// command (it forks a PTY), so the reconciler only ever destroys.
-func surfacesToTearDown(liveSurfaceIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
-  liveSurfaceIds.subtracting(Set(model.allPaneIds))
+func sessionsToTearDown(liveSessionIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
+  liveSessionIds.subtracting(Set(model.allPaneIds))
 }
 
 // MARK: - MRU Switcher + Quit Confirmation Projections

@@ -46,10 +46,28 @@ enum ProgressState: Equatable {
 
 // MARK: - Search
 
+/// The find overlay's match counter as one value, so "a selected match with no
+/// total" -- which two independent `Int?`s allowed -- cannot be represented. This
+/// mirrors the engine's own `TerminalSearchStatus`, with the extra `.counted` state
+/// for the window between a backend reporting the total and reporting which match
+/// it selected.
+enum SearchMatchStatus: Equatable {
+    /// Matches counted, none selected yet -- renders `-/N`. `total` is 0 for a
+    /// needle that matched nothing.
+    case counted(total: Int)
+    case matched(selected: Int, total: Int)
+
+    var total: Int {
+        switch self {
+        case .counted(let total): return total
+        case .matched(_, let total): return total
+        }
+    }
+}
+
 struct SearchModel: Equatable {
     var needle: String = ""
-    var total: Int?      // nil = unknown/not yet reported
-    var selected: Int?   // nil = no selection
+    var status: SearchMatchStatus?   // nil = nothing reported yet
 }
 
 // MARK: - Remote Session
@@ -77,7 +95,12 @@ struct PaneModel: Equatable {
     var cwd: String?
     var lastCommand: String?
     var progress: ProgressState? = nil
-    var theme: String? = nil  // ghostty theme name; nil = app default
+    var theme: String? = nil  // catalog theme name; nil = app default
+    /// Font-size zoom relative to the configured size, in `paneFontSizeStepPoints`
+    /// steps; 0 = follow the configuration. Relative rather than absolute so a
+    /// configuration change moves zoomed and unzoomed panes alike. Always inside
+    /// `paneFontSizeStepRange` -- every ingress bounds it.
+    var fontSizeSteps: Int = 0
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
     var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
@@ -143,20 +166,21 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
-/// Ghostty config values relevant to the preferences panel.
-/// Populated by the runtime from ghosttyApp.readConfigString; nil = Ghostty default.
-struct GhosttyPrefs: Equatable {
-    var theme: String?
-    var fontSize: String?
-}
-
 /// Raw form state for the preferences panel. Stores what the user actually typed,
 /// not yet normalized. Normalization happens only on save.
+///
+/// `fontSize` is text rather than a number precisely because it is mid-edit
+/// state: a half-typed "1" must stay "1" until save, not be reinterpreted as a
+/// size. Comparing it against the committed `config.fontSize` therefore renders
+/// that number with `configFontSizeText` at the point of comparison -- the model
+/// never stores a second copy of it.
 struct PreferencesDraft: Equatable {
     var alertClearMode: AlertClearMode
     var remoteTheme: String  // raw text from the field; may have whitespace or be empty
-    var theme: String?       // nil = use Ghostty default (remove key from config)
-    var fontSize: String?    // nil = use Ghostty default (remove key from config)
+    var theme: String?       // nil = no `theme` key; use the catalog default
+    var fontSize: String?    // nil = no `fontSize` key; use the built-in default
+    var fontFamily: String?  // nil = use the system monospace font (remove key from config)
+    var copyOnSelect: Bool
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
@@ -193,14 +217,24 @@ struct AppModel: Equatable {
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
+    // The canonical installed family `config.fontFamily` resolved to, or nil for the
+    // system monospace font. Ephemeral: re-derived from disk on every config apply,
+    // never snapshotted. The core cannot compute it (that is a CoreText question), so
+    // the impure caller injects it alongside the config it came from -- which is also
+    // why "the configured font is missing" is derived from the pair rather than stored:
+    // a second copy of the requested name could drift from `config`.
+    var resolvedFontFamily: String? = nil
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
-    var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
+    // The font families installed on this machine, injected when the preferences
+    // panel opens and dropped when it closes. Ephemeral and panel-scoped: the
+    // syntax-only core never queries CoreText and cannot enumerate them, and the
+    // catalog is deliberately a snapshot per open rather than a live view.
+    var installedFontFamilies: [String] = []
     var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
-    var ghosttyConfigGeneration: Int = 0  // ephemeral -- bumps when Ghostty base config reloads
 
     /// Whether any group holds at least one tab. Short-circuits on the first
     /// non-empty group without materializing `groups.flatMap(\.tabs)`, which
@@ -273,11 +307,6 @@ enum RenameTarget: Equatable {
 /// multi-selection; mirroring either here would be dead weight no pass reads.
 struct ViewLocalState {
     var sidebarRenameTarget: RenameTarget?
-}
-
-enum RestoreCommandBehavior: String, Equatable {
-    case prefill
-    case execute
 }
 
 // MARK: - Init Snapshot Types
@@ -395,9 +424,12 @@ struct PaneSnapshot: Codable {
     let cwd: String?
     let launch: PaneLaunchSnapshot?
     var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
-    let theme: String?       // raw ghostty theme name; nil = default
+    let theme: String?       // raw catalog theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
     var agentSession: AgentSessionSnapshot? = nil  // nil for backward compat; raw recovery-only DTO
+    // Absent for an unzoomed pane, so a pane at the configured size persists
+    // exactly as it did before per-pane zoom existed.
+    var fontSizeSteps: Int? = nil
 }
 
 struct PaneLaunchSnapshot: Codable {
@@ -422,7 +454,7 @@ func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> App
 /// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
     // Panes, groups, tabs, and splits share one UUID namespace. A leaf pane id
-    // colliding with any other domain's id is rejected -- surfaces / searchState /
+    // colliding with any other domain's id is rejected -- sessions / searchState /
     // lastNotificationTime / updatePane are all id-keyed, so a dup would
     // reintroduce exactly the drift this refactor removes.
     var allIds = Set<UUID>()
@@ -547,9 +579,9 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
     )
 }
 
-/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for surface
+/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for session
 /// creation. `home` is the tilde-expansion base; it defaults to the real ambient
-/// home (nil), so the app's surface-creation caller and the restore builder both
+/// home (nil), so the app's session-creation caller and the restore builder both
 /// expand against the live home unless a test pins one.
 func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: String?, command: String?) {
     let h = home ?? CoreEnv.live.homeDirectory()
@@ -609,6 +641,10 @@ private func parseSplitNode(
         // the returned paneSnapshots map (the restore replay/scrollback source).
         let expandedCwd = resolveLaunch(ps, home: env.homeDirectory()).cwd
         var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        // A hand-edited or corrupt step count is bounded here rather than at
+        // projection, so the restored pane responds to the next adjustment
+        // exactly as one the user zoomed to that bound would.
+        paneModel.fontSizeSteps = clampedPaneFontSizeSteps(ps.fontSizeSteps ?? 0)
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in
                 guard let uuid = UUID(uuidString: ts.id) else { return nil }

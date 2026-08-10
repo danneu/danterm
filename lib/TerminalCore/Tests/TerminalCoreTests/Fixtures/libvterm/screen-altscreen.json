@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/60screen_ascii.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Altscreen",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 6, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "P" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "P     \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1049h" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "      \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[2K\u001b[HA" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A     \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1049l" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "P     \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10"
+  ],
+  "background": "#000000",
+  "cursor": "#13a10e",
+  "cursorText": "#000000",
+  "foreground": "#13a10e",
+  "name": "Retro",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#000000"
+}

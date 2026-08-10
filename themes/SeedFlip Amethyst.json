@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#d7d1cb",
+    "#bd0f0f",
+    "#0fbd49",
+    "#bda00f",
+    "#0f58bd",
+    "#bd0fbd",
+    "#0fbdbd",
+    "#0e0519",
+    "#b5aba0",
+    "#ee2b2b",
+    "#12d452",
+    "#d4b312",
+    "#2b7cee",
+    "#ee2bee",
+    "#05c8c8",
+    "#1a0a2e"
+  ],
+  "background": "#f8f7f6",
+  "cursor": "#635bff",
+  "cursorText": "#1a0a2e",
+  "foreground": "#1a0a2e",
+  "name": "SeedFlip Amethyst",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#1a0a2e"
+}

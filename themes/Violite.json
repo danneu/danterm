@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#241c36",
+    "#ec7979",
+    "#79ecb3",
+    "#ece279",
+    "#a979ec",
+    "#ec79ec",
+    "#79ecec",
+    "#eef4f6",
+    "#56447a",
+    "#ef8f8f",
+    "#9fefbf",
+    "#efe78f",
+    "#b78fef",
+    "#ef8fcf",
+    "#9fefef",
+    "#f8fafc"
+  ],
+  "background": "#241c36",
+  "cursor": "#eef4f6",
+  "cursorText": "#241c36",
+  "foreground": "#eef4f6",
+  "name": "Violite",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#49376d",
+  "selectionForeground": "#eef4f6"
+}

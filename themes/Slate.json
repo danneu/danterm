@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#222222",
+    "#e2a8bf",
+    "#81d778",
+    "#c4c9c0",
+    "#335856",
+    "#a481d3",
+    "#15ab9c",
+    "#02c5e0",
+    "#ffffff",
+    "#ffcdd9",
+    "#beffa8",
+    "#d0ccca",
+    "#7ab0d2",
+    "#c5a7d9",
+    "#8cdfe0",
+    "#e0e0e0"
+  ],
+  "background": "#222222",
+  "cursor": "#87d3c4",
+  "cursorText": "#323232",
+  "foreground": "#35b1d2",
+  "name": "Slate",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0f3754",
+  "selectionForeground": "#2dffc0"
+}

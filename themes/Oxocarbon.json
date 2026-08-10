@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#161616",
+    "#00dfdb",
+    "#00b4ff",
+    "#ff4297",
+    "#00c15a",
+    "#c693ff",
+    "#ff74b8",
+    "#f2f4f8",
+    "#585858",
+    "#00dfdb",
+    "#00b4ff",
+    "#ff4297",
+    "#00c15a",
+    "#c693ff",
+    "#ff74b8",
+    "#f2f4f8"
+  ],
+  "background": "#161616",
+  "cursor": "#ffffff",
+  "cursorText": "#000000",
+  "foreground": "#f2f4f8",
+  "name": "Oxocarbon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#393939",
+  "selectionForeground": "#626262"
+}

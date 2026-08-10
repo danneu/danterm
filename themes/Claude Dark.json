@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#888681",
+    "#d47563",
+    "#9aca86",
+    "#e8c96b",
+    "#6a9bcc",
+    "#9b87f5",
+    "#3cbe8c",
+    "#e2e1da",
+    "#a6a59b",
+    "#f4a9a9",
+    "#a8d166",
+    "#fab319",
+    "#9fc5f4",
+    "#f3aac5",
+    "#79d7b3",
+    "#efeeeb"
+  ],
+  "background": "#262624",
+  "cursor": "#d97757",
+  "cursorText": "#262624",
+  "foreground": "#e5e4e1",
+  "name": "Claude Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#363634",
+  "selectionForeground": "#e5e4e1"
+}

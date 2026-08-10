@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#272822",
+    "#f92672",
+    "#a6e22e",
+    "#e6db74",
+    "#fd971f",
+    "#ae81ff",
+    "#66d9ef",
+    "#fdfff1",
+    "#6e7066",
+    "#f92672",
+    "#a6e22e",
+    "#e6db74",
+    "#fd971f",
+    "#ae81ff",
+    "#66d9ef",
+    "#fdfff1"
+  ],
+  "background": "#272822",
+  "cursor": "#c0c1b5",
+  "cursorText": "#8d8e82",
+  "foreground": "#fdfff1",
+  "name": "Monokai Classic",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#57584f",
+  "selectionForeground": "#fdfff1"
+}

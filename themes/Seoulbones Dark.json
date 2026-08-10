@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#4b4b4b",
+    "#e388a3",
+    "#98bd99",
+    "#ffdf9b",
+    "#97bdde",
+    "#a5a6c5",
+    "#6fbdbe",
+    "#dddddd",
+    "#797172",
+    "#eb99b1",
+    "#8fcd92",
+    "#ffe5b3",
+    "#a2c8e9",
+    "#b2b3da",
+    "#6bcacb",
+    "#a8a8a8"
+  ],
+  "background": "#4b4b4b",
+  "cursor": "#e2e2e2",
+  "cursorText": "#4b4b4b",
+  "foreground": "#dddddd",
+  "name": "Seoulbones Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#777777",
+  "selectionForeground": "#dddddd"
+}

@@ -1,18 +1,55 @@
 #!/usr/bin/env bash
-# Smoke-test the bundled danterm CLI against a running DanTerm Dev app.
+# Smoke-test the bundled danterm CLI against an isolated development slot.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-APP_NAME="DanTerm Dev"
-APP_PATH="$HOME/Applications/$APP_NAME.app"
-CLI_PATH="$APP_PATH/Contents/Helpers/danterm"
+CLI_PATH="$SCRIPT_DIR/.build/DanTerm Dev.app/Contents/Helpers/danterm"
+launch_output="$(mktemp)"
+launch_error="$(mktemp)"
+smoke_output="$(mktemp)"
+smoke_error="$(mktemp)"
+launcher_pid=""
 
-if [[ "${DANTERM_CLI_TEST_ALLOW_APP_CONTROL:-}" != "1" ]]; then
-    echo "Refusing to launch or quit $APP_NAME without DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1" >&2
-    exit 2
-fi
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [[ "$launcher_pid" =~ ^[0-9]+$ ]]; then
+        kill -TERM "$launcher_pid" 2>/dev/null || true
+        wait "$launcher_pid" 2>/dev/null || true
+    fi
+    rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error"
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
 
-"$SCRIPT_DIR/dev-build.sh"
+python3 "$SCRIPT_DIR/scripts/dev-slot-launcher.py" >"$launch_output" 2>"$launch_error" &
+launcher_pid=$!
+handle=""
+for _ in $(seq 1 180); do
+    if [[ -s "$launch_output" ]]; then
+        handle="$(tail -1 "$launch_output")"
+        printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 && break
+    fi
+    kill -0 "$launcher_pid" 2>/dev/null || {
+        echo "DanTerm slot launcher exited before emitting a handle" >&2
+        cat "$launch_error" >&2
+        exit 1
+    }
+    sleep 1
+done
+printf '%s\n' "$handle" | jq -e . >/dev/null 2>&1 || {
+    echo "DanTerm slot launcher did not emit a handle" >&2
+    cat "$launch_error" >&2
+    exit 1
+}
+socket="$(printf '%s\n' "$handle" | jq -er '.socketPath')"
+bundle_id="$(printf '%s\n' "$handle" | jq -er '.bundleId')"
+reported_pid="$(printf '%s\n' "$handle" | jq -er '.pid')"
+slot="$(printf '%s\n' "$handle" | jq -er '.slot')"
+[[ "$slot" -ge 1 && "$slot" -le 8 ]]
+[[ "$bundle_id" == "com.danneu.danterm-dev.$slot" ]]
+[[ "$reported_pid" == "$launcher_pid" ]]
+[[ "$socket" == "$HOME/Library/Caches/$bundle_id/control.sock" ]]
 
 # Help-text smoke tests. These run against the freshly built helper but
 # do not require the app to be running -- help is local arg handling.
@@ -51,6 +88,7 @@ grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
 grep -qE '^ *doctor +Check DanTerm integration health' "$err"
 ! grep -qF 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
+grep -qF 'danterm [--socket <path>] <command> [args]' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
 ! grep -qF 'DANTERM_TAB' "$err"
@@ -74,6 +112,7 @@ for help_arg in help --help -h; do
     grep -qE '^ *doctor +Check DanTerm integration health' "$out"
     ! grep -qF 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
+    grep -qF 'danterm [--socket <path>] <command> [args]' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
     ! grep -qF 'DANTERM_TAB' "$out"
@@ -114,13 +153,8 @@ grep -qx 'danterm: unknown flag: --bogus' "$err"
 ! grep -qF 'DanTerm is not running' "$out" "$err"
 rm -rf "$doctor_home"
 
-pkill -x "$APP_NAME" 2>/dev/null || true
-open -a "$APP_PATH"
-
-socket=""
 for _ in $(seq 1 30); do
-    socket="$(find "$HOME/Library/Caches/com.danneu.danterm-dev" -name control.sock -type s 2>/dev/null | head -1 || true)"
-    if [[ -n "$socket" ]]; then
+    if [[ -S "$socket" ]]; then
         break
     fi
     sleep 1
@@ -132,14 +166,18 @@ if [[ -z "$socket" ]]; then
 fi
 
 export DANTERM=1
-export DANTERM_SOCK="$socket"
+export DANTERM_SOCK="$launch_output/wrong.sock"
+
+slot_cli() {
+    "$CLI_PATH" --socket "$socket" "$@"
+}
 
 model=""
 pane_id=""
 tab_id=""
 group_id=""
 for _ in $(seq 1 30); do
-    if model="$("$CLI_PATH" ls 2>/dev/null)" \
+    if model="$(slot_cli ls 2>/dev/null)" \
         && tab_id="$(printf '%s\n' "$model" | jq -er '.selectedTabId // empty')" \
         && pane_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[].tabs[] | select(.id == $tab) | .focusedPaneId // empty')" \
         && group_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[] | select([.tabs[].id] | index($tab)) | .id')"; then
@@ -154,37 +192,38 @@ fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
+slot_cli pane tape --pane "$pane_id" | jq -e '.events' >/dev/null
 
-info="$("$CLI_PATH" pane info --pane "$pane_id")"
+info="$(slot_cli pane info --pane "$pane_id")"
 printf '%s\n' "$info" | jq -e \
     --arg pane "$pane_id" \
     --arg tab "$tab_id" \
     --arg group "$group_id" \
     '.pane.id == $pane and .tab.id == $tab and .group.id == $group' >/dev/null
 
-"$CLI_PATH" tab rename --tab "$tab_id" test123
-"$CLI_PATH" ls | jq -e \
+slot_cli tab rename --tab "$tab_id" test123
+slot_cli ls | jq -e \
     --arg tab "$tab_id" \
     '.groups[].tabs[] | select(.id == $tab and .customTitle == "test123")' >/dev/null
 
-"$CLI_PATH" tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
-"$CLI_PATH" tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
-close_id="$("$CLI_PATH" tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
-"$CLI_PATH" tab close --tab "$close_id"
-"$CLI_PATH" ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
-split_pane_id="$("$CLI_PATH" pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
+slot_cli tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
+slot_cli tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
+close_id="$(slot_cli tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
+slot_cli tab close --tab "$close_id"
+slot_cli ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
+split_pane_id="$(slot_cli pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
 
-"$CLI_PATH" theme set --pane "$pane_id" SmokeTheme
-"$CLI_PATH" theme set --pane "$pane_id" --clear
+slot_cli theme set --pane "$pane_id" SmokeTheme
+slot_cli theme set --pane "$pane_id" --clear
 
-todo_id="$("$CLI_PATH" todo add 'ship cli' | jq -r '.todo.id')"
-"$CLI_PATH" todo list --pane "$pane_id" | jq -e --arg id "$todo_id" '.todos[] | select(.id == $id)' >/dev/null
-"$CLI_PATH" todo edit --pane "$pane_id" "$todo_id" 'ship cli v2'
-"$CLI_PATH" todo "done" --pane "$pane_id" "$todo_id"
-"$CLI_PATH" todo delete --pane "$pane_id" "$todo_id"
+todo_id="$(slot_cli todo add 'ship cli' | jq -r '.todo.id')"
+slot_cli todo list --pane "$pane_id" | jq -e --arg id "$todo_id" '.todos[] | select(.id == $id)' >/dev/null
+slot_cli todo edit --pane "$pane_id" "$todo_id" 'ship cli v2'
+slot_cli todo "done" --pane "$pane_id" "$todo_id"
+slot_cli todo delete --pane "$pane_id" "$todo_id"
 
-/usr/bin/python3 - "$DANTERM_SOCK" <<'PY'
+/usr/bin/python3 - "$socket" <<'PY'
 import json
 import socket
 import sys
@@ -207,13 +246,15 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         raise SystemExit("no response for unknown method")
 PY
 
-pkill -x "$APP_NAME" 2>/dev/null || true
+kill -TERM "$launcher_pid"
+wait "$launcher_pid" 2>/dev/null || true
+launcher_pid=""
 for _ in $(seq 1 10); do
     [[ ! -S "$socket" ]] && break
     sleep 0.5
 done
-if env -u DANTERM_PANE "$CLI_PATH" ls >/tmp/danterm-cli-smoke.out 2>/tmp/danterm-cli-smoke.err; then
+if env -u DANTERM_PANE "$CLI_PATH" --socket "$socket" ls >"$smoke_output" 2>"$smoke_error"; then
     echo "danterm ls unexpectedly succeeded after app quit" >&2
     exit 1
 fi
-grep -qx 'danterm: DanTerm is not running' /tmp/danterm-cli-smoke.err
+grep -qx 'danterm: DanTerm is not running' "$smoke_error"

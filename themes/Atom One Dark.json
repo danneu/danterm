@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#21252b",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#abb2bf",
+    "#767676",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#abb2bf"
+  ],
+  "background": "#21252b",
+  "cursor": "#abb2bf",
+  "cursorText": "#21252b",
+  "foreground": "#abb2bf",
+  "name": "Atom One Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#323844",
+  "selectionForeground": "#abb2bf"
+}

@@ -18,16 +18,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify XCFramework exists
-if [ ! -d "$SCRIPT_DIR/lib/GhosttyKit.xcframework" ]; then
-    echo "Error: GhosttyKit.xcframework not found. Run ./build-lib.sh first."
-    exit 1
-fi
-
 # Compile with SwiftPM (release mode, optimized)
 echo "Compiling (release)..."
 swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --configuration release
 BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --configuration release --show-bin-path)
+
+# The PTY session bootstrap is its own package and its own executable: the Swift
+# terminal backend spawns it per session and reports itself not ready when the
+# bundled copy is missing, so it must be built and bundled on the release path
+# exactly as dev-build.sh does.
+swift build --package-path "$SCRIPT_DIR/lib/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --configuration release --product PTYSessionBootstrap
+BOOTSTRAP_BIN_PATH=$(swift build --package-path "$SCRIPT_DIR/lib/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --configuration release --show-bin-path)
 
 # Assemble app bundle
 APP_PATH="$SCRIPT_DIR/build/DanTerm.app"
@@ -37,14 +42,18 @@ cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm"
 mkdir -p "$APP_PATH/Contents/Helpers"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 chmod +x "$APP_PATH/Contents/Helpers/danterm"
+cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
+chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 
 # Defense in depth. A case-insensitive filesystem can collapse paths
 # that differ only by case, and a copy-source mistake can write the CLI
 # bytes into both files. Either produces a signed bundle that will not launch.
 GUI="$APP_PATH/Contents/MacOS/DanTerm"
 CLI="$APP_PATH/Contents/Helpers/danterm"
-GUI_INODE=$(stat -f %i "$GUI")
-CLI_INODE=$(stat -f %i "$CLI")
+# /usr/bin/stat, not stat: a nix profile earlier on PATH shadows it with GNU
+# coreutils, where -f asks for filesystem info and this guard aborts the build.
+GUI_INODE=$(/usr/bin/stat -f %i "$GUI")
+CLI_INODE=$(/usr/bin/stat -f %i "$CLI")
 if [ "$GUI_INODE" = "$CLI_INODE" ]; then
     echo "Error: GUI and CLI bundle paths collided (same inode)" >&2
     exit 1
@@ -75,25 +84,28 @@ for pair in \
     "integrations/claude-code/claude-notify-osc777.sh danterm-claude-notify-osc777" \
     "integrations/claude-code/danterm-agent-session.sh danterm-claude-agent-session" \
     "integrations/codex/danterm-agent-session.sh danterm-codex-agent-session"; do
+    # Intentional word splitting: each entry is a "source destination" pair.
+    # shellcheck disable=SC2086
     set -- $pair
     cp "$SCRIPT_DIR/$1" "$APP_PATH/Contents/Resources/danterm-hooks/$2"
     chmod +x "$APP_PATH/Contents/Resources/danterm-hooks/$2"
     test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
 done
 
-# Bundle ghostty themes (CI caches to lib/ghostty-themes; local builds have .ghostty-src)
-THEMES_SRC="$SCRIPT_DIR/lib/ghostty-themes"
-if [ ! -d "$THEMES_SRC" ]; then
-    THEMES_SRC="$SCRIPT_DIR/.ghostty-src/zig-out/share/ghostty/themes"
-fi
-mkdir -p "$APP_PATH/Contents/Resources/ghostty"
-cp -R "$THEMES_SRC" "$APP_PATH/Contents/Resources/ghostty/themes"
+# Ship the integration tree wholesale, not just the three entry points:
+# danterm.bash sources vendor/bash-preexec.sh relative to its own BASH_SOURCE,
+# so a bundle missing vendor/ breaks on the very line the README tells bash
+# users to source. The explicit asset check mirrors the danterm-hooks guard
+# above -- a silently thinned copy must fail the build, not the user's shell.
+rm -rf "$APP_PATH/Contents/Resources/shell-integration"
+cp -R "$SCRIPT_DIR/integrations/shell-integration" \
+    "$APP_PATH/Contents/Resources/shell-integration"
+for asset in danterm.zsh danterm.bash danterm.fish \
+    vendor/bash-preexec.sh vendor/bash-preexec.LICENSE vendor/bash-preexec.PROVENANCE; do
+    test -r "$APP_PATH/Contents/Resources/shell-integration/$asset" \
+        || { echo "Error: shell integration asset $asset not bundled" >&2; exit 1; }
+done
 
-THEME_COUNT=$(ls "$APP_PATH/Contents/Resources/ghostty/themes" | wc -l | tr -d ' ')
-echo "Bundled $THEME_COUNT themes"
-if [ "$THEME_COUNT" -eq 0 ]; then
-    echo "Error: no themes bundled"
-    exit 1
-fi
+"$SCRIPT_DIR/scripts/bundle-theme-resources.sh" "$SCRIPT_DIR" "$APP_PATH"
 
 echo "Built: $APP_PATH"

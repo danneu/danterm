@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#33303b",
+    "#87404f",
+    "#74934e",
+    "#ae835a",
+    "#615772",
+    "#854b64",
+    "#625464",
+    "#c0a79a",
+    "#5c5865",
+    "#87404f",
+    "#74934e",
+    "#ae835a",
+    "#615772",
+    "#854b64",
+    "#625464",
+    "#c0a79a"
+  ],
+  "background": "#312e39",
+  "cursor": "#c0a79a",
+  "cursorText": "#312e39",
+  "foreground": "#c0a79a",
+  "name": "urban",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c0a79a",
+  "selectionForeground": "#312e39"
+}

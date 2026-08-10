@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#a03050",
+    "#40d080",
+    "#e09040",
+    "#3060b0",
+    "#603090",
+    "#0090c0",
+    "#dbded8",
+    "#685656",
+    "#c06060",
+    "#90d050",
+    "#e0d000",
+    "#00b0c0",
+    "#801070",
+    "#20b0c0",
+    "#ffffff"
+  ],
+  "background": "#040404",
+  "cursor": "#e0d000",
+  "cursorText": "#000000",
+  "foreground": "#feffff",
+  "name": "12-bit Rainbow",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#606060",
+  "selectionForeground": "#ffffff"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#324a4d",
+    "#e66533",
+    "#49e9a6",
+    "#e4b781",
+    "#49ace9",
+    "#df769b",
+    "#49d6e9",
+    "#b2cacd",
+    "#47686c",
+    "#e97749",
+    "#60ebb1",
+    "#e69533",
+    "#60b6eb",
+    "#e798b3",
+    "#60dbeb",
+    "#c1d4d7"
+  ],
+  "background": "#052529",
+  "cursor": "#b2cacd",
+  "cursorText": "#052529",
+  "foreground": "#b2cacd",
+  "name": "Noctis",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0f3a3f",
+  "selectionForeground": "#b2cacd"
+}

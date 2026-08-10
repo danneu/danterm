@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1a1a1a",
+    "#cc372e",
+    "#26a439",
+    "#cdac08",
+    "#0869cb",
+    "#9647bf",
+    "#479ec2",
+    "#98989d",
+    "#464646",
+    "#ff453a",
+    "#32d74b",
+    "#e5bc00",
+    "#0a84ff",
+    "#bf5af2",
+    "#69c9f2",
+    "#ffffff"
+  ],
+  "background": "#feffff",
+  "cursor": "#98989d",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Apple System Colors Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#abd8ff",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#11151c",
+    "#ea6c73",
+    "#7fd962",
+    "#f9af4f",
+    "#53bdfa",
+    "#cda1fa",
+    "#90e1c6",
+    "#c7c7c7",
+    "#686868",
+    "#f07178",
+    "#aad94c",
+    "#ffb454",
+    "#59c2ff",
+    "#d2a6ff",
+    "#95e6cb",
+    "#ffffff"
+  ],
+  "background": "#0b0e14",
+  "cursor": "#e6b450",
+  "cursorText": "#0b0e14",
+  "foreground": "#bfbdb6",
+  "name": "Ayu",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#409fff",
+  "selectionForeground": "#0b0e14"
+}

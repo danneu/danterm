@@ -523,10 +523,10 @@ import Testing
     @Test("closePane closing selected tab removes container and shows fallback")
     func closePaneClosingSelectedTabRemovesContainerShowsFallback() {
         // Intent: closing the last pane of the selected tab selects the
-        //   fallback tab; the surface-existence net tears down only the
+        //   fallback tab; the session-existence net tears down only the
         //   closed pane.
         // Why it exists: pins the "selected-tab closes -> fallback shown"
-        //   path with the surface teardown invariant.
+        //   path with the session teardown invariant.
         // Scenario: spec-first selected-tab close.
         var model = makeModel()
         createTab(&model)
@@ -538,8 +538,8 @@ import Testing
         update(&model, .closePane(paneId: closingPaneId))
 
         #expect(model.selectedTabId == fallbackTabId, "closing selected tab should select fallback")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([closingPaneId]),
-            "closed tab's pane surface is torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == Set([closingPaneId]),
+            "closed tab's pane session is torn down")
     }
 
     // MARK: - Zoom Tests
@@ -702,12 +702,12 @@ import Testing
         #expect(fx.model.groups[0].tabs[0] == selectedBefore, "selected tab must be untouched")
     }
 
-    @Test("surfaceClosed for a background-tab pane removes it and preserves the selected tab's zoom")
-    func surfaceClosedBackgroundTabPaneIsRemoved() {
-        // Intent: .surfaceClosed for a pane in a non-selected tab removes the
+    @Test("sessionClosed for a background-tab pane removes it and preserves the selected tab's zoom")
+    func sessionClosedBackgroundTabPaneIsRemoved() {
+        // Intent: .sessionClosed for a pane in a non-selected tab removes the
         //   pane from its own tab's tree and does not clear the selected
         //   tab's isZoomed.
-        // Why it exists: regression test for the ghost-pane bug. .surfaceClosed
+        // Why it exists: regression test for the ghost-pane bug. .sessionClosed
         //   routes into .closePane, which resolved selectedTab(in:); for a
         //   background-tab pane removeLeaf missed, so the dead pane stayed in
         //   its real tab as a ghost and the selected tab's isZoomed was
@@ -718,11 +718,11 @@ import Testing
         //   zoom state.
         var fx = makeTwoTabFixture()
 
-        update(&fx.model, .surfaceClosed(paneId: fx.a1))
+        update(&fx.model, .sessionClosed(paneId: fx.a1))
 
         #expect(fx.model.pane(fx.a1) == nil, "the dead pane must leave its tab's tree, not linger as a ghost")
         let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
-        #expect(tabB.isZoomed == true, "selected tab's zoom must survive a background-tab surface close")
+        #expect(tabB.isZoomed == true, "selected tab's zoom must survive a background-tab session close")
     }
 
     @Test("toggleZoomPane(paneId:) toggles the pane's own tab; nil keeps selected-tab behavior")
@@ -979,7 +979,7 @@ import Testing
     @Test("testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus")
     func testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus() {
         // Intent: background split on the selected tab adds a pane,
-        //   leaves focus on the existing pane, and emits createSurface +
+        //   leaves focus on the existing pane, and emits createSession +
         //   scheduleCheckpoint without makeFirstResponder.
         // Why it exists: pins the background-split contract.
         // Scenario: spec-first background-split-selected.
@@ -1001,11 +1001,11 @@ import Testing
         #expect(tab.focusedPaneId == existingFocusedPaneId, "background split should preserve focused pane")
         #expect(model.selectedTabId == tabId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
-            if case .createSurface(let paneId, _, _, _, _) = $0 {
+            if case .createSession(let paneId, _, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
-        }, "should create a surface for the new pane")
+        }, "should create a session for the new pane")
         #expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -1046,11 +1046,11 @@ import Testing
         #expect(tabB.focusedPaneId == tabBFocusedPaneId, "background split should preserve target tab focus")
         #expect(model.selectedTabId == tabAId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
-            if case .createSurface(let paneId, _, _, _, _) = $0 {
+            if case .createSession(let paneId, _, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
-        }, "should create a surface for the new pane")
+        }, "should create a session for the new pane")
         #expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -1138,10 +1138,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
 
@@ -1156,7 +1156,7 @@ import Testing
     func testMovePaneToTabBasicCrossTab() {
         // Intent: movePaneToTab reparents the pane to the target tab,
         //   selects the target, focuses the moved pane, clears zoom, and
-        //   removes an emptied source tab; surface-existence tears down
+        //   removes an emptied source tab; session-existence tears down
         //   nothing.
         // Why it exists: pins the full cross-tab move contract.
         // Scenario: spec-first cross-tab move -- two single-pane tabs;
@@ -1186,8 +1186,8 @@ import Testing
         #expect(targetTab.focusedPaneId == paneA, "should focus moved pane")
         #expect(targetTab.isZoomed == false, "target zoom should be cleared")
 
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
-            "a cross-tab move tears down no surfaces")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).isEmpty,
+            "a cross-tab move tears down no sessions")
         #expect(tabById(tab1Id, in: model) == nil, "emptied source tab is removed")
 
         #expect(hasEffect(commands) {
@@ -1245,10 +1245,10 @@ import Testing
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
 
         createTab(&model)
@@ -1323,12 +1323,12 @@ import Testing
         #expect(targetPanes.contains(paneB))
     }
 
-    @Test("testMovePaneToTabDefocusesOldTabSurfaces")
-    func testMovePaneToTabDefocusesOldTabSurfaces() {
+    @Test("testMovePaneToTabDefocusesOldTabSessions")
+    func testMovePaneToTabDefocusesOldTabSessions() {
         // Intent: movePaneToTab into an already-selected target defocuses
         //   the target's previous focused pane.
         // Why it exists: pins the focus-handoff side effect.
-        // Scenario: spec-first defocus-old-surfaces.
+        // Scenario: spec-first defocus-old-sessions.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -1340,7 +1340,7 @@ import Testing
         let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         #expect(hasEffect(commands) {
-            if case .focusSurface(let pid, let focused) = $0, pid == paneB, !focused { return true }
+            if case .focusSession(let pid, let focused) = $0, pid == paneB, !focused { return true }
             return false
         }, "should defocus old tab's panes")
     }
@@ -1630,10 +1630,10 @@ import Testing
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         let groupId = model.groups[0].id
 

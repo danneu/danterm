@@ -11,25 +11,25 @@ import Foundation
 import DanTermProtocol
 
 enum Command {
-    // Surface
-    case createSurface(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
-    // Surface *destruction* is a projection (reconcileSurfaceExistence tears down surfaces
-    // for panes gone from model.allPaneIds), so there is no destroySurface command.
-    // Paste path (ghostty_surface_text). Strips control bytes and applies
-    // bracketed-paste mode if active. Used by direct IPC callers that send
-    // the top-level `text` field.
+    // Session
+    case createSession(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
+    // Session *destruction* is a projection (reconcileSessionExistence tears down sessions
+    // for panes gone from model.allPaneIds), so there is no destroy-session command.
+    // The paste path, taken by IPC's top-level `text` field. Delivered through the
+    // same safe-paste policy as the clipboard: control bytes stripped, bracketed-paste
+    // markers applied when the child asked for them. Deliberately distinct from
+    // sendInputText -- an untrusted blob must not be able to fake keystrokes.
     case sendText(paneId: PaneId, text: String)
-    // Structured-input text run, dispatched as a key event with keycode=0
-    // through ghostty_surface_key. Bypasses paste-stripping and bracketed
-    // paste so vim/htop see characters as if typed.
+    // The structured-input path, taken by IPC's `input` array alongside sendInputKey.
+    // Delivered raw, with no stripping and no paste brackets, because the caller is
+    // scripting a keyboard: vim and htop must see the characters as if typed.
     case sendInputText(paneId: PaneId, text: String)
-    // Single named/letter key event with optional modifiers, dispatched
-    // through ghostty_surface_key so escape sequences (arrows, F-keys, C-c,
-    // Esc) actually reach the PTY.
+    // One named/letter key with modifiers, encoded by the terminal's key encoder so
+    // arrows, F-keys, C-c, and Esc reach the PTY as real escape sequences.
     case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods)
 
     // Focus
-    case focusSurface(paneId: PaneId, focused: Bool)
+    case focusSession(paneId: PaneId, focused: Bool)
     case makeFirstResponder(paneId: PaneId)
 
     // View
@@ -46,6 +46,9 @@ enum Command {
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
+    case readPaneRowStructure(reqId: UUID, paneId: PaneId)
+    case dumpPaneTape(reqId: UUID, paneId: PaneId)
+    case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
@@ -55,14 +58,11 @@ enum Command {
     case showCloseTabsConfirmation(tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)
     case terminate
     case activateApp
-    case setAppFocus(Bool)
     case dismissAlertsPopover
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Config persistence
-    case saveDanTermConfigKey(key: String, value: String)
-    case removeDanTermConfigKey(key: String)
-    case reloadGhosttyConfig
+    case saveDanTermConfig(DanTermConfig)
 
     // Persistence — triggers a debounced write of the model snapshot to disk.
     // Returned by state-mutating update() branches so the recovery file stays current.
@@ -90,23 +90,23 @@ extension Command {
     /// the reconciler creates. Exactly `makeFirstResponder` and `focusSearchField`:
     /// `reconcileContainers` mounts a pane's `TerminalView` during reconcile (Stage 8),
     /// and `reconcilePaneChrome` builds the search field, so neither exists until after
-    /// reconcile. `focusSurface` stays pre-reconcile: it acts on an already-existing
-    /// surface, and deferring it is actively wrong -- a foreground createTab create-failure
-    /// re-enters send() and re-focuses the fallback, which a deferred focusSurface(old,false)
+    /// reconcile. `focusSession` stays pre-reconcile: it acts on an already-existing
+    /// session, and deferring it is actively wrong -- a foreground createTab create-failure
+    /// re-enters send() and re-focuses the fallback, which a deferred focusSession(old,false)
     /// would then defocus. (makeFirstResponder/focusSearchField safely no-op in that failure
-    /// path: their pane was removed, so surfaces[id] is nil.) Exhaustive with no `default`
+    /// path: their pane was removed, so sessions[id] is nil.) Exhaustive with no `default`
     /// so a new case cannot be added without classifying it.
     var isPostReconcile: Bool {
         switch self {
         case .makeFirstResponder, .focusSearchField:
             return true
-        case .createSurface, .sendText, .sendInputText, .sendInputKey,
-             .focusSurface, .exportState, .ipcReply, .ipcError,
-             .readPaneText, .sendNotification,
+        case .createSession, .sendText, .sendInputText, .sendInputKey,
+             .focusSession, .exportState, .ipcReply, .ipcError,
+             .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
+             .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
-             .setAppFocus, .dismissAlertsPopover,
-             .saveDanTermConfigKey, .removeDanTermConfigKey,
-             .reloadGhosttyConfig, .scheduleCheckpoint, .sendStartSearch,
+             .dismissAlertsPopover,
+             .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
              .showClosePaneConfirmation:

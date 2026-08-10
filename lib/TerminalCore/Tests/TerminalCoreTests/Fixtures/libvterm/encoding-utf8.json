@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/03encoding_utf8.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Low; 2 byte; 3 byte; 4 byte; Early termination; Early restart; Overlong; UTF-16 Surrogates; Split write",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery."
+    ]
+  },
+  "initial": { "columns": 16, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "123" },
+    { "type": "expect", "expect": { "viewportText": "123             " } },
+    { "type": "feed", "base64": "G2PCgN+/" },
+    { "type": "expect", "expect": { "viewportText": "\u0080\u07ff              " } },
+    { "type": "feed", "base64": "G2PgoIDvv70=" },
+    { "type": "expect", "expect": { "viewportText": "\u0800\ufffd              " } },
+    { "type": "feed", "base64": "G2PwkICA97+/vw==" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "\ud800\udc00\ufffd\ufffd\ufffd\ufffd           ",
+        "cursor": { "row": 0, "column": 5, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "base64": "G2PCIeAh4KAh8CHwkCHwkIAh" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!    " } },
+    { "type": "feed", "base64": "G2PCwpDgwpDwkMKQ" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\u0090\ufffd\u0090\ufffd\u0090          " } },
+    { "type": "feed", "base64": "G2PAgMG/" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd            " } },
+    { "type": "feed", "base64": "G2PggIDgn78=" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
+    { "type": "feed", "base64": "G2PwgICA8I+/vw==" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd        " } },
+    { "type": "feed", "base64": "G2PtoIDtv78=" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
+    { "type": "feed", "base64": "G2PC" },
+    { "type": "feed", "base64": "oA==" },
+    { "type": "feed", "base64": "4KA=" },
+    { "type": "feed", "base64": "gA==" },
+    { "type": "feed", "base64": "8JCA" },
+    { "type": "feed", "base64": "gA==" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 0, "column": 0, "scalars": "\u00a0" },
+          { "row": 0, "column": 1, "scalars": "\u0800" },
+          { "row": 0, "column": 2, "scalars": "\ud800\udc00" }
+        ],
+        "cursor": { "row": 0, "column": 3, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "base64": "G2ODmUE=" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffdA             " } }
+  ]
+}

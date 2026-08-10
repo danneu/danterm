@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1f0000",
+    "#b00d0d",
+    "#b00d0d",
+    "#b00d0d",
+    "#b00d0d",
+    "#b00d0d",
+    "#b00d0d",
+    "#fafafa",
+    "#554040",
+    "#ff1111",
+    "#ff1010",
+    "#ff1010",
+    "#ff1010",
+    "#ff1010",
+    "#ff1010",
+    "#fefefe"
+  ],
+  "background": "#200101",
+  "cursor": "#b00d0d",
+  "cursorText": "#ffffff",
+  "foreground": "#b10e0e",
+  "name": "HaX0R R3D",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ebc1ff",
+  "selectionForeground": "#979797"
+}

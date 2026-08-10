@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#011627",
+    "#ef5350",
+    "#22da6e",
+    "#addb67",
+    "#82aaff",
+    "#c792ea",
+    "#21c7a8",
+    "#ffffff",
+    "#575656",
+    "#ef5350",
+    "#22da6e",
+    "#ffeb95",
+    "#82aaff",
+    "#c792ea",
+    "#7fdbca",
+    "#ffffff"
+  ],
+  "background": "#011627",
+  "cursor": "#7e57c2",
+  "cursorText": "#ffffff",
+  "foreground": "#d6deeb",
+  "name": "Night Owl",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5f7e97",
+  "selectionForeground": "#dfe5ee"
+}

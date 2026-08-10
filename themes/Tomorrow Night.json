@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cc6666",
+    "#b5bd68",
+    "#f0c674",
+    "#81a2be",
+    "#b294bb",
+    "#8abeb7",
+    "#ffffff",
+    "#4c4c4c",
+    "#cc6666",
+    "#b5bd68",
+    "#f0c674",
+    "#81a2be",
+    "#b294bb",
+    "#8abeb7",
+    "#ffffff"
+  ],
+  "background": "#1d1f21",
+  "cursor": "#c5c8c6",
+  "cursorText": "#1d1f21",
+  "foreground": "#c5c8c6",
+  "name": "Tomorrow Night",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#373b41",
+  "selectionForeground": "#c5c8c6"
+}

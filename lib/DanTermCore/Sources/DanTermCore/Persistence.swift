@@ -1,5 +1,5 @@
 // Model <-> disk: the pure serialization/restore policy, no file I/O. Restore
-// (decode + validate an init file from in-memory Data, restore-command behavior),
+// (decode + validate an init file from in-memory Data),
 // Export (AppModel -> snapshot -> init file, plus scrollback grafting), the
 // checkpoint merge (enriched scrollback grafted into a light restore), and
 // scrollback truncation. Everything is pure value-mapping: the FileManager/Data
@@ -53,37 +53,6 @@ func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> Vali
   )
 }
 
-/// Parse the restore command behavior from CLI arguments.
-/// Defaults to `.prefill` to avoid surprising command execution during restore.
-func restoreCommandBehavior(from arguments: [String]) -> RestoreCommandBehavior {
-  guard let idx = arguments.firstIndex(of: "--restore-commands"),
-    idx + 1 < arguments.count
-  else {
-    return .prefill
-  }
-
-  switch arguments[idx + 1] {
-  case RestoreCommandBehavior.execute.rawValue:
-    return .execute
-  case RestoreCommandBehavior.prefill.rawValue:
-    return .prefill
-  default:
-    return .prefill
-  }
-}
-
-/// Convert saved command metadata into live shell input for restore.
-/// `.prefill` restores the draft command without executing it.
-func restoreInitialInput(for command: String?, behavior: RestoreCommandBehavior) -> String? {
-  guard let command, !command.isEmpty else { return nil }
-  switch behavior {
-  case .prefill:
-    return command
-  case .execute:
-    return command.hasSuffix("\n") ? command : command + "\n"
-  }
-}
-
 // MARK: - Export
 
 func toInitFile(_ model: AppModel, home: String? = nil) -> AppInitFile {
@@ -133,7 +102,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 
 /// Build the PaneSnapshot embedded in a leaf, reading the leaf's PaneModel
 /// directly. Always emits `scrollback: nil`; scrollback is grafted separately
-/// (graftScrollback) from a live-surface read so this stays pure.
+/// (graftScrollback) from a live-session read so this stays pure.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
   let launch: PaneLaunchSnapshot?
@@ -154,6 +123,7 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     theme: pane.theme
   )
   snapshot.todos = todoSnapshots
+  snapshot.fontSizeSteps = pane.fontSizeSteps == 0 ? nil : pane.fontSizeSteps
   snapshot.agentSession = pane.agentSession.map {
     AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
   }
@@ -181,7 +151,7 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
 }
 
 /// Embed scrollback text into a snapshot's tree leaves, keyed by pane id. Pure:
-/// the live-surface read is the separate impure `scrollbackByPaneId()` step in
+/// the live-session read is the separate impure `scrollbackByPaneId()` step in
 /// AppRuntime. Used by both `.exportState` and the enriched checkpoint.
 func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneId: String]) -> AppModelSnapshot {
   AppModelSnapshot(
@@ -248,9 +218,21 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
 
 // MARK: - Scrollback Truncation
 
-/// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.
-/// Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
-func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 400_000) -> String? {
+/// How much scrollback a checkpoint keeps per pane, as one value rather than two loose numbers.
+/// The bounded history read and the truncation it feeds have to agree -- a read that stops short
+/// of what the cut would have kept silently stores less than the pane is owed -- so the call site
+/// hands both the same value and the pairing is structural rather than a convention to remember.
+struct ScrollbackRetention {
+  var maxLines: Int
+  var maxChars: Int
+
+  /// The only policy in use: what an enriched checkpoint reads from each pane and stores.
+  static let checkpoint = ScrollbackRetention(maxLines: 4000, maxChars: 400_000)
+}
+
+/// Truncate scrollback text to the last `keeping.maxLines` lines and `keeping.maxChars`
+/// characters. Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
+func truncateScrollback(_ text: String, keeping: ScrollbackRetention = .checkpoint) -> String? {
   // Strip trailing whitespace
   let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !trimmed.isEmpty else { return nil }
@@ -261,7 +243,7 @@ func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 40
   for i in trimmed.indices.reversed() {
     if trimmed[i] == "\n" {
       newlineCount += 1
-      if newlineCount == maxLines {
+      if newlineCount == keeping.maxLines {
         cutIndex = trimmed.index(after: i)
         break
       }
@@ -270,8 +252,8 @@ func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 40
   var result = cutIndex != nil ? String(trimmed[cutIndex!...]) + "\n" : trimmed + "\n"
 
   // If still over maxChars, take last maxChars breaking at nearest newline
-  if result.count > maxChars {
-    let tail = result.suffix(maxChars)
+  if result.count > keeping.maxChars {
+    let tail = result.suffix(keeping.maxChars)
     if let newlineIdx = tail.firstIndex(of: "\n") {
       result = String(tail[tail.index(after: newlineIdx)...])
     } else {
@@ -280,4 +262,11 @@ func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 40
   }
 
   return result
+}
+
+/// Whether this text would leave anything behind after truncation -- i.e. whether a pane holding
+/// it has scrollback worth checkpointing at all. Named for the question the caller is asking, so
+/// deciding to checkpoint does not read as assembling a checkpoint payload.
+func hasCheckpointableScrollback(_ text: String) -> Bool {
+  truncateScrollback(text) != nil
 }

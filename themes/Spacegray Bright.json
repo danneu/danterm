@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#080808",
+    "#bc5553",
+    "#a0b56c",
+    "#f6c987",
+    "#7baec1",
+    "#b98aae",
+    "#85c9b8",
+    "#d8d8d8",
+    "#626262",
+    "#bc5553",
+    "#a0b56c",
+    "#f6c987",
+    "#7baec1",
+    "#b98aae",
+    "#85c9b8",
+    "#f7f7f7"
+  ],
+  "background": "#2a2e3a",
+  "cursor": "#c6c6c6",
+  "cursorText": "#8c8c8c",
+  "foreground": "#f3f3f3",
+  "name": "Spacegray Bright",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#cacaca",
+  "selectionForeground": "#000000"
+}

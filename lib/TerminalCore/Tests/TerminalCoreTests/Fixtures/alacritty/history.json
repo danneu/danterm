@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/history/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "history",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 105,
+    "rows": 29
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICANIA0NG1swbRtbMjdtG1syNG0bW0obWzA7MzA7MTAxbSBVTCAbWzBtG1swOzM3OzEwMG0gfi/igKYvdGVzdHMvcmVmL2hpc3RvcnkgG1swbRtbMDszMDsxMDFtIGlzc3VlLTEyNDQgG1swbSAbW0sbWz8yMDA0aGYbWzkwbW9yIGkgaW4gezEwMC4uMn07IGRvIGVjaG8gJGk7IGRvbmUbWzM5bRtbMzRECGYbWzM5bW8bWzM5bXIbWzM5bSAbWzM5bWkbWzM5bSAbWzM5bWkbWzM5bW4bWzM5bSAbWzM5bXsbWzM5bTEbWzM5bTAbWzM5bTAbWzM5bS4bWzM5bS4bWzM5bTIbWzM5bX0bWzM5bTsbWzM5bSAbWzM5bWQbWzM5bW8bWzM5bSAbWzM5bWUbWzM5bWMbWzM5bWgbWzM5bW8bWzM5bSAbWzM5bSQbWzM5bWkbWzM5bTsbWzM5bSAbWzM5bWQbWzM5bW8bWzM5bW4bWzM5bWUbWz8yMDA0bA0NCjEwMA0KOTkNCjk4DQo5Nw0KOTYNCjk1DQo5NA0KOTMNCjkyDQo5MQ0KOTANCjg5DQo4OA0KODcNCjg2DQo4NQ0KODQNCjgzDQo4Mg0KODENCjgwDQo3OQ0KNzgNCjc3DQo3Ng0KNzUNCjc0DQo3Mw0KNzINCjcxDQo3MA0KNjkNCjY4DQo2Nw0KNjYNCjY1DQo2NA0KNjMNCjYyDQo2MQ0KNjANCjU5DQo1OA0KNTcNCjU2DQo1NQ0KNTQNCjUzDQo1Mg0KNTENCjUwDQo0OQ0KNDgNCjQ3DQo0Ng0KNDUNCjQ0DQo0Mw0KNDINCjQxDQo0MA0KMzkNCjM4DQozNw0KMzYNCjM1DQozNA0KMzMNCjMyDQozMQ0KMzANCjI5DQoyOA0KMjcNCjI2DQoyNQ0KMjQNCjIzDQoyMg0KMjENCjIwDQoxOQ0KMTgNCjE3DQoxNg0KMTUNCjE0DQoxMw0KMTINCjExDQoxMA0KOQ0KOA0KNw0KNg0KNQ0KNA0KMw0KMg0KG1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICANIA0NG1swbRtbMjdtG1syNG0bW0obWzA7MzA7MTAxbSBVTCAbWzBtG1swOzM3OzEwMG0gfi/igKYvdGVzdHMvcmVmL2hpc3RvcnkgG1swbRtbMDszMDsxMDFtIGlzc3VlLTEyNDQgG1swbSAbW0sbWz8yMDA0aA=="
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "28                                                                                                       \n27                                                                                                       \n26                                                                                                       \n25                                                                                                       \n24                                                                                                       \n23                                                                                                       \n22                                                                                                       \n21                                                                                                       \n20                                                                                                       \n19                                                                                                       \n18                                                                                                       \n17                                                                                                       \n16                                                                                                       \n15                                                                                                       \n14                                                                                                       \n13                                                                                                       \n12                                                                                                       \n11                                                                                                       \n10                                                                                                       \n9                                                                                                        \n8                                                                                                        \n7                                                                                                        \n6                                                                                                        \n5                                                                                                        \n4                                                                                                        \n3                                                                                                        \n2                                                                                                        \n%                                                                                                        \n UL  ~/\u2026/tests/ref/history  issue-1244                                                                   "
+      }
+    }
+  ]
+}

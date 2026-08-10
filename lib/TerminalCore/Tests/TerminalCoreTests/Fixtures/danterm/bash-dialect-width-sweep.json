@@ -1,0 +1,380 @@
+{
+ "events": [
+  {
+   "base64": "G10xMzM7QTtyZWRyYXc9bGFzdAcbWz8yMDA0aBtdMTMzO1A7az1pBxtbOTBt4pWtG1swbSAbWzkwbXJlcG86G1sxOzM2bWRhbnRlcm0tdGVybWluYWwtZW5naW5lG1swbRtbMzdtG1sxOzMwbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzBtG1s5MG1rOHM6G1sxOzM0bW9yYnN0YWNrG1swbQ0KG1s5MG3ilbAbWzBtIBtbMTszMm0kG1swbSAbXTEzMztCBw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IH",
+   "type": "feed"
+  },
+  {
+   "columns": 99,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 98,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 97,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 96,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 95,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 94,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 93,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 92,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 91,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 90,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 89,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 88,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 87,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 86,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 85,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 84,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 83,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 82,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 81,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 80,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 79,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 78,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 77,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 76,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 75,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 74,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 73,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 72,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 71,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 70,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 69,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 68,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 67,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 66,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 65,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 64,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 63,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 62,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 61,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  },
+  {
+   "columns": 60,
+   "rows": 10,
+   "type": "resize"
+  },
+  {
+   "base64": "DRtbSw0bWzkwbeKVsBtbMG0gG1sxOzMybSQbWzBtIBtdMTMzO0IHDRtbOTBt4pWwG1swbSAbWzE7MzJtJBtbMG0gG10xMzM7Qgc=",
+   "type": "feed"
+  }
+ ],
+ "initial": {
+  "columns": 100,
+  "rows": 10
+ },
+ "provenance": {
+  "author": "DanTerm",
+  "notes": "Live PTY recording of bash with the bundled danterm.bash integration and Starship, swept one column at a time from 100 to 60. readline repaints only the final prompt line, so the dialect declares redraw=last. The prompt is two rows with a right-aligned segment padded to the full terminal width -- the shape that re-wraps under reflow and produced the original resize staircase.",
+  "recordedDeviations": [],
+  "source": "danterm",
+  "test": "bash-dialect-width-sweep"
+ },
+ "version": 1
+}

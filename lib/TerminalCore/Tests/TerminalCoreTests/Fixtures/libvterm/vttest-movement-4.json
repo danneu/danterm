@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_01-movement-4.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b[00000000004;0000000001HT\u001b[00000000004;0000000002Hh\u001b[00000000004;0000000003Hi\u001b[00000000004;0000000004Hs\u001b[00000000004;0000000005H \u001b[00000000004;0000000006Hi\u001b[00000000004;0000000007Hs\u001b[00000000004;0000000008H \u001b[00000000004;0000000009Ha\u001b[00000000004;0000000010H \u001b[00000000004;0000000011Hc\u001b[00000000004;0000000012Ho\u001b[00000000004;0000000013Hr\u001b[00000000004;0000000014Hr\u001b[00000000004;0000000015He\u001b[00000000004;0000000016Hc\u001b[00000000004;0000000017Ht\u001b[00000000004;0000000018H \u001b[00000000004;0000000019Hs\u001b[00000000004;0000000020He\u001b[00000000004;0000000021Hn\u001b[00000000004;0000000022Ht\u001b[00000000004;0000000023He\u001b[00000000004;0000000024Hn\u001b[00000000004;0000000025Hc\u001b[00000000004;0000000026He"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          {
+            "row": 3,
+            "column": 0,
+            "scalars": "T"
+          },
+          {
+            "row": 3,
+            "column": 1,
+            "scalars": "h"
+          },
+          {
+            "row": 3,
+            "column": 2,
+            "scalars": "i"
+          },
+          {
+            "row": 3,
+            "column": 3,
+            "scalars": "s"
+          },
+          {
+            "row": 3,
+            "column": 4,
+            "scalars": " "
+          },
+          {
+            "row": 3,
+            "column": 5,
+            "scalars": "i"
+          },
+          {
+            "row": 3,
+            "column": 6,
+            "scalars": "s"
+          },
+          {
+            "row": 3,
+            "column": 7,
+            "scalars": " "
+          },
+          {
+            "row": 3,
+            "column": 8,
+            "scalars": "a"
+          },
+          {
+            "row": 3,
+            "column": 9,
+            "scalars": " "
+          },
+          {
+            "row": 3,
+            "column": 10,
+            "scalars": "c"
+          },
+          {
+            "row": 3,
+            "column": 11,
+            "scalars": "o"
+          },
+          {
+            "row": 3,
+            "column": 12,
+            "scalars": "r"
+          },
+          {
+            "row": 3,
+            "column": 13,
+            "scalars": "r"
+          },
+          {
+            "row": 3,
+            "column": 14,
+            "scalars": "e"
+          },
+          {
+            "row": 3,
+            "column": 15,
+            "scalars": "c"
+          },
+          {
+            "row": 3,
+            "column": 16,
+            "scalars": "t"
+          },
+          {
+            "row": 3,
+            "column": 17,
+            "scalars": " "
+          },
+          {
+            "row": 3,
+            "column": 18,
+            "scalars": "s"
+          },
+          {
+            "row": 3,
+            "column": 19,
+            "scalars": "e"
+          },
+          {
+            "row": 3,
+            "column": 20,
+            "scalars": "n"
+          },
+          {
+            "row": 3,
+            "column": 21,
+            "scalars": "t"
+          },
+          {
+            "row": 3,
+            "column": 22,
+            "scalars": "e"
+          },
+          {
+            "row": 3,
+            "column": 23,
+            "scalars": "n"
+          },
+          {
+            "row": 3,
+            "column": 24,
+            "scalars": "c"
+          },
+          {
+            "row": 3,
+            "column": 25,
+            "scalars": "e"
+          }
+        ]
+      }
+    }
+  ]
+}

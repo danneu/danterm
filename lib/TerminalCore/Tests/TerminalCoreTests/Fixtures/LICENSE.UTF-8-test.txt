@@ -1,0 +1,11 @@
+UTF-8 decoder capability and stress test
+
+Markus Kuhn - 2015-08-28
+https://www.cl.cam.ac.uk/~mgk25/ucs/examples/UTF-8-test.txt
+
+Licensed under the Creative Commons Attribution 4.0 International License.
+https://creativecommons.org/licenses/by/4.0/
+
+DanTerm's utf8-decoder-corpus.json is an adapted, neutral fixture derived from
+the source's byte categories. It retains DanTerm's modern maximal-subpart
+recovery expectations rather than the source's suggested presentation.

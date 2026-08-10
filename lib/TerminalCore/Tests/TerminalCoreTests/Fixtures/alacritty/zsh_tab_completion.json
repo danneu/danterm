@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/zsh_tab_completion/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "zsh_tab_completion",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 105,
+    "rows": 29
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICANIA0NG1swbRtbMjdtG1syNG0bW0pqd2lsbUBrdXJhc3QubG9jYWwgG1swMTszMm3inpwgG1swMTszMm0gG1szNm1+L2NvZGUvYWxhY3JpdHR5IBtbMDBtIBtbSxtbPzFoGz0bWz8yMDA0aBtbMzZtYxtbMzltCBtbMW0bWzMxbWMbWzFtG1szMW1hG1swbRtbMzltCAgbWzBtG1szNW1jG1swbRtbMzVtYRtbMzVtdBtbMzltIBtbMzZtYxtbMzltBwgbWzM5bWMNDQobW0obWzBtQ2FyZ28ubG9jayAgG1tKQ2FyZ28udG9tbCAgG1tKG1sxOzMybWNvbG9ycy5wbBtbMG0qICAbW0obWzE7MzFtY29weXBhc3RhG1swbS8bW0obW0EbWzBtG1syN20bWzI0bQ0bWzQwQxtbMzVtY2F0G1szOW0gYxtbSw=="
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "jwilm@kurast.local \u279c  ~/code/alacritty  cat c                                                            \nCargo.lock  Cargo.toml  colors.pl*  copypasta/                                                           \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         \n                                                                                                         "
+      }
+    }
+  ]
+}

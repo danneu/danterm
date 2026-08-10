@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/21state_tabstops.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Initial; HTS; TBC 0; TBC 3; Tabstops after resize",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 80, "rows": 25 },
+  "events": [
+    { "type": "feed", "text": "\tX\tX" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 17, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[5G\u001bH\u001b[G\tX" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 5, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[9G\u001b[g\u001b[G\tX\tX" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 17, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[3g\u001b[50G\u001bH\u001b[G\tX" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 50, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bc" },
+    { "type": "resize", "columns": 100, "rows": 30 },
+    { "type": "feed", "text": "\tX\tX\tX\tX\tX\tX\tX\tX\tX\tX\tX\tX" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 97, "pendingWrap": false } } }
+  ]
+}

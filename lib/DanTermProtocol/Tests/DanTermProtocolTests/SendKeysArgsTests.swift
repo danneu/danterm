@@ -1,81 +1,83 @@
 // Tests for the CLI argument parser shared with `danterm pane input`.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class SendKeysArgsTests: XCTestCase {
-    func testNoSeparatorThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["hello", "world"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .missingArguments)
+struct SendKeysArgsTests {
+    @Test("no separator throws")
+    func noSeparatorThrows() {
+        #expect(throws: SendKeysParseError.missingArguments) {
+            try parseSendKeysArgs(["hello", "world"])
         }
     }
 
-    func testTmuxModeBasic() throws {
+    @Test("tmux mode basic")
+    func tmuxModeBasic() throws {
         let parsed = try parseSendKeysArgs(["--", "ls", "Enter"])
-        XCTAssertEqual(
-            parsed,
-            ParsedSendKeys(
+        #expect(parsed == ParsedSendKeys(
                 pane: nil,
                 events: [.text("ls"), .key(.named(.enter), [])]
-            )
-        )
+            ))
     }
 
-    func testExplicitPaneInTmuxMode() throws {
+    @Test("explicit pane in tmux mode")
+    func explicitPaneInTmuxMode() throws {
         let parsed = try parseSendKeysArgs(["--pane", "P1", "--", "x"])
-        XCTAssertEqual(
-            parsed,
-            ParsedSendKeys(pane: "P1", events: [.text("x")])
-        )
+        #expect(parsed == ParsedSendKeys(pane: "P1", events: [.text("x")]))
     }
 
-    func testExplicitPaneWithoutSeparatorThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--pane", "P1", "hello"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .missingArguments)
+    @Test("explicit pane without separator throws")
+    func explicitPaneWithoutSeparatorThrows() {
+        #expect(throws: SendKeysParseError.missingArguments) {
+            try parseSendKeysArgs(["--pane", "P1", "hello"])
         }
     }
 
-    func testLiteralFlagPassesThroughToTokens() throws {
+    @Test("literal flag passes through to tokens")
+    func literalFlagPassesThroughToTokens() throws {
         let parsed = try parseSendKeysArgs(["--literal", "--", "Enter"])
-        XCTAssertEqual(
-            parsed,
-            ParsedSendKeys(pane: nil, events: [.text("Enter")])
-        )
+        #expect(parsed == ParsedSendKeys(pane: nil, events: [.text("Enter")]))
     }
 
-    func testLiteralWithoutSeparatorThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--literal", "hello"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .literalRequiresSeparator)
+    @Test("literal without separator throws")
+    func literalWithoutSeparatorThrows() {
+        #expect(throws: SendKeysParseError.literalRequiresSeparator) {
+            try parseSendKeysArgs(["--literal", "hello"])
         }
     }
 
-    func testUnknownFlagThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--bogus", "x"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .unknownFlag("--bogus"))
+    @Test("unknown flag throws")
+    func unknownFlagThrows() {
+        #expect(throws: SendKeysParseError.unknownFlag("--bogus")) {
+            try parseSendKeysArgs(["--bogus", "x"])
         }
     }
 
-    func testMissingPaneArgThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--pane"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .missingPaneArg)
+    @Test("missing pane arg throws")
+    func missingPaneArgThrows() {
+        #expect(throws: SendKeysParseError.missingPaneArg) {
+            try parseSendKeysArgs(["--pane"])
         }
     }
 
-    func testEmptyArgsThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs([])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .missingArguments)
+    @Test("empty args throws")
+    func emptyArgsThrows() {
+        #expect(throws: SendKeysParseError.missingArguments) {
+            try parseSendKeysArgs([])
         }
     }
 
-    func testEmptyAfterSeparatorThrows() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .missingArguments)
+    @Test("empty after separator throws")
+    func emptyAfterSeparatorThrows() {
+        #expect(throws: SendKeysParseError.missingArguments) {
+            try parseSendKeysArgs(["--"])
         }
     }
 
-    func testKeyTokenErrorIsWrapped() {
-        XCTAssertThrowsError(try parseSendKeysArgs(["--", "C-yz"])) { err in
-            XCTAssertEqual(err as? SendKeysParseError, .keyToken(.unknownKey("C-yz")))
+    @Test("key token error is wrapped")
+    func keyTokenErrorIsWrapped() {
+        #expect(throws: SendKeysParseError.keyToken(.unknownKey("C-yz"))) {
+            try parseSendKeysArgs(["--", "C-yz"])
         }
     }
 }

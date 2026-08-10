@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff260e",
+    "#9be205",
+    "#ffc400",
+    "#00a2fa",
+    "#815bb5",
+    "#00deef",
+    "#ffffff",
+    "#565656",
+    "#ff4250",
+    "#b8e36e",
+    "#ffd852",
+    "#00a6ff",
+    "#ac7bf0",
+    "#74fdf3",
+    "#ffffff"
+  ],
+  "background": "#21084a",
+  "cursor": "#ff271d",
+  "cursorText": "#ff9a90",
+  "foreground": "#fffbf6",
+  "name": "Purple Rain",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#287691",
+  "selectionForeground": "#ffffff"
+}

@@ -1,0 +1,300 @@
+# Repeatable live-btop profiling workload
+
+## Problem
+
+The sparse AppKit damage regression was discovered by a manually assembled live
+btop profile rather than by the benchmark suite. Reproducing that diagnostic
+required an isolated optimized app, canonical geometry, live PTY verification,
+controlled arrow input, profiler attribution, damage-topology accounting, and
+executable and machine-state provenance. Those steps currently survive only in
+the research record and disposable artifacts, so the next investigation would
+have to rebuild the instrument before it could investigate the product.
+
+The supporting evidence and benchmark blind spot are preserved in
+`docs/research/29-sparse-appkit-damage-clip-topology/` (F3-F7 and D3).
+
+## Desired outcome
+
+Live btop becomes a workload of the existing profiling commands:
+
+```sh
+just benchmark-sample btop-scroll 20
+just benchmark-trace btop-scroll "Time Profiler" 20
+just benchmark-loop btop-scroll
+```
+
+The existing profile identity and activity path let an agent address the exact
+owned app from loop mode and attach or report another profiler without a second
+btop-specific front-end.
+
+For `btop-scroll`, sample and trace durations are whole numbers from 1 through
+20 and describe the profiler's requested recording window. Loop runs until
+interrupted and alternates Down and Up in 10-second legs.
+
+## Decision
+
+Admit `btop-scroll` only to the existing sample, trace, and loop profiling
+modes. Memory profiling, every calibrated comparison, and every other
+decision-bearing entry point reject it. The workload reuses the harness's
+optimized isolated app, fresh HOME/TMPDIR/ZDOTDIR, canonical 179x66 geometry,
+explicit bundled-CLI pane targeting, foreground activation, activity snapshots,
+identity artifacts, and owned-process teardown.
+
+Before any build or launch, resolve btop to an executable absolute path and
+preflight permission to synthesize input. Launch that exact binary in the owned
+pane. Readiness requires a uniquely owned btop process and PTY whose live `stty`
+size is 66 rows by 179 columns.
+
+Generate arrow input through CGEvent-level synthesis targeted at the owned
+foreground app, using and recording the host's repeat cadence. A bounded capture
+starts the stimulus before profiler recording begins and releases it only after
+recording ends. Record measured stimulus and profiler start/stop times, and
+invalidate any capture whose profiler window is not fully contained in the
+stimulus window. Loop releases one direction before pressing the other and
+releases the active key on every exit.
+
+During a bounded capture, the existing continuous activity publisher also
+samples whether the owned app remains foreground and whether its canonical
+window remains visible, unoccluded, and contained on screen. The capture is
+invalid if either condition lapses inside the measured interval or if the
+publisher cannot prove coverage for that interval.
+
+Bounded captures difference the profiling harness's existing before/after
+activity snapshots into a topology delta. A valid capture requires parsed
+profiler samples, positive topology coverage, and full stimulus/profiler
+overlap; missing measurement is never reported as zero. Loop publishes its
+current stimulus direction and timing beside the existing identity and activity
+path so an attaching agent can bracket and validate its own window.
+
+Extend the existing profile identity rather than creating another provenance
+format. It records the input mechanism and permission result, btop absolute
+path and version, fresh-home status, effective config path and hash, owned btop
+PID and PTY, repeat timing and direction changes, measured profiler/stimulus
+overlap, topology coverage, and measured machine state. Existing source,
+binary, dirty-tree, symbol, geometry, command, and diagnostic-status fields
+remain authoritative.
+
+An invalid or failed bounded capture exits nonzero and preserves every partial
+artifact collected before the failure so an agent can diagnose why the run was
+rejected.
+
+## Invariants
+
+- **I1 -- profiling-only workload.** `btop-scroll` is unreachable from
+  `benchmark-quick`, `benchmark-confirm`, calibration, and every other
+  decision-bearing collection path.
+- **I2 -- bounded interface.** Sample and trace accept only an explicit 1-20
+  second whole-number recording duration; loop accepts no duration and stops
+  only when interrupted.
+- **I3 -- owned isolation.** Every app, pane, shell, btop, stimulus, and profiler
+  process belongs to the invocation; cleanup never selects or terminates another
+  DanTerm or btop process.
+- **I4 -- live workload identity.** Profiling starts only after the owned btop
+  process and PTY are uniquely identified and `stty` reports 66 by 179.
+- **I5 -- attributable stimulus.** Arrow input traverses the real AppKit event
+  path while the owned app remains foreground and its canonical window remains
+  presented, every transition and exit releases the active key, and a bounded
+  profiler window lies wholly inside the measured stimulus lifetime.
+- **I6 -- measured coverage.** A successful bounded capture contains parsed
+  profiler samples and a topology delta with a positive sample count. A trace
+  also proves that its template exported time-profile rows. Counted continuous
+  samples prove foreground and presentation coverage across the measured
+  interval.
+- **I7 -- reproducible provenance.** Every run records enough source, binary,
+  btop configuration, workload, timing, geometry, process, input-permission,
+  and machine-state identity to explain whether two executions had matching
+  conditions.
+- **I8 -- diagnostic status.** Every identity and report remains explicitly
+  ineligible for a performance verdict or cross-session history; profiler
+  samples are never presented as whole-process CPU.
+
+## Proof obligations
+
+- **PO1 -- admission and preflight.** Behavioral tests prove btop's profiling-
+  only admission to sample, trace, and loop; memory and every decision-bearing
+  mode reject it. They also prove all duration bounds and rejection of a missing
+  btop executable or input permission before build or launch.
+- **PO2 -- stimulus and overlap.** Separately invocable logic, tested with an
+  injected clock and profiler boundary events, proves repeat timing, direction
+  changes, release-before-press, release on every exit, measured timestamps, and
+  rejection of any profiler window not contained by the stimulus.
+- **PO3 -- artifacts and coverage.** Separately invocable artifact logic proves
+  topology subtraction, missing-versus-zero handling, positive sample gates,
+  trace export validation, counted foreground/presentation samples and lapse
+  invalidation, effective btop-config identity, and the extended profile
+  identity without asserting shell source layout. Every invalidation path exits
+  nonzero while preserving the partial diagnostic bundle.
+- **PO4 -- live proof.** Opt-in GUI runs prove a fresh optimized app can launch
+  the resolved btop at a live 179x66 PTY, deliver foreground CGEvent arrow input,
+  produce nonempty sample and Time Profiler reports with positive topology and
+  valid overlap, invalidate a bounded run when another app takes foreground,
+  alternate a loop leg, and tear down without a stuck key or an unrelated-
+  process signal.
+- **PO5 -- repository and operator contract.** Existing benchmark harness and
+  command tests remain green, new non-GUI behavioral tests join `just test`, and
+  `agent-docs/terminal-performance.md` documents the exact positional sample,
+  trace (`just benchmark-trace btop-scroll "Time Profiler" 20`), and loop
+  commands, their preconditions and artifacts, and their attribution-only
+  status.
+
+## Non-goals
+
+- Turning live btop into a calibrated benchmark or permanent performance
+  threshold.
+- Measuring or claiming battery use, Energy Impact, or whole-process CPU.
+- Comparing revisions, choosing a baseline, or deriving a directional verdict.
+- Expanding the `danterm` CLI surface.
+
+## Accepted risks
+
+- **AR1 -- host repeat settings.** The stimulus follows and records the host's
+  repeat timing, so machines may produce different event rates. This diagnostic
+  reproduces local held-key behavior; cross-machine comparison is out of scope.
+- **AR2 -- fixed loop legs.** A short process list may reach an end before a
+  10-second leg finishes and leave an idle tail. Loop exposes live activity and
+  direction state but issues no coverage verdict; an attaching agent must
+  bracket and validate its own profiling window.
+- **AR3 -- canonical workload.** The 179x66 geometry and 20-second recording cap
+  cover the reproduced incident rather than every window size or arbitrarily
+  long process list. Broader coverage belongs in a calibrated deterministic
+  workload.
+
+## Rejected ideas
+
+- **RI1 -- add a CPU verdict.** Rejected because the profiling modes are
+  attribution instruments and `sample` mixes running and blocked counts that
+  cannot stand in for whole-process CPU.
+- **RI2 -- target an existing user pane.** Rejected because implicit focus,
+  unknown geometry and configuration, and ambiguous process ownership would
+  destroy the diagnostic's provenance and teardown guarantees.
+- **RI3 -- add a btop-specific profiling front-end.** Rejected because the
+  existing profiling harness already owns profiler modes, identity, activity
+  snapshots, symbols, reporting, and teardown; duplicating that surface would
+  create two contracts for the same behavior.
+
+## Commit progress
+- [x] 1. feat(benchmark): add a held-arrow stimulus with measured overlap
+- [x] 2. feat(benchmark): publish foreground and presentation coverage
+- [x] 3. feat(benchmark): add btop workload identity and coverage artifacts
+- [x] 4. feat(benchmark): admit btop-scroll to sample, trace, and loop profiling
+- [x] 5. feat(benchmark): prove and document the live btop-scroll diagnostic
+
+## Implementation notes
+
+- **Where the stimulus boundary landed (commit 1).** Every timing decision --
+  cadence, repeat scheduling, direction changes, containment -- is Python in
+  `scripts/terminal_btop_stimulus.py`, and only CGEvent posting and the
+  permission preflight are native, in `scripts/terminal-btop-stimulus-arm.swift`.
+  That split is what lets PO2 be proved against an injected clock; the arm holds
+  no policy beyond releasing whatever key it left down when stdin closes or a
+  signal arrives.
+- **The repeat train is synthesized, not inherited (commit 1).** A synthetic
+  `CGEvent` key-down does not auto-repeat the way real HID input does, so the
+  driver emits the repeats itself at the host's cadence with
+  `keyboardEventAutorepeat` set. Two consequences the plan did not spell out: a
+  `KeyRepeat` of 0 (a settable value) is clamped to one 1/60 s tick and the
+  clamp is recorded, and a driver that fell behind resyncs to now instead of
+  bursting the repeats it missed -- a real held key does not catch up.
+- **The profiler wait is bounded (commit 1).** `run_bounded_capture` takes a
+  required `profiler_timeout_seconds`. I5 asks that every exit release the key,
+  and an unbounded wait on a wedged profiler is not an exit at all: it holds an
+  arrow down in the operator's live session indefinitely.
+
+- **Coverage counting is its own module (commit 2).** The counting rules went
+  into a new `TerminalBenchmarkCoverage` target rather than into
+  `TerminalBenchmarkTopology`, whose file header scopes it to sparse-span damage
+  topology. Same split as commit 1: the pure counters are headlessly tested, and
+  the app-side observer keeps only the two AppKit probes
+  (`NSApplication.shared.isActive` and the existing full window-presentation
+  check) that produce the booleans.
+- **Three cumulative counters, not a lapse flag (commit 2).** The activity
+  snapshot publishes lifetime `sampleCount`, `foregroundSampleCount`, and
+  `presentedSampleCount`; a bounded capture differences two snapshots, so a
+  lapse inside the measured interval shows up as a foreground/presented delta
+  short of the sample delta, and an interval nobody sampled shows up as a zero
+  sample delta. The `presentationCoverage` key is omitted entirely when no state
+  recorder exists to feed it, so "not measured" never renders as clean zeros.
+  The activity snapshot's `schemaVersion` moved to 2 for the added vocabulary;
+  nothing currently reads that field.
+
+- **One record, not a second one (commit 3).** `terminal_btop_artifacts.py`
+  extends `identity.json` in place rather than writing a `btop-capture.json`
+  beside it, because the Decision asks for one provenance format and a separate
+  verdict file would be a second one. It bumps `schemaVersion` to 3 for the
+  added `btop`/`coverage`/`capture` vocabulary and always writes the file before
+  choosing its exit status, so an invalidated run leaves the reason on disk.
+- **Every gate is graded, not the first failure (commit 3).** The gates are
+  independent, so `summarize_capture` collects all their reasons instead of
+  raising at the first. An operator diagnoses a rejected 20-second GUI capture
+  from one list rather than one relaunch per reason.
+- **btop's config precedence is measured, not recalled (commit 3).** btop 1.4.7
+  was launched under a fresh `HOME` and a fresh `XDG_CONFIG_HOME` and wrote
+  `btop.conf` into `$XDG_CONFIG_HOME/btop`, which is the precedence
+  `btop_config_identity` implements (explicit `--config`, then XDG, then HOME).
+  A config that does not exist yet -- the normal state mid-run, since btop
+  writes it on exit -- reports `exists: false` and carries no digest at all.
+- **Machine state is graded here, sampled by the harness (commit 3).** The
+  plan's discretion clause requires machine-state coverage to be counted and
+  able to invalidate a capture, so `machine_state_coverage` counts the samples
+  and rejects a zero-sample interval, thermal pressure, and low-power mode. The
+  sampling itself stays in the harness (commit 4), which already owns the
+  `terminal-benchmark-state-probe.swift` pattern.
+
+- **Admission is a module, not a `case` arm (commit 4).** Mode admission,
+  duration bounds, owned-process selection, live-PTY readiness, and the capture
+  driver went into `scripts/terminal_btop_workload.py`, which the two shell
+  scripts call. The profiling harness is bash; expressing "one owned btop
+  descended from this app, at this live geometry, or say which condition failed"
+  there would have been untestable. The shell keeps only what a shell is good
+  at: which env var to set and which command to run.
+- **Admission and preflight are two commands, not one (commit 4).** `admit`
+  decides the mode and duration and costs nothing; `preflight` resolves btop,
+  reads its version, and compiles the stimulus arm and state probe. Splitting
+  them is what lets `sample btop-scroll 21` be refused without a `swiftc` run,
+  and both still precede the release build and the app launch.
+- **`exec btop` in the pane (commit 4).** The pane's shell is replaced rather
+  than made btop's parent, so the PTY has exactly one foreground process and
+  ownership is a lineage question instead of a job-control one. Readiness then
+  reads the winsize from the device (`stty -f /dev/ttysNNN size`) rather than
+  from inside the pane: an in-pane probe reports the size before btop started,
+  and I4 is a claim about the geometry the profiled process is drawing at now.
+- **An invalid capture is recorded, not raised (commit 4).** The driver turns a
+  profiler window outside the stimulus -- and a profiler that never exited --
+  into a recorded `contained: false` with its reason, and the trace path no
+  longer exits on a missing time-profile table when the workload is btop. The
+  grader from commit 3 owns every verdict, and it can only name one from a
+  bundle that survived to disk.
+- **Two profiler call sites became one `run_profiler` (commit 4).** The corpus
+  workloads still invoke the profiler directly; btop hands the same argv to the
+  capture driver. The bracketing contract test moved with them, so the two
+  attaches are still asserted to sit between their activity snapshots.
+
+- **The proof grades, the script only drives (commit 5).** Every rule
+  `scripts/terminal-btop-gui-proof.py` decides a live run by is a pure `judge_*`
+  function over artifacts, fixture-tested in
+  `scripts/tests/terminal_btop_gui_proof_test.py`, which joins `just test`. An
+  opt-in proof whose judgments are only ever exercised by the opt-in run would go
+  green exactly when the diagnostic broke.
+- **The deliberate foreground theft waits for the measured interval (commit 5).**
+  The first live run stole the foreground on a fixed timer a few seconds after
+  the harness started -- during the release build, tens of seconds before the
+  profiler attached -- and the capture came back valid. The theft now waits for
+  `activity-before.json` to land in the new bundle, which is the harness's own
+  mark that the interval coverage is differenced over has opened. Before that
+  moment no theft is observable, so the phase was failing while the gate it
+  tests was working.
+- **What the live run actually observed (commit 5).** Bounded `sample` and
+  `Time Profiler` `trace` both graded valid at a live 179x66 PTY under a held
+  Down arrow, with parsed profiler samples, positive damage topology, and the
+  profiler window contained by the stimulus with ~1s of lead and trail. The
+  spoiled run exited 1 and preserved "the app was not frontmost for 17 of 18
+  samples inside the measured interval". Loop published alternating `down`/`up`
+  legs 10s apart. Teardown left no stimulus arm and did not signal the bystander
+  btop.
+
+## Implementation discretion
+
+- The internal boundary between the existing harness and the new workload-
+  specific readiness, stimulus, overlap, and topology-delta logic.
+- The machine-state sampling cadence, provided its coverage is counted and can
+  invalidate a bounded capture.

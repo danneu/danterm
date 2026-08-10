@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#0f191c",
+    "#23755a",
+    "#82d967",
+    "#ffd700",
+    "#3f5242",
+    "#409931",
+    "#50b45a",
+    "#507350",
+    "#688060",
+    "#2fc079",
+    "#90d762",
+    "#faff00",
+    "#4f7e7e",
+    "#11ff25",
+    "#c1ff8a",
+    "#678c61"
+  ],
+  "background": "#0f191c",
+  "cursor": "#384545",
+  "cursorText": "#00ff00",
+  "foreground": "#426644",
+  "name": "Matrix",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#18282e",
+  "selectionForeground": "#00ff87"
+}

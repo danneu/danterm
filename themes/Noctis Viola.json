@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#362f3d",
+    "#e66533",
+    "#49e9a6",
+    "#e4b781",
+    "#49ace9",
+    "#df769b",
+    "#49d6e9",
+    "#bfafcf",
+    "#594e65",
+    "#e97749",
+    "#60ebb1",
+    "#e69533",
+    "#60b6eb",
+    "#e798b3",
+    "#60dbeb",
+    "#ccbfd9"
+  ],
+  "background": "#30243d",
+  "cursor": "#ccbfd9",
+  "cursorText": "#30243d",
+  "foreground": "#ccbfd9",
+  "name": "Noctis Viola",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3e3352",
+  "selectionForeground": "#ccbfd9"
+}

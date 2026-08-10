@@ -19,6 +19,18 @@ public struct CLICommand: Equatable {
     }
 }
 
+/// Keeps process-local targeting separate from the JSON-RPC command so an
+/// explicit instance choice can never leak into method parameters.
+public struct CLIInvocation: Equatable {
+    public let socketPath: String?
+    public let command: CLICommand
+
+    public init(socketPath: String?, command: CLICommand) {
+        self.socketPath = socketPath
+        self.command = command
+    }
+}
+
 public struct CLIParseError: Error, Equatable, LocalizedError {
     public let message: String
 
@@ -27,6 +39,30 @@ public struct CLIParseError: Error, Equatable, LocalizedError {
     }
 
     public var errorDescription: String? { message }
+}
+
+/// Parses global process options before delegating the remaining arguments to
+/// the command parser shared by the executable and protocol tests.
+public func parseCLIInvocation(_ args: [String]) throws -> CLIInvocation {
+    var remaining = args
+    var socketPath: String?
+
+    while remaining.first == "--socket" {
+        guard remaining.count >= 2 else {
+            throw CLIParseError("usage: danterm --socket <path> <command> [args]")
+        }
+        guard socketPath == nil else {
+            throw CLIParseError("--socket may be specified only once")
+        }
+        let candidate = remaining[1]
+        guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIParseError("--socket requires a non-empty path")
+        }
+        socketPath = candidate
+        remaining.removeFirst(2)
+    }
+
+    return CLIInvocation(socketPath: socketPath, command: try parseCLI(remaining))
 }
 
 public func parseCLI(_ args: [String]) throws -> CLICommand {
@@ -52,7 +88,7 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         }
 
     case "pane":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm pane <focus|info|split|input|read>") }
+        guard args.count >= 2 else { throw CLIParseError("usage: danterm pane <focus|info|split|input|read|tape>") }
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
@@ -65,6 +101,12 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
             return try parsePaneInputCommand(Array(args.dropFirst(2)))
         case "read":
             return try parsePaneReadCommand(Array(args.dropFirst(2)))
+        case "rows":
+            return try parsePaneRowsCommand(Array(args.dropFirst(2)))
+        case "zoom":
+            return try parsePaneZoomCommand(Array(args.dropFirst(2)))
+        case "tape":
+            return try parsePaneTapeCommand(Array(args.dropFirst(2)))
         default:
             throw CLIParseError("unknown pane command")
         }
@@ -299,6 +341,92 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
     return CLICommand(method: Methods.paneRead, params: params, outputMode: .text)
 }
 
+// The state is a positional word rather than a flag, and `toggle` is opt-in rather than the
+// default: a script that can only toggle has to already know the current state, and the whole
+// point of the command is to reach a known one.
+private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane zoom [--pane <pane-id>] on|off|toggle"
+    var pane: String?
+    var state: String?
+    var index = 0
+    while index < args.count {
+        switch args[index] {
+        case "--pane":
+            guard index + 1 < args.count else { throw CLIParseError(usage) }
+            pane = args[index + 1]
+            index += 2
+        case "on", "off", "toggle":
+            guard state == nil else { throw CLIParseError(usage) }
+            state = args[index]
+            index += 1
+        default:
+            if args[index].hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(args[index])")
+            }
+            throw CLIParseError(usage)
+        }
+    }
+    guard let state else { throw CLIParseError(usage) }
+    var params: [String: JSONValue] = ["state": .string(state)]
+    if let pane, pane.isEmpty == false { params["pane"] = .string(pane) }
+    return CLICommand(method: Methods.paneZoom, params: params, outputMode: .json)
+}
+
+// `pane rows` reuses `pane read`'s argument grammar minus `--lines`: the projection is the
+// whole stream by construction, so a tail limit would only hide the retained rows it exists
+// to inspect.
+private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane rows --pane <pane-id>"
+    var pane: String?
+    var index = 0
+    while index < args.count {
+        switch args[index] {
+        case "--pane":
+            guard index + 1 < args.count else { throw CLIParseError(usage) }
+            pane = args[index + 1]
+            index += 2
+        default:
+            if args[index].hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(args[index])")
+            }
+            throw CLIParseError("unexpected argument: \(args[index])")
+        }
+    }
+    guard let pane, pane.isEmpty == false else { throw CLIParseError(usage) }
+    return CLICommand(method: Methods.paneRows, params: ["pane": .string(pane)], outputMode: .json)
+}
+
+private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane tape --pane <pane-id> [--follow] [--from-now]"
+    let parsed: ParsedTapePane
+    do {
+        parsed = try parseTapePaneArgs(args)
+    } catch let error as TapePaneParseError {
+        switch error {
+        case .missingPane, .missingPaneArg:
+            throw CLIParseError(usage)
+        case .fromNowRequiresFollow:
+            throw CLIParseError("--from-now requires --follow\n\(usage)")
+        case .unknownFlag(let flag):
+            throw CLIParseError("unknown flag: \(flag)")
+        case .unexpectedArgument(let argument):
+            throw CLIParseError("unexpected argument: \(argument)")
+        }
+    }
+    var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
+    if parsed.follow {
+        params["follow"] = .bool(true)
+    }
+    if parsed.fromNow {
+        params["fromNow"] = .bool(true)
+    }
+    return CLICommand(
+        method: Methods.paneTape,
+        params: params,
+        outputMode: .json
+    )
+}
+
 private func parseAgentAttachCommand(_ args: [String]) throws -> CLICommand {
     let usage = "usage: danterm agent attach --kind <kind> --id <session-id>"
     var remaining = args
@@ -400,6 +528,7 @@ private func inputEventToJSON(_ event: InputEvent) -> JSONValue {
             var modNames: [JSONValue] = []
             if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
             if mods.contains(.alt)  { modNames.append(.string("alt")) }
+            if mods.contains(.shift) { modNames.append(.string("shift")) }
             object["mods"] = .array(modNames)
         }
         return .object(object)

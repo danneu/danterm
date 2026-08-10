@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#494d5c",
+    "#bb383a",
+    "#94c66e",
+    "#d28e5d",
+    "#8884c5",
+    "#b73999",
+    "#00aba4",
+    "#e7e8eb",
+    "#7f869e",
+    "#bb383a",
+    "#94c66e",
+    "#d28e5d",
+    "#8884c5",
+    "#b73999",
+    "#00aba4",
+    "#e7e8eb"
+  ],
+  "background": "#292c36",
+  "cursor": "#e7e8eb",
+  "cursorText": "#292c36",
+  "foreground": "#e7e8eb",
+  "name": "Xcode WWDC",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#494d5c",
+  "selectionForeground": "#e7e8eb"
+}

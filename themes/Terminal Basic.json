@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#990000",
+    "#00a600",
+    "#999900",
+    "#0000b2",
+    "#b200b2",
+    "#00a6b2",
+    "#bfbfbf",
+    "#666666",
+    "#e50000",
+    "#00d900",
+    "#bfbf00",
+    "#0000ff",
+    "#e500e5",
+    "#00d8d8",
+    "#e5e5e5"
+  ],
+  "background": "#ffffff",
+  "cursor": "#7f7f7f",
+  "cursorText": "#000000",
+  "foreground": "#000000",
+  "name": "Terminal Basic",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a4c9ff",
+  "selectionForeground": "#000000"
+}

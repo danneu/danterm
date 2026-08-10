@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#a60000",
+    "#006800",
+    "#6f5500",
+    "#0031a9",
+    "#721045",
+    "#005e8b",
+    "#a6a6a6",
+    "#595959",
+    "#972500",
+    "#00663f",
+    "#884900",
+    "#3548cf",
+    "#531ab6",
+    "#005f5f",
+    "#595959"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Modus Operandi",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bdbdbd",
+  "selectionForeground": "#000000"
+}

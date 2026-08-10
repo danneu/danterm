@@ -1,6 +1,7 @@
 // UI-harness tests for SplitContainerView's first-reveal layout lifecycle.
 import Cocoa
 
+@MainActor
 func splitContainerViewTests() {
     print("SplitContainerView")
 
@@ -100,6 +101,33 @@ func splitContainerViewTests() {
         try uiExpect(firstSubviewRatio(in: outerSplitView, expectedRatio: 0.65), "outer split should match stored ratio")
         try uiExpect(firstSubviewRatio(in: innerSplitView, expectedRatio: 0.7), "inner split should match stored ratio")
     }
+
+    uiTest("container rebuild reparents the same terminal host") {
+        // Intent: rebuilding pane containers replaces wrapper chrome but preserves
+        //   the terminal session and its stable host-view identity.
+        // Why it exists: pane moves and zoom rebuilds must not recreate the PTY owner.
+        // Scenario: spec-first container rebuild for one live pane.
+        let paneId = PaneId()
+        let terminal = TerminalView()
+        let root = SplitNodeModel.leaf(PaneModel(id: paneId))
+        let container = SplitContainerView(
+            rootNode: root,
+            sessionLookup: { id in id == paneId ? terminal : nil },
+            runtime: nil,
+            isZoomed: false,
+            hasSplits: false,
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        container.rebuild()
+        let firstWrapper = terminal.paneWrapper
+        container.rebuild()
+        let secondWrapper = terminal.paneWrapper
+
+        try uiExpect(terminal.hostView === terminal, "session host identity changed")
+        try uiExpect(firstWrapper != nil && secondWrapper != nil, "rebuild should mount both wrappers")
+        try uiExpect(firstWrapper !== secondWrapper, "rebuild should replace wrapper chrome")
+    }
 }
 
 private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRuntime? = nil) -> SplitContainerView {
@@ -112,7 +140,7 @@ private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRu
     )
     return SplitContainerView(
         rootNode: root,
-        surfaceLookup: { _ in nil },
+        sessionLookup: { _ in nil },
         runtime: runtime,
         isZoomed: false,
         hasSplits: true,
@@ -136,7 +164,7 @@ private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: Split
     )
     return SplitContainerView(
         rootNode: root,
-        surfaceLookup: { _ in nil },
+        sessionLookup: { _ in nil },
         runtime: nil,
         isZoomed: false,
         hasSplits: true,

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "windows-terminal",
+    "url": "https://github.com/microsoft/terminal/blob/1cea42d433253d95c4487a3037db48197b5e72f4/src/terminal/parser/ut_parser/Base64Test.cpp",
+    "pinnedCommit": "1cea42d433253d95c4487a3037db48197b5e72f4",
+    "upstreamCase": "Base64Test.cpp#DecodeUTF8 and OutputEngineTest.cpp#TestSetClipboard",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.windows-terminal.txt",
+    "recordedDeviations": [
+      "DanTerm requires canonical padded Base64 and accepts only OSC 52 writes that decode to strict UTF-8."
+    ]
+  },
+  "initial": { "columns": 2, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "\u001b]52;;44Gr44G744KT44GU5rGJ6K+t7ZWc6rWt\u0007" },
+    { "type": "expect", "expect": { "clipboardWrites": ["\u306b\u307b\u3093\u3054\u6c49\u8bed\ud55c\uad6d"] } },
+    { "type": "feed", "text": "\u001b]52;;8J+RjfCfkY3wn4+78J+RjfCfj7zwn5GN8J+PvfCfkY3wn4++8J+RjfCfj78=\u0007" },
+    { "type": "expect", "expect": { "clipboardWrites": ["\ud83d\udc4d\ud83d\udc4d\ud83c\udffb\ud83d\udc4d\ud83c\udffc\ud83d\udc4d\ud83c\udffd\ud83d\udc4d\ud83c\udffe\ud83d\udc4d\ud83c\udfff"] } }
+  ]
+}

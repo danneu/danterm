@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#333333",
+    "#8c4665",
+    "#287373",
+    "#7c7c99",
+    "#395573",
+    "#5e468c",
+    "#31658c",
+    "#899ca1",
+    "#3d3d3d",
+    "#bf4d80",
+    "#53a6a6",
+    "#9e9ecb",
+    "#477ab3",
+    "#7e62b3",
+    "#6096bf",
+    "#c0c0c0"
+  ],
+  "background": "#101010",
+  "cursor": "#9e9ecb",
+  "cursorText": "#000000",
+  "foreground": "#999993",
+  "name": "Wryan",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

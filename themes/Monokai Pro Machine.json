@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#273136",
+    "#ff6d7e",
+    "#a2e57b",
+    "#ffed72",
+    "#ffb270",
+    "#baa0f8",
+    "#7cd5f1",
+    "#f2fffc",
+    "#6b7678",
+    "#ff6d7e",
+    "#a2e57b",
+    "#ffed72",
+    "#ffb270",
+    "#baa0f8",
+    "#7cd5f1",
+    "#f2fffc"
+  ],
+  "background": "#273136",
+  "cursor": "#b8c4c3",
+  "cursorText": "#859190",
+  "foreground": "#f2fffc",
+  "name": "Monokai Pro Machine",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#545f62",
+  "selectionForeground": "#f2fffc"
+}

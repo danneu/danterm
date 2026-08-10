@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff0000",
+    "#59d600",
+    "#e3be00",
+    "#00a2ff",
+    "#c17ecc",
+    "#00d0d6",
+    "#c0c5bb",
+    "#8f928b",
+    "#ff0013",
+    "#6dd900",
+    "#ccbe00",
+    "#88c9ff",
+    "#e9a7e1",
+    "#00d8d9",
+    "#f6f6f4"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Tango Adapted",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

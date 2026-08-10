@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#333333",
+    "#f8818e",
+    "#92d3a2",
+    "#1a8e63",
+    "#8ed0ce",
+    "#5e468c",
+    "#31658c",
+    "#e2d8cd",
+    "#4a4a4a",
+    "#fb3d66",
+    "#6bb48d",
+    "#30c85a",
+    "#39a7a2",
+    "#7e62b3",
+    "#6096bf",
+    "#e2d8cd"
+  ],
+  "background": "#051519",
+  "cursor": "#9e9ecb",
+  "cursorText": "#000000",
+  "foreground": "#e2d8cd",
+  "name": "Forest Blue",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

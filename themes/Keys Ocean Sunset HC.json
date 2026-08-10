@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#7a92a8",
+    "#ff6361",
+    "#4ad68a",
+    "#ffa600",
+    "#6aa8f0",
+    "#de72b0",
+    "#5edee8",
+    "#c8d8ec",
+    "#8aa0b8",
+    "#ff8578",
+    "#72f0a8",
+    "#ffd380",
+    "#88c4ff",
+    "#f0a8d8",
+    "#88f0f8",
+    "#fff5be"
+  ],
+  "background": "#060910",
+  "cursor": "#ff8531",
+  "cursorText": "#060910",
+  "foreground": "#f0f4fa",
+  "name": "Keys Ocean Sunset HC",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2c4875",
+  "selectionForeground": "#ffffff"
+}

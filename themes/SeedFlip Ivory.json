@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#d9d9d9",
+    "#bd0f0f",
+    "#0fbd49",
+    "#bda00f",
+    "#0f58bd",
+    "#bd0fbd",
+    "#0fbdbd",
+    "#07182a",
+    "#b3b3b3",
+    "#ee2b2b",
+    "#12d452",
+    "#e1c01e",
+    "#2b7cee",
+    "#ee2bee",
+    "#12d4d4",
+    "#0a2540"
+  ],
+  "background": "#ffffff",
+  "cursor": "#635bff",
+  "cursorText": "#0a2540",
+  "foreground": "#0a2540",
+  "name": "SeedFlip Ivory",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f6f9fc",
+  "selectionForeground": "#0a2540"
+}

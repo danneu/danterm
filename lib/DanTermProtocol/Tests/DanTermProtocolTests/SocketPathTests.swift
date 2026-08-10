@@ -1,17 +1,25 @@
 // Tests for DanTerm control-socket path resolution.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class SocketPathTests: XCTestCase {
-    func testControlSocketPathUsesCachesBundleDirectory() {
-        let path = controlSocketPath(bundleId: "com.example.one").path
-        XCTAssertTrue(path.hasSuffix("/Library/Caches/com.example.one/control.sock"))
+struct SocketPathTests {
+    @Test("control socket path uses caches bundle directory")
+    func controlSocketPathUsesCachesBundleDirectory() {
+        let path = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.one")
+        ).path
+        #expect(path.hasSuffix("/Library/Caches/com.example.one/control.sock"))
     }
 
-    func testDistinctBundleIdsProduceDistinctPaths() {
-        let first = controlSocketPath(bundleId: "com.example.one")
-        let second = controlSocketPath(bundleId: "com.example.two")
-        XCTAssertNotEqual(first, second)
+    @Test("distinct bundle IDs produce distinct paths")
+    func distinctBundleIdsProduceDistinctPaths() {
+        let first = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.one")
+        )
+        let second = controlSocketPath(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.example.two")
+        )
+        #expect(first != second)
     }
 }

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#9f0000",
+    "#008b00",
+    "#ffd000",
+    "#0081ff",
+    "#bc00ca",
+    "#008b8b",
+    "#bbbbbb",
+    "#555555",
+    "#ff0000",
+    "#00ee00",
+    "#ffff00",
+    "#0000ff",
+    "#ff00ff",
+    "#00cdcd",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#00a595",
+  "name": "ENCOM",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#00a48c",
+  "selectionForeground": "#3de1c9"
+}

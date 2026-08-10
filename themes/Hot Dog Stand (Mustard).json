@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ea3323",
+    "#ea3323",
+    "#ea3323",
+    "#000000",
+    "#ea3323",
+    "#000000",
+    "#b9b9b9",
+    "#000000",
+    "#ea3323",
+    "#ea3323",
+    "#ea3323",
+    "#000000",
+    "#ea3323",
+    "#000000",
+    "#c6c6c6"
+  ],
+  "background": "#ffff54",
+  "cursor": "#ea3323",
+  "cursorText": "#ffff54",
+  "foreground": "#000000",
+  "name": "Hot Dog Stand (Mustard)",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ea3323",
+  "selectionForeground": "#ffffff"
+}

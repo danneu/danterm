@@ -1,5 +1,5 @@
 // Remote theme picker: a sheet presented on the preferences panel that lets
-// users browse and select a Ghostty theme for remote (SSH) sessions. Uses the
+// users browse and select a theme for remote (SSH) sessions. Uses the
 // same swatch preview and search filtering as the sidebar theme browser.
 import Cocoa
 

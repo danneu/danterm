@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/62screen_damage.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Altscreen damages entire area; Merge scroll*2 with damage",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm asserts public screen residue and logical-damage redraw equivalence instead of moverect and damage-merge callbacks."
+    ]
+  },
+  "initial": { "columns": 6, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "P" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "P     \n      \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1049h\u001b[3HABCDE\b\b\b\u001b[2P\r\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "      \nABE   \n      ",
+        "cursor": { "row": 2, "column": 0, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1049l" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "P     \n      \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    }
+  ]
+}

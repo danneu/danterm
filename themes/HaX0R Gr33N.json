@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#001f0b",
+    "#15d00d",
+    "#15d00d",
+    "#15d00d",
+    "#15d00d",
+    "#15d00d",
+    "#15d00d",
+    "#fafafa",
+    "#334843",
+    "#19e20e",
+    "#19e20e",
+    "#19e20e",
+    "#19e20e",
+    "#19e20e",
+    "#19e20e",
+    "#fefefe"
+  ],
+  "background": "#020f01",
+  "cursor": "#15d00d",
+  "cursorText": "#ffffff",
+  "foreground": "#16b10e",
+  "name": "HaX0R Gr33N",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#d4ffc1",
+  "selectionForeground": "#b0b0b0"
+}

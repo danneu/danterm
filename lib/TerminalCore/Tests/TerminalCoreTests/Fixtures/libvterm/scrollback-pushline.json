@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/nvim/t/69screen_pushline.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Spillover text marks continuation on second line; continuation mark sent to sb_pushline",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": ["Callback timing is replaced by oldest-first public scrollback inspection.", "Dimensions reduced while preserving the scroll-off boundaries."]
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "ABCDE" },
+    { "type": "feed", "base64": "DQo=" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "E   \n    ",
+        "softWraps": [false, false],
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 1,
+        "scrollbackRows": [
+          {
+            "softWrapped": true,
+            "cells": [
+              {
+                "kind": "narrow",
+                "scalars": "A",
+                "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+              },
+              { "kind": "narrow", "scalars": "B" },
+              { "kind": "narrow", "scalars": "C" },
+              { "kind": "narrow", "scalars": "D" }
+            ]
+          }
+        ],
+        "fullHistoryText": "ABCDE"
+      }
+    },
+    { "type": "feed", "base64": "Cg==" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "    \n    ",
+        "softWraps": [false, false],
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 2,
+        "scrollbackRows": [
+          {
+            "softWrapped": true,
+            "cells": [
+              {
+                "kind": "narrow",
+                "scalars": "A",
+                "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+              },
+              { "kind": "narrow", "scalars": "B" },
+              { "kind": "narrow", "scalars": "C" },
+              { "kind": "narrow", "scalars": "D" }
+            ]
+          },
+          {
+            "softWrapped": false,
+            "cells": [
+              { "kind": "narrow", "scalars": "E" },
+              { "kind": "padding", "scalars": "" },
+              { "kind": "padding", "scalars": "" },
+              { "kind": "padding", "scalars": "" }
+            ]
+          }
+        ],
+        "fullHistoryText": "ABCDE"
+      }
+    }
+  ]
+}

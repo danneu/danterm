@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#101116",
+    "#ff5680",
+    "#00ff9c",
+    "#fffc58",
+    "#00b0ff",
+    "#d57bff",
+    "#76c1ff",
+    "#c7c7c7",
+    "#686868",
+    "#ff6e67",
+    "#5ffa68",
+    "#fffc67",
+    "#6871ff",
+    "#d682ec",
+    "#60fdff",
+    "#ffffff"
+  ],
+  "background": "#101116",
+  "cursor": "#76ff9f",
+  "cursorText": "#a6a6a6",
+  "foreground": "#00a2ff",
+  "name": "Blue Matrix",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

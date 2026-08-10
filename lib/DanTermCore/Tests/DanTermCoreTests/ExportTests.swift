@@ -1,9 +1,5 @@
 // Swift Testing migration of the legacy `tests/ExportTests.swift` harness
-// suite. Pins the export helpers + title-channel event translation that link
-// the running terminal to the model: parseDantermEvent / translateMsg (the
-// title-channel parser and the runtime interception path), PaneTokenStore
-// lifecycle, restore-command behavior and prefill/execute input synthesis,
-// commandStarted Msg side effects, truncateScrollback's char/line/whitespace
+// suite. Pins commandStarted Msg side effects, truncateScrollback's char/line/whitespace
 // rules, exportState's snapshot payload, the toSnapshot/validateAndBuild
 // round-trip + launch field projection, and the JSON encode/decode contract.
 // `guard case` patterns that the legacy suite asserted via `throw
@@ -14,546 +10,6 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct ExportTests {
-    // MARK: - parseDantermEvent
-
-    @Test("parseDantermEvent: valid CMD_START")
-    func parseDantermEventValidCMDStart() {
-        // Intent: a well-formed CMD_START title with the expected token
-        //   parses into .commandStarted with the base64-decoded command.
-        // Why it exists: pins the happy path of the title-channel parser
-        //   that wraps a Ghostty surface's `__DANTERM_EVT__` titles.
-        // Scenario: spec-first parse -- `vim` base64-encoded inside a
-        //   well-formed event title parses to .commandStarted("vim").
-        let cmd = "vim"
-        let b64 = Data(cmd.utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == .commandStarted(command: "vim"))
-    }
-
-    @Test("parseDantermEvent: valid CMD_END")
-    func parseDantermEventValidCMDEnd() {
-        // Intent: a CMD_END title (no payload) parses into .commandEnded.
-        // Why it exists: pins the end-of-command sentinel parse.
-        // Scenario: spec-first parse -- the terminal emits the CMD_END
-        //   event title and the parser reports .commandEnded.
-        let raw = "__DANTERM_EVT__:tok123:CMD_END"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == .commandEnded)
-    }
-
-    @Test("parseDantermEvent: wrong token rejected")
-    func parseDantermEventWrongTokenRejected() {
-        // Intent: an event with a token that does not match the expected
-        //   pane token is rejected (returns nil).
-        // Why it exists: pins the token-scoping that prevents events from
-        //   one pane bleeding into another's interpretation.
-        // Scenario: spec-first auth check -- a CMD_START with a stale
-        //   token returns nil.
-        let cmd = "vim"
-        let b64 = Data(cmd.utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:wrong:CMD_START:\(b64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "wrong token should be rejected")
-    }
-
-    @Test("parseDantermEvent: missing token segment rejected")
-    func parseDantermEventMissingTokenSegmentRejected() {
-        // Intent: a title that lacks the token segment entirely is rejected.
-        // Why it exists: pins the parser's strict frame requirement.
-        // Scenario: spec-first guard -- a bare `__DANTERM_EVT__:` prefix
-        //   returns nil.
-        let raw = "__DANTERM_EVT__:"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "missing token should be rejected")
-    }
-
-    @Test("parseDantermEvent: malformed base64 rejected")
-    func parseDantermEventMalformedBase64Rejected() {
-        // Intent: a CMD_START whose payload is not valid base64 is rejected.
-        // Why it exists: pins the decode-failure path so a corrupted title
-        //   does not surface as a bogus command string.
-        // Scenario: spec-first decode guard -- garbage payload returns nil.
-        let raw = "__DANTERM_EVT__:tok123:CMD_START:!!!invalid!!!"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "malformed base64 should be rejected")
-    }
-
-    @Test("parseDantermEvent: empty command after decode rejected")
-    func parseDantermEventEmptyCommandAfterDecodeRejected() {
-        // Intent: a CMD_START whose base64 payload decodes to "" is rejected.
-        // Why it exists: pins the non-empty-command precondition so a stray
-        //   blank event does not seed an empty lastCommand.
-        // Scenario: spec-first guard -- base64 of "" returns nil.
-        let b64 = Data("".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "empty command should be rejected")
-    }
-
-    @Test("parseDantermEvent: no prefix returns nil")
-    func parseDantermEventNoPrefixReturnsNil() {
-        // Intent: a title without the __DANTERM_EVT__ prefix returns nil.
-        // Why it exists: pins the boundary between event-channel titles and
-        //   ordinary surface titles so the parser is a pure pass-through.
-        // Scenario: spec-first guard -- the title "just a normal title"
-        //   is not an event.
-        let result = parseDantermEvent("just a normal title", expectedToken: "tok123")
-        #expect(result == nil, "non-event title should return nil")
-    }
-
-    @Test("parseDantermEvent: valid REMOTE_START")
-    func parseDantermEventValidRemoteStart() {
-        // Intent: a REMOTE_START title (no payload) parses into .remoteStart.
-        // Why it exists: pins the remote-session start sentinel.
-        // Scenario: spec-first parse -- a REMOTE_START event title parses
-        //   into the remote-start case.
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_START"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == .remoteStart)
-    }
-
-    @Test("parseDantermEvent: valid REMOTE_HOST")
-    func parseDantermEventValidRemoteHost() {
-        // Intent: a REMOTE_HOST title with valid user+host base64 segments
-        //   parses into .remoteSession(value:) with the decoded fields.
-        // Why it exists: pins the two-field payload parse.
-        // Scenario: spec-first parse -- user=dan, host=caja decodes into
-        //   .remoteSession with both fields surfaced.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == .remoteSession(value: RemoteSession(user: "dan", host: "caja")))
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with missing user field rejected")
-    func parseDantermEventRemoteHostMissingUserRejected() {
-        // Intent: REMOTE_HOST with an empty user segment is rejected.
-        // Why it exists: pins the required-fields guard for the two-field
-        //   payload.
-        // Scenario: spec-first guard -- empty user segment returns nil.
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST::\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "missing user field should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with missing host field rejected")
-    func parseDantermEventRemoteHostMissingHostRejected() {
-        // Intent: REMOTE_HOST with an empty host segment is rejected.
-        // Why it exists: pins the symmetric required-host guard.
-        // Scenario: spec-first guard -- empty host segment returns nil.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "missing host field should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with no separator rejected")
-    func parseDantermEventRemoteHostNoSeparatorRejected() {
-        // Intent: REMOTE_HOST with a single payload (no `:` separator
-        //   between user and host) is rejected.
-        // Why it exists: pins the wire-shape guard so a mis-framed payload
-        //   does not yield a partial parse.
-        // Scenario: spec-first guard -- no separator returns nil.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "missing separator should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with invalid base64 user rejected")
-    func parseDantermEventRemoteHostInvalidBase64UserRejected() {
-        // Intent: REMOTE_HOST with non-base64 in the user slot is rejected.
-        // Why it exists: pins the decode guard on the user slot.
-        // Scenario: spec-first guard -- garbage in user slot returns nil.
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:!!!invalid!!!:\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "invalid user base64 should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with invalid base64 host rejected")
-    func parseDantermEventRemoteHostInvalidBase64HostRejected() {
-        // Intent: REMOTE_HOST with non-base64 in the host slot is rejected.
-        // Why it exists: pins the symmetric decode guard on the host slot.
-        // Scenario: spec-first guard -- garbage in host slot returns nil.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):!!!invalid!!!"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "invalid host base64 should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with empty decoded user rejected")
-    func parseDantermEventRemoteHostEmptyDecodedUserRejected() {
-        // Intent: REMOTE_HOST whose user base64 decodes to "" is rejected.
-        // Why it exists: pins the post-decode non-empty guard on user.
-        // Scenario: spec-first guard -- base64-of-"" user returns nil.
-        let userB64 = Data("".utf8).base64EncodedString()
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "empty decoded user should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST with empty decoded host rejected")
-    func parseDantermEventRemoteHostEmptyDecodedHostRejected() {
-        // Intent: REMOTE_HOST whose host base64 decodes to "" is rejected.
-        // Why it exists: pins the post-decode non-empty guard on host.
-        // Scenario: spec-first guard -- base64-of-"" host returns nil.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let hostB64 = Data("".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "empty decoded host should be rejected")
-    }
-
-    @Test("parseDantermEvent: REMOTE_HOST wrong token rejected")
-    func parseDantermEventRemoteHostWrongTokenRejected() {
-        // Intent: REMOTE_HOST with a wrong token is rejected.
-        // Why it exists: pins the token-scoping for the REMOTE_HOST branch
-        //   (symmetric to CMD_START).
-        // Scenario: spec-first auth check -- valid payload but stale token
-        //   returns nil.
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:wrong-token:REMOTE_HOST:\(userB64):\(hostB64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "wrong token should be rejected")
-    }
-
-    @Test("parseDantermEvent: unknown event type returns nil")
-    func parseDantermEventUnknownEventTypeReturnsNil() {
-        // Intent: an event with an unrecognized type returns nil.
-        // Why it exists: pins forward-compat behavior -- a future event
-        //   type cannot be silently mis-interpreted as a known one.
-        // Scenario: spec-first forward-compat -- CMD_UNKNOWN returns nil.
-        let raw = "__DANTERM_EVT__:tok123:CMD_UNKNOWN"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == nil, "unknown event type should return nil")
-    }
-
-    @Test("parseDantermEvent: command with special characters")
-    func parseDantermEventCommandWithSpecialCharacters() {
-        // Intent: a command containing spaces and `@`/`-` symbols
-        //   round-trips through base64 to the expected .commandStarted.
-        // Why it exists: pins the payload neutrality of base64 against the
-        //   colon-delimited frame around it.
-        // Scenario: spec-first parse -- `ssh user@host -p 2222` parses
-        //   verbatim as the command string.
-        let cmd = "ssh user@host -p 2222"
-        let b64 = Data(cmd.utf8).base64EncodedString()
-        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
-        let result = parseDantermEvent(raw, expectedToken: "tok123")
-        #expect(result == .commandStarted(command: cmd))
-    }
-
-    // MARK: - translateMsg (runtime interception path)
-
-    @Test("translateMsg: valid CMD_START translates to commandStarted")
-    func translateMsgValidCMDStartTranslatesToCommandStarted() {
-        // Intent: a surfaceTitle whose payload is a valid CMD_START event
-        //   translates to a .commandStarted(paneId:, command:) Msg.
-        // Why it exists: pins the runtime interception path that turns
-        //   title-channel events into model-level Msgs.
-        // Scenario: spec-first translation -- a per-pane token plus a
-        //   CMD_START title yields a .commandStarted Msg with the same
-        //   paneId and decoded command.
-        let paneId = PaneId()
-        let token = "my-token"
-        let b64 = Data("vim".utf8).base64EncodedString()
-        let title = "__DANTERM_EVT__:\(token):CMD_START:\(b64)"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
-            id == paneId ? token : nil
-        }
-        guard case .commandStarted(let pid, let cmd) = result else {
-            Issue.record("expected .commandStarted, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-        #expect(cmd == "vim")
-    }
-
-    @Test("translateMsg: CMD_END translates to commandEnded")
-    func translateMsgCMDEndTranslatesToCommandEnded() {
-        // Intent: a surfaceTitle CMD_END translates to a .commandEnded Msg
-        //   carrying the originating paneId.
-        // Why it exists: pins the end-of-command Msg translation symmetric
-        //   to CMD_START.
-        // Scenario: spec-first translation -- a CMD_END title yields
-        //   .commandEnded(paneId:) with the originating pane.
-        let paneId = PaneId()
-        let token = "my-token"
-        let title = "__DANTERM_EVT__:\(token):CMD_END"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
-            id == paneId ? token : nil
-        }
-        guard case .commandEnded(let pid) = result else {
-            Issue.record("expected .commandEnded, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-    }
-
-    @Test("translateMsg: REMOTE_START translates to remoteSessionStarted")
-    func translateMsgRemoteStartTranslatesToRemoteSessionStarted() {
-        // Intent: a surfaceTitle REMOTE_START translates to
-        //   .remoteSessionStarted carrying the paneId.
-        // Why it exists: pins the remote-start Msg translation.
-        // Scenario: spec-first translation -- REMOTE_START yields
-        //   .remoteSessionStarted(paneId:).
-        let paneId = PaneId()
-        let token = "my-token"
-        let title = "__DANTERM_EVT__:\(token):REMOTE_START"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
-            id == paneId ? token : nil
-        }
-        guard case .remoteSessionStarted(let pid) = result else {
-            Issue.record("expected .remoteSessionStarted, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-    }
-
-    @Test("translateMsg: REMOTE_HOST translates to remoteSessionReported")
-    func translateMsgRemoteHostTranslatesToRemoteSessionReported() {
-        // Intent: a REMOTE_HOST surfaceTitle translates to
-        //   .remoteSessionReported with the paneId AND the decoded session.
-        // Why it exists: pins the two-field remote-session translation.
-        // Scenario: spec-first translation -- REMOTE_HOST yields
-        //   .remoteSessionReported with RemoteSession(user, host).
-        let paneId = PaneId()
-        let token = "my-token"
-        let userB64 = Data("dan".utf8).base64EncodedString()
-        let hostB64 = Data("caja".utf8).base64EncodedString()
-        let title = "__DANTERM_EVT__:\(token):REMOTE_HOST:\(userB64):\(hostB64)"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
-            id == paneId ? token : nil
-        }
-        guard case .remoteSessionReported(let pid, let session) = result else {
-            Issue.record("expected .remoteSessionReported, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-        #expect(session == RemoteSession(user: "dan", host: "caja"))
-    }
-
-    @Test("translateMsg: wrong token drops message")
-    func translateMsgWrongTokenDropsMessage() {
-        // Intent: a surfaceTitle with a wrong token returns nil from
-        //   translateMsg (message dropped, not surfaced as a Msg).
-        // Why it exists: pins the token-scoping at the Msg layer (parser
-        //   layer is covered separately).
-        // Scenario: spec-first drop -- wrong-token title returns nil.
-        let paneId = PaneId()
-        let b64 = Data("vim".utf8).base64EncodedString()
-        let title = "__DANTERM_EVT__:wrong-token:CMD_START:\(b64)"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
-            id == paneId ? "correct-token" : nil
-        }
-        #expect(result == nil, "wrong token should drop message")
-    }
-
-    @Test("translateMsg: no token for pane drops message")
-    func translateMsgNoTokenForPaneDropsMessage() {
-        // Intent: when the resolver returns nil (no token registered for
-        //   the pane), translateMsg drops the event.
-        // Why it exists: pins the unauthorized-pane guard.
-        // Scenario: spec-first drop -- resolver returns nil; result is nil.
-        let paneId = PaneId()
-        let b64 = Data("vim".utf8).base64EncodedString()
-        let title = "__DANTERM_EVT__:any-token:CMD_START:\(b64)"
-        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { _ in nil }
-        #expect(result == nil, "no token for pane should drop message")
-    }
-
-    @Test("translateMsg: normal title passes through")
-    func translateMsgNormalTitlePassesThrough() {
-        // Intent: a surfaceTitle that is NOT an event title passes through
-        //   verbatim as a .surfaceTitle Msg.
-        // Why it exists: pins the non-event pass-through so ordinary
-        //   terminal titles continue to update the chrome.
-        // Scenario: spec-first pass-through -- "vim - file.txt" returns
-        //   .surfaceTitle with the same payload.
-        let paneId = PaneId()
-        let msg = Msg.surfaceTitle(paneId: paneId, title: "vim - file.txt")
-        let result = translateMsg(msg) { _ in "some-token" }
-        guard case .surfaceTitle(let pid, let t) = result else {
-            Issue.record("expected .surfaceTitle, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-        #expect(t == "vim - file.txt")
-    }
-
-    @Test("translateMsg: non-surfaceTitle msg passes through")
-    func translateMsgNonSurfaceTitleMsgPassesThrough() {
-        // Intent: a Msg that is not a surfaceTitle passes through verbatim.
-        // Why it exists: pins the scope of translation -- only surfaceTitle
-        //   may be reinterpreted, everything else is untouched.
-        // Scenario: spec-first pass-through -- .surfaceCwd returns unchanged.
-        let paneId = PaneId()
-        let msg = Msg.surfaceCwd(paneId: paneId, cwd: "/home")
-        let result = translateMsg(msg) { _ in nil }
-        guard case .surfaceCwd(let pid, let cwd) = result else {
-            Issue.record("expected .surfaceCwd, got \(String(describing: result))")
-            return
-        }
-        #expect(pid == paneId)
-        #expect(cwd == "/home")
-    }
-
-    // MARK: - PaneTokenStore (token lifecycle)
-
-    @Test("PaneTokenStore: generate creates token")
-    func paneTokenStoreGenerateCreatesToken() {
-        // Intent: generate(for:) creates a non-empty token and stashes it
-        //   so token(for:) returns the same value.
-        // Why it exists: pins the basic lifecycle of the per-pane token
-        //   used to scope title-channel events.
-        // Scenario: spec-first happy path -- generate then read returns
-        //   the same non-empty token.
-        var store = PaneTokenStore()
-        let paneId = PaneId()
-        let token = store.generate(for: paneId)
-        #expect(!token.isEmpty, "token should not be empty")
-        #expect(store.token(for: paneId) == token)
-    }
-
-    @Test("PaneTokenStore: remove cleans up token")
-    func paneTokenStoreRemoveCleansUpToken() {
-        // Intent: remove(_:) clears the stored token; subsequent token(for:)
-        //   returns nil.
-        // Why it exists: pins the teardown path callers run when closing a
-        //   pane so stale tokens don't linger.
-        // Scenario: spec-first teardown -- generate, remove, read returns nil.
-        var store = PaneTokenStore()
-        let paneId = PaneId()
-        _ = store.generate(for: paneId)
-        store.remove(paneId)
-        #expect(store.token(for: paneId) == nil, "token should be removed")
-    }
-
-    @Test("PaneTokenStore: each pane gets unique token")
-    func paneTokenStoreEachPaneGetsUniqueToken() {
-        // Intent: distinct panes get distinct tokens from the same store.
-        // Why it exists: pins the per-pane uniqueness so a cross-pane
-        //   replay cannot pass the token-check.
-        // Scenario: spec-first uniqueness -- two generates for two panes
-        //   produce different tokens.
-        var store = PaneTokenStore()
-        let p1 = PaneId()
-        let p2 = PaneId()
-        let t1 = store.generate(for: p1)
-        let t2 = store.generate(for: p2)
-        #expect(t1 != t2, "tokens should be unique")
-    }
-
-    @Test("PaneTokenStore: generate replaces existing token")
-    func paneTokenStoreGenerateReplacesExistingToken() {
-        // Intent: a second generate(for:) on the same pane replaces the
-        //   previous token (rotation), and token(for:) returns the new one.
-        // Why it exists: pins the rotation semantics so a re-launched
-        //   pane's tokens don't pile up.
-        // Scenario: spec-first rotation -- generate twice -> distinct
-        //   tokens; reading surfaces the second.
-        var store = PaneTokenStore()
-        let paneId = PaneId()
-        let t1 = store.generate(for: paneId)
-        let t2 = store.generate(for: paneId)
-        #expect(t1 != t2, "regenerated token should differ")
-        #expect(store.token(for: paneId) == t2)
-    }
-
-    @Test("PaneTokenStore: unknown pane returns nil")
-    func paneTokenStoreUnknownPaneReturnsNil() {
-        // Intent: token(for:) on an unknown pane returns nil.
-        // Why it exists: pins the absent-key contract; callers branch on it.
-        // Scenario: spec-first lookup miss -- fresh store + unknown pane.
-        let store = PaneTokenStore()
-        #expect(store.token(for: PaneId()) == nil, "unknown pane should return nil")
-    }
-
-    // MARK: - restore command behavior
-
-    @Test("restoreCommandBehavior defaults to prefill")
-    func restoreCommandBehaviorDefaultsToPrefill() {
-        // Intent: with no --restore-commands flag, behavior defaults to
-        //   .prefill (the safe option that doesn't auto-execute).
-        // Why it exists: pins the conservative default so a fresh install
-        //   doesn't auto-run prior session commands.
-        // Scenario: spec-first default -- argv without the flag yields
-        //   .prefill.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json"])
-        #expect(behavior == .prefill)
-    }
-
-    @Test("restoreCommandBehavior parses execute flag")
-    func restoreCommandBehaviorParsesExecuteFlag() {
-        // Intent: `--restore-commands execute` resolves to .execute.
-        // Why it exists: pins the opt-in execute mode.
-        // Scenario: spec-first opt-in -- argv with `--restore-commands
-        //   execute` yields .execute.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json", "--restore-commands", "execute"])
-        #expect(behavior == .execute)
-    }
-
-    @Test("restoreCommandBehavior falls back to prefill for unknown value")
-    func restoreCommandBehaviorFallsBackToPrefillForUnknownValue() {
-        // Intent: `--restore-commands bogus` falls back to .prefill (the
-        //   safe default) rather than throwing or erroring.
-        // Why it exists: pins forward-compat -- unknown values do not
-        //   crash startup.
-        // Scenario: spec-first robust fallback -- argv with "bogus"
-        //   yields .prefill.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--restore-commands", "bogus"])
-        #expect(behavior == .prefill)
-    }
-
-    @Test("restoreInitialInput prefills without newline by default")
-    func restoreInitialInputPrefillsWithoutNewlineByDefault() {
-        // Intent: in .prefill mode, the command is returned verbatim with
-        //   no trailing newline appended.
-        // Why it exists: pins the prefill-only semantics so the user must
-        //   press Enter to actually run the prior command.
-        // Scenario: spec-first prefill -- input == command, no newline.
-        let input = restoreInitialInput(for: "node server.js", behavior: .prefill)
-        #expect(input == "node server.js")
-    }
-
-    @Test("restoreInitialInput execute appends trailing newline")
-    func restoreInitialInputExecuteAppendsTrailingNewline() {
-        // Intent: in .execute mode, the command is suffixed with a single
-        //   trailing newline so the shell runs it immediately.
-        // Why it exists: pins the execute-mode side effect explicitly.
-        // Scenario: spec-first execute -- input ends in "\n".
-        let input = restoreInitialInput(for: "node server.js", behavior: .execute)
-        #expect(input == "node server.js\n")
-    }
-
-    @Test("restoreInitialInput execute preserves existing trailing newline")
-    func restoreInitialInputExecutePreservesExistingTrailingNewline() {
-        // Intent: in .execute mode, a command already ending in "\n" is
-        //   not double-suffixed.
-        // Why it exists: pins idempotency of the newline append so two
-        //   restore paths producing the same effective input.
-        // Scenario: spec-first idempotent -- a command already ending in
-        //   "\n" stays a single-newline string.
-        let input = restoreInitialInput(for: "node server.js\n", behavior: .execute)
-        #expect(input == "node server.js\n")
-    }
-
-    @Test("restoreInitialInput returns nil for empty command")
-    func restoreInitialInputReturnsNilForEmptyCommand() {
-        // Intent: an empty command surfaces no input (nil), in either mode.
-        // Why it exists: pins the no-op behavior for missing commands so
-        //   the pane does not see a phantom empty line.
-        // Scenario: spec-first no-op -- empty command -> nil.
-        let input = restoreInitialInput(for: "", behavior: .prefill)
-        #expect(input == nil, "empty command should not produce input")
-    }
-
     // MARK: - commandStarted Msg
 
     @Test("commandStarted sets lastCommand")
@@ -605,9 +61,9 @@ import Testing
         #expect(model.pane(paneId)?.title == titleBefore)
     }
 
-    @Test("surfaceTitle does not affect lastCommand")
-    func surfaceTitleDoesNotAffectLastCommand() {
-        // Intent: a subsequent .surfaceTitle does NOT clear or change
+    @Test("sessionTitle does not affect lastCommand")
+    func sessionTitleDoesNotAffectLastCommand() {
+        // Intent: a subsequent .sessionTitle does NOT clear or change
         //   lastCommand (only .commandStarted/.commandEnded do).
         // Why it exists: pins the inverse of the previous test --
         //   ordinary title updates do not regress the command field.
@@ -618,7 +74,7 @@ import Testing
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        update(&model, .sessionTitle(paneId: paneId, title: "new title"))
         #expect(model.pane(paneId)?.lastCommand == "vim")
     }
 
@@ -673,7 +129,8 @@ import Testing
         //   surfaces lines 1001..5000.
         let lines = (1...5000).map { "line \($0)" }
         let text = lines.joined(separator: "\n")
-        let result = truncateScrollback(text, maxLines: 4000)!
+        let result = truncateScrollback(
+            text, keeping: ScrollbackRetention(maxLines: 4000, maxChars: .max))!
         let resultLines = result.split(separator: "\n")
         #expect(resultLines.count == 4000)
         #expect(String(resultLines.first!) == "line 1001")
@@ -693,7 +150,8 @@ import Testing
         let lines = (1...100).map { _ in longLine }
         let text = lines.joined(separator: "\n")
         // maxChars=500 with 100-char lines + newlines
-        let result = truncateScrollback(text, maxLines: 10000, maxChars: 500)!
+        let result = truncateScrollback(
+            text, keeping: ScrollbackRetention(maxLines: 10000, maxChars: 500))!
         #expect(result.count <= 500, "result should be at most maxChars")
         // Should break at a newline boundary
         #expect(!result.hasPrefix("\n"), "should not start with newline")
@@ -707,7 +165,8 @@ import Testing
         //   sneak in.
         // Scenario: spec-first boundary -- 2 lines at maxLines=2 keeps
         //   both.
-        let result = truncateScrollback("a\nb", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "a\nb\n")
     }
 
@@ -718,7 +177,8 @@ import Testing
         // Why it exists: pins the tail-keep direction at the boundary.
         // Scenario: spec-first boundary -- 3 lines at maxLines=2 keeps
         //   the latter two.
-        let result = truncateScrollback("a\nb\nc", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\nb\nc", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "b\nc\n")
     }
 
@@ -731,7 +191,8 @@ import Testing
         //   in the middle aren't silently coalesced.
         // Scenario: spec-first count -- "a\n\n\nb" at maxLines=2 keeps
         //   one empty line and "b".
-        let result = truncateScrollback("a\n\n\nb", maxLines: 2)!
+        let result = truncateScrollback(
+            "a\n\n\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
         #expect(result == "\nb\n")
     }
 
@@ -739,9 +200,9 @@ import Testing
     func truncateScrollbackTrailingWhitespaceOnlyLinesAreStripped() {
         // Intent: lines at the tail that contain only whitespace are
         //   removed before the trailing newline is added.
-        // Why it exists: pins the ghostty-padding behavior -- ghostty
-        //   pads the visible buffer with whitespace lines that should
-        //   not pollute the saved scrollback.
+        // Why it exists: a viewport read pads the visible buffer out to
+        //   its full row count with whitespace lines, which should not
+        //   pollute the saved scrollback.
         // Scenario: spec-first stripping -- "hello\nworld\n   \n   \n
         //   \n" becomes "hello\nworld\n".
         let result = truncateScrollback("hello\nworld\n   \n   \n   \n")!

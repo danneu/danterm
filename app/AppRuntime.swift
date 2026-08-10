@@ -1,37 +1,151 @@
-// Runtime bridge that performs update commands and synchronizes AppKit/Ghostty views.
+// Runtime bridge that performs update commands and synchronizes the AppKit view tree.
 import Cocoa
 import DanTermProtocol
-import GhosttyKit
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
+/// Resolve DanTerm's process-temporary root, with a harness-only override
+/// because macOS Foundation ignores a launched app's `TMPDIR` value.
+func danTermTemporaryDirectoryURL(fileManager: FileManager = .default) -> URL {
+    #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
+    if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT"] {
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    #endif
+    return fileManager.temporaryDirectory
+}
+
+/// Centralize the replay directory used by restore writes, stale cleanup, and
+/// the characterization isolation probe so all three observe the same path.
+func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
+    scrollbackReplayDirectoryURL(
+        identity: DanTermInstanceIdentity(),
+        temporaryDirectory: danTermTemporaryDirectoryURL(fileManager: fileManager)
+    )
+}
+
+#if DANTERM_TERMINAL_CHARACTERIZATION
+/// Records terminal boundary events so opt-in characterization harnesses can
+/// assert callback conformance without exposing backend details.
+@MainActor
+func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
+    let description: String
+    switch event {
+    case .titleChanged(let title):
+        description = "session.titleChanged:\(title)"
+    case .cwdChanged(let cwd):
+        description = "session.cwdChanged:\(cwd)"
+    case .bell:
+        description = "session.bell"
+    case .desktopNotification(let title, let body):
+        description = "session.desktopNotification:\(title):\(body)"
+    case .progress(let progress):
+        description = "session.progress:\(String(describing: progress))"
+    case .searchStarted(let needle):
+        description = "session.searchStarted:\(needle)"
+    case .searchTotal(let total):
+        description = "session.searchTotal:\(String(describing: total))"
+    case .searchSelected(let selected):
+        description = "session.searchSelected:\(String(describing: selected))"
+    case .becameFirstResponder:
+        description = "session.becameFirstResponder"
+    case .closeRequested:
+        description = "session.closeRequested"
+    }
+    appendTerminalCharacterizationEvent(description)
+}
+
+/// Marks a complete frame reaching the visible Swift terminal view so harnesses
+/// can prove hidden and idle panes do not schedule rendering work.
+@MainActor
+func recordTerminalCharacterizationPlanDelivery() {
+    appendTerminalCharacterizationEvent("session.planDelivered")
+}
+
+/// Marks an effective pane visibility transition before it reaches the backend,
+/// giving harnesses an ordering fence for hidden-output and reveal assertions.
+@MainActor
+func recordTerminalCharacterizationVisibilityChange(paneId: PaneId, visible: Bool) {
+    appendTerminalCharacterizationEvent(
+        "session.visibilityChanged:\(paneId.rawValue.uuidString):\(visible)"
+    )
+}
+
+@MainActor
+private func appendTerminalCharacterizationEvent(_ description: String) {
+    guard let path = ProcessInfo.processInfo.environment[
+        "DANTERM_TERMINAL_CHARACTERIZATION_EVENT_LOG"
+    ] else { return }
+    let data = Data("\(description)\n".utf8)
+    if FileManager.default.fileExists(atPath: path) == false {
+        FileManager.default.createFile(atPath: path, contents: data)
+        return
+    }
+    guard let handle = FileHandle(forWritingAtPath: path) else { return }
+    defer { try? handle.close() }
+    do {
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+    } catch {
+        print("[characterization] Failed to record terminal event: \(error)")
+    }
+}
+#endif
+
+/// Encodes and queues one complete follow batch off the main actor, completing after its last line.
+private func writePaneTapeFollowRecords(
+    _ records: [JSONValue],
+    connection: IpcConnection,
+    subscriptionId: UUID,
+    completion: @escaping @Sendable (Bool) -> Void
+) {
+    precondition(records.isEmpty == false)
+    DispatchQueue.global(qos: .utility).async {
+        for (index, record) in records.enumerated() {
+            let isLast = index == records.index(before: records.endIndex)
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([
+                    "subscription": .string(subscriptionId.uuidString),
+                    "record": record,
+                ]),
+                completion: isLast ? completion : nil
+            )
+        }
+    }
+}
+
 // App runtime owns the mutable app model, performs the commands emitted by the
-// pure update function, and bridges model changes into AppKit/Ghostty objects.
+// pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
 class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
-        let surfaces: [PaneId: TerminalView]
-        let tokenStore: PaneTokenStore
+        let sessions: [PaneId: any TerminalSession]
         let replayFiles: [PaneId: URL]
     }
 
     var model: AppModel
+    private let configStore: DanTermConfigStore
+    private let notificationAuthorizationPolicy: NotificationAuthorizationPolicy
+    private var pendingConfigError: Error?
     // Ephemeral view state the reconciler reads as a second input (see ViewLocalState).
     // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
     // read only by reconcileSidebar's rename guard.
     var viewLocalState = ViewLocalState()
-    let ghosttyApp: GhosttyApp
-    var surfaces: [PaneId: TerminalView] = [:]
-    // Last libghostty occlusion value pushed for each live surface.
-    // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
-    private var surfaceVisibility: [PaneId: Bool] = [:]
+    let terminalBackend: SwiftTerminalBackend
+    var sessions: [PaneId: any TerminalSession] = [:]
+    // Last occlusion value pushed for each live session.
+    // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
+    // Cross-file presentation lifecycle forwarding diffs effective visibility here.
+    var paneVisibility: [PaneId: Bool] = [:]
+    // Kept separate from pane visibility so an occluded wake remains deferred.
+    var renderingAvailable = true
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
     // internal (not private): the cross-file reconcileContainers extension reads/mutates it.
     var tabContainers: [TabId: SplitContainerView] = [:]
-    var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
@@ -51,40 +165,71 @@ class AppRuntime {
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
+    private var switcherEventMonitorToken: AppRuntimeSchedulingToken?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
-    private static let replayDirectoryName = "danterm-scrollback"
     // Session persistence uses two tiers of checkpoints:
     //   Light  — pure model serialization (no scrollback), written after a 2s debounce
     //            following any state-mutating Msg. Cheap and frequent.
-    //   Enriched — model + scrollback text read from live Ghostty surfaces, written on
-    //              a 10 min repeating timer and once at clean termination. Expensive but
-    //              gives full restore fidelity including terminal history.
+    //   Enriched -- model + primary history, driven by primary-history mutations,
+    //               plus one final synchronous clean-exit write.
     private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
-    private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
+    private var checkpointDebouncerToken: AppRuntimeSchedulingToken?
+    private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
+    private var enrichedCheckpointTimerToken: AppRuntimeSchedulingToken?
+    private var recoveryPolicy = RecoveryCheckpointPolicy(
+        window: UInt64(600 * NSEC_PER_SEC)
+    )
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
-    // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
-    private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
+    private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
+    // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
+    private static let checkpointWriter = CheckpointWriter()
     private var searchDebouncers: [PaneId: Debouncer] = [:]
+    private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
+    private var ipcConnectionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
+    private var paneTapeFollowSubscriptions = PaneTapeFollowSubscriptions()
+    private var paneTapeFollowConnections: [UUID: IpcConnection] = [:]
+    private var paneTapeFollowSubscriptionTokens: [UUID: AppRuntimeSchedulingToken] = [:]
+    private var paneTapeFollowNoticeRegistrations: [
+        UUID: PaneTapeFollowNoticeRegistration
+    ] = [:]
     private var ipcServer: IpcServer?
+    private var ipcServerToken: AppRuntimeSchedulingToken?
+    private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
+    let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private static let checkpointDebounceInterval: TimeInterval = 2.0
-    // Matches Ghostty's title coalesce interval: quick enough to feel live, slow
-    // enough to avoid flickering chrome under terminal-title spam.
+    // Coalescing window for the reconcile pass, sized for its noisiest driver: a
+    // shell that rewrites its OSC 0/2 title on every prompt. 75ms still reads as
+    // instant to a human, and it collapses a burst of title writes into one chrome
+    // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
-    // Slowed from 60s to 10min until the libghostty memory leak is fixed.
-    // https://github.com/danneu/danterm/issues/31
-    private static let enrichedCheckpointInterval: TimeInterval = 600.0
 
-    init(ghosttyApp: GhosttyApp) {
-        self.ghosttyApp = ghosttyApp
+    init(
+        terminalBackend: SwiftTerminalBackend,
+        configStore: DanTermConfigStore = DanTermConfigStore(),
+        notificationAuthorizationPolicy: NotificationAuthorizationPolicy = .requestIfNeeded
+    ) {
+        self.terminalBackend = terminalBackend
+        self.configStore = configStore
+        self.notificationAuthorizationPolicy = notificationAuthorizationPolicy
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
         )
-        // Load DanTerm config before any tabs are created
-        self.model.config = DanTermConfigParser.loadFromDisk()
+        // Load DanTerm config before any tabs are created. This is the one apply
+        // path that cannot go through send() -- the Elm loop is not running yet --
+        // so it assigns the same pair configLoaded does, via the same resolver.
+        let launchConfig: DanTermConfig
+        do {
+            launchConfig = try configStore.load()
+        } catch {
+            launchConfig = .default
+            self.pendingConfigError = error
+        }
+        self.model.config = launchConfig
+        self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -96,22 +241,37 @@ class AppRuntime {
         // the model directly; mutations go through send().
         installSwitcherEventMonitor()
 
-        self.ipcServer = IpcServer(socketPath: controlSocketPath(), runtime: self)
-        Task { await self.ipcServer?.start() }
+        do {
+            let server = try IpcServer(socketPath: controlSocketPath(), runtime: self)
+            self.ipcServer = server
+            self.ipcServerToken = schedulingLifecycle.arm(.ipcServer) {
+                server.stop()
+            }
+            let startToken = schedulingLifecycle.arm(.deferredCallback, cancel: {})
+            Task { [weak self, weak server] in
+                guard let self, let startToken else { return }
+                guard self.schedulingLifecycle.run(startToken, action: {}) else { return }
+                await server?.start()
+            }
+        } catch {
+            self.ipcServer = nil
+            print("Failed to start DanTerm IPC server: \(error)")
+        }
     }
 
     deinit {
-        if let monitor = switcherEventMonitor {
-            NSEvent.removeMonitor(monitor)
+        // AppDelegate creates, owns, and releases the runtime on the main actor; deinit is
+        // nonisolated in this language mode, so encode that owner guarantee for the fallback.
+        MainActor.assumeIsolated {
+            schedulingLifecycle.shutdown()
         }
     }
 
     // MARK: - Ephemeral Mode Event Monitor
 
     private func installSwitcherEventMonitor() {
-        switcherEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
+        guard schedulingLifecycle.isActive else { return }
+        let eventHandler: (NSEvent) -> NSEvent? = { [weak self] event in
             guard let self = self else { return event }
 
             let mods = self.normalizedSwitcherModifiers(from: event)
@@ -195,6 +355,14 @@ class AppRuntime {
             case .commit:      self.send(.mruCycleCommitted);                   return nil
             }
         }
+        guard let monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown],
+            handler: eventHandler
+        ) else { return }
+        switcherEventMonitor = monitor
+        switcherEventMonitorToken = schedulingLifecycle.arm(.eventMonitor) {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     private func normalizedSwitcherModifiers(from event: NSEvent) -> SwitcherModifiers {
@@ -220,9 +388,8 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
-        guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
-
-        let commands = update(&model, translatedMsg)
+        guard schedulingLifecycle.isActive else { return }
+        let commands = update(&model, msg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
         // whose search field reconcilePaneChrome builds) run after. See
@@ -232,7 +399,7 @@ class AppRuntime {
         }
         let emitsPostReconcile = commands.contains { $0.isPostReconcile }
         switch reconcileDecision(
-            for: translatedMsg,
+            for: msg,
             coalescedSweepPending: coalescedReconcileTimer != nil,
             emitsPostReconcile: emitsPostReconcile
         ) {
@@ -250,7 +417,7 @@ class AppRuntime {
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
-        if case .appResignedActive = translatedMsg {
+        if case .appResignedActive = msg {
             cancelPaneDrag()
             // Flush pending light checkpoint so we don't lose state if the app
             // is killed while backgrounded (e.g. memory pressure, force quit).
@@ -303,44 +470,31 @@ class AppRuntime {
         return popover
     }
 
-    func terminalView(for paneId: PaneId) -> TerminalView? {
-        return surfaces[paneId]
-    }
-
-    /// Push effective model visibility to live libghostty surfaces, skipping unchanged panes.
-    func syncSurfaceVisibility() {
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
-        let desired = effectiveSurfaceVisibility(in: model, windowVisible: windowVisible)
-
-        for (paneId, view) in surfaces {
-            guard let surface = view.surface else { continue }
-            let visible = desired[paneId] ?? true
-            if surfaceVisibility[paneId] != visible {
-                ghostty_surface_set_occlusion(surface, visible)
-                surfaceVisibility[paneId] = visible
+    /// Re-reads every live session's backing scale after the window changes screens.
+    /// Deferred one main-loop turn because AppKit can skip the automatic
+    /// backing-properties callback on a screen change.
+    func refreshSessionsForScreenChange() {
+        guard let callback = captureDeferredCallback({ runtime in
+            for session in runtime.sessions.values {
+                session.refreshBackingProperties()
             }
-        }
-
-        surfaceVisibility = surfaceVisibility.filter { paneId, _ in
-            surfaces[paneId] != nil
+        }) else { return }
+        DispatchQueue.main.async {
+            callback()
         }
     }
 
-    /// Push the active monitor's display id to every live surface so libghostty's
-    /// per-surface CVDisplayLink re-syncs to that monitor's refresh rate.
-    func syncSurfaceDisplayID() {
-        guard let displayID = window?.screen?.displayID else { return }
-        for (_, view) in surfaces {
-            guard let surface = view.surface else { continue }
-            ghostty_surface_set_display_id(surface, displayID)
+    /// Captures one main-actor callback that becomes inert when runtime shutdown wins the race.
+    private func captureDeferredCallback(
+        _ action: @escaping (AppRuntime) -> Void
+    ) -> (() -> Void)? {
+        guard let token = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            return nil
         }
-
-        // Mirror Ghostty's screen-change path: nudge backing properties on the
-        // next main-loop turn because AppKit can skip the automatic callback.
-        DispatchQueue.main.async { [weak self] in
+        return { [weak self] in
             guard let self else { return }
-            for (_, view) in self.surfaces {
-                view.viewDidChangeBackingProperties()
+            self.schedulingLifecycle.run(token) {
+                action(self)
             }
         }
     }
@@ -348,101 +502,407 @@ class AppRuntime {
     /// Make the pane first responder; AppKit focus is the reparent/display-link
     /// recovery path for terminal activation.
     /// See docs/design/2026-05-27-terminal-focus-display-link.md.
-    func focusPaneSurface(_ paneId: PaneId) {
-        guard let view = surfaces[paneId] else { return }
-        window?.makeFirstResponder(view)
+    func focusPaneSession(_ paneId: PaneId) {
+        guard let session = sessions[paneId] else { return }
+        window?.makeFirstResponder(session.hostView)
     }
 
-    var ipcSocketPath: URL {
-        ipcServer?.socketPath ?? controlSocketPath()
+    var ipcSocketPath: URL? {
+        ipcServer?.socketPath
     }
 
     func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
+        guard schedulingLifecycle.isActive else {
+            connection.close()
+            return
+        }
         ipcConnections[reqId] = connection
+        ipcConnectionTokens[reqId] = schedulingLifecycle.arm(.subscription) {
+            connection.close()
+        }
+    }
+
+    /// Drops all streams owned by a closed socket before another append edge can fetch.
+    func ipcConnectionClosed(_ connectionId: UUID) {
+        guard schedulingLifecycle.isActive else { return }
+        let requestIds = ipcConnections.compactMap { reqId, connection in
+            connection.id == connectionId ? reqId : nil
+        }
+        for reqId in requestIds {
+            ipcConnections.removeValue(forKey: reqId)
+            schedulingLifecycle.cancel(ipcConnectionTokens.removeValue(forKey: reqId))
+        }
+        for removal in paneTapeFollowSubscriptions.connectionClosed(connectionId) {
+            removePaneTapeFollowNotice(removal)
+            schedulingLifecycle.cancel(
+                paneTapeFollowSubscriptionTokens.removeValue(forKey: removal.subscriptionId)
+            )
+        }
+        paneTapeFollowConnections.removeValue(forKey: connectionId)
+    }
+
+    private func beginPaneTapeFollow(
+        reqId: UUID,
+        paneId: PaneId,
+        fromNow: Bool,
+        connection: IpcConnection,
+        session: any TerminalSession
+    ) {
+        guard schedulingLifecycle.isActive else {
+            connection.close()
+            return
+        }
+        guard let prepareStart = session.paneTapeFollowStart(fromNow: fromNow) else {
+            connection.writeError(
+                reqId: reqId,
+                code: -32603,
+                message: "pane tape unavailable for this terminal backend"
+            )
+            return
+        }
+        let subscriptionId = UUID()
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            connection.close()
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let start = try prepareStart()
+                connection.writeSuccess(reqId: reqId, result: start.record) { succeeded in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.schedulingLifecycle.run(callbackToken) {
+                            self.finishPaneTapeFollowStart(
+                                succeeded: succeeded,
+                                subscriptionId: subscriptionId,
+                                paneId: paneId,
+                                connection: connection,
+                                start: start
+                            )
+                        }
+                    }
+                }
+            } catch {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "failed to encode pane tape"
+                )
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken, action: {})
+                }
+            }
+        }
+    }
+
+    private func finishPaneTapeFollowStart(
+        succeeded: Bool,
+        subscriptionId: UUID,
+        paneId: PaneId,
+        connection: IpcConnection,
+        start: PaneTapeFollowStart
+    ) {
+        guard schedulingLifecycle.isActive else { return }
+        guard succeeded else { return }
+        guard let session = sessions[paneId] else {
+            writePaneTapeFollowNotification(
+                connection: connection,
+                subscriptionId: subscriptionId,
+                record: makePaneTapeFollowEndRecord(),
+                closeAfterWrite: true
+            )
+            return
+        }
+        paneTapeFollowConnections[connection.id] = connection
+        paneTapeFollowSubscriptions.add(
+            id: subscriptionId,
+            connectionId: connection.id,
+            paneId: paneId.rawValue,
+            cursor: start.cursor
+        )
+        paneTapeFollowSubscriptionTokens[subscriptionId] = schedulingLifecycle.arm(
+            .subscription,
+            cancel: { connection.close() }
+        )
+        guard let noticeRegistration = session.addPaneTapeFollowNotice(
+            id: subscriptionId,
+            cursor: start.cursor,
+            notify: { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    MainActor.assumeIsolated {
+                        self.paneTapeFollowEventsAvailable(subscriptionId)
+                    }
+                }
+            }
+        ) else {
+            discardPaneTapeFollow(subscriptionId, closeConnection: true)
+            return
+        }
+        paneTapeFollowNoticeRegistrations[subscriptionId] = noticeRegistration
+    }
+
+    private func paneTapeFollowEventsAvailable(_ subscriptionId: UUID) {
+        guard schedulingLifecycle.isActive else { return }
+        guard let fetch = paneTapeFollowSubscriptions.eventsAvailable(subscriptionId) else {
+            return
+        }
+        fetchPaneTapeFollow(fetch)
+    }
+
+    private func fetchPaneTapeFollow(_ fetch: PaneTapeFollowFetch) {
+        guard let connection = paneTapeFollowConnections[fetch.connectionId] else {
+            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: false)
+            return
+        }
+        let paneId = PaneId(rawValue: fetch.paneId)
+        guard let session = sessions[paneId] else {
+            endPaneTapeFollowers(for: paneId)
+            return
+        }
+        guard let prepareBatch = session.paneTapeFollowBatch(
+            subscriptionId: fetch.subscriptionId,
+            from: fetch.cursor
+        ) else {
+            discardPaneTapeFollow(fetch.subscriptionId, closeConnection: true)
+            return
+        }
+        guard let callbackToken = schedulingLifecycle.arm(
+            .deferredCallback,
+            cancel: {}
+        ) else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                let snapshot = try prepareBatch()
+                let batch = makePaneTapeFollowBatch(from: snapshot)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken) {
+                        self.deliverPaneTapeFollowBatch(
+                            subscriptionId: fetch.subscriptionId,
+                            connection: connection,
+                            batch: batch
+                        )
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken) {
+                        self.discardPaneTapeFollow(
+                            fetch.subscriptionId,
+                            closeConnection: true
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func deliverPaneTapeFollowBatch(
+        subscriptionId: UUID,
+        connection: IpcConnection,
+        batch: PaneTapeFollowBatch
+    ) {
+        guard schedulingLifecycle.isActive else { return }
+        guard let accepted = paneTapeFollowSubscriptions.finishFetch(
+            subscriptionId: subscriptionId,
+            batch: batch
+        ) else { return }
+        guard accepted.records.isEmpty == false else {
+            if let fetch = paneTapeFollowSubscriptions.completeDelivery(
+                subscriptionId: subscriptionId
+            ) {
+                fetchPaneTapeFollow(fetch)
+            }
+            return
+        }
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            return
+        }
+
+        writePaneTapeFollowRecords(
+            accepted.records,
+            connection: connection,
+            subscriptionId: subscriptionId
+        ) { [weak self] succeeded in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    guard succeeded else {
+                        self.discardPaneTapeFollow(
+                            subscriptionId,
+                            closeConnection: false
+                        )
+                        return
+                    }
+                    if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
+                        subscriptionId: subscriptionId
+                    ) {
+                        self.fetchPaneTapeFollow(fetch)
+                    }
+                }
+            }
+        }
+    }
+
+    private func discardPaneTapeFollow(
+        _ subscriptionId: UUID,
+        closeConnection: Bool
+    ) {
+        guard let removal = paneTapeFollowSubscriptions.remove(subscriptionId) else { return }
+        removePaneTapeFollowNotice(removal)
+        schedulingLifecycle.cancel(
+            paneTapeFollowSubscriptionTokens.removeValue(forKey: subscriptionId)
+        )
+        guard let connection = paneTapeFollowConnections.removeValue(
+            forKey: removal.connectionId
+        ) else { return }
+        if closeConnection {
+            connection.close()
+        }
+    }
+
+    private func removePaneTapeFollowNotice(_ removal: PaneTapeFollowRemoval) {
+        paneTapeFollowNoticeRegistrations.removeValue(
+            forKey: removal.subscriptionId
+        )?.cancel()
+    }
+
+    private func endPaneTapeFollowers(for paneId: PaneId) {
+        for end in paneTapeFollowSubscriptions.paneClosed(paneId.rawValue) {
+            paneTapeFollowNoticeRegistrations.removeValue(
+                forKey: end.subscriptionId
+            )?.cancel()
+            if let token = paneTapeFollowSubscriptionTokens.removeValue(
+                forKey: end.subscriptionId
+            ) {
+                schedulingLifecycle.run(token, action: {})
+            }
+            guard let connection = paneTapeFollowConnections.removeValue(
+                forKey: end.connectionId
+            ) else { continue }
+            writePaneTapeFollowNotification(
+                connection: connection,
+                subscriptionId: end.subscriptionId,
+                record: end.record,
+                closeAfterWrite: true
+            )
+        }
+    }
+
+    private func writePaneTapeFollowNotification(
+        connection: IpcConnection,
+        subscriptionId: UUID,
+        record: JSONValue,
+        closeAfterWrite: Bool
+    ) {
+        DispatchQueue.global(qos: .utility).async {
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([
+                    "subscription": .string(subscriptionId.uuidString),
+                    "record": record,
+                ]),
+                closeAfterWrite: closeAfterWrite
+            )
+        }
     }
 
     func stopIpcServer() {
-        let socketPath = ipcSocketPath
-        Task { await ipcServer?.stop() }
-        try? FileManager.default.removeItem(at: socketPath)
+        schedulingLifecycle.cancel(ipcServerToken)
+        ipcServerToken = nil
+        ipcServer = nil
+    }
+
+    /// Transfers one pending IPC request out of the shutdown census before replying.
+    private func takeIpcConnection(for reqId: UUID) -> IpcConnection? {
+        guard let connection = ipcConnections.removeValue(forKey: reqId) else { return nil }
+        if let token = ipcConnectionTokens.removeValue(forKey: reqId) {
+            schedulingLifecycle.run(token, action: {})
+        }
+        return connection
+    }
+
+    /// Permanently cancels runtime-owned scheduling without duplicating native PTY teardown.
+    func shutdown() {
+        guard schedulingLifecycle.isActive else { return }
+
+        checkpointPending = false
+        for removal in paneTapeFollowSubscriptions.removeAll() {
+            removePaneTapeFollowNotice(removal)
+        }
+        paneTapeFollowConnections.removeAll()
+        paneTapeFollowSubscriptionTokens.removeAll()
+        paneTapeFollowNoticeRegistrations.removeAll()
+        ipcConnections.removeAll()
+        ipcConnectionTokens.removeAll()
+        for session in sessions.values {
+            session.onEvent = nil
+            session.onPrimaryHistoryMutation = nil
+        }
+        sessionSubscriptionTokens.removeAll()
+
+        schedulingLifecycle.shutdown()
+
+        switcherEventMonitor = nil
+        switcherEventMonitorToken = nil
+        checkpointDebouncerToken = nil
+        enrichedCheckpointTimer = nil
+        enrichedCheckpointTimerToken = nil
+        coalescedReconcileTimer = nil
+        coalescedReconcileTimerToken = nil
+        searchDebouncers.removeAll()
+        searchDebouncerTokens.removeAll()
+        ipcServer = nil
+        ipcServerToken = nil
     }
 
     // MARK: - Command Performer
 
     private func perform(_ command: Command) {
         switch command {
-        case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
-            let token = tokenStore.generate(for: paneId)
+        case .createSession(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let envVars = terminalLaunchEnvironment(
-                ipcSocketPath: ipcSocketPath.path,
-                paneId: paneId,
-                token: token
+                ipcSocketPath: ipcSocketPath?.path,
+                paneId: paneId
             )
-            let view = makeTerminalView(
+            guard let session = makeTerminalSession(
                 paneId: paneId,
                 workingDirectory: cwd,
                 command: command,
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
-                restoreCommandBehavior: .execute,
-                envVars: envVars
-            )
-            surfaces[paneId] = view
-            if view.surface == nil {
-                send(.surfaceCreationFailed(paneId: paneId))
+                envVars: envVars,
+                themeName: model.pane(paneId).map {
+                    effectiveTheme(for: $0, config: model.config)
+                },
+                fontSize: model.pane(paneId).map {
+                    effectiveFontSize(for: $0, config: model.config)
+                } ?? model.config.resolvedFontSize,
+                fontFamily: model.resolvedFontFamily
+            ) else {
+                send(.sessionCreationFailed(paneId: paneId))
+                break
             }
+            sessions[paneId] = session
 
         case .sendText(let paneId, let text):
-            guard !text.isEmpty,
-                  let surface = surfaces[paneId]?.surface else { break }
-            text.withCString { ptr in
-                ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
-            }
+            sessions[paneId]?.sendText(text)
 
         case .sendInputText(let paneId, let text):
-            // Send a press-only key event with keycode 0 and the literal
-            // UTF-8 text attached. Avoids paste stripping and bracketed-paste
-            // markers so TUIs receive characters as if typed.
-            guard !text.isEmpty,
-                  let surface = surfaces[paneId]?.surface else { break }
-            var ev = ghostty_input_key_s()
-            ev.action = GHOSTTY_ACTION_PRESS
-            ev.keycode = 0
-            ev.mods = GHOSTTY_MODS_NONE
-            ev.consumed_mods = GHOSTTY_MODS_NONE
-            ev.unshifted_codepoint = 0
-            ev.composing = false
-            text.withCString { ptr in
-                ev.text = ptr
-                _ = ghostty_surface_key(surface, ev)
-            }
+            sessions[paneId]?.sendInputText(text)
 
         case .sendInputKey(let paneId, let key, let mods):
-            // Press + matching release so a follow-up key event isn't
-            // interpreted as auto-repeat. Ghostty's keymap layer handles
-            // terminal encoding and DECCKM for us.
-            guard let surface = surfaces[paneId]?.surface else { break }
-            let (keycode, codepoint) = macKeyMapping(for: key)
-            var ev = ghostty_input_key_s()
-            ev.action = GHOSTTY_ACTION_PRESS
-            ev.keycode = keycode
-            ev.mods = ghosttyMods(mods)
-            ev.consumed_mods = GHOSTTY_MODS_NONE
-            ev.unshifted_codepoint = codepoint
-            ev.composing = false
-            ev.text = nil
-            _ = ghostty_surface_key(surface, ev)
-            ev.action = GHOSTTY_ACTION_RELEASE
-            _ = ghostty_surface_key(surface, ev)
+            sessions[paneId]?.sendInputKey(key, modifiers: mods)
 
-        case .focusSurface(let paneId, let focused):
-            if let view = surfaces[paneId], let surface = view.surface {
-                ghostty_surface_set_focus(surface, focused)
-            }
+        case .focusSession(let paneId, let focused):
+            sessions[paneId]?.setFocused(focused)
 
         case .makeFirstResponder(let paneId):
-            if let view = surfaces[paneId] {
-                window?.makeFirstResponder(view)
+            if let session = sessions[paneId] {
+                window?.makeFirstResponder(session.hostView)
             }
 
         case .sendNotification(let alertId, let title, let body):
@@ -460,14 +920,16 @@ class AppRuntime {
             enqueueNotificationRequest(request)
 
         case .exportState(let snapshot):
-            let enrichedSnapshot = graftScrollback(onto: snapshot, scrollbackByPaneId: scrollbackByPaneId())
-            let initFile = toInitFile(snapshot: enrichedSnapshot)
-
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            // Same pipeline as a checkpoint, run here rather than queued: export is a deliberate
+            // user action that blocks on a save panel anyway, and its bytes are human-readable.
+            let capture = CheckpointCapture(
+                snapshot: snapshot,
+                scrollbackReads: captureScrollbackReads(keeping: .checkpoint)
+            )
+            let encode = capture.encoder(prettyPrinted: true)
             let data: Data
             do {
-                data = try encoder.encode(initFile)
+                data = try encode()
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Export Failed"
@@ -495,24 +957,96 @@ class AppRuntime {
             }
 
         case .ipcReply(let reqId, let result):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeSuccess(reqId: reqId, result: result)
 
         case .ipcError(let reqId, let code, let message):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
-            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
-            guard let surface = surfaces[paneId]?.surface else {
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
-            guard let text = capturePaneText(surface: surface, lineLimit: lineLimit) else {
+            let raw = lineLimit == nil ? session.readViewportText() : session.readFullHistoryText()
+            guard let raw else {
                 connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane text")
                 break
             }
+            let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
+
+        case .readPaneRowStructure(let reqId, let paneId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            guard let structure = session.readRowStructure() else {
+                connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane rows")
+                break
+            }
+            let rows = structure.map { row in
+                JSONValue.object([
+                    "index": .number(Double(row.index)),
+                    "retained": .bool(row.isRetained),
+                    "softWrapped": .bool(row.isSoftWrapped),
+                    "contentEnd": .number(Double(row.contentEnd)),
+                    "width": .number(Double(row.width)),
+                    "marginKind": .string(row.marginKind),
+                    "staleWrapClaim": .bool(row.staleWrapClaim),
+                ])
+            }
+            connection.writeSuccess(reqId: reqId, result: .object(["rows": .array(rows)]))
+
+        case .dumpPaneTape(let reqId, let paneId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            switch preparePaneTapeDump(encoder: session.flightRecordingEncoder()) {
+            case .error(let code, let message):
+                connection.writeError(
+                    reqId: reqId,
+                    code: code,
+                    message: message
+                )
+            case .encode(let encode):
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let data = try encode()
+                        let recording = try JSONDecoder().decode(JSONValue.self, from: data)
+                        connection.writeSuccess(reqId: reqId, result: recording)
+                    } catch {
+                        connection.writeError(
+                            reqId: reqId,
+                            code: -32603,
+                            message: "failed to encode pane tape"
+                        )
+                    }
+                }
+            }
+
+        case .followPaneTape(let reqId, let paneId, let fromNow):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "pane no longer available"
+                )
+                break
+            }
+            beginPaneTapeFollow(
+                reqId: reqId,
+                paneId: paneId,
+                fromNow: fromNow,
+                connection: connection,
+                session: session
+            )
 
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
             runConfirmation(
@@ -541,31 +1075,37 @@ class AppRuntime {
                 self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
             }
 
-        case .saveDanTermConfigKey(let key, let value):
-            let path = DanTermConfigPaths.configFilePath()
-            let url = URL(fileURLWithPath: path)
-            ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
-            let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-            let updated = DanTermConfigWriter.setKey(key, value: value, in: existing)
-            try? updated.write(to: url, atomically: true, encoding: .utf8)
-
-        case .removeDanTermConfigKey(let key):
-            let path = DanTermConfigPaths.configFilePath()
-            let url = URL(fileURLWithPath: path)
-            guard let existing = try? String(contentsOfFile: path, encoding: .utf8) else { break }
-            let updated = DanTermConfigWriter.removeKey(key, from: existing)
-            try? updated.write(to: url, atomically: true, encoding: .utf8)
-
-        case .reloadGhosttyConfig:
-            reloadAllConfig()
+        case .saveDanTermConfig(let config):
+            do {
+                try configStore.save(config)
+            } catch {
+                presentConfigError(error)
+            }
+            // Complete the save path's coherent config application. prefSave already
+            // committed `config` to the model but could not know whether its family is
+            // installed; the resolution follows here so live panes repaint without a
+            // reload or restart. Sent even when the write failed, because the running
+            // settings still apply.
+            send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
 
         case .terminate:
             cancelCoalescedReconcile()
-            checkpointDebouncer.cancel()
-            enrichedCheckpointTimer?.cancel()
+            for removal in paneTapeFollowSubscriptions.removeAll() {
+                removePaneTapeFollowNotice(removal)
+            }
+            paneTapeFollowConnections.removeAll()
+            for token in paneTapeFollowSubscriptionTokens.values {
+                schedulingLifecycle.cancel(token)
+            }
+            paneTapeFollowSubscriptionTokens.removeAll()
+            paneTapeFollowNoticeRegistrations.removeAll()
+            schedulingLifecycle.cancel(checkpointDebouncerToken)
+            checkpointDebouncerToken = nil
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
             enrichedCheckpointTimer = nil
             for paneId in replayFiles.keys {
                 cleanupReplayFile(for: paneId)
@@ -577,11 +1117,6 @@ class AppRuntime {
             NSApp.activate(ignoringOtherApps: true)
             window?.makeKeyAndOrderFront(nil)
 
-        case .setAppFocus(let focused):
-            if let app = ghosttyApp.app {
-                ghostty_app_set_focus(app, focused)
-            }
-
         case .dismissAlertsPopover:
             alertsPopover?.performClose(nil)
             alertsPopover = nil
@@ -589,9 +1124,7 @@ class AppRuntime {
         // Search commands
 
         case .sendStartSearch(let paneId):
-            if let view = surfaces[paneId], let surface = view.surface {
-                sendBindingAction(surface, "start_search")
-            }
+            sessions[paneId]?.startSearch()
 
         case .focusSearchField(let paneId):
             if let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField {
@@ -602,14 +1135,12 @@ class AppRuntime {
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
             let sendNeedle = { [weak self] in
-                guard let self = self,
-                      let view = self.surfaces[paneId],
-                      let surface = view.surface else { return }
-                sendBindingAction(surface, "search:\(needle)")
+                guard let self else { return }
+                self.sessions[paneId]?.setSearchNeedle(needle)
             }
 
             if delay == 0 {
-                searchDebouncers[paneId]?.cancel()
+                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
                 sendNeedle()
             } else {
                 let debouncer = searchDebouncers[paneId] ?? {
@@ -617,21 +1148,25 @@ class AppRuntime {
                     searchDebouncers[paneId] = debouncer
                     return debouncer
                 }()
-                debouncer.schedule(after: delay, perform: sendNeedle)
+                schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
+                debouncer.schedule(after: delay) { [weak self] in
+                    guard let self,
+                          let token = self.searchDebouncerTokens.removeValue(forKey: paneId)
+                    else { return }
+                    self.schedulingLifecycle.run(token, action: sendNeedle)
+                }
+                searchDebouncerTokens[paneId] = schedulingLifecycle.arm(.debouncer) {
+                    debouncer.cancel()
+                }
             }
 
         case .sendSearchNavigate(let paneId, let direction):
-            if let view = surfaces[paneId], let surface = view.surface {
-                let action = direction == .next ? "navigate_search:next" : "navigate_search:previous"
-                sendBindingAction(surface, action)
-            }
+            sessions[paneId]?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
-            searchDebouncers[paneId]?.cancel()
+            schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
             searchDebouncers.removeValue(forKey: paneId)
-            if let view = surfaces[paneId], let surface = view.surface {
-                sendBindingAction(surface, "end_search")
-            }
+            sessions[paneId]?.endSearch()
 
         // TODO popover
 
@@ -670,8 +1205,8 @@ class AppRuntime {
                 informativeText: "This pane has \(tasks).",
                 confirmTitle: "Close Pane"
             ) { [weak self] isConfirm in
-                guard isConfirm, let surface = self?.surfaces[paneId]?.surface else { return }
-                ghostty_surface_request_close(surface)
+                guard isConfirm else { return }
+                self?.sessions[paneId]?.requestClose()
             }
         }
     }
@@ -683,6 +1218,7 @@ class AppRuntime {
     // no model/view mutation here without hopping back to main.
     private func enqueueNotificationRequest(_ request: UNNotificationRequest) {
         let center = UNUserNotificationCenter.current()
+        let permitsAuthorizationRequest = notificationAuthorizationPolicy.permitsRequest
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
@@ -692,6 +1228,7 @@ class AppRuntime {
                     }
                 }
             case .notDetermined:
+                guard permitsAuthorizationRequest else { return }
                 center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
                     if let error {
                         print("Notification authorization request failed: \(error)")
@@ -714,42 +1251,10 @@ class AppRuntime {
 
     // MARK: - Scrollback Replay Files
 
-    /// Read text from one Ghostty point tag using line-based selection.
-    private func readSurfaceRegion(
-        surface: ghostty_surface_t,
-        tag: ghostty_point_tag_e
-    ) -> String? {
-        let topLeft = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
-        let bottomRight = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
-        let selection = ghostty_selection_s(top_left: topLeft, bottom_right: bottomRight, rectangle: false)
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
-        return decodeGhosttyText(text)
-    }
-
-    /// Capture visible text, or full written text tailed to a requested line count.
-    private func capturePaneText(surface: ghostty_surface_t, lineLimit: Int?) -> String? {
-        let tag: ghostty_point_tag_e = lineLimit == nil ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
-        guard let raw = readSurfaceRegion(surface: surface, tag: tag) else {
-            return nil
-        }
-        guard let n = lineLimit else {
-            return raw
-        }
-        return tailLines(raw, n: n)
-    }
-
-    /// Read full scrollback text from a ghostty surface using line-based selection.
-    private func readScrollbackText(surface: ghostty_surface_t) -> String? {
-        return readSurfaceRegion(surface: surface, tag: GHOSTTY_POINT_SCREEN)
-    }
-
     /// Write scrollback text to a temp file for shell replay. Returns the file URL.
     private func writeReplayFile(scrollback: String) -> URL? {
         guard let data = scrollback.data(using: .utf8) else { return nil }
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
+        let dir = scrollbackReplayDirectoryURL()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent(UUID().uuidString).appendingPathExtension("txt")
         guard (try? data.write(to: fileURL, options: .atomic)) != nil else { return nil }
@@ -763,25 +1268,27 @@ class AppRuntime {
         }
     }
 
-    /// Tear down all runtime resources for one pane's surface. The body of the old
-    /// `.destroySurface` perform arm, now owned by `reconcileSurfaceExistence` (which
+    /// Tear down all runtime resources for one pane's session. The former command
+    /// executor body is now owned by `reconcileSessionExistence` (which
     /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
     /// cross-file reconcile extension can reach it.
-    func tearDownSurface(_ paneId: PaneId) {
-        tokenStore.remove(paneId)
+    func tearDownSession(_ paneId: PaneId) {
+        endPaneTapeFollowers(for: paneId)
         cleanupReplayFile(for: paneId)
-        searchDebouncers[paneId]?.cancel()
+        schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
         searchDebouncers.removeValue(forKey: paneId)
-        if let view = surfaces.removeValue(forKey: paneId) {
-            view.closeSurface()
+        if let session = sessions.removeValue(forKey: paneId) {
+            cancelSessionSubscriptions(session)
+            session.tearDown()
         }
     }
 
-    /// Delete all files in $TMPDIR/danterm-scrollback/ from prior sessions.
+    /// Delete this identity's replay files from prior sessions.
     func cleanupStaleReplayDirectory() {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
-        try? FileManager.default.removeItem(at: dir)
+        cleanupStaleScrollbackReplayDirectory(
+            identity: DanTermInstanceIdentity(),
+            temporaryDirectory: danTermTemporaryDirectoryURL()
+        )
     }
 
     // MARK: - Session Checkpointing
@@ -790,12 +1297,22 @@ class AppRuntime {
     /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
     /// into a single disk write.
     private func scheduleDebouncedCheckpoint() {
+        guard schedulingLifecycle.isActive else { return }
         checkpointPending = true
+        schedulingLifecycle.cancel(checkpointDebouncerToken)
+        checkpointDebouncerToken = nil
         checkpointDebouncer.schedule(
             after: Self.checkpointDebounceInterval,
             leeway: .milliseconds(200)
         ) { [weak self] in
-            self?.performLightCheckpoint(async: true)
+            guard let self, let token = self.checkpointDebouncerToken else { return }
+            self.checkpointDebouncerToken = nil
+            self.schedulingLifecycle.run(token) {
+                self.performLightCheckpoint(async: true)
+            }
+        }
+        checkpointDebouncerToken = schedulingLifecycle.arm(.debouncer) { [checkpointDebouncer] in
+            checkpointDebouncer.cancel()
         }
     }
 
@@ -804,13 +1321,24 @@ class AppRuntime {
     /// frequency. The timer reads the latest model when it fires. This is
     /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
-        guard coalescedReconcileTimer == nil else { return }
+        guard coalescedReconcileTimer == nil,
+              schedulingLifecycle.isActive
+        else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Self.reconcileCoalesceInterval)
+        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+            timer.cancel()
+            return
+        }
+        coalescedReconcileTimerToken = token
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            self.coalescedReconcileTimer = nil
-            self.reconcile()
+            self.coalescedReconcileTimer?.cancel()
+            self.schedulingLifecycle.run(token) {
+                self.coalescedReconcileTimer = nil
+                self.coalescedReconcileTimerToken = nil
+                self.reconcile()
+            }
         }
         timer.resume()
         coalescedReconcileTimer = timer
@@ -818,114 +1346,190 @@ class AppRuntime {
 
     /// Cancel any deferred sweep because an inline reconcile will cover the latest model.
     private func cancelCoalescedReconcile() {
-        coalescedReconcileTimer?.cancel()
+        schedulingLifecycle.cancel(coalescedReconcileTimerToken)
+        coalescedReconcileTimerToken = nil
         coalescedReconcileTimer = nil
     }
 
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
     /// so we don't lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
-        checkpointDebouncer.cancel()
+        guard schedulingLifecycle.isActive else { return }
+        schedulingLifecycle.cancel(checkpointDebouncerToken)
+        checkpointDebouncerToken = nil
         if checkpointPending {
             performLightCheckpoint(async: false)
         } else {
-            Self.checkpointIOQueue.sync {}
+            Self.checkpointWriter.drain()
         }
     }
 
-    /// Start a repeating timer that writes enriched checkpoints (model +
-    /// scrollback from live surfaces). Called once from applicationDidFinishLaunching.
-    func startEnrichedCheckpointTimer() {
-        enrichedCheckpointTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(
-            deadline: .now() + Self.enrichedCheckpointInterval,
-            repeating: Self.enrichedCheckpointInterval,
-            leeway: .seconds(30)
-        )
-        timer.setEventHandler { [weak self] in
-            self?.performEnrichedCheckpoint(async: true)
+    /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
+    func prepareRecoveryForApplicationExit() {
+        guard schedulingLifecycle.isActive else { return }
+        schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+        enrichedCheckpointTimerToken = nil
+        enrichedCheckpointTimer = nil
+        for session in sessions.values {
+            session.fenceForApplicationExit()
         }
-        timer.resume()
-        enrichedCheckpointTimer = timer
+        _ = recoveryPolicy.terminate()
+        performEnrichedCheckpoint(async: false)
+    }
+
+    private func notePrimaryHistoryMutation() {
+        guard schedulingLifecycle.isActive else { return }
+        applyRecoveryAction(recoveryPolicy.mutation(at: DispatchTime.now().uptimeNanoseconds))
+    }
+
+    private func applyRecoveryAction(_ action: RecoveryCheckpointAction) {
+        guard schedulingLifecycle.isActive else { return }
+        switch action {
+        case .none:
+            break
+        case .schedule(let deadline):
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: DispatchTime(uptimeNanoseconds: deadline))
+            guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+                timer.cancel()
+                return
+            }
+            enrichedCheckpointTimerToken = token
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.enrichedCheckpointTimer?.cancel()
+                self.schedulingLifecycle.run(token) {
+                    self.enrichedCheckpointTimer = nil
+                    self.enrichedCheckpointTimerToken = nil
+                    self.applyRecoveryAction(
+                        self.recoveryPolicy.deadlineReached(at: deadline)
+                    )
+                }
+            }
+            timer.resume()
+            enrichedCheckpointTimer = timer
+        case .write(let revision):
+            guard let callbackToken = schedulingLifecycle.arm(
+                .deferredCallback,
+                cancel: {}
+            ) else { return }
+            performEnrichedCheckpoint(async: true) { [weak self] succeeded in
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    self.applyRecoveryAction(
+                        self.recoveryPolicy.writeCompleted(
+                            revision: revision,
+                            succeeded: succeeded,
+                            at: DispatchTime.now().uptimeNanoseconds
+                        )
+                    )
+                }
+            }
+        case .cancel:
+            schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
+            enrichedCheckpointTimerToken = nil
+            enrichedCheckpointTimer = nil
+        }
     }
 
     /// Write a light checkpoint: pure model serialization with scrollback: nil.
-    /// Cheap — no Ghostty surface interaction.
+    /// Cheap — no terminal interaction.
     private func performLightCheckpoint(async: Bool) {
         checkpointPending = false
-        let initFile = toInitFile(model)
-        writeCheckpoint(initFile, to: lightCheckpointURL(), async: async)
+        // The same pipeline with nothing to read: no pane reads means the graft is the identity
+        // and every leaf goes out with `scrollback: nil`, which is what "light" has always been.
+        let capture = CheckpointCapture(snapshot: toSnapshot(model), scrollbackReads: [:])
+        Self.checkpointWriter.write(
+            to: lightCheckpointURL(),
+            async: async,
+            encode: capture.encoder()
+        )
     }
 
-    /// Read scrollback text from each live surface, keyed by pane id. The impure
-    /// half of scrollback enrichment; the pure `graftScrollback(onto:...)` embeds
-    /// this map into a snapshot's tree leaves.
-    private func scrollbackByPaneId() -> [PaneId: String] {
-        var result: [PaneId: String] = [:]
-        for (paneId, view) in surfaces {
-            guard let surface = view.surface,
-                  let rawText = readScrollbackText(surface: surface),
-                  let scrollback = truncateScrollback(rawText) else {
-                continue
+    /// Take each live pane's bounded scrollback read without performing it, so the projection
+    /// lands on the checkpoint queue. A backend that can only read on the main actor has no
+    /// deferred reader and is read here instead, leaving the pipeline downstream uniform.
+    private func captureScrollbackReads(
+        keeping retention: ScrollbackRetention
+    ) -> [PaneId: CheckpointScrollbackRead] {
+        var reads: [PaneId: CheckpointScrollbackRead] = [:]
+        for (paneId, session) in sessions {
+            if let deferred = session.primaryHistoryTailReader() {
+                reads[paneId] = deferred
+            } else if let text = session.readPrimaryHistoryTail(
+                maxLines: retention.maxLines,
+                maxChars: retention.maxChars
+            ) {
+                reads[paneId] = { _ in text }
             }
-            result[paneId] = scrollback
         }
-        return result
+        return reads
     }
 
-    /// Write an enriched checkpoint: model snapshot + scrollback text read from
-    /// each live Ghostty surface. Expensive but gives full restore fidelity.
-    /// Called by the periodic timer and once at clean termination.
-    func performEnrichedCheckpoint(async: Bool) {
-        let enrichedSnapshot = graftScrollback(onto: toSnapshot(model), scrollbackByPaneId: scrollbackByPaneId())
-        writeCheckpoint(toInitFile(snapshot: enrichedSnapshot), to: enrichedCheckpointURL(), async: async)
+    /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
+    /// Everything after this is a pure function of the returned value, which is what lets the
+    /// projection, truncation, graft, and encode run on the checkpoint queue instead of here.
+    private func captureEnrichedCheckpoint() -> CheckpointCapture {
+        let retention = ScrollbackRetention.checkpoint
+        return CheckpointCapture(
+            snapshot: toSnapshot(model),
+            scrollbackReads: captureScrollbackReads(keeping: retention),
+            retention: retention
+        )
     }
 
-    /// Encode and atomically write a checkpoint to the given URL.
-    /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
-    private func writeCheckpoint(_ initFile: AppInitFile, to url: URL, async: Bool) {
-        let dir = recoveryDirectoryURL()
-        let work = DispatchWorkItem {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            guard let data = try? encoder.encode(initFile) else { return }
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? data.write(to: url, options: .atomic)
-        }
-
-        if async {
-            Self.checkpointIOQueue.async(execute: work)
-        } else {
-            Self.checkpointIOQueue.sync(execute: work)
-        }
+    /// Write an enriched checkpoint: model snapshot + each pane's primary history. Expensive but
+    /// gives full restore fidelity, so only the capture happens here — the cost rides the
+    /// checkpoint queue. Called by the mutation-driven policy and once at clean termination.
+    func performEnrichedCheckpoint(
+        async: Bool,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard schedulingLifecycle.isActive else { return }
+        let capture = captureEnrichedCheckpoint()
+        Self.checkpointWriter.write(
+            to: enrichedCheckpointURL(),
+            async: async,
+            encode: capture.encoder(),
+            completion: completion
+        )
     }
 
     // MARK: - State Import
 
     /// Present a file picker, validate the chosen state file, and replace the current session.
-    func importStateFromPanel(restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func importStateFromPanel() {
+        guard schedulingLifecycle.isActive else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard let window else { return }
+        guard let callbackToken = schedulingLifecycle.arm(
+            .deferredCallback,
+            cancel: { panel.cancel(nil) }
+        ) else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .OK, let url = panel.url else { return }
-            self.importState(from: url, restoreCommandBehavior: restoreCommandBehavior)
+            guard let self else { return }
+            self.schedulingLifecycle.run(callbackToken) {
+                guard response == .OK, let url = panel.url else { return }
+                self.importState(from: url)
+            }
         }
     }
 
     /// Load a state file from disk, keeping the current session intact on any validation failure.
-    func importState(from url: URL, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func importState(from url: URL) {
         do {
             let data = try Data(contentsOf: url)
             let loaded = try loadValidatedInitFile(from: data)
             do {
-                let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+                let staged = try stageValidatedRestore(loaded)
                 commitRestoreSession(staged)
             } catch {
-                showImportError(message: "Import failed while creating terminal surfaces.")
+                showImportError(message: "Import failed while creating terminal sessions.")
             }
         } catch let error as AppInitFileLoadError {
             showImportError(message: importErrorMessage(for: error))
@@ -982,31 +1586,64 @@ class AppRuntime {
         dragCoordinator = nil
     }
 
-    /// Full config reload: Ghostty files, DanTerm config, then themed pane re-layering.
-    func reloadAllConfig() {
-        ghosttyApp.reloadConfig()
-        reloadDanTermConfig()
-        send(.ghosttyConfigReloaded)
-    }
-
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
     func reloadDanTermConfig() {
-        let config = DanTermConfigParser.loadFromDisk()
-        send(.configLoaded(config))
+        do {
+            applyDanTermConfig(try configStore.load())
+        } catch {
+            applyDanTermConfig(.default)
+            presentConfigError(error)
+        }
+    }
+
+    /// Resolves the config's requested font family against the installed families,
+    /// then hands config and verdict to the core together so every config-apply path
+    /// produces coherent config, resolution, warning, and pane state. Launch assigns
+    /// the same pair by hand for want of a running Elm loop, and the save path sends
+    /// the resolution alone because prefSave already committed the config; launch,
+    /// reload, and save all go through `resolveConfiguredFontFamily`.
+    private func applyDanTermConfig(_ config: DanTermConfig) {
+        send(.configLoaded(config, resolvedFontFamily: resolveConfiguredFontFamily(config)))
     }
 
     // MARK: - Preferences Panel
 
-    /// Show or re-focus the preferences panel. Reads the live Ghostty config to
-    /// seed the draft, then lets reconcile create/show from the model. The final
+    /// Show or re-focus the preferences panel. Projects the live JSON config into
+    /// the draft, then lets reconcile create/show from the model. The final
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
-        let ghostty = GhosttyPrefs(
-            theme: ghosttyApp.readConfigString(key: "theme"),
-            fontSize: ghosttyApp.readConfigFloatString(key: "font-size")
-        )
-        send(.preferencesOpened(ghostty: ghostty))
+        send(.preferencesOpened(
+            // Snapshot on each open: the syntax-only core may not query CoreText,
+            // and a font installed while the panel sits open is not worth a watcher.
+            installedFontFamilies: installedFontFamilyNames()
+        ))
         preferencesPanel?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Seeds and opens the valid v1 JSON file shared by both config menu entry points.
+    func openDanTermConfig() {
+        do {
+            try configStore.seedIfMissing()
+            NSWorkspace.shared.open(configStore.url)
+        } catch {
+            presentConfigError(error)
+        }
+    }
+
+    /// Presents a launch-time config failure after AppDelegate has installed the main window.
+    func presentPendingConfigError() {
+        guard let error = pendingConfigError else { return }
+        pendingConfigError = nil
+        presentConfigError(error)
+    }
+
+    private func presentConfigError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "DanTerm Config Error"
+        alert.informativeText = (error as? LocalizedError)?.errorDescription
+            ?? error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     // MARK: - Theme Browser
@@ -1017,10 +1654,10 @@ class AppRuntime {
             existing.removeFromSuperview()
             themeBrowserView = nil
             reconcileThemeBrowser()
-            // Restore focus to the focused pane's surface
+            // Restore focus to the focused pane's session.
             if let tab = selectedTab(in: model),
-               let view = surfaces[tab.focusedPaneId] {
-                window?.makeFirstResponder(view)
+               let session = sessions[tab.focusedPaneId] {
+                window?.makeFirstResponder(session.hostView)
             }
             return
         }
@@ -1042,47 +1679,50 @@ class AppRuntime {
     // MARK: - Snapshot Bootstrap
 
     /// Validate a raw snapshot (the --init path) then stage + commit it.
-    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
         guard let built = validateAndBuildDetailed(snapshot) else {
             print("[init] Snapshot validation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
             return
         }
         bootstrapFromValidatedRestore(
-            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots),
-            restoreCommandBehavior: restoreCommandBehavior
+            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
         )
     }
 
     /// Stage + commit an already-validated restore (the crash/clean-recovery path,
     /// where main.swift validated and merged the checkpoints up front). Avoids
     /// decoding/validating the recovered structure a second time.
-    func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore) {
         do {
-            let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+            let staged = try stageValidatedRestore(loaded)
             commitRestoreSession(staged)
         } catch {
-            print("[init] Snapshot surface creation failed, falling back to default startup")
+            print("[init] Snapshot session creation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
         }
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
-    private func stageValidatedRestore(
-        _ loaded: ValidatedAppRestore,
-        restoreCommandBehavior: RestoreCommandBehavior
-    ) throws -> StagedRestoreSession {
-        var stagedSurfaces: [PaneId: TerminalView] = [:]
-        var stagedTokenStore = PaneTokenStore()
+    private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
+        var stagedSessions: [PaneId: any TerminalSession] = [:]
         var stagedReplayFiles: [PaneId: URL] = [:]
+        // A snapshot carries structure, not appearance, so the rebuilt model arrives
+        // with its config and resolved font family at the defaults. Carry the live
+        // ones on before anything reads them: sessions below are built from this
+        // model, and it is the one commitRestoreSession installs.
+        let restoredModel = carryingLiveAppearance(
+            loaded.model,
+            config: model.config,
+            resolvedFontFamily: model.resolvedFontFamily
+        )
 
         do {
-            for group in loaded.model.groups {
+            for group in restoredModel.groups {
                 for tab in group.tabs {
                     for paneId in allPaneIds(tab.rootNode) {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
-                        let token = stagedTokenStore.generate(for: paneId)
                         var scrollbackFilePath: String?
                         if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession),
                            let replayURL = writeReplayFile(scrollback: replayText) {
@@ -1090,39 +1730,42 @@ class AppRuntime {
                             scrollbackFilePath = replayURL.path
                         }
                         let envVars = restoreLaunchEnvironment(
-                            ipcSocketPath: ipcSocketPath.path,
+                            ipcSocketPath: ipcSocketPath?.path,
                             paneId: paneId,
-                            token: token,
-                            scrollbackFilePath: scrollbackFilePath
+                            scrollbackFilePath: scrollbackFilePath,
+                            command: resolved?.command
                         )
-                        let view = makeTerminalView(
+                        guard let session = makeTerminalSession(
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
-                            command: resolved?.command,
+                            command: nil,
                             launchCommand: nil,
                             waitAfterCommand: true,
-                            restoreCommandBehavior: restoreCommandBehavior,
-                            envVars: envVars
-                        )
-                        stagedSurfaces[paneId] = view
-                        if view.surface == nil {
-                            throw RestoreBuildError.surfaceCreationFailed
+                            envVars: envVars,
+                            themeName: restoredModel.pane(paneId).map {
+                                effectiveTheme(for: $0, config: restoredModel.config)
+                            },
+                            fontSize: restoredModel.pane(paneId).map {
+                                effectiveFontSize(for: $0, config: restoredModel.config)
+                            } ?? restoredModel.config.resolvedFontSize,
+                            fontFamily: restoredModel.resolvedFontFamily
+                        ) else {
+                            throw RestoreBuildError.sessionCreationFailed
                         }
+                        stagedSessions[paneId] = session
                     }
                 }
             }
 
             return StagedRestoreSession(
-                model: loaded.model,
-                surfaces: stagedSurfaces,
-                tokenStore: stagedTokenStore,
+                model: restoredModel,
+                sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             )
         } catch {
             discardRestoreSession(StagedRestoreSession(
-                model: loaded.model,
-                surfaces: stagedSurfaces,
-                tokenStore: stagedTokenStore,
+                model: restoredModel,
+                sessions: stagedSessions,
                 replayFiles: stagedReplayFiles
             ))
             throw error
@@ -1146,13 +1789,15 @@ class AppRuntime {
             removeTabContainer(tabId)
         }
 
-        for paneId in Array(surfaces.keys) {
+        for paneId in Array(sessions.keys) {
+            endPaneTapeFollowers(for: paneId)
             cleanupReplayFile(for: paneId)
-            if let view = surfaces.removeValue(forKey: paneId) {
-                view.closeSurface()
+            if let session = sessions.removeValue(forKey: paneId) {
+                cancelSessionSubscriptions(session)
+                session.tearDown()
             }
         }
-        surfaceVisibility.removeAll()
+        paneVisibility.removeAll()
         // The switcher panel persists across sessions; hide it before resetting
         // caches.switcher so nil continues to mean the panel is already hidden.
         switcherPanel?.orderOut(nil)
@@ -1162,15 +1807,13 @@ class AppRuntime {
         for paneId in Array(replayFiles.keys) {
             cleanupReplayFile(for: paneId)
         }
-        tokenStore = PaneTokenStore()
     }
 
     /// Swap a fully staged restore into the live runtime and refresh derived UI state.
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
         tearDownCurrentSession()
         model = staged.model
-        surfaces = staged.surfaces
-        tokenStore = staged.tokenStore
+        sessions = staged.sessions
         replayFiles = staged.replayFiles
         cancelCoalescedReconcile()
 
@@ -1182,45 +1825,70 @@ class AppRuntime {
         // tearDownCurrentSession reset the caches). reconcileContainers builds every
         // tab's container eagerly from the nil containerShape cache -- selected visible,
         // the rest mounted+hidden -- and the chrome/sidebar/window passes build from
-        // scratch. reconcileSurfaceExistence is a no-op (staged surfaces match allPaneIds).
+        // scratch. reconcileSessionExistence is a no-op (staged sessions match allPaneIds).
         reconcile()
 
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for (_, view) in staged.surfaces {
-            view.closeSurface()
+        for session in staged.sessions.values {
+            cancelSessionSubscriptions(session)
+            session.tearDown()
         }
         for url in staged.replayFiles.values {
             try? FileManager.default.removeItem(at: url)
         }
     }
 
-    /// Construct a terminal view and attach DanTerm runtime metadata before first use.
-    private func makeTerminalView(
+    /// Construct one backend session and install its pane-scoped event translation.
+    private func makeTerminalSession(
         paneId: PaneId,
         workingDirectory: String?,
         command: String?,
         launchCommand: String?,
         waitAfterCommand: Bool,
-        restoreCommandBehavior: RestoreCommandBehavior,
-        envVars: [(String, String)]
-    ) -> TerminalView {
-        let view = TerminalView(
-            ghosttyApp: ghosttyApp,
+        envVars: [(String, String)],
+        themeName: String?,
+        fontSize: Double,
+        fontFamily: String?
+    ) -> (any TerminalSession)? {
+        let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
-            restoreCommandBehavior: restoreCommandBehavior,
-            envVars: envVars
+            environment: envVars,
+            themeName: themeName,
+            fontSize: fontSize,
+            fontFamily: fontFamily
         )
-        view.bridge.paneId = paneId
-        view.runtime = self
-        view.scrollbarEnabled = ghosttyApp.scrollbarEnabled
-        view.copyOnSelectEnabled = ghosttyApp.copyOnSelectEnabled
-        return view
+        guard let session = terminalBackend.createSession(request) else { return nil }
+        session.onEvent = { [weak self] event in
+            #if DANTERM_TERMINAL_CHARACTERIZATION
+            recordTerminalCharacterizationEvent(event)
+            #endif
+            self?.send(terminalMessage(for: event, paneId: paneId))
+        }
+        let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
+        session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
+        if let token = schedulingLifecycle.arm(.subscription, cancel: {
+            session.onEvent = nil
+            session.onPrimaryHistoryMutation = nil
+        }) {
+            sessionSubscriptionTokens[ObjectIdentifier(session)] = token
+        }
+        session.setRenderingAvailable(renderingAvailable)
+        if hasCheckpointableScrollback(initialRecoveryCandidate) {
+            notePrimaryHistoryMutation()
+        }
+        return session
+    }
+
+    /// Disconnects the two callbacks that let a terminal session schedule runtime work.
+    private func cancelSessionSubscriptions(_ session: any TerminalSession) {
+        let key = ObjectIdentifier(session)
+        schedulingLifecycle.cancel(sessionSubscriptionTokens.removeValue(forKey: key))
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -1243,6 +1911,7 @@ class AppRuntime {
         confirmTitle: String,
         onResponse: @escaping (Bool) -> Void
     ) {
+        guard schedulingLifecycle.isActive else { return }
         let alert = NSAlert()
         alert.messageText = messageText
         alert.informativeText = informativeText
@@ -1250,8 +1919,15 @@ class AppRuntime {
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         if let window = window {
-            alert.beginSheetModal(for: window) { response in
-                onResponse(response == .alertFirstButtonReturn)
+            guard let callbackToken = schedulingLifecycle.arm(
+                .deferredCallback,
+                cancel: { window.endSheet(alert.window, returnCode: .abort) }
+            ) else { return }
+            alert.beginSheetModal(for: window) { [weak self] response in
+                guard let self else { return }
+                self.schedulingLifecycle.run(callbackToken) {
+                    onResponse(response == .alertFirstButtonReturn)
+                }
             }
         } else {
             onResponse(alert.runModal() == .alertFirstButtonReturn)
@@ -1267,10 +1943,10 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    // Resolve via the existing PaneId -> TerminalView index. `internal` (not `private`)
+    // Resolve via the existing PaneId -> TerminalSession index. `internal` (not `private`)
     // so reconcilePaneChrome in Reconcile.swift can reach the live wrapper.
     func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
-        surfaces[paneId]?.paneWrapper
+        sessions[paneId]?.paneWrapper
     }
 
     // MARK: - View Building
@@ -1286,16 +1962,14 @@ class AppRuntime {
             displayNode = tab.rootNode
         }
 
-        // Defocus all surfaces before rebuilding
+        // Defocus all sessions before rebuilding
         for paneId in allPaneIds(tab.rootNode) {
-            if let view = surfaces[paneId], let surface = view.surface {
-                ghostty_surface_set_focus(surface, false)
-            }
+            sessions[paneId]?.setFocused(false)
         }
 
         let container = SplitContainerView(
             rootNode: displayNode,
-            surfaceLookup: { [weak self] paneId in self?.surfaces[paneId] },
+            sessionLookup: { [weak self] paneId in self?.sessions[paneId] },
             runtime: self,
             isZoomed: tab.isZoomed,
             hasSplits: { if case .leaf = tab.rootNode { return false } else { return true } }(),
@@ -1342,11 +2016,11 @@ class AppRuntime {
               tabContainers[tabId] != nil else { return }
         let browserFocus = themeBrowserView?.captureFocusTarget()
         let focusedId = tab.focusedPaneId
-        // Focus the focused pane's surface -- unless the theme browser owns focus or the
+        // Focus the focused pane's session -- unless the theme browser owns focus or the
         // pane has an active search (whose field is focused just below instead).
         if browserFocus == nil, model.searchState[focusedId] == nil,
-           let focusedView = surfaces[focusedId] {
-            window?.makeFirstResponder(focusedView)
+           let focusedSession = sessions[focusedId] {
+            window?.makeFirstResponder(focusedSession.hostView)
         }
         // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
         if browserFocus == nil, model.searchState[focusedId] != nil,
@@ -1457,61 +2131,5 @@ func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastT
 }
 
 private enum RestoreBuildError: Error {
-    case surfaceCreationFailed
-}
-
-// macOS hardware keycodes (kVK_*) for the closed `KeyName` set, plus the ASCII
-// codepoint for letters so Ghostty's keymap layer encodes the right terminal
-// bytes. Total: every enum case maps to a concrete (keycode, codepoint) pair.
-private func macKeyMapping(for key: KeyName) -> (UInt32, UInt32) {
-    switch key {
-    case .named(let n):
-        switch n {
-        case .enter:  return (36, 0)
-        case .tab:    return (48, 0)
-        case .bspace: return (51, 0)
-        case .escape: return (53, 0)
-        case .up:     return (126, 0)
-        case .down:   return (125, 0)
-        case .left:   return (123, 0)
-        case .right:  return (124, 0)
-        case .home:   return (115, 0)
-        case .end:    return (119, 0)
-        case .pgUp:   return (116, 0)
-        case .pgDn:   return (121, 0)
-        case .delete: return (117, 0)
-        case .f1:  return (122, 0)
-        case .f2:  return (120, 0)
-        case .f3:  return (99, 0)
-        case .f4:  return (118, 0)
-        case .f5:  return (96, 0)
-        case .f6:  return (97, 0)
-        case .f7:  return (98, 0)
-        case .f8:  return (100, 0)
-        case .f9:  return (101, 0)
-        case .f10: return (109, 0)
-        case .f11: return (103, 0)
-        case .f12: return (111, 0)
-        }
-    case .letter(let c):
-        let keycode = letterKeycodes[c] ?? 0
-        let codepoint = UInt32(c.asciiValue ?? 0)
-        return (keycode, codepoint)
-    }
-}
-
-// kVK_ANSI_* keycodes for a-z. Non-sequential — these come from the original
-// ADB keyboard layout and have stuck around.
-private let letterKeycodes: [Character: UInt32] = [
-    "a": 0,  "s": 1,  "d": 2,  "f": 3,  "h": 4,  "g": 5,  "z": 6,  "x": 7,
-    "c": 8,  "v": 9,  "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16,
-    "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40,
-    "n": 45, "m": 46,
-]
-
-private func ghosttyMods(_ mods: KeyMods) -> ghostty_input_mods_e {
-    var raw: UInt32 = GHOSTTY_MODS_NONE.rawValue
-    if mods.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
-    if mods.contains(.alt)  { raw |= GHOSTTY_MODS_ALT.rawValue }
-    return ghostty_input_mods_e(raw)
+    case sessionCreationFailed
 }

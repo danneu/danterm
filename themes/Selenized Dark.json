@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#184956",
+    "#fa5750",
+    "#75b938",
+    "#dbb32d",
+    "#4695f7",
+    "#f275be",
+    "#41c7b9",
+    "#adbcbc",
+    "#72898f",
+    "#ff665c",
+    "#84c747",
+    "#ebc13d",
+    "#58a3ff",
+    "#ff84cd",
+    "#53d6c7",
+    "#cad8d9"
+  ],
+  "background": "#103c48",
+  "cursor": "#adbcbc",
+  "cursorText": "#103c48",
+  "foreground": "#adbcbc",
+  "name": "Selenized Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#184956",
+  "selectionForeground": "#53d6c7"
+}

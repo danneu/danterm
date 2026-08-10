@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#010101",
+    "#f8b63f",
+    "#7fb5e1",
+    "#d6da25",
+    "#489e48",
+    "#b296c6",
+    "#f5bfd7",
+    "#a8a49d",
+    "#726e6a",
+    "#f8b63f",
+    "#7fb5e1",
+    "#d6da25",
+    "#489e48",
+    "#b296c6",
+    "#f5bfd7",
+    "#fefbea"
+  ],
+  "background": "#010101",
+  "cursor": "#a8a49d",
+  "cursorText": "#010101",
+  "foreground": "#a8a49d",
+  "name": "Harper",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5a5753",
+  "selectionForeground": "#a8a49d"
+}

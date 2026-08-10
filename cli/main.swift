@@ -3,7 +3,7 @@ import Foundation
 import DanTermProtocol
 import Darwin
 
-private struct CLIError: Error {
+struct CLIError: Error {
     let message: String
     let exitCode: Int32
 
@@ -23,7 +23,7 @@ struct DanTermCLI {
         danterm -- control DanTerm from the shell
 
         Usage:
-          danterm <command> [args]
+          danterm [--socket <path>] <command> [args]
 
         Commands:
           ls                          Print the full app snapshot as JSON
@@ -47,6 +47,15 @@ struct DanTermCLI {
           pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
+          pane zoom [--pane <pane-id>] on|off|toggle
+                                      Zoom a pane to fill its tab, or restore the
+                                      split. Prints the tab's resulting zoom state.
+          pane rows --pane <pane-id>
+                                      Print each display row's line structure as
+                                      JSON: wrap claim, content end, and width.
+          pane tape --pane <pane-id> [--follow] [--from-now]
+                                      Print a replayable snapshot, or follow the
+                                      bounded backlog and live events as JSON Lines
           theme set [--pane <pane-id>] <name>|--clear
                                       Set or clear a pane theme
           agent attach --kind <kind> --id <session-id>
@@ -70,12 +79,16 @@ struct DanTermCLI {
           help, --help, -h            Print this message
 
         CLI defaults:
+          --socket explicitly targets one DanTerm instance and overrides
+          DANTERM_SOCK and identity-derived socket lookup.
           tab new opens in the background at the target group end by default.
           Position flags change placement; --foreground selects the new tab.
           pane split opens in the background by default; --foreground focuses
           the new pane within its tab. App UI shortcuts are unaffected.
 
         Environment:
+          DANTERM        Marks a process launched inside DanTerm. Without a
+                         non-empty DANTERM_SOCK, socket lookup fails closed.
           DANTERM_SOCK   Path to the DanTerm control socket
           DANTERM_PANE   Pane id for context-aware commands (set by shell integration)
 
@@ -98,9 +111,23 @@ struct DanTermCLI {
                 try runDoctor(Array(rawArgs.dropFirst()))
                 return
             }
-            let command = try parseCLI(rawArgs)
+            let invocation = try parseCLIInvocation(rawArgs)
+            let command = invocation.command
             let environment = ProcessInfo.processInfo.environment
-            let socketPath = nonEmpty(environment[EnvVars.sock]) ?? controlSocketPath().path
+            let socketPath = try selectControlSocketPath(
+                explicit: invocation.socketPath,
+                environment: environment,
+                fallback: controlSocketPath().path
+            )
+            if command.method == Methods.paneTape, command.params["follow"] == .bool(true) {
+                signal(SIGPIPE, SIG_IGN)
+                try requestPaneTapeFollow(
+                    command,
+                    socketPath: socketPath,
+                    environment: environment
+                )
+                exit(0)
+            }
             let response = try request(command, socketPath: socketPath, environment: environment)
             if let error = response.error {
                 throw CLIError(error.message)
@@ -124,7 +151,7 @@ struct DanTermCLI {
         socketPath: String,
         environment: [String: String]
     ) throws -> JsonRpcResponse {
-        let fd = try connectSocket(path: socketPath)
+        let fd = try connectSocket(path: socketPath, receiveTimeout: true)
         defer { Darwin.close(fd) }
 
         guard let helloLine = try readLine(from: fd) else {
@@ -132,17 +159,7 @@ struct DanTermCLI {
         }
         try validateHello(helloLine)
 
-        let requestId = UUID().uuidString
-        var params = command.params
-        let context = IpcRequestContext(
-            paneId: nonEmpty(environment[EnvVars.pane])
-        )
-        params[IpcRequestContext.paramsKey] = context.jsonValue
-        let request = JsonRpcRequest(
-            id: .string(requestId),
-            method: command.method,
-            params: .object(params)
-        )
+        let (requestId, request) = makeRequest(command, environment: environment)
         try writeJSON(request, to: fd)
 
         while let line = try readLine(from: fd) {
@@ -155,6 +172,46 @@ struct DanTermCLI {
         throw CLIError("DanTerm closed the connection")
     }
 
+    private static func requestPaneTapeFollow(
+        _ command: CLICommand,
+        socketPath: String,
+        environment: [String: String]
+    ) throws {
+        let fd = try connectSocket(path: socketPath, receiveTimeout: false)
+        defer { Darwin.close(fd) }
+
+        guard let helloLine = try readLine(from: fd) else {
+            return
+        }
+        try validateHello(helloLine)
+
+        let (requestId, request) = makeRequest(command, environment: environment)
+        try writeJSON(request, to: fd)
+        _ = try renderPaneTapeFollowStream(
+            socket: fd,
+            output: STDOUT_FILENO,
+            requestId: requestId
+        )
+    }
+
+    private static func makeRequest(
+        _ command: CLICommand,
+        environment: [String: String]
+    ) -> (id: String, request: JsonRpcRequest) {
+        let requestId = UUID().uuidString
+        var params = command.params
+        let context = IpcRequestContext(paneId: nonEmpty(environment[EnvVars.pane]))
+        params[IpcRequestContext.paramsKey] = context.jsonValue
+        return (
+            requestId,
+            JsonRpcRequest(
+                id: .string(requestId),
+                method: command.method,
+                params: .object(params)
+            )
+        )
+    }
+
     private static func runDoctor(_ args: [String]) throws {
         for arg in args {
             if arg.hasPrefix("-") {
@@ -163,7 +220,7 @@ struct DanTermCLI {
             throw CLIParseError("unexpected argument: \(arg)")
         }
 
-        let checks = evaluateDoctor(gatherDoctorFacts())
+        let checks = evaluateDoctor(gatherDoctorFacts(configFont: gatherConfigFontFacts()))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
     }
@@ -180,11 +237,11 @@ struct DanTermCLI {
         }
     }
 
-    private static func connectSocket(path: String) throws -> Int32 {
+    private static func connectSocket(path: String, receiveTimeout: Bool) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw CLIError("failed to create socket") }
         do {
-            try configureSocketTimeouts(fd)
+            try configureSocket(fd, receiveTimeout: receiveTimeout)
         } catch {
             Darwin.close(fd)
             throw error
@@ -229,9 +286,11 @@ struct DanTermCLI {
         }
     }
 
-    private static func configureSocketTimeouts(_ fd: Int32) throws {
+    private static func configureSocket(_ fd: Int32, receiveTimeout: Bool) throws {
         try setNoSigPipe(fd)
-        try setSocketTimeout(fd, option: SO_RCVTIMEO)
+        if receiveTimeout {
+            try setSocketTimeout(fd, option: SO_RCVTIMEO)
+        }
         try setSocketTimeout(fd, option: SO_SNDTIMEO)
     }
 
@@ -328,6 +387,29 @@ struct DanTermCLI {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
+}
+
+/// Selects an explicit owner or the external-process fallback without crossing instances.
+func selectControlSocketPath(
+    explicit: String?,
+    environment: [String: String],
+    fallback: String
+) throws -> String {
+    func nonEmptyValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    if let explicit = nonEmptyValue(explicit) {
+        return explicit
+    }
+    if let explicit = nonEmptyValue(environment[EnvVars.sock]) {
+        return explicit
+    }
+    if nonEmptyValue(environment[EnvVars.flag]) != nil {
+        throw CLIError("DanTerm is not running")
+    }
+    return fallback
 }
 
 DanTermCLI.main()

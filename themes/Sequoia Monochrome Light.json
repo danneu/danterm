@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#d4d5dc",
+    "#525666",
+    "#2e3038",
+    "#50535e",
+    "#5f6370",
+    "#25262d",
+    "#454752",
+    "#282930",
+    "#42434e",
+    "#525666",
+    "#2e3038",
+    "#50535e",
+    "#5f6370",
+    "#25262d",
+    "#454752",
+    "#282930"
+  ],
+  "background": "#edeef2",
+  "cursor": "#565760",
+  "cursorText": "#282930",
+  "foreground": "#282930",
+  "name": "Sequoia Monochrome Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#817c9c",
+  "selectionForeground": "#282930"
+}

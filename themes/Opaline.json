@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#201b33",
+    "#ff6b92",
+    "#86e6b4",
+    "#ffc2ae",
+    "#8fb4ff",
+    "#be9bff",
+    "#5fe3d8",
+    "#ece9f7",
+    "#6b678f",
+    "#ff81a2",
+    "#95e9bd",
+    "#f4d27e",
+    "#b79bff",
+    "#ff9ed2",
+    "#72e6dd",
+    "#ffffff"
+  ],
+  "background": "#131121",
+  "cursor": "#ffb3d6",
+  "cursorText": "#131121",
+  "foreground": "#ece9f7",
+  "name": "Opaline",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2c2748",
+  "selectionForeground": "#535161"
+}

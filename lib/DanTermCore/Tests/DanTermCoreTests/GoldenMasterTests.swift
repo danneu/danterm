@@ -20,7 +20,7 @@ import DanTermProtocol
         //   createdAt/notification throttle clock reads.
         // Scenario: spec-first deterministic replay across splitPane,
         //   createGroup -> createTab recursion, IPC pane.split, IPC
-        //   pane.focus -> navigateToPane, and inactive-app surfaceBell.
+        //   pane.focus -> navigateToPane, and inactive-app sessionBell.
         let ids = (0..<64).map { i in
             UUID(uuidString: "00000000-0000-0000-0000-\(String(format: "%012x", i))")!
         }
@@ -53,7 +53,7 @@ import DanTermProtocol
         ), env: env)
 
         _ = update(&model, .appResignedActive, env: env)
-        _ = update(&model, .surfaceBell(paneId: firstPane), env: env)
+        _ = update(&model, .sessionBell(paneId: firstPane), env: env)
 
         assertSnapshot(of: model, as: .customDump)
     }

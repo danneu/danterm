@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#151515",
+    "#b46958",
+    "#90a959",
+    "#f4bf75",
+    "#bad7ff",
+    "#aa759f",
+    "#88afa2",
+    "#e1e1e1",
+    "#727272",
+    "#7e97ab",
+    "#90a959",
+    "#f4bf75",
+    "#bad7ff",
+    "#aa759f",
+    "#88afa2",
+    "#afafaf"
+  ],
+  "background": "#101010",
+  "cursor": "#e0e1e4",
+  "cursorText": "#18191b",
+  "foreground": "#e0e1e4",
+  "name": "No Clown Fiesta",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#696d79",
+  "selectionForeground": "#e0e1e4"
+}

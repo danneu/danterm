@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#404040",
+    "#e3716e",
+    "#819b69",
+    "#b77e64",
+    "#6099c0",
+    "#b279a7",
+    "#66a5ad",
+    "#f0e4cf",
+    "#6f6768",
+    "#ec8685",
+    "#8bae68",
+    "#d68c67",
+    "#61abda",
+    "#cf86c1",
+    "#65b8c1",
+    "#c0ab86"
+  ],
+  "background": "#404040",
+  "cursor": "#f3eadb",
+  "cursorText": "#404040",
+  "foreground": "#f0e4cf",
+  "name": "Zenburned",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#746956",
+  "selectionForeground": "#f0e4cf"
+}

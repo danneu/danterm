@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#15161f",
+    "#ff6c8d",
+    "#00ffc3",
+    "#ffebb1",
+    "#77abff",
+    "#daa4f4",
+    "#00e5ff",
+    "#7187b7",
+    "#4b5b8c",
+    "#ff6c8d",
+    "#00ffc3",
+    "#ffebb1",
+    "#77abff",
+    "#daa4f4",
+    "#00e5ff",
+    "#c3cde2"
+  ],
+  "background": "#23283d",
+  "cursor": "#a5b6d4",
+  "cursorText": "#171b29",
+  "foreground": "#a5b6d4",
+  "name": "Electron Highlighter",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#293257",
+  "selectionForeground": "#a5b6d4"
+}

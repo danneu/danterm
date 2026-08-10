@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/colored_underline/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "colored_underline",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": [
+      "DanTerm retains colors semantically instead of resolving Alacritty palette RGB values."
+    ]
+  },
+  "initial": {
+    "columns": 157,
+    "rows": 40
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICANIA0bXTEzMztBBxtdMjtrY2hpYmlzb3ZAWm9kaWFjOn4vc3JjL3J1c3QvYWxhY3JpdHR5LXdvcmtzcGFjZS9mb3JrBw0bWzBtG1syN20bWzI0bRtbShtbMTszNG1mb3JrG1swbSBvbiAbWzE7MzVt7oKgIBtbMG0bWzE7MzVtY29sb3JlZC11bmRlcmxpbmVzLXYzG1swbSB2aWEgG1sxOzMxbfCfpoAgG1swbRtbMTszMW12MS41OS4wG1swbRtbMTszMW0gG1swbRtbMTszN23inpwbWzBtIBtbSxtbPzIwMDRoG1sxbRtbOTJtY2FyZ28bWzBtG1szOW0gcnVuIC0tIC0tcmVmLXRlc3QgLS1jb25maWctZmlsZSAbWzRtL2Rldi9udWxsG1syNG0gLW8gc2Nyb2xsaW5nLmhpc3Rvcnk9MBtbNzBEG1sxbRtbOTJtZRtbMW0bWzkybWMbWzFtG1s5Mm1oG1sxbRtbOTJtbxtbMG0bWzM5bRtbMG0bWzM5bSAtZSAbWzkybScbWzkybVwbWzkybWUbWzkybVsbWzkybTUbWzkybTgbWzkybTsbWzkybTIbWzkybTsbWzkybTIbWzkybTUbWzkybTUbWzkybTsbWzkybTAbWzkybTsbWzkybTIbWzkybTUbWzkybTUbWzkybW0bWzkybVwbWzkybWUbWzkybVsbWzkybTQbWzkybTobWzkybTEbWzkybW0bWzkybVUbWzkybU4bWzkybUQbWzkybUUbWzI0bRtbOTJtUhtbMjRtG1s5Mm1MG1syNG0bWzkybUkbWzI0bRtbOTJtThtbMjRtG1s5Mm1FG1syNG0bWzkybVwbWzI0bRtbOTJtZRtbMjRtG1s5Mm1bG1syNG0bWzkybTQbWzkybTobWzkybTIbWzkybW0bWzkybUQbWzkybU8bWzkybVUbWzkybUIbWzkybUwbWzkybUUbWzkybVwbWzkybWUbWzkybVsbWzkybTUbWzkybTgbWzkybTobWzkybTUbWzkybTobWzkybTEbWzkybTkbWzkybTYbWzkybW0bWzkybVwbWzkybWUbWzkybVs0OjNtVWjMt8yXRVJDVVJMXGVbNDo0bUQbWzkybU8bWzkybVRURURcZVs0OjVtREFTSEVEXGVbNTltTk9UX0NPTE9SRURfREFTSFxlWzBtJxtbMzltG1tLG1s/MjAwNGwNDQobXTI7ZWNobyAtZSAnXGVbNTg7MjsyNTU7MDsyNTVtXGVbNDoxbVVOREVSTElORVxlWzQ6Mm1ET1VCTEVcZVs1ODo1OjE5Nm1cZVs0OjNtVWjMt8yXRVJDVVJMXGVbNDo0bURPVFRFRFxlWzQ6NW1EQVNIRURcZVs1OW1OT1RfQ09MT1JFRF9EQVNIXGVbMG0nBxtbNTg7MjsyNTU7MDsyNTVtG1s0OjFtVU5ERVJMSU5FG1s0OjJtRE9VQkxFG1s1ODo1OjE5Nm0bWzQ6M21VaMy3zJdFUkNVUkwbWzQ6NG1ET1RURUQbWzQ6NW1EQVNIRUQbWzU5bU5PVF9DT0xPUkVEX0RBU0gbWzBtDQobWzFtG1s3bSUbWzI3bRtbMW0bWzBtICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA0gDRtdMTMzO0EHG10yO2tjaGliaXNvdkBab2RpYWM6fi9zcmMvcnVzdC9hbGFjcml0dHktd29ya3NwYWNlL2ZvcmsHDRtbMG0bWzI3bRtbMjRtG1tKG1sxOzM0bWZvcmsbWzBtIG9uIBtbMTszNW3ugqAgG1swbRtbMTszNW1jb2xvcmVkLXVuZGVybGluZXMtdjMbWzBtIHZpYSAbWzE7MzFt8J+mgCAbWzBtG1sxOzMxbXYxLjU5LjAbWzBtG1sxOzMxbSAbWzBtG1sxOzM3beKenBtbMG0gG1tLG1s/MjAwNGgbWz8yMDA0bA0NCg=="
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          "UNDERLINEDOUBLEUh\u0337\u0317ERCURLDOTTEDDASHEDNOT_COLORED_DASH"
+        ]
+      }
+    }
+  ]
+}

@@ -6,7 +6,7 @@
 // `app/DanTermSupport` symlink (plain `internal`, no access annotations) and ALSO
 // compile here as a separate module that DanTermSupportTests reach via
 // `@testable import DanTermSupport`. Running `swift test` here builds only
-// DanTermSupport + its tests -- no AppKit/GhosttyKit, and NO dependency on
+// DanTermSupport + its tests -- no AppKit, and NO dependency on
 // DanTermCore. That sibling-independence is the structural proof that keeps the
 // whole split annotation-free. See docs/design/2026-05-28-core-module-via-symlink.md
 // and plans/impl/2026-05-29-pure-core-portable-support.md.
@@ -32,7 +32,10 @@ let package = Package(
         ),
         .testTarget(
             name: "DanTermSupportTests",
-            dependencies: ["DanTermSupport"],
+            dependencies: [
+                "DanTermSupport",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+            ],
             path: "Tests/DanTermSupportTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

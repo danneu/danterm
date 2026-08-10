@@ -1,5 +1,5 @@
 // Theme browser panel: an overlay anchored to the right side of the content area.
-// Lists all available Ghostty themes with search filtering. Selecting a theme
+// Lists the whole DanTerm theme catalog with search filtering. Selecting a theme
 // (via click or keyboard navigation) applies it to the focused pane immediately.
 import Cocoa
 
@@ -59,7 +59,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         headerLabel.font = .preferredFont(forTextStyle: .headline)
         headerLabel.textColor = .labelColor
 
-        // "Reset" clears the DanTerm theme override, reverting to the user's Ghostty config.
+        // "Reset" clears the pane's theme override, reverting it to the configured default theme.
         resetButton = NSButton(title: "Reset", target: nil, action: nil)
         resetButton.bezelStyle = .inline
         resetButton.controlSize = .small
@@ -215,7 +215,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     // MARK: - Actions
 
-    /// Clear the DanTerm theme override, reverting to the user's Ghostty config.
+    /// Clear the pane's theme override, reverting it to the configured default theme.
     @objc private func resetTheme() {
         guard currentThemeName != nil else { return }
         guard let runtime = runtime,

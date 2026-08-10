@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#232a2d",
+    "#e57474",
+    "#8ccf7e",
+    "#e5c76b",
+    "#67b0e8",
+    "#c47fd5",
+    "#6cbfbf",
+    "#b3b9b8",
+    "#464e50",
+    "#ef7e7e",
+    "#96d988",
+    "#f4d67a",
+    "#71baf2",
+    "#ce89df",
+    "#67cbe7",
+    "#bdc3c2"
+  ],
+  "background": "#141b1e",
+  "cursor": "#dadada",
+  "cursorText": "#141b1e",
+  "foreground": "#dadada",
+  "name": "Everblush",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#141b1e",
+  "selectionForeground": "#dadada"
+}

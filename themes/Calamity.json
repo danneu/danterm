@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2f2833",
+    "#fc644d",
+    "#a5f69c",
+    "#e9d7a5",
+    "#3b79c7",
+    "#f92672",
+    "#74d3de",
+    "#d5ced9",
+    "#7e6c88",
+    "#fc644d",
+    "#a5f69c",
+    "#e9d7a5",
+    "#3b79c7",
+    "#f92672",
+    "#74d3de",
+    "#ffffff"
+  ],
+  "background": "#2f2833",
+  "cursor": "#d5ced9",
+  "cursorText": "#2f2833",
+  "foreground": "#d5ced9",
+  "name": "Calamity",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#7e6c88",
+  "selectionForeground": "#d5ced9"
+}

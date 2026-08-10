@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#3b4252",
+    "#bf616a",
+    "#96b17f",
+    "#c5a565",
+    "#81a1c1",
+    "#b48ead",
+    "#7bb3c3",
+    "#a5abb6",
+    "#4c566a",
+    "#bf616a",
+    "#96b17f",
+    "#c5a565",
+    "#81a1c1",
+    "#b48ead",
+    "#82afae",
+    "#eceff4"
+  ],
+  "background": "#e5e9f0",
+  "cursor": "#7bb3c3",
+  "cursorText": "#3b4252",
+  "foreground": "#414858",
+  "name": "Nord Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#d8dee9",
+  "selectionForeground": "#4c556a"
+}

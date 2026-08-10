@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2a1a4a",
+    "#ff3d7f",
+    "#2ee6b6",
+    "#ffcb52",
+    "#29b6ff",
+    "#b86bff",
+    "#18e0ff",
+    "#e6d4ff",
+    "#5e5388",
+    "#ff2e97",
+    "#2ee6b6",
+    "#ff7847",
+    "#29b6ff",
+    "#b86bff",
+    "#18e0ff",
+    "#fce7ff"
+  ],
+  "background": "#120b2e",
+  "cursor": "#ff2e97",
+  "cursorText": "#120b2e",
+  "foreground": "#fce7ff",
+  "name": "Miami Heat",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#34215c",
+  "selectionForeground": "#5e577a"
+}

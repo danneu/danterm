@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#990000",
+    "#00a600",
+    "#999900",
+    "#2009db",
+    "#b200b2",
+    "#00a6b2",
+    "#bfbfbf",
+    "#666666",
+    "#e50000",
+    "#00d900",
+    "#e5e500",
+    "#0000ff",
+    "#e500e5",
+    "#00e5e5",
+    "#e5e5e5"
+  ],
+  "background": "#000000",
+  "cursor": "#4d4d4d",
+  "cursorText": "#ffffff",
+  "foreground": "#f2f2f2",
+  "name": "Pro",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#414141",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,367 @@
+// The saturated-history resize probe: how long a width change costs on a full scrollback.
+//
+// `research/28/H1` asks an *absolute* question -- does a width change on a saturated
+// history fit in a frame budget, and where does its time go -- and `research/28/D1`
+// pitch 2 answered it with a deliberate refusal: this is a committed probe
+// recipe, not a candidate workload. A paired workload would need two arms, and
+// there is no pre-trim arm to compare against (the doc's evidence floor forbids
+// wanting one). So this reports a distribution and no verdict; nothing here
+// selects a threshold and nothing here decides anything.
+//
+// It exists as committed code because `research/15/F18`'s browsing probe was deleted
+// after it was read, which cost this doc a whole re-implementation task
+// (`research/28/F5`). A probe whose recipe is frozen in prose but whose code is gone is
+// a recipe nobody can re-run.
+//
+// Belongs here: the saturation stimulus, the resize loop, and the distribution
+// reduction. Does not belong here: a frame-budget comparison, a pass/fail, or
+// anything paired -- upgrading this to a candidate workload is `D1`'s stated
+// gate (a change *expected* to move resize cost, which gives the comparison a
+// second arm), and a separate decision.
+//
+// Depends on `TerminalCore` alone. No planning, no rendering, no AppKit: a
+// resize is an engine operation, and keeping the probe pure is what lets it run
+// headless and under a profiler.
+import Foundation
+import TerminalCore
+
+/// What a recipe feeds, because content density decides retained depth and depth
+/// decides resize cost.
+///
+/// A retained row has been content-sized since doc 15, so the byte budget buys a
+/// number of rows that varies by an order of magnitude with how long the rows are:
+/// the corpus prices `benchmark/scrollback-stream` at 4,607 B/row and
+/// `alacritty/history` at 186 B/row, which is 3,414 rows against 84,562 in the
+/// same 15,728,640-byte arena. A probe that only ever fed one density would report
+/// one point on that range and read as though it were the whole of it -- which is
+/// exactly how `saturated-resize-v1`'s 6,756-row baseline came to stand in for "a
+/// saturated pane" when it is near the shallow end.
+public enum ResizeProbePayload: String, Equatable, Sendable {
+    /// A ~50-column line: program output, and what `v1` and `v2` both feed.
+    case dense
+    /// Short shell-history lines, the regime where content-sized rows retain
+    /// deepest. Stands in for `alacritty/history` (4.7 stored cells per row).
+    case sparse
+    /// Lines that fill the pane's width, the regime that maximizes retained
+    /// *cells* rather than retained rows.
+    ///
+    /// Reflow cost is roughly `a x rows + b x cells` with the cell term dominant
+    /// at any real width, so this is the expensive end -- and it is the end a
+    /// **row** cap does not bound. Length is tied to `saturated-resize-v1`'s 179
+    /// columns on purpose, so a row here is exactly one full-width row;
+    /// `widePayloadFillsTheStandardWidth` pins that coupling rather than leaving
+    /// it to a reader to notice.
+    case wide
+
+    /// Real short shell commands rather than a synthetic short string, so the row
+    /// widths this recipe saturates with are widths a shell history really holds.
+    private static let sparseCommands = [
+        "ls", "cd ..", "git status", "make", "vim .", "pwd", "top", "git log",
+    ]
+
+    /// The line this payload emits at `index`, without its terminator.
+    public func line(_ index: Int) -> String {
+        switch self {
+        case .dense:
+            return "DANTERM-RESIZE-\(String(format: "%05d", index)) plain ascii retained row"
+        case .sparse:
+            return Self.sparseCommands[index % Self.sparseCommands.count]
+        case .wide:
+            // Digits varying with `index` so no two rows are identical, in case a
+            // future representation ever shares storage between equal rows.
+            let unit = "abcdefgh\(index % 10)"
+            return String(String(repeating: unit, count: 20).prefix(179))
+        }
+    }
+}
+
+/// The probe's recipe, frozen as data so every number it prints names its shape.
+///
+/// `D1` pitch 2 required the recipe to state its geometry, budget, row count,
+/// and repeat count. This type is that requirement made mechanical: the values
+/// are carried into the emitted report, so a distribution can never be read
+/// without the conditions that produced it.
+public struct ResizeProbeRecipe: Equatable, Sendable {
+    /// The recipe's frozen version name, carried into `identity`.
+    ///
+    /// Versioned rather than edited in place: `saturated-resize-v2` covers ~14x
+    /// the retained rows `v1` did at the same budget, so a report that reused
+    /// `v1`'s name would invite reading `F7`'s recorded distribution and a v2
+    /// distribution as two arms of one comparison.
+    public let name: String
+    public let columns: Int
+    public let rows: Int
+    public let lineCount: Int
+    /// What the saturation stimulus writes. See `ResizeProbePayload`.
+    public let payload: ResizeProbePayload
+    /// Reported, not configurable. The budget-taking initializer is internal to
+    /// `TerminalCore` (it exists to give deterministic tests a small budget), so
+    /// this probe runs at the production budget and says so -- which is the
+    /// budget H1's question is about anyway.
+    public let scrollbackBudgetBytes: Int
+    /// The width the probe alternates to and back from. Chosen wide-to-narrow
+    /// rather than narrow-to-wide because narrowing is the direction that
+    /// *reflows* content -- widening a canonical row mostly re-pads it.
+    public let alternateColumns: Int
+    /// Resize operations timed, counting both directions. Each is one sample.
+    public let sampleCount: Int
+    /// Untimed resizes run first, so the first sample is not charged for the
+    /// scratch every later one reuses.
+    public let warmupCount: Int
+
+    /// The standard recipe: `research/15/F18`'s saturation geometry and payload at the
+    /// production budget, alternating 179 <-> 100 columns.
+    ///
+    /// The stimulus is deliberately the browsing workload's, so a reader
+    /// comparing this probe against `research/28/F5`'s numbers is looking at the same
+    /// history rather than two differently-shaped ones.
+    public static let standard = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 10_000,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+        alternateColumns: 100, sampleCount: 40, warmupCount: 4,
+        name: "saturated-resize-v1"
+    )
+
+    /// The saturating recipe: `standard`'s geometry, fed enough lines that the
+    /// **budget** decides retained depth again.
+    ///
+    /// `standard`'s 10,000 lines saturated the pre-packing representation and no
+    /// longer saturate the packed one, which admits ~42,000 rows at the shipped
+    /// 16 MiB. Reading a resize distribution off a history bounded by the line
+    /// count rather than the budget understates the cost by that whole ratio, so
+    /// this recipe overshoots the ceiling and `saturatingRecipeReachesTheBudgetCeiling`
+    /// pins that it still does. Sample count is halved because each sample now
+    /// costs an order of magnitude more wall-clock.
+    public static let saturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 120_000,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-resize-v2"
+    )
+
+    /// The sparse saturating recipe: `v2`'s geometry and budget, fed short
+    /// shell-history lines instead of program output.
+    ///
+    /// Exists because `v1` and `v2` both feed a ~50-column line, and a content-sized
+    /// row representation retains an order of magnitude more of a *short* row at the
+    /// same budget. That makes the dense payload's depth the shallow end of the
+    /// range rather than a representative point, and resize cost scales with depth
+    /// -- so the deepest content is also the most expensive to reflow, in **both**
+    /// representations. Reading a resize cost off dense content alone answers the
+    /// question for the cheapest regime and reports it as the answer.
+    ///
+    /// Geometry, budget, and alternation are `v2`'s exactly, so content density is
+    /// the only variable between the two and their numbers subtract. `lineCount` is
+    /// therefore the only lever, and it is much larger because these rows are much
+    /// cheaper -- ~63.2 B/line, so the arena fills at ~248,700 lines.
+    ///
+    /// It carries a **2.0x** margin over that depth rather than sitting just above it.
+    /// The margin is the point: a line count that only just clears the ceiling stops
+    /// clearing it the moment anything makes a retained row cheaper, and the probe
+    /// would then print a full distribution of a *line-bounded* history under a
+    /// saturated label. The shipped 250,000 had drifted to 1.003x before anyone
+    /// looked. `saturatingRecipesChargePastTheBudgetCeiling` asserts the margin, not
+    /// just the ceiling, so the next erosion fails a test while headroom remains.
+    /// The extra lines are paid for only by the manually-run probe binary -- once
+    /// history is budget-bound the surplus evicts, and retained depth is unmoved
+    /// (measured: 246,595 records / 13,564,656 arena bytes at 250,000 lines against
+    /// 246,596 / 13,564,592 at 500,000).
+    public static let sparseSaturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 500_000,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-sparse-resize-v1", payload: .sparse
+    )
+
+    /// The wide saturating recipe: `v2`'s geometry and budget fed full-width lines.
+    ///
+    /// The third content regime, and the one that decides whether a **row** cap
+    /// bounds resize cost. Reflow is dominated by its per-cell term, and a row cap
+    /// leaves that term free: 8,192 rows of 179 columns is 1.47 M cells in ~2.15 MB,
+    /// so the byte budget never intervenes and the cap's row bound is not reached in
+    /// bytes either. Both other recipes understate this -- `v2`'s rows are ~45 cells
+    /// and `sparse`'s ~4.9.
+    public static let wideSaturating = ResizeProbeRecipe(
+        columns: 179, rows: 66, lineCount: 60_000,
+        scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        name: "saturated-wide-resize-v1", payload: .wide
+    )
+
+    public init(
+        columns: Int, rows: Int, lineCount: Int, scrollbackBudgetBytes: Int,
+        alternateColumns: Int, sampleCount: Int, warmupCount: Int,
+        name: String = "saturated-resize-custom",
+        payload: ResizeProbePayload = .dense
+    ) {
+        self.name = name
+        self.payload = payload
+        self.columns = columns
+        self.rows = rows
+        self.lineCount = lineCount
+        self.scrollbackBudgetBytes = scrollbackBudgetBytes
+        self.alternateColumns = alternateColumns
+        self.sampleCount = sampleCount
+        self.warmupCount = warmupCount
+    }
+
+    /// The identity a report claims, so a changed shape is a changed identity.
+    public var identity: String {
+        "\(name)-\(lineCount)-lines-\(columns)x\(rows)-to-\(alternateColumns)"
+    }
+}
+
+/// A resize-cost distribution, reported instead of a single number.
+///
+/// `D1` pitch 2 required a distribution rather than a point estimate, and the
+/// reason is the question: "does this fit in a frame budget" is answered by the
+/// tail, not the median. Every raw sample is retained so a later reader can
+/// re-reduce them under different quantiles without re-running the probe --
+/// `research/20/F12` is the standing example of an artifact that had to be recovered by
+/// hand because only a summary was kept.
+public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
+    public let sampleCount: Int
+    public let minimumNanoseconds: UInt64
+    public let medianNanoseconds: UInt64
+    public let p90Nanoseconds: UInt64
+    public let p99Nanoseconds: UInt64
+    public let maximumNanoseconds: UInt64
+    public let meanNanoseconds: UInt64
+    /// Every timed resize, in collection order, alternating narrow and wide.
+    public let samplesNanoseconds: [UInt64]
+
+    /// Reduces raw samples, or reports an empty distribution rather than a zero.
+    ///
+    /// Zeros would read as "instant" to anyone scanning the report; the empty
+    /// count is what says "not measured", which is the distinction the
+    /// measurement-discipline rule this doc binds itself to insists on.
+    public init(samplesNanoseconds: [UInt64]) {
+        self.samplesNanoseconds = samplesNanoseconds
+        let ordered = samplesNanoseconds.sorted()
+        sampleCount = ordered.count
+        guard ordered.isEmpty == false else {
+            minimumNanoseconds = 0
+            medianNanoseconds = 0
+            p90Nanoseconds = 0
+            p99Nanoseconds = 0
+            maximumNanoseconds = 0
+            meanNanoseconds = 0
+            return
+        }
+        minimumNanoseconds = ordered[0]
+        maximumNanoseconds = ordered[ordered.count - 1]
+        medianNanoseconds = Self.quantile(ordered, 0.50)
+        p90Nanoseconds = Self.quantile(ordered, 0.90)
+        p99Nanoseconds = Self.quantile(ordered, 0.99)
+        meanNanoseconds = ordered.reduce(UInt64(0), &+) / UInt64(ordered.count)
+    }
+
+    /// Nearest-rank quantile: an order statistic, never an interpolated value.
+    ///
+    /// A real observed sample is the honest answer for a tail question -- an
+    /// interpolated p99 over 40 samples reports a duration that never occurred.
+    static func quantile(_ ordered: [UInt64], _ fraction: Double) -> UInt64 {
+        let rank = Int((fraction * Double(ordered.count)).rounded(.up))
+        return ordered[min(max(rank, 1), ordered.count) - 1]
+    }
+}
+
+/// One probe run: the recipe, what it actually saturated, and the distribution.
+public struct ResizeProbeReport: Codable, Equatable, Sendable {
+    public let recipeIdentity: String
+    public let columns: Int
+    public let rows: Int
+    public let lineCount: Int
+    public let scrollbackBudgetBytes: Int
+    public let alternateColumns: Int
+    public let warmupCount: Int
+    /// Retained rows present when timing began. Reported because the budget, not
+    /// `lineCount`, decides it -- a recipe that stopped saturating would show up
+    /// here rather than silently measuring a shallow history.
+    public let retainedRowCountAtStart: Int
+    public let distribution: ResizeProbeDistribution
+
+    public init(
+        recipeIdentity: String, columns: Int, rows: Int, lineCount: Int,
+        scrollbackBudgetBytes: Int, alternateColumns: Int, warmupCount: Int,
+        retainedRowCountAtStart: Int, distribution: ResizeProbeDistribution
+    ) {
+        self.recipeIdentity = recipeIdentity
+        self.columns = columns
+        self.rows = rows
+        self.lineCount = lineCount
+        self.scrollbackBudgetBytes = scrollbackBudgetBytes
+        self.alternateColumns = alternateColumns
+        self.warmupCount = warmupCount
+        self.retainedRowCountAtStart = retainedRowCountAtStart
+        self.distribution = distribution
+    }
+}
+
+/// Builds a terminal whose scrollback is saturated against the recipe's budget.
+///
+/// Separate from the timing loop so a test can assert the precondition the whole
+/// probe rests on -- that history is budget-saturated rather than merely deep --
+/// which is the one way this probe could silently degrade into a measurement of
+/// resizing a small history.
+public func makeSaturatedTerminal(recipe: ResizeProbeRecipe = .standard) -> Terminal {
+    // Force-unwrapped deliberately: the only failure is a geometry or budget no
+    // terminal accepts, and both are frozen constants of the recipe. A nil here
+    // is a bug in the constant, not a runtime condition.
+    var terminal = Terminal(columns: recipe.columns, rows: recipe.rows)!
+    for line in 0..<recipe.lineCount {
+        terminal.feed(Array("\(recipe.payload.line(line))\r\n".utf8))
+    }
+    return terminal
+}
+
+/// Times `sampleCount` width changes on a saturated history and reports the spread.
+///
+/// Alternates between the two widths rather than resizing to the same width
+/// repeatedly: a no-op resize is free and would measure nothing. Each direction
+/// is timed separately and both land in one distribution, because H1's question
+/// is about the cost a user's window drag pays, and a drag pays both.
+public func measureSaturatedResize(
+    recipe: ResizeProbeRecipe = .standard,
+    now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+) -> ResizeProbeReport {
+    // A backstop, not the user-facing check: `Terminal.resize` early-returns for
+    // `columns < 2` and for a width equal to the current one, so a degenerate
+    // alternation would time two clock reads `sampleCount` times and emit a full,
+    // plausible distribution of near-zero nanoseconds -- a measurement of nothing
+    // wearing a measured label, which is what `ResizeProbeDistribution`'s empty
+    // case exists to keep out of the report. The CLI rejects this as a usage error
+    // first; anything reaching here constructed the recipe in code.
+    precondition(
+        recipe.alternateColumns >= 2 && recipe.alternateColumns != recipe.columns,
+        "resize recipe alternates to a width Terminal.resize ignores: \(recipe.alternateColumns)"
+    )
+    var terminal = makeSaturatedTerminal(recipe: recipe)
+    let widths = [recipe.alternateColumns, recipe.columns]
+
+    for index in 0..<recipe.warmupCount {
+        terminal.resize(columns: widths[index % 2], rows: recipe.rows)
+    }
+    // Read after warming: the warm resizes reflow, and reflow changes how many
+    // rows the same bytes buy. This is the depth the timed samples actually run
+    // against, which is the number worth reporting.
+    let retainedAtStart = terminal.scrollbackRowCount
+
+    var samples: [UInt64] = []
+    samples.reserveCapacity(recipe.sampleCount)
+    for index in 0..<recipe.sampleCount {
+        let width = widths[(recipe.warmupCount + index) % 2]
+        let started = now()
+        terminal.resize(columns: width, rows: recipe.rows)
+        samples.append(now() &- started)
+    }
+
+    return ResizeProbeReport(
+        recipeIdentity: recipe.identity,
+        columns: recipe.columns, rows: recipe.rows, lineCount: recipe.lineCount,
+        scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
+        alternateColumns: recipe.alternateColumns, warmupCount: recipe.warmupCount,
+        retainedRowCountAtStart: retainedAtStart,
+        distribution: ResizeProbeDistribution(samplesNanoseconds: samples)
+    )
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#546e7a",
+    "#ff5370",
+    "#c3e88d",
+    "#ffcb6b",
+    "#82aaff",
+    "#c792ea",
+    "#89ddff",
+    "#ffffff",
+    "#546e7a",
+    "#ff5370",
+    "#c3e88d",
+    "#ffcb6b",
+    "#82aaff",
+    "#c792ea",
+    "#89ddff",
+    "#ffffff"
+  ],
+  "background": "#0f111a",
+  "cursor": "#ffcc00",
+  "cursorText": "#0f111a",
+  "foreground": "#8f93a2",
+  "name": "Material Ocean",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1f2233",
+  "selectionForeground": "#8f93a2"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#20111b",
+    "#be100e",
+    "#858162",
+    "#eaa549",
+    "#426a79",
+    "#97522c",
+    "#989a9c",
+    "#968c83",
+    "#5e5252",
+    "#be100e",
+    "#858162",
+    "#eaa549",
+    "#426a79",
+    "#97522c",
+    "#989a9c",
+    "#d5ccba"
+  ],
+  "background": "#20111b",
+  "cursor": "#968c83",
+  "cursorText": "#20111b",
+  "foreground": "#968c83",
+  "name": "Belafonte Night",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#45373c",
+  "selectionForeground": "#968c83"
+}

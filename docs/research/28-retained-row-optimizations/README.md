@@ -1,0 +1,1041 @@
+# Retained-row optimization opportunities
+
+Research started: 2026-08-03.
+Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/H6`,
+`15/H7`, `15/F18`).
+
+- [findings.md](findings.md) -- the append-only evidence chain.
+- [decisions.md](decisions.md) -- the auditable decision log.
+
+## Purpose
+
+This doc owns **the follow-on performance opportunities opened by compact
+retained-row storage** -- the representation shipped in
+`plans/impl/2026-08-01-1803-compact-retained-scrollback-rows.md` (seam
+`fa01b66`, trim `dd51a12`, validation `54d4d2d`). Retained rows now store only
+their content prefix in canonical form; the blank tail is virtual, depth
+follows content rather than pane width, and the budget charge is coherent
+under seam mutation. Several optimizations that were incoherent against
+full-width mutable rows are newly cheap or newly attackable against canonical
+content-sized rows. This doc enumerates them, sizes them against fresh
+evidence, and graduates any winner to a plan.
+
+It also owns the measurement residue the shipped change left behind: `15/F18`
+never resolved the feed-path CPU verdict, and the browsing-render measurement
+was a one-off probe that no routine workload can reproduce.
+
+| Question | Owned by |
+| --- | --- |
+| What the process held before compact rows, and the shipped compaction | doc 15 (**closed**) |
+| Live-grid cell layout (`GridCell` stride, alignment) | doc 16 (**closed**, rejected) |
+| Renderer bracket leads | doc 18 (live) |
+| **What compact retained rows make possible next** | **this file** |
+
+## Investigation rules
+
+- **Evidence floor: `dd51a12`.** Every number used in a verdict is measured at
+  or after the trim commit, on current HEAD. Pre-trim measurements across docs
+  9-17 are historical orientation and technique input only -- the
+  representation, the cell (32 bytes since `15/F15`), and the row population
+  (`15/F18`: 5,799 plain rows at saturation, up from ~1,700) have all changed
+  under them. `15/F18` is the only inherited baseline; anything it did not
+  measure gets measured fresh here.
+- **Performance claims follow
+  [agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md)**:
+  name the benchmark, commit, and compatibility conditions; profiled or probe
+  timings are diagnostic, never benchmark verdicts, until a frozen decision
+  rule exists.
+- **An experiment ends in a verdict, and a candidate graduates only on
+  `faster` (or a deliberate, quantified trade).** A hypothesis leaves this doc
+  for a plan only when a calibrated workload that *contains the moved cost*
+  answers `faster` under its frozen rule, and nothing else the change
+  plausibly touches answers `slower`: `terminal-feed` and `scrollback-stream`
+  for anything on the admission path, the serialized-draw ladder for anything
+  on presentation, and the sparse-span candidates (`sparse-spans-few`/`-max`)
+  for anything that alters damage topology. Memory claims ride the probe at
+  both 179 and 80 columns. A trade (e.g. H4 giving back depth for footprint)
+  is admissible only stated as numbers and decided in a `D` entry, never
+  discovered after landing.
+- **A cost no calibrated workload contains gets a workload before it gets an
+  experiment.** The ladder's recent growth is the precedent: btop's
+  `synchronized-frames` and the sparse-span pair entered as candidates and are
+  screened toward frozen rules via
+  `scripts/terminal-benchmark-candidate-screen.py` and the winsorized freeze
+  pipeline (per
+  [agent-docs/measurement-discipline.md](../../../agent-docs/measurement-discipline.md)).
+  An unfrozen workload produces numbers, not decisions -- `23/D4`'s demotion
+  of `synchronized-frames` is the standing example. If a hypothesis here moves
+  a cost the ladder cannot see, building and screening that measurement is a
+  prerequisite task of the hypothesis, not optional tooling.
+- **Measurement machinery must not perturb what it measures -- or anything
+  else.** The standing incident: the benchmark's activity-snapshot write ran
+  inside AppKit's `draw(_:)` and billed 71 ms of a 20 s btop-scroll trace to
+  the path it exists to observe, fixed in `6747e82` and pinned by
+  `scripts/terminal-benchmark-draw-path-lint.sh` in the test gate (its sibling
+  `2eaac68` moved coverage observation onto a clock for the same reason). Any
+  workload, probe, or coverage instrumentation this doc adds obeys the same
+  law: its cost stays off the measured hot paths (run-loop timers and
+  benchmark-only code, never draw/feed/admission callbacks); if it must touch
+  app or engine code, that change gets the same no-`slower` paired treatment
+  as an optimization candidate; and where the boundary is mechanically
+  pinnable, pin it with a lint in the gate rather than a convention in prose.
+- **The shipped invariants are the boundary, not an obstacle course.** Any
+  candidate must preserve canonical trimmed form (stored cells are a pure
+  function of observable content), budget-charge coherence, and the
+  observability contract (reads at every column below `columnCount` answer as
+  before). The landed behavioral suite is the gate. A candidate that needs to
+  relax canonicality -- e.g. lazy trimming to reclaim feed-path allocation --
+  is a plan-level decision to reopen, not a research-side hack.
+- **Any byte change is a depth change.** The budget is denominated in bytes,
+  so a representation change silently changes retained depth at the same
+  nominal budget. Every proposal states its depth effect and decides it
+  deliberately (carried forward from doc 12/15 as a rule, not a number).
+- **A representation change is a CPU claim as much as a memory claim.** State
+  and measure the effect on the feed path (admission) and the browsing render
+  path (presentation) for every candidate.
+- **References supply techniques, never numbers.** kitty's `PagerHistoryBuf`
+  (`references/kitty/kitty/history.h#PagerHistoryBuf`) and similar prior art
+  are mined for shape and edge cases; every cost and benefit is measured in
+  DanTerm.
+- **Pre-adjudicated boundaries stay closed here.** Doc 16 closed live-grid
+  `GridCell` layout changes. The shipped plan's rejected ideas (charge content
+  while storing full width; content-width field beside a full array; inflate
+  on read) stay rejected. Doc 27's adoption bar governs any swift-collections
+  container this doc is tempted by.
+
+## Trigger and current evidence
+
+The compact retained-row representation landed 2026-08-01 and `15/F18`
+validated it: plain retained history is **3.41x deeper at 179 columns and
+1.71x deeper at 80 columns** at the same 10 MiB budget, candidate depth
+converges across pane widths (content now dominates the charge), the browsing
+frame plan measured **-5.79% symmetric median** in a 16-pair probe, and a live
+widen kept the head of history byte-identical.
+
+Three facts in that finding are this doc's starting evidence:
+
+1. **Per-row fixed overhead is now a first-class cost.** At saturation the
+   candidate holds 2,404-4,097 *more* row arrays than before; their
+   `GridRow` strides, array headers, and allocator buckets raised attributable
+   footprint by +2.51 MB at 179 columns (+21.8%) and +0.44 MB at 80. Compact
+   rows converted the dominant cost from blank cells to per-row overhead --
+   which is `15/H7`'s territory, quantified fresh by `15/F18`.
+2. **The feed-path CPU verdict is closed as unobtainable, not as neutral**
+   (`F1`). Four valid paired schedules agree on +1.03% to +1.45% against
+   `fa01b66`, which falls in the dead zone between `confirm`'s equivalence band
+   and its directional threshold; the escalation ladder has no third rung. The
+   shipped plan's `AR2` neutrality assumption is therefore neither confirmed
+   nor refuted, and the only defensible statement is a bound: admission-time
+   trimming costs no more than ~2.5% on the feed path, point estimate ~+1%.
+   Later candidates in this doc inherit that bound, not a neutrality claim.
+3. **The browsing measurement is unreproducible by routine tooling.** No
+   paired workload displays retained history -- `scrollback-stream` follows
+   the bottom and the draw workloads start from live grids. `15/F18`'s result
+   came from a temporary probe that was deleted after measurement.
+4. **The benchmark system just grew in the right direction, but not far
+   enough for this doc.** The ladder now carries btop's `synchronized-frames`
+   workload, the `sparse-spans-few`/`sparse-spans-max` candidates for
+   non-contiguous damage, and the live btop-scroll GUI diagnostic
+   (`just test-terminal-btop-gui`) -- all presentation/damage coverage. The
+   two paths this doc's hypotheses move remain uncovered: nothing displays
+   retained history, and nothing resizes a deep history. Both gaps are named
+   workload pitches in the Phase 1 ledger.
+
+## Current hypotheses
+
+### H1 -- deep-history resize is now proportionally cheaper, and nobody has measured it
+
+Reflow unpacks and repacks every retained row on a width change. Both sides of
+that operation now touch the content prefix instead of `columnCount` cells per
+row, so a saturated-history resize should move roughly a content-to-width
+ratio less data -- while also processing ~2-3x more rows at the same budget,
+which cuts against it. Net direction is genuinely unknown. **Answered by `F14`:
+per-row reflow got 1.17x *dearer*, not cheaper, and the row count rose 12.13x, so
+a saturated resize costs 14.2x more wall clock. Resolved by `F15`/`D8`:** the
+cost is `1.85 us x rows + 0.352 us x cells`, the byte budget had been bounding the
+cell term implicitly until a packed cell stopped costing 32 B, and restoring that
+bound explicitly returns every measured regime to within 1.19x of pre-packing. Window-drag latency
+on a deep pane is user-visible and composes with the shipped resize
+coalescing. Confirm or reject with a paired before/after-style probe at HEAD
+(there is no pre-trim arm to compare against and the rules forbid wanting one;
+the measurement is absolute: does saturated resize fit comfortably in a frame
+budget, and where does its time go).
+
+### H2 -- canonical blank rows can share one storage allocation
+
+Canonical form means every fully blank retained row stores identical content
+(one blank cell). Swift arrays are COW, so all blank rows could share a single
+storage buffer: a screenful of blank lines costs one allocation total. Two
+open mechanics questions decide viability: the budget charges per-row
+`capacity`, so shared storage needs a deliberate charge-model answer (charging
+each row for shared bytes overstates; charging once complicates eviction
+accounting), and the share must survive the seam (a write into a shared blank
+row must CoW-detach without corrupting siblings -- the existing suite should
+prove this for free). Reject if blank rows are a negligible fraction of real
+histories (measure first).
+
+**Rejected by `D4`** on `F9`'s sizing: 0 blank rows across the committed corpus,
+and a ceiling under 350 KB at any blank fraction below 50%, because canonical
+trimming already made a blank row cost 80 B against a content row's 1,808 B. The
+reopening condition is in the "Rejected" section.
+
+### H3 -- retained rows can be packed tighter than `[GridCell]` (15/H6 proper)
+
+The shipped change stores fewer cells; `15/H6` proposes storing them
+*smaller*: retained rows are immutable-in-practice, so a packed form (packed
+scalars plus run-length styles, or similar) does not need the live grid's
+32-byte random-write cell. This is the deferred remainder of `15/H6`, and the
+shipped seam -- readers already tolerate storage narrower than the logical row
+-- is most of the machinery it needed. Doc 16's constraint stands: the live
+grid's `GridCell` is untouched. Gate on Phase 2 evidence: only worth designing
+if stored cell bytes, not per-row overhead, dominate the remaining footprint.
+
+**Current state: GRADUATED as accepted-with-trade (`D10`).** C1 is landed
+(`987927a`..`f364cd9`), the plan is closed and promoted to
+[`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md),
+and the residuals it did not clear are accepted as numbers rather than fixed. The
+arc below is how it got there; `D10` is the ruling.
+
+**Selected by `D3`** (`F8`: stored cell bytes are 89.5% of attributable footprint
+at both widths) and **designed by `D5`** on `F11`'s composition evidence: a
+per-row fixed-stride scalar column, a run-length style table, and an exception
+list, priced at 9.41x depth at saturation. The experiment is the next hand-off,
+against `D3`'s success criterion.
+
+**Implemented at `efa549f`; resize fixed by `D8`; the deciding gate then failed.**
+The memory claim held at both geometries (`F16`: 69 B/row, 1.27 MB live heap at
+179x66, 1.12x deeper than pre-packing at roughly an eighth of the memory), and
+`D8`'s dual bounds returned every content regime to within **1.19x** of
+pre-packing resize, closing `F14`'s 14.2x. The deciding ladder then answered
+`slower` on four of six calibrated workloads, worst **`retained-browse` at
++19.83% against a 1.05% threshold** -- and `F16` Observation 2 shows neither cap
+binds on that workload, so the cost is the packed row's read.
+**`F17` then profiled that read, and `C6`'s named falsification had not fired.**
+Nothing on the browsing path took a per-cell point read; it took `unpacked()`,
+which is the linear walk `PO5` proved -- but *two* readers took it, per visible
+row per frame, each wanting a slice of a whole materialized row. Giving each
+reader a walk that decodes only what it consumes cut browsing from **+19.83% to
++3.27%** and put `geometry` below the baseline arm. All four workloads still
+answered `slower`: the read-side residual is the decode itself (~3.8 ns/cell) and
+the other three are `pack(_:)` at 9.2% of feed self time.
+
+**`D9` therefore rejects C6 and pivots `H3` to C1 -- a fixed 8-byte retained
+cell.** The scratch-reusing encoder lead is declined, because even its success
+leaves browsing over threshold. The pivot is cheap for a reason that is a property
+of `D8` rather than of C1: **both caps count content, so the cell cap binds under
+either representation and C1 retains exactly the rows C6 retains** (`F18`). It
+gives back only memory -- 528.0 B/row against C6's 128.0, still **3.42x cheaper
+than pre-packing**, ~3.1x total improvement instead of ~12.8x -- and buys a column
+read that is a load at a fixed offset with nothing to decode. C6 was selected over
+C1 on depth per byte (`D5`); `D8` retired that contest before the ladder ran.
+
+**`D10` accepts the residuals as a trade and graduates `H3`.** Banked:
+**10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24 at 1.11x the depth**,
+`retained-browse` at parity (-0.33%), resize within 1% of `D8`'s line in all three
+regimes. Paid: `terminal-feed` **+4.55%** and `scrollback-stream` **+4.13%** against
+`678bfe9` on `F20`'s deciding table, plus an `incremental-mixed` **+2.15%** that
+`F21` isolated to `2ae37c4`'s reader rewiring rather than to packing. `F22`'s
+wide-baseline audit is what makes the giveback legible: the feed residual is ~61 ms
+on a 1,345 ms batch, ~3.3% of an 1,855 ms campaign win, leaving HEAD **2.30x faster
+than pre-campaign** rather than 2.38x -- while `scrollback-stream`'s absolute
+position stays **unknown**, because it is one of the four workloads that cannot
+reach that baseline. `H8` is the designated successor and removes both residuals by
+construction; accepting now forecloses nothing, and C1's format is not reopened by
+it (`D9`'s decode-on-read reasons are measured and stand).
+
+### H4 -- per-row overhead wants fewer, larger allocations (15/H7 on new evidence)
+
+The counterpart gate to H3. `15/F18` measured the overhead side growing
+(+2.51 MB attributable at 179 columns) precisely because compact rows multiply
+row count at a fixed budget. `15/H7`'s narrow form -- aggregate storage for
+immutable retained rows only, no manual memory control -- composes with H3 and
+attacks the bytes H3 cannot. Whichever of H3/H4 Phase 2 shows is larger gets
+designed first; they may graduate as one plan (that is doc 15's own Phase-3
+gate logic, reapplied to post-trim numbers).
+
+**`D3` refused it as a standalone candidate** (a 1.16 MB ceiling only at zero
+per-row overhead) and kept it alive only as a composition inside H3's design.
+`F11` then earned it that place: packing shrinks the payload ~16x while the row
+slot, array header and size-class rounding do not move, so `F8`'s 89.5 / 10.5
+split inverts to roughly 50 / 50 and the arena is worth a further **36%** on top
+of H3. `D5` sequences it as a separately measured second step.
+
+**That arithmetic does not survive `D9`'s pivot, and this is a ledger note rather
+than work.** The 50/50 inversion and the 36% were computed for C6's ~1 byte per
+stored cell. C1's cell is 8 bytes, so the payload is the dominant term again --
+408 of C1's 423 payload B/row on the CRLF reference payload, 96.5% -- and the
+fixed per-row cost an arena would remove is a much smaller share than it was.
+`H4` stays sequenced behind the representation (`RI3`) and must be **re-priced
+before it is run**; nobody should quote the 36% at a C1 HEAD.
+
+### H5 -- ancient history can demote to a compressed tier
+
+kitty's `PagerHistoryBuf` precedent: recent history stays cell-backed for
+interaction; history older than some horizon demotes to packed text that
+re-inflates on browse. Strictly more mechanism than H3/H4 for the same bytes,
+so it is live only if Phase 2 shows deep-history footprint still matters after
+the cheaper hypotheses land or are rejected. The canonical representation
+makes the demotion boundary well-defined (stored content is already exactly
+the observable content).
+
+**Parked by `D12` (2026-08-05), and not rejected.** The gate `D3`/`D5` deferred
+it to cannot be read here any more: `9ad7cc5` moved retained storage into doc
+31's `LogicalLineStore`, whose footprint is bounded by the arena's capacity
+rather than by what rows charge, so `F19`'s 3.72 MB is a pre-cutover number about
+a container that no longer exists. Doc 31's own readings (settled residency
+**0.92x** the incumbent's, live heap inside capacity) say deep history is not
+over budget, which is the premise `H5` needs. `D12` carries the reopening
+condition: a measured deep-history residency figure against the *store* that is
+judged unacceptable at the shipped budget, with lowering the budget already ruled
+out as the lever.
+
+### H6 -- canonical rows make scrollback persistence cheap enough to be a feature
+
+Storage is now a pure function of observable content: content-sized and
+deterministic across runs, which is exactly what a save/restore codec wants
+(and aligns with the SAVED/SENT/ASSERTED injection rule). This is a product
+question before it is a performance question -- the recovery store snapshots
+the model, not terminal content, today. Parked until session-restore of
+terminal content is a live feature goal; recorded here so the sizing argument
+is not lost.
+
+### H7 -- viewport-adjacent reflow makes depth stop costing latency
+
+`D8` capped retained history because reflow visits **every** retained row, so
+depth is latency: `F15` fitted the cost at `1.85 us x rows + 0.352 us x cells`
+and both caps exist only to bound that product. The caps are therefore a
+workaround for the reflow algorithm, not a property anyone wants -- they cost
+sparse content 3.08x its pre-packing depth (`D8`), and the packed format could
+otherwise carry ~12x.
+
+The hypothesis: **rows near the viewport reflow synchronously on resize; the rest
+reflow on demand or in the background.** Resize becomes O(viewport) instead of
+O(history), which decouples depth from resize latency and lets both caps rise
+toward what the format can actually hold.
+
+What this doc's own evidence says is hard about it, so the research does not
+rediscover it:
+
+- **A width-keyed wrap-count index.** Mapping a viewport position to a row in
+  unreflowed history needs to know how many display rows each logical line
+  occupies *at the current width*, which is exactly what reflow computes. Doing
+  it lazily means maintaining that count separately, per width.
+- **Scroll anchoring across a resize.** The user's scroll position is a row
+  offset today. If most of history has not been reflowed yet, that offset does
+  not denote a stable place, and the scrollbar's extent is unknown until it does.
+- **The end of "history is always at the current width."** Every reader assumes
+  it: `projectionRows`, `activationIdentity`'s range scan, `primaryHistoryText`,
+  and the resize path's own rejoining of soft-wrapped lines. A mixed-width
+  history is a new invariant that all of them have to state.
+
+First research task is **mining `references/` for how the pinned terminals handle
+history reflow and scrollbar mapping** -- kitty, wezterm, alacritty, foot and
+windows-terminal all keep scrollback across resizes and have each made this
+tradeoff somewhere. Cite `file#identifier` per `AGENTS.md`. Design and
+implementation are explicitly **not** in scope until that read is recorded: this
+is a ledger entry opening an investigation, not a plan.
+
+**Superseded as the direction (2026-08-04).** The human chose a from-scratch
+redesign over this incremental hybrid:
+[doc 31](../31-logical-line-scrollback/README.md) owns storing history as
+unwrapped logical lines with wrapping computed at read time, which removes
+reflow-of-history entirely instead of deferring it. The three hard parts named
+above transfer there (the wrap-count index becomes `31`'s derived block index,
+scroll anchoring and the mixed-width invariant land in `31/H1` and `31/H4`),
+and the hybrid itself is recorded in doc 31's Rejected section as the fallback
+if its viability gate (`31/D1`) answers no-go. This entry stays as the record
+of the incremental alternative; nothing here is worked unless that fallback
+fires.
+
+### H8 -- packing costs what it costs because of *when* it runs, not what it writes
+
+`H3`'s residual regressions are on the admission path, and the evidence that
+they are a *scheduling* cost rather than an *encoding* cost is that they did not
+move between two representations 4x apart in per-row bytes: `F19` measured
+`scrollback-stream` and `terminal-feed` `slower` under `C6` at 128 B/row, and
+`F20` measured them `slower` under `C1` at 528 B/row after the write-pattern fix
+had already taken -6.69% out of the encoder. What both share is not a format --
+it is that a row is packed synchronously, on the thread draining the pty, at the
+moment it scrolls out of the viewport.
+
+The hypothesis: **admit rows by reference into a bounded unpacked tail of `K`
+rows, and pack in amortized steps on the pane's queue.** Admission stops doing
+per-cell work at all; the transient cost is bounded at `K x 1,808 B` (a
+179-column `[GridCell]` row), which is a constant a `D` entry can price against
+the 3.72 MB steady state. Feed and scrollback-stream become neutral *by
+construction* -- there is no longer any packing on the measured path -- while
+the memory win stays asymptotically intact, since the tail is bounded and
+everything behind it is packed.
+
+Named hard parts, so the research does not rediscover them:
+
+- **Two coexisting representations in scrollback.** Every reader that today sees
+  a `PackedRetainedRow` would see a sum type, on the paths `F17` made fast; the
+  risk is giving back that work at the dispatch.
+- **Budget accounting for the mixed state.** `D8`'s dual caps count *content*,
+  which survives the change, but `productionScrollbackBudgetBytes` and the census
+  price bytes -- and the tail's bytes are the live-cell stride, not the packed
+  payload. What the budget charges for an unpacked tail row, and whether the tail
+  counts against depth at all, is a decision and not an implementation detail.
+- **Scheduling the packing step against real queue occupancy.** Doc 19's
+  queue-occupancy evidence is the input: amortized background work is only free
+  if the queue has room, and the drain that would hand it work is the same one
+  competing for it. A step size that is wrong turns a bounded tail into an
+  unbounded one under sustained output -- exactly the `scrollback-stream` regime.
+
+**`H3`'s disposition is now decided, and it did not fund this.** `D10` accepted
+the residuals as a trade, so `H8` is the **designated successor**: the option that
+removes both by construction, named in `D10` and deliberately left unfunded.
+Funding it is a fresh decision, not a consequence of that one. Two things `D10`
+settles for whoever picks it up: C1's format is **not** reopened by `H8` (it moves
+when the encode runs, not what it writes, and `D9` rejected C6 on decode-on-read
+that no encoder change reaches), and `F22` cannot say where `scrollback-stream`
+sits against pre-campaign DanTerm, so this hypothesis inherits that unknown rather
+than an established absolute regression. Still a ledger entry: no design and no
+implementation without that funding decision.
+
+## Task ledger
+
+### Phase 1 -- close the shipped change's measurement residue
+
+- [x] `DONE` Resolve the feed-path verdict at HEAD. Closed by `F1`: **no
+  directional verdict is obtainable.** Four valid paired schedules (`15/F18`'s
+  quick and confirm, plus a quick and a confirm at `6da2bb7` on AC power)
+  agree on +1.03% to +1.45% against baseline `fa01b66`, which sits in the dead
+  zone between `confirm`'s 0.75% equivalence band and its 2.5% directional
+  threshold. The escalation ladder is exhausted and re-running is shopping. The
+  defensible bound: admission-time trimming costs no more than ~2.5% on the
+  feed path, point estimate ~+1%, direction slower. The `scrollback-stream`
+  empty-stdout defect did **not** recur -- `15/F18` records it as already
+  diagnosed and repaired (theme-packer status prefix; the tolerance lives in
+  `_load_fresh_replay_result` in `scripts/terminal-benchmark-validation.py`),
+  and all four `scrollback-stream` blocks of this confirm returned JSON. That
+  confirm also produced `F2`, which is unrelated to the trim and is flagged
+  there for another doc.
+- [x] `DONE` Isolate `F2`'s draw-path signal against the adjacent baseline.
+  Closed by `F3`: `just benchmark-confirm baseline=dd51a12` collapsed three of
+  the four `slower` verdicts (`scrollback-stream` +4.46% -> `equivalent`,
+  `content-churn` +4.02% -> `inconclusive`, and `incremental-mixed` is
+  sign-mixed across -8.03%..+8.95% and so not directional). **`style-churn`
+  survives at +3.09%** with tight positive pairs, reproducing `F2`'s +3.47%,
+  which places it in `dd51a12..HEAD`. Handed to docs 29/30 with the isolating
+  bisect named (`confirm` against `13f82c8~1` separates the renderer work from
+  its accepted-draw-path instrumentation). Not fixed here: the cause may be the
+  renderer work, which this doc does not own.
+- [x] `DONE` Run the `13f82c8~1` bisect and attribute `F3`'s survivor. Closed
+  by `F4`: `style-churn` is **4.05% faster** at HEAD than at `13f82c8~1` (four
+  of four negative pairs), so the accepted-draw-path instrumentation is **not**
+  the cause and this doc's measurement-machinery rule did not recur. `13f82c8`'s
+  recorder is nil for every workload but the two sparse-span ones, which is the
+  mechanism. The residual cost localizes to `dd51a12..e4556c0` -- the sparse
+  damage renderer work -- and is handed to docs 29/30 unfixed, with both
+  bounding runs named. `content-churn` is also 4.46% faster over the same range,
+  plausibly `6747e82`/`2eaac68` paying out.
+- [x] `DONE` Pitch and decide benchmark coverage for retained history.
+  Closed by `D1`, which dispositions four pitches: admit the retained-history
+  browsing workload as a candidate; freeze the saturated-resize probe recipe
+  rather than admitting it (H1's question is absolute, not paired); reject a
+  longer-schedule `terminal-feed` screening tier with a stated reopening
+  condition; and admit a host-idleness preflight annotation, sequenced first.
+- [x] `DONE` Implement `D1`'s admitted item (a), the preflight host-idleness
+  annotation. `sample_host_conditions` in
+  `scripts/terminal-benchmark-compare.py` reads load average, per-processor
+  load, and the busiest **non-harness** processes at two points -- at invocation
+  and immediately before the first block -- and records both under
+  `summary.hostConditions` in `run.json`, rendered beside the verdicts. It
+  excludes the driver's own descendants (`F3`'s confound), reports "not
+  measured" as a state distinct from "measured idle", and applies **no
+  threshold**, per `D1`'s refusal to invent an uncalibrated gate. Off every
+  measured path by construction: it runs before collection starts.
+- [x] `DONE` Implement `D1`'s admitted item (b), the retained-history browsing
+  candidate workload. `lib/TerminalCore/Sources/TerminalBrowseBenchmarkSupport`
+  plus the `TerminalBrowseBenchmark` executable resurrect `15/F18`'s recipe
+  (179x66, 10,000 hard-terminated lines, parked at the oldest retained row, 20
+  warm and 2,000 measured `planFrame` calls, coverage checksum). Registered as
+  `retained-browse` in `CANDIDATE_WORKLOADS` with a block contract and the
+  `planNanosecondsPerFrame` metric -- **no frozen rule**, per `D1`'s gate.
+  Headless, so it needs no window: it plans frames and never draws one. Screen
+  result in `F5`.
+- [x] `DONE` Implement `D1`'s admitted item (c), the committed saturated-resize
+  probe recipe. `lib/TerminalCore/Sources/TerminalResizeProbeSupport` plus the
+  `TerminalResizeProbe` executable and `just terminal-resize-probe` freeze the
+  recipe `D1` pitch 2 specified: geometry, budget, retained row count, warm
+  count, and sample count all stated in the emitted report, and a distribution
+  reported rather than a single number. Benchmark-only code, no app or engine
+  hook, so no lint was needed. First run recorded descriptively in `F7`: ~98 ms
+  median over 6,756 retained rows, with narrowing and widening separable. **No
+  verdict** -- `D1` scoped this probe to an absolute question with one arm.
+- [x] `DONE` Run the **second** independent browsing screen `D1` requires.
+  Closed by `F6`: a separate invocation at a separate tree replicates screen 1
+  and is quieter (SD 0.51% against 0.99%, 0 of 12 quartets discarded in both).
+  Frozen by `D2` at the **conservative envelope** rather than the cheapest cell
+  -- `quick` 2 pairs at +/-1.05%, `confirm` **4** pairs at +/-1.05% -- and
+  `retained-browse` moved from `CANDIDATE_WORKLOADS` into `WORKLOADS`. Both
+  rules carry the A/A dead zone in their own comment, so a reader who sees
+  `inconclusive` here knows it is structural rather than a bad run. This screen
+  is also the host-condition preflight's first real consumer: the screen script
+  now records both pre-launch readings into `candidate-screen.json`.
+- [ ] ~~`TODO` Pitch and decide benchmark coverage for retained history, so
+  every later experiment here can end in a verdict rather than a probe
+  anecdote. Two named gaps, one decision: (a) a **retained-history browsing**
+  workload -- saturate history, scroll to the oldest row, then run serialized
+  updates while the viewport sits in history (`15/F18`'s deleted probe is the
+  recipe; the sparse-span pair is the precedent for admitting it as a
+  candidate and screening it toward a frozen rule); (b) a
+  **saturated-history resize** workload or documented probe -- repeated width
+  changes against 5,000+ retained rows, timed like the serialized-draw
+  blocks. Decide each as: admit as candidate, freeze a probe recipe, or
+  reject with reason. Either workload lives in benchmark-only code per the
+  measurement-machinery rule; any hook it needs in app or engine code gets
+  the no-`slower` treatment and, where pinnable, a gate lint. Destination:
+  `D1`.~~ (superseded by the two entries above; kept for the reasoning it
+  carries)
+
+### Phase 2 -- size the remaining costs at HEAD
+
+- [x] `DONE` Split saturated attributable footprint into stored cell bytes vs
+  per-row fixed overhead (headers, `GridRow` strides, bucket slack) at both
+  179 and 80 columns, using the census plus probe arithmetic. Closed by `F8`:
+  **stored cell bytes are 89.5% at 179 columns and 89.3% at 80**, per-row
+  overhead 10.5%/10.7% at ~197 bytes per row allocation, and the split does not
+  vary with pane width. The malloc block delta matches the row allocation count
+  to within 64 blocks at both widths, so the residual is per-row overhead rather
+  than an unattributed mixture. **H3 is the larger target by roughly 9x**; H4's
+  ceiling is 1.16 MB at 179 columns and only at zero per-row overhead.
+- [x] `DONE` Measure blank-row frequency in realistic histories to size H2's
+  ceiling. Closed by `F9`: **not one retained row in the committed corpus is
+  blank** -- 0 of 133 recorded rows, 0 of 4,707 overall -- so H2's measured
+  ceiling is **0 bytes**. Its ceiling at the extreme, measured rather than
+  argued, is 8.00 MB, and only for a history that is *entirely* blank; at any
+  blank fraction below 50% it is under 350 KB, because canonical trimming already
+  made a blank row cost 80 B against a content row's 1,808 B. The instrument's
+  negative control reports 49.9% blank on an alternating stream, so the zero is a
+  measurement rather than a broken detector. The new probe
+  (`just terminal-retained-row-probe`) is committed, not deleted.
+- [x] `DONE` Check allocator behavior under ragged row sizes. Closed by `F10`:
+  **rounding does not eat the savings.** macOS malloc's classes above 256 B are
+  four buckets per octave -- ~12.5% granularity, geometric rather than a fixed
+  quantum -- so rounding is proportional and ragged storage keeps what it saves:
+  71.1% on paper against 70.8% realized on `F8`'s payload, with the worst gap
+  across all stimuli 0.9 points and two stimuli realizing *more* than paper.
+  Rounding costs 6.2%-9.6% of allocated bytes and does not rise with length
+  variety. The design constraint it leaves H3: a packing scheme must shrink a row
+  by more than one bucket step (~12.5%) to be guaranteed to yield any bytes. It
+  also splits `F8`'s 197.5 B/row residual into 160 B of row allocation (32 B
+  header + 128 B rounding) and ~37 B of history's own buffer.
+- [x] `DONE` Size styled and multi-scalar content at depth -- the evidence gap
+  `F8`, `F10` and `D3` all named. Closed by `F11`: the committed shape probe gained
+  a composition reduction and a `--saturated` replay mode, because **every styled
+  stimulus in the corpus retains zero rows in one pass** (TUIs paint in place and
+  never scroll). At depth across 94,990 rows of repeated committed content:
+  **22.54% of stored cells are styled but the mean row holds only 1.66 style runs**,
+  **0.119% of cells are multi-scalar**, 1.32% of scalars are non-ASCII, and 0.37%
+  carry a hyperlink. Styled rows are 20.3% of rows and 31.4% of charged bytes --
+  and they cost more only because they are twice as long, since the current cell
+  pays for styling whether or not it uses it. `F11` also prices six candidate
+  representations against those exact rows through the engine's own charge model.
+- [x] `REJECTED` (obsolete 2026-08-05 -- the subject was deleted, not the question
+  answered) Probe saturated-history resize cost at HEAD (H1): where does
+  a full-width change on 5,000+ retained rows spend its time, and is it within
+  a frame budget? `F7` has the distribution and the committed probe; this task
+  is the profile and the frame-budget reading `F7` deliberately withheld. Now
+  also a prerequisite risk check for `D5` (depth rises ~9x at the same budget, so
+  reflow processes ~9x more rows). Destination: `F16`.
+  **Half-answered and sharply promoted by `F14`/`D7`, then narrowed by `F15`.**
+  The frame-budget reading is in, and so is the shape: reflow costs
+  `1.85 us x rows + 0.352 us x cells` (`F15`), and `D8`'s two caps bound that
+  product back to within 1.19x of pre-packing. What this task still owes is the
+  *profile* -- where inside the **per-cell** term the time goes, since that is the
+  dominant one and the one whose reduction would let `D8`'s cell cap rise. Unpack,
+  repack, or the allocation traffic between them is still unmeasured.
+  **OBSOLETE 2026-08-05, superseded by
+  [doc 31](../31-logical-line-scrollback/README.md).** `9ad7cc5` deleted reflow of
+  history and both caps, so the per-cell term this task was to profile and the
+  cell cap it was the prerequisite for are both gone. The replacement number is a
+  measurement, not a profile: `D11`'s exit amendment reads the same committed
+  `saturated-wide-resize-v1` recipe at **1.58 ms** median and **2.75 ms** max
+  against the trial's 576.19 ms, at greater depth. Profiling the surviving
+  live-screen refold is a new question with a new subject and belongs to whoever
+  reopens resize work.
+
+### Phase 3 -- direction gates
+
+- [x] `DONE` Gate: H3 vs H4. Closed by `D3`: **H3 proceeds first**, on `F8`'s
+  9:1 split at both widths; **H4 does not stand alone** (1.16 MB ceiling, and
+  `F10` shows ~37 B/row of it belongs to history's buffer rather than to rows)
+  and survives only as a composition inside H3's design. `F10` does **not**
+  undercut the selection -- rounding is proportional, so ragged savings survive
+  -- but it adds a design admission test: a packing scheme must shrink a row's
+  request by more than one bucket step (~12.5%) to be guaranteed to yield bytes,
+  and the committed probe prices that before any engine change. `D3` also states
+  the full success criterion: two-width memory probe, a stated depth effect,
+  `retained-browse` under `D2`'s frozen rule, `terminal-feed` with `F1`'s wall
+  and `D1` pitch 3's reopening condition, the four standing ladder guards, the
+  resize probe's now-triggered upgrade gate, and the preflight annotation on
+  every deciding run.
+- [x] `REJECTED` Gate: H2. Closed by `D4`: **rejected on sizing.** `F9` measured
+  the ceiling at 0 bytes across the committed corpus and under 350 KB at any blank
+  fraction below 50%, and the reason is structural rather than a corpus accident --
+  canonical trimming already made a blank row cost 80 B against a content row's
+  1,808 B, so blank rows cannot be a meaningful *byte* share until they are an
+  overwhelming *count* share. The charge-model question dies with it. Reopening
+  condition: a recorded stimulus whose retained history is more than ~50% blank
+  rows by count, which `just terminal-retained-row-probe` reports directly.
+- [x] `DONE` Pitch and select the H3 packing representation. Closed by `D5`:
+  **C6 -- a per-row fixed-stride scalar column (1/2/4 bytes, chosen from the row's
+  widest single scalar), a run-length style table, and a 3-byte-per-entry exception
+  list for wide and multi-scalar cells.** Priced at **1,076.9 -> 114.5 B/row
+  (89.4%, 9.41x depth)** at depth and **1,808.0 -> 112.0 B/row (16.14x)** on `F8`'s
+  payload at both widths. Chosen over the cheaper-looking UTF-8 text form because
+  the two cost the same in bytes at 0.903 UTF-8 bytes per cell while only the
+  fixed stride keeps a **column read O(1)** -- and `retained-browse` is the guard
+  `D3` says is most likely to fire. `H4` composes in for a further 36% and lands as
+  a separately measured second step.
+- [x] `DONE` (parked 2026-08-05) Gate: H5 -- live only if the selected H3/H4
+  direction leaves deep-history footprint on the table. `D5`'s priced 9.41x made
+  this look dead on sizing; the post-landing evidence pointed the other way
+  (C1 retains at **3.72 MB**, not C6's 0.78 MB -- `F19`), and then the subject
+  moved: `9ad7cc5` replaced retained-row storage with doc 31's
+  `LogicalLineStore`, whose footprint is bounded by the arena's capacity rather
+  than by a per-row charge. **Closed by `D12` as a park, not a verdict**: the
+  gate's number no longer describes the engine, doc 31's residency readings do
+  not show deep history over budget, and reopening now needs a residency figure
+  measured against the store. Destination: `D12`.
+- [x] `DONE` (superseded 2026-08-04) Open `H7` -- viewport-adjacent reflow. The
+  question this task would have opened moved to
+  [doc 31](../31-logical-line-scrollback/README.md), which pursues the
+  from-scratch alternative (logical-line storage, read-time wrapping) instead;
+  the references read survives as `31`'s F4 edge-case inventory. The hybrid
+  itself is doc 31's recorded fallback if `31/D1` answers no-go. Original task,
+  kept for the record: opened by `D8`, which
+  capped retained depth because reflow visits every retained row, and which cost
+  sparse content 3.08x its pre-packing depth to do it. **The first task is a read,
+  not a design**: mine `references/` for how the pinned terminals reflow history
+  across a width change and how they map a scroll position onto history that may
+  not be reflowed yet -- kitty, wezterm, alacritty, foot and windows-terminal all
+  keep scrollback across resizes and have each placed this tradeoff somewhere.
+  Cite `file#identifier`. The three hard parts this doc already knows about are in
+  `H7`'s statement (a width-keyed wrap-count index, scroll anchoring across a
+  resize, and the end of the "history is always at the current width" invariant
+  every reader assumes) and exist so the read confirms or refutes them rather than
+  rediscovering them. Nothing is designed or implemented until that read is
+  recorded. Destination: a finding, and then its own doc if the ledger says Phase 4
+  is the wrong home.
+
+### Phase 4 -- graduate
+
+- [x] `DONE` Build and run `H3`'s experiment: implement `D5`'s C6 in the
+  engine (retained rows only -- doc 16's closure keeps the live grid's `GridCell`
+  untouched) and read it against `D3`'s success criterion as written. This is the
+  next hand-off and the first Phase-4 task, because `D5` is a priced design and
+  not yet a measured one. Prerequisites `D5` names: the `saturated-resize` upgrade
+  if a resize claim is made, and the longer `terminal-feed` screen if the predicted
+  feed effect lands under ~2%. Run `D5`'s falsification checks against a prototype
+  before the full ladder.
+  **Graduated to [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md),
+  which is awaiting human plan review before any engine code.** The plan writes
+  the predicted feed effect down as **~+1%, bounded at +2%** -- under the ~2%
+  line, so `D1` pitch 3's screening reopen fires and the longer `terminal-feed`
+  schedule is screened *before* the deciding run. It also settles `D1` pitch 2's
+  gate affirmatively: C6 changes what reflow unpacks, so `F7`'s probe converts to
+  a two-armed comparison.
+  **Plan review sent it back for an evidence-only Phase 0 (`PR1`), now closed by
+  `F12`/`D6`.** Review found C6's pricing charged hyperlink metadata nowhere and
+  no candidate charged `contentIdentity` at all, on a false premise that a
+  retained cell's `contentIdentity` has no reader. `F12` measured what `F11` had
+  only inferred -- **85.14% of retained rows at depth are printed contiguously**,
+  100% on the CRLF reference payload -- so the field encodes per run rather than
+  per cell. `D6` preserves every field and keeps C6, which is cheapest under
+  *both* identity variants; the yield falls to **128.0 B/row and 14.12x** on the
+  CRLF payload (from 112.0 and 16.14x). Phase 1 may begin.
+  **Phase 1 chunk A landed the packing (`efa549f`); chunk B's first gate run
+  stopped it.** `F13` records five accounting corrections the implementation
+  forced -- the saturated pool re-weights under packing (so `F12`'s 85.14% reads
+  83.96% at HEAD, and 82.71% under the strict run rule the encoder actually
+  writes), the encoder pays a 13 B per-row header the candidate table charges
+  nowhere, the spill directory is charged by the engine and priced by nobody, the
+  probe's `current` arm now prices a representation nothing stores, and
+  narrow-width depth differences collapse into one malloc bucket. None of them
+  move `D6`'s 128.0 B/row headline, which was reproduced to the byte. `F14` then
+  ran gate item 6's two-armed resize comparison on a re-versioned saturating
+  recipe and measured **1,425.8 ms against 100.2 ms** -- 12.13x the retained rows
+  at 1.17x the per-row reflow cost. `D7` states the trade as numbers and stopped
+  the gate there, because all three exits change the shape the remaining runs
+  would measure.
+  **`D8` took the cap exit, and the resumed gate then failed on the read side.**
+  `F15` measured what `D7` could only assume: the pre-packing byte budget had been
+  bounding stored *cells* implicitly at `10 MiB / 32 B`, and a ~1 B packed cell
+  removed that bound -- so `D8` restates it explicitly as a **327,680-cell cap**
+  beside a **16,384-row cap** derived from the fitted two-term reflow model
+  (`1.85 us/row + 0.352 us/cell`). A row cap alone was measured unsound: it leaves
+  wide content at 2.66x and destroys history across a narrow-then-widen round trip
+  (8,192 -> 4,095), now pinned by `narrowThenWidenPreservesCappedHistory`. With
+  both bounds, resize lands within 1.19x of pre-packing in all three regimes.
+  `F16` then ran the full deciding ladder and **the gate failed**: four `slower`
+  verdicts, worst `retained-browse` at **+19.83%** against 1.05%, with neither cap
+  binding on that workload.
+  **`F17` profiled the read and fixed what wiring could fix.** The suspected
+  cause -- per-cell point reads defeating `PO5`'s linear walk -- was wrong: the
+  planner already took the linear walk, but `geometry` and `forEachViewportCell`
+  each materialized a whole `[GridCell]` per visible row per frame, where the
+  pre-packing form returned its stored array by reference. Three readers now get
+  three walks (`forEachCell`, `forEachContentCell`, `forEachKind`), pinned
+  against drift by `TerminalRetainedRowReadPathTests`, landing at `2ae37c4`.
+  Browsing fell **+19.83% -> +3.27%** and `geometry` now costs less than at the
+  baseline. **`H3` still does not graduate**: browsing misses 1.05% by 3x on a
+  residual that is the decode itself, and the three admission-bound workloads are
+  unmoved because their cost is `pack(_:)` -- 9.2% of feed self time, absent at
+  the baseline. `F17` Observation 5 also records the plan's `terminal-feed`
+  prediction (~+1%, bounded +2%) as **falsified** across three readings.
+  **The human took the pivot, and `D9` records it: C6 is rejected on that verdict
+  set and replaced by C1, a fixed 8-byte retained cell.** The scratch-reusing
+  encoder is declined -- it addresses only admission, and browsing is the workload
+  with the tightest threshold and no encoder fix, so the lead's best case is still
+  a failed gate. `F18` prices C1 against the same rows with `F13`'s corrections
+  applied: **528.0 B/row** on the CRLF reference payload, 3.42x cheaper than
+  pre-packing, on two side tables instead of five -- and, decisively, **at
+  identical retained depth**, because `D8`'s caps count content and the cell cap
+  binds under either representation. The pivot's whole cost is memory: 3.24 MB
+  against C6's 0.78 MB, ~3.1x better than pre-packing instead of ~12.8x. C6's
+  evidence contributions stay load-bearing (`D8`'s caps, `F13`'s corrections,
+  `F17`'s streaming readers), and the record stays in the repo permanently so a
+  future session can take a different trade with the evidence intact.
+  **C1 is implemented and measured (`F19`), and the pivot did what it was chosen
+  to do -- on five of six workloads.** `retained-browse` came back **at the
+  pre-packing baseline** (-0.11% against 1.05%), `terminal-feed` +1.50%,
+  `incremental-mixed` +1.27% while planning frames **24.08% faster**,
+  `content-churn` +1.72%, `style-churn` +0.74% -- all passes. Memory is
+  **10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24, at 1.11x the depth**,
+  and resize holds `D8`'s line to within 1% in all three regimes. `F18`'s cap
+  prediction was confirmed to five cells: 327,675 retained against a 327,680 cap.
+  **`H3` still does not graduate, on one workload.** `F20` profiled the drain,
+  found scrollback admission at **19.7% of the PTY-host thread with half of it
+  copying cells rather than encoding them**, and fixed it inside `C1`'s shape:
+  `pack` now trims as it encodes (no intermediate `compacted()` row) and skips
+  cells whose word is zero. That is worth **-6.69% on `scrollback-stream`** against
+  pre-fix `C1` -- and the workload still answers `slower` at **+4.13%** against
+  pre-packing, threshold 1.85%.
+  `F20` Observation 5 also **retracts `F19`'s mechanism**: the bare-LF staircase is
+  not in this workload. The producer writes through a real tty, `openpty` with a
+  `nil` termios installs Darwin's `OPOST | ONLCR`, and the terminal receives CRLF.
+  The staircase belongs to the *probe*, which feeds the same corpus bytes with no
+  tty in between -- two stimuli, one name. So the stimulus-fidelity question does
+  not arise, there is no `23/D4`-style demotion to propose, and the regression is
+  over dense realistic rows, which makes it matter more rather than less.
+  **`F21` closes the control question and leaves `F20`'s table standing.**
+  `style-churn` is not a control for this range -- `2ae37c4` rewrote `geometry`
+  and `forEachViewportCell` for *every* row, live rows included -- so its
+  repeated `slower` reading is not a failed control and gives no ground to
+  re-measure. Isolating that commit against its parent reads `style-churn`
+  `equivalent` at **-0.41%**, so the +2.36% is unattributed. The same isolation
+  turns up a reading the whole-range runs averaged away: **`incremental-mixed`
+  `slower` at +2.15%** against 1.85%, plan time +5.99%, attributable by
+  construction to the reader rewiring. The disposition returns to the human as a
+  decision package, with `H8` registered as the funded-work option.
+  **Closed by `D10`: the human accepted the residuals as a trade and `H3`
+  graduates as accepted-with-trade.** Banked -- 10.49 -> 3.72 MB at 179x66 and
+  10.17 -> 3.40 MB at 80x24 at 1.11x depth, browsing at parity, resize within 1%
+  of `D8`. Paid -- `terminal-feed` +4.55%, `scrollback-stream` +4.13%, and an
+  `incremental-mixed` +2.15% that `F21` attributes to the reader rewiring rather
+  than to packing. `F22` supplies the absolute framing (feed's residual is ~3.3%
+  of an 1,855 ms campaign win; `scrollback-stream`'s absolute position is
+  **unknown** and accepted as an open question). `H8` is named the designated
+  successor and left **unfunded**; funding it is a fresh decision.
+- [x] `DONE` Run the campaign's first wide-baseline audit. Closed by `F22`,
+  which is **wide-baseline descriptive** and carries no verdict: against
+  pre-campaign `6c58c45`, HEAD feeds **2.38x faster** (3,197 -> 1,345 ms) and
+  browses **2.20x faster** (739 -> 336 us/frame) while retaining **4.24x the
+  history** (1,717 -> 7,281 rows from one 10,000-line stimulus). The smoke alarm
+  is **empty**: no comparable workload is slower than pre-campaign, so no bisect
+  is opened. Coverage is the finding's real content -- the four app-driven
+  workloads and both probes cannot reach that baseline, because HEAD's app only
+  compiles against the pre-campaign engine through shims that would then run
+  inside the measurement, and `app/TerminalBenchmark.swift` is 538 lines behind
+  HEAD's block contract there. A full-ladder wide run needs a baseline no older
+  than `39abdbf` (2026-07-31), which is close enough to HEAD to mostly duplicate
+  the adjacent runs; that is why it is not proposed here.
+- [x] `DONE` Extract the selected direction into a plan file once the experiment
+  answers; record where it went. **It went to
+  [`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md)**,
+  promoted out of `plans/wip/` at closure, and shipped as C1 across
+  `987927a`..`f364cd9`. The doc did not close with it -- three things outlived
+  it, and **all three are now closed**: `H7` was superseded 2026-08-04 by doc 31
+  and its reopening spent by `31/F16`, Phase 2's resize *profile* (`F24`) went
+  obsolete 2026-08-05 when `9ad7cc5` deleted its subject, and `H5`'s gate is
+  parked by `D12`. See `## Outcome`.
+- [x] `DONE` (trial closed 2026-08-04 on exit 4) Size the history-depth defaults
+  against a stated line-count target. `F23` measured what today's bounds retain
+  at 179 columns (1,830 rows of full-width content, 7,281 of program output,
+  16,384 of shell history), priced two candidate bound sets for ~10,000 rows
+  through `D8`'s model, and changed no default. **`D11` then shipped candidate
+  (b)** -- cell cap 1,790,000, row cap 89,500, budget 16 MiB -- as a provisional
+  dogfood trial, reopening `D8`'s ~150 ms budget by explicit human choice and
+  paying a measured 600.5 ms worst-case reflow and ~14.8 MB per deep pane.
+  Deliberately no mitigation shipped with the raise. **`D11`'s amendment closes
+  it on a fourth exit, *the cause is removed*:** the human's exit-1 verdict is
+  recorded, and was unratified when
+  [doc 31](../31-logical-line-scrollback/README.md)'s store deleted reflow of
+  history out from under it. **That ratification slot was closed as MOOT
+  2026-08-05** (marked amendment at `D11`), so nothing is waiting on it.
+  Re-measured on the committed
+  `saturated-wide-resize-v1` recipe at both revisions, the same width change at
+  the trial's own depth went **576.19 ms at 9,860 retained rows -> 1.58 ms at
+  10,735**: deeper history, and 0.011x `D8`'s budget instead of 3.84x. Both caps
+  are deleted with no analogue; the 16 MiB budget survives on a new derivation.
+  `F23`'s harness
+  (`lib/TerminalCore/Tests/TerminalCoreTests/TerminalHistoryDepthSizingProbe.swift`)
+  is deleted with the caps it was written against; `just terminal-resize-probe
+  --recipe wide` is what stays re-runnable.
+
+## Rejected
+
+The shipped plan's rejected ideas and doc 16's closure are inherited boundaries
+(see Investigation rules), not re-litigated here.
+
+### H2 -- one shared storage allocation for canonical blank rows (`D4`)
+
+Considered because canonical form makes every blank retained row byte-identical
+and Swift arrays are COW, so a screenful of blank lines could cost one allocation.
+Rejected on sizing, not on mechanism. `F9` measured **0 blank retained rows across
+the whole committed corpus** (0 of 133 recorded, 0 of 4,707 overall, with a
+negative control reporting 49.9% on an alternating stream), and the ceiling is
+under **350 KB at any blank fraction below 50%** -- because the shipped trim
+already made a blank row cost 80 B against a content row's 1,808 B. `H2` is a win
+the trim already collected. The charge-model question it owed (charging every
+sharer overstates; charging once complicates eviction accounting) dies with it,
+and it was never cheap: it would have made the cost of one row depend on how many
+*other* rows happen to be blank.
+
+**Reopening condition:** a recorded stimulus -- committed content, replayed through
+`just terminal-retained-row-probe`, not a generated stream -- whose retained
+history is **more than ~50% blank rows by count**. Not "more blank rows than we
+thought": below that fraction the ceiling stays under ~350 KB, and `F9`'s curve
+shows the byte share cannot get there by any other route. The probe reports
+`blankRowFraction` directly, so re-testing is one command.
+
+### C3/C4 -- UTF-8-text-packed retained rows (`D5`)
+
+The obvious packing shape, and kitty's `PagerHistoryBuf` precedent. Rejected as
+the selected representation because `F11` measured 0.903 UTF-8 bytes per stored
+cell: "one byte per scalar" and "UTF-8" are the same number for nearly every real
+row, so the text form buys nothing in bytes -- it is in fact **dearer** at depth
+(`D6`'s corrected 137.4 B/row against C6's 121.5; 123.3 against 114.5 on `D5`'s
+uncharged pricing, so the correction widened the gap), since it pays a descriptor
+byte on every cell to
+navigate a variable-width payload. What it costs on top is a column read that
+becomes a scan from the start of the row, on the workload `D3` says is most likely
+to fire. Reopening condition: recorded content at depth whose rows are mostly
+non-ASCII, which is the one regime where variable width wins on bytes
+(`unicode-wrapping` is the example: 343.4 B/row against C6's 544.0).
+
+## Open questions and caveats
+
+- ~~Is +2.51 MB attributable footprint at 179-column saturation an accepted cost
+  of 3.41x depth, or itself a target?~~ **Sized by `F8`:** per-row overhead is
+  1.16 MB of an 11.00 MB attributable total, 10.5%. `15/F18`'s +2.51 MB is a
+  delta against the pre-trim representation, not a share of the current one, and
+  the two are not in tension. H4 could at best reclaim that 1.16 MB and only by
+  driving per-row overhead to zero, which nothing does.
+- ~~The browsing -5.79% result has no frozen decision rule behind it; treat it
+  as descriptive until `D1` gives the measurement a home.~~ **Resolved by `D2`:**
+  the workload is calibrated and future browsing claims can be verdicts. The
+  -5.79% itself stays descriptive -- a rule is not retroactive, and `15/F18`'s
+  probe no longer exists to re-run under it.
+- `terminal-feed` cannot resolve a ~1% effect and buys no extra pairs at
+  `confirm` (`F1`). Any later candidate here whose predicted feed effect is
+  around 1% will hit the same wall, so either predict a larger effect or expect
+  to screen `terminal-feed` for a longer schedule before running one.
+- `F2`'s four `slower` verdicts are resolved by `F3`: three were artifacts of a
+  15-commit-wide baseline plus host load, and **`style-churn`'s ~3% survives**,
+  living in `dd51a12..HEAD`. `F4` then ran the bisect and narrowed it to
+  `dd51a12..e4556c0` -- the sparse-damage renderer work -- while clearing the
+  benchmark instrumentation. The renderer docs own it; neither doc 29's nor doc
+  30's outcome currently names this cost.
+- A wide baseline is a smoke alarm, not a diagnosis. Three of `F2`'s four
+  verdicts evaporated under the correct adjacent baseline, so per-commit A/B is
+  the discipline. Its one structural blind spot is the reason to run a wide
+  baseline occasionally anyway: `F1` established that `terminal-feed` cannot
+  resolve ~1% and cannot buy pairs, so a series of individually sub-threshold
+  regressions would each read `equivalent` while the range total did not. Run
+  wide baselines to detect accumulation, never to attribute it.
+- `F1`'s ~+1% feed cost is now attributed to the trim itself, not to later
+  commits (`F3` reads `equivalent` on `terminal-feed` across `dd51a12..HEAD`).
+  The bound is unchanged; only the attribution sharpened.
+- The harness graded a load-contaminated run `decisionEligible: true` (`F2`).
+  `D1`'s preflight annotation now exists and every `run.json` carries two
+  pre-launch host readings. It is an annotation, **not a gate**: it will not
+  stop a contaminated run, so reading it before trusting a verdict is still the
+  operator's job. What load actually perturbs a verdict remains uncalibrated,
+  and that is the evidence a refusal threshold would need.
+- ~~The browsing workload is admitted as a **candidate** only.~~ **Closed by
+  `F6`/`D2`:** two independent screens replicate and the envelope is frozen.
+  What replaces this caveat is a subtler one -- **expect `inconclusive` on this
+  workload and do not treat it as a defect.** `confirm`'s band is 0.75% and its
+  frozen threshold 1.05%, so a true difference inside that 0.30-point gap is
+  unclassifiable by construction; screen 1's A/A series landed there 28.4% of
+  the time at the frozen 4 pairs. Being the quietest workload on the ladder is
+  exactly what makes it prone to this: its real effects are small enough to fall
+  in the gap. The rule entries in `DECISION_RULES` say so in place, so nobody
+  reaches for the rerun `F1`'s protocol forbids.
+- ~~`F7`'s resize distribution is a **probe**, not a verdict, and `D1` pitch 2
+  chose that deliberately: `H1`'s question has one arm.~~ **Superseded by `F14`:**
+  packing supplied the second arm `D1` pitch 2 was waiting for, and the comparison
+  ran on a re-versioned recipe. What replaces this caveat is sharper -- **`F7`'s
+  `saturated-resize-v1` no longer saturates.** 10,000 lines bounded the pre-packing
+  representation at the budget; packed rows admit ~82,000, so a `v1` run at HEAD
+  retains ~9,940 rows and understates resize cost by most of an order of magnitude
+  while printing a well-formed distribution. `saturated-resize-v2` (120,000 lines)
+  is the recipe that still saturates, and it is a **new name, not an edit**, so the
+  two sets of numbers cannot be read as one comparison. Any future recipe here
+  inherits that hazard: a representation change silently un-saturates a
+  line-count-bounded stimulus.
+- **A depth win is a reflow cost, and they cannot be separated by measurement**
+  (`F14`/`D7`). Reflow visits every retained row, so anything that multiplies depth
+  at a fixed budget multiplies resize cost by the same factor -- 12.13x here, on
+  top of a per-row term packing moved the wrong way (1.17x). This is not specific
+  to C6: every candidate in `F11`'s table that bought this depth would buy this
+  resize with it. A future hypothesis in this doc that proposes more depth owes a
+  resize number in the same breath as its byte number.
+- ~~H2's charge-model question (how shared storage is charged) may itself be the
+  reason to reject it; cheapness of the trick does not excuse an incoherent
+  budget.~~ **Moot after `F9`:** the question never gets asked, because the
+  population is empty. H2's ceiling is 0 bytes on measured content and under
+  350 KB at any blank fraction below 50%.
+- `F10`'s size-class ladder is a libmalloc implementation detail, not a contract.
+  The budget is insulated -- doc 15's `D4` charges `Array.capacity`, the
+  allocator's own answer -- so a future macOS changing the classes would not make
+  the charge dishonest; it would only stale `F10`'s arithmetic.
+  `just terminal-retained-row-probe` compares its model against libmalloc on
+  every run and prints `MISMATCH` if they part company.
+- ~~Nothing in Phase 2 measured styled or multi-scalar content at depth.~~
+  **Closed by `F11`**, which also explains the zeros: every styled stimulus in the
+  corpus retains **zero rows in a single pass**, because TUIs paint in place and
+  nothing scrolls off the top. The gap was a fact about what reaches history, not
+  a hole in the instrument. What replaces this caveat is what the measurement
+  needed: **styled content at depth exists only in the `saturated/` pool**, built
+  by replaying committed bytes until the budget fills. Its *composition* is real;
+  its *mix* is an artifact of which recordings repeat well (`alacritty/history`
+  alone is 40,772 of 94,990 rows). Quote the per-stimulus range, not only the pool
+  mean, when a number has to carry a decision.
+- The two deepest single-pass corpus workloads **staircase**: `scrollback-stream`
+  and `unicode-wrapping` emit bare `\n` with no `\r`, so each line starts where the
+  last ended and 66.4% / 39.8% of their stored cells hold no scalar, at 134 and 129
+  cells per row against ~50 for CRLF content (`F11`). A real program writing through
+  a PTY gets `ONLCR` from the tty driver and does not do this. It does not touch
+  `F8`'s or `F10`'s headline numbers (both used the CRLF `reference/scrollback-plain`
+  payload), but it inflates any pooled figure those two workloads dominate, and it
+  **flatters any scheme that compresses gaps** -- which is exactly the flattery this
+  doc's rules exist to refuse.
+- **`scrollback-stream`'s absolute position is unknown, and `D10` accepted the
+  trade without it.** `F22` could place `terminal-feed`'s residual against
+  pre-campaign DanTerm (~3.3% of an 1,855 ms win) but not this one: the workload
+  drives the real app, which only compiles against the pre-campaign engine through
+  shims that would then run inside the measurement. So nothing in this repo says
+  whether sustained output at HEAD is above or below where the campaign started.
+  Closing it needs a baseline no older than `39abdbf`, which is close enough to
+  HEAD to mostly duplicate the adjacent runs -- which is why it is a caveat and
+  not a task.
+- `D5`'s selection rests on three measured properties of retained content -- 1.66
+  style runs per row, 0.903 UTF-8 bytes per cell, 0.119% multi-scalar cells. Each
+  has a stated falsification threshold in `D5`, and each is one probe command to
+  re-check. A future corpus that moves any of them re-opens the choice between C6
+  and C1/C3 rather than invalidating the direction.
+
+## Outcome
+
+**Closed 2026-08-05.** `H3` shipped, and every thread that outlived it is now
+answered, spent, or parked with a condition -- three of the four by having their
+subject removed rather than their question answered, which is the thing worth
+reading here.
+
+**Settled.** `H3` graduated as accepted-with-trade (`D10`), shipping C1 across
+`987927a`..`f364cd9` via
+[`plans/impl/2026-08-03-2357-packed-retained-rows.md`](../../../plans/impl/2026-08-03-2357-packed-retained-rows.md):
+retained history costs **10.49 -> 3.72 MB at 179x66 and 10.17 -> 3.40 MB at 80x24
+at 1.11x the depth**, browsing at parity and resize on `D8`'s line, paid for with
+`terminal-feed` +4.55% and `scrollback-stream` +4.13%. `H2` is rejected (`D4`),
+C6 is rejected on measurement (`D9`), and C3/C4 on pricing plus read shape
+(`D5`/`D6`). `D8`'s dual caps and `F17`'s streaming readers are the two shipped
+byproducts that outlive the representation contest.
+
+**The four threads that kept this doc live, and how each ended.** All four are
+kept in place and marked closed rather than deleted. Items 1, 2 and 4 ended the
+same way -- their subject was removed by doc 31's store rather than their
+question answered -- and item 3 ended one day later for the same underlying
+reason.
+
+1. ~~**Phase 2's resize *profile*** (`RESEARCH`, destination `F24`) -- where inside
+   reflow's dominant per-cell term the time goes. Renumbered eleven times and
+   still owed; it is the prerequisite for `D8`'s cell cap ever rising.~~
+   **OBSOLETE 2026-08-05, superseded by
+   [doc 31](../31-logical-line-scrollback/README.md).** The question cannot be run
+   as written: `9ad7cc5` deleted reflow of history and the cell cap the profile was
+   the prerequisite for, so neither the term nor the bound it was to inform exists.
+   What replaced it is a measurement rather than a profile -- `D11`'s exit
+   amendment reads the same committed recipe at **1.58 ms** (max 2.75 ms) against
+   the trial's 576.19 ms, at greater depth, and prices the surviving live-screen
+   refold at 1.46 ms widening and 2.65 ms narrowing on a 179x66 pane. A profile of
+   *that* is a new question against a new subject, and it belongs to whoever
+   reopens resize work; it is not this task restated.
+2. **`H7`, viewport-adjacent reflow** -- superseded 2026-08-04 by
+   [doc 31](../31-logical-line-scrollback/README.md) (logical-line storage,
+   read-time wrapping), which removes what `H7` would have deferred. What `F23`
+   and `D11` established still stands and now motivates doc 31: reaching 10,000
+   retained rows of full-width content at 179 columns costs a measured 600.5 ms
+   resize (4.00x `D8`'s budget) and ~15 MiB, and those bounds shipped and were
+   dogfooded, so the cost being removed was one a user could feel. It is now
+   measured removed rather than predicted removed: `D11`'s amendment reads the
+   same recipe at **1.58 ms** against the trial's 576.19 ms, at greater depth.
+   `H7` remains only as doc 31's fallback if wrap-at-read is ever reverted.
+   **Closed 2026-08-04.** Doc 31's frozen rule reopened `H7` on its ladder's
+   first reading (`31/F11`, `retained-browse` +60.44% with both diagnostics
+   holding) and that reopening is now **spent**: `31/F13` attributed the
+   regression to four wiring and backing mechanisms with wrap-at-read in none of
+   them, and taking all four brought every acceptance rung inside its frozen
+   threshold (`31/F16`: `retained-browse` **+0.94%**, `terminal-feed` +2.49%,
+   `scrollback-stream` **-13.60%**, the last drawing its PTY faster than the
+   pre-cutover engine). The hybrid was never worked and needs no work; a future
+   reopening needs a new rule against new evidence.
+3. **`H5`'s gate** -- **PARKED 2026-08-05 by `D12`**, the entry that closes this
+   doc. The gate `D3`/`D5` deferred it to asked whether the selected direction
+   left deep-history footprint on the table, and the post-landing evidence did
+   point that way (C1 retains at 3.72 MB rather than C6's 0.78 MB). Then the
+   subject moved: `9ad7cc5` put retained storage inside doc 31's
+   `LogicalLineStore`, whose footprint is bounded by the arena's capacity rather
+   than by a per-row charge, so `F19`'s figure is a pre-cutover number about a
+   container that no longer exists. Doc 31's readings -- settled residency 0.92x
+   the incumbent's, live heap inside capacity -- do not show deep history over
+   budget, which is the premise a compressed tier needs. Parked rather than
+   rejected because the evidence that would decide it must be measured against
+   the store, and this doc does not own the store.
+4. **The history-depth default** (opened by `F23`, shipped provisionally by
+   `D11`) -- **CLOSED 2026-08-04 on a fourth exit, *the cause is removed*, by
+   `D11`'s amendment.** The trial ran with `D8`'s budget reopened by explicit
+   human choice; the human's verdict was exit 1 (keep the caps, the hitch is
+   livable) and it was **still unratified** when doc 31's store deleted reflow of
+   history out from under it. **That ratification slot is closed as MOOT
+   2026-08-05** (marked amendment at `D11`): the verdict has no subject left, so
+   nothing is waiting on it. Re-measured on the same committed recipe at the
+   trial's own depth, the width change went **576.19 ms at 9,860 retained rows ->
+   1.58 ms at 10,735**, so the subjective question the trial existed to answer no
+   longer has a subject. Both caps are deleted with no analogue; the 16 MiB
+   budget survives on a new derivation. What the amendment deliberately left
+   open was `D8`'s ~150 ms *budget*, which now wants deriving against the live
+   screen rather than inheriting -- a fresh question, not this trial's.
+   **Settled 2026-08-05: `D8`'s budget is RETIRED**, superseded by the measurement
+   (1.58 ms is 0.011x it) with no successor set. Any future resize budget belongs
+   to whoever reopens resize work, derived against the live screen.
+
+**Parked with stated conditions, not live.** `H4` (re-price before running --
+`D5`'s 36% was computed against a ~1-byte cell), `H5` (`D12`: reopens on a
+deep-history residency figure measured against `LogicalLineStore` and judged
+unacceptable at the shipped budget, with lowering the budget ruled out as the
+lever), `H6` (waits on session restore of terminal content becoming a product
+goal), `H8` (designated successor to `D10`'s trade, deliberately unfunded), and
+`H2`'s reopening condition.
+
+Reopening conditions for the settled work live in `D10` and `D9`; the shortest
+statement of what would restart the admission thread is **`H8` funded, or a
+measured `scrollback-stream` cost worse than the +4.13% `D10` accepted**.
+Closure is one-way: any of those conditions firing opens a new numbered doc that
+cites this one, not an edit here.

@@ -1,96 +1,82 @@
 // Tests for the CLI argument parser shared with `danterm tab new`.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class TabNewArgsTests: XCTestCase {
-    func testEmptyArgsParsesDefaultTab() throws {
-        XCTAssertEqual(try parseTabNewArgs([]), ParsedTabNew(group: nil, launch: nil))
+struct TabNewArgsTests {
+    @Test("empty args parses default tab")
+    func emptyArgsParsesDefaultTab() throws {
+        #expect(try parseTabNewArgs([]) == ParsedTabNew(group: nil, launch: nil))
     }
 
-    func testGroupParses() throws {
-        XCTAssertEqual(
-            try parseTabNewArgs(["--group", "G1"]),
-            ParsedTabNew(group: "G1", launch: nil)
-        )
+    @Test("group parses")
+    func groupParses() throws {
+        #expect(try parseTabNewArgs(["--group", "G1"]) == ParsedTabNew(group: "G1", launch: nil))
     }
 
-    func testBackgroundFlagParses() throws {
+    @Test("background flag parses")
+    func backgroundFlagParses() throws {
         // Intent: `--background` records only the background flag.
         // Why it exists: preserves back-compat for scripts that already pass the
         //   now-redundant explicit background request.
         // Scenario: an existing agent recipe still includes `--background`;
         //   parsing must keep accepting it without implying foreground.
-        XCTAssertEqual(
-            try parseTabNewArgs(["--background"]),
-            ParsedTabNew(group: nil, launch: nil, background: true, foreground: false)
-        )
+        #expect(try parseTabNewArgs(["--background"]) == ParsedTabNew(group: nil, launch: nil, background: true, foreground: false))
     }
 
-    func testForegroundFlagParses() throws {
+    @Test("foreground flag parses")
+    func foregroundFlagParses() throws {
         // Intent: `--foreground` records a request to focus/select the new tab.
         // Why it exists: keeps the arg parser as a faithful flag-presence layer
         //   before CLI policy maps absent focus flags to background execution.
         // Scenario: the user explicitly asks an agent to switch to the new tab.
-        XCTAssertEqual(
-            try parseTabNewArgs(["--foreground"]),
-            ParsedTabNew(group: nil, launch: nil, background: false, foreground: true)
-        )
+        #expect(try parseTabNewArgs(["--foreground"]) == ParsedTabNew(group: nil, launch: nil, background: false, foreground: true))
     }
 
-    func testLaunchFlagsParseIndividually() throws {
-        XCTAssertEqual(
-            try parseTabNewArgs(["--cmd", "date"]),
-            ParsedTabNew(group: nil, launch: LaunchSpec(cmd: "date", cwd: nil, title: nil))
-        )
-        XCTAssertEqual(
-            try parseTabNewArgs(["--cwd", "/tmp"]),
-            ParsedTabNew(group: nil, launch: LaunchSpec(cmd: nil, cwd: "/tmp", title: nil))
-        )
-        XCTAssertEqual(
-            try parseTabNewArgs(["--title", "logs"]),
-            ParsedTabNew(group: nil, launch: LaunchSpec(cmd: nil, cwd: nil, title: "logs"))
-        )
+    @Test("launch flags parse individually")
+    func launchFlagsParseIndividually() throws {
+        #expect(try parseTabNewArgs(["--cmd", "date"]) == ParsedTabNew(group: nil, launch: LaunchSpec(cmd: "date", cwd: nil, title: nil)))
+        #expect(try parseTabNewArgs(["--cwd", "/tmp"]) == ParsedTabNew(group: nil, launch: LaunchSpec(cmd: nil, cwd: "/tmp", title: nil)))
+        #expect(try parseTabNewArgs(["--title", "logs"]) == ParsedTabNew(group: nil, launch: LaunchSpec(cmd: nil, cwd: nil, title: "logs")))
     }
 
-    func testCombinationParses() throws {
-        XCTAssertEqual(
-            try parseTabNewArgs(["--group", "G1", "--cmd", "make test", "--cwd", "/repo", "--title", "tests"]),
-            ParsedTabNew(group: "G1", launch: LaunchSpec(cmd: "make test", cwd: "/repo", title: "tests"))
-        )
+    @Test("combination parses")
+    func combinationParses() throws {
+        #expect(try parseTabNewArgs(["--group", "G1", "--cmd", "make test", "--cwd", "/repo", "--title", "tests"]) == ParsedTabNew(group: "G1", launch: LaunchSpec(cmd: "make test", cwd: "/repo", title: "tests")))
     }
 
-    func testBackgroundCombinesWithOtherFlags() throws {
-        XCTAssertEqual(
-            try parseTabNewArgs(["--group", "G1", "--background", "--cmd", "date"]),
-            ParsedTabNew(
+    @Test("background combines with other flags")
+    func backgroundCombinesWithOtherFlags() throws {
+        #expect(try parseTabNewArgs(["--group", "G1", "--background", "--cmd", "date"]) == ParsedTabNew(
                 group: "G1",
                 launch: LaunchSpec(cmd: "date", cwd: nil, title: nil),
                 background: true,
                 foreground: false
-            )
-        )
+            ))
     }
 
-    func testConflictingFocusFlagsThrow() {
+    @Test("conflicting focus flags throw")
+    func conflictingFocusFlagsThrow() {
         // Intent: `--background --foreground` is rejected instead of letting the
         //   last parsed flag win.
         // Why it exists: prevents ambiguous focus policy on the agent-facing CLI.
         // Scenario: a composed command accidentally includes both focus flags.
-        XCTAssertThrowsError(try parseTabNewArgs(["--background", "--foreground"])) { err in
-            XCTAssertEqual(err as? TabNewParseError, .conflictingFocusFlags)
+        #expect(throws: TabNewParseError.conflictingFocusFlags) {
+            try parseTabNewArgs(["--background", "--foreground"])
         }
     }
 
-    func testMissingValueThrows() {
-        XCTAssertThrowsError(try parseTabNewArgs(["--title"])) { err in
-            XCTAssertEqual(err as? TabNewParseError, .missingValue("--title"))
+    @Test("missing value throws")
+    func missingValueThrows() {
+        #expect(throws: TabNewParseError.missingValue("--title")) {
+            try parseTabNewArgs(["--title"])
         }
     }
 
-    func testUnknownFlagThrows() {
-        XCTAssertThrowsError(try parseTabNewArgs(["--bogus"])) { err in
-            XCTAssertEqual(err as? TabNewParseError, .unknownFlag("--bogus"))
+    @Test("unknown flag throws")
+    func unknownFlagThrows() {
+        #expect(throws: TabNewParseError.unknownFlag("--bogus")) {
+            try parseTabNewArgs(["--bogus"])
         }
     }
 }

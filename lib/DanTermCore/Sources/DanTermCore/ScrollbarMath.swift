@@ -1,5 +1,6 @@
-// Pure scrollbar coordinate math functions. No AppKit/GhosttyKit dependency so they
-// can be compiled in both the app build and the unit test build.
+// Pure scrollbar coordinate math functions. No AppKit dependency so they can be
+// compiled in both the app build and the unit test build. Live for the Swift
+// terminal backend via `app/ScrollableTerminalView.swift`.
 
 import Foundation
 
@@ -25,7 +26,7 @@ func scrollbarOffsetY(
 }
 
 /// Convert AppKit scroll position to terminal row (for scrollbar drag).
-/// Returns the row offset that should be sent to ghostty's scroll_to_row action.
+/// Returns the top-row offset the session should be scrolled to.
 func scrollbarRowFromPosition(
     documentHeight: CGFloat, visibleOriginY: CGFloat,
     visibleHeight: CGFloat, cellHeight: CGFloat

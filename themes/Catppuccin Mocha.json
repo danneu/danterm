@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#45475a",
+    "#f38ba8",
+    "#a6e3a1",
+    "#f9e2af",
+    "#89b4fa",
+    "#f5c2e7",
+    "#94e2d5",
+    "#bac2de",
+    "#585b70",
+    "#f7aec2",
+    "#c2ecbf",
+    "#fcd682",
+    "#aeccfc",
+    "#f398da",
+    "#b1eae1",
+    "#a6adc8"
+  ],
+  "background": "#1e1e2e",
+  "cursor": "#f5e0dc",
+  "cursorText": "#1e1e2e",
+  "foreground": "#cdd6f4",
+  "name": "Catppuccin Mocha",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f5e0dc",
+  "selectionForeground": "#1e1e2e"
+}

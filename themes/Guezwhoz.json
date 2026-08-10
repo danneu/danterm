@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#333333",
+    "#e85181",
+    "#7ad694",
+    "#b7d074",
+    "#5aa0d6",
+    "#9a90e0",
+    "#58d6ce",
+    "#d9d9d9",
+    "#808080",
+    "#e85181",
+    "#afd7af",
+    "#d1ed85",
+    "#64b2ed",
+    "#a398ed",
+    "#61ede4",
+    "#ededed"
+  ],
+  "background": "#1d1d1d",
+  "cursor": "#99d4b1",
+  "cursorText": "#1d1d1d",
+  "foreground": "#d9d9d9",
+  "name": "Guezwhoz",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#245354",
+  "selectionForeground": "#58d6ce"
+}

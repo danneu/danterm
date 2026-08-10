@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#050505",
+    "#e9897c",
+    "#b6377d",
+    "#ecebbe",
+    "#a9cdeb",
+    "#75507b",
+    "#c9caec",
+    "#f2f2f2",
+    "#474747",
+    "#f99286",
+    "#c3f786",
+    "#fcfbcc",
+    "#b6defb",
+    "#ad7fa8",
+    "#d7d9fc",
+    "#e2e2e2"
+  ],
+  "background": "#1a1a1a",
+  "cursor": "#fcfbcc",
+  "cursorText": "#000000",
+  "foreground": "#acacab",
+  "name": "Square",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

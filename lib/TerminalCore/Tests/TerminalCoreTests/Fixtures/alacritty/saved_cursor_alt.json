@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/saved_cursor_alt/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "saved_cursor_alt",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": [
+      "DanTerm ignores unpromised legacy G0 character-set state during cursor restore."
+    ]
+  },
+  "initial": {
+    "columns": 139,
+    "rows": 35
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "W3VuZGVhZGxlZWNoQGFyY2hocSBzYXZlZF9jdXJzb3JfYWx0XSQgZWNobyAtZSAiXGUoMFxlWzEwOyQodHB1dCBjb2xzKUggXGVbPzEwNDloXGU3IFxlWz8xMDQ5bCBcZShCXGVbSCBcZVs/MTA0OWggdGVzdFxlOHh4eCINChsoMBtbMTA7MTM5SCAbWz8xMDQ5aBs3IBtbPzEwNDlsIBsoQhtbSCAbWz8xMDQ5aCB0ZXN0Gzh4eHgNClt1bmRlYWRsZWVjaEBhcmNoaHEgc2F2ZWRfY3Vyc29yX2FsdF0kIGV4aXQNCmV4aXQNCg=="
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          " xxxst",
+          "[undeadleech@archhq saved_cursor_alt]$ exit"
+        ],
+        "viewportExcludes": [
+          "\u23bd\u251c",
+          "\u2502\u2502\u2502"
+        ]
+      }
+    }
+  ]
+}

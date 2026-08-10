@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1e1e1e",
+    "#ff453a",
+    "#32d74b",
+    "#ffd60a",
+    "#0a84ff",
+    "#bf5af2",
+    "#5ac8fa",
+    "#ffffff",
+    "#515151",
+    "#ff453a",
+    "#32d74b",
+    "#ffd60a",
+    "#0a84ff",
+    "#bf5af2",
+    "#5ac8fa",
+    "#ffffff"
+  ],
+  "background": "#1e1e1e",
+  "cursor": "#32d74b",
+  "cursorText": "#1c1c1c",
+  "foreground": "#ffffff",
+  "name": "Midnight In Mojave",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4a504d",
+  "selectionForeground": "#ffffff"
+}

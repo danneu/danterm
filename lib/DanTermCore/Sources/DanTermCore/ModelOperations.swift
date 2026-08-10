@@ -8,7 +8,7 @@
 // AppKit-free peer, Projections.swift (the counterpart to Reconcile.swift); snapshot /
 // restore / recovery I/O lives in Persistence.swift; the tab-todo row model in
 // TabTodo.swift. Keep this `import Foundation` only -- no AppKit -- so the model core
-// stays unit-testable without Cocoa or GhosttyKit.
+// stays unit-testable without Cocoa or the terminal engine.
 import Foundation
 
 // MARK: - Pane Theme
@@ -19,10 +19,65 @@ func resolveRemoteTheme(_ raw: String) -> String {
     return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
 }
 
-/// Returns the theme that should be applied to a pane's Ghostty surface.
-/// Remote override takes priority over user-set theme.
-func effectiveTheme(for pane: PaneModel) -> String? {
-  pane.remoteThemeOverride ?? pane.theme
+/// Normalizes a drafted font family to the value that belongs in the config
+/// document: trimmed, with blank text -- or the picker's system-monospace entry,
+/// which is a choice rather than a font name -- meaning "no `font.family` key"
+/// rather than an empty family name. This is the whole of the core's font-family
+/// validation: whether the name is installed is a CoreText question the core
+/// never asks.
+func resolveFontFamilyDraft(_ raw: String?) -> String? {
+    guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+          trimmed.isEmpty == false,
+          trimmed != systemMonospaceFontChoiceTitle
+    else { return nil }
+    return trimmed
+}
+
+/// Formats optional numeric config values for the Preferences text-field boundary.
+func configFontSizeText(_ size: Double) -> String {
+    let text = String(size)
+    return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
+}
+
+/// Resolves remote and pane overrides ahead of the catalog-backed local default.
+func effectiveTheme(for pane: PaneModel, config: DanTermConfig = .default) -> String {
+  pane.remoteThemeOverride ?? pane.theme ?? config.resolvedDefaultTheme
+}
+
+/// Points one zoom step moves a pane. Whole points: a fractional step would
+/// produce sizes too close to distinguish while still forcing a re-raster and a
+/// PTY reflow, and would lose the exact return to the configured size.
+let paneFontSizeStepPoints: Double = 1
+
+/// How far a pane may be zoomed from the configured size. Bounded on every
+/// ingress, not at projection, so repeated presses at a bound accumulate no
+/// hidden state and one press in the other direction is always visible.
+let paneFontSizeStepRange: ClosedRange<Int> = -4...24
+
+/// Bound a step count arriving from an adjustment or a persisted snapshot.
+func clampedPaneFontSizeSteps(_ steps: Int) -> Int {
+  min(max(steps, paneFontSizeStepRange.lowerBound), paneFontSizeStepRange.upperBound)
+}
+
+/// The size a pane actually renders at. No clamp: both operands are already
+/// bounded, and clamping here would silently eat steps the pane still holds.
+func effectiveFontSize(for pane: PaneModel, config: DanTermConfig = .default) -> Double {
+  config.resolvedFontSize + Double(pane.fontSizeSteps) * paneFontSizeStepPoints
+}
+
+/// Carry the live appearance settings onto a model rebuilt from a snapshot.
+/// `config` and `resolvedFontFamily` are loaded from disk at launch and never
+/// snapshotted, so a restored model arrives with them at their defaults. The
+/// restore path applies this before it creates any session from the model, so a
+/// zoomed pane is built at its real size instead of the default one and the
+/// committed model does not revert the user's configuration.
+func carryingLiveAppearance(
+  _ model: AppModel, config: DanTermConfig, resolvedFontFamily: String?
+) -> AppModel {
+  var carried = model
+  carried.config = config
+  carried.resolvedFontFamily = resolvedFontFamily
+  return carried
 }
 
 // MARK: - Pane side-table cleanup
@@ -119,7 +174,7 @@ func updatePaneInNode(_ node: SplitNodeModel, id: PaneId, _ body: (inout PaneMod
 }
 
 /// Compute the model-derived renderer visibility for every pane in every tab.
-func effectiveSurfaceVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
+func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
   var result: [PaneId: Bool] = [:]
   let selectedTabId = model.selectedTabId
 
@@ -687,14 +742,6 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
   }
 }
 
-/// Whether the preferences draft has any changes compared to the committed config.
-func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: GhosttyPrefs?) -> Bool {
-    draft.alertClearMode != config.alertClearMode
-        || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
-        || draft.theme != ghostty?.theme
-        || draft.fontSize != ghostty?.fontSize
-}
-
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
   let paneIds = Set(allPaneIds(tab.rootNode))
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count
@@ -824,39 +871,6 @@ func deleteGroupAction(for groupId: GroupId, in model: AppModel) -> DeleteGroupA
   }
 }
 
-// MARK: - DanTerm Event Protocol
-
-enum DantermEvent: Equatable {
-  case commandStarted(command: String)
-  case commandEnded
-  case remoteStart
-  case remoteSession(value: RemoteSession)
-}
-
-/// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
-struct PaneTokenStore {
-  private(set) var tokens: [PaneId: String] = [:]
-  private var idGenerator: () -> UUID
-
-  init(idGenerator: @escaping () -> UUID = UUID.init) {
-    self.idGenerator = idGenerator
-  }
-
-  mutating func generate(for paneId: PaneId) -> String {
-    let token = idGenerator().uuidString
-    tokens[paneId] = token
-    return token
-  }
-
-  mutating func remove(_ paneId: PaneId) {
-    tokens.removeValue(forKey: paneId)
-  }
-
-  func token(for paneId: PaneId) -> String? {
-    tokens[paneId]
-  }
-}
-
 /// How send() should drive reconcile() for a translated message.
 enum ReconcileDecision: Equatable {
   case reconcileNow
@@ -872,72 +886,6 @@ func reconcileDecision(
 ) -> ReconcileDecision {
   guard msg.coalescesReconcile, !emitsPostReconcile else { return .reconcileNow }
   return coalescedSweepPending ? .coalesceIntoPending : .scheduleCoalesced
-}
-
-/// Translate a Msg through the event protocol layer.
-/// Returns nil when the message should be dropped (bad token, malformed event).
-/// Normal (non-event) messages pass through unchanged.
-func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
-  guard case .surfaceTitle(let paneId, let title) = msg,
-    title.hasPrefix("__DANTERM_EVT__:")
-  else {
-    return msg
-  }
-  guard let token = tokenForPane(paneId),
-    let event = parseDantermEvent(title, expectedToken: token)
-  else {
-    return nil
-  }
-  switch event {
-  case .commandStarted(let command):
-    return .commandStarted(paneId: paneId, command: command)
-  case .commandEnded:
-    return .commandEnded(paneId: paneId)
-  case .remoteStart:
-    return .remoteSessionStarted(paneId: paneId)
-  case .remoteSession(let value):
-    return .remoteSessionReported(paneId: paneId, session: value)
-  }
-}
-
-func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
-  let prefix = "__DANTERM_EVT__:"
-  guard raw.hasPrefix(prefix) else { return nil }
-  let payload = String(raw.dropFirst(prefix.count))
-
-  let parts = payload.split(separator: ":", maxSplits: 1)
-  guard parts.count == 2, String(parts[0]) == expectedToken else { return nil }
-  let event = String(parts[1])
-
-  if event.hasPrefix("CMD_START:") {
-    let b64 = String(event.dropFirst("CMD_START:".count))
-    guard let data = Data(base64Encoded: b64),
-      let cmd = String(data: data, encoding: .utf8),
-      !cmd.isEmpty
-    else { return nil }
-    return .commandStarted(command: cmd)
-  } else if event == "CMD_END" {
-    return .commandEnded
-  } else if event == "REMOTE_START" {
-    return .remoteStart
-  } else if event.hasPrefix("REMOTE_HOST:") {
-    let payload = String(event.dropFirst("REMOTE_HOST:".count))
-    let parts = payload.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-    guard parts.count == 2 else { return nil }
-    let userB64 = String(parts[0])
-    let hostB64 = String(parts[1])
-    guard !userB64.isEmpty,
-      !hostB64.isEmpty,
-      let userData = Data(base64Encoded: userB64),
-      let user = String(data: userData, encoding: .utf8),
-      !user.isEmpty,
-      let hostData = Data(base64Encoded: hostB64),
-      let host = String(data: hostData, encoding: .utf8),
-      !host.isEmpty
-    else { return nil }
-    return .remoteSession(value: RemoteSession(user: user, host: host))
-  }
-  return nil
 }
 
 // MARK: - MRU Tab Switcher

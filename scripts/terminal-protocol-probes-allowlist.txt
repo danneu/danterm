@@ -1,0 +1,23 @@
+# Pinned esctest2 cases selected for stateful behavior DanTerm advertises.
+# Cursor movement is observed through CPR after defaulting, clamping, or moving
+# each coordinate independently; feed-only fixtures cannot prove reply routing.
+CUPTests.test_CUP_DefaultParams
+CUPTests.test_CUP_RowOnly
+CUPTests.test_CUP_ColumnOnly
+CUPTests.test_CUP_ZeroIsTreatedAsOne
+CUPTests.test_CUP_OutOfBoundsParams
+# DA1 is part of DanTerm's advertised query contract. The adapter checks the
+# exact DanTerm identity instead of esctest2's xterm feature list.
+DATests.test_DA_NoParameter
+DATests.test_DA_0
+# DECCPR is observable through the real PTY. The adapter uses the runner's
+# fixed VT3 profile rather than probing the deliberately unsupported DA2.
+DECDSRTests.test_DECDSR_DECXCPR
+# These modes are implemented and queryable. Each case observes state, toggles
+# it through the public protocol, and observes the changed DECRQM reply.
+DECRQMTests.test_DECRQM_ANSI_IRM
+DECRQMTests.test_DECRQM_ANSI_LNM
+DECRQMTests.test_DECRQM_DEC_DECCKM
+DECRQMTests.test_DECRQM_DEC_DECOM
+DECRQMTests.test_DECRQM_DEC_DECAWM
+DECRQMTests.test_DECRQM_DEC_DECTCEM

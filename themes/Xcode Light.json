@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#b4d8fd",
+    "#d12f1b",
+    "#3e8087",
+    "#78492a",
+    "#0f68a0",
+    "#ad3da4",
+    "#804fb8",
+    "#262626",
+    "#8a99a6",
+    "#d12f1b",
+    "#23575c",
+    "#78492a",
+    "#0b4f79",
+    "#ad3da4",
+    "#4b21b0",
+    "#262626"
+  ],
+  "background": "#ffffff",
+  "cursor": "#262626",
+  "cursorText": "#ffffff",
+  "foreground": "#262626",
+  "name": "Xcode Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b4d8fd",
+  "selectionForeground": "#262626"
+}

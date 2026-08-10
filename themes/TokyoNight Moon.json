@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1b1d2b",
+    "#ff757f",
+    "#c3e88d",
+    "#ffc777",
+    "#82aaff",
+    "#c099ff",
+    "#86e1fc",
+    "#828bb8",
+    "#444a73",
+    "#ff757f",
+    "#c3e88d",
+    "#ffc777",
+    "#82aaff",
+    "#c099ff",
+    "#86e1fc",
+    "#c8d3f5"
+  ],
+  "background": "#222436",
+  "cursor": "#c8d3f5",
+  "cursorText": "#222436",
+  "foreground": "#c8d3f5",
+  "name": "TokyoNight Moon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2d3f76",
+  "selectionForeground": "#c8d3f5"
+}

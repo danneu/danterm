@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#050505",
+    "#f04242",
+    "#42f07c",
+    "#f0d342",
+    "#428bf0",
+    "#f042f0",
+    "#42f0f0",
+    "#fafafa",
+    "#3d3d3d",
+    "#f58989",
+    "#89f5ad",
+    "#f5e389",
+    "#89b6f5",
+    "#f589f5",
+    "#89f5f5",
+    "#ffffff"
+  ],
+  "background": "#0a0a0a",
+  "cursor": "#ff6b3d",
+  "cursorText": "#0a0a0a",
+  "foreground": "#ededed",
+  "name": "SeedFlip Ember",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#141414",
+  "selectionForeground": "#ededed"
+}

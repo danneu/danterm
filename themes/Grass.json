@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff5959",
+    "#00bb00",
+    "#e7b000",
+    "#0000a3",
+    "#ee59bb",
+    "#00bbbb",
+    "#bbbbbb",
+    "#959595",
+    "#ff5959",
+    "#00bb00",
+    "#e7b000",
+    "#0000bb",
+    "#ff55ff",
+    "#55ffff",
+    "#ffffff"
+  ],
+  "background": "#13773d",
+  "cursor": "#d9744c",
+  "cursorText": "#ffffff",
+  "foreground": "#fff0a5",
+  "name": "Grass",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b64926",
+  "selectionForeground": "#ffffff"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#fefeff",
+    "#ff2090",
+    "#01dab2",
+    "#e5ba4e",
+    "#8abacd",
+    "#eb8394",
+    "#8abacd",
+    "#000000",
+    "#969cbd",
+    "#ff2090",
+    "#01dab2",
+    "#e5ba4e",
+    "#0ebfff",
+    "#eb8394",
+    "#0ebfff",
+    "#000000"
+  ],
+  "background": "#fefeff",
+  "cursor": "#969cbd",
+  "cursorText": "#fefeff",
+  "foreground": "#969cbd",
+  "name": "Poimandres White",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#969cbd",
+  "selectionForeground": "#3b3e48"
+}

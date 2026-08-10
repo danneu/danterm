@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/20state_wrapping.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "79th Column; 80th Column Phantom; Line Wraparound; Line Wraparound during combined write; DEC Auto Wrap Mode",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 80, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "\u001b[75GAAAAA" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 79, "pendingWrap": false } } },
+    { "type": "feed", "text": "A" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 79, "pendingWrap": true } } },
+    { "type": "feed", "text": "B" },
+    { "type": "expect", "expect": { "softWraps": [true, false, false], "cursor": { "row": 1, "column": 1, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[78GBBBCC" },
+    { "type": "expect", "expect": { "softWraps": [true, true, false], "cursor": { "row": 2, "column": 2, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bc\u001b[?7l\u001b[75GDDDDDDD" },
+    { "type": "expect", "expect": { "cursor": { "row": 0, "column": 79, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[?7h" }
+  ]
+}

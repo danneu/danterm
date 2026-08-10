@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#333e4f",
+    "#d03941",
+    "#007b49",
+    "#a65921",
+    "#3c60dd",
+    "#6f4cde",
+    "#0075a2",
+    "#5d6a7d",
+    "#000000",
+    "#a52430",
+    "#00522f",
+    "#904b1a",
+    "#002487",
+    "#4d21bb",
+    "#00607e",
+    "#475365"
+  ],
+  "background": "#f4f7fd",
+  "cursor": "#6f4cde",
+  "cursorText": "#f4f7fd",
+  "foreground": "#475365",
+  "name": "Monospace Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c7d3ff",
+  "selectionForeground": "#1f2939"
+}

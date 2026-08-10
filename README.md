@@ -1,6 +1,6 @@
 # <img src="icon/raw-readme.svg" width="64" height="64" alt="DanTerm icon" align="center" style="vertical-align: middle;"> danterm
 
-A macOS terminal built on ghostty with the behavior I want.
+A macOS terminal with the behavior I want, built on its own Swift terminal engine.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
@@ -30,7 +30,11 @@ Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/rel
       modules = [
         danterm.homeManagerModules.default
         {
-          programs.danterm.enable = true;
+          programs.danterm = {
+            enable = true;
+            # Optional: keep the app-writable config in your nix repo.
+            configPath = "/Users/myuser/src/dotfiles/danterm/config.json";
+          };
         }
       ];
     };
@@ -49,32 +53,42 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 
 ## Configuration
 
-DanTerm uses a config file at `~/.config/danterm/config` with the same `key = value`
-format as Ghostty. Open it with **Cmd+,** from the menu bar.
+DanTerm uses a versioned JSON config file at `~/.config/danterm/config.json`.
+Edit its supported settings with **Cmd+,**, or choose **Open DanTerm Config**
+from the app menu to edit the file directly.
 
-This file is an **overlay** on top of Ghostty's own config (`~/.config/ghostty/config`).
-You can put any Ghostty terminal setting in it (fonts, colors, cursor style, etc.) and
-it will override the Ghostty config. You can also use DanTerm-specific keys listed below.
-
-```
-# Override Ghostty settings for DanTerm
-font-size = 14
-theme = Dracula
-
-# DanTerm-specific settings
-remote-theme = Purplepeter
+```json
+{
+  "schemaVersion": 1,
+  "font": { "size": 14 },
+  "theme": { "default": "Dracula", "remote": "Purplepeter" },
+  "ui": { "alertClearMode": "focus", "copyOnSelect": true }
+}
 ```
 
-Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Option+,**.
+Reload with **Cmd+Shift+,**.
 
-### DanTerm-specific keys
+Nix users can set `programs.danterm.configPath` to an absolute string path in
+their nix repo. Home Manager links the standard location to that out-of-store
+file, and DanTerm writes Preferences changes to the linked file directly. Leave
+the option unset to let DanTerm own `~/.config/danterm/config.json` as usual.
+Use a string such as `"/Users/myuser/src/dotfiles/danterm/config.json"`, not a
+nix path literal such as `./danterm/config.json`, which nix would copy into its
+read-only store.
 
-| Key                | Default       | Description                                                                        |
-| ------------------ | ------------- | ---------------------------------------------------------------------------------- |
-| `remote-theme`     | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions                          |
-| `alert-clear-mode` | `focus`       | When to clear pane alerts: `focus` (on pane focus) or `manual` (only via ⌘. / ⇧⌘.) |
+### Settings
 
-Set `alert-clear-mode = manual` to make alerts persist until you explicitly dismiss them with ⌘. (all panes in tab) or ⇧⌘. (current pane only). This is useful when you want alerts to act as a to-do list — focusing a pane to check what triggered the alert won't clear it, so the badge stays visible as a reminder to come back to it.
+| Key                   | Default               | Description                                                                       |
+| --------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| `font.size`           | `13`                  | Terminal font size                                                               |
+| `theme.default`       | `Monokai Remastered`  | Theme applied to local panes                                                      |
+| `theme.remote`        | `Purplepeter`         | Theme applied to panes during SSH/remote sessions                                 |
+| `ui.alertClearMode`   | `focus`               | When to clear pane alerts: `focus` (on pane focus) or `manual` (explicit dismiss) |
+| `ui.copyOnSelect`     | `true`                | Copy the selection to the clipboard as soon as a mouse selection gesture ends     |
+
+Set `ui.alertClearMode` to `manual` to make alerts persist until you explicitly
+dismiss them. This is useful when you want alerts to act as a to-do list: focusing
+a pane will not clear its badge.
 
 ## Non-negotiable features:
 
@@ -87,7 +101,7 @@ Set `alert-clear-mode = manual` to make alerts persist until you explicitly dism
 ## Bonus features:
 
 - Tabs can be grouped into collapsible sections
-- Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
+- Lightweight: AppKit and a terminal engine, both Swift, no web runtime
 - Theme browser sidebar lets you change the current pane's theme on the fly
 - Remote session integration (ssh, mosh, etc)
   - Give remote sessions a custom theme
@@ -97,8 +111,8 @@ Set `alert-clear-mode = manual` to make alerts persist until you explicitly dism
 
 ## General terminal features
 
-- Cmd-click to open URL and file paths
-  - Cmd-shift-click needed if program is capturing mouse events (vim, tmux, etc). The shift modifier tells ghostty the click is for you, not the program.
+- Cmd-click to open `http`/`https` links. Other schemes and bare file paths are deliberately not clickable.
+  - Cmd-shift-click needed if program is capturing mouse events (vim, tmux, etc). The shift modifier tells the terminal the click is for you, not the program.
 
 ## Claude Code Integration
 
@@ -213,6 +227,75 @@ somewhere on your machine and point the command at that file.
 
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
+
+The exact accepted notification forms, terminal identity, queries, terminfo
+claims, denials, and resource limits are documented in the
+[terminal capability contract](docs/terminal-capabilities.md), the normative
+contract; `TERM=xterm-256color` is only its compatibility selector.
+
+### Live agent notification compatibility tests
+
+An opt-in macOS-oriented suite launches the installed, authenticated Claude and
+Codex CLIs in fresh PTYs and isolated temporary configuration:
+
+```sh
+just test-agent-notifications-live          # both CLIs
+just test-agent-notifications-live claude
+just test-agent-notifications-live codex
+```
+
+The suite uses network access and model quota and is intentionally outside CI
+and the normal `just test` gate. It requires the selected binaries on `PATH`, a
+working login (`~/.codex/auth.json` for Codex), and `jq` for Claude's production
+hook. Claude defaults to `haiku`; set `DANTERM_CLAUDE_MODEL` to override it.
+Codex uses its configured default model unless `DANTERM_CODEX_MODEL` is set.
+`DANTERM_AGENT_NOTIFICATION_TIMEOUT` changes the per-scenario timeout in
+seconds. `DANTERM_AGENT_NOTIFICATION_GRACE` changes the post-event wait for a
+terminal notification (5 seconds by default). Set
+`DANTERM_KEEP_AGENT_NOTIFICATION_ARTIFACTS=1` to retain successful
+captures, or `DANTERM_AGENT_NOTIFICATION_ARTIFACTS=/private/tmp` to choose the
+temporary-artifact parent. Failures always preserve sanitized hook payloads and
+raw PTY captures and print their location.
+
+Claude is tested through DanTerm's production notification hook, which returns
+OSC 777 via `terminalSequence`. Codex deliberately has no DanTerm notification
+hook: the suite configures its native TUI path for `agent-turn-complete`,
+`approval-requested`, and `plan-mode-prompt`, with OSC 9 and the condition set
+to `always`. Every scenario runs in a fresh process so completion and blocked
+input notifications cannot be confused with an earlier lifecycle event.
+
+The equivalent Codex configuration is:
+
+```toml
+[tui]
+notifications = ["agent-turn-complete", "approval-requested", "plan-mode-prompt"]
+notification_method = "osc9"
+notification_condition = "always"
+```
+
+The table below is both the notification policy and the latest live
+compatibility result. "Pass" means the CLI produced exactly one terminal
+notification at the required point; completion notifications are deliberately
+deferred until the root turn genuinely finishes.
+
+| Scenario | Required behavior | Claude 2.1.216: DanTerm hook (OSC 777) | Codex 0.144.6: native TUI (OSC 9) |
+| --- | --- | --- | --- |
+| Root completes | Notify once after root `Stop` | Pass | Pass |
+| Root asks a direct question | Notify while blocked, before root `Stop` | Pass: `AskUserQuestion` | Pass: `plan-mode-prompt` |
+| Root requests tool approval | Notify while blocked | Pass: `PermissionRequest` | Pass: `approval-requested` |
+| Root receives MCP elicitation | Notify while the form is blocked | Pass: `Elicitation` | Pass: native approval dialog |
+| Subagent completes | Stay silent for `SubagentStop`; notify once after later root completion | Pass | Pass |
+| Subagent requests approval | Notify while the subagent is blocked | Pass: identified `PermissionRequest` | Known gap: dialog and identified event appear, but no OSC 9 |
+| Subagent receives MCP elicitation | Notify while the subagent form is blocked | Pass: identified MCP call plus `Elicitation` | Known gap: dialog and identified events appear, but no OSC 9 |
+| Root parks on background work | Stay silent while parked; notify after genuine root completion | Pass | Not covered; Claude-only compatibility case |
+
+These results were captured by the live suite on July 21, 2026. Re-run it after
+upgrading either CLI rather than treating the version-specific gaps as
+permanent. The Codex root-question fixture enables
+`features.default_mode_request_user_input` only in its isolated test config so
+it can exercise the same `plan-mode-prompt` notification used by Plan mode.
+The flag controls tool availability, not notification delivery, and is not
+required in the notification configuration above.
 
 ### Claude session recovery hook
 
@@ -356,124 +439,126 @@ DanTerm can export its state or load from a state file.
 This state includes the tab groups, tabs, pane layout, cwd of each pane, and
 (once you opt in) the command running in each pane.
 
-Add the snippet for your shell to opt in. It's zero-cost when not running inside DanTerm.
+Source the integration for your shell to opt in. The assets are inert outside
+DanTerm and safe to source repeatedly. They preserve existing prompt hooks,
+report command boundaries and local cwd without changing terminal titles, and
+wrap SSH/mosh to preserve pane-scoped remote-session reporting.
 
-<details>
-<summary>Zsh (~/.zshrc)</summary>
+Both routes below ship the same directory: the three `danterm.$shell` entry
+points plus the `vendor/` sibling that `danterm.bash` sources. Source
+`danterm.bash` from a copy that lost `vendor/` and it fails.
+
+### With Nix
+
+The home-manager module wires every shell you have enabled:
+
+```nix
+programs.danterm.shellIntegration.enable = true;
+```
+
+Each of bash/zsh/fish is wired if and only if that shell's own
+`programs.<shell>.enable` is true. This is gated independently of
+`programs.danterm.enable`, so a Linux host can import
+`danterm.homeManagerModules.default` for the shell assets alone without
+evaluating the macOS app package. Override the source with
+`programs.danterm.shellIntegration.package`.
+
+To wire it yourself instead, add `danterm.overlays.default` to your
+`nixpkgs.overlays` and reference the package path:
+
+```nix
+programs.bash.initExtra = ''
+  if [[ -n ''${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+    asset="$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash"
+    if [[ -r $asset ]]; then
+      source "$asset"
+    else
+      printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+    fi
+    unset asset
+  elif [[ -n ''${LC_DANTERM:-} ]]; then
+    source ${pkgs.danterm-shell-integration}/share/danterm-shell-integration/danterm.bash
+  fi
+'';
+```
+
+The package is `packages.<system>.shell-integration`, built for both
+`aarch64-darwin` and `x86_64-linux`.
+
+### Without Nix
+
+The app bundle carries the same tree under
+`Contents/Resources/shell-integration`. DanTerm advertises that exact directory
+as `DANTERM_SHELL_INTEGRATION_DIR`; hooks use the running app's value, so an
+installed app, dev build, and dev slot each load their own assets. Add the
+matching block to `~/.zshrc`, `~/.bashrc`, or
+`~/.config/fish/config.fish` -- only the block for that shell:
 
 ```zsh
-# Restore scrollback and agent-session recovery hints from previous DanTerm session
-if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
-  _danterm_sbf="$DANTERM_RESTORE_SCROLLBACK_FILE"
-  unset DANTERM_RESTORE_SCROLLBACK_FILE
-  if [[ -r "$_danterm_sbf" ]]; then
-    /bin/cat -- "$_danterm_sbf" 2>/dev/null || true
-    /bin/rm -f -- "$_danterm_sbf" >/dev/null 2>&1 || true
+if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+  asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.zsh
+  if [[ -r $asset ]]; then
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
   fi
-  unset _danterm_sbf
-fi
-
-# Report current command to DanTerm.app
-if [[ -n "$DANTERM_TOKEN" ]]; then
-  typeset -g _danterm_tok="$DANTERM_TOKEN"
-  unset DANTERM_TOKEN
-  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-  _danterm_preexec() {
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' "$_danterm_tok" "$(_danterm_b64 "$1")"
-    printf '\e]0;%s\a' "$1"
-  }
-  _danterm_precmd() {
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' "$_danterm_tok"
-    printf '\e]0;%s\a' "${(%):-%(4~|…/%3~|%~)}"
-  }
-  preexec_functions+=(_danterm_preexec)
-  precmd_functions+=(_danterm_precmd)
-  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
-  ssh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
-  }
-  mosh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    command mosh "$@"
-  }
-elif [[ -n "$LC_DANTERM_TOKEN" ]]; then
-  typeset -g _danterm_tok="$LC_DANTERM_TOKEN"
-  unset LC_DANTERM_TOKEN
-  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-  _danterm_remote_host() {
-    local ub="$(_danterm_b64 "$(whoami)")"
-    local hb="$(_danterm_b64 "$(hostname)")"
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' \
-      "$_danterm_tok" "$ub" "$hb"
-  }
-  precmd_functions+=(_danterm_remote_host)
-  ssh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
-  }
+  unset asset
 fi
 ```
 
-</details>
-
-<details>
-<summary>Fish (~/.config/fish/config.fish)</summary>
+```bash
+if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
+  asset=$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash
+  if [[ -r $asset ]]; then
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
+  fi
+  unset asset
+fi
+```
 
 ```fish
-# Restore scrollback and agent-session recovery hints from previous DanTerm session
-if set -q DANTERM_RESTORE_SCROLLBACK_FILE
-  set -l f $DANTERM_RESTORE_SCROLLBACK_FILE
-  set -e DANTERM_RESTORE_SCROLLBACK_FILE
-  if test -r "$f"
-    /bin/cat -- "$f" 2>/dev/null; or true
-    /bin/rm -f -- "$f" >/dev/null 2>&1; or true
-  end
-end
-
-# Report current command to DanTerm.app
-if set -q DANTERM_TOKEN
-  set -g _danterm_tok $DANTERM_TOKEN
-  set -e DANTERM_TOKEN
-  function __danterm_preexec --on-event fish_preexec
-    set -l b64 (printf '%s' $argv[1] | base64 | string replace -a '\n' '')
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' $_danterm_tok $b64
-    printf '\e]0;%s\a' $argv[1]
-  end
-  function __danterm_postcmd --on-event fish_prompt
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' $_danterm_tok
-    printf '\e]0;%s\a' (prompt_pwd)
-  end
-  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
-  function ssh --wraps ssh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    set -lx LC_DANTERM_TOKEN $_danterm_tok
-    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
-  end
-  function mosh --wraps mosh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    command mosh $argv
-  end
-else if set -q LC_DANTERM_TOKEN
-  set -g _danterm_tok $LC_DANTERM_TOKEN
-  set -e LC_DANTERM_TOKEN
-  function _danterm_remote_host --on-event fish_prompt
-    set -l ub (printf '%s' (whoami) | base64 | tr -d '\n')
-    set -l hb (printf '%s' (hostname) | base64 | tr -d '\n')
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' $_danterm_tok $ub $hb
-  end
-  function ssh --wraps ssh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    set -lx LC_DANTERM_TOKEN $_danterm_tok
-    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
+if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
+  set -l asset "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
+  if test -r "$asset"
+    source "$asset"
+  else
+    printf 'DanTerm shell integration is unreadable: %s\n' "$asset" >&2
   end
 end
 ```
 
-</details>
+These blocks are inert outside a local DanTerm shell. If DanTerm advertises a
+directory but its matching asset is unreadable, they report the broken path
+instead of silently starting without prompt marks. Home Manager's generated
+hooks additionally use its packaged assets when `LC_DANTERM` marks a remote
+shell.
 
-For `user@host` labels, install the same snippet on the remote shell and ensure
-the remote sshd accepts `LC_*` environment variables. In `sshd_config`, use:
+### On a remote host
+
+For `user@host` labels, source the same asset on the remote shell. The remote
+has no `.app` bundle, so get the directory there one of these ways:
+
+```sh
+# On a Nix remote (Linux or macOS): build the package there.
+nix build github:danneu/danterm#shell-integration
+source ./result/share/danterm-shell-integration/danterm.bash
+
+# Or with home-manager on the remote, the same option as above:
+#   programs.danterm.shellIntegration.enable = true;
+
+# Without Nix: copy the whole directory, never a single file --
+# danterm.bash resolves vendor/bash-preexec.sh next to itself.
+scp -r "/Applications/DanTerm.app/Contents/Resources/shell-integration" \
+  user@host:~/.danterm-shell-integration
+```
+
+Pin the flake input to the DanTerm revision you run locally so both ends carry
+matching assets.
+
+The remote sshd also has to accept `LC_*` environment variables. In
+`sshd_config`, use:
 
 ```sshconfig
 AcceptEnv LC_*
@@ -486,15 +571,15 @@ services.openssh.settings.AcceptEnv = "LC_*";
 ```
 
 `AcceptEnv LANG LC_*` is also fine if you want normal locale forwarding. DanTerm
-only requires `LC_*`, because it forwards the per-pane token as
-`LC_DANTERM_TOKEN` with `SendEnv`. If the remote does not accept or source the
-snippet, DanTerm still shows the compact remote accessory from the local
-`REMOTE_START` event, but the host label stays empty.
+only requires `LC_*`, because its ssh/mosh wrappers forward the integration
+marker as `LC_DANTERM=1` with `SendEnv`. If the remote does not accept or source
+the snippet, DanTerm still shows the compact remote accessory from the local
+`remote-start` event, but the host label stays empty.
 
-When changing the shell snippets in `~/world/scripts`, run:
+When changing the shell integrations, run:
 
 ```sh
-bash ~/world/scripts/tests/danterm-integration_test.sh
+bash scripts/tests/shell-integration_test.sh
 ```
 
 ## Keybinds
@@ -521,8 +606,7 @@ bash ~/world/scripts/tests/danterm-integration_test.sh
 | Clear Pane Alerts              | ⇧⌘.      |
 | Toggle Tab To-do List          | ⌘'       |
 | Toggle Pane To-do List         | ⇧⌘'      |
-| Open DanTerm Config            | ⌘,       |
-| Open Ghostty Config            | ⌥⌘,      |
+| Preferences                    | ⌘,       |
 | Reload Config                  | ⇧⌘,      |
 | Quit                           | ⌘Q       |
 
@@ -566,19 +650,77 @@ But it's more complicated than I'd like since it includes a browser, and its pan
 
 Many TUI programs — tmux, vim, less, htop, fzf, btop, ranger, k9s — turn on "mouse reporting" so they can handle clicks, drags, and scrolls themselves. The downside: your terminal stops doing native click-drag selection, so highlighting text to copy with ⌘C suddenly doesn't work. Either nothing gets selected, or the program highlights text into its own internal buffer that ⌘C can't reach.
 
-Ghostty (and other modern terminals) reserve **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release, ⌘C, done.
+DanTerm (like other modern terminals) reserves **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release and the text is already on your clipboard, because `ui.copyOnSelect` is on by default; turn that off and you copy with ⌘C instead.
 
-Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection you can ⌘C.
+Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection, which the release copies for you.
 
 Same trick works inside vim with `set mouse=a`, inside less, inside htop, etc.
 
 ## Development
 
-The dev loop is to make changes and `just build-run` to try them out.
+The dev loop is to make changes and `just replace-dev` to try them out. That
+command replaces the canonical `~/Applications/DanTerm Dev.app` and quits the
+instance currently running from it, so it belongs to whoever owns that app --
+you. Anything else building this tree, an agent especially, wants
+`just launch-slot`: it runs an isolated slot and leaves your app alone.
+
+After creating a linked Git worktree, run `just provision-worktree` from that
+worktree before its first build. The repeatable command links the primary
+checkout's reference sources without modifying the primary checkout. Fetch
+those prerequisites in the primary checkout first if the command reports one
+missing.
 
 - `just build` or `bash ./dev-build.sh` to build a local dev app to
   ".build/DanTerm Dev.app" and copy to "~/Applications/DanTerm Dev.app".
-- `just build-run` or `bash ./dev-build-run.sh` to build + run it.
+- `just replace-dev` or `bash ./dev-build-run.sh` to build + run it, replacing
+  the canonical dev app.
+- `just build-optimized` or `bash ./dev-build.sh --release` to build the same
+  dev app with SwiftPM's release configuration.
+- `just replace-dev-optimized` or `bash ./dev-build-run.sh --release` to build
+  and run that optimized dev app in place of the canonical one.
+- `just launch-slot` or `./scripts/dev-slot-launcher.py` to claim and directly
+  run an isolated, unattended development slot without replacing the user's app.
+- `just launch-slot-optimized` to do the same with SwiftPM's release
+  configuration.
+- `just launch-slot-prime` to launch one fresh slot in the foreground when
+  granting that slot notification permission for the first time.
+
+The build-optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
+development signing, and install path. They do not create a production release
+or publish anything.
+
+Isolated launches use slots 1 through 8; slot 0 remains the canonical
+`~/Applications/DanTerm Dev.app`. The launcher prints one JSON handle containing
+`slot`, `bundleId`, `socketPath`, and `pid`, then becomes the app process. Capture
+that handle in a per-launch file, then drive the instance by its explicit socket:
+
+```sh
+SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
+./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
+DANTERM_SLOT_PID=$!
+while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
+    && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
+test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+```
+
+The explicit flag prevents an agent shell from falling back to the user's app.
+A slot is held by a kernel lock for the app lifetime and becomes reusable on any
+exit, including SIGKILL. If all slots are occupied, the launcher exits with status
+75 without starting another app. Use `./dev-build.sh --no-install` when only the
+canonical `.build/DanTerm Dev.app` artifact is wanted.
+
+Pass an environment-gated launch control only by naming its allowlisted variable,
+for example `DANTERM_PTY_RECORDING_DIR=/tmp/rec ./scripts/dev-slot-launcher.py
+--pass-env DANTERM_PTY_RECORDING_DIR`. Unnamed launching-shell state is not
+forwarded into the slot.
+
+The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for
+its Powerline references. It requires
+[`unifont_upper-17.0.05.otf`](https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/unifont_upper-17.0.05.otf)
+for its Symbols for Legacy Computing references; install that font with Font
+Book before launching the preview. The
+[terminal sprite system](docs/terminal-sprites.md) documents the procedural
+glyph contract, layer boundaries, family models, and extension rules.
 
 I don't remember why, but there was some benefit to running the app from the macOS applications folder during dev.
 

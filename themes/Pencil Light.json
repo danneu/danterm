@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#212121",
+    "#c30771",
+    "#10a778",
+    "#a89c14",
+    "#008ec4",
+    "#523c79",
+    "#20a5ba",
+    "#b3b3b3",
+    "#424242",
+    "#fb007a",
+    "#52caa2",
+    "#c0b100",
+    "#20bbfc",
+    "#6855de",
+    "#4fb8cc",
+    "#f1f1f1"
+  ],
+  "background": "#f1f1f1",
+  "cursor": "#20bbfc",
+  "cursorText": "#424242",
+  "foreground": "#424242",
+  "name": "Pencil Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b6d6fd",
+  "selectionForeground": "#424242"
+}

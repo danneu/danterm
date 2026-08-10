@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#f0f2f6",
+    "#d00c36",
+    "#3e9e28",
+    "#dd8c1a",
+    "#1c64f2",
+    "#8636ec",
+    "#159096",
+    "#4a4d66",
+    "#adb2bc",
+    "#d00c36",
+    "#3e9e28",
+    "#dd8c1a",
+    "#1c64f2",
+    "#8636ec",
+    "#159096",
+    "#4a4d66"
+  ],
+  "background": "#f0f2f6",
+  "cursor": "#fc6008",
+  "cursorText": "#f0f2f6",
+  "foreground": "#4a4d66",
+  "name": "Aizen Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bdc2cc",
+  "selectionForeground": "#4a4d66"
+}

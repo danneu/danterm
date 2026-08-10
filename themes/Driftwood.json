@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#211d19",
+    "#e77467",
+    "#aab971",
+    "#e1b869",
+    "#78b3b5",
+    "#c9a0bd",
+    "#a5c4b1",
+    "#c2b7a6",
+    "#9a8e7c",
+    "#f38f7e",
+    "#becc8a",
+    "#e39962",
+    "#92c6c7",
+    "#dab6d1",
+    "#bbd6c3",
+    "#f2eadb"
+  ],
+  "background": "#2a2622",
+  "cursor": "#dfb666",
+  "cursorText": "#2a2622",
+  "foreground": "#e6ddd0",
+  "name": "Driftwood",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#39332b",
+  "selectionForeground": "#5d5955"
+}

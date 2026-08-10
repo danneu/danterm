@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#f9555f",
+    "#21b089",
+    "#fef02a",
+    "#589df6",
+    "#944d95",
+    "#1f9ee7",
+    "#bbbbbb",
+    "#555555",
+    "#fa8c8f",
+    "#35bb9a",
+    "#ffff55",
+    "#589df6",
+    "#e75699",
+    "#3979bc",
+    "#ffffff"
+  ],
+  "background": "#1d2837",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffff",
+  "name": "Galaxy",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b5d5ff",
+  "selectionForeground": "#000000"
+}

@@ -5,54 +5,15 @@
 // clear / preserve, stale-pane handling, popover dismissal), the quit
 // confirmation cycle (requestQuit -> confirmTerminate / cancelTerminate),
 // the close-tab(s) confirmation response shims, and the no-op guards while
-// either confirmation is pending. The `case .setAppFocus / .terminate /
-// .confirmCloseTab / .cancelCloseTab` pattern matches inside `commands[0]`
-// convert to `Issue.record + return` to preserve the per-file failure-site
-// count.
+// either confirmation is pending. The `case .terminate / .confirmCloseTab /
+// .cancelCloseTab` pattern matches inside `commands[0]` convert to
+// `Issue.record + return` to preserve the per-file failure-site count.
 import Foundation
 import Testing
 
 @testable import DanTermCore
 
 @Suite struct UpdateLifecycleTests {
-    @Test("testAppBecameActive")
-    func testAppBecameActive() {
-        // Intent: app activation still forwards focus to Ghostty.
-        // Why it exists: lifecycle model bookkeeping must not disturb the
-        //   runtime command that informs libghostty focus changed.
-        // Scenario: the user switches back to DanTerm; Ghostty receives an app
-        //   focus command. Spec-first -- no incident to cite, and none should be
-        //   invented.
-        var model = makeModel()
-        let commands = update(&model, .appBecameActive)
-        #expect(commands.count == 1)
-        if case .setAppFocus(let focused) = commands[0] {
-            #expect(focused == true)
-        } else {
-            Issue.record("expected setAppFocus(true)")
-            return
-        }
-    }
-
-    @Test("testAppResignedActive")
-    func testAppResignedActive() {
-        // Intent: app deactivation still forwards focus loss to Ghostty.
-        // Why it exists: lifecycle model bookkeeping must not disturb the
-        //   runtime command that informs libghostty focus changed.
-        // Scenario: the user switches away from DanTerm; Ghostty receives an app
-        //   defocus command. Spec-first -- no incident to cite, and none should
-        //   be invented.
-        var model = makeModel()
-        let commands = update(&model, .appResignedActive)
-        #expect(commands.count == 1)
-        if case .setAppFocus(let focused) = commands[0] {
-            #expect(focused == false)
-        } else {
-            Issue.record("expected setAppFocus(false)")
-            return
-        }
-    }
-
     @Test("testAppResignedActiveClearsActiveFlag")
     func testAppResignedActiveClearsActiveFlag() {
         // Intent: app deactivation records that DanTerm is no longer active in
@@ -67,10 +28,7 @@ import Testing
         let commands = update(&model, .appResignedActive)
 
         #expect(model.isAppActive == false, "app should be marked inactive")
-        #expect(hasEffect(commands) {
-            if case .setAppFocus(false) = $0 { return true }
-            return false
-        }, "should still defocus Ghostty")
+        #expect(commands.isEmpty, "deactivation is pure model bookkeeping")
     }
 
     @Test("testAppBecameActiveSetsActiveFlag")
@@ -88,10 +46,7 @@ import Testing
         let commands = update(&model, .appBecameActive)
 
         #expect(model.isAppActive == true, "app should be marked active")
-        #expect(hasEffect(commands) {
-            if case .setAppFocus(true) = $0 { return true }
-            return false
-        }, "should still focus Ghostty")
+        #expect(commands.isEmpty, "activation is pure model bookkeeping")
     }
 
     @Test("testAppBecameActiveMarksFocusedPaneAlertReadInFocusMode")
@@ -108,7 +63,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.isAppActive = false
-        update(&model, .surfaceBell(paneId: paneId))
+        update(&model, .sessionBell(paneId: paneId))
 
         update(&model, .appBecameActive)
 
@@ -131,7 +86,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.isAppActive = false
-        update(&model, .surfaceBell(paneId: paneId))
+        update(&model, .sessionBell(paneId: paneId))
 
         update(&model, .appBecameActive)
 
@@ -157,8 +112,8 @@ import Testing
         let focusedPaneId = model.groups[0].tabs[1].focusedPaneId
         model.isAppActive = false
 
-        update(&model, .surfaceBell(paneId: backgroundPaneId))
-        update(&model, .surfaceBell(paneId: focusedPaneId))
+        update(&model, .sessionBell(paneId: backgroundPaneId))
+        update(&model, .sessionBell(paneId: focusedPaneId))
         update(&model, .appBecameActive)
 
         let backgroundAlert = model.alerts.first { $0.paneId == backgroundPaneId }

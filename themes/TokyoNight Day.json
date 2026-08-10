@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#e9e9ed",
+    "#f52a65",
+    "#587539",
+    "#8c6c3e",
+    "#2e7de9",
+    "#9854f1",
+    "#007197",
+    "#6172b0",
+    "#a1a6c5",
+    "#f52a65",
+    "#587539",
+    "#8c6c3e",
+    "#2e7de9",
+    "#9854f1",
+    "#007197",
+    "#3760bf"
+  ],
+  "background": "#e1e2e7",
+  "cursor": "#3760bf",
+  "cursorText": "#e1e2e7",
+  "foreground": "#3760bf",
+  "name": "TokyoNight Day",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#99a7df",
+  "selectionForeground": "#3760bf"
+}

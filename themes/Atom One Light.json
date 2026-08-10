@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#de3e35",
+    "#3f953a",
+    "#d2b67c",
+    "#2f5af3",
+    "#950095",
+    "#3f953a",
+    "#bbbbbb",
+    "#000000",
+    "#de3e35",
+    "#3f953a",
+    "#d2b67c",
+    "#2f5af3",
+    "#a00095",
+    "#3f953a",
+    "#ffffff"
+  ],
+  "background": "#f9f9f9",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#2a2c33",
+  "name": "Atom One Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ededed",
+  "selectionForeground": "#2a2c33"
+}

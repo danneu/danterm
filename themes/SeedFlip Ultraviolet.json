@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#05000a",
+    "#f04242",
+    "#42f07c",
+    "#f0d342",
+    "#428bf0",
+    "#f042f0",
+    "#42f0f0",
+    "#f6f3fb",
+    "#5b2687",
+    "#f58989",
+    "#89f5ad",
+    "#f5e389",
+    "#89b6f5",
+    "#f589f5",
+    "#89f5f5",
+    "#ffffff"
+  ],
+  "background": "#0b0014",
+  "cursor": "#c77dff",
+  "cursorText": "#0b0014",
+  "foreground": "#e8e0f5",
+  "name": "SeedFlip Ultraviolet",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#13082a",
+  "selectionForeground": "#e8e0f5"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#060609",
+    "#f04242",
+    "#42f07c",
+    "#f0d342",
+    "#428bf0",
+    "#f042f0",
+    "#42f0f0",
+    "#f2f2f3",
+    "#424256",
+    "#f58989",
+    "#89f5ad",
+    "#f5e389",
+    "#89b6f5",
+    "#f589f5",
+    "#89f5f5",
+    "#ffffff"
+  ],
+  "background": "#0a0a0f",
+  "cursor": "#818cf8",
+  "cursorText": "#0a0a0f",
+  "foreground": "#e4e4e7",
+  "name": "SeedFlip Nightfall",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#12121a",
+  "selectionForeground": "#e4e4e7"
+}

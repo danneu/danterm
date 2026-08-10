@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff5c57",
+    "#94e362",
+    "#eebd70",
+    "#99ecfe",
+    "#ff6ac1",
+    "#5fdeed",
+    "#f1f1f0",
+    "#686868",
+    "#ff5c57",
+    "#94e362",
+    "#efc781",
+    "#99ecfe",
+    "#ff6ac1",
+    "#87e0f0",
+    "#f1f1f0"
+  ],
+  "background": "#282a36",
+  "cursor": "#eaeaea",
+  "cursorText": "#282a36",
+  "foreground": "#eff0eb",
+  "name": "Dogxi Misty",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#92bcd0",
+  "selectionForeground": "#000000"
+}

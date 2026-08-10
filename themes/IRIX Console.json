@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1a1919",
+    "#d42426",
+    "#37a327",
+    "#c29d28",
+    "#0739e2",
+    "#911f9c",
+    "#4497df",
+    "#cccccc",
+    "#767676",
+    "#f34f59",
+    "#45c731",
+    "#f9f2a7",
+    "#4079ff",
+    "#c31ba2",
+    "#6ed7d7",
+    "#f2f2f2"
+  ],
+  "background": "#0c0c0c",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#f2f2f2",
+  "name": "IRIX Console",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c2deff",
+  "selectionForeground": "#000000"
+}

@@ -119,7 +119,7 @@ import Testing
 
     @Test("update() stores the raw cwd/title in the model, never abbreviating into it")
     func modelStaysHomeCleanUnderAmbientHome() {
-        // Intent: surfaceCwd/surfaceTitle write the shell-reported path verbatim
+        // Intent: sessionCwd/sessionTitle write the shell-reported path verbatim
         //   into the model; HOME never enters AppModel, only its saved/sent output.
         // Why it exists: this is the load-bearing premise of the WHOLE narrow home
         //   seam -- because the model is home-clean, only save/send/restore needed
@@ -144,8 +144,8 @@ import Testing
             TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId))))
         model.selectedTabId = tabId
 
-        _ = update(&model, .surfaceCwd(paneId: paneId, cwd: h + "/sentinel"), env: env)
-        _ = update(&model, .surfaceTitle(paneId: paneId, title: h + "/sentinel"), env: env)
+        _ = update(&model, .sessionCwd(paneId: paneId, cwd: h + "/sentinel"), env: env)
+        _ = update(&model, .sessionTitle(paneId: paneId, title: h + "/sentinel"), env: env)
 
         #expect(model.pane(paneId)?.cwd == h + "/sentinel", "cwd stored raw, not abbreviated into the model")
         #expect(model.pane(paneId)?.title == h + "/sentinel", "title stored raw, not abbreviated into the model")

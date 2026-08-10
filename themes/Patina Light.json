@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2e2a24",
+    "#9b3b3b",
+    "#34644c",
+    "#6e5817",
+    "#2f626f",
+    "#7a4f47",
+    "#2e6260",
+    "#5a5248",
+    "#625a51",
+    "#833333",
+    "#2d5839",
+    "#634e14",
+    "#2c5660",
+    "#6d463e",
+    "#285654",
+    "#393a34"
+  ],
+  "background": "#ddd7c4",
+  "cursor": "#2e2a24",
+  "cursorText": "#ddd7c4",
+  "foreground": "#2e2a24",
+  "name": "Patina Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bfb8a3",
+  "selectionForeground": "#2e2a24"
+}

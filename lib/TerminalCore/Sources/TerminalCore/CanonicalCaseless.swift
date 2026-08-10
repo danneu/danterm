@@ -1,0 +1,128 @@
+// Unicode 17.0 canonical decomposition and root-locale full case folding for search.
+
+/// Produces pinned NFD scalars without importing Foundation or inheriting the toolchain's Unicode version.
+func canonicalDecomposition(of scalars: [Unicode.Scalar]) -> [Unicode.Scalar] {
+    var result: [UInt32] = []
+    result.reserveCapacity(scalars.count)
+    for scalar in scalars {
+        appendCanonicalDecomposition(of: scalar.value, to: &result)
+    }
+    canonicallyOrder(&result)
+    return result.map { Unicode.Scalar($0)! }
+}
+
+/// Returns the Unicode full case-fold mapping for one scalar, or the scalar itself when unmapped.
+func fullCaseFold(of scalar: Unicode.Scalar) -> [Unicode.Scalar] {
+    guard let index = exactIndex(
+        of: scalar.value,
+        in: GeneratedCanonicalCaselessTables.foldScalars
+    ) else {
+        return [scalar]
+    }
+    let lower = Int(GeneratedCanonicalCaselessTables.foldOffsets[index])
+    let upper = Int(GeneratedCanonicalCaselessTables.foldOffsets[index + 1])
+    return GeneratedCanonicalCaselessTables.foldPool[lower..<upper].map {
+        Unicode.Scalar($0)!
+    }
+}
+
+/// Builds the D145 canonical caseless key used to compare already-segmented graphemes.
+func canonicalCaselessKey(for scalars: [Unicode.Scalar]) -> [Unicode.Scalar] {
+    let decomposed = canonicalDecomposition(of: scalars)
+    let folded = decomposed.flatMap(fullCaseFold)
+    // Unicode 17.0 D145 requires this second NFD pass because folding can
+    // introduce a scalar with its own canonical decomposition.
+    return canonicalDecomposition(of: folded)
+}
+
+private let hangulSyllableBase: UInt32 = 0xAC00
+private let hangulLeadingBase: UInt32 = 0x1100
+private let hangulVowelBase: UInt32 = 0x1161
+private let hangulTrailingBase: UInt32 = 0x11A7
+private let hangulLeadingCount: UInt32 = 19
+private let hangulVowelCount: UInt32 = 21
+private let hangulTrailingCount: UInt32 = 28
+private let hangulSyllableCount = hangulLeadingCount * hangulVowelCount * hangulTrailingCount
+
+/// Recurses through canonical mappings while handling Hangul's algorithmic decomposition inline.
+private func appendCanonicalDecomposition(of value: UInt32, to result: inout [UInt32]) {
+    if value >= hangulSyllableBase && value < hangulSyllableBase + hangulSyllableCount {
+        let syllableIndex = value - hangulSyllableBase
+        result.append(hangulLeadingBase + syllableIndex / (hangulVowelCount * hangulTrailingCount))
+        result.append(hangulVowelBase + (syllableIndex % (hangulVowelCount * hangulTrailingCount)) / hangulTrailingCount)
+        let trailingIndex = syllableIndex % hangulTrailingCount
+        if trailingIndex != 0 {
+            result.append(hangulTrailingBase + trailingIndex)
+        }
+        return
+    }
+
+    guard let index = exactIndex(
+        of: value,
+        in: GeneratedCanonicalCaselessTables.decompositionScalars
+    ) else {
+        result.append(value)
+        return
+    }
+    let lower = Int(GeneratedCanonicalCaselessTables.decompositionOffsets[index])
+    let upper = Int(GeneratedCanonicalCaselessTables.decompositionOffsets[index + 1])
+    for component in GeneratedCanonicalCaselessTables.decompositionPool[lower..<upper] {
+        appendCanonicalDecomposition(of: component, to: &result)
+    }
+}
+
+/// Applies the stable canonical-ordering rule within each starter-delimited combining run.
+private func canonicallyOrder(_ values: inout [UInt32]) {
+    // Guard first: most graphemes decompose to a single scalar, and building `classes` for
+    // them costs an allocation plus a binary search whose result is discarded.
+    guard values.count > 1 else { return }
+    var classes = values.map(canonicalCombiningClass)
+    for index in 1..<values.count where classes[index] != 0 {
+        let value = values[index]
+        let combiningClass = classes[index]
+        var insertionIndex = index
+        while insertionIndex > 0 && classes[insertionIndex - 1] > combiningClass {
+            values[insertionIndex] = values[insertionIndex - 1]
+            classes[insertionIndex] = classes[insertionIndex - 1]
+            insertionIndex -= 1
+        }
+        values[insertionIndex] = value
+        classes[insertionIndex] = combiningClass
+    }
+}
+
+/// Looks up the pinned combining class while treating scalars outside generated ranges as starters.
+private func canonicalCombiningClass(of value: UInt32) -> UInt8 {
+    let lowerBounds = GeneratedCanonicalCaselessTables.combiningClassLowerBounds
+    var lower = 0
+    var upper = lowerBounds.count
+    while lower < upper {
+        let middle = lower + (upper - lower) / 2
+        if lowerBounds[middle] <= value {
+            lower = middle + 1
+        } else {
+            upper = middle
+        }
+    }
+    guard lower > 0 else { return 0 }
+    let index = lower - 1
+    guard value <= GeneratedCanonicalCaselessTables.combiningClassUpperBounds[index] else {
+        return 0
+    }
+    return GeneratedCanonicalCaselessTables.combiningClassValues[index]
+}
+
+/// Finds one scalar mapping without introducing hashing or Foundation into the pure core.
+private func exactIndex(of value: UInt32, in sortedValues: [UInt32]) -> Int? {
+    var lower = 0
+    var upper = sortedValues.count
+    while lower < upper {
+        let middle = lower + (upper - lower) / 2
+        if sortedValues[middle] < value {
+            lower = middle + 1
+        } else {
+            upper = middle
+        }
+    }
+    return lower < sortedValues.count && sortedValues[lower] == value ? lower : nil
+}

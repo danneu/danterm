@@ -20,6 +20,7 @@ AppModel(
                 lastCommand: nil,
                 progress: nil,
                 theme: nil,
+                fontSizeSteps: 0,
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
@@ -35,6 +36,7 @@ AppModel(
                 lastCommand: nil,
                 progress: nil,
                 theme: nil,
+                fontSizeSteps: 0,
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
@@ -70,6 +72,7 @@ AppModel(
                 lastCommand: nil,
                 progress: nil,
                 theme: nil,
+                fontSizeSteps: 0,
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
@@ -85,6 +88,7 @@ AppModel(
                 lastCommand: nil,
                 progress: nil,
                 theme: nil,
+                fontSizeSteps: 0,
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
@@ -122,11 +126,16 @@ AppModel(
   searchState: [:],
   showAllAlerts: false,
   config: DanTermConfig(
+    defaultTheme: nil,
     remoteTheme: "Purplepeter",
-    alertClearMode: .focus
+    fontFamily: nil,
+    fontSize: nil,
+    alertClearMode: .focus,
+    copyOnSelect: true
   ),
+  resolvedFontFamily: nil,
   preferencesDraft: nil,
-  committedGhosttyPrefs: nil,
+  installedFontFamilies: [],
   todoPopover: nil,
   mruOrder: [
     [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
@@ -134,6 +143,5 @@ AppModel(
   ],
   mruCycle: nil,
   jumpMode: nil,
-  pendingConfirmation: nil,
-  ghosttyConfigGeneration: 0
+  pendingConfirmation: nil
 )

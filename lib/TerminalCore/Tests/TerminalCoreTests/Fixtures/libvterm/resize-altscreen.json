@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/63screen_resize.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Resize can operate on altscreen",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 12, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "Main screen\u001b[?1049h\u001b[HAlt screen" },
+    { "type": "resize", "columns": 12, "rows": 4 },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "Alt screen  \n            \n            \n            ",
+        "cursor": { "row": 0, "column": 10, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1049l" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "Main screen \n            \n            \n            ",
+        "cursor": { "row": 0, "column": 11, "pendingWrap": false }
+      }
+    }
+  ]
+}

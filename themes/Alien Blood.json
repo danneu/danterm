@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#112616",
+    "#7f2b27",
+    "#2f7e25",
+    "#717f24",
+    "#2f6a7f",
+    "#47587f",
+    "#327f77",
+    "#647d75",
+    "#3c4812",
+    "#e08009",
+    "#18e000",
+    "#bde000",
+    "#00aae0",
+    "#0058e0",
+    "#00e0c4",
+    "#73fa91"
+  ],
+  "background": "#0f1610",
+  "cursor": "#73fa91",
+  "cursorText": "#0f1610",
+  "foreground": "#637d75",
+  "name": "Alien Blood",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1d4125",
+  "selectionForeground": "#73fa91"
+}

@@ -1,11 +1,11 @@
 // Pane container view that owns the toolbar, drag handling, search overlay, the
 // terminal view, and the single pane context-menu builder (makePaneMenu) behind
-// the surface right-click, the "..." toolbar button, and the drag-handle menu.
+// the terminal right-click, the "..." toolbar button, and the drag-handle menu.
 import Cocoa
 
 class PaneWrapperView: NSView {
     let paneId: PaneId
-    let terminalView: TerminalView
+    let terminalSession: any TerminalSession
     private let toolbar: NSView
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
@@ -14,6 +14,10 @@ class PaneWrapperView: NSView {
     private let isZoomed: Bool
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
+    /// Destination for the context menu's copy actions (cwd, agent session id). Defaults to the
+    /// system pasteboard so a test can assign a scratch board and neither read nor destroy the
+    /// developer's real clipboard; mirrors `SwiftTerminalSessionView.selectionPasteboard`.
+    var menuPasteboard = NSPasteboard.general
 
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
@@ -39,9 +43,9 @@ class PaneWrapperView: NSView {
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
 
-    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
+    init(paneId: PaneId, terminalView: any TerminalSession, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
-        self.terminalView = terminalView
+        self.terminalSession = terminalView
         self.toolbar = NSView()
         self.toolbarLabel = NonHitTestingLabel(labelWithString: "")
         self.isZoomed = isZoomed
@@ -237,7 +241,7 @@ class PaneWrapperView: NSView {
         }
 
         // Terminal view wrapped in scroll view for native scrollbar support
-        let scrollWrapper = ScrollableTerminalView(terminalView: terminalView)
+        let scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
 
@@ -297,13 +301,6 @@ class PaneWrapperView: NSView {
         }
 
         NSLayoutConstraint.activate(constraints)
-    }
-
-    deinit {
-        // A rebuild can point the terminal at a new wrapper before this one deallocates.
-        if terminalView.paneWrapper === self {
-            terminalView.paneWrapper = nil
-        }
     }
 
     required init?(coder: NSCoder) {
@@ -418,9 +415,9 @@ class PaneWrapperView: NSView {
     }
 
     /// Builds the pane context menu fresh so dynamic item state reflects the current
-    /// model. Single builder for all three entry points -- the surface right-click
-    /// (`TerminalView.menu(for:)`), the "..." toolbar button, and the drag-handle
-    /// right-click -- so their compositions can't drift apart. Only the surface entry
+    /// model. Single builder for all three entry points -- the terminal right-click
+    /// (terminal-host right-click), the "..." toolbar button, and the drag-handle
+    /// right-click -- so their compositions can't drift apart. Only the terminal entry
     /// point passes `includeClipboard: true` to prepend the Copy/Paste section.
     func makePaneMenu(includeClipboard: Bool = false) -> NSMenu {
         let menu = NSMenu()
@@ -437,16 +434,13 @@ class PaneWrapperView: NSView {
         }
 
         if includeClipboard {
-            // Copy/Paste act on the terminal surface, so they target the terminal
-            // view directly (it persists across reconciles -- no anchor needed).
-            // Copy is disabled rather than hidden so the surface menu's shape is
+            // Copy/Paste forward through the backend-neutral session. Copy is
+            // disabled rather than hidden so the terminal menu's shape is
             // stable with and without a selection.
-            let copy = NSMenuItem(title: "Copy", action: #selector(TerminalView.copySelection(_:)), keyEquivalent: "")
-            copy.target = terminalView
-            copy.isEnabled = terminalView.hasSelection
+            let copy = wrapperItem("Copy", #selector(copySelectionAction(_:)))
+            copy.isEnabled = terminalSession.hasSelection
             menu.addItem(copy)
-            let paste = NSMenuItem(title: "Paste", action: #selector(TerminalView.pasteClipboard(_:)), keyEquivalent: "")
-            paste.target = terminalView
+            let paste = wrapperItem("Paste", #selector(pasteClipboardAction(_:)))
             menu.addItem(paste)
             menu.addItem(.separator())
         }
@@ -484,6 +478,14 @@ class PaneWrapperView: NSView {
         return menu
     }
 
+    @objc private func copySelectionAction(_ sender: Any?) {
+        terminalSession.copySelection()
+    }
+
+    @objc private func pasteClipboardAction(_ sender: Any?) {
+        terminalSession.pasteClipboard()
+    }
+
     @objc private func showPaneMenu() {
         let menu = makePaneMenu()
         let point = NSPoint(x: 0, y: menuButton.bounds.height + 2)
@@ -508,14 +510,14 @@ class PaneWrapperView: NSView {
 
     @objc private func copyCwdAction() {
         guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(cwd, forType: .string)
+        menuPasteboard.clearContents()
+        menuPasteboard.setString(cwd, forType: .string)
     }
 
     @objc private func copyAgentSessionIdAction() {
         guard let sessionId = runtime?.model.pane(paneId)?.agentSession?.sessionId else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(sessionId, forType: .string)
+        menuPasteboard.clearContents()
+        menuPasteboard.setString(sessionId, forType: .string)
     }
 
     @objc private func zoomPaneAction() {

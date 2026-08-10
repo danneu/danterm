@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#414453",
+    "#ff8170",
+    "#78c2b3",
+    "#d9c97c",
+    "#4eb0cc",
+    "#ff7ab2",
+    "#b281eb",
+    "#dfdfe0",
+    "#7f8c98",
+    "#ff8170",
+    "#acf2e4",
+    "#ffa14f",
+    "#6bdfff",
+    "#ff7ab2",
+    "#dabaff",
+    "#dfdfe0"
+  ],
+  "background": "#292a30",
+  "cursor": "#dfdfe0",
+  "cursorText": "#292a30",
+  "foreground": "#dfdfe0",
+  "name": "Xcode Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#414453",
+  "selectionForeground": "#dfdfe0"
+}

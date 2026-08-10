@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#0a1222",
+    "#ffa7c4",
+    "#85cc95",
+    "#ffcb8b",
+    "#8dabe1",
+    "#c792eb",
+    "#78ccf0",
+    "#ffffff",
+    "#575656",
+    "#ffa7c4",
+    "#85cc95",
+    "#ffcb8b",
+    "#8dabe1",
+    "#c792eb",
+    "#ffa7c4",
+    "#ffffff"
+  ],
+  "background": "#0e1729",
+  "cursor": "#ffa7c4",
+  "cursorText": "#ffffff",
+  "foreground": "#ced2d6",
+  "name": "Overnight Slumber",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1f2b41",
+  "selectionForeground": "#ced2d6"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#51576d",
+    "#e78284",
+    "#a6d189",
+    "#e5c890",
+    "#8caaee",
+    "#f4b8e4",
+    "#81c8be",
+    "#b5bfe2",
+    "#626880",
+    "#eda0a2",
+    "#b9dba2",
+    "#ecd7ae",
+    "#adc2f3",
+    "#f38ed8",
+    "#98d2ca",
+    "#a5adce"
+  ],
+  "background": "#303446",
+  "cursor": "#f2d5cf",
+  "cursorText": "#303446",
+  "foreground": "#c6d0f5",
+  "name": "Catppuccin Frappe",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f2d5cf",
+  "selectionForeground": "#303446"
+}

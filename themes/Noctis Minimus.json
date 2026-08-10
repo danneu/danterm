@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#182a35",
+    "#c08872",
+    "#72c09f",
+    "#c8a984",
+    "#6196b8",
+    "#c28097",
+    "#72b7c0",
+    "#c5cdd3",
+    "#425866",
+    "#ca8468",
+    "#84c8ab",
+    "#d1aa7b",
+    "#68a4ca",
+    "#c88da2",
+    "#84c0c8",
+    "#c5d1d3"
+  ],
+  "background": "#1b2932",
+  "cursor": "#c5cdd3",
+  "cursorText": "#1b2932",
+  "foreground": "#c5cdd3",
+  "name": "Noctis Minimus",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#263c4a",
+  "selectionForeground": "#c5cdd3"
+}

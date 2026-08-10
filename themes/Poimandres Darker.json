@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#16161e",
+    "#d0679d",
+    "#5de4c7",
+    "#fffac2",
+    "#89ddff",
+    "#fcc5e9",
+    "#add7ff",
+    "#ffffff",
+    "#a6accd",
+    "#d0679d",
+    "#5de4c7",
+    "#fffac2",
+    "#add7ff",
+    "#fae4fc",
+    "#89ddff",
+    "#ffffff"
+  ],
+  "background": "#16161e",
+  "cursor": "#ffffff",
+  "cursorText": "#16161e",
+  "foreground": "#a6accd",
+  "name": "Poimandres Darker",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a6accd",
+  "selectionForeground": "#ffffff"
+}

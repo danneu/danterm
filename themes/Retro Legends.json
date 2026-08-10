@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#262626",
+    "#de5454",
+    "#45eb45",
+    "#f7bf2b",
+    "#4066f2",
+    "#bf4cf2",
+    "#40d9e6",
+    "#bfe6bf",
+    "#4c594c",
+    "#ff6666",
+    "#59ff59",
+    "#ffd933",
+    "#4c80ff",
+    "#e666ff",
+    "#59e6ff",
+    "#f2fff2"
+  ],
+  "background": "#0d0d0d",
+  "cursor": "#45eb45",
+  "cursorText": "#0d0d0d",
+  "foreground": "#45eb45",
+  "name": "Retro Legends",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#336633",
+  "selectionForeground": "#f2fff2"
+}

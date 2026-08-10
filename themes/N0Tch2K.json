@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#383838",
+    "#a95551",
+    "#666666",
+    "#a98051",
+    "#657d3e",
+    "#767676",
+    "#c9c9c9",
+    "#d0b8a3",
+    "#545454",
+    "#a97775",
+    "#8c8c8c",
+    "#a99175",
+    "#98bd5e",
+    "#a3a3a3",
+    "#dcdcdc",
+    "#d8c8bb"
+  ],
+  "background": "#222222",
+  "cursor": "#aa9175",
+  "cursorText": "#000000",
+  "foreground": "#a0a0a0",
+  "name": "N0Tch2K",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

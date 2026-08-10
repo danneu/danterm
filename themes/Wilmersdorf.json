@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#34373e",
+    "#e06383",
+    "#7ebebd",
+    "#cccccc",
+    "#a6c1e0",
+    "#e1c1ee",
+    "#5b94ab",
+    "#ababab",
+    "#50545d",
+    "#fa7193",
+    "#8fd7d6",
+    "#d1dfff",
+    "#b2cff0",
+    "#efccfd",
+    "#69abc5",
+    "#d3d3d3"
+  ],
+  "background": "#282b33",
+  "cursor": "#7ebebd",
+  "cursorText": "#1f2024",
+  "foreground": "#c6c6c6",
+  "name": "Wilmersdorf",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1f2024",
+  "selectionForeground": "#c6c6c6"
+}

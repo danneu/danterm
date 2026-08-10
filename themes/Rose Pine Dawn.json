@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#f2e9e1",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279",
+    "#9893a5",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279"
+  ],
+  "background": "#faf4ed",
+  "cursor": "#575279",
+  "cursorText": "#faf4ed",
+  "foreground": "#575279",
+  "name": "Rose Pine Dawn",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#dfdad9",
+  "selectionForeground": "#575279"
+}

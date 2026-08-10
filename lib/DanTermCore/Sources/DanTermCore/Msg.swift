@@ -69,6 +69,10 @@ enum Msg {
     case clearCustomTitles(tabIds: [TabId])
     case clearAlertsForTabs(tabIds: [TabId])
     case setPaneTheme(paneId: PaneId, themeName: String?)
+    // Font-size zoom for one pane. nil paneId = the selected tab's focused pane
+    // (menubar path), matching .toggleZoomPane.
+    case adjustPaneFontSize(paneId: PaneId?, steps: Int)
+    case resetPaneFontSize(paneId: PaneId?)
     case renameTab(id: TabId, name: String?)
     case sidebarRenameEnded
 
@@ -93,14 +97,14 @@ enum Msg {
     // Export
     case exportState
 
-    // Ghostty callbacks
-    case surfaceTitle(paneId: PaneId, title: String)
-    case surfaceCwd(paneId: PaneId, cwd: String)
-    case surfaceBell(paneId: PaneId)
+    // Terminal session callbacks
+    case sessionTitle(paneId: PaneId, title: String)
+    case sessionCwd(paneId: PaneId, cwd: String?)
+    case sessionBell(paneId: PaneId)
     case desktopNotification(paneId: PaneId, title: String, body: String)
-    case surfaceProgress(paneId: PaneId, state: ProgressState?)
-    case surfaceClosed(paneId: PaneId)
-    case surfaceCreationFailed(paneId: PaneId)
+    case sessionProgress(paneId: PaneId, state: ProgressState?)
+    case sessionClosed(paneId: PaneId)
+    case sessionCreationFailed(paneId: PaneId)
 
     // Alerts
     case markAlertRead(alertId: AlertId)
@@ -110,23 +114,37 @@ enum Msg {
     case setShowAllAlerts(Bool)
     case clearAlertsForPane(paneId: PaneId)
 
-    // Config (external reload)
-    case configLoaded(DanTermConfig)
-    case ghosttyConfigReloaded
+    // Config (launch and external reload)
+    // Carries the font-family verdict because the core cannot compute it: the
+    // impure caller resolves the name against the installed families and injects
+    // the answer, so config and resolution can never be applied separately.
+    case configLoaded(DanTermConfig, resolvedFontFamily: String?)
+    // The resolution half on its own, for the save path: prefSave has already
+    // committed the config it wrote, so only the verdict it could not compute is
+    // missing. A full configLoaded would also reset the draft, discarding text
+    // the panel deliberately keeps on screen (an invalid font size).
+    case fontFamilyResolved(String?)
 
     // Preferences panel
-    case preferencesOpened(ghostty: GhosttyPrefs)
+    // The installed-family catalog is injected for the same reason the font
+    // resolution is: the syntax-only core may not ask CoreText which families exist.
+    // It rides in on open so the picker's choices are a snapshot taken when the panel
+    // appeared, not a live query.
+    case preferencesOpened(installedFontFamilies: [String] = [])
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)
     case prefSetRemoteTheme(String)
     case prefSetTheme(String?)
     case prefSetFontSize(String?)
+    case prefSetFontFamily(String?)
+    case prefSetCopyOnSelect(Bool)
     case prefResetAlertClearMode
     case prefResetRemoteTheme
     case prefResetTheme
     case prefResetFontSize
+    case prefResetFontFamily
+    case prefResetCopyOnSelect
     case prefSave
-    case ghosttyPrefsRefreshed(GhosttyPrefs)
 
     // Lifecycle
     case appBecameActive
@@ -143,11 +161,15 @@ enum Msg {
     case startSearch
     case searchNeedleChanged(paneId: PaneId, needle: String)
     case searchNavigate(paneId: PaneId, direction: SearchDirection)
+    /// Cmd-G / Cmd-Shift-G: the menu bar has no pane in hand, so the focused pane is
+    /// resolved in `update` the way `.startSearch` resolves it.
+    case navigateFocusedSearch(direction: SearchDirection)
     case endSearch(paneId: PaneId)
-    // Ghostty search callbacks
-    case ghosttyStartSearch(paneId: PaneId, needle: String)
-    case ghosttySearchTotal(paneId: PaneId, total: Int?)
-    case ghosttySearchSelected(paneId: PaneId, selected: Int?)
+    // Backend search callbacks: reported by whichever terminal engine owns the pane,
+    // never crossing the C boundary, so they carry no backend in their names.
+    case searchStarted(paneId: PaneId, needle: String)
+    case searchTotalReported(paneId: PaneId, total: Int?)
+    case searchSelectionReported(paneId: PaneId, selected: Int?)
 
     // TODO
     case toggleTodoPopover(paneId: PaneId)
@@ -196,9 +218,8 @@ extension Msg {
     /// never dropped; only the whole-model view sweep is deferred -- and the
     /// side-effecting commands these emit (.sendNotification, .scheduleCheckpoint)
     /// are not post-reconcile, so they still run inline. The runtime evaluates this
-    /// on the translated message, so a title-channel `__DANTERM_EVT__:` event's
-    /// eligibility is its translated case's: commandStarted/commandEnded opt in
-    /// here; remoteSession start/report events stay inline. Eligibility is
+    /// on the pane-scoped message, so commandStarted/commandEnded opt in here;
+    /// remoteSession start/report events stay inline. Eligibility is
     /// necessary but not sufficient: reconcileDecision still forces an inline
     /// reconcile when update() emitted a post-reconcile command, so opting a message
     /// in here is always safe.
@@ -207,8 +228,8 @@ extension Msg {
         // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
         // real but throttleable diff (tab title/subtitle, progress, the search
         // overlay's live "N/M" match count).
-        case .surfaceTitle, .surfaceCwd, .surfaceProgress,
-             .ghosttySearchTotal, .ghosttySearchSelected:
+        case .sessionTitle, .sessionCwd, .sessionProgress,
+             .searchTotalReported, .searchSelectionReported:
             return true
         // Window/divider live-resize fires this every tick, but ContainerShape
         // drops split ratios (see ReconcileTests "split ratio is excluded"), so
@@ -221,7 +242,7 @@ extension Msg {
         // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
-        case .surfaceBell, .desktopNotification:
+        case .sessionBell, .desktopNotification:
             return true
         // Shell-integration command events, one per prompt in a command loop.
         // commandStarted only sets pane.lastCommand, which no projection reads --

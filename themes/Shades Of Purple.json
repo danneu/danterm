@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d90429",
+    "#3ad900",
+    "#ffe700",
+    "#6943ff",
+    "#ff2c70",
+    "#00c5c7",
+    "#c7c7c7",
+    "#686868",
+    "#f92a1c",
+    "#43d426",
+    "#f1d000",
+    "#6871ff",
+    "#ff77ff",
+    "#79e8fb",
+    "#ffffff"
+  ],
+  "background": "#1e1d40",
+  "cursor": "#fad000",
+  "cursorText": "#98998e",
+  "foreground": "#ffffff",
+  "name": "Shades Of Purple",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b362ff",
+  "selectionForeground": "#c2c2c2"
+}

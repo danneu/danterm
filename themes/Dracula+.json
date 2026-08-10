@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#21222c",
+    "#ff5555",
+    "#50fa7b",
+    "#ffcb6b",
+    "#82aaff",
+    "#c792ea",
+    "#8be9fd",
+    "#f8f8f2",
+    "#545454",
+    "#ff6e6e",
+    "#69ff94",
+    "#ffcb6b",
+    "#d6acff",
+    "#ff92df",
+    "#a4ffff",
+    "#f8f8f2"
+  ],
+  "background": "#212121",
+  "cursor": "#eceff4",
+  "cursorText": "#282828",
+  "foreground": "#f8f8f2",
+  "name": "Dracula+",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f8f8f2",
+  "selectionForeground": "#545454"
+}

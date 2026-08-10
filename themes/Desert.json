@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#4d4d4d",
+    "#ff2b2b",
+    "#98fb98",
+    "#f0e68c",
+    "#cd853f",
+    "#ffdead",
+    "#ffa0a0",
+    "#f5deb3",
+    "#626262",
+    "#ff5555",
+    "#55ff55",
+    "#ffff55",
+    "#87ceff",
+    "#ff55ff",
+    "#ffd700",
+    "#ffffff"
+  ],
+  "background": "#333333",
+  "cursor": "#00ff00",
+  "cursorText": "#000000",
+  "foreground": "#ffffff",
+  "name": "Desert",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b5d5ff",
+  "selectionForeground": "#000000"
+}

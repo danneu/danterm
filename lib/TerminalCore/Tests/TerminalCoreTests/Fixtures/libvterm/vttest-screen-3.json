@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_02-screen-3.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b[?6h"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[23;24r"
+    },
+    {
+      "type": "feed",
+      "text": "\n"
+    },
+    {
+      "type": "feed",
+      "text": "Bottom"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;1H"
+    },
+    {
+      "type": "feed",
+      "text": "Above"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          {
+            "row": 22,
+            "column": 0,
+            "scalars": "A"
+          },
+          {
+            "row": 22,
+            "column": 1,
+            "scalars": "b"
+          },
+          {
+            "row": 22,
+            "column": 2,
+            "scalars": "o"
+          },
+          {
+            "row": 22,
+            "column": 3,
+            "scalars": "v"
+          },
+          {
+            "row": 22,
+            "column": 4,
+            "scalars": "e"
+          },
+          {
+            "row": 23,
+            "column": 0,
+            "scalars": "B"
+          },
+          {
+            "row": 23,
+            "column": 1,
+            "scalars": "o"
+          },
+          {
+            "row": 23,
+            "column": 2,
+            "scalars": "t"
+          },
+          {
+            "row": 23,
+            "column": 3,
+            "scalars": "t"
+          },
+          {
+            "row": 23,
+            "column": 4,
+            "scalars": "o"
+          },
+          {
+            "row": 23,
+            "column": 5,
+            "scalars": "m"
+          }
+        ],
+        "cursor": {
+          "row": 22,
+          "column": 5,
+          "pendingWrap": false
+        }
+      }
+    }
+  ]
+}

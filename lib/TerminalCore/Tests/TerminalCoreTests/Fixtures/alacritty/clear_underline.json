@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/clear_underline/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "clear_underline",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 66,
+    "rows": 32
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "W3VuZGVhZGxlZWNoQHVuZGVhZGxhcCBhbGFjcml0dHldJCBlY2hvIC1lICJcZVs0bVVOREVSTElORUQiDQobWzRtVU5ERVJMSU5FRA0KW3VuZGVhZGxlZWNoQHVuZGVhZGxhcCBhbGFjcml0dHldJCBjbGVhcg0KG1szShtbSBtbMkpbdW5kZWFkbGVlY2hAdW5kZWFkbGFwIGFsYWNyaXR0eV0kIGV4aXQNCmV4aXQNCg=="
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "[undeadleech@undeadlap alacritty]$ exit                           \nexit                                                              \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  \n                                                                  "
+      }
+    }
+  ]
+}

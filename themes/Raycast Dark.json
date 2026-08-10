@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff5360",
+    "#59d499",
+    "#ffc531",
+    "#56c2ff",
+    "#cf2f98",
+    "#52eee5",
+    "#ffffff",
+    "#4c4c4c",
+    "#ff6363",
+    "#59d499",
+    "#ffc531",
+    "#56c2ff",
+    "#cf2f98",
+    "#52eee5",
+    "#ffffff"
+  ],
+  "background": "#1a1a1a",
+  "cursor": "#cccccc",
+  "cursorText": "#999999",
+  "foreground": "#ffffff",
+  "name": "Raycast Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#333333",
+  "selectionForeground": "#595959"
+}

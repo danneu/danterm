@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#d4d5dc",
+    "#5f7982",
+    "#4a704e",
+    "#bf5238",
+    "#456a82",
+    "#c99730",
+    "#8a6539",
+    "#282930",
+    "#42434e",
+    "#c99730",
+    "#4a704e",
+    "#bf5238",
+    "#456a82",
+    "#5f7982",
+    "#8a6539",
+    "#282930"
+  ],
+  "background": "#edeef2",
+  "cursor": "#565760",
+  "cursorText": "#282930",
+  "foreground": "#282930",
+  "name": "Sequoia Retro Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#817c9c",
+  "selectionForeground": "#282930"
+}

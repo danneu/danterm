@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#07080d",
+    "#ffc0b9",
+    "#b3f6c0",
+    "#fce094",
+    "#a6dbff",
+    "#ffcaff",
+    "#8cf8f7",
+    "#eef1f8",
+    "#4f5258",
+    "#ffc0b9",
+    "#b3f6c0",
+    "#fce094",
+    "#a6dbff",
+    "#ffcaff",
+    "#8cf8f7",
+    "#eef1f8"
+  ],
+  "background": "#14161b",
+  "cursor": "#9b9ea4",
+  "cursorText": "#e0e2ea",
+  "foreground": "#e0e2ea",
+  "name": "Nvim Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4f5258",
+  "selectionForeground": "#e0e2ea"
+}

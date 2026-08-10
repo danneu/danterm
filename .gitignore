@@ -1,14 +1,3 @@
-# Built artifacts under lib/ (rebuild with ./build-lib.sh).
-# Source packages (DanTermProtocol, DanTermCore, DanTermSupport) ARE tracked -- only
-# the build artifacts (GhosttyKit.xcframework, ghostty-themes) are ignored.
-lib/*
-!lib/DanTermProtocol/
-!lib/DanTermCore/
-!lib/DanTermSupport/
-
-# Ghostty source cache
-.ghostty-src/
-
 # Dev build output
 build/
 .build/
@@ -16,5 +5,15 @@ build/
 
 # SwiftPM
 .spm-build/
+# The `just test` gate builds lib/TerminalCore with extra -Xswiftc args, which change
+# SwiftPM's build-argument hash. Sharing .build/ with a bare `swift test` made the two
+# invalidate each other on every switch; the gate gets its own scratch path instead.
+.build-gate/
+# The root app/CLI tests are an independent parallel gate step and need their own SwiftPM build tree.
+.build-app-tests/
 .swiftpm/
 Package.resolved
+__pycache__/
+
+# Reproducible external source checkouts (materialize with `just fetch-references`).
+/references/

@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/13state_edit.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "IL; IL with DECSTBM; IL outside DECSTBM; DL; DL with DECSTBM; DL outside DECSTBM",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm keeps the cursor column for IL and DL, matching xterm and libvterm rather than ECMA-48 line home.",
+      "DanTerm clears pending wrap and open grapheme attachment on valid IL and DL."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "A\r\nC\u001b[L" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nC   \n    ",
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\rB\u001b[3L" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \n    \n    ",
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[r\u001b[2J\u001b[HA\r\nB\r\nB\r\nC\u001b[2H\u001b[M" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \nB   \nC   \n    ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[3M" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \n    \n    ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[r\u001b[2J\u001b[HA\r\nB\r\nC\r\nD\u001b[2;3r\u001b[2H\u001b[L" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nB   \nD   ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[4H\u001b[L" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nB   \nD   ",
+        "cursor": { "row": 3, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[r\u001b[2J\u001b[HA\r\nB\r\nC\r\nD\u001b[2;3r\u001b[2H\u001b[M" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \nC   \n    \nD   ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[4H\u001b[M" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \nC   \n    \nD   ",
+        "cursor": { "row": 3, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

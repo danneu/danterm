@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#3c3c30",
+    "#98290f",
+    "#479a43",
+    "#7f7111",
+    "#497f7d",
+    "#7f4e2f",
+    "#387f58",
+    "#807974",
+    "#555445",
+    "#e0502a",
+    "#61e070",
+    "#d69927",
+    "#79d9d9",
+    "#cd7c54",
+    "#59d599",
+    "#fff1e9"
+  ],
+  "background": "#22211d",
+  "cursor": "#facb80",
+  "cursorText": "#161611",
+  "foreground": "#807a74",
+  "name": "Elemental",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#413829",
+  "selectionForeground": "#facd77"
+}

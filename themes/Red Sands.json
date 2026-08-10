@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff3f00",
+    "#00bb00",
+    "#e7b000",
+    "#0072ff",
+    "#bb00bb",
+    "#00bbbb",
+    "#bbbbbb",
+    "#6e6e6e",
+    "#d41a1a",
+    "#00bb00",
+    "#e7b000",
+    "#0072ae",
+    "#ff55ff",
+    "#55ffff",
+    "#ffffff"
+  ],
+  "background": "#7a251e",
+  "cursor": "#ffffff",
+  "cursorText": "#000000",
+  "foreground": "#d7c9a7",
+  "name": "Red Sands",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a4a390",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/02parser.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "OSC BEL; OSC ST (7bit); OSC ST (8bit); OSC in parts; OSC BEL without semicolon; OSC ST without semicolon; Escape cancels OSC, starts Escape; CAN cancels OSC, returns to normal mode; C0 in OSC interrupts and continues; DCS BEL; DCS ST (7bit); DCS ST (8bit); Split write of 7bit ST; Escape cancels DCS, starts Escape; CAN cancels DCS, returns to normal mode; C0 in OSC interrupts and continues; APC BEL; APC ST (7bit); APC ST (8bit); PM BEL; PM ST (7bit); PM ST (8bit); SOS BEL; SOS ST (7bit); SOS ST (8bit); SOS can contain any C0 or C1 code",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
+      "DanTerm's UTF-8 mode excludes raw C1 introducers, 8-bit ST, and S8C1T; bytes 0x80 through 0x9f are opaque inside active control strings."
+    ]
+  },
+  "initial": { "columns": 12, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "A\u001b]1;Hello\u0007B" },
+    { "type": "expect", "expect": { "viewportText": "AB          \n            " } },
+    { "type": "feed", "text": "\u001bcC\u001b]1;Hello\u001b\\D" },
+    { "type": "expect", "expect": { "viewportText": "CD          \n            " } },
+    { "type": "feed", "text": "\u001bcE\u001b]52;abc" },
+    { "type": "feed", "text": "def" },
+    { "type": "feed", "text": "ghi\u001b\\F" },
+    { "type": "expect", "expect": { "viewportText": "EF          \n            " } },
+    { "type": "feed", "text": "\u001bcG\u001b]1234\u0007H\u001b]1234\u001b\\I" },
+    { "type": "expect", "expect": { "viewportText": "GHI         \n            " } },
+    { "type": "feed", "text": "\u001bcJ\u001b]Something\u001b9K\u001b]12\u0018LM" },
+    { "type": "expect", "expect": { "viewportText": "JKLM        \n            " } },
+    { "type": "feed", "text": "\u001bcN\u001b]2;Bye\u0007O" },
+    { "type": "expect", "expect": {
+      "viewportText": "NO          \n            ",
+      "semanticEvents": [{ "kind": "title", "value": "Bye" }]
+    } },
+    { "type": "feed", "text": "\u001bcP\u001bPHello\u0007Q\u001b\\R" },
+    { "type": "expect", "expect": { "viewportText": "PR          \n            " } },
+    { "type": "feed", "text": "\u001bcS\u001bPABC\u001b" },
+    { "type": "feed", "text": "\\T" },
+    { "type": "expect", "expect": { "viewportText": "ST          \n            " } },
+    { "type": "feed", "text": "\u001bcU\u001bP12\u0018VW" },
+    { "type": "expect", "expect": { "viewportText": "UVW         \n            " } },
+    { "type": "feed", "text": "\u001bcX\u001bPBy\ne\u0007Z\u001b\\Y" },
+    { "type": "expect", "expect": { "viewportText": "XY          \n            " } },
+    { "type": "feed", "text": "\u001bca\u001b_Hello\u0007b\u001b\\c\u001b^Hello\u0007d\u001b\\e\u001bXHello\u0007f\u001b\\g" },
+    { "type": "expect", "expect": { "viewportText": "aceg        \n            " } },
+    { "type": "feed", "base64": "G2NoG1hBQkMBREVGmUdISRtcaQ==" },
+    { "type": "expect", "expect": { "viewportText": "hi          \n            " } }
+  ]
+}

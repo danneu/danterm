@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#5f8787",
+    "#a5aaa7",
+    "#626b67",
+    "#888888",
+    "#999999",
+    "#aaaaaa",
+    "#c1c1c1",
+    "#404040",
+    "#5f8787",
+    "#a5aaa7",
+    "#626b67",
+    "#888888",
+    "#999999",
+    "#aaaaaa",
+    "#c1c1c1"
+  ],
+  "background": "#000000",
+  "cursor": "#c1c1c1",
+  "cursorText": "#8e8e8e",
+  "foreground": "#c1c1c1",
+  "name": "Black Metal (Marduk)",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1c1c1",
+  "selectionForeground": "#000000"
+}

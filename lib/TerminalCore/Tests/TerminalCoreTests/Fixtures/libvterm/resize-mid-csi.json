@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/16state_resize.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Resize without reset",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "x\u001b[2;" },
+    { "type": "resize", "columns": 5, "rows": 3 },
+    { "type": "feed", "text": "5Hq" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "x    \n    q\n     ",
+        "cursor": { "row": 1, "column": 4, "pendingWrap": true },
+        "scrollbackCount": 0,
+        "fullHistoryText": "x\n    q"
+      }
+    }
+  ]
+}

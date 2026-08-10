@@ -7,6 +7,20 @@
 | `ci.yml` | Pull requests | Ad-hoc (`--sign -`) | Build verification + release-build validation |
 | `release-stable.yml` | `v*` tags | Developer ID + notarized | GitHub Release with `.dmg` + `.zip` |
 
+`ci.yml` runs four independent jobs:
+
+| Job | Runner | What it proves |
+|---|---|---|
+| `cliff-smoke` | `ubuntu-latest` | git-cliff changelog grouping, plus the two Nix checks that can only execute on Linux (`shell-integration`, `home-manager-shell-integration`) |
+| `theme-freshness` | `ubuntu-latest` | re-importing the pinned theme archive leaves `themes/` byte-identical |
+| `build` | `macos-26` | `./build-app.sh` produces an ad-hoc-signable bundle |
+| `release-build-check` | `macos-26` | `./build-app.sh --version` produces the full release layout, and that layout survives a signed ZIP round-trip |
+
+Both macOS jobs are checkout-then-build: DanTerm is a pure SwiftPM/AppKit build,
+so there is no external toolchain to install or artifact to cache. `nix` appears
+only where a job actually uses it -- the Linux checks and git-cliff in
+`cliff-smoke`, and git-cliff plus `nix hash convert` in `release-stable.yml`.
+
 ## Releasing
 
 ```bash
@@ -27,24 +41,24 @@ just version         # show current version
 | `APPLE_API_ISSUER_ID` | App Store Connect issuer ID (UUID) | Same page as above |
 | `APPLE_API_KEY_P8` | Full `.p8` key file contents | Download from App Store Connect (one-time) |
 
-## Pinned versions
-
-- **Ghostty** -- pinned in `.ghostty-version` and loaded by each workflow through `scripts/load-ghostty-version.sh`
-- **Zig `0.15.2`** -- pulled from DanTerm's flake (`flake.nix`'s `zig_0_15` re-exports mitchellh/zig-overlay's Homebrew-bottled patched 0.15.2, for macOS 26.4+ SDK compatibility); installed via nix-installer in every GhosttyKit job
-
-When upgrading Ghostty, edit `.ghostty-version` and potentially the Zig version
-if the new Ghostty requires it.
-
 ## Runner requirements
 
-- **`macos-26`** — required for latest Xcode SDK (Ghostty uses `kCVPixelFormatType_30RGB_r210` from CoreVideo, added in macOS 15 SDK)
-- **`-Dxcframework-target=native`** — builds arm64 only; the universal (arm64+x86_64) build fails due to x86_64 cross-compilation SDK issues
+- **`macos-26`** -- both macOS jobs and the release job pin the same image, so
+  PR validation and the shipped build compile against the same Xcode and SDK.
 
 ## Nested helper signing
 
-The release bundle ships the `danterm` helper at `DanTerm.app/Contents/Helpers/danterm`.
-CI signs that nested executable before signing the outer `.app`, then verifies
-the full bundle with `codesign --verify --deep --strict --verbose=2`.
+The release bundle ships two nested executables under
+`DanTerm.app/Contents/Helpers/`: the `danterm` CLI, and `PTYSessionBootstrap`
+(the terminal backend reports itself not ready without it, so a bundle missing
+it launches and then fails to open a session). CI signs both nested executables
+*before* signing the outer `.app` -- signing the container seals whatever
+signatures the helpers already carry, so a helper signed afterwards invalidates
+the app -- then verifies the full bundle with
+`codesign --verify --deep --strict --verbose=2`.
+
+Both workflows assert the presence of both helpers, and re-assert
+`PTYSessionBootstrap` after the ZIP round-trip.
 
 The agent hook scripts live at `DanTerm.app/Contents/Resources/danterm-hooks/`,
 not `Contents/Helpers/`. They are executable shell scripts, not Mach-O nested
@@ -54,10 +68,6 @@ by content in `CodeResources`, and CI verifies the published shape by unzipping
 the signed app and running `codesign --verify --deep --strict`.
 
 ## Troubleshooting
-
-### Dependency URL staleness
-
-As of Ghostty v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`), so the old iTerm2-Color-Schemes URL patching is no longer needed. If a CDN URL goes stale in the future, a similar `sed` patch approach can be used.
 
 ### Re-triggering a release
 
@@ -80,4 +90,4 @@ The CI needs a **Developer ID Application** certificate (not "Apple Development"
 
 ### macOS runner minutes
 
-macOS runners cost **10x** regular minutes. Free tier: 2,000 min/month = effectively 200 macOS minutes. GhosttyKit builds take ~5-10 min but are cached after the first run.
+macOS runners cost **10x** regular minutes. Free tier: 2,000 min/month = effectively 200 macOS minutes. Keep new work on the `ubuntu-latest` jobs unless it genuinely needs macOS.

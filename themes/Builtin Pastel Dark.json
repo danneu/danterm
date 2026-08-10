@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#4f4f4f",
+    "#ff6c60",
+    "#a8ff60",
+    "#ffffb6",
+    "#96cbfe",
+    "#ff73fd",
+    "#c6c5fe",
+    "#eeeeee",
+    "#7c7c7c",
+    "#ffb6b0",
+    "#ceffac",
+    "#ffffcc",
+    "#b5dcff",
+    "#ff9cfe",
+    "#dfdffe",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#ffa560",
+  "cursorText": "#ffffff",
+  "foreground": "#bbbbbb",
+  "name": "Builtin Pastel Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#363983",
+  "selectionForeground": "#f2f2f2"
+}

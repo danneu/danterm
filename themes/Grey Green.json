@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#fe1414",
+    "#74ff00",
+    "#f1ff01",
+    "#00deff",
+    "#ff00f0",
+    "#00ffbc",
+    "#ffffff",
+    "#666666",
+    "#ff3939",
+    "#00ff44",
+    "#ffd100",
+    "#00afff",
+    "#ff008a",
+    "#00ffd3",
+    "#f5ecec"
+  ],
+  "background": "#002a1a",
+  "cursor": "#fff400",
+  "cursorText": "#aeb1b0",
+  "foreground": "#ffffff",
+  "name": "Grey Green",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#517e50",
+  "selectionForeground": "#e2e2e2"
+}

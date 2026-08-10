@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#31363b",
+    "#ed1515",
+    "#11d116",
+    "#f67400",
+    "#1d99f3",
+    "#9b59b6",
+    "#1abc9c",
+    "#eff0f1",
+    "#7f8c8d",
+    "#c0392b",
+    "#1cdc9a",
+    "#fdbc4b",
+    "#3daee9",
+    "#8e44ad",
+    "#16a085",
+    "#fcfcfc"
+  ],
+  "background": "#31363b",
+  "cursor": "#eff0f1",
+  "cursorText": "#31363b",
+  "foreground": "#eff0f1",
+  "name": "Breeze",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#eff0f1",
+  "selectionForeground": "#31363b"
+}

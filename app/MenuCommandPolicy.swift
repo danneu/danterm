@@ -1,6 +1,6 @@
 // Menu command enablement policy shared by the app delegate and the UI-test
 // harness. Keep this file free of AppKit view/runtime dependencies so command
-// validation can be tested without GhosttyKit.
+// validation can be tested without standing up the app runtime.
 import Foundation
 
 /// App-level commands that remain valid even when the terminal window is not
@@ -12,7 +12,6 @@ import Foundation
     func importState(_ sender: Any?)
     func exportState(_ sender: Any?)
     func openDanTermConfig(_ sender: Any?)
-    func openGhosttyConfig(_ sender: Any?)
     func reloadConfig(_ sender: Any?)
     func installDantermInPath(_ sender: Any?)
 }
@@ -26,7 +25,6 @@ enum MenuCommandPolicy {
         #selector(WindowIndependentMenuActions.importState(_:)),
         #selector(WindowIndependentMenuActions.exportState(_:)),
         #selector(WindowIndependentMenuActions.openDanTermConfig(_:)),
-        #selector(WindowIndependentMenuActions.openGhosttyConfig(_:)),
         #selector(WindowIndependentMenuActions.reloadConfig(_:)),
         #selector(WindowIndependentMenuActions.installDantermInPath(_:)),
     ]

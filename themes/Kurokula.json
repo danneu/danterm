@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#333333",
+    "#c35a52",
+    "#78b3a9",
+    "#e1b917",
+    "#5c91dd",
+    "#8b79a6",
+    "#867268",
+    "#e0cfc2",
+    "#515151",
+    "#ffc34c",
+    "#afffa5",
+    "#fff700",
+    "#90dbff",
+    "#ad93ff",
+    "#ffcdb6",
+    "#ffffff"
+  ],
+  "background": "#141515",
+  "cursor": "#7a1c1c",
+  "cursorText": "#fffbf2",
+  "foreground": "#e0cfc2",
+  "name": "Kurokula",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#515151",
+  "selectionForeground": "#ffc34c"
+}

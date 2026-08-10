@@ -1196,7 +1196,7 @@ import DanTermProtocol
             let reply = try requireIpcReply(commands)
             let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
             #expect(hasEffect(commands) {
-                if case .createSurface(let effectPaneId, let cwd, _, _, _) = $0 {
+                if case .createSession(let effectPaneId, let cwd, _, _, _) = $0 {
                     return effectPaneId == paneId && cwd == "/caller"
                 }
                 return false
@@ -1207,7 +1207,7 @@ import DanTermProtocol
     @Test("tab.new with launch seeds shell input and custom tab title")
     func tabNewWithLaunchSeedsShellInputAndCustomTitle() throws {
         // Intent: tab.new with a launch object seeds shell input, sets
-        //   custom title, and emits createSurface with the documented
+        //   custom title, and emits createSession with the documented
         //   shape (command + waitAfterCommand=true).
         // Why it exists: pins the launch wiring.
         // Scenario: spec-first launch shell input.
@@ -1237,7 +1237,7 @@ import DanTermProtocol
         #expect(tabById(tabId, in: model)?.displayTitle == "clock")
         #expect(model.pane(paneId)?.title == "clock")
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
+            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
                 return effectPaneId == paneId
                     && cwd == "/tmp"
                     && command == "date"
@@ -1245,7 +1245,7 @@ import DanTermProtocol
                     && waitAfterCommand
             }
             return false
-        }, "expected createSurface with shell input command")
+        }, "expected createSession with shell input command")
     }
 
     @Test("tab.new with explicit group id forwards launch to created tab")
@@ -1272,7 +1272,7 @@ import DanTermProtocol
         let paneId = group?.tabs.last?.focusedPaneId
         #expect(paneId != nil, "target group should have a new tab")
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, _, let command, let launchCommand, _) = $0 {
+            if case .createSession(let effectPaneId, _, let command, let launchCommand, _) = $0 {
                 return effectPaneId == paneId && command == "make test" && launchCommand == nil
             }
             return false
@@ -1457,14 +1457,14 @@ import DanTermProtocol
         #expect(model.pane(newPaneId)?.title == "cargo")
         #expect(tabById(tabId, in: model)?.customTitle == nil)
         #expect(hasEffect(commands) {
-            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
+            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
                 return effectPaneId == newPaneId
                     && cwd == "/tmp"
                     && command == "cargo --version"
                     && launchCommand == nil
             }
             return false
-        }, "expected split createSurface to seed shell input")
+        }, "expected split createSession to seed shell input")
     }
 
     @Test("pane.split background on selected tab preserves focused pane")
@@ -1558,7 +1558,7 @@ import DanTermProtocol
     @Test("malformed launch returns invalid params without mutation commands")
     func malformedLaunchReturnsInvalidParamsWithoutMutation() throws {
         // Intent: a malformed launch param fails both tab.new and
-        //   pane.split paths before any mutation; no createSurface
+        //   pane.split paths before any mutation; no createSession
         //   command leaks.
         // Why it exists: pins fail-closed for malformed launch.
         // Scenario: spec-first malformed launch.
@@ -1579,9 +1579,9 @@ import DanTermProtocol
             #expect(try requireIpcError(tabEffects).code == -32602)
             #expect(Set(model.allPaneIds) == paneIdsBefore)
             #expect(!hasEffect(tabEffects) {
-                if case .createSurface = $0 { return true }
+                if case .createSession = $0 { return true }
                 return false
-            }, "malformed tab.new launch should not create a surface")
+            }, "malformed tab.new launch should not create a session")
 
             let splitEffects = sendIpc(
                 &model,
@@ -1595,9 +1595,9 @@ import DanTermProtocol
             #expect(try requireIpcError(splitEffects).code == -32602)
             #expect(Set(model.allPaneIds) == paneIdsBefore)
             #expect(!hasEffect(splitEffects) {
-                if case .createSurface = $0 { return true }
+                if case .createSession = $0 { return true }
                 return false
-            }, "malformed pane.split launch should not create a surface")
+            }, "malformed pane.split launch should not create a session")
         }
     }
 
@@ -2274,12 +2274,8 @@ import DanTermProtocol
             "message should mention unknown mod bogus, got: \(error.message)")
     }
 
-    @Test("pane.input shift mod is rejected")
-    func paneInputShiftModIsRejected() throws {
-        // Intent: shift as a modifier is rejected (use the bare key
-        //   instead).
-        // Why it exists: pins the named-mod exclusion of shift.
-        // Scenario: spec-first shift mod rejected.
+    @Test("pane.input shift mod reaches the named-key command")
+    func paneInputShiftModReachesNamedKeyCommand() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -2296,10 +2292,12 @@ import DanTermProtocol
             ]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message.contains("shift"),
-            "message should mention shift, got: \(error.message)")
+        #expect(commands.contains { command in
+            if case .sendInputKey(let target, .named(.tab), let modifiers) = command {
+                return target == paneId && modifiers == [.shift]
+            }
+            return false
+        })
     }
 
     @Test("pane.input explicit pane targets that pane regardless of context")
@@ -2534,6 +2532,97 @@ import DanTermProtocol
             #expect(error.message == "lines must be a positive integer")
         }
     }
+
+    @Test("pane.tape resolves the addressed pane and defers its reply")
+    func paneTapeResolvesAddressedPane() {
+        // Intent: pane.tape emits one dump command for the explicit pane and no
+        //   immediate reply, leaving serialization to the runtime boundary.
+        // Why it exists: the pure update layer must not read a session or encode
+        //   a recording while still owning pane-addressing semantics.
+        // Scenario: a CLI client requests a tape from a known background pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneTape,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        )
+
+        #expect(commands.count == 1)
+        guard case .dumpPaneTape(_, let commandPaneId) = commands[0] else {
+            Issue.record("expected dumpPaneTape command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+    }
+
+    @Test("pane.tape follow resolves the addressed pane and preserves tail mode")
+    func paneTapeFollowResolvesAddressedPane() {
+        // Intent: follow requests emit a long-lived stream command for the explicit pane.
+        // Why it exists: the one-reply dump command cannot represent later notifications.
+        // Scenario: an agent asks to tail a known background pane without its backlog.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneTape,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "follow": .bool(true),
+                "fromNow": .bool(true),
+            ])
+        )
+
+        #expect(commands.count == 1)
+        guard case .followPaneTape(_, let commandPaneId, let fromNow) = commands[0] else {
+            Issue.record("expected followPaneTape command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+        #expect(fromNow)
+    }
+
+    @Test("pane.tape rejects missing and unknown panes")
+    func paneTapeRejectsMissingAndUnknownPanes() throws {
+        var missingModel = makeModel()
+        createTab(&missingModel)
+        let missing = sendIpc(
+            &missingModel,
+            method: Methods.paneTape,
+            params: .object([:]),
+            context: IpcRequestContext()
+        )
+        #expect(try requireIpcError(missing) == .init(code: -32602, message: "pane required"))
+
+        var unknownModel = makeModel()
+        createTab(&unknownModel)
+        let unknown = sendIpc(
+            &unknownModel,
+            method: Methods.paneTape,
+            params: .object(["pane": .string(UUID().uuidString)])
+        )
+        #expect(try requireIpcError(unknown) == .init(code: -32602, message: "pane not found"))
+
+        var invalidModel = makeModel()
+        createTab(&invalidModel)
+        let paneId = selectedTab(in: invalidModel)!.focusedPaneId
+        let invalid = sendIpc(
+            &invalidModel,
+            method: Methods.paneTape,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "fromNow": .bool(true),
+            ])
+        )
+        #expect(try requireIpcError(invalid) == .init(
+            code: -32602,
+            message: "fromNow requires follow"
+        ))
+    }
 }
 
 // MARK: - Private helpers
@@ -2649,5 +2738,122 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
             body(&model.groups[groupIndex].tabs[tabIndex])
             return
         }
+    }
+}
+
+// MARK: - pane.zoom
+
+@Suite struct UpdateIpcZoomTests {
+    @Test("pane.zoom sets an explicit state rather than toggling")
+    func paneZoomSetsExplicitState() throws {
+        // Intent: `state: "on"` and `state: "off"` drive the tab to that zoom state
+        //   regardless of what it was, so repeating a request is a no-op.
+        // Why it exists: a script that can only toggle cannot recover a known state
+        //   after any concurrent change, which makes an agent-driven resize stimulus
+        //   depend on history it cannot observe.
+        // Scenario: spec-first; an agent zooms a split tab twice, then unzooms twice.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let params = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("on"),
+        ])
+
+        for _ in 0..<2 {
+            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))
+            #expect(reply["tab"]?["isZoomed"]?.asBool == true)
+            #expect(selectedTab(in: model)!.isZoomed)
+        }
+
+        let off = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("off"),
+        ])
+        for _ in 0..<2 {
+            let reply = try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: off))
+            #expect(reply["tab"]?["isZoomed"]?.asBool == false)
+            #expect(selectedTab(in: model)!.isZoomed == false)
+        }
+    }
+
+    @Test("pane.zoom toggle flips the tab and reports the resulting state")
+    func paneZoomToggleFlips() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let params = JSONValue.object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("toggle"),
+        ])
+
+        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == true)
+        #expect(try requireIpcReply(sendIpc(&model, method: Methods.paneZoom, params: params))["tab"]?["isZoomed"]?.asBool == false)
+    }
+
+    @Test("pane.zoom on an unsplit tab reports not zoomed instead of failing")
+    func paneZoomUnsplitTabReportsNotZoomed() throws {
+        // Intent: a tab with no split cannot zoom, and the reply says so.
+        // Why it exists: a caller scripting a resize stimulus needs to distinguish
+        //   "zoom applied" from "nothing to zoom" without parsing an error string.
+        // Scenario: spec-first; an agent zooms a tab holding a single pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let reply = try requireIpcReply(sendIpc(
+            &model,
+            method: Methods.paneZoom,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "state": .string("on"),
+            ])
+        ))
+        #expect(reply["tab"]?["isZoomed"]?.asBool == false)
+    }
+
+    @Test("pane.zoom rejects an unknown state and an unknown pane")
+    func paneZoomRejectsBadInput() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let badState = sendIpc(&model, method: Methods.paneZoom, params: .object([
+            "pane": .string(paneId.rawValue.uuidString),
+            "state": .string("sideways"),
+        ]))
+        #expect(try requireIpcError(badState).code == -32602)
+
+        let unknownPane = sendIpc(&model, method: Methods.paneZoom, params: .object([
+            "pane": .string(UUID().uuidString),
+            "state": .string("on"),
+        ]))
+        #expect(try requireIpcError(unknownPane).code == -32602)
+        #expect(selectedTab(in: model)!.isZoomed == false)
+    }
+
+    @Test("pane.info reports the tab's zoom state")
+    func paneInfoReportsZoomState() throws {
+        // Intent: the state `pane.zoom` sets is readable through `pane.info`.
+        // Why it exists: zoom is deliberately transient and so is absent from the
+        //   persisted snapshot `ls` returns, which would otherwise leave an agent
+        //   able to set zoom but not observe it.
+        // Scenario: spec-first; an agent zooms a tab and reads it back.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+
+        let before = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        #expect(before["tab"]?["isZoomed"]?.asBool == false)
+
+        _ = update(&model, .toggleZoomPane(paneId: paneId))
+
+        let after = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        #expect(after["tab"]?["isZoomed"]?.asBool == true)
     }
 }

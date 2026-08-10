@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cc0000",
+    "#009600",
+    "#d06b00",
+    "#0000cc",
+    "#cc00cc",
+    "#0087cc",
+    "#a6a6a6",
+    "#808080",
+    "#cc0000",
+    "#009600",
+    "#d06b00",
+    "#0000cc",
+    "#cc00cc",
+    "#0087cc",
+    "#ffffff"
+  ],
+  "background": "#dfdbc3",
+  "cursor": "#73635a",
+  "cursorText": "#000000",
+  "foreground": "#3b2322",
+  "name": "Novel",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a4a390",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#131317",
+    "#f58ee0",
+    "#8eb6f5",
+    "#9898a6",
+    "#c58fff",
+    "#fdfdfe",
+    "#ffbb88",
+    "#868690",
+    "#575861",
+    "#f58ee0",
+    "#8eb6f5",
+    "#9898a6",
+    "#c58fff",
+    "#fdfdfe",
+    "#ffbb88",
+    "#868690"
+  ],
+  "background": "#0f1014",
+  "cursor": "#43444d",
+  "cursorText": "#868690",
+  "foreground": "#868690",
+  "name": "Sequoia Moonlight Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#817c9c",
+  "selectionForeground": "#acacb6"
+}

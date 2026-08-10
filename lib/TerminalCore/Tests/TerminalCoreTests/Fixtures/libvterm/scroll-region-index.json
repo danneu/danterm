@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Index in DECSTBM; Reverse Index in DECSTBM",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "The upstream Index case sends ESC M (RI); the upstream Reverse Index case sends LF below the region."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "A\r\nB\r\nC\r\nD\u001b[2;3r\u001b[3H\u001bM" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \nB   \nC   \nD   ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001bM" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nB   \nD   ",
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[4H\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nB   \nD   ",
+        "cursor": { "row": 3, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

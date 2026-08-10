@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#26233a",
+    "#eb6f92",
+    "#31748f",
+    "#f6c177",
+    "#9ccfd8",
+    "#c4a7e7",
+    "#ebbcba",
+    "#e0def4",
+    "#6e6a86",
+    "#eb6f92",
+    "#31748f",
+    "#f6c177",
+    "#9ccfd8",
+    "#c4a7e7",
+    "#ebbcba",
+    "#e0def4"
+  ],
+  "background": "#191724",
+  "cursor": "#e0def4",
+  "cursorText": "#191724",
+  "foreground": "#e0def4",
+  "name": "Rose Pine",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#403d52",
+  "selectionForeground": "#e0def4"
+}

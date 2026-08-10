@@ -1,0 +1,365 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/vim_simple_edit/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "vim_simple_edit",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": [
+      "DanTerm retains explicit RGB foregrounds that equal Alacritty's configured default."
+    ]
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 24
+  },
+  "events": [
+    {
+      "type": "feed",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICANIA0bXTI7andpbG1AandpbG0tZGVzazogfi9jb2RlL2FsYWNyaXR0eQcbXTE7Li5vZGUvYWxhY3JpdHR5Bw0bWzBtG1syN20bWzI0bRtbSmp3aWxtQGp3aWxtLWRlc2sgG1swMTszMm3inpwgG1swMTszMm0gG1szNm1+L2NvZGUvYWxhY3JpdHR5IBtbMDBtIBtbSxtbPzFoGz0bWz8yMDA0aBtbMW0bWzMxbXYbWzBtG1szOW0IG1swbRtbMzVtdhtbMzVtaRtbMzltCAgbWzM1bXYbWzM1bWkbWzM1bW0bWzM5bRtbPzFsGz4bWz8yMDA0bA0NChtdMjt2aW0HG10xO3ZpbQcbWz8xMDQ5aBtbPzFoGz0bWzI7MUjilr0bWzZuG1syOzFIICAbWzE7MUgbWzE7MjRyG1s/MTI7MjVoG1s/MTJsG1s/MjVoG1syN20bWzIzbRtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtG1tIG1syShtbPmMbWz8yNWwbWzE7MUgbWzM4OzI7NjY7NjY7NjZtICAxIA0KfiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzM7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbNDsxSH4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgG1s1OzFIfiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzY7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbNzsxSH4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgG1s4OzFIfiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzk7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTA7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTE7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTI7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTM7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTQ7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTU7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTY7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTc7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTg7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTk7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMjA7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMjE7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMjI7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMjM7MUh+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtG1syNDs2M0gwLDAtMRtbOUNBbGwbWzc7MzJIVklNIC0gVmkgSU1wcm92ZWQbWzk7MzNIdmVyc2lvbiA3LjQuMTgzMhtbMTA7MjlIYnkgQnJhbSBNb29sZW5hYXIgZXQgYWwuG1sxMTsxOUhWaW0gaXMgb3BlbiBzb3VyY2UgYW5kIGZyZWVseSBkaXN0cmlidXRhYmxlG1sxMzsyNkhCZWNvbWUgYSByZWdpc3RlcmVkIFZpbSB1c2VyIRtbMTQ7MThIdHlwZSAgOmhlbHAgcmVnaXN0ZXIbWzM4OzI7NjY7NjY7NjZtPEVudGVyPhtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtICAgZm9yIGluZm9ybWF0aW9uIBtbMTY7MThIdHlwZSAgOnEbWzM4OzI7NjY7NjY7NjZtPEVudGVyPhtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtICAgICAgICAgICAgICAgdG8gZXhpdCAgICAgICAgIBtbMTc7MThIdHlwZSAgOmhlbHAbWzM4OzI7NjY7NjY7NjZtPEVudGVyPhtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtICBvciAgG1szODsyOzY2OzY2OzY2bTxGMT4bW20bWzM4OzI7MjM0OzIzNDsyMzRtG1s0ODsyOzA7MDswbSAgZm9yIG9uLWxpbmUgaGVscBtbMTg7MThIdHlwZSAgOmhlbHAgdmVyc2lvbjcbWzM4OzI7NjY7NjY7NjZtPEVudGVyPhtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtICAgZm9yIHZlcnNpb24gaW5mbxtbMTs1SBtbPzEybBtbPzI1aBtbPzI1bBtbMjQ7MUgbWzFtG1szODsyOzE5NzsyMDk7OTJtLS0gSU5TRVJUIC0tG1ttG1szODsyOzIzNDsyMzQ7MjM0bRtbNDg7MjswOzA7MG0bWzI0OzYzSBtbSxtbMjQ7NjNIMCwxG1sxMUNBbGwbWzc7MzJIG1szODsyOzY2OzY2OzY2bSAgICAgICAgICAgICAgICAgG1s5OzMzSCAgICAgICAgICAgICAgICAbWzEwOzI5SCAgICAgICAgICAgICAgICAgICAgICAgIBtbMTE7MTlIICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMTM7MjZIICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzE0OzE4SCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzE2OzE4SCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzE3OzE4SCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzE4OzE4SCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzE7NUgbWz8xMmwbWz8yNWgbWz8yNWwbW20bWzM4OzI7MjM0OzIzNDsyMzRtG1s0ODsyOzA7MDswbUgbWzI0OzYzSDEsMhtbMTs2SBtbPzEybBtbPzI1aBtbPzI1bGUbWzI0OzY1SDMbWzE7N0gbWz8xMmwbWz8yNWgbWz8yNWxsG1syNDs2NUg0G1sxOzhIG1s/MTJsG1s/MjVoG1s/MjVsbBtbMjQ7NjVINRtbMTs5SBtbPzEybBtbPzI1aBtbPzI1bG8bWzI0OzY1SDYbWzE7MTBIG1s/MTJsG1s/MjVoG1s/MjVsLBtbMjQ7NjVINxtbMTsxMUgbWz8xMmwbWz8yNWgbWz8yNWwbWzM4OzI7NjY7NjY7NjZtwrcbW20bWzM4OzI7MjM0OzIzNDsyMzRtG1s0ODsyOzA7MDswbRtbMjQ7NjVIOBtbMTsxMkgbWz8xMmwbWz8yNWgbWz8yNWwIIHcbWzI0OzY1SDkbWzE7MTNIG1s/MTJsG1s/MjVoG1s/MjVsbxtbMjQ7NjVIMTAbWzE7MTRIG1s/MTJsG1s/MjVoG1s/MjVschtbMjQ7NjZIMRtbMTsxNUgbWz8xMmwbWz8yNWgbWz8yNWxsG1syNDs2NkgyG1sxOzE2SBtbPzEybBtbPzI1aBtbPzI1bGQbWzI0OzY2SDMbWzE7MTdIG1s/MTJsG1s/MjVoG1s/MjVsLhtbMjQ7NjZINBtbMTsxOEgbWz8xMmwbWz8yNWgbWz8yNWwuG1syNDs2Nkg1G1sxOzE5SBtbPzEybBtbPzI1aBtbPzI1bA0KG1szODsyOzY2OzY2OzY2bSAgMhtbbRtbMzg7MjsyMzQ7MjM0OzIzNG0bWzQ4OzI7MDswOzBtG1sxQyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAbWzI0OzYzSDIsMSAbWzI7NUgbWz8xMmwbWz8yNWgbWz8yNWwNChtbMzg7Mjs2Njs2Njs2Nm0gIDMbW20bWzM4OzI7MjM0OzIzNDsyMzRtG1s0ODsyOzA7MDswbRtbMUMgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgG1syNDs2M0gzG1szOzVIG1s/MTJsG1s/MjVoG1s/MjVsDQobWzM4OzI7NjY7NjY7NjZtICA0G1ttG1szODsyOzIzNDsyMzQ7MjM0bRtbNDg7MjswOzA7MG0bWzFDICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMjQ7NjNINBtbNDs1SBtbPzEybBtbPzI1aBtbPzI1bE8bWzI0OzY1SDIbWzQ7NkgbWz8xMmwbWz8yNWgbWz8yNWxrG1syNDs2NUgzG1s0OzdIG1s/MTJsG1s/MjVoG1s/MjVsLhtbMjQ7NjVINBtbNDs4SBtbPzEybBtbPzI1aBtbMjQ7MUgbW0sbWzQ7N0gbWz8yNWwbWzI0OzYzSDQsMxtbMTFDQWxsG1s0OzdIG1s/MTJsG1s/MjVoG1s/MjVsG1syNDs2M0gzLDAtMRtbMzs1SBtbPzEybBtbPzI1aBtbPzI1bBtbMjQ7NjNIG1tLG1syNDsxSDobWz8xMmwbWz8yNWh3G1s/MjVsG1s/MTJsG1s/MjVoG1s/MjVsG1syNDsxSBtbSxtbMjQ7NjNIMywwLTEbWzlDQWxsG1szOzVIG1s/MTJsG1s/MjVo"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "  1 Hello, world..                                                              \n  2                                                                             \n  3                                                                             \n  4 Ok.                                                                         \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n~                                                                               \n                                                              3,0-1         All ",
+        "cellStyleRuns": [
+          {
+            "row": 0,
+            "startColumn": 0,
+            "endColumn": 4,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 0,
+            "startColumn": 4,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:234,234,234",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 1,
+            "startColumn": 0,
+            "endColumn": 4,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 1,
+            "startColumn": 4,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:234,234,234",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 2,
+            "startColumn": 0,
+            "endColumn": 4,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 2,
+            "startColumn": 4,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:234,234,234",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 3,
+            "startColumn": 0,
+            "endColumn": 4,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 3,
+            "startColumn": 4,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:234,234,234",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 4,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 5,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 6,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 7,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 8,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 9,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 10,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 11,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 12,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 13,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 14,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 15,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 16,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 17,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 18,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 19,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 20,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 21,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 22,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:66,66,66",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          },
+          {
+            "row": 23,
+            "startColumn": 0,
+            "endColumn": 80,
+            "style": {
+              "foreground": "rgb:234,234,234",
+              "background": "rgb:0,0,0",
+              "attributes": [],
+              "underline": "none"
+            }
+          }
+        ],
+        "cursor": {
+          "row": 2,
+          "column": 4,
+          "pendingWrap": false
+        },
+        "cursorPresentation": {
+          "isVisible": true,
+          "shape": "block",
+          "isBlinking": false
+        },
+        "scrollbackCount": 0,
+        "primaryHistoryContains": [
+          "~/code/alacritty"
+        ],
+        "alternateScreenActive": true,
+        "inputModes": {
+          "applicationCursorKeys": true,
+          "applicationKeypad": true,
+          "lineFeedNewLine": false,
+          "focusReporting": false,
+          "bracketedPaste": false,
+          "mouseTracking": "off",
+          "sgrMouseEncoding": false,
+          "kittyKeyboardFlags": 0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#131317",
+    "#829fa7",
+    "#648f68",
+    "#da674b",
+    "#5c87a4",
+    "#e8b246",
+    "#a27e57",
+    "#868690",
+    "#575861",
+    "#e8b246",
+    "#648f68",
+    "#da674b",
+    "#5c87a4",
+    "#829fa7",
+    "#a27e57",
+    "#868690"
+  ],
+  "background": "#0f1014",
+  "cursor": "#43444d",
+  "cursorText": "#868690",
+  "foreground": "#868690",
+  "name": "Sequoia Retro Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#817c9c",
+  "selectionForeground": "#acacb6"
+}

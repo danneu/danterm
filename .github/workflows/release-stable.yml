@@ -26,13 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Load Ghostty version
-        id: ghostty-version
-        run: |
-          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
-          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
-          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
-
       - uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Set version from tag
@@ -42,19 +35,6 @@ jobs:
           echo "DMG_NAME=DanTerm-${VERSION}.dmg" >> "$GITHUB_ENV"
           echo "ZIP_NAME=DanTerm-${VERSION}.zip" >> "$GITHUB_ENV"
 
-      - name: Cache GhosttyKit
-        id: cache-ghosttykit
-        uses: actions/cache@v5
-        with:
-          path: |
-            lib/GhosttyKit.xcframework
-            lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Build GhosttyKit
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: ./build-lib.sh all
-
       - name: Build app bundle
         run: ./build-app.sh --version "${{ env.VERSION }}"
 
@@ -63,9 +43,18 @@ jobs:
           APP_PATH="build/${{ env.APP_NAME }}.app"
           test -x "$APP_PATH/Contents/MacOS/DanTerm"
           test -x "$APP_PATH/Contents/Helpers/danterm"
+          # The Swift terminal backend reports itself not ready without this
+          # helper, so a bundle missing it launches and then fails to open a session.
+          test -x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
           done
+          for shell in zsh bash fish; do
+            test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
+          done
+          # danterm.bash sources this as a sibling; without it the bundle path the
+          # README documents for bash fails on its source line.
+          test -r "$APP_PATH/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
             exit 1
@@ -97,8 +86,12 @@ jobs:
       - name: Codesign app
         run: |
           APP_PATH="build/${{ env.APP_NAME }}.app"
+          # Nested code first: signing the container seals whatever signatures the
+          # helpers already carry, so a helper signed afterwards invalidates the app.
           codesign --force --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/danterm"
+          codesign --force --options runtime \
+            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
           codesign --force --deep --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -124,9 +117,14 @@ jobs:
           mkdir -p "$WORK"
           unzip -q "build/${{ env.ZIP_NAME }}" -d "$WORK"
           codesign --verify --deep --strict --verbose=2 "$WORK/${{ env.APP_NAME }}.app"
+          test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Helpers/PTYSessionBootstrap"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/danterm-hooks/$h"
           done
+          for shell in zsh bash fish; do
+            test -r "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/shell-integration/danterm.$shell"
+          done
+          test -r "$WORK/${{ env.APP_NAME }}.app/Contents/Resources/shell-integration/vendor/bash-preexec.sh"
 
       - name: Notarize DMG
         env:
@@ -193,10 +191,9 @@ jobs:
           SRI=$(nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
           echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
 
-      # Check out master to a separate path so the second checkout doesn't
-      # clobber the default workdir (which holds lib/GhosttyKit.xcframework
-      # and .zig-cache). actions/cache saves in post-job cleanup, so those
-      # paths must still exist when the job finishes.
+      # Check out master to a separate path: actions/checkout cleans the
+      # directory it writes into, and the default workdir still holds the
+      # signed, notarized build/ artifacts this job produced.
       - name: Checkout master for package.nix update
         uses: actions/checkout@v6
         with:

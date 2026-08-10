@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#1f1f28",
+    "#c84053",
+    "#6f894e",
+    "#77713f",
+    "#4d699b",
+    "#b35b79",
+    "#597b75",
+    "#545464",
+    "#8a8980",
+    "#d7474b",
+    "#6e915f",
+    "#836f4a",
+    "#6693bf",
+    "#624c83",
+    "#5e857a",
+    "#43436c"
+  ],
+  "background": "#f2ecbc",
+  "cursor": "#43436c",
+  "cursorText": "#f2ecbc",
+  "foreground": "#545464",
+  "name": "Kanagawa Lotus",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#545464",
+  "selectionForeground": "#f2ecbc"
+}

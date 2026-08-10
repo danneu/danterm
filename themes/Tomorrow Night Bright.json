@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d54e53",
+    "#b9ca4a",
+    "#e7c547",
+    "#7aa6da",
+    "#c397d8",
+    "#70c0b1",
+    "#ffffff",
+    "#404040",
+    "#d54e53",
+    "#b9ca4a",
+    "#e7c547",
+    "#7aa6da",
+    "#c397d8",
+    "#70c0b1",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#eaeaea",
+  "cursorText": "#000000",
+  "foreground": "#eaeaea",
+  "name": "Tomorrow Night Bright",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#424242",
+  "selectionForeground": "#eaeaea"
+}

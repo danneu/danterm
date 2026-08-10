@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#e24346",
+    "#39b13a",
+    "#dae145",
+    "#4261c5",
+    "#f920fb",
+    "#2abbd4",
+    "#d0b8a3",
+    "#fefcfc",
+    "#e97071",
+    "#9cc090",
+    "#ddda7a",
+    "#7b91d6",
+    "#f674ba",
+    "#5ed1e5",
+    "#d8c8bb"
+  ],
+  "background": "#404040",
+  "cursor": "#30ff24",
+  "cursorText": "#0bbc04",
+  "foreground": "#afdab6",
+  "name": "Warm Neon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b0ad21",
+  "selectionForeground": "#ffffff"
+}

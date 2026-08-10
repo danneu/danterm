@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/31state_rep.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "REP no argument; REP zero (zero should be interpreted as one); REP lowercase a times two; REP with UTF-8 1 char; REP with UTF-8 wide char; REP with UTF-8 combining character",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 8, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "a\u001b[b" },
+    { "type": "expect", "expect": { "viewportText": "aa      \n        ", "cursor": { "row": 0, "column": 2, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bca\u001b[0b" },
+    { "type": "expect", "expect": { "viewportText": "aa      \n        ", "cursor": { "row": 0, "column": 2, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bca\u001b[2b" },
+    { "type": "expect", "expect": { "viewportText": "aaa     \n        ", "cursor": { "row": 0, "column": 3, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bc\u00e9\u001b[b" },
+    { "type": "expect", "expect": { "viewportText": "\u00e9\u00e9      \n        ", "cursor": { "row": 0, "column": 2, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bc\uff10\u001b[b" },
+    { "type": "expect", "expect": { "viewportText": "\uff10\uff10    \n        ", "cursor": { "row": 0, "column": 4, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bce\u0301\u001b[b" },
+    { "type": "expect", "expect": { "viewportText": "e\u0301e\u0301      \n        ", "cursor": { "row": 0, "column": 2, "pendingWrap": false } } }
+  ]
+}

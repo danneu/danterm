@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#283645",
+    "#c2384f",
+    "#2e7a56",
+    "#876010",
+    "#1a66be",
+    "#5552cc",
+    "#1a7e9e",
+    "#586878",
+    "#93a4b6",
+    "#c2384f",
+    "#2e7a56",
+    "#9a5220",
+    "#1a66be",
+    "#5552cc",
+    "#1a7e9e",
+    "#283645"
+  ],
+  "background": "#eef5fc",
+  "cursor": "#1f73cc",
+  "cursorText": "#eef5fc",
+  "foreground": "#283645",
+  "name": "Frostbyte",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#d2e4f4",
+  "selectionForeground": "#a1a8af"
+}

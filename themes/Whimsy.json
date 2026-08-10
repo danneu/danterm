@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#535178",
+    "#ef6487",
+    "#5eca89",
+    "#fdd877",
+    "#65aef7",
+    "#aa7ff0",
+    "#43c1be",
+    "#ffffff",
+    "#535178",
+    "#ef6487",
+    "#5eca89",
+    "#fdd877",
+    "#65aef7",
+    "#aa7ff0",
+    "#43c1be",
+    "#ffffff"
+  ],
+  "background": "#29283b",
+  "cursor": "#b3b0d6",
+  "cursorText": "#535178",
+  "foreground": "#b3b0d6",
+  "name": "Whimsy",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3d3c58",
+  "selectionForeground": "#ffffff"
+}

@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -16,6 +16,10 @@ cases agents hit in practice.
 Keep this section synced with `danterm help` and the parser in
 `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
 
+Every IPC command accepts `--socket <path>` before the command name. This
+explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
+lookup.
+
     danterm ls
     danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
     danterm tab rename [--tab <tab-id>] <name>|--clear
@@ -25,6 +29,9 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
+    danterm pane zoom [--pane <pane-id>] on|off|toggle
+    danterm pane rows --pane <pane-id>
+    danterm pane tape --pane <pane-id> [--follow] [--from-now]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
     danterm doctor
@@ -63,6 +70,9 @@ the app's currently focused group, tab, or pane.
   `danterm pane info --pane "$DANTERM_PANE"` when deriving live ids.
 - `danterm` may still work outside DanTerm if the app is running, but agents
   must use explicit ids for mutation commands.
+- When driving an isolated source-tree instance, agents must also pass
+  `--socket <path>` before every command. Do not export `DANTERM_SOCK`: the
+  target should remain visible at each call site.
 - If `$DANTERM_PANE` is absent, start with `danterm ls` and select targets only
   from explicit user-provided criteria visible in the JSON: id, exact group
   name, exact tab `customTitle`, exact pane title, or cwd. If the criteria do
@@ -85,7 +95,7 @@ For agent commands:
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
 - `agent attach`: hooks may use the implicit `$DANTERM_PANE` context; ordinary
   agent recipes should not call it.
-- `pane focus` and `pane read` already require explicit pane ids; keep them
+- `pane focus`, `pane read`, and `pane tape` already require explicit pane ids; keep them
   explicit.
 
 ## Context env vars
@@ -96,10 +106,48 @@ DanTerm sets these per pane:
 - `DANTERM_PANE` -- caller's pane id. Humans may omit explicit targets inside
   DanTerm; agents should use it only to derive live ids.
 - `DANTERM_SOCK` -- control socket path. Rarely needed; the CLI resolves it.
+  Inside DanTerm, an absent or empty value means that process does not own a
+  control socket, so the CLI reports that DanTerm is not running instead of
+  falling back to another same-identity instance. `--socket <path>` overrides
+  this value.
 
 If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique
 user-provided criteria.
+
+## Isolated source-tree instances
+
+In a fresh linked worktree, run `just provision-worktree` before the first
+build. It repeatably links the primary checkout's reference sources into the
+worktree without changing the primary checkout.
+
+When an agent needs its own development app, run `just launch-slot` from the
+source tree instead of `just replace-dev`. The launcher builds without replacing
+or focusing the user's slot-zero app, claims a free slot from 1 through 8, prints
+one JSON handle, and then becomes the app process. Capture the handle from
+stdout and target its `socketPath` explicitly:
+
+    SLOT_HANDLE="$(mktemp /tmp/danterm-slot.XXXXXX)"
+    ./scripts/dev-slot-launcher.py > "$SLOT_HANDLE" &
+    DANTERM_SLOT_PID=$!
+    while ! SLOT_SOCKET="$(jq -er '.socketPath' "$SLOT_HANDLE" 2>/dev/null)" \
+        && kill -0 "$DANTERM_SLOT_PID" 2>/dev/null; do sleep 0.1; done
+    test -n "${SLOT_SOCKET:-}" && danterm --socket "$SLOT_SOCKET" ls
+
+The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the launched
+app because the launcher uses direct exec. The default is fresh, background,
+and notification-prompt-free. Use `just launch-slot-prime` only when a human is
+ready to grant one slot's notification permission, and
+`just launch-slot-optimized` for an optimized build. Pool exhaustion exits with
+status 75 and starts no process.
+
+## Shell integration capability
+
+DanTerm ships opt-in zsh, Bash, and fish integrations at
+`Contents/Resources/shell-integration/danterm.{zsh,bash,fish}`. They report
+command boundaries, cwd, and remote-session metadata to the owning pane. Local
+integration is enabled by `DANTERM=1`; the bundled ssh/mosh wrappers forward
+`LC_DANTERM=1` so an installed remote integration can report host metadata.
 
 ## Derive targets
 
@@ -126,6 +174,10 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
+| "make this pane fill the tab" / "restore the split" | `pane zoom on` / `pane zoom off` |
+| "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
+| "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
+| "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
 | "what tabs/panes are open?" | `ls` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
@@ -227,6 +279,104 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
     danterm pane read --pane "$PANE_ID"
     danterm pane read --pane "$PANE_ID" --lines 200
 
+### Zoom a pane
+
+`pane zoom` drives the same zoom the Pane menu and the pane toolbar button
+drive: the tab renders only the target pane, so the pane's width and height
+change without the window resizing. This is the scripted form of the
+resize stimulus, which is otherwise only reachable by a keyboard shortcut.
+
+    danterm pane zoom --pane "$PANE_ID" on
+    danterm pane zoom --pane "$PANE_ID" off
+
+Prefer `on` and `off` over `toggle`: they are idempotent, so a script reaches a
+known state without having to observe the current one first. The reply carries
+`tab.isZoomed`, which is the state after the request. A tab holding a single
+pane has nothing to zoom and reports `isZoomed: false` rather than failing --
+check the field, not the exit status.
+
+Zoom is deliberately transient and is not part of the persisted snapshot, so
+`ls` does not report it. `pane info` does.
+
+### Inspect a pane's line structure
+
+`pane rows` prints one JSON record per display row of the whole stream --
+retained scrollback first, then the live grid:
+
+    {"rows":[{"index":0,"retained":true,"softWrapped":false,"contentEnd":30,
+              "width":117,"marginKind":"padding","staleWrapClaim":false}, ...]}
+
+`contentEnd` is one past the last column holding printed content; background
+erase paint is not content. `marginKind` is the last column's cell kind
+(`padding`, `narrow`, `wideHead`, `wideTail`, `spacerHead`). `softWrapped` is
+the *gated* continuation the line-structure readers consume; `staleWrapClaim`
+marks the transient where a live row still carries a printer wrap claim whose
+margin an erase blanked (EL 1/2 keep the claim for xterm parity, and the engine
+declines it everywhere it would fuse lines). Use this when text lands at the
+wrong columns after a resize, which text projections cannot diagnose: `pane
+read` joins soft-wrapped rows, so a logical line holding more cells than its
+content reads the same as legitimately wrapped prose.
+
+The check worth running is heuristic, not exact: a wrap whose margin holds no
+content is *suspect*. An autowrap prints at the last column, and a wide glyph
+that could not fit leaves a `spacerHead` there -- but a reflow can legitimately
+fold a line so an interior blank lands on the margin, which is
+indistinguishable row-locally. Flag and then eyeball:
+
+    danterm pane rows --pane "$PANE_ID" | python3 -c '
+    import json, sys
+    for row in json.load(sys.stdin)["rows"]:
+        if row["softWrapped"] and row["contentEnd"] < row["width"] \
+           and row["marginKind"] != "spacerHead":
+            print(row)'
+
+A genuinely spurious row renders correctly at the width it was built for and
+garbled at every other one, so pair this with `pane tape` to capture the byte
+stream that made it.
+
+### Dump a pane flight recording
+
+`pane tape` prints the dev pane's bounded, raw recording as one complete
+snapshot JSON document. This is the replay artifact format: it carries the
+initial geometry, ordered neutral events, live-capture provenance, and
+truncation metadata. Feed payloads emitted by the app use lossless base64.
+
+The output is unscrubbed; redirect it to a file, then run the repository's
+fixture converter before committing it. The converter refuses every snapshot
+that reports dropped events because its surviving geometry and event sequence
+cannot be trusted. There is no truncation override. Only a bundle built with
+recording enabled has a tape; production panes return an unsupported-backend
+error.
+
+    danterm pane tape --pane "$PANE_ID" > tape.json
+    scripts/terminal-tape-to-fixture.py tape.json \\
+        lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \\
+        --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
+
+### Follow a pane flight recording
+
+`--follow` is the incremental capture format: it writes unwrapped `start`,
+`event`, optional `gap`, and `end` records as JSON Lines. `--from-now` skips the
+backlog and waits for the next live event. Redirect the stream when evidence
+must survive an app crash:
+
+    danterm pane tape --pane "$PANE_ID" --follow > tape.jsonl
+    danterm pane tape --pane "$PANE_ID" --follow --from-now > tape.jsonl
+
+The stream is raw and unscrubbed. A slow reader may receive a `gap` record when
+it falls behind the bounded recorder; the fixture converter rejects any such
+stream. A pane close writes an `end` record, while an abrupt app exit can leave
+a valid stream ending at EOF without one.
+
+The fixture converter accepts either complete snapshot JSON or follow JSONL:
+
+    scripts/terminal-tape-to-fixture.py tape.jsonl \
+        lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm/my-case.json \
+        --test TerminalPromptRegressionTests --shell fish --stimulus "dragged divider"
+
+JSON-RPC notifications are socket transport only and are not a persisted
+recording format.
+
 ### Send keys to another pane
 
 Use this for interrupts, replies to prompts, or scripted interaction with an
@@ -257,13 +407,19 @@ source.
 ### Check integration health
 
 `doctor` is local-only and does not require the app to be running. Use it when
-the user asks whether DanTerm's shell command, agent hooks, agent skill, or `jq`
-setup is healthy:
+the user asks whether DanTerm's shell command, agent hooks, agent skill, `jq`, or
+configured font setup is healthy:
 
     danterm doctor
 
 The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
+
+The `Configured font installed` row checks `font.family` in
+`~/.config/danterm/config.json`: SKIP when no family is set, OK when it names an
+installed family, and WARN when it does not (DanTerm falls back to the system
+monospace font) or when the config file can't be read as a schemaVersion 1 JSON
+document. It is always advisory -- a font problem never changes the exit code.
 
 ### Todos
 
@@ -291,6 +447,8 @@ arg when spaces or newlines must be preserved.
   `Down`, `Left`, `Right`, `Home`, `End`, `PgUp`, `PgDn`, `Delete`, `F1`
   through `F12`.
 - `C-<x>` is Ctrl-x and `M-<x>` is Alt-x, such as `C-c`, `C-d`, and `M-b`.
+  `S-` is accepted on named keys, such as `S-Tab` and `C-S-Up`; shifted
+  letters such as `S-a` remain unsupported.
 - `--literal` disables key parsing. Every token after `--` is emitted as text.
   Each token is still a separate event; pass one quoted argument if you need
   spaces inside the literal text.
@@ -318,6 +476,10 @@ else prints nothing on success and exits 0.
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
+| `pane zoom [--pane <pane-id>] on\|off\|toggle` | JSON: pane, tab (with `isZoomed`), group |
+| `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
+| `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
+| `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
 
 `agent attach --kind <kind> --id <session-id>` is a silent mutation: no stdout
 on success.
@@ -328,7 +490,7 @@ on success.
   user request; you would be typing into your own input stream.
 - Prefer `tab new --group <group-id> --cmd` and
   `pane split --pane <pane-id> --cmd` over the
-  split-then-`pane input` pattern. `--cmd` seeds the command at surface
+  split-then-`pane input` pattern. `--cmd` seeds the command at session
   creation time and avoids racing the shell prompt.
 - To launch Claude with an initial prompt, keep its stdout attached to the
   terminal. For serious agent work (implementing a plan, verifying an issue,

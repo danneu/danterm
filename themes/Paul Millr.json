@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2a2a2a",
+    "#ff0000",
+    "#79ff0f",
+    "#e7bf00",
+    "#396bd7",
+    "#b449be",
+    "#66ccff",
+    "#bbbbbb",
+    "#666666",
+    "#ff0080",
+    "#66ff66",
+    "#f3d64e",
+    "#709aed",
+    "#db67e6",
+    "#7adff2",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#4d4d4d",
+  "cursorText": "#ffffff",
+  "foreground": "#f2f2f2",
+  "name": "Paul Millr",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#414141",
+  "selectionForeground": "#ffffff"
+}

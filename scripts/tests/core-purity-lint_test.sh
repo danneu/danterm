@@ -13,8 +13,10 @@
 #          line, and the marker NEVER exempts a hard-ban on the same line;
 #        - comment/string stripping keeps pure comments and the deterministic
 #          UUID(uuidString:) / Date(timeIntervalSince1970:) parses from tripping;
-#   3. the portable profile's GhosttyKit rule plus its deliberate tolerance of
-#      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support).
+#   3. the portable profile's Cocoa rule plus its deliberate tolerance of
+#      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support);
+#   4. the opt-in import gates either reject every library-target import or
+#      allow exactly the named modules while rejecting every other real import.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINT="$SCRIPT_DIR/../core-purity-lint.sh"
@@ -35,6 +37,30 @@ assert_lint() {
     local got
     if "$LINT" --profile "$profile" "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
     [[ "$got" == "$expect" ]] || fail "[$profile] expected '$expect' got '$got' :: $desc :: <$line>"
+    TOTAL=$((TOTAL + 1))
+}
+
+# assert_import_gate <trip|pass> <description> <source-line>
+assert_import_gate() {
+    local expect="$1" desc="$2" line="$3"
+    local dir="$TMP/import-case"
+    rm -rf "$dir"; mkdir -p "$dir"
+    printf '%s\n' "$line" > "$dir/Module.swift"
+    local got
+    if "$LINT" --forbid-imports "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
+    [[ "$got" == "$expect" ]] || fail "[import gate] expected '$expect' got '$got' :: $desc :: <$line>"
+    TOTAL=$((TOTAL + 1))
+}
+
+# assert_import_allowlist <allowed-modules> <trip|pass> <description> <source-line>
+assert_import_allowlist() {
+    local allowed="$1" expect="$2" desc="$3" line="$4"
+    local dir="$TMP/import-allowlist-case"
+    rm -rf "$dir"; mkdir -p "$dir"
+    printf '%s\n' "$line" > "$dir/Module.swift"
+    local got
+    if "$LINT" --allow-imports "$allowed" "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
+    [[ "$got" == "$expect" ]] || fail "[import allowlist] expected '$expect' got '$got' :: $desc :: <$line>"
     TOTAL=$((TOTAL + 1))
 }
 
@@ -108,9 +134,8 @@ assert_lint pure pass "neg: tokens in /* */ block"     "        let x = 1 /* Fil
 assert_lint pure pass "neg: plain Foundation import"   "import Foundation"
 
 # ---------------------------------------------------------------------------
-# portable profile -- GhosttyKit + Cocoa banned; portable IO deliberately allowed.
+# portable profile -- Cocoa banned; portable IO deliberately allowed.
 # ---------------------------------------------------------------------------
-assert_lint portable trip "port: import GhosttyKit"    "import GhosttyKit"
 assert_lint portable trip "port: import AppKit"        "import AppKit"
 assert_lint portable pass "port: FileManager ok"       "        let d = FileManager.default.contents(atPath: p)"
 assert_lint portable pass "port: DispatchSource ok"    "        let t = DispatchSource.makeTimerSource(queue: q)"
@@ -118,4 +143,28 @@ assert_lint portable pass "port: ProcessInfo ok"       "        let pid = Proces
 assert_lint portable pass "port: Process( ok"          "        let p = Process()"
 assert_lint portable pass "port: import Foundation"    "import Foundation"
 
-echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles)"
+# ---------------------------------------------------------------------------
+# import-free library gate -- any real import trips; ordinary source passes.
+# ---------------------------------------------------------------------------
+assert_import_gate trip "Foundation is still an import" "import Foundation"
+assert_import_gate trip "Testing is still an import"    "import Testing"
+assert_import_gate trip "attributed import"             "@_implementationOnly import Foundation"
+assert_import_gate trip "access-level import"            "public import Foundation"
+assert_import_gate trip "stacked import modifiers"       "@preconcurrency public import Foundation"
+assert_import_gate pass "import-free declaration"       "struct Cell { let value: UInt32 }"
+assert_import_gate pass "commented import"              "// import Foundation"
+
+# ---------------------------------------------------------------------------
+# import-allowlist library gate -- named modules pass; every other real import
+# trips, including a submodule of an allowed module.
+# ---------------------------------------------------------------------------
+assert_import_allowlist TerminalCore pass "allowed module"                 "import TerminalCore"
+assert_import_allowlist TerminalCore pass "allowed attributed import"      "@_implementationOnly import TerminalCore"
+assert_import_allowlist TerminalCore pass "import-free declaration"        "struct RenderPlan {}"
+assert_import_allowlist TerminalCore pass "commented disallowed import"     "// import Foundation"
+assert_import_allowlist TerminalCore trip "Foundation is not allowed"       "import Foundation"
+assert_import_allowlist TerminalCore trip "allowed module subpath is exact" "import TerminalCore.Internal"
+assert_import_allowlist TerminalCore,Testing pass "multiple allowed modules" "import Testing"
+assert_import_allowlist TerminalCore,Testing trip "module outside list"      "import AppKit"
+
+echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles and import gates)"

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d62e4e",
+    "#71be6b",
+    "#beb86b",
+    "#489bee",
+    "#e979d7",
+    "#6bbeb8",
+    "#d6d6d6",
+    "#666666",
+    "#e02553",
+    "#aff08c",
+    "#dfddb7",
+    "#65aaf1",
+    "#ddb7df",
+    "#b7dfdd",
+    "#ffffff"
+  ],
+  "background": "#762423",
+  "cursor": "#ffffff",
+  "cursorText": "#762423",
+  "foreground": "#ffffff",
+  "name": "Red Alert",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#073642",
+  "selectionForeground": "#ffffff"
+}

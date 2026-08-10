@@ -1,0 +1,21 @@
+{
+  "events": [
+    { "base64": "G10xMzM7QQdBQkNERUZHSElKS0wNCj4gG10xMzM7Qgc=", "type": "feed" },
+    { "columns": 11, "rows": 5, "type": "resize" },
+    { "base64": "DQ0bW0EbW0sbXTEzMztBB0FCQ0RFRkdISUpLTA0KPiAbXTEzMztCBxtbSg==", "type": "feed" },
+    { "columns": 10, "rows": 5, "type": "resize" },
+    { "base64": "DQ0bW0EbW0sbXTEzMztBB0FCQ0RFRkdISUpLTA0KPiAbXTEzMztCBxtbSg==", "type": "feed" },
+    { "columns": 9, "rows": 5, "type": "resize" },
+    { "base64": "DQ0bW0EbW0sbXTEzMztBB0FCQ0RFRkdISUpLTA0KPiAbXTEzMztCBxtbSg==", "type": "feed" },
+    { "columns": 12, "rows": 5, "type": "resize" },
+    { "base64": "DQ0bW0EbW0sbXTEzMztBB0FCQ0RFRkdISUpLTA0KPiAbXTEzMztCBxtbSg==", "type": "feed" }
+  ],
+  "initial": { "columns": 12, "rows": 5 },
+  "provenance": {
+    "author": "DanTerm",
+    "recordedDeviations": [],
+    "source": "danterm",
+    "test": "zsh-osc133-width-sweep"
+  },
+  "version": 1
+}

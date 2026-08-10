@@ -1,7 +1,7 @@
 // Argv-token classifier for `danterm pane input -- <token>...`.
 // Each token is classified as either a literal text run or a structured key
-// event. The rule is deterministic — no fall-through that contradicts itself
-// — and rejects shifted special keys (any S- prefix) outright in v1.
+// event. The rule is deterministic -- no fall-through that contradicts itself
+// -- and accepts Shift only for named keys whose terminal encoding can use it.
 import Foundation
 
 public enum KeyTokenError: Error, Equatable {
@@ -25,10 +25,6 @@ private func classifyKeyToken(_ token: String, literal: Bool) throws -> InputEve
 
     // Step 2: modifier-prefixed token (e.g. C-c, M-x, C-M-Up).
     if let prefixSplit = stripModifierPrefix(token) {
-        // S- anywhere in the chain is rejected unconditionally in v1.
-        if prefixSplit.mods.contains(.shift) {
-            throw KeyTokenError.unknownKey(token)
-        }
         // Modifier-prefixed Space is out of scope for v1.
         if prefixSplit.base == "Space" {
             throw KeyTokenError.unknownKey(token)
@@ -36,7 +32,13 @@ private func classifyKeyToken(_ token: String, literal: Bool) throws -> InputEve
         // Resolve the base: known keyname or single ASCII letter (either case,
         // normalized to lowercase before going on the wire).
         if let key = KeyName(wireName: prefixSplit.base) {
+            if case .letter = key, prefixSplit.mods.contains(.shift) {
+                throw KeyTokenError.unknownKey(token)
+            }
             return .key(key, prefixSplit.mods.toKeyMods())
+        }
+        if prefixSplit.mods.contains(.shift) {
+            throw KeyTokenError.unknownKey(token)
         }
         if prefixSplit.base.count == 1,
            let c = prefixSplit.base.first,
@@ -81,8 +83,7 @@ private struct PrefixSplit {
     var base: String
 }
 
-// Internal mod-set with a `.shift` slot so we can reject S- before lowering
-// to KeyMods (which only carries ctrl/alt for v1).
+// Internal mod-set distinguishes CLI prefixes before lowering them to stable wire bits.
 private struct ModSet: OptionSet {
     let rawValue: Int
     static let ctrl  = ModSet(rawValue: 1 << 0)
@@ -93,6 +94,7 @@ private struct ModSet: OptionSet {
         var out: KeyMods = []
         if contains(.ctrl) { out.insert(.ctrl) }
         if contains(.alt)  { out.insert(.alt) }
+        if contains(.shift) { out.insert(.shift) }
         return out
     }
 }

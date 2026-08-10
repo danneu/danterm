@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "SD/SU in DECSTBM; SD/SU in DECSTBM+DECSLRM",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "The DECSLRM-dependent horizontal clipping is omitted; the full-width DECSTBM behavior is retained.",
+      "DanTerm does not push scrollback for bounded regions."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "A\r\nB\r\nC\r\nD\u001b[2;3r\u001b[S" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \nC   \n    \nD   ",
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[T" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "A   \n    \nC   \nD   ",
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

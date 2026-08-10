@@ -182,6 +182,12 @@ check_case "elicitation: subagent alerts" \
   '{"hook_event_name":"Elicitation","agent_id":"a1","message":"Need input"}' \
   "$(expected_seq 'Need input')"
 
+# Claude 2.1.216 omits agent identity on Elicitation even when the preceding
+# MCP PreToolUse carries agent_id. Blocking behavior is still unambiguous.
+check_case "elicitation: current subagent payload without identity alerts" \
+  '{"hook_event_name":"Elicitation","mcp_server_name":"live-notification-fixture","message":"DANTERM_LIVE_ELICITATION","mode":"form","requested_schema":{"type":"object"}}' \
+  "$(expected_seq 'DANTERM_LIVE_ELICITATION')"
+
 check_case "elicitation: fallback" \
   '{"hook_event_name":"Elicitation"}' \
   "$(expected_seq 'Claude needs your input')"

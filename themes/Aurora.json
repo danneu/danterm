@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#23262e",
+    "#f0266f",
+    "#8fd46d",
+    "#ffe66d",
+    "#102ee4",
+    "#ee5d43",
+    "#03d6b8",
+    "#c74ded",
+    "#4f545e",
+    "#f92672",
+    "#8fd46d",
+    "#ffe66d",
+    "#03d6b8",
+    "#ee5d43",
+    "#03d6b8",
+    "#c74ded"
+  ],
+  "background": "#23262e",
+  "cursor": "#ee5d43",
+  "cursorText": "#ffd29c",
+  "foreground": "#ffca28",
+  "name": "Aurora",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#292e38",
+  "selectionForeground": "#00e8c6"
+}

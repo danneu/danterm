@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#56595c",
+    "#c94c22",
+    "#85981c",
+    "#b4881d",
+    "#2e8bce",
+    "#d13a82",
+    "#32a198",
+    "#b9b6af",
+    "#45484b",
+    "#bd3613",
+    "#738a04",
+    "#a57705",
+    "#2176c7",
+    "#c61c6f",
+    "#259286",
+    "#c9c6bd"
+  ],
+  "background": "#fcf4dc",
+  "cursor": "#536870",
+  "cursorText": "#fcf4dc",
+  "foreground": "#536870",
+  "name": "Violet Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#595ab7",
+  "selectionForeground": "#fcf4dc"
+}

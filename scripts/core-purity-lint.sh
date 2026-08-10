@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local purity lint with two profiles:
+# Local purity lint with two profiles plus an opt-in import-free gate:
 #
 #   pure     (default; target lib/DanTermCore/Sources/DanTermCore)
 #            Bans Cocoa/AppKit/SwiftUI imports AND a denylist of side-effecting /
@@ -14,14 +14,22 @@
 #                and the abbreviateHome/expandTilde leaf defaults). Anywhere else
 #                they are a fresh nondeterminism leak.
 #   portable (target lib/DanTermSupport/Sources/DanTermSupport)
-#            Bans Cocoa/AppKit/SwiftUI AND GhosttyKit imports -- and nothing else.
+#            Bans Cocoa/AppKit/SwiftUI imports -- and nothing else.
 #            DanTermSupport legitimately performs portable IO (FileManager,
 #            Process, DispatchSource, ProcessInfo), so the pure-tier IO bans do
 #            NOT apply here. The profiles are deliberately kept separate.
+#   --forbid-imports
+#            Rejects every real Swift import, including Foundation. TerminalCore
+#            uses this alongside the pure profile so its dependency-free package
+#            cannot silently acquire a toolchain- or OS-versioned framework.
+#   --allow-imports <module[,module...]>
+#            Rejects every real Swift import except the exact named modules.
+#            TerminalRenderPlanning uses this alongside the pure profile so it
+#            can depend on TerminalCore without acquiring framework imports.
 #
 # The regex denylist is a heuristic regression guard, not the proof of purity:
 # the real proof is structural (the nested test packages compile core/support
-# with no GhosttyKit and no cross-module IO dependency). The lint keeps it that way.
+# with no cross-module IO dependency). The lint keeps it that way.
 #
 # The token pass strips comments and string literals before tokenizing (so a pure
 # comment mentioning FileManager/DispatchSourceTimer does not false-positive) but
@@ -35,19 +43,63 @@ CORE_DEFAULT="$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
 
 PROFILE="pure"
 TARGET=""
+FORBID_IMPORTS=0
+ALLOWED_IMPORTS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
         --profile=*) PROFILE="${1#*=}"; shift ;;
+        --forbid-imports) FORBID_IMPORTS=1; shift ;;
+        --allow-imports) ALLOWED_IMPORTS="${2:?--allow-imports needs a value}"; shift 2 ;;
+        --allow-imports=*) ALLOWED_IMPORTS="${1#*=}"; shift ;;
         *) TARGET="$1"; shift ;;
     esac
 done
 [[ -n "$TARGET" ]] || TARGET="$CORE_DEFAULT"
 
+if [[ "$FORBID_IMPORTS" -eq 1 && -n "$ALLOWED_IMPORTS" ]]; then
+    echo "core-purity-lint: --forbid-imports and --allow-imports are mutually exclusive" >&2
+    exit 2
+fi
+
 case "$PROFILE" in
     pure|portable) ;;
     *) echo "core-purity-lint: unknown profile '$PROFILE' (expected pure|portable)" >&2; exit 2 ;;
 esac
+
+# Import-free modules may use the Swift standard library without an import, but
+# no explicit module dependency. Line anchoring ignores commented-out examples.
+if [[ "$FORBID_IMPORTS" -eq 1 ]] &&
+   grep -rnE '^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+[[:alnum:]_][[:alnum:]_.]*([^[:alnum:]_]|$)' "$TARGET"; then
+    echo "Swift import found in $TARGET (module must remain import-free)" >&2
+    exit 1
+fi
+
+if [[ -n "$ALLOWED_IMPORTS" ]]; then
+    if ! find "$TARGET" -name '*.swift' -print0 | xargs -0 awk -v allowed="$ALLOWED_IMPORTS" '
+    BEGIN {
+        count = split(allowed, modules, ",")
+        for (i = 1; i <= count; i++) allowedModule[modules[i]] = 1
+        bad = 0
+    }
+    {
+        line = $0
+        if (line ~ /^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+[[:alnum:]_][[:alnum:]_.]*([^[:alnum:]_]|$)/) {
+            sub(/^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+/, "", line)
+            module = line
+            sub(/[^[:alnum:]_.].*$/, "", module)
+            if (!(module in allowedModule)) {
+                printf("%s:%d: disallowed Swift import %s\n", FILENAME, FNR, module) > "/dev/stderr"
+                bad = 1
+            }
+        }
+    }
+    END { if (bad) exit 1 }
+'; then
+        echo "Swift import outside allowlist '$ALLOWED_IMPORTS' found in $TARGET" >&2
+        exit 1
+    fi
+fi
 
 # --- Cocoa/AppKit/SwiftUI import rule (both profiles). Line-anchored; tolerates
 # leading whitespace + an optional @<attr>; the trailing non-identifier guard
@@ -58,12 +110,6 @@ if grep -rnE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(Cocoa
 fi
 
 if [[ "$PROFILE" == "portable" ]]; then
-    # --- GhosttyKit import rule (portable only; echoes the structural guarantee
-    # that the support nested package has no GhosttyKit dependency). ---
-    if grep -rnE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+GhosttyKit([^[:alnum:]_]|$)' "$TARGET"; then
-        echo "GhosttyKit import found in $TARGET (DanTermSupport must stay GhosttyKit-free)" >&2
-        exit 1
-    fi
     exit 0
 fi
 

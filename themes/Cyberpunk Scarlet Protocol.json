@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#101116",
+    "#ff0051",
+    "#01dc84",
+    "#faf945",
+    "#0271b6",
+    "#c930c7",
+    "#00c5c7",
+    "#c7c7c7",
+    "#686868",
+    "#ff6e67",
+    "#60fa68",
+    "#fffc67",
+    "#6871ff",
+    "#bd35ec",
+    "#60fdff",
+    "#ffffff"
+  ],
+  "background": "#101116",
+  "cursor": "#76ff9f",
+  "cursorText": "#a6a6a6",
+  "foreground": "#e41951",
+  "name": "Cyberpunk Scarlet Protocol",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

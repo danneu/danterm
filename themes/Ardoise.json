@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2c2c2c",
+    "#d3322d",
+    "#588b35",
+    "#fca93a",
+    "#2465c2",
+    "#7332b4",
+    "#64e1b8",
+    "#f7f7f7",
+    "#535353",
+    "#fa5852",
+    "#8dc252",
+    "#ffea51",
+    "#6ab5f8",
+    "#be68ca",
+    "#89ffdb",
+    "#fefefe"
+  ],
+  "background": "#1e1e1e",
+  "cursor": "#f7f7f7",
+  "cursorText": "#000000",
+  "foreground": "#eaeaea",
+  "name": "Ardoise",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#46515e",
+  "selectionForeground": "#f1f3f5"
+}

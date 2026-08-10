@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#e52222",
+    "#a6e32d",
+    "#fc951e",
+    "#c48dff",
+    "#fa2573",
+    "#67d9f0",
+    "#f2f2f2",
+    "#555555",
+    "#ff5555",
+    "#55ff55",
+    "#ffff55",
+    "#5555ff",
+    "#ff55ff",
+    "#55ffff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#bbbbbb",
+  "name": "Mathias",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#555555",
+  "selectionForeground": "#f2f2f2"
+}

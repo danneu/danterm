@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#22262d",
+    "#c4746e",
+    "#8a9a7b",
+    "#c4b28a",
+    "#8ba4b0",
+    "#a292a3",
+    "#8ea4a2",
+    "#a4a7a4",
+    "#5c6066",
+    "#e46876",
+    "#87a987",
+    "#e6c384",
+    "#7fb4ca",
+    "#938aa9",
+    "#7aa89f",
+    "#c5c9c7"
+  ],
+  "background": "#22262d",
+  "cursor": "#c5c9c7",
+  "cursorText": "#22262d",
+  "foreground": "#c5c9c7",
+  "name": "Kanso Mist",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#43464e",
+  "selectionForeground": "#c5c9c7"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#282a36",
+    "#f37f97",
+    "#5adecd",
+    "#f2a272",
+    "#8897f4",
+    "#c574dd",
+    "#79e6f3",
+    "#fdfdfd",
+    "#4e5165",
+    "#ff4971",
+    "#18e3c8",
+    "#ff8037",
+    "#556fff",
+    "#b043d1",
+    "#3fdcee",
+    "#bebec1"
+  ],
+  "background": "#1d1f28",
+  "cursor": "#c574dd",
+  "cursorText": "#ffffff",
+  "foreground": "#fdfdfd",
+  "name": "Lovelace",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/30state_pen.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Reset; Bold; Underline; Italic; Reverse; Foreground; Background; DECSTR resets pen attributes",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "Default and indexed colors remain semantic rather than resolving through libvterm's palette.",
+      "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm consumes both correctly in native tests."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "\u001b[m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["bold"],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[22m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1m\u001b[m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[4m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "single"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[21m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "double"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[24m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[3m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["italic"],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[23m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[7m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["reverse"],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[27m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1;2;3;4;7;8;9m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["bold", "dim", "italic", "reverse", "hidden", "strikethrough"],
+          "underline": "single"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[4:0m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["bold", "dim", "italic", "reverse", "hidden", "strikethrough"],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[4:2m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["bold", "dim", "italic", "reverse", "hidden", "strikethrough"],
+          "underline": "double"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[4:3m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": ["bold", "dim", "italic", "reverse", "hidden", "strikethrough"],
+          "underline": "curly"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[22;23;24;27;28;29;31m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "indexed:1",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[91m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "indexed:9",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[38:2:10:20:30m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "rgb:10,20,30",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[38:5:1m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "indexed:1",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[39m\u001b[41m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "indexed:1",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[101m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "indexed:9",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[48:2:10:20:30m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "rgb:10,20,30",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[48:5:1m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "indexed:1",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[49m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1;4m\u001b[!p" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    }
+  ]
+}

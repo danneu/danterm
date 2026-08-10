@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#7a828e",
+    "#ff9492",
+    "#26cd4d",
+    "#f0b72f",
+    "#71b7ff",
+    "#cb9eff",
+    "#39c5cf",
+    "#d9dee3",
+    "#9ea7b3",
+    "#ffb1af",
+    "#4ae168",
+    "#f7c843",
+    "#91cbff",
+    "#dbb7ff",
+    "#56d4dd",
+    "#ffffff"
+  ],
+  "background": "#0a0c10",
+  "cursor": "#71b7ff",
+  "cursorText": "#b1f7ff",
+  "foreground": "#f0f3f6",
+  "name": "GitHub Dark High Contrast",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f0f3f6",
+  "selectionForeground": "#0a0c10"
+}

@@ -5,7 +5,7 @@
 // reorder rules, dedup + stale filter, intra-group offset math, auto-prune
 // of empty source groups), extractTabsToNewGroup (selection preservation,
 // dedup + stale, all-tab no-ops), and the auto-prune interactions with
-// closeTab / movePaneToNewTab / surfaceCreationFailed. The legacy harness
+// closeTab / movePaneToNewTab / sessionCreationFailed. The legacy harness
 // had no compound `guard case` patterns in this file -- every assertion
 // converts 1:1 with no Issue.record needed.
 import Foundation
@@ -91,7 +91,7 @@ import Testing
     @Test("testDeleteGroupClosesTabs")
     func testDeleteGroupClosesTabs() {
         // Intent: deleteGroup(moveTabs: false) closes every tab in the
-        //   deleted group; the surface-existence net tears down every
+        //   deleted group; the session-existence net tears down every
         //   destroyed pane.
         // Why it exists: pins the destructive branch of deleteGroup.
         // Scenario: spec-first close-on-delete.
@@ -111,8 +111,8 @@ import Testing
 
         update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
         #expect(model.groups.count == 1, "only General should remain")
-        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == deletedPanes,
-            "both deleted tabs' pane surfaces are torn down")
+        #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model) == deletedPanes,
+            "both deleted tabs' pane sessions are torn down")
         #expect(model.groups[0].tabs.count == 1)
         #expect(model.groups[0].tabs[0].id == tabId2)
     }
@@ -280,7 +280,7 @@ import Testing
     @Test("testCreateGroupCreatesTabAndFocuses")
     func testCreateGroupCreatesTabAndFocuses() {
         // Intent: createGroup creates a tab in the new group and selects
-        //   that tab; the tab's pane gets a createSurface and
+        //   that tab; the tab's pane gets a createSession and
         //   scheduleCheckpoint.
         // Why it exists: pins the auto-tab + selection + persistence
         //   contract.
@@ -299,9 +299,9 @@ import Testing
         #expect(model.pane(newTab.focusedPaneId) != nil, "pane should exist in model")
 
         #expect(hasEffect(commands) {
-            if case .createSurface = $0 { return true }
+            if case .createSession = $0 { return true }
             return false
-        }, "should emit createSurface for the new tab's pane")
+        }, "should emit createSession for the new tab's pane")
         #expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -450,13 +450,13 @@ import Testing
         #expect(model.selectedTabId == model.groups[0].tabs[0].id, "moved tab should be selected")
     }
 
-    @Test("testSurfaceCreationFailedPrunesEmptyGroup")
-    func testSurfaceCreationFailedPrunesEmptyGroup() {
-        // Intent: surfaceCreationFailed on the only pane in the only tab
+    @Test("testSessionCreationFailedPrunesEmptyGroup")
+    func testSessionCreationFailedPrunesEmptyGroup() {
+        // Intent: sessionCreationFailed on the only pane in the only tab
         //   of a group prunes that group; the model does NOT terminate
         //   because another group exists.
         // Why it exists: pins the auto-prune + survival path under
-        //   surface-creation failure.
+        //   session-creation failure.
         // Scenario: spec-first failure-prune.
         var model = makeModel()
         createTab(&model)
@@ -468,7 +468,7 @@ import Testing
         let generalPaneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .selectTab(id: generalTabId))
 
-        let commands = update(&model, .surfaceCreationFailed(paneId: generalPaneId))
+        let commands = update(&model, .sessionCreationFailed(paneId: generalPaneId))
 
         #expect(model.groups.count == 1, "empty General should be pruned")
         #expect(model.groups[0].id == workGroupId, "Work should remain")

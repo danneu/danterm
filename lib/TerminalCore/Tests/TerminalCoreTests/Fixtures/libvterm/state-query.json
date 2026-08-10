@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/26state_query.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "DA; DSR; CPR; DECCPR",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 12, "rows": 12 },
+  "events": [
+    { "type": "feed", "text": "\u001b[c" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 63, 49, 59, 50, 99] } },
+    { "type": "feed", "text": "\u001bc\u001b[5n" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 48, 110] } },
+    { "type": "feed", "text": "\u001b[6n" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 49, 59, 49, 82] } },
+    { "type": "feed", "text": "\u001b[10;10H\u001b[6n" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 49, 48, 59, 49, 48, 82] } },
+    { "type": "feed", "text": "\u001b[?6n" },
+    { "type": "expect", "expect": { "replyBytes": [27, 91, 63, 49, 48, 59, 49, 48, 82] } }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#7f7f7f",
+    "#e15a60",
+    "#a9cfa4",
+    "#ffe2a9",
+    "#6699cc",
+    "#f1a5ab",
+    "#5fb3b3",
+    "#d4d4d4",
+    "#7f7f7f",
+    "#e15a60",
+    "#a9cfa4",
+    "#ffe2a9",
+    "#6699cc",
+    "#f1a5ab",
+    "#5fb3b3",
+    "#d4d4d4"
+  ],
+  "background": "#282c35",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#d4d4d4",
+  "name": "Subliminal",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#484e5b",
+  "selectionForeground": "#ffffff"
+}

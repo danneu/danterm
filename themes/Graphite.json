@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#15171a",
+    "#e58888",
+    "#a7c59f",
+    "#cec59d",
+    "#8db4d0",
+    "#baabcb",
+    "#a8c6d4",
+    "#b4b9c0",
+    "#7e8590",
+    "#f19f9f",
+    "#b9d5b1",
+    "#cfba97",
+    "#a5c6de",
+    "#ccbedd",
+    "#bcd6e2",
+    "#eceff3"
+  ],
+  "background": "#1c1e22",
+  "cursor": "#c4cedb",
+  "cursorText": "#1c1e22",
+  "foreground": "#d2d6dc",
+  "name": "Graphite",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2e333b",
+  "selectionForeground": "#5c5e62"
+}

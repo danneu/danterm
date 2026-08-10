@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#372920",
+    "#ba4138",
+    "#468336",
+    "#d4b139",
+    "#4395c6",
+    "#855fb8",
+    "#2f9794",
+    "#d3b9a2",
+    "#704f39",
+    "#df4d43",
+    "#659a4c",
+    "#e8c23f",
+    "#4ca4db",
+    "#9d70da",
+    "#60aca9",
+    "#f2d4bb"
+  ],
+  "background": "#372920",
+  "cursor": "#b19b89",
+  "cursorText": "#372920",
+  "foreground": "#b19b89",
+  "name": "Squirrelsong Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5b402e",
+  "selectionForeground": "#b19b89"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#24292f",
+    "#b35900",
+    "#0550ae",
+    "#4d2d00",
+    "#0969da",
+    "#8250df",
+    "#1b7c83",
+    "#6e7781",
+    "#57606a",
+    "#8a4600",
+    "#0969da",
+    "#633c01",
+    "#218bff",
+    "#a475f9",
+    "#3192aa",
+    "#8c959f"
+  ],
+  "background": "#ffffff",
+  "cursor": "#0969da",
+  "cursorText": "#3c9cff",
+  "foreground": "#24292f",
+  "name": "GitHub Light Colorblind",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#24292f",
+  "selectionForeground": "#ffffff"
+}

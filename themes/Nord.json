@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#3b4252",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#88c0d0",
+    "#e5e9f0",
+    "#596377",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#8fbcbb",
+    "#eceff4"
+  ],
+  "background": "#2e3440",
+  "cursor": "#eceff4",
+  "cursorText": "#282828",
+  "foreground": "#d8dee9",
+  "name": "Nord",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#eceff4",
+  "selectionForeground": "#4c566a"
+}

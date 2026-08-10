@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#981a22",
+    "#098003",
+    "#c4a000",
+    "#4140c3",
+    "#d33682",
+    "#0e807f",
+    "#7f7c7f",
+    "#808080",
+    "#ef2929",
+    "#1cfe3c",
+    "#fefe45",
+    "#268ad2",
+    "#fe13fa",
+    "#29fffe",
+    "#c2c1c3"
+  ],
+  "background": "#052454",
+  "cursor": "#f6f6f7",
+  "cursorText": "#052454",
+  "foreground": "#f6f6f7",
+  "name": "Powershell",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f6f6f7",
+  "selectionForeground": "#052454"
+}

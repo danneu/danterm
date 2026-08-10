@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "workloads": {
+    "scrollback-stream": {
+      "identity": "scrollback-stream-v1-25000-lines",
+      "dominantQuestion": "How fast can sustained output be consumed, scrolled, and retained?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Twenty-five thousand numbered ASCII lines exercising sustained output, viewport scrolling, and scrollback growth."
+      },
+      "segments": [
+        {"repeat": 25000, "template": "DANTERM-SCROLLBACK-{index:05d} sustained plain-text output payload\n"}
+      ]
+    },
+    "styled-screen-redraw": {
+      "identity": "styled-screen-redraw-v1-3500-frames",
+      "dominantQuestion": "How fast can styled TUI output be consumed when intermediate screen states may coalesce?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Thirty-five hundred deterministic 80x24 TUI frames with cursor-home redraws and dense truecolor style transitions."
+      },
+      "segments": [
+        {"bytes": "\u001b[2J"},
+        {"repeat": 3500, "template": "\u001b[H\u001b[38;2;17;93;211;48;2;31;37;43m FRAME {index:05d} \u001b[0m row 01 styled terminal dashboard\u001b[K\n\u001b[38;2;237;158;86mrow 02 warm\u001b[38;2;129;202;191m cool\u001b[38;2;207;171;224m accent\u001b[0m metrics and status\u001b[K\n\u001b[38;2;223;101;102mrow 03 error\u001b[38;2;197;209;92m success\u001b[38;2;140;182;225m info\u001b[0m changing content\u001b[K\nrow 04 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 05 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 06 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 07 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 08 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 09 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 10 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 11 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 12 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 13 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 14 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 15 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 16 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 17 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 18 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 19 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 20 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 21 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 22 alpha beta gamma delta epsilon zeta eta theta\u001b[K\nrow 23 alpha beta gamma delta epsilon zeta eta theta\u001b[K\n\u001b[1;38;2;234;234;234;48;2;42;42;42mrow 24 frame {index:05d} complete\u001b[0m\u001b[K"}
+      ]
+    },
+    "unicode-wrapping": {
+      "identity": "unicode-wrapping-v1-9000-lines",
+      "dominantQuestion": "How expensive is complex text flowing and wrapping through the grid?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Nine thousand deliberately over-width lines mixing Spanish, CJK, combining marks, emoji, and ASCII boundaries."
+      },
+      "segments": [
+        {"repeat": 9000, "template": "UNICODE-{index:05d}: Espanol: manana y corazon; Chinese: \u4f60\u597d\u4e16\u754c; combining: cafe\u0301; emoji: \ud83d\udc69\ud83c\udffd\u200d\ud83d\udcbb \ud83d\ude80; wrap-boundary: abcdefghijklmnopqrstuvwxyz0123456789-END\n"}
+      ]
+    },
+    "incremental-screen-updates": {
+      "identity": "incremental-screen-updates-v1-100000-cycles",
+      "dominantQuestion": "How efficiently can localized TUI updates avoid full-screen work?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "One hundred thousand localized status, insert/delete-character, cursor, and bounded scroll-region updates without full-screen clears."
+      },
+      "segments": [
+        {"bytes": "\u001b[2J\u001b[Hincremental update canvas\u001b[2;23r"},
+        {"repeat": 100000, "template": "\u001b[24;1Hstatus-{index:05d}\u001b[K\u001b[12;10H\u001b[@+\u001b[P\u001b[23;1Hregion-{index:05d}\n"},
+        {"bytes": "\u001b[r"}
+      ]
+    },
+    "synchronized-frames": {
+      "identity": "synchronized-frames-v1-btop-95-frames",
+      "dominantQuestion": "How fast can a real TUI's output be parsed and damage-tracked when frame coalescing suppresses drawing throughout?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Ninety-five consecutive btop 1.4.7 frames captured live at 179x66, every byte inside a DECSET 2026 bracket -- the frame-coalescing path no generated workload enters. Sized by block duration rather than byte count: the draw tail is a constant ~7 ms regardless of stimulus length, so only a longer block lowers the noise floor. Unlike its four siblings this is captured evidence rather than a regenerable generator: it holds one machine's system state at one moment, and re-running the capture produces different bytes. See docs/research/20-pty-throughput-and-interactive-stimulus.md."
+      },
+      "recording": "benchmarks/fixtures/recordings/synchronized-frames-v1-btop-95-frames.json.gz"
+    }
+  }
+}

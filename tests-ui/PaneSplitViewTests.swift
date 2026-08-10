@@ -3,10 +3,16 @@ import Cocoa
 
 @main
 struct UITestRunner {
+    @MainActor
     static func main() {
         // NSApplication must be initialized for NSSplitView layout to work
         let _ = NSApplication.shared
 
+        terminalBackendBoundaryTests()
+        appPresentationLifecycleTests()
+        danTermConfigStoreTests()
+        swiftTerminalSessionViewTests()
+        ioSurfaceLayerContentsTests()
         paneSplitViewTests()
         linkPreviewViewTests()
         paneWrapperViewTests()
@@ -20,10 +26,10 @@ struct UITestRunner {
         sidebarContextMenuTests()
         tabTodoPopoverViewTests()
         themeBrowserViewTests()
-        clipboardWriteTests()
         remoteThemePickerSheetTests()
         todoPopoverViewTests()
         alertsPopoverViewTests()
+        preferencesPanelTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }

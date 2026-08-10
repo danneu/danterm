@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#f8efe7",
+    "#ce4770",
+    "#218871",
+    "#b16803",
+    "#d4572b",
+    "#6851a2",
+    "#2473b6",
+    "#2c232e",
+    "#a59c9c",
+    "#ce4770",
+    "#218871",
+    "#b16803",
+    "#d4572b",
+    "#6851a2",
+    "#2473b6",
+    "#2c232e"
+  ],
+  "background": "#f8efe7",
+  "cursor": "#72696d",
+  "cursorText": "#a59ca0",
+  "foreground": "#2c232e",
+  "name": "Monokai Pro Light Sun",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#beb5b3",
+  "selectionForeground": "#2c232e"
+}

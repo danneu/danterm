@@ -3,6 +3,15 @@
 `Status`: Accepted
 `Date`: 2026-06-09
 
+> **2026-08-06: partly superseded by the libghostty removal.** The AppKit
+> lifetime rules -- undo managers, observers, NSEvent monitors, timers, escaping
+> closures -- are unchanged and still normative. What is gone is the Ghostty half:
+> there is no `ghostty_surface_t`, no `ghostty_surface_free`, and no C `userdata`
+> boundary, so rule 5 now applies only to whatever C/`Unmanaged` bridges DanTerm
+> introduces itself. `docs/upgrading-ghostty.md`, linked below, was retired with
+> the dependency; find it in Git history if the historical procedure matters.
+> The body is unedited on purpose.
+
 ## Context
 
 On 2026-06-09, DanTerm v0.0.73 crashed with `EXC_BAD_ACCESS` /

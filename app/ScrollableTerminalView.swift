@@ -1,34 +1,28 @@
-// Wraps a TerminalView in an NSScrollView to provide native macOS overlay scrollbar support.
-// Closely follows Ghostty's SurfaceScrollView pattern: the NSScrollView manages a blank
-// document view whose height represents total scrollback. The TerminalView is pinned to the
+// Wraps a terminal session host in an NSScrollView to provide native macOS overlay
+// scrollbar support. A blank document view represents total scrollback; the host is pinned to the
 // visible rect so the renderer only draws what's on screen.
 
 import Cocoa
-import GhosttyKit
 
 // MARK: - TerminalScrollView
 
-/// Private NSScrollView subclass that forwards scroll wheel events directly to TerminalView,
-/// preventing NSScrollView from fighting ghostty over scroll position. Keyboard focus stays
-/// on TerminalView since acceptsFirstResponder returns false.
+/// Forwards scroll wheels to the terminal host so NSScrollView does not own terminal scrolling.
 private class TerminalScrollView: NSScrollView {
-    weak var terminalView: TerminalView?
+    weak var terminalSession: (any TerminalSession)?
 
     override var acceptsFirstResponder: Bool { false }
 
     override func scrollWheel(with event: NSEvent) {
-        // Forward scroll events directly to TerminalView so ghostty handles them.
-        // NSScrollView must NOT consume these — ghostty owns scroll position.
-        terminalView?.scrollWheel(with: event)
+        terminalSession?.hostView.scrollWheel(with: event)
     }
 }
 
 // MARK: - ScrollableTerminalView
 
-class ScrollableTerminalView: NSView {
+class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
     private let scrollView: TerminalScrollView
     private let documentView: NSView
-    let terminalView: TerminalView
+    let terminalSession: any TerminalSession
     private var observers: [NSObjectProtocol] = []
     private var isLiveScrolling = false
 
@@ -36,47 +30,46 @@ class ScrollableTerminalView: NSView {
     /// actions when the user drags the scrollbar but stays on the same row.
     private var lastSentRow: Int?
 
-    init(terminalView: TerminalView) {
-        self.terminalView = terminalView
+    init(terminalSession: any TerminalSession) {
+        self.terminalSession = terminalSession
 
         // Set up scroll view with overlay scroller style
         scrollView = TerminalScrollView()
-        scrollView.terminalView = terminalView
-        scrollView.hasVerticalScroller = terminalView.scrollbarEnabled
+        scrollView.terminalSession = terminalSession
+        scrollView.hasVerticalScroller = terminalSession.state.scrollbarEnabled
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = false
         scrollView.usesPredominantAxisScrolling = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
-        scrollView.contentView.clipsToBounds = false
+        scrollView.contentView.clipsToBounds = true
 
         // Blank document view — its height represents total scrollback in pixels
         documentView = NSView(frame: .zero)
         scrollView.documentView = documentView
 
-        // TerminalView is a child of documentView, pinned to the visible rect
-        documentView.addSubview(terminalView)
+        // The stable terminal host is pinned to the visible rect.
+        documentView.addSubview(terminalSession.hostView)
 
         super.init(frame: .zero)
 
         addSubview(scrollView)
 
-        // Set ourselves as the scroll delegate so TerminalView property changes notify us
-        terminalView.scrollDelegate = self
+        terminalSession.stateObserver = self
 
-        // If TerminalView already has cached state (e.g. after a view rebuild), sync now
-        if terminalView.cellSize != .zero || terminalView.scrollbarState != nil {
+        // If the session already has cached state after reparenting, sync now.
+        if terminalSession.state.cellHeight > 0 || terminalSession.state.scrollPosition != nil {
             synchronizeScrollView()
         }
 
-        // Listen for clip view bounds changes to keep surface pinned to visible rect
+        // Listen for clip view bounds changes to keep the session view pinned to visible rect
         scrollView.contentView.postsBoundsChangedNotifications = true
         observers.append(NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
             queue: .main
         ) { [weak self] _ in
-            self?.synchronizeSurfaceView()
+            self?.synchronizeSessionView()
         })
 
         // Live scroll tracking
@@ -127,22 +120,17 @@ class ScrollableTerminalView: NSView {
     override func layout() {
         super.layout()
         scrollView.frame = bounds
-        terminalView.frame.size = scrollView.bounds.size
+        terminalSession.hostView.frame.size = scrollView.bounds.size
         documentView.frame.size.width = scrollView.bounds.width
         synchronizeScrollView()
-        synchronizeSurfaceView()
+        synchronizeSessionView()
     }
 
     // MARK: - Scroll Delegate
 
-    /// Called by TerminalView when cellSize or scrollbarState changes.
-    func scrollbarStateDidChange() {
+    func terminalSessionStateDidChange(_ state: TerminalSessionState) {
+        scrollView.hasVerticalScroller = state.scrollbarEnabled
         synchronizeScrollView()
-    }
-
-    /// Called by TerminalView when scrollbarEnabled changes (config reload).
-    func scrollbarConfigDidChange() {
-        scrollView.hasVerticalScroller = terminalView.scrollbarEnabled
     }
 
     // MARK: - Synchronization
@@ -150,21 +138,22 @@ class ScrollableTerminalView: NSView {
     /// Sizes the document view and scrolls the content view to match scrollbar state.
     private func synchronizeScrollView() {
         let contentHeight = scrollView.contentSize.height
-        let cellHeight = terminalView.cellSize.height
+        let state = terminalSession.state
+        let cellHeight = state.cellHeight
 
-        if let sb = terminalView.scrollbarState {
+        if let sb = state.scrollPosition {
             documentView.frame.size.height = scrollbarDocumentHeight(
                 contentHeight: contentHeight, cellHeight: cellHeight,
-                total: sb.total, len: sb.len
+                total: sb.total, len: sb.length
             )
         } else {
             documentView.frame.size.height = contentHeight
         }
 
         if !isLiveScrolling {
-            if cellHeight > 0, let sb = terminalView.scrollbarState {
+            if cellHeight > 0, let sb = state.scrollPosition {
                 let offsetY = scrollbarOffsetY(
-                    total: sb.total, offset: sb.offset, len: sb.len,
+                    total: sb.total, offset: sb.offset, len: sb.length,
                     cellHeight: cellHeight
                 )
                 scrollView.contentView.scroll(to: CGPoint(x: 0, y: offsetY))
@@ -175,17 +164,17 @@ class ScrollableTerminalView: NSView {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    /// Pins terminalView origin to the visible rect so it fills the viewport.
-    private func synchronizeSurfaceView() {
+    /// Pins the terminal host origin to the visible rect so it fills the viewport.
+    private func synchronizeSessionView() {
         let visibleRect = scrollView.contentView.documentVisibleRect
-        terminalView.frame.origin = visibleRect.origin
+        terminalSession.hostView.frame.origin = visibleRect.origin
     }
 
     // MARK: - Live Scroll (Scrollbar Drag)
 
     /// Convert AppKit scroll position to a terminal row and send scroll_to_row action.
     private func handleLiveScroll() {
-        let cellHeight = terminalView.cellSize.height
+        let cellHeight = terminalSession.state.cellHeight
         guard cellHeight > 0 else { return }
 
         let visibleRect = scrollView.contentView.documentVisibleRect
@@ -198,8 +187,7 @@ class ScrollableTerminalView: NSView {
         guard row != lastSentRow else { return }
         lastSentRow = row
 
-        guard let surface = terminalView.surface else { return }
-        sendBindingAction(surface, "scroll_to_row:\(row)")
+        terminalSession.scroll(toRow: row)
     }
 
     // MARK: - Mouse Events
@@ -223,4 +211,3 @@ class ScrollableTerminalView: NSView {
         ))
     }
 }
-

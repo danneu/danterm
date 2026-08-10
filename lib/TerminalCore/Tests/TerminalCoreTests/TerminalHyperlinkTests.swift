@@ -1,0 +1,425 @@
+// Proves bounded OSC 8 state, identity carry, and pure HTTP(S) link resolution.
+import Testing
+
+@testable import TerminalCore
+
+/// Locks terminal-originated links behind bounded storage and a pure activation gate.
+struct TerminalHyperlinkTests {
+    @Test("OSC 8 opens, closes, preserves semicolons, and reuses explicit ids")
+    func grammarAndIdentity() {
+        var terminal = Terminal(columns: 20, rows: 2)!
+
+        terminal.feed(osc8(params: "id=42:unknown=value:broken", uri: "http://a.test/x;y"))
+        terminal.feed(Array("ab".utf8))
+        terminal.feed(osc8(params: "id=42", uri: "http://a.test/x;y"))
+        terminal.feed(Array("c".utf8))
+        terminal.feed(osc8(params: "id=ignored", uri: ""))
+        terminal.feed(Array("d".utf8))
+
+        let first = terminal.cell(row: 0, column: 0)?.hyperlink
+        #expect(first == TerminalHyperlink(uri: "http://a.test/x;y", explicitId: "42"))
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink == first)
+        #expect(terminal.cell(row: 0, column: 2)?.hyperlink == first)
+        #expect(terminal.cell(row: 0, column: 3)?.hyperlink == nil)
+        #expect(terminal.retainedHyperlinkCount == 1)
+
+        terminal.feed([0x1B, 0x5D] + Array("8;id=".utf8) + [0xFF]
+            + Array(";https://malformed-params.test".utf8) + [0x07, 0x65])
+        #expect(terminal.cell(row: 0, column: 4)?.hyperlink
+            == TerminalHyperlink(uri: "https://malformed-params.test"))
+    }
+
+    @Test("OSC 8 is terminator- and chunk-invariant")
+    func terminatorAndChunkInvariance() {
+        let bodies = [
+            Array("\u{1B}]8;;https://example.com\u{7}x".utf8),
+            Array("\u{1B}]8;;https://example.com\u{1B}\\x".utf8),
+        ]
+        var authored = Terminal(columns: 20, rows: 2)!
+        authored.feed(bodies[0])
+
+        for bytes in bodies {
+            var whole = Terminal(columns: 20, rows: 2)!
+            whole.feed(bytes)
+            #expect(whole == authored)
+            for offset in 0...bytes.count {
+                var split = Terminal(columns: 20, rows: 2)!
+                split.feed(Array(bytes[..<offset]))
+                split.feed(Array(bytes[offset...]))
+                #expect(split == authored)
+            }
+        }
+    }
+
+    @Test("OSC 8 rejects invalid UTF-8 and oversized targets without changing the pen")
+    func rejectionIsAtomic() {
+        var terminal = Terminal(columns: 70_000, rows: 1)!
+        terminal.feed(osc8(uri: "https://kept.test"))
+        terminal.feed(Array("a".utf8))
+        let baseline = terminal
+
+        terminal.feed([0x1B, 0x5D] + Array("8;;".utf8) + [0xFF, 0x07])
+        terminal.feed([0x1B, 0x5D] + Array("8;;https://invalid".utf8) + [0x9C, 0x1B, 0x5C])
+        terminal.feed(osc8(uri: "https://" + String(repeating: "x", count: 65_529)))
+        #expect(terminal == baseline)
+
+        terminal.feed(Array("b".utf8))
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri == "https://kept.test")
+    }
+
+    @Test("OSC 8 accepts exactly 64 KiB of target metadata")
+    func perTargetBoundary() {
+        let prefix = "https://"
+        let accepted = prefix + String(repeating: "a", count: 65_536 - prefix.utf8.count)
+        let rejected = accepted + "a"
+        var terminal = Terminal(columns: 2, rows: 1)!
+
+        terminal.feed(osc8(uri: accepted))
+        terminal.feed(Array("x".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == accepted)
+        let acceptedState = terminal
+        terminal.feed(osc8(uri: rejected))
+        #expect(terminal == acceptedState)
+    }
+
+    @Test("aggregate pressure sweeps dead targets atomically before admission")
+    func aggregateBudgetSweepAndRefusal() {
+        // Intent: aggregate admission sweeps dead cell identities but commits no part of a
+        //   candidate when the live table still cannot fit it.
+        // Why it exists: a mark-and-sweep performed directly on live state could delete old
+        //   metadata even though the OSC 8 open itself must be apply-none.
+        // Scenario: a pane sits just below 256 KiB, one old cell is overwritten, and another
+        //   maximum-sized target arrives before enough dead metadata exists to admit it.
+        var terminal = Terminal(columns: 20, rows: 1)!
+        let retainedLength = 65_500
+        for index in 0..<4 {
+            let prefix = "https://\(index).test/"
+            terminal.feed(osc8(uri: prefix + String(repeating: "a", count: retainedLength - prefix.utf8.count)))
+            terminal.feed(Array("x".utf8))
+        }
+        #expect(terminal.retainedHyperlinkMetadataBytes == 4 * retainedLength)
+
+        terminal.feed(osc8(uri: ""))
+        let baseline = terminal
+        let maximum = "https://candidate.test/"
+            + String(repeating: "b", count: 65_536 - "https://candidate.test/".utf8.count)
+        terminal.feed(osc8(uri: maximum))
+        #expect(terminal == baseline)
+
+        terminal.feed(Array("\u{1B}[1;1Hy".utf8))
+        terminal.feed(osc8(uri: maximum))
+        #expect(terminal.retainedHyperlinkCount == 4)
+        #expect(terminal.retainedHyperlinkMetadataBytes <= 256 * 1_024)
+    }
+
+    @Test("SGR preserves the link pen while resets and blank-producing operations clear links")
+    func penSemantics() {
+        var terminal = Terminal(columns: 8, rows: 2)!
+        terminal.feed(osc8(uri: "https://example.com"))
+        terminal.feed(Array("a\u{1B}[0mb\u{1B}[mc\u{1B}[1;0md".utf8))
+        for column in 0..<4 {
+            #expect(terminal.cell(row: 0, column: column)?.hyperlink != nil)
+        }
+
+        terminal.feed(Array("\u{1B}7\u{1B}]8;;\u{7}\u{1B}8e\u{1B}[2J\u{1B}#8".utf8))
+        #expect(terminal.cell(row: 0, column: 4)?.hyperlink == nil)
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink == nil)
+
+        terminal.feed(osc8(uri: "https://reset.test"))
+        terminal.feed(Array("x\u{1B}[!py".utf8))
+        #expect(terminal.cell(row: 0, column: 5)?.hyperlink != nil)
+        #expect(terminal.cell(row: 0, column: 6)?.hyperlink == nil)
+    }
+
+    @Test("REP inherits the pen while resize fill, alternate cells, and RIS do not leak links")
+    func penAcrossStructuralOperations() {
+        var terminal = Terminal(columns: 4, rows: 2)!
+        terminal.feed(osc8(uri: "https://primary.test"))
+        terminal.feed(Array("x\u{1B}[2b".utf8))
+        for column in 0..<3 {
+            #expect(terminal.cell(row: 0, column: column)?.hyperlink?.uri
+                == "https://primary.test")
+        }
+
+        terminal.resize(columns: 6, rows: 2)
+        #expect(terminal.cell(row: 0, column: 4)?.hyperlink == nil)
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array("\u{1B}[?1047h".utf8))
+        terminal.feed(osc8(uri: "https://alternate.test"))
+        terminal.feed(Array("a".utf8))
+        #expect(terminal.cell(row: 0, column: 3)?.hyperlink?.uri
+            == "https://alternate.test")
+        terminal.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://primary.test")
+        #expect(terminal.cell(row: 0, column: 3)?.hyperlink == nil)
+
+        terminal.feed(osc8(uri: "https://reset.test"))
+        terminal.feed(Array("\u{1B}cy".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink == nil)
+        #expect(terminal.retainedHyperlinkCount == 0)
+    }
+
+    @Test("link identity survives wide cells, soft wraps, reflow, scrollback, and eviction")
+    func identityCarry() {
+        // Sized at the *widest* geometry this test reaches (it resizes 5 -> 3 -> 6), because the
+        // budget is denominated in bytes: a budget that holds a row at 5 columns holds none at 6.
+        var terminal = Terminal(columns: 5, rows: 2, scrollbackBudgetBytes: historyBudget(lines: 4, cells: 6, paneColumns: 6))!
+        terminal.feed(osc8(params: "id=wide", uri: "https://wide.test"))
+        terminal.feed(Array("abc界z\nnext\nlast".utf8))
+        terminal.resize(columns: 3, rows: 2)
+        terminal.resize(columns: 6, rows: 2)
+
+        let linkedCells = (0..<terminal.scrollbackRowCount).reduce(into: [TerminalCell]()) {
+            $0.append(contentsOf: terminal.scrollbackRow(at: $1)?.cells ?? [])
+        }.filter { $0.hyperlink?.explicitId == "wide" }
+        #expect(linkedCells.isEmpty == false)
+        #expect(terminal.retainedHyperlinkMetadataBytes <= 1_048_576)
+        expectValidGrid(terminal)
+    }
+
+    @Test("links keep working after far more distinct targets than the id space holds at once")
+    func linksSurviveIdSpaceExhaustion() {
+        // Intent: a session that emits more distinct OSC 8 targets than the identifier space can
+        //   hold simultaneously still resolves later links, and never resolves one to an earlier
+        //   target's URI.
+        // Why it exists: cell-held link ids are a narrow integer (`research/15/D3`), so the id space
+        //   is exhaustible in a way an unbounded counter's was not, and the counter must therefore
+        //   wrap and recycle. This test covers the recycling half: an id handed out again while a
+        //   live cell still points at it would show that cell another target's URI. The half where
+        //   recycling is no longer possible -- every id occupied at once -- is
+        //   `fullIdSpaceRefusesFurtherOpens` below. Both are invisible to every other test here,
+        //   which uses a handful of links.
+        // Scenario: a long-lived pane running a tool that emits a uniquely-identified link per
+        //   line -- `ls --hyperlink`, a build log, a test runner -- for hours.
+        // Walking the cursor to the wrap for real costs 65,536 targets, and admission is linear in
+        // the live table, so that is quadratic work for one boundary crossing. The warm-up below
+        // is sized only to force at least one metadata sweep -- which is what puts previously
+        // issued low ids back in the free pool -- and `primeHyperlinkIdWrapForTesting` then jumps
+        // the cursor to the last id before the wrap. The recycled ids the post-wrap phase hands
+        // out are therefore genuinely reissued, not pristine.
+        let warmUpCount = 600
+        let postWrapCount = 120
+        let linkCount = warmUpCount + postWrapCount
+        var terminal = Terminal(columns: 8, rows: 2)!
+
+        // Column 0 is written once and never touched again, so its link stays live for the whole
+        // run. It is the cell that catches a recycled id landing on a target something still
+        // points at -- the assertion below reads the *old* URI, not the newest one.
+        terminal.feed(osc8(uri: "https://pinned.test"))
+        terminal.feed(Array("a".utf8))
+        let pinnedId = terminal.liveRowForTesting(at: 0)?.cell(at: 0).hyperlinkId
+
+        // Padded to ~512 bytes so the 256 KiB metadata cap admits only a few hundred targets at a
+        // time. Short URIs would let the table grow into the thousands between sweeps, and
+        // admission is linear in table size, which makes this test minutes long for no extra
+        // coverage -- the property under test is the *id* space, not the byte cap.
+        let padding = String(repeating: "p", count: 480)
+        func emit(_ index: Int) {
+            // Rewrite column 1 in place. Nothing scrolls, so the pinned cell above survives, and
+            // each link's only cell dies as the next one overwrites it.
+            terminal.feed(Array("\u{1B}[1;2H".utf8))
+            terminal.feed(osc8(uri: "https://h\(index).test/\(padding)"))
+            terminal.feed(Array("x".utf8))
+        }
+
+        for index in 0..<warmUpCount { emit(index) }
+
+        terminal.primeHyperlinkIdWrapForTesting()
+        var idsAfterPriming = Set<Terminal.HyperlinkId>()
+        for index in warmUpCount..<linkCount {
+            emit(index)
+            if let id = terminal.liveRowForTesting(at: 0)?.cell(at: 1).hyperlinkId {
+                idsAfterPriming.insert(id)
+            }
+        }
+
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://pinned.test")
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri
+            == "https://h\(linkCount - 1).test/\(padding)")
+        // The wrap really happened, and the allocator walked back into the low ids rather than
+        // refusing or reissuing the one the pinned cell still holds. Asserting the issued ids
+        // directly is what keeps the priming honest: a seam that failed to reach the boundary,
+        // or a skip that stopped skipping, changes this set rather than passing silently.
+        #expect(pinnedId == 1)
+        #expect(idsAfterPriming.contains(Terminal.HyperlinkId.max))
+        #expect(idsAfterPriming.contains(0))
+        #expect(idsAfterPriming.contains(2))
+        #expect(idsAfterPriming.contains(1) == false)
+        // The live table must stay bounded rather than growing with the number of targets seen,
+        // which is the property that keeps a narrow id sufficient in the first place. Failing this
+        // also means no sweep ran, which would leave the recycled ids above pristine.
+        #expect(terminal.retainedHyperlinkCount < linkCount)
+        expectValidGrid(terminal)
+    }
+
+    @Test("a full id space refuses further opens instead of spinning, and keeps the pen")
+    func fullIdSpaceRefusesFurtherOpens() {
+        // Intent: once every hyperlink id is taken, an OSC 8 open changes nothing -- no new
+        //   target, no new pen -- and later text keeps the link that was already open.
+        // Why it exists: `allocateHyperlinkId` scans forward from a rotating cursor for a free id,
+        //   so a completely occupied table has no free candidate to find. Two independent things
+        //   make that a refusal rather than an infinite loop inside `feed` -- the count guard's
+        //   early return, and the scan's own bound over the id space -- and this pins the
+        //   behavior they agree on, so neutralizing either one alone still leaves it green. The
+        //   sibling test above covers the other half of the id space -- the wrap, where ids are
+        //   still recyclable. Nothing covered this half, because a table that reaches 65,536
+        //   entries needs short URIs, and the padded targets that test needs steady-state at ~500.
+        // Scenario: a pane whose output alternates two very short OSC 8 targets. Each open dedupes
+        //   only against the current pen, so every one mints a fresh id while the one-byte URIs
+        //   keep the table far below the 256 KiB metadata cap -- the table grows until the ids,
+        //   not the bytes, run out.
+        var terminal = Terminal(columns: 4, rows: 1)!
+        terminal.primeHyperlinkIdSpaceForTesting()
+
+        // One id is still free, so this open must succeed -- and taking it is what saturates the
+        // space. Straddling the boundary with real feeds keeps the seam from deciding the outcome.
+        terminal.feed(osc8(uri: "https://last.test"))
+        terminal.feed(Array("x".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://last.test")
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
+
+        let saturated = terminal
+        terminal.feed(osc8(uri: "https://refused.test"))
+        #expect(terminal == saturated)
+
+        terminal.feed(Array("y".utf8))
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri == "https://last.test")
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
+        expectValidGrid(terminal)
+    }
+
+    @Test("explicit links resolve by contiguous run and take precedence over detection")
+    func explicitResolution() {
+        var terminal = Terminal(columns: 12, rows: 2)!
+        terminal.feed(osc8(uri: "https://explicit.test"))
+        terminal.feed(Array("abc".utf8))
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array(" http://x.io".utf8))
+
+        let explicit = terminal.activatableLink(at: .init(row: 0, column: 1))
+        #expect(explicit?.hyperlink.uri == "https://explicit.test")
+        #expect(explicit?.range == range(0, 0, 0, 3))
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 5))?.hyperlink.uri == "http://x.io")
+    }
+
+    @Test("automatic detection follows soft wraps and ignores surrounding punctuation")
+    func automaticDetection() {
+        var terminal = Terminal(columns: 10, rows: 3)!
+        terminal.feed(Array("see (https://example.com/path), ok".utf8))
+
+        let link = terminal.activatableLink(at: .init(row: 1, column: 3))
+        #expect(link?.hyperlink.uri == "https://example.com/path")
+        #expect(link?.range.start == .init(row: 0, column: 5))
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 1)) == nil)
+    }
+
+    @Test("automatic detection trims terminal punctuation and resolves only URL cells")
+    func automaticDetectionBoundaries() throws {
+        // Intent: automatic HTTP(S) detection finds the complete token from any URL cell,
+        //   trims prose punctuation, and does not extend activation into adjacent whitespace.
+        // Why it exists: the previous coverage exercised only `(URL),`, leaving the rest of
+        //   the detector's punctuation and token-boundary policy unproved.
+        // Scenario: command output contains URLs beside punctuation, leading whitespace, and
+        //   malformed lookalikes, and the user Command-clicks both inside and beside them.
+        // Adapted from kitty_tests/datatypes.py#test_url_at
+        //   (kitty v0.48.2 2cb1d95, body sha256:2ba030f7abcf).
+        //   Divergence: asserts through `activatableLink(at:)`, supports only HTTP(S), trims an
+        //   unbalanced `)` in agreement with WezTerm/foot/iTerm2, and does not activate whitespace.
+        let cases: [(text: String, click: Int, uri: String)] = [
+            ("http://xyz.com.", 7, "http://xyz.com"),
+            ("http://xyz.com,", 7, "http://xyz.com"),
+            ("http://xyz.com\\", 7, "http://xyz.com"),
+            ("http://xyz.com}", 7, "http://xyz.com"),
+            ("http://xyz.com]", 7, "http://xyz.com"),
+            ("http://xyz.com>", 7, "http://xyz.com"),
+            ("http://xyz.com)", 7, "http://xyz.com"),
+            ("http://-abcd] ", 8, "http://-abcd"),
+            ("http://a.b?q=1/", 8, "http://a.b?q=1/"),
+            ("http://a.b?q=1-", 8, "http://a.b?q=1-"),
+            ("http://a.b?q=1&", 8, "http://a.b?q=1&"),
+        ]
+        for entry in cases {
+            var terminal = try #require(Terminal(columns: entry.text.utf8.count + 1, rows: 1))
+            terminal.feed(Array(entry.text.utf8))
+            #expect(
+                terminal.activatableLink(at: .init(row: 0, column: entry.click))?.hyperlink.uri
+                    == entry.uri,
+                "input: \(entry.text)"
+            )
+        }
+
+        let surrounded = "  https://testing.me  "
+        var terminal = try #require(Terminal(columns: surrounded.utf8.count, rows: 1))
+        terminal.feed(Array(surrounded.utf8))
+        for column in 2..<(surrounded.utf8.count - 2) {
+            #expect(
+                terminal.activatableLink(at: .init(row: 0, column: column))?.hyperlink.uri
+                    == "https://testing.me"
+            )
+        }
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 0)) == nil)
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 1)) == nil)
+        #expect(terminal.activatableLink(at: .init(row: 0, column: surrounded.utf8.count - 1)) == nil)
+
+        for text in ["https:// testing.me", "h ttp://acme.com", "http: //acme.com", "http:/ /acme.com"] {
+            var malformed = try #require(Terminal(columns: text.utf8.count + 1, rows: 1))
+            malformed.feed(Array(text.utf8))
+            for column in 0..<text.utf8.count {
+                #expect(malformed.activatableLink(at: .init(row: 0, column: column)) == nil)
+            }
+        }
+    }
+
+    @Test("automatic detection accepts 64 KiB and rejects one byte more")
+    func detectedTargetBoundary() {
+        let prefix = "https://example.test/"
+        let accepted = prefix + String(repeating: "a", count: 65_536 - prefix.utf8.count)
+        let rejected = accepted + "a"
+        var acceptedTerminal = Terminal(columns: 65_540, rows: 1)!
+        acceptedTerminal.feed(Array(accepted.utf8))
+        #expect(
+            acceptedTerminal.activatableLink(at: .init(row: 0, column: 100))?.hyperlink.uri
+                == accepted
+        )
+
+        var rejectedTerminal = Terminal(columns: 65_540, rows: 2)!
+        rejectedTerminal.feed(Array(rejected.utf8))
+        #expect(rejectedTerminal.activatableLink(at: .init(row: 0, column: 100)) == nil)
+        #expect(rejectedTerminal.retainedHyperlinkCount == 0)
+    }
+
+    @Test("activation rejects unsafe schemes and malformed HTTP authorities")
+    func activationValidation() {
+        let rejected = [
+            "javascript:alert(1)", "file:///tmp/a", "data:text/plain,x", "mailto:a@b.test",
+            "http:/missing", "http://", "http://:80/a", "http://host:0/a",
+            "http://host:65536/a", "http://host:abc/a", "http://host name/a",
+            "http://bad%zz.test/a", "http://[gg::1]/a", "http://a@b@example.com/a",
+        ]
+        for uri in rejected {
+            var terminal = Terminal(columns: 80, rows: 1)!
+            terminal.feed(osc8(uri: uri))
+            terminal.feed(Array("x".utf8))
+            #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == uri)
+            #expect(terminal.activatableLink(at: .init(row: 0, column: 0)) == nil)
+        }
+
+        for uri in ["HTTP://example.com", "Https://user@example.com:443/a?b=c#d", "http://[::1]:8080/"] {
+            var terminal = Terminal(columns: 80, rows: 1)!
+            terminal.feed(osc8(uri: uri))
+            terminal.feed(Array("x".utf8))
+            #expect(terminal.activatableLink(at: .init(row: 0, column: 0))?.hyperlink.uri == uri)
+        }
+    }
+
+    private func osc8(params: String = "", uri: String) -> [UInt8] {
+        Array("\u{1B}]8;\(params);\(uri)\u{7}".utf8)
+    }
+
+    private func range(_ sr: Int, _ sc: Int, _ er: Int, _ ec: Int) -> TerminalTextRange {
+        TerminalTextRange(
+            start: .init(row: sr, column: sc),
+            end: .init(row: er, column: ec)
+        )
+    }
+}

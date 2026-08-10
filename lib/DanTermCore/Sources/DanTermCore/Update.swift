@@ -8,7 +8,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // selectedTabId reaches this point. `defer` fires after the matched case
     // returns, and `inout model` makes the reconciled state visible to
     // callers. Without this, MRU updates would have to be sprinkled into
-    // every handler that touches tabs (movePaneToTab, surfaceCreationFailed,
+    // every handler that touches tabs (movePaneToTab, sessionCreationFailed,
     // deleteGroup, restore/import paths, etc.).
     let strandedPopoverPrev = todoPopoverStrandKey(model)
     defer {
@@ -83,7 +83,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         var commands: [Command] = []
         if !background, let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -91,7 +91,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.selectedTabId = tabId
         }
 
-        commands.append(.createSurface(
+        commands.append(.createSession(
             paneId: paneId,
             cwd: cwd,
             command: launch?.cmd,
@@ -166,12 +166,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         let newSplitId = SplitId(rawValue: env.newId())
         let cwd = launch?.cwd ?? model.pane(targetPaneId)?.cwd
         let theme = model.pane(targetPaneId)?.theme
+        let fontSizeSteps = model.pane(targetPaneId)?.fontSizeSteps ?? 0
 
         var newPane = PaneModel(id: newPaneId)
         if let title = launch?.title {
             newPane.title = title
         }
         newPane.theme = theme
+        newPane.fontSizeSteps = fontSizeSteps
 
         // splitLeaf embeds the new pane's payload directly into the leaf.
         guard let newRoot = splitLeaf(
@@ -189,7 +191,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         }
 
         var commands: [Command] = [
-            .createSurface(
+            .createSession(
                 paneId: newPaneId,
                 cwd: cwd,
                 command: launch?.cmd,
@@ -202,7 +204,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .closePane(let paneId):
-        // Resolve the pane's own tab (mirrors .splitPane): .surfaceClosed routes
+        // Resolve the pane's own tab (mirrors .splitPane): .sessionClosed routes
         // background-tab shell exits here, and a stale context menu may fire after
         // the selection changed -- both must act on the tab that owns the pane.
         // A pane in no tab (already closed) is a pure no-op.
@@ -216,8 +218,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             return emitTerminateConfirmation(&model)
         }
 
-        // Surface teardown is reconcileSurfaceExistence's now (paneId leaves the tree
-        // below, so the next reconcile tears its surface down); keep side-table cleanup.
+        // Session teardown is reconcileSessionExistence's now (paneId leaves the tree
+        // below, so the next reconcile tears its session down); keep side-table cleanup.
         var commands: [Command] = []
         clearPaneSideTables(paneId, in: &model)
         if model.todoPopover == .pane(paneId) {
@@ -340,7 +342,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         var commands: [Command] = []
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
         model.selectedTabId = targetTabId
@@ -366,7 +368,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Defocus old tab's panes
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSession(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -457,6 +459,27 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.updatePane(paneId) { $0.theme = themeName }
         return [.scheduleCheckpoint]
 
+    case .adjustPaneFontSize(let paneId, let steps):
+        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+              let pane = model.pane(targetId) else { return [] }
+        // Bound the delta against the room this pane has left, not against the
+        // step range: the latter saturates short (a pane at the floor jumped by
+        // Int.max would stop below the ceiling), while this lands a huge jump
+        // exactly on the bound and still keeps the addition from overflowing.
+        let roomDown = paneFontSizeStepRange.lowerBound - pane.fontSizeSteps
+        let roomUp = paneFontSizeStepRange.upperBound - pane.fontSizeSteps
+        let next = pane.fontSizeSteps + min(max(steps, roomDown), roomUp)
+        guard next != pane.fontSizeSteps else { return [] }
+        model.updatePane(targetId) { $0.fontSizeSteps = next }
+        // The pane re-grids via reconcilePaneConfig (font size is in the projection).
+        return [.scheduleCheckpoint]
+
+    case .resetPaneFontSize(let paneId):
+        guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
+              let pane = model.pane(targetId), pane.fontSizeSteps != 0 else { return [] }
+        model.updatePane(targetId) { $0.fontSizeSteps = 0 }
+        return [.scheduleCheckpoint]
+
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
@@ -485,7 +508,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .paneBecameFirstResponder(let paneId):
         guard let tab = selectedTab(in: model) else { return [] }
         // Only adopt a pane that actually lives in the selected tab. A stray
-        // becomeFirstResponder from a hidden/background surface must not
+        // becomeFirstResponder from a hidden/background session must not
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
         guard allPaneIds(tab.rootNode).contains(paneId) else { return [] }
         let oldFocusedId = tab.focusedPaneId
@@ -502,6 +525,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // MARK: - Command Tracking
 
     case .commandStarted(let paneId, let command):
+        guard command.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.lastCommand = command }
         // Persist last command so restore can prefill it in the shell.
         return [.scheduleCheckpoint]
@@ -530,6 +554,9 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return []
 
     case .remoteSessionReported(let paneId, let session):
+        guard session.user.fitsTerminalMetadataValueLimit,
+              session.host.fitsTerminalMetadataValueLimit
+        else { return [] }
         let remoteTheme = model.config.remoteTheme
         model.updatePane(paneId) { p in
             let wasRemote = p.isRemote
@@ -543,15 +570,20 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Config (external reload)
 
-    case .configLoaded(let newConfig):
+    case .configLoaded(let newConfig, let resolvedFontFamily):
         let oldConfig = model.config
         model.config = newConfig
+        // Written as a pair with the config it was resolved from so config, resolution,
+        // warning, and pane projection stay coherent and panes never render a stale family.
+        model.resolvedFontFamily = resolvedFontFamily
         // Reset draft to match new config if panel is open.
-        // Reset DanTerm draft fields to match new config; preserve Ghostty fields
-        // (ghosttyPrefsRefreshed handles those separately after CONFIG_CHANGE).
         if model.preferencesDraft != nil {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
+            model.preferencesDraft!.theme = newConfig.defaultTheme
+            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+            model.preferencesDraft!.fontFamily = newConfig.fontFamily
+            model.preferencesDraft!.copyOnSelect = newConfig.copyOnSelect
         }
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane
@@ -562,28 +594,30 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         }
         return []
 
-    case .ghosttyConfigReloaded:
-        model.ghosttyConfigGeneration += 1
+    case .fontFamilyResolved(let resolvedFontFamily):
+        model.resolvedFontFamily = resolvedFontFamily
         return []
 
     // MARK: - Preferences Panel
 
-    case .preferencesOpened(let ghostty):
+    case .preferencesOpened(let installedFontFamilies):
         // Only create draft on closed → open transition; re-focus is a no-op.
         if model.preferencesDraft == nil {
+            model.installedFontFamilies = installedFontFamilies
             model.preferencesDraft = PreferencesDraft(
                 alertClearMode: model.config.alertClearMode,
                 remoteTheme: model.config.remoteTheme,
-                theme: ghostty.theme,
-                fontSize: ghostty.fontSize
+                theme: model.config.defaultTheme,
+                fontSize: model.config.fontSize.map(configFontSizeText),
+                fontFamily: model.config.fontFamily,
+                copyOnSelect: model.config.copyOnSelect
             )
-            model.committedGhosttyPrefs = ghostty
         }
         return []
 
     case .preferencesClosed:
         model.preferencesDraft = nil
-        model.committedGhosttyPrefs = nil
+        model.installedFontFamilies = []
         return []
 
     case .prefSetAlertClearMode(let mode):
@@ -616,108 +650,104 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.preferencesDraft!.fontSize = text
         return []
 
+    case .prefSetFontFamily(let text):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontFamily = text
+        return []
+
+    case .prefSetCopyOnSelect(let enabled):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.copyOnSelect = enabled
+        return []
+
     case .prefResetTheme:
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.theme = model.committedGhosttyPrefs?.theme
+        model.preferencesDraft!.theme = model.config.defaultTheme
         return []
 
     case .prefResetFontSize:
         guard model.preferencesDraft != nil else { return [] }
-        model.preferencesDraft!.fontSize = model.committedGhosttyPrefs?.fontSize
+        model.preferencesDraft!.fontSize = model.config.fontSize.map(configFontSizeText)
         return []
 
-    case .ghosttyPrefsRefreshed(let ghostty):
-        model.committedGhosttyPrefs = ghostty
-        if model.preferencesDraft != nil {
-            model.preferencesDraft!.theme = ghostty.theme
-            model.preferencesDraft!.fontSize = ghostty.fontSize
-        }
+    case .prefResetFontFamily:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontFamily = model.config.fontFamily
+        return []
+
+    case .prefResetCopyOnSelect:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.copyOnSelect = model.config.copyOnSelect
         return []
 
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
         let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
         let oldConfig = model.config
-        var commands: [Command] = []
-        // Save changed keys to disk.
-        if draft.alertClearMode != oldConfig.alertClearMode {
-            commands.append(.saveDanTermConfigKey(key: "alert-clear-mode", value: draft.alertClearMode.rawValue))
+        var newConfig = oldConfig
+        newConfig.alertClearMode = draft.alertClearMode
+        newConfig.copyOnSelect = draft.copyOnSelect
+        newConfig.remoteTheme = resolvedTheme
+        newConfig.defaultTheme = draft.theme
+        // A size outside the renderable range is bounded rather than rejected:
+        // the number the user typed says which end they wanted, and storing it
+        // raw would leave the panel showing a size no pane draws at.
+        let parsedFontSize: Double? = draft.fontSize.flatMap { Double($0) }
+        let validFontSize = draft.fontSize == nil
+            || (parsedFontSize.map { $0.isFinite && $0 > 0 } ?? false)
+        if validFontSize {
+            newConfig.fontSize = parsedFontSize.map(DanTermConfig.boundedFontSize)
         }
-        if resolvedTheme != oldConfig.remoteTheme {
-            commands.append(.saveDanTermConfigKey(key: "remote-theme", value: resolvedTheme))
-        }
-        // Apply to model.
-        model.config.alertClearMode = draft.alertClearMode
-        model.config.remoteTheme = resolvedTheme
-        // Normalize draft to resolved values post-save.
+        // Whether the family is installed is not knowable here and is not a
+        // validation question anyway: an unavailable name is still written, since
+        // it is the user's file and they may be about to install the font. The
+        // runtime resolves what it writes and feeds the verdict back through
+        // fontFamilyResolved, completing a coherent apply and repainting live panes
+        // without a manual reload.
+        newConfig.fontFamily = resolveFontFamilyDraft(draft.fontFamily)
+        model.config = newConfig
+        // Normalize draft to resolved values post-save. The size is echoed back
+        // only when it was saved: text that failed to parse stays on screen for
+        // the user to correct, and the field keeps reading dirty.
         model.preferencesDraft!.remoteTheme = resolvedTheme
+        model.preferencesDraft!.fontFamily = newConfig.fontFamily
+        if validFontSize {
+            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+        }
         // Update remote panes if theme changed.
         if resolvedTheme != oldConfig.remoteTheme {
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
                 model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
             }
         }
-        // Save changed Ghostty keys and trigger reload if any changed.
-        let committedGhostty = model.committedGhosttyPrefs ?? GhosttyPrefs()
-        var ghosttyChanged = false
-        if draft.theme != committedGhostty.theme {
-            if let theme = draft.theme {
-                commands.append(.saveDanTermConfigKey(key: "theme", value: theme))
-            } else {
-                commands.append(.removeDanTermConfigKey(key: "theme"))
-            }
-            ghosttyChanged = true
-        }
-        if draft.fontSize != committedGhostty.fontSize {
-            if let fs = draft.fontSize, let val = Double(fs), val > 0 {
-                commands.append(.saveDanTermConfigKey(key: "font-size", value: fs))
-                ghosttyChanged = true
-            } else if draft.fontSize == nil {
-                commands.append(.removeDanTermConfigKey(key: "font-size"))
-                ghosttyChanged = true
-            }
-            // else: invalid font-size — skip, leave dirty
-        }
-        if ghosttyChanged {
-            commands.append(.reloadGhosttyConfig)
-            // Optimistically update committed baselines for saved fields.
-            // The CONFIG_CHANGE callback will confirm with ghosttyPrefsRefreshed.
-            if draft.theme != committedGhostty.theme {
-                model.committedGhosttyPrefs?.theme = draft.theme
-            }
-            // Only update font-size baseline if it was actually saved (valid value or nil).
-            let fontSizeSaved = draft.fontSize == nil
-                || (draft.fontSize != nil && Double(draft.fontSize!) != nil && Double(draft.fontSize!)! > 0)
-            if fontSizeSaved && draft.fontSize != committedGhostty.fontSize {
-                model.committedGhosttyPrefs?.fontSize = draft.fontSize
-            }
-        }
-        return commands
+        return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 
     // MARK: - Export
 
     case .exportState:
         return [.exportState(toSnapshot(model, home: env.homeDirectory()))]
 
-    // MARK: - Ghostty Callbacks
+    // MARK: - Terminal Session Callbacks
 
-    case .surfaceTitle(let paneId, let title):
+    case .sessionTitle(let paneId, let title):
+        guard title.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.title = title }
         // Tab/window chrome derives from the focused pane title just set above.
         // Persist so restored tabs show the correct name.
         return [.scheduleCheckpoint]
 
-    case .surfaceCwd(let paneId, let cwd):
+    case .sessionCwd(let paneId, let cwd):
+        guard cwd?.fitsTerminalMetadataValueLimit != false else { return [] }
         model.updatePane(paneId) { $0.cwd = cwd }
         // Tab/window chrome derives from the focused pane cwd just set above.
         // Persist so restored panes open in the right dir.
         return [.scheduleCheckpoint]
 
-    case .surfaceProgress(let paneId, let state):
+    case .sessionProgress(let paneId, let state):
         model.updatePane(paneId) { $0.progress = state }
         return []
 
-    case .surfaceBell(let paneId):
+    case .sessionBell(let paneId):
         // No alert for the focused pane while the app is active; when inactive,
         // the focused pane is unseen and should follow the normal alert path.
         if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
@@ -751,6 +781,9 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .desktopNotification(let paneId, let title, let body):
+        guard title.fitsTerminalMetadataValueLimit,
+              body.fitsTerminalMetadataValueLimit
+        else { return [] }
         // Same as bell: suppress focused-pane noise only while the app is active.
         if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
             return []
@@ -771,7 +804,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        // Tab/group bell badges ride reconcileSidebar (see surfaceBell).
+        // Tab/group bell badges ride reconcileSidebar (see sessionBell).
         var commands: [Command] = []
 
         commands.append(contentsOf: throttledNotification(
@@ -780,11 +813,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         ))
         return commands
 
-    case .surfaceClosed(let paneId):
+    case .sessionClosed(let paneId):
         return update(&model, .closePane(paneId: paneId), env: env)
 
-    case .surfaceCreationFailed(let paneId):
-        // Surface creation failure removes the whole containing tab, so every
+    case .sessionCreationFailed(let paneId):
+        // Session creation failure removes the whole containing tab, so every
         // sibling pane must be cleaned up as if the tab had been closed.
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
@@ -793,7 +826,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 let groupId = model.groups[gi].id
                 var commands: [Command] = []
                 for pid in allPaneIds(tab.rootNode) {
-                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
                 }
@@ -807,7 +840,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 if !model.hasAnyTab {
                     return commands + [.terminate]
                 }
-                // Persist tab removal after a failed surface so it doesn't reappear.
+                // Persist tab removal after a failed session so it doesn't reappear.
                 commands.append(.scheduleCheckpoint)
                 return commands
             }
@@ -825,14 +858,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
            let focusedPaneId = selectedTab(in: model)?.focusedPaneId {
             markAlertsReadForPane(focusedPaneId, in: &model)
         }
-        return [.setAppFocus(true)]
+        return []
 
     case .appResignedActive:
         model.isAppActive = false
         if model.jumpMode != nil {
             model.jumpMode = nil   // jump badges clear via reconcileSidebar
         }
-        return [.setAppFocus(false)]
+        return []
 
     case .requestQuit:
         return emitTerminateConfirmation(&model)
@@ -973,11 +1006,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }
             model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
-            // Close all tabs' surfaces
+            // Close all tabs' sessions.
             var commands: [Command] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
-                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
                     clearPaneSideTables(pid, in: &model)
                 }
@@ -1137,7 +1170,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         guard let tab = selectedTab(in: model) else { return [] }
         return [.sendStartSearch(paneId: tab.focusedPaneId)]
 
-    case .ghosttyStartSearch(let paneId, let needle):
+    case .searchStarted(let paneId, let needle):
         if model.searchState[paneId] == nil {
             model.searchState[paneId] = SearchModel()
         }
@@ -1151,14 +1184,19 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .searchNeedleChanged(let paneId, let needle):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.needle = needle
-        model.searchState[paneId]?.total = nil
-        model.searchState[paneId]?.selected = nil
+        model.searchState[paneId]?.status = nil
         // The overlay re-renders from the searchState change via reconcilePaneChrome.
         return [.sendSearchNeedle(paneId: paneId, needle: needle)]
 
     case .searchNavigate(let paneId, let direction):
         guard model.searchState[paneId] != nil else { return [] }
         return [.sendSearchNavigate(paneId: paneId, direction: direction)]
+
+    case .navigateFocusedSearch(let direction):
+        // The menu items stay enabled, so Cmd-G with no open overlay lands here and
+        // must do nothing rather than drive engine search state invisibly.
+        guard let tab = selectedTab(in: model) else { return [] }
+        return update(&model, .searchNavigate(paneId: tab.focusedPaneId, direction: direction), env: env)
 
     case .endSearch(let paneId):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1167,15 +1205,23 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
         return [.sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
 
-    case .ghosttySearchTotal(let paneId, let total):
+    case .searchTotalReported(let paneId, let total):
         guard model.searchState[paneId] != nil else { return [] }
-        model.searchState[paneId]?.total = total
+        // Backends report the total first and the selection that goes with it second,
+        // so a fresh total supersedes any standing selection rather than keeping an
+        // index the new count may no longer contain.
+        model.searchState[paneId]?.status = total.map { .counted(total: $0) }
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
-    case .ghosttySearchSelected(let paneId, let selected):
-        guard model.searchState[paneId] != nil else { return [] }
-        model.searchState[paneId]?.selected = selected
+    case .searchSelectionReported(let paneId, let selected):
+        // A selection is only meaningful against a standing total; one arriving
+        // before any total is dropped, which is what keeps the impossible
+        // "selected without total" pair out of the model.
+        guard let status = model.searchState[paneId]?.status else { return [] }
+        model.searchState[paneId]?.status = selected.map {
+            .matched(selected: $0, total: status.total)
+        } ?? .counted(total: status.total)
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
@@ -1692,6 +1738,70 @@ private func dispatchIpc(
         }
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
+    case Methods.paneZoom:
+        let paneId = try resolvePane(params: params, context: context, in: model)
+        guard case .string(let requested)? = params["state"] else {
+            throw IpcParamsError("state must be one of on, off, toggle")
+        }
+        guard let tab = tabForPane(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
+        }
+        let target: Bool
+        switch requested {
+        case "on": target = true
+        case "off": target = false
+        case "toggle": target = tab.isZoomed == false
+        default:
+            throw IpcParamsError("state must be one of on, off, toggle")
+        }
+        // Route through `.toggleZoomPane` rather than writing `isZoomed` here, so the
+        // scripted path and the menubar/context-menu paths cannot drift: the guard that
+        // only a split tab may zoom lives there and is the reason a request can be
+        // honoured and still report `isZoomed: false`.
+        if tab.isZoomed != target {
+            _ = update(&model, .toggleZoomPane(paneId: paneId))
+        }
+        guard let result = paneInfoResult(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
+        }
+        return [.ipcReply(reqId: reqId, result: result)]
+
+    case Methods.paneRows:
+        let paneId = try resolvePane(params: params, context: context, in: model, requireExplicit: true)
+        return [.readPaneRowStructure(reqId: reqId, paneId: paneId)]
+
+    case Methods.paneTape:
+        let paneId = try resolvePane(
+            params: params,
+            context: context,
+            in: model,
+            requireExplicit: true
+        )
+        let follow: Bool
+        switch params["follow"] {
+        case nil:
+            follow = false
+        case .some(.bool(let value)):
+            follow = value
+        default:
+            throw IpcParamsError("follow must be boolean")
+        }
+        let fromNow: Bool
+        switch params["fromNow"] {
+        case nil:
+            fromNow = false
+        case .some(.bool(let value)):
+            fromNow = value
+        default:
+            throw IpcParamsError("fromNow must be boolean")
+        }
+        guard fromNow == false || follow else {
+            throw IpcParamsError("fromNow requires follow")
+        }
+        return follow
+            ? [.followPaneTape(reqId: reqId, paneId: paneId, fromNow: fromNow)]
+            : [.dumpPaneTape(reqId: reqId, paneId: paneId)]
+
     case Methods.todoList:
         let paneId = try resolvePane(params: params, context: context, in: model)
         let todos = model.pane(paneId)?.todos ?? []
@@ -2113,6 +2223,9 @@ private func paneInfoResult(_ paneId: PaneId, in model: AppModel) -> JSONValue? 
             "id": .string(tab.id.rawValue.uuidString),
             "title": .string(tab.displayTitle),
             "groupId": .string(group.id.rawValue.uuidString),
+            // Zoom is transient and so never reaches the persisted snapshot `ls` returns.
+            // Reporting it here is what lets a caller observe the state it just set.
+            "isZoomed": .bool(tab.isZoomed),
         ]),
         "group": .object([
             "id": .string(group.id.rawValue.uuidString),
@@ -2194,7 +2307,7 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     var commands: [Command] = []
     if let oldTabId = model.selectedTabId {
         for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-            commands.append(.focusSurface(paneId: oldPaneId, focused: false))
+            commands.append(.focusSession(paneId: oldPaneId, focused: false))
         }
     }
     model.selectedTabId = id
@@ -2238,7 +2351,7 @@ private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [
 private func mruCycleCommit(_ model: inout AppModel) -> [Command] {
     guard let cycle = model.mruCycle else { return [] }
 
-    // Tabs may have been removed mid-cycle (closeTab, surfaceCreationFailed,
+    // Tabs may have been removed mid-cycle (closeTab, sessionCreationFailed,
     // last-pane closePane, automation). Filter frozenOrder against live tabs
     // and remap the cursor before reading the chosen id.
     guard let resolved = resolveLiveCycle(cycle, in: model) else {
@@ -2404,7 +2517,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
 
     var commands: [Command] = []
     for pid in paneIds {
-        // Surface teardown is reconcileSurfaceExistence's (these panes leave the tree
+        // Session teardown is reconcileSessionExistence's (these panes leave the tree
         // below); keep side-table cleanup + per-pane popover dismiss here.
         clearPaneSideTables(pid, in: &model)
         if model.todoPopover == .pane(pid) {

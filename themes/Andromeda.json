@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cd3131",
+    "#05bc79",
+    "#e5e512",
+    "#2472c8",
+    "#bc3fbc",
+    "#0fa8cd",
+    "#e5e5e5",
+    "#666666",
+    "#cd3131",
+    "#05bc79",
+    "#e5e512",
+    "#2472c8",
+    "#bc3fbc",
+    "#0fa8cd",
+    "#e5e5e5"
+  ],
+  "background": "#262a33",
+  "cursor": "#f8f8f0",
+  "cursorText": "#b5b5a8",
+  "foreground": "#e5e5e5",
+  "name": "Andromeda",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5a5c62",
+  "selectionForeground": "#ece7e7"
+}

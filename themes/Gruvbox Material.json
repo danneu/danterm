@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#141617",
+    "#ea6926",
+    "#c1d041",
+    "#eecf75",
+    "#6da3ec",
+    "#fd9bc1",
+    "#fe9d6e",
+    "#ffffff",
+    "#4c4c4c",
+    "#d3573b",
+    "#c1d041",
+    "#eecf75",
+    "#2c86ff",
+    "#fd9bc1",
+    "#92a5df",
+    "#ffffff"
+  ],
+  "background": "#1d2021",
+  "cursor": "#ffffff",
+  "cursorText": "#000000",
+  "foreground": "#d4be98",
+  "name": "Gruvbox Material",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2b2c3f",
+  "selectionForeground": "#7cfb70"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#0a0e14",
+    "#fc618d",
+    "#2d972f",
+    "#eeae11",
+    "#5688c7",
+    "#6f42c1",
+    "#5688c7",
+    "#525053",
+    "#999999",
+    "#fc618d",
+    "#2d972f",
+    "#ffaa33",
+    "#5688c7",
+    "#a86efd",
+    "#5688c7",
+    "#0a0e14"
+  ],
+  "background": "#ffffff",
+  "cursor": "#a86efd",
+  "cursorText": "#ffffff",
+  "foreground": "#0a0e14",
+  "name": "Karma Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e5e3ea",
+  "selectionForeground": "#0a0e14"
+}

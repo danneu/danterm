@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/60screen_ascii.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Copycell",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 6, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "ABC\u001b[H\u001b[@1" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "1ABC  \n      ",
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[2J\u001b[HABC\u001b[H\u001b[P" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "BC    \n      ",
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false }
+      }
+    }
+  ]
+}

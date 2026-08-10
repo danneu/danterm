@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/13state_edit.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "ED 3",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm clears pending wrap and open grapheme attachment while preserving viewport, cursor, and margins."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "a\r\nb\r\nc\r\nd\u001b[1;2r\u001b[2;2H" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "b   \nc   \nd   ",
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 1
+      }
+    },
+    { "type": "feed", "text": "\u001b[3J" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "b   \nc   \nd   ",
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "c   \n    \nd   ",
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 1
+      }
+    }
+  ]
+}

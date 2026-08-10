@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#383a42",
+    "#e45649",
+    "#50a14f",
+    "#c18401",
+    "#0184bc",
+    "#a626a4",
+    "#0997b3",
+    "#bababa",
+    "#4f525e",
+    "#e06c75",
+    "#98c379",
+    "#d8b36e",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#ffffff"
+  ],
+  "background": "#fafafa",
+  "cursor": "#a5b4e5",
+  "cursorText": "#383a42",
+  "foreground": "#383a42",
+  "name": "One Half Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bfceff",
+  "selectionForeground": "#383a42"
+}

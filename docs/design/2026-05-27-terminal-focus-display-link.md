@@ -3,6 +3,14 @@
 Status: Accepted
 Date: 2026-05-27
 
+> **2026-08-06: superseded by the libghostty removal.** Every mechanism below --
+> `ghostty_surface_set_focus`, `ghostty_surface_set_occlusion`,
+> `ghostty_surface_refresh`, `set_display_id`, Ghostty's per-surface display link,
+> and `app/TerminalView.swift` itself -- no longer exists. Focus, visibility, and
+> repaint now live in `app/SwiftTerminalSessionView.swift` over DanTerm's own
+> engine. Read this only as a record of the Ghostty-era contract; the body is
+> unedited on purpose.
+
 ## Context
 
 DanTerm hosts libghostty surfaces inside AppKit views. When a terminal pane is
@@ -20,7 +28,7 @@ transition. This makes the tempting fixes misleading:
 - `ghostty_surface_refresh` queues render work, but Ghostty skips ordinary
   draw-frame work while `hasVsync()` reports that the display link is running.
 - Visibility is a separate lifecycle input. DanTerm sends effective visibility
-  through `syncSurfaceVisibility` via `ghostty_surface_set_occlusion`, and
+  through `syncPaneVisibility` via `ghostty_surface_set_occlusion`, and
   Ghostty's renderer starts the display link from `setVisible` only when the
   surface is visible and already focused.
 
@@ -54,8 +62,8 @@ already focused.
 
 ## References
 
-- `app/AppRuntime.swift`: `focusPaneSurface`, `syncSurfaceVisibility`,
-  `syncSurfaceDisplayID`
+- `app/AppRuntime.swift`: `focusPaneSession`, `syncPaneVisibility`,
+  `syncSessionDisplayID`
 - `app/TerminalView.swift`: `becomeFirstResponder`, `resignFirstResponder`
 - `.ghostty-src/src/apprt/embedded.zig`: `ghostty_surface_set_focus`,
   `ghostty_surface_set_display_id`, `ghostty_surface_refresh`

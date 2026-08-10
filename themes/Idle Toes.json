@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#323232",
+    "#d25252",
+    "#7fe173",
+    "#ffc66d",
+    "#4099ff",
+    "#f680ff",
+    "#bed6ff",
+    "#eeeeec",
+    "#606060",
+    "#f07070",
+    "#9dff91",
+    "#ffe48b",
+    "#5eb7f7",
+    "#ff9dff",
+    "#dcf4ff",
+    "#ffffff"
+  ],
+  "background": "#323232",
+  "cursor": "#d6d6d6",
+  "cursorText": "#000000",
+  "foreground": "#ffffff",
+  "name": "Idle Toes",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5b5b5b",
+  "selectionForeground": "#000000"
+}

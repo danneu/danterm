@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#0a0d12",
+    "#ff6366",
+    "#85df5e",
+    "#f1c655",
+    "#5fb9ff",
+    "#cea5ff",
+    "#3addc4",
+    "#b7c0ce",
+    "#5c6675",
+    "#ff8688",
+    "#a0ec7e",
+    "#fad77c",
+    "#84ccff",
+    "#ddbfff",
+    "#68ead3",
+    "#f4f8fd"
+  ],
+  "background": "#0e1116",
+  "cursor": "#f6c45f",
+  "cursorText": "#0e1116",
+  "foreground": "#dce3ed",
+  "name": "Eclipse",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#25324a",
+  "selectionForeground": "#5a5e62"
+}

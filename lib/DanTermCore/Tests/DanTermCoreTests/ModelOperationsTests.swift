@@ -74,10 +74,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(ids.contains(c))
     }
 
-    // MARK: - effectiveSurfaceVisibility
+    // MARK: - effectivePaneVisibility
 
-    @Test("effectiveSurfaceVisibility marks every reachable pane hidden when window is hidden")
-    func effectiveSurfaceVisibilityHidesAllWhenWindowHidden() {
+    @Test("effectivePaneVisibility marks every reachable pane hidden when window is hidden")
+    func effectivePaneVisibilityHidesAllWhenWindowHidden() {
         // Intent: with windowVisible: false, every pane in every tab is hidden.
         // Why it exists: pins the window-hidden short-circuit so a refactor
         //   cannot accidentally leak per-tab visibility decisions when the
@@ -99,13 +99,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(PaneModel(id: c)))
         let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: false)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: false)
 
         #expect(visibility == [a: false, b: false, c: false])
     }
 
-    @Test("effectiveSurfaceVisibility marks a selected single-pane tab visible")
-    func effectiveSurfaceVisibilityVisibleSinglePane() {
+    @Test("effectivePaneVisibility marks a selected single-pane tab visible")
+    func effectivePaneVisibilityVisibleSinglePane() {
         // Intent: a selected single-pane tab reports its pane visible.
         // Why it exists: pins the happy path of the visibility projection.
         // Scenario: spec-first single-pane check -- one tab, one pane, window
@@ -115,16 +115,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId)))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [paneId: true])
     }
 
-    @Test("effectiveSurfaceVisibility hides panes in non-selected tabs")
-    func effectiveSurfaceVisibilityHidesNonSelectedTabs() {
+    @Test("effectivePaneVisibility hides panes in non-selected tabs")
+    func effectivePaneVisibilityHidesNonSelectedTabs() {
         // Intent: panes in a non-selected tab are hidden even when the window
         //   is visible.
-        // Why it exists: pins per-tab scoping so background-tab surfaces stay
+        // Why it exists: pins per-tab scoping so background-tab sessions stay
         //   hidden until selected.
         // Scenario: spec-first scoping check -- two tabs (selected split,
         //   background single-pane); the background pane reports hidden.
@@ -147,16 +147,16 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [selectedA: true, selectedB: true, background: false])
     }
 
-    @Test("effectiveSurfaceVisibility hides zoomed sibling panes")
-    func effectiveSurfaceVisibilityHidesZoomedSiblings() {
+    @Test("effectivePaneVisibility hides zoomed sibling panes")
+    func effectivePaneVisibilityHidesZoomedSiblings() {
         // Intent: when a tab is zoomed, only the focused pane is visible; its
         //   siblings hide.
-        // Why it exists: pins the zoom contract that drives surface render
+        // Why it exists: pins the zoom contract that drives session rendering
         //   suspension on hidden siblings.
         // Scenario: spec-first zoom check -- a split tab with isZoomed=true
         //   reports the focused pane visible and the sibling hidden.
@@ -175,13 +175,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [focused: true, sibling: false])
     }
 
-    @Test("effectiveSurfaceVisibility keeps a zoomed single-pane tab visible")
-    func effectiveSurfaceVisibilityZoomedSinglePaneVisible() {
+    @Test("effectivePaneVisibility keeps a zoomed single-pane tab visible")
+    func effectivePaneVisibilityZoomedSinglePaneVisible() {
         // Intent: zoom on a single-pane tab keeps the pane visible (no
         //   siblings to hide).
         // Why it exists: pins the zoom corner case that hits the same code
@@ -198,13 +198,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [paneId: true])
     }
 
-    @Test("effectiveSurfaceVisibility hides every pane when there is no selected tab")
-    func effectiveSurfaceVisibilityNoSelectedHidesAll() {
+    @Test("effectivePaneVisibility hides every pane when there is no selected tab")
+    func effectivePaneVisibilityNoSelectedHidesAll() {
         // Intent: with selectedTabId nil, every pane is hidden even on a
         //   visible window.
         // Why it exists: pins the "no selection" guard against accidental
@@ -225,13 +225,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: nil)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [a: false, b: false])
     }
 
-    @Test("effectiveSurfaceVisibility marks every selected nested split leaf visible")
-    func effectiveSurfaceVisibilityNestedSplitAllVisible() {
+    @Test("effectivePaneVisibility marks every selected nested split leaf visible")
+    func effectivePaneVisibilityNestedSplitAllVisible() {
         // Intent: every leaf in the selected tab's nested split tree is
         //   visible (when not zoomed).
         // Why it exists: pins the visibility walker's coverage of nested
@@ -257,7 +257,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
 
         #expect(visibility == [a: true, b: true, c: true])
     }
@@ -3072,12 +3072,11 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "no active search -> no key")
 
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "foo"))
-        model.searchState[paneId]?.total = 7
-        model.searchState[paneId]?.selected = 2
+        update(&model, .searchStarted(paneId: paneId, needle: "foo"))
+        model.searchState[paneId]?.status = .matched(selected: 2, total: 7)
         #expect(
             desiredSearchOverlays(in: model)[paneId] ==
-            SearchOverlayRender(needle: "foo", total: 7, selected: 2),
+            SearchOverlayRender(needle: "foo", status: .matched(selected: 2, total: 7)),
             "active search keys the pane with needle + match counts")
 
         update(&model, .endSearch(paneId: paneId))
@@ -3087,30 +3086,22 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
     // MARK: - desiredPaneConfig (pane-config projection)
 
-    @Test("desiredPaneConfig: keyed only for themed panes; drops the key on clear")
-    func desiredPaneConfigKeyedForThemedDropsOnClear() {
-        // Intent: a pane's config key exists only while it has a theme;
-        //   clearing the theme drops the key.
-        // Why it exists: pins the disappear-but-host-survives net for
-        //   per-pane Ghostty config application.
-        // Scenario: spec-first lifecycle -- no key pre-set, set "Dracula"
-        //   (key appears), clear (key disappears).
+    @Test("desiredPaneConfig returns to the configured default after clearing an override")
+    func desiredPaneConfigReturnsToDefaultOnClear() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
 
-        #expect(desiredPaneConfig(in: model)[paneId] == nil,
-            "nil theme -> no config key")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
 
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
         #expect(
             desiredPaneConfig(in: model)[paneId] ==
-            PaneConfigKey(theme: "Dracula", generation: 0),
+            PaneConfigKey(theme: "Dracula"),
             "set theme keys the pane")
 
         update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
-        #expect(desiredPaneConfig(in: model)[paneId] == nil,
-            "cleared theme drops the pane's key")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
     }
 
     @Test("desiredPaneConfig: remote override takes priority over user theme")
@@ -3131,54 +3122,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         #expect(
             desiredPaneConfig(in: model)[paneId] ==
-            PaneConfigKey(theme: "Purplepeter", generation: 0),
+            PaneConfigKey(theme: "Purplepeter"),
             "effective theme prefers remote override")
-    }
-
-    @Test("desiredPaneConfig: ghosttyConfigReloaded changes every themed pane generation")
-    func desiredPaneConfigReloadBumpsGeneration() {
-        // Intent: ghosttyConfigReloaded bumps every themed pane's
-        //   generation while leaving unthemed panes absent.
-        // Why it exists: pins the reload-propagation rule that drives
-        //   per-pane config refreshes after a global Ghostty reload.
-        // Scenario: spec-first reload -- two themed panes + one
-        //   unthemed; reload increments both themed generations and
-        //   keeps the unthemed pane absent.
-        var model = makeModel()
-        createTab(&model)
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .setPaneTheme(paneId: firstPaneId, themeName: "Dracula"))
-        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let themedPaneIds = Set(desiredPaneConfig(in: model).keys)
-        createTab(&model)
-        let unthemedPaneId = selectedTab(in: model)!.focusedPaneId
-
-        let before = desiredPaneConfig(in: model)
-        #expect(Set(before.keys) == themedPaneIds)
-        #expect(before[unthemedPaneId] == nil, "unthemed pane is absent before reload")
-
-        update(&model, .ghosttyConfigReloaded)
-        let after = desiredPaneConfig(in: model)
-        #expect(Set(after.keys) == themedPaneIds)
-        #expect(after[unthemedPaneId] == nil, "unthemed pane stays absent after reload")
-        for paneId in themedPaneIds {
-            #expect(after[paneId]?.generation == (before[paneId]?.generation ?? -1) + 1)
-            #expect(after[paneId]?.theme == before[paneId]?.theme)
-        }
-    }
-
-    @Test("ghosttyConfigReloaded increments generation and returns no commands")
-    func ghosttyConfigReloadedIncrementsGenerationNoCommands() {
-        // Intent: ghosttyConfigReloaded bumps model.ghosttyConfigGeneration
-        //   and emits no commands.
-        // Why it exists: pins the bare state mutation against silent
-        //   side-effect leakage.
-        // Scenario: spec-first generation bump.
-        var model = makeModel()
-        let commands = update(&model, .ghosttyConfigReloaded)
-
-        #expect(model.ghosttyConfigGeneration == 1)
-        #expect(commands.count == 0)
     }
 
     // MARK: - desiredSidebar (sidebar projection, Stage 5)

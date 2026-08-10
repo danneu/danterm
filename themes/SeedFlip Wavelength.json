@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#090c10",
+    "#d55d5d",
+    "#5dd585",
+    "#d5c15d",
+    "#5d8fd5",
+    "#d55dd5",
+    "#5dd5d5",
+    "#f7f9fb",
+    "#364255",
+    "#e59a9a",
+    "#9ae5b3",
+    "#e5d89a",
+    "#9ab9e5",
+    "#e59ae5",
+    "#9ae5e5",
+    "#ffffff"
+  ],
+  "background": "#0d1117",
+  "cursor": "#238636",
+  "cursorText": "#0d1117",
+  "foreground": "#e6edf3",
+  "name": "SeedFlip Wavelength",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#161b22",
+  "selectionForeground": "#e6edf3"
+}

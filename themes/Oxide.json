@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#262626",
+    "#ed756e",
+    "#5bb661",
+    "#c39900",
+    "#3ba6f5",
+    "#968ff7",
+    "#00baaa",
+    "#cecece",
+    "#8f8f8f",
+    "#ff9890",
+    "#7bd77f",
+    "#e3b831",
+    "#6fc6ff",
+    "#b5b2ff",
+    "#00dcca",
+    "#dedede"
+  ],
+  "background": "#161616",
+  "cursor": "#cecece",
+  "cursorText": "#161616",
+  "foreground": "#cecece",
+  "name": "Oxide",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#262626",
+  "selectionForeground": "#cecece"
+}

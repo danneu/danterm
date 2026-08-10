@@ -1,121 +1,126 @@
 // Tests for the CLI argument parser shared with `danterm pane split`.
 import Foundation
-import XCTest
+import Testing
 @testable import DanTermProtocol
 
-final class PaneSplitArgsTests: XCTestCase {
-    func testHorizontalDirectionParses() throws {
+struct PaneSplitArgsTests {
+    @Test("horizontal direction parses")
+    func horizontalDirectionParses() throws {
         let parsed = try parsePaneSplitArgs(["-h"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal))
+        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal))
     }
 
-    func testVerticalDirectionParses() throws {
+    @Test("vertical direction parses")
+    func verticalDirectionParses() throws {
         let parsed = try parsePaneSplitArgs(["-v"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .vertical))
+        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .vertical))
     }
 
-    func testExplicitPaneParses() throws {
+    @Test("explicit pane parses")
+    func explicitPaneParses() throws {
         let parsed = try parsePaneSplitArgs(["--pane", "P1", "-h"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: "P1", direction: .horizontal))
+        #expect(parsed == ParsedPaneSplit(pane: "P1", direction: .horizontal))
     }
 
-    func testBackgroundFlagParses() throws {
+    @Test("background flag parses")
+    func backgroundFlagParses() throws {
         // Intent: `--background` records only the background flag.
         // Why it exists: preserves back-compat for existing split recipes while
         //   the CLI layer flips the default to background.
         // Scenario: an existing agent recipe still includes `--background`.
         let parsed = try parsePaneSplitArgs(["-h", "--background"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: true, foreground: false))
+        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal, background: true, foreground: false))
     }
 
-    func testForegroundFlagParses() throws {
+    @Test("foreground flag parses")
+    func foregroundFlagParses() throws {
         // Intent: `--foreground` records a request to focus the new split pane
         //   within its tab.
         // Why it exists: keeps focus policy explicit without making the arg
         //   parser infer command defaults.
         // Scenario: the user asks an agent to split and focus the new pane.
         let parsed = try parsePaneSplitArgs(["-h", "--foreground"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: false, foreground: true))
+        #expect(parsed == ParsedPaneSplit(pane: nil, direction: .horizontal, background: false, foreground: true))
     }
 
-    func testLaunchFlagsParse() throws {
+    @Test("launch flags parse")
+    func launchFlagsParse() throws {
         let parsed = try parsePaneSplitArgs(["-h", "--cmd", "vim foo", "--cwd", "/tmp", "--title", "edit"])
-        XCTAssertEqual(
-            parsed,
-            ParsedPaneSplit(
+        #expect(parsed == ParsedPaneSplit(
                 pane: nil,
                 direction: .horizontal,
                 launch: LaunchSpec(cmd: "vim foo", cwd: "/tmp", title: "edit")
-            )
-        )
+            ))
     }
 
-    func testBackgroundCombinesWithOtherFlags() throws {
+    @Test("background combines with other flags")
+    func backgroundCombinesWithOtherFlags() throws {
         let parsed = try parsePaneSplitArgs([
             "--pane", "P1", "-h", "--background",
             "--cmd", "just test", "--cwd", "/tmp", "--title", "tests",
         ])
-        XCTAssertEqual(
-            parsed,
-            ParsedPaneSplit(
+        #expect(parsed == ParsedPaneSplit(
                 pane: "P1",
                 direction: .horizontal,
                 launch: LaunchSpec(cmd: "just test", cwd: "/tmp", title: "tests"),
                 background: true,
                 foreground: false
-            )
-        )
+            ))
     }
 
-    func testConflictingFocusFlagsThrow() {
+    @Test("conflicting focus flags throw")
+    func conflictingFocusFlagsThrow() {
         // Intent: `--background --foreground` is rejected for pane splits.
         // Why it exists: prevents ambiguous focus policy before the command is
         //   serialized for IPC.
         // Scenario: a composed split command accidentally includes both flags.
-        XCTAssertThrowsError(try parsePaneSplitArgs(["-h", "--background", "--foreground"])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .conflictingFocusFlags)
+        #expect(throws: PaneSplitParseError.conflictingFocusFlags) {
+            try parsePaneSplitArgs(["-h", "--background", "--foreground"])
         }
     }
 
-    func testEmptyCommandIsOmittedFromLaunch() throws {
+    @Test("empty command is omitted from launch")
+    func emptyCommandIsOmittedFromLaunch() throws {
         let parsed = try parsePaneSplitArgs(["-v", "--cmd", "", "--cwd", "/tmp"])
-        XCTAssertEqual(
-            parsed,
-            ParsedPaneSplit(
+        #expect(parsed == ParsedPaneSplit(
                 pane: nil,
                 direction: .vertical,
                 launch: LaunchSpec(cmd: nil, cwd: "/tmp", title: nil)
-            )
-        )
+            ))
     }
 
-    func testMissingPaneArgThrows() {
-        XCTAssertThrowsError(try parsePaneSplitArgs(["--pane"])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .missingPaneArg)
+    @Test("missing pane arg throws")
+    func missingPaneArgThrows() {
+        #expect(throws: PaneSplitParseError.missingPaneArg) {
+            try parsePaneSplitArgs(["--pane"])
         }
     }
 
-    func testMissingLaunchFlagValueThrows() {
-        XCTAssertThrowsError(try parsePaneSplitArgs(["-h", "--cmd"])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .missingValue("--cmd"))
+    @Test("missing launch flag value throws")
+    func missingLaunchFlagValueThrows() {
+        #expect(throws: PaneSplitParseError.missingValue("--cmd")) {
+            try parsePaneSplitArgs(["-h", "--cmd"])
         }
     }
 
-    func testNoDirectionThrows() {
-        XCTAssertThrowsError(try parsePaneSplitArgs([])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .missingDirection)
+    @Test("no direction throws")
+    func noDirectionThrows() {
+        #expect(throws: PaneSplitParseError.missingDirection) {
+            try parsePaneSplitArgs([])
         }
     }
 
-    func testUnknownFlagThrows() {
-        XCTAssertThrowsError(try parsePaneSplitArgs(["--bogus"])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .unknownFlag("--bogus"))
+    @Test("unknown flag throws")
+    func unknownFlagThrows() {
+        #expect(throws: PaneSplitParseError.unknownFlag("--bogus")) {
+            try parsePaneSplitArgs(["--bogus"])
         }
     }
 
-    func testTrailingArgumentThrows() {
-        XCTAssertThrowsError(try parsePaneSplitArgs(["-h", "extra"])) { err in
-            XCTAssertEqual(err as? PaneSplitParseError, .unexpectedArgument("extra"))
+    @Test("trailing argument throws")
+    func trailingArgumentThrows() {
+        #expect(throws: PaneSplitParseError.unexpectedArgument("extra")) {
+            try parsePaneSplitArgs(["-h", "extra"])
         }
     }
 }

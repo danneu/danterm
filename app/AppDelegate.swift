@@ -1,7 +1,6 @@
 // App delegate responsible for window setup, app lifecycle hooks, menus, and
 // notification center delegation.
 import Cocoa
-import GhosttyKit
 @preconcurrency import UserNotifications
 
 @MainActor
@@ -11,35 +10,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     nonisolated static let minSidebarWidth: CGFloat = 200
 
     var window: NSWindow!
-    var ghosttyApp: GhosttyApp!
+    var terminalBackend: SwiftTerminalBackend!
     var runtime: AppRuntime!
     var sidebarView: SidebarView!
     var contentArea: NSView!
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
+    // Owned for the application lifetime; its teardown disconnects NSWorkspace callbacks.
+    var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
     var initSnapshot: AppModelSnapshot?
-    var restoreCommandBehavior: RestoreCommandBehavior = .prefill
+    var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
+    #if DANTERM_TERMINAL_BENCHMARK
+    private var benchmarkGeometryController: TerminalBenchmarkGeometryController?
+    // AppPresentationLifecycle forwards occlusion into benchmark validity recording.
+    var benchmarkStateRecorder: TerminalBenchmarkStateRecorder?
+    #endif
     /// Set by the .terminate effect before calling NSApp.terminate to bypass the
     /// applicationShouldTerminate safety net (user already confirmed).
     var quitConfirmed = false
 
-    // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
+    // NSApplicationDelegate: finish bootstrapping the terminal backend, main
     // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create ghostty app (config + runtime callbacks)
-        ghosttyApp = GhosttyApp()
-        guard ghosttyApp.app != nil else {
-            print("Failed to create GhosttyApp")
+        terminalBackend = SwiftTerminalBackend()
+        guard terminalBackend.isReady else {
+            print("Failed to create terminal backend")
             NSApp.terminate(nil)
             return
         }
 
         // Create runtime
-        runtime = AppRuntime(ghosttyApp: ghosttyApp)
-        ghosttyApp.runtime = runtime
+        runtime = AppRuntime(
+            terminalBackend: terminalBackend,
+            notificationAuthorizationPolicy: launchPolicy.notificationAuthorization
+        )
+        installWorkspaceLifecycleObserver()
 
         // Build menu bar
         buildMenu()
@@ -111,7 +119,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         ])
 
         window.contentView = rootView
-        window.makeKeyAndOrderFront(nil)
+        #if DANTERM_TERMINAL_BENCHMARK
+        window.orderFront(nil)
+        #else
+        if launchPolicy.activation == .foreground {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.orderFront(nil)
+        }
+        #endif
 
         // Set divider position after window is visible
         splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
@@ -122,23 +138,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.sidebarView = sidebarView
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
+        runtime.presentPendingConfigError()
 
         // Write session lock (crash detection for next launch). Atomically
         // overwrites any stale lock from a previous crash, so there's no window
         // where a startup crash would lose the lock.
         writeSessionLockFile()
 
-        // Start periodic enriched checkpoints (scrollback capture)
-        runtime.startEnrichedCheckpointTimer()
-
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()
 
         // Bootstrap startup: --init CLI > crash/clean restore prompt > fresh
         if let snapshot = initSnapshot {
-            runtime.bootstrapFromSnapshot(snapshot, restoreCommandBehavior: restoreCommandBehavior)
+            runtime.bootstrapFromSnapshot(snapshot)
             initSnapshot = nil
-        } else if let lastSession = lastSessionSnapshot {
+        } else if launchPolicy.startup == .promptForRecovery,
+                  let lastSession = lastSessionSnapshot {
             // Prompt the user before restoring so they know what's coming.
             // Crash path gets a warning tone; clean exit is a neutral prompt.
             let summary = sessionSummary(lastSession)
@@ -158,7 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             }
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
-                runtime.bootstrapFromValidatedRestore(lastSession, restoreCommandBehavior: .prefill)
+                runtime.bootstrapFromValidatedRestore(lastSession)
             } else {
                 runtime.send(.createTab(inGroupId: nil))
             }
@@ -167,17 +182,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             runtime.send(.createTab(inGroupId: nil))
         }
 
+        #if DANTERM_TERMINAL_BENCHMARK
+        let benchmarkRuntime = runtime
+        benchmarkGeometryController = TerminalBenchmarkGeometryController(
+            window: window,
+            environment: ProcessInfo.processInfo.environment,
+            session: { [weak benchmarkRuntime] in benchmarkRuntime?.sessions.values.first }
+        )
+        benchmarkGeometryController?.start()
+        benchmarkStateRecorder = TerminalBenchmarkStateRecorder(
+            window: window,
+            environment: ProcessInfo.processInfo.environment
+        )
+        TerminalBenchmarkObserver.shared?.stateRecorder = benchmarkStateRecorder
+        // After the recorder is attached, because the sampler reads through it.
+        // Profiling runs only -- the observer refuses without an activity path.
+        TerminalBenchmarkObserver.shared?.startPresentationSampling()
+        #endif
+
+        #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Set up notification center
         let notifCenter = UNUserNotificationCenter.current()
         notifCenter.delegate = self
+        #endif
 
-        NSApp.activate(ignoringOtherApps: true)
+        #if DANTERM_TERMINAL_BENCHMARK
+        NSApp.activate()
+        #else
+        if launchPolicy.activation == .foreground {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        #endif
 
+        // Benchmark builds are excluded so notification authorization never interrupts a measurement.
+        #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Request notification authorization after the app is active so the
         // system prompt is not racing the initial launch and window setup.
-        DispatchQueue.main.async { [weak self] in
-            self?.requestNotificationAuthorizationIfNeeded()
+        if launchPolicy.notificationAuthorization.permitsRequest {
+            DispatchQueue.main.async { [weak self] in
+                self?.requestNotificationAuthorizationIfNeeded()
+            }
         }
+        #endif
 
     }
 
@@ -218,10 +264,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
-        appMenu.addItem(withTitle: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: "")
-        let openGhosttyItem = NSMenuItem(title: "Open Ghostty Config", action: #selector(openGhosttyConfig(_:)), keyEquivalent: ",")
-        openGhosttyItem.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(openGhosttyItem)
+        let openConfigItem = NSMenuItem(title: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: ",")
+        openConfigItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(openConfigItem)
         let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)
@@ -254,6 +299,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
         editMenu.addItem(withTitle: "Find", action: #selector(findInTerminal(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextInTerminal(_:)), keyEquivalent: "g")
+        let findPreviousItem = NSMenuItem(title: "Find Previous", action: #selector(findPreviousInTerminal(_:)), keyEquivalent: "G")
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(findPreviousItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -265,6 +314,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let toggleThemeItem = NSMenuItem(title: "Toggle Theme Browser", action: #selector(toggleThemeBrowser(_:)), keyEquivalent: "B")
         toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(toggleThemeItem)
+
+        // Font size zooms the focused pane only. AppKit matches key equivalents
+        // against charactersIgnoringModifiers, so Cmd-Shift-= arrives as "+" and
+        // plain Cmd-= as "="; one item cannot match both. The visible row binds
+        // "+", and a hidden twin keeps "=" live without showing a second row.
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(withTitle: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "+")
+        let increaseEqualsItem = NSMenuItem(title: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "=")
+        increaseEqualsItem.isHidden = true
+        increaseEqualsItem.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(increaseEqualsItem)
+        viewMenu.addItem(withTitle: "Decrease Font Size", action: #selector(decreasePaneFontSize(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetPaneFontSize(_:)), keyEquivalent: "0")
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -319,7 +382,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             colorSubmenu.addItem(item)
         }
         colorSubmenu.addItem(NSMenuItem.separator())
-        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "0")
+        // Cmd-9, not Cmd-0: "Actual Size" in the View menu owns Cmd-0.
+        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "9")
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
@@ -517,7 +581,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func importState(_ sender: Any?) {
-        runtime.importStateFromPanel(restoreCommandBehavior: restoreCommandBehavior)
+        runtime.importStateFromPanel()
     }
 
     @objc func showPreferences(_ sender: Any?) {
@@ -525,21 +589,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func openDanTermConfig(_ sender: Any?) {
-        let path = DanTermConfigPaths.configFilePath()
-        // Create file + parent dirs if needed so the editor opens something; the
-        // seed comment also makes macOS recognize it as a text file.
-        ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
-    }
-
-    @objc func openGhosttyConfig(_ sender: Any?) {
-        guard let path = GhosttyApp.configFilePath() else { return }
-        ensureFileExists(atPath: path, seed: nil)
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        runtime.openDanTermConfig()
     }
 
     @objc func reloadConfig(_ sender: Any?) {
-        runtime.reloadAllConfig()
+        runtime.reloadDanTermConfig()
     }
 
     @objc func installDantermInPath(_ sender: Any?) {
@@ -566,8 +620,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.send(.startSearch)
     }
 
+    @objc func findNextInTerminal(_ sender: Any?) {
+        runtime.send(.navigateFocusedSearch(direction: .next))
+    }
+
+    @objc func findPreviousInTerminal(_ sender: Any?) {
+        runtime.send(.navigateFocusedSearch(direction: .previous))
+    }
+
     @objc func toggleThemeBrowser(_ sender: Any?) {
         runtime.toggleThemeBrowser()
+    }
+
+    // nil paneId means the focused pane of the selected tab, which is what a
+    // menubar action targets.
+    @objc func increasePaneFontSize(_ sender: Any?) {
+        runtime.send(.adjustPaneFontSize(paneId: nil, steps: 1))
+    }
+
+    @objc func decreasePaneFontSize(_ sender: Any?) {
+        runtime.send(.adjustPaneFontSize(paneId: nil, steps: -1))
+    }
+
+    @objc func resetPaneFontSize(_ sender: Any?) {
+        runtime.send(.resetPaneFontSize(paneId: nil))
     }
 
     @objc func closePane(_ sender: Any?) {
@@ -703,18 +779,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return false
     }
 
-    // NSWindowDelegate: window occlusion changes alter every pane's effective
-    // renderer visibility.
-    func windowDidChangeOcclusionState(_ notification: Notification) {
-        guard notification.object is NSWindow else { return }
-        runtime?.syncSurfaceVisibility()
-    }
-
-    // NSWindowDelegate: window screen changes alter the display link each
-    // surface should sync against.
+    // NSWindowDelegate: a window moved to another screen may have a different
+    // backing scale, which every session's renderer has to pick up.
     func windowDidChangeScreen(_ notification: Notification) {
         guard notification.object is NSWindow else { return }
-        runtime?.syncSurfaceDisplayID()
+        runtime?.refreshSessionsForScreenChange()
     }
 
     // MARK: - App Lifecycle
@@ -732,8 +801,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
     // delete the session lock so the next launch knows this was a clean exit.
     func applicationWillTerminate(_ notification: Notification) {
+        tearDownWorkspaceLifecycleObserver()
         runtime?.stopIpcServer()
-        runtime?.performEnrichedCheckpoint(async: false)
+        runtime?.prepareRecoveryForApplicationExit()
+        runtime?.shutdown()
+        terminalBackend?.terminateForApplicationExit()
         deleteSessionLockFile()
     }
 

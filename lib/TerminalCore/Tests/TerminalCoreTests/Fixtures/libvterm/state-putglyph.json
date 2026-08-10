@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/10state_putglyph.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Low; UTF-8 1 char; UTF-8 split writes; UTF-8 wide char; UTF-8 emoji wide char; UTF-8 combining chars; Combining across buffers; Spare combining chars get truncated",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks."
+    ]
+  },
+  "initial": { "columns": 16, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "ABC" },
+    { "type": "expect", "expect": { "viewportText": "ABC             " } },
+    { "type": "feed", "base64": "G2PDgcOp" },
+    { "type": "expect", "expect": { "viewportText": "\u00c1\u00e9              " } },
+    { "type": "feed", "base64": "G2PD" },
+    { "type": "feed", "base64": "gQ==" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\u00c1" }] } },
+    { "type": "feed", "base64": "G2PvvJAg" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellKinds": [["wide-head", "wide-tail", "narrow", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"]],
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "\uff10" }]
+      }
+    },
+    { "type": "feed", "base64": "G2Pwn5iAIA==" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellKinds": [["wide-head", "wide-tail", "narrow", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"]],
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "\ud83d\ude00" }]
+      }
+    },
+    { "type": "feed", "base64": "G2NlzIFa" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 0, "column": 0, "scalars": "e\u0301" },
+          { "row": 0, "column": 1, "scalars": "Z" }
+        ]
+      }
+    },
+    { "type": "feed", "base64": "G2Nl" },
+    { "type": "feed", "base64": "zIFa" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301" }] } },
+    { "type": "feed", "text": "\u001bce\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" }],
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    }
+  ]
+}

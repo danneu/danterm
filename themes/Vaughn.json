@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#25234f",
+    "#705050",
+    "#60b48a",
+    "#dfaf8f",
+    "#5555ff",
+    "#f08cc3",
+    "#8cd0d3",
+    "#709080",
+    "#709080",
+    "#dca3a3",
+    "#60b48a",
+    "#f0dfaf",
+    "#5555ff",
+    "#ec93d3",
+    "#93e0e3",
+    "#ffffff"
+  ],
+  "background": "#25234f",
+  "cursor": "#ff5555",
+  "cursorText": "#ffffff",
+  "foreground": "#dcdccc",
+  "name": "Vaughn",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b5d5ff",
+  "selectionForeground": "#000000"
+}

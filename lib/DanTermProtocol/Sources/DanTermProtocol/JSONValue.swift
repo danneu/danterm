@@ -1,7 +1,7 @@
 // Codable representation of arbitrary JSON used by DanTerm JSON-RPC messages.
 import Foundation
 
-public enum JSONValue: Equatable {
+public enum JSONValue: Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)

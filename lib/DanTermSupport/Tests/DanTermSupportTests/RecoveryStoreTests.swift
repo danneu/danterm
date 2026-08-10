@@ -7,6 +7,7 @@
 // seams (a per-test temp dir, frozen clock, fixed pid) directly -- no CoreEnv --
 // so it is hermetic + parallel-safe and proves the store needs nothing from core.
 import Foundation
+import DanTermProtocol
 import Testing
 
 @testable import DanTermSupport
@@ -62,13 +63,57 @@ private func makeTestRecoveryDir() -> URL {
         // Why it exists: pins the namespacing rule that keeps dev runs
         //   from sharing prod recovery files.
         // Scenario: spec-first prod-vs-dev namespacing.
-        let prodURL = recoveryDirectoryURL(bundleId: "com.danneu.danterm")
-        let devURL  = recoveryDirectoryURL(bundleId: "com.danneu.danterm-dev")
+        let prodURL = recoveryDirectoryURL(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm")
+        )
+        let devURL = recoveryDirectoryURL(
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm-dev")
+        )
         #expect(prodURL != devURL, "prod and dev paths must differ, both were \(prodURL.path)")
         #expect(prodURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm/Recovery"),
             "prod path wrong: \(prodURL.path)")
         #expect(devURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm-dev/Recovery"),
             "dev path wrong: \(devURL.path)")
+    }
+
+    @Test("scrollback replay directories are namespaced by instance identity")
+    func scrollbackReplayDirectoriesAreNamespacedByIdentity() throws {
+        // Intent: replay files for two live identities occupy disjoint directories.
+        // Why it exists: launch cleanup removes an entire replay directory, so a
+        //   shared path lets one instance erase another instance's live files.
+        // Scenario: slot 1 launches while slot 2 is already serving panes and must
+        //   clean only its own abandoned replay files.
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("danterm-replay-tests-\(UUID().uuidString)", isDirectory: true)
+        let slot1 = DanTermInstanceIdentity(developmentSlot: 1)!
+        let slot2 = DanTermInstanceIdentity(developmentSlot: 2)!
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let first = scrollbackReplayDirectoryURL(
+            identity: slot1,
+            temporaryDirectory: temporaryDirectory
+        )
+        let second = scrollbackReplayDirectoryURL(
+            identity: slot2,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        #expect(first != second)
+        #expect(first.path.hasSuffix("/danterm-scrollback/com.danneu.danterm-dev.1"))
+        #expect(second.path.hasSuffix("/danterm-scrollback/com.danneu.danterm-dev.2"))
+
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        let survivor = second.appendingPathComponent("live.txt")
+        try Data("live".utf8).write(to: survivor)
+
+        cleanupStaleScrollbackReplayDirectory(
+            identity: slot1,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: first.path))
+        #expect(FileManager.default.fileExists(atPath: survivor.path))
     }
 
     @Test("lightCheckpointURL ends with last-light.json")

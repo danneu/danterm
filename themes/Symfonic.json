@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#dc322f",
+    "#56db3a",
+    "#ff8400",
+    "#0084d4",
+    "#b729d9",
+    "#ccccff",
+    "#ffffff",
+    "#414347",
+    "#dc322f",
+    "#56db3a",
+    "#ff8400",
+    "#0084d4",
+    "#b729d9",
+    "#ccccff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#dc322f",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffff",
+  "name": "Symfonic",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#073642",
+  "selectionForeground": "#ffffff"
+}

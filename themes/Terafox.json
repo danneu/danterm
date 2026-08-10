@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2f3239",
+    "#e85c51",
+    "#7aa4a1",
+    "#fda47f",
+    "#5a93aa",
+    "#ad5c7c",
+    "#a1cdd8",
+    "#ebebeb",
+    "#4e5157",
+    "#eb746b",
+    "#8eb2af",
+    "#fdb292",
+    "#73a3b7",
+    "#b97490",
+    "#afd4de",
+    "#eeeeee"
+  ],
+  "background": "#152528",
+  "cursor": "#e6eaea",
+  "cursorText": "#152528",
+  "foreground": "#e6eaea",
+  "name": "Terafox",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#293e40",
+  "selectionForeground": "#e6eaea"
+}

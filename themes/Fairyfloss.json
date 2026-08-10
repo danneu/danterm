@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#040303",
+    "#f92672",
+    "#c2ffdf",
+    "#e6c000",
+    "#c2ffdf",
+    "#ffb8d1",
+    "#c5a3ff",
+    "#f8f8f0",
+    "#6090cb",
+    "#ff857f",
+    "#c2ffdf",
+    "#ffea00",
+    "#c2ffdf",
+    "#ffb8d1",
+    "#c5a3ff",
+    "#f8f8f0"
+  ],
+  "background": "#5a5475",
+  "cursor": "#f8f8f0",
+  "cursorText": "#060709",
+  "foreground": "#f8f8f2",
+  "name": "Fairyfloss",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#8077a8",
+  "selectionForeground": "#f6e1ce"
+}

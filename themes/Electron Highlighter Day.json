@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#c2c6d4",
+    "#f52a65",
+    "#10a877",
+    "#df8e1d",
+    "#366ff0",
+    "#8b4fe0",
+    "#0a9fbf",
+    "#59647e",
+    "#7b88a8",
+    "#f52a65",
+    "#10a877",
+    "#df8e1d",
+    "#366ff0",
+    "#8b4fe0",
+    "#0a9fbf",
+    "#2f3b54"
+  ],
+  "background": "#eef0f5",
+  "cursor": "#2f3b54",
+  "cursorText": "#eef0f5",
+  "foreground": "#2f3b54",
+  "name": "Electron Highlighter Day",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#d6def5",
+  "selectionForeground": "#2f3b54"
+}

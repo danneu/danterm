@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#212121",
+    "#b7141f",
+    "#457b24",
+    "#f6981e",
+    "#134eb2",
+    "#560088",
+    "#0e717c",
+    "#afafaf",
+    "#424242",
+    "#e83b3f",
+    "#7aba3a",
+    "#bfaa00",
+    "#54a4f3",
+    "#aa4dbc",
+    "#26bbd1",
+    "#d9d9d9"
+  ],
+  "background": "#eaeaea",
+  "cursor": "#16afca",
+  "cursorText": "#2e2e2d",
+  "foreground": "#232322",
+  "name": "Material",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c2c2c2",
+  "selectionForeground": "#4e4e4e"
+}
