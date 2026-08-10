@@ -27,17 +27,4 @@ import Testing
         recovery.apply(stream.apply(.agentDetached(session)))
         #expect(recovery.snapshot.agentSession == nil)
     }
-
-    @Test("pane teardown clears recovery state")
-    func teardownClearsRecoveryState() throws {
-        let session = try #require(AgentSession(kind: "codex", sessionId: "session-2"))
-        var stream = PaneSemanticStream()
-        var recovery = PaneSemanticRecoveryState()
-        recovery.apply(stream.apply(.commandStarted("make test")))
-        recovery.apply(stream.apply(.agentAttached(session)))
-
-        recovery.apply(stream.apply(.paneTornDown))
-
-        #expect(recovery.snapshot == PaneSemanticRecoverySnapshot())
-    }
 }

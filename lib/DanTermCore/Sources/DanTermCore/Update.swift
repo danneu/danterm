@@ -545,7 +545,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 env: env
             )
         case .integrationReady, .remoteDetected, .remoteIdentityReported,
-             .connectionEnded, .agentActivityChanged, .paneTornDown:
+             .connectionEnded, .agentActivityChanged:
             return []
         }
 

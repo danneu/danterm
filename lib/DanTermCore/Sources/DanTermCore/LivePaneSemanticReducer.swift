@@ -69,7 +69,6 @@ enum PaneSemanticEvent: Equatable {
     case agentAttached(AgentSession)
     case agentActivityChanged(session: AgentSession, activity: AgentActivity)
     case agentDetached(AgentSession)
-    case paneTornDown
 }
 
 /// Describes one serialized semantic input together with the complete snapshots
@@ -141,7 +140,5 @@ func reducePaneSemantics(_ state: inout PaneSemanticState, event: PaneSemanticEv
         }
         state.agent = .none
 
-    case .paneTornDown:
-        state = PaneSemanticState()
     }
 }

@@ -243,7 +243,7 @@ extension Msg {
             case .commandStarted, .commandEnded, .agentActivityChanged:
                 return true
             case .integrationReady, .remoteDetected, .remoteIdentityReported,
-                 .connectionEnded, .agentAttached, .agentDetached, .paneTornDown:
+                 .connectionEnded, .agentAttached, .agentDetached:
                 return false
             }
         default:

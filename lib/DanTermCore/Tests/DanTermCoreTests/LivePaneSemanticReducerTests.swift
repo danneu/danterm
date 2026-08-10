@@ -4,8 +4,8 @@ import Testing
 @testable import DanTermCore
 
 struct LivePaneSemanticReducerTests {
-    @Test("pane stream preserves ordered interleaving and teardown cannot resurrect stale activity")
-    func paneStreamPreservesOrderingThroughTeardown() throws {
+    @Test("pane stream preserves ordered interleaving")
+    func paneStreamPreservesOrdering() throws {
         let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         var stream = PaneSemanticStream()
 
@@ -20,14 +20,6 @@ struct LivePaneSemanticReducerTests {
         #expect(stream.snapshot.command == .idle)
         #expect(stream.snapshot.connection == .remote(identity: nil))
         #expect(stream.snapshot.agent == .attached(session: session, activity: .waiting))
-
-        let teardown = stream.apply(.paneTornDown)
-        let stale = stream.apply(.agentActivityChanged(session: session, activity: .working))
-
-        #expect(teardown.previous.agent == .attached(session: session, activity: .waiting))
-        #expect(teardown.current == PaneSemanticState())
-        #expect(stale.didChange == false)
-        #expect(stream.snapshot == PaneSemanticState())
     }
 
     @Test("initial state has no reported live semantics")
@@ -192,21 +184,6 @@ struct LivePaneSemanticReducerTests {
         ])
 
         #expect(state.agent == .attached(session: current, activity: .working))
-    }
-
-    @Test("pane teardown clears every live facet")
-    func paneTeardownClearsEveryFacet() throws {
-        let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let state = reduce([
-            .integrationReady,
-            .commandStarted("claude"),
-            .remoteIdentityReported(RemoteSession(user: "dan", host: "caja")),
-            .agentAttached(session),
-            .agentActivityChanged(session: session, activity: .working),
-            .paneTornDown,
-        ])
-
-        #expect(state == PaneSemanticState())
     }
 
     private func reduce(_ events: [PaneSemanticEvent]) -> PaneSemanticState {

@@ -1036,7 +1036,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             removeTrackingArea(mouseTrackingArea)
             self.mouseTrackingArea = nil
         }
-        semanticRecovery.apply(semanticStream.apply(.paneTornDown))
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)

@@ -29,9 +29,6 @@ struct PaneSemanticRecoveryState {
             guard transition.didChange else { return }
             snapshot.agentSession = nil
 
-        case .paneTornDown:
-            snapshot = PaneSemanticRecoverySnapshot()
-
         case .integrationReady, .commandEnded, .remoteDetected,
              .remoteIdentityReported, .connectionEnded, .agentActivityChanged:
             break
