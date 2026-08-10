@@ -628,8 +628,7 @@ import Testing
 
     @Test("testClearCustomTitlesDedupesAndIgnoresStale")
     func testClearCustomTitlesDedupesAndIgnoresStale() {
-        // Intent: batch clearCustomTitles dedupes and ignores stale
-        //   ids; persists via scheduleCheckpoint.
+        // Intent: batch clearCustomTitles dedupes and ignores stale ids.
         // Why it exists: pins dedup + stale rules for the batch.
         // Scenario: spec-first batch dedup.
         var model = makeModel()
@@ -641,15 +640,10 @@ import Testing
         update(&model, .renameTab(id: id1, name: "alpha"))
         update(&model, .renameTab(id: id2, name: "beta"))
 
-        let commands = update(&model, .clearCustomTitles(
-            tabIds: [id1, id1, stale, id2]))
+        update(&model, .clearCustomTitles(tabIds: [id1, id1, stale, id2]))
 
         #expect(model.groups[0].tabs[0].customTitle == nil)
         #expect(model.groups[0].tabs[1].customTitle == nil)
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist the batch clear via scheduleCheckpoint")
     }
 
     @Test("testClearCustomTitlesAllStaleIsNoop")

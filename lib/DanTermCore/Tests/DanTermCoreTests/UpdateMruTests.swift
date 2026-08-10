@@ -280,8 +280,7 @@ import Testing
 
     @Test("mruCycleCommitted with cursorIndex > 0 selects target and reorders MRU")
     func mruCycleCommittedWithCursorIndexGT0SelectsAndReorders() {
-        // Intent: commit at a non-zero cursor selects the target and
-        //   hoists it; emits scheduleCheckpoint.
+        // Intent: commit at a non-zero cursor selects the target and hoists it.
         // Why it exists: pins the commit semantics.
         // Scenario: spec-first commit move.
         let (m0, _) = Self.buildModelWithTabs(3)
@@ -295,14 +294,10 @@ import Testing
         }
         #expect(target != initiallySelected)
 
-        let commands = update(&model, .mruCycleCommitted)
+        update(&model, .mruCycleCommitted)
         #expect(model.selectedTabId! == target, "target tab focused")
         #expect(model.mruCycle == nil, "cycle cleared")
         #expect(model.mruOrder.first == target, "chosen tab hoisted to MRU front")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "commit persists the new selection via scheduleCheckpoint")
     }
 
     @Test("mruCycleCommitted at cursorIndex 0 is a focus no-op")
@@ -357,14 +352,10 @@ import Testing
             return
         }
 
-        let commands = update(&model, .mruCycleOneShot(direction: .older))
+        update(&model, .mruCycleOneShot(direction: .older))
         #expect(model.selectedTabId! == nextOlderTarget, "jumped to next-older tab")
         #expect(initiallySelected != nextOlderTarget)
         #expect(model.mruCycle == nil, "cycle does not linger")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "commits the selection (persists via scheduleCheckpoint); the switcher hides via reconcile")
     }
 
     @Test("tab removed during active cycle: commit selects a live tab")
@@ -388,16 +379,12 @@ import Testing
         #expect(!model.groups[0].tabs.contains { $0.id == ids[1] }, "tab is gone")
         #expect(model.mruCycle != nil, "cycle still active (frozenOrder kept)")
 
-        let commands = update(&model, .mruCycleCommitted)
+        update(&model, .mruCycleCommitted)
         #expect(model.selectedTabId != nil)
         #expect(model.selectedTabId! != ids[1], "did not select the deleted tab")
         let live = Set(model.groups.flatMap(\.tabs).map(\.id))
         #expect(live.contains(model.selectedTabId!), "selection is live")
         #expect(model.mruCycle == nil)
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "commits a live tab (persists via scheduleCheckpoint); the switcher hides via reconcile")
     }
 
     @Test("restore-time reconciliation: empty mruOrder fills on next update()")

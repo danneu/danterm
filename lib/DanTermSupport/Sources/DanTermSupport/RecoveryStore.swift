@@ -26,7 +26,7 @@ struct SessionLock: Codable {
 //
 // Session persistence lives in
 // ~/Library/Application Support/<bundle-id>/Recovery/:
-//   last-light.json    -- frequent structural checkpoint (no scrollback, 2s debounce)
+//   last-light.json    -- frequent structural checkpoint (no scrollback, fixed 2s window)
 //   last-enriched.json -- periodic full checkpoint (structure + scrollback, 60s timer)
 //   session.json       -- lock file, written at launch and deleted on clean exit
 //

@@ -894,8 +894,8 @@ import DanTermProtocol
         #expect(try #require(loaded.paneSnapshots.values.first).agentSession == nil)
     }
 
-    @Test("cwd reset checkpoints and restores as nil")
-    func cwdResetCheckpointsAndRestoresAsNil() throws {
+    @Test("cwd reset restores as nil")
+    func cwdResetRestoresAsNil() throws {
         // Intent: an explicit cwd reset removes the live value and serializes
         //   no empty-path substitute, so restore also has a nil cwd.
         // Why it exists: pins reset semantics across the persistence boundary.
@@ -906,12 +906,11 @@ import DanTermProtocol
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp/project"))
 
-        let commands = update(&model, .sessionCwd(paneId: paneId, cwd: nil))
+        update(&model, .sessionCwd(paneId: paneId, cwd: nil))
         let snapshot = toSnapshot(model, home: "/Users/testhome")
         let restored = try #require(validateAndBuild(snapshot))
         let paneSnapshot = try #require(allPaneSnapshots(snapshot).first)
 
-        #expect(commands.contains { if case .scheduleCheckpoint = $0 { true } else { false } })
         #expect(model.pane(paneId)?.cwd == nil)
         #expect(paneSnapshot.cwd == nil)
         #expect(restored.pane(paneId)?.cwd == nil)

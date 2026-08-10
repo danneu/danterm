@@ -318,19 +318,19 @@ struct AppInitFile: Codable {
     let model: AppModelSnapshot
 }
 
-struct AppModelSnapshot: Codable {
+struct AppModelSnapshot: Codable, Equatable {
     let groups: [GroupSnapshot]
     let selectedTabId: String?
 }
 
-struct GroupSnapshot: Codable {
+struct GroupSnapshot: Codable, Equatable {
     let id: String?
     let name: String
     let isCollapsed: Bool?
     let tabs: [TabSnapshot]
 }
 
-struct TabSnapshot: Codable {
+struct TabSnapshot: Codable, Equatable {
     let id: String?
     let customTitle: String?
     let focusedPaneId: String?
@@ -339,7 +339,7 @@ struct TabSnapshot: Codable {
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
 }
 
-indirect enum SplitNodeSnapshot: Codable {
+indirect enum SplitNodeSnapshot: Codable, Equatable {
     // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
     case split(id: String?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
@@ -387,14 +387,14 @@ indirect enum SplitNodeSnapshot: Codable {
     }
 }
 
-struct TodoSnapshot: Codable {
+struct TodoSnapshot: Codable, Equatable {
     let id: String
     let text: String
     let isDone: Bool
 }
 
 /// Strictly decoded checkpoint DTO validated through `AgentSession` during load.
-struct AgentSessionSnapshot: Codable {
+struct AgentSessionSnapshot: Codable, Equatable {
     let kind: String
     let sessionId: String
 
@@ -404,7 +404,7 @@ struct AgentSessionSnapshot: Codable {
     }
 }
 
-struct PaneSnapshot: Codable {
+struct PaneSnapshot: Codable, Equatable {
     let id: String?
     let title: String?
     let cwd: String?

@@ -144,8 +144,6 @@ import Testing
             "createSession is pre-reconcile")
         #expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")
-        #expect(!Command.scheduleCheckpoint.isPostReconcile,
-            "scheduleCheckpoint is pre-reconcile")
         #expect(!Command.terminate.isPostReconcile,
             "terminate is pre-reconcile")
     }

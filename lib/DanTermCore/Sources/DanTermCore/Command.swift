@@ -70,10 +70,6 @@ enum Command {
     // Config persistence
     case saveDanTermConfig(DanTermConfig)
 
-    // Persistence — triggers a debounced write of the model snapshot to disk.
-    // Returned by state-mutating update() branches so the recovery file stays current.
-    case scheduleCheckpoint
-
     // Search
     case sendStartSearch(paneId: PaneId)
     case focusSearchField(paneId: PaneId)
@@ -113,7 +109,7 @@ extension Command {
              .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .dismissAlertsPopover,
-             .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,
+             .saveDanTermConfig, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
              .showClosePaneConfirmation:

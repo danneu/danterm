@@ -210,8 +210,8 @@ extension Msg {
     /// remote/agent toolbar + per-pane theme a command event clears). update()
     /// still runs immediately, so the model stays current and the final value is
     /// never dropped; only the whole-model view sweep is deferred -- and the
-    /// side-effecting commands these emit (.sendNotification, .scheduleCheckpoint)
-    /// are not post-reconcile, so they still run inline. The runtime evaluates this
+    /// side-effecting commands these emit (such as .sendNotification) are not
+    /// post-reconcile, so they still run inline. The runtime evaluates this
     /// on the pane-scoped message, so command and activity transitions opt in
     /// here while remote and attach/detach transitions stay inline. Eligibility is
     /// necessary but not sufficient: reconcileDecision still forces an inline

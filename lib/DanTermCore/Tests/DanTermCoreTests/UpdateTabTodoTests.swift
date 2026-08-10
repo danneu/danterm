@@ -4,7 +4,7 @@
 // reorderTabTodo / clearCompletedTabTodos, the moveTodo paths (pane->tab,
 // tab->pane, pane->pane, atIndex clamps in both directions, source ==
 // destination no-op, unknown todo no-op, missing destination no-op,
-// cross-tab no-op, success emits scheduleCheckpoint), the popover scope
+// cross-tab no-op, successful moves), the popover scope
 // transitions (toggleTodoPopoverForTab + toggleTodoPopover mutual
 // exclusion, same-scope close, dismiss on tab removal), and the close-tab
 // + close-pane confirmation rollup against the tab/pane todo counts.
@@ -28,9 +28,8 @@ import Testing
 
     @Test("addTabTodo appends to the tab and leaves panes/other tabs untouched")
     func addTabTodoAppendsAndLeavesOthersUntouched() {
-        // Intent: addTabTodo appends to that tab's todos and leaves
-        //   pane todos and sibling tabs untouched; emits
-        //   scheduleCheckpoint.
+        // Intent: addTabTodo appends to that tab's todos and leaves pane todos and
+        //   sibling tabs untouched.
         // Why it exists: pins the bare append + persistence path.
         // Scenario: spec-first addTabTodo.
         var model = makeModel()
@@ -41,7 +40,7 @@ import Testing
         let paneA = tabA.focusedPaneId
 
         update(&model, .addTodo(paneId: paneA, text: "pane task"))
-        let commands = update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
+        update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
 
         let updatedTabA = tabById(tabA.id, in: model)!
         #expect(updatedTabA.todos.count == 1)
@@ -53,10 +52,6 @@ import Testing
 
         #expect(tabById(tabB.id, in: model)!.todos.count == 0)
 
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "expected scheduleCheckpoint")
     }
 
     @Test("addTabTodo trims whitespace and rejects empty")
@@ -322,21 +317,19 @@ import Testing
         #expect(tabById(tabB.id, in: model)!.todos.count == 0)
     }
 
-    @Test("moveTodo returns scheduleCheckpoint on success")
-    func moveTodoReturnsScheduleCheckpointOnSuccess() {
-        // Intent: a successful moveTodo emits scheduleCheckpoint.
-        // Why it exists: pins the persistence wiring on success.
-        // Scenario: spec-first success checkpoint.
+    @Test("moveTodo succeeds across todo owners")
+    func moveTodoSucceedsAcrossTodoOwners() {
+        // Intent: a successful moveTodo transfers the item to its destination.
+        // Why it exists: pins the cross-owner mutation path.
+        // Scenario: spec-first tab-to-pane move.
         var (model, tabId, paneA, _) = Self.makeTwoPaneTabForMoveTests()
         update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
-        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
+        update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
 
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "expected scheduleCheckpoint")
+        #expect(tabById(tabId, in: model)!.todos.isEmpty)
+        #expect(model.pane(paneA)!.todos.map(\.text) == ["tab task"])
     }
 
     // MARK: - clearCompletedTabTodos

@@ -66,39 +66,42 @@ struct UpdateRemoteTests {
         #expect(desiredPaneConfig(in: model, livePaneState: LivePaneStateView())[paneId]?.theme == "Solarized")
     }
 
-    @Test("semantic transition scheduling follows product policy")
-    func semanticTransitionScheduling() throws {
+    @Test("semantic recovery projection changes only for persisted transitions")
+    func semanticRecoveryProjectionChangesOnlyForPersistedTransitions() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         var stream = PaneSemanticStream()
+        var recovery = PaneSemanticRecoveryState()
 
-        func sendsCheckpoint(_ transition: PaneSemanticTransition) -> Bool {
-            update(
-                &model,
-                .paneSemanticsChanged(paneId: paneId, event: transition.event),
-                livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: transition.current])
-            ).contains {
-                if case .scheduleCheckpoint = $0 { return true }
-                return false
-            }
+        func changesProjection(_ transition: PaneSemanticTransition) -> Bool {
+            let before = LightCheckpointProjection(
+                snapshot: toSnapshot(model),
+                semanticRecoveryByPaneId: [paneId: recovery.snapshot]
+            )
+            recovery.apply(transition)
+            let after = LightCheckpointProjection(
+                snapshot: toSnapshot(model),
+                semanticRecoveryByPaneId: [paneId: recovery.snapshot]
+            )
+            return before != after
         }
 
-        #expect(sendsCheckpoint(stream.apply(.commandStarted("make"))))
-        #expect(sendsCheckpoint(stream.apply(.commandEnded(exitStatus: 0))) == false)
-        #expect(sendsCheckpoint(stream.apply(.remoteDetected)) == false)
-        #expect(sendsCheckpoint(stream.apply(.remoteIdentityReported(
+        #expect(changesProjection(stream.apply(.commandStarted("make"))))
+        #expect(changesProjection(stream.apply(.commandEnded(exitStatus: 0))) == false)
+        #expect(changesProjection(stream.apply(.remoteDetected)) == false)
+        #expect(changesProjection(stream.apply(.remoteIdentityReported(
             RemoteSession(user: "dan", host: "caja")
         ))) == false)
-        #expect(sendsCheckpoint(stream.apply(.agentAttached(agent))))
-        #expect(sendsCheckpoint(stream.apply(.agentActivityChanged(
+        #expect(changesProjection(stream.apply(.agentAttached(agent))))
+        #expect(changesProjection(stream.apply(.agentActivityChanged(
             session: agent,
             activity: .idle
         ))) == false)
-        #expect(sendsCheckpoint(stream.apply(.commandStarted("test"))))
-        #expect(sendsCheckpoint(stream.apply(.commandEnded(exitStatus: 0))))
-        #expect(sendsCheckpoint(stream.apply(.agentDetached(agent))))
-        #expect(sendsCheckpoint(stream.apply(.connectionEnded)) == false)
+        #expect(changesProjection(stream.apply(.commandStarted("test"))))
+        #expect(changesProjection(stream.apply(.commandEnded(exitStatus: 0))) == false)
+        #expect(changesProjection(stream.apply(.agentDetached(agent))))
+        #expect(changesProjection(stream.apply(.connectionEnded)) == false)
     }
 }

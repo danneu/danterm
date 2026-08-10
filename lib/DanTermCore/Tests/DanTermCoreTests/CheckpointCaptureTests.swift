@@ -16,7 +16,6 @@ private final class Recorder<Value>: @unchecked Sendable {
     var value: Value
     init(_ value: Value) { self.value = value }
 }
-
 /// Build a model with `count` tabs, each owning one pane, and return it with its pane ids in
 /// tab order so a test can address panes without reaching through the tree at every assertion.
 private func makeModelWithPanes(_ count: Int) -> (AppModel, [PaneId]) {
@@ -32,6 +31,237 @@ private func makeModelWithPanes(_ count: Int) -> (AppModel, [PaneId]) {
 private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
     let restore = try loadValidatedInitFile(from: data)
     return restore.paneSnapshots.compactMapValues(\.scrollback)
+}
+
+/// Decode a light capture through the real codec so projection tests assert the bytes that
+/// would reach disk, not a parallel interpretation of the projection fields.
+private func decodeLightCapture(_ capture: CheckpointCapture) throws -> ValidatedAppRestore {
+    try loadValidatedInitFile(from: capture.encoder()())
+}
+
+/// Build a stable-home light projection so persisted-facet tests compare only the mutation
+/// under test, never the machine running the suite.
+private func lightProjection(
+    _ model: AppModel,
+    recovery: [PaneId: PaneSemanticRecoverySnapshot] = [:]
+) -> LightCheckpointProjection {
+    LightCheckpointProjection(
+        snapshot: toSnapshot(model, home: "/Users/testhome"),
+        semanticRecoveryByPaneId: recovery
+    )
+}
+
+@Suite struct LightCheckpointProjectionTests {
+    @Test("every persisted model facet changes the projection")
+    func persistedModelFacetsChangeProjection() {
+        // Intent: representative mutations for every persisted model facet change projection
+        //   equality, so runtime scheduling follows persistence automatically.
+        // Why it exists: a new or refactored update path must not depend on hand-maintained
+        //   scheduling commands to make structure, metadata, appearance, or todos durable.
+        // Scenario: one model accumulates each persisted facet and advances its comparison
+        //   baseline after every mutation.
+        var model = makeModel()
+        var previous = lightProjection(model)
+
+        createTab(&model)
+        var current = lightProjection(model)
+        #expect(current != previous, "tab and pane structure")
+        previous = current
+
+        let firstTabId = model.groups[0].tabs[0].id
+        createTab(&model)
+        current = lightProjection(model)
+        #expect(current != previous, "selected tab and added structure")
+        previous = current
+
+        update(&model, .selectTab(id: firstTabId))
+        current = lightProjection(model)
+        #expect(current != previous, "selected tab")
+        previous = current
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneIds = allPaneIds(model.groups[0].tabs[0].rootNode)
+        current = lightProjection(model)
+        #expect(current != previous, "split structure and focused pane")
+        previous = current
+
+        update(&model, .paneBecameFirstResponder(paneId: paneIds[0]))
+        current = lightProjection(model)
+        #expect(current != previous, "focused pane")
+        previous = current
+
+        update(&model, .renameTab(id: firstTabId, name: "Build"))
+        current = lightProjection(model)
+        #expect(current != previous, "tab title")
+        previous = current
+
+        update(&model, .renameGroup(id: model.groups[0].id, name: "Project"))
+        current = lightProjection(model)
+        #expect(current != previous, "group title")
+        previous = current
+
+        update(&model, .toggleGroupCollapse(groupId: model.groups[0].id))
+        current = lightProjection(model)
+        #expect(current != previous, "group collapse")
+        previous = current
+
+        update(&model, .setTabColors(tabIds: [firstTabId], color: .purple))
+        current = lightProjection(model)
+        #expect(current != previous, "tab color")
+        previous = current
+
+        update(&model, .sessionTitle(paneId: paneIds[0], title: "swift"))
+        current = lightProjection(model)
+        #expect(current != previous, "pane title")
+        previous = current
+
+        update(&model, .sessionCwd(paneId: paneIds[0], cwd: "/tmp/project"))
+        current = lightProjection(model)
+        #expect(current != previous, "pane cwd")
+        previous = current
+
+        update(&model, .setPaneTheme(paneId: paneIds[0], themeName: "Nord"))
+        current = lightProjection(model)
+        #expect(current != previous, "pane theme")
+        previous = current
+
+        update(&model, .adjustPaneFontSize(paneId: paneIds[0], steps: 1))
+        current = lightProjection(model)
+        #expect(current != previous, "pane font steps")
+        previous = current
+
+        update(&model, .addTodo(paneId: paneIds[0], text: "pane task"))
+        current = lightProjection(model)
+        #expect(current != previous, "pane todos")
+        previous = current
+
+        update(&model, .addTabTodo(tabId: firstTabId, text: "tab task"))
+        current = lightProjection(model)
+        #expect(current != previous, "tab todos")
+    }
+
+    @Test("transient model facets leave the projection unchanged")
+    func transientModelFacetsLeaveProjectionUnchanged() {
+        // Intent: zoom, progress, alerts, and search never enter light-checkpoint equality.
+        // Why it exists: projection-derived scheduling must remove the old alert over-schedule
+        //   and must not replace it with writes for other live-only state.
+        // Scenario: a two-tab model mutates each transient facet while its persisted snapshot
+        //   remains fixed.
+        var model = makeModel()
+        createTab(&model)
+        let backgroundPane = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let selectedPane = model.groups[0].tabs[1].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let baseline = lightProjection(model)
+
+        update(&model, .toggleZoomPane(paneId: selectedPane))
+        #expect(lightProjection(model) == baseline, "zoom")
+
+        update(&model, .sessionProgress(paneId: selectedPane, state: .set(percent: 50)))
+        #expect(lightProjection(model) == baseline, "progress")
+
+        update(&model, .sessionBell(paneId: backgroundPane))
+        #expect(model.alerts.isEmpty == false)
+        #expect(lightProjection(model) == baseline, "alerts")
+
+        update(&model, .clearAlertsForTabs(tabIds: [model.groups[0].tabs[0].id]))
+        #expect(lightProjection(model) == baseline, "alert clearing")
+
+        update(&model, .startSearch)
+        #expect(lightProjection(model) == baseline, "search")
+    }
+
+    @Test("semantic recovery facets alone change the projection")
+    func semanticRecoveryFacetsChangeProjection() throws {
+        let (model, paneIds) = makeModelWithPanes(1)
+        let paneId = paneIds[0]
+        let baseline = lightProjection(model)
+        let withCommand = lightProjection(
+            model,
+            recovery: [paneId: PaneSemanticRecoverySnapshot(command: "swift test")]
+        )
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let withAgent = lightProjection(
+            model,
+            recovery: [paneId: PaneSemanticRecoverySnapshot(
+                command: "swift test",
+                agentSession: agent
+            )]
+        )
+
+        #expect(withCommand != baseline, "command memo")
+        #expect(withAgent != withCommand, "agent session")
+    }
+
+    @Test("semantic recovery for a missing pane leaves the projection unchanged")
+    func missingPaneRecoveryLeavesProjectionUnchanged() {
+        let (model, _) = makeModelWithPanes(1)
+        let baseline = lightProjection(model)
+        let missingPane = PaneId(rawValue: UUID())
+        let withStaleSession = lightProjection(
+            model,
+            recovery: [missingPane: PaneSemanticRecoverySnapshot(command: "ignored")]
+        )
+
+        #expect(withStaleSession == baseline)
+    }
+
+    @Test("the write decision follows projection equality")
+    func writeDecisionFollowsProjectionEquality() throws {
+        // Intent: an unchanged projection produces no capture, while a changed one produces a
+        //   capture whose bytes carry that exact projection.
+        // Why it exists: scheduling and capture must share one definition of persisted state;
+        //   separate derivations can silently drift in either direction.
+        // Scenario: a tab title changes after baseline A, then repeats unchanged at baseline B.
+        var model = makeModel()
+        createTab(&model)
+        let baseline = LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: [:]
+        )
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .renameTab(id: tabId, name: "persisted title"))
+        let changed = LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: [:]
+        )
+
+        #expect(lightCheckpointCapture(current: baseline, baseline: baseline) == nil)
+        let capture = try #require(
+            lightCheckpointCapture(current: changed, baseline: baseline)
+        )
+        let restored = try decodeLightCapture(capture)
+        #expect(restored.snapshot == changed.snapshot)
+        #expect(lightCheckpointCapture(current: changed, baseline: changed) == nil)
+    }
+
+    @Test("a reversion while a write is in flight becomes the next write")
+    func reversionAfterCaptureBecomesNextWrite() throws {
+        // Intent: advancing the baseline when a capture is handed off still detects a later
+        //   reversion, so serial writer order ends at the current projection.
+        // Why it exists: comparing against the last completed disk write would require callback
+        //   coordination and can lose the projection that wins while an earlier encode runs.
+        // Scenario: A is on disk, B is captured, then state returns to A before B completes.
+        var model = makeModel()
+        createTab(&model)
+        let projectionA = LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: [:]
+        )
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .renameTab(id: tabId, name: "temporary"))
+        let projectionB = LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: [:]
+        )
+
+        _ = try #require(lightCheckpointCapture(current: projectionB, baseline: projectionA))
+        let reverted = try #require(
+            lightCheckpointCapture(current: projectionA, baseline: projectionB)
+        )
+        #expect(try decodeLightCapture(reverted).snapshot == projectionA.snapshot)
+    }
 }
 
 @Suite struct CheckpointCaptureTests {

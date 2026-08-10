@@ -115,10 +115,9 @@ import Testing
 
     @Test("testSplitRatioChangedNoEffects")
     func testSplitRatioChangedNoEffects() {
-        // Intent: splitRatioChanged updates the targeted split's ratio and
-        //   emits exactly one scheduleCheckpoint.
-        // Why it exists: pins the divider-drag persistence path against
-        //   accidental extra commands.
+        // Intent: splitRatioChanged updates the targeted split's ratio without a
+        //   side-effect command.
+        // Why it exists: pins the divider-drag mutation against accidental commands.
         // Scenario: spec-first ratio drag.
         var model = makeModel()
         createTab(&model)
@@ -130,8 +129,7 @@ import Testing
         }
 
         let commands = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
-        #expect(commands.count == 1, "splitRatioChanged should only produce scheduleCheckpoint")
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(commands.isEmpty)
 
         guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].rootNode else {
             Issue.record("should still be a split")
@@ -163,8 +161,7 @@ import Testing
         let tabBId = model.selectedTabId
         let commands = update(&model, .splitRatioChanged(splitId: tabASplitId, ratio: 0.3))
 
-        #expect(commands.count == 1, "mutating a split should only produce scheduleCheckpoint")
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(commands.isEmpty)
 
         guard let tabA = tabById(tabAId, in: model) else {
             Issue.record("tab A should still exist")
@@ -475,10 +472,9 @@ import Testing
         #expect(tab.subtitle == "/tmp/pane-a")
     }
 
-    @Test("testClosePaneInCollapsedGroupClosesAndPersists")
-    func testClosePaneInCollapsedGroupClosesAndPersists() {
-        // Intent: closing a pane inside a collapsed group still mutates the
-        //   model and persists via scheduleCheckpoint.
+    @Test("testClosePaneInCollapsedGroupCloses")
+    func testClosePaneInCollapsedGroupCloses() {
+        // Intent: closing a pane inside a collapsed group still mutates the model.
         // Why it exists: pins that collapse is purely a view concern -- it
         //   does not gate model mutations.
         // Scenario: spec-first collapsed close.
@@ -492,14 +488,10 @@ import Testing
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .closePane(paneId: paneB))
+        update(&model, .closePane(paneId: paneB))
 
         #expect(model.pane(paneB) == nil, "paneB should be closed")
         #expect(model.groups[0].tabs[0].focusedPaneId == paneA, "paneA should refocus")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint")
     }
 
     @Test("closePane with remaining panes rebuilds the visible tab")
@@ -791,9 +783,8 @@ import Testing
 
     @Test("closePane for a vanished pane is a pure no-op")
     func closePaneVanishedPaneIsNoOp() {
-        // Intent: .closePane for a paneId present in no tab returns [] and
-        //   leaves the model unchanged -- no zoom clobber, no
-        //   scheduleCheckpoint.
+        // Intent: .closePane for a paneId present in no tab returns [] and leaves the
+        //   model unchanged, including zoom state.
         // Why it exists: pins the guard-return branch for the fully-stale
         //   case (e.g. a retained context menu firing after its pane was
         //   already closed). Pre-fix this input clobbered the selected tab's
@@ -896,9 +887,8 @@ import Testing
 
     @Test("movePane ignores panes that are only present in a background tab")
     func movePaneBackgroundTabPanesAreNoOp() throws {
-        // Intent: .movePane whose source and target live outside the selected
-        //   tab returns [] and leaves the model unchanged -- no focusedPaneId
-        //   corruption, no zoom clobber, no scheduleCheckpoint.
+        // Intent: .movePane whose source and target live outside the selected tab returns []
+        //   and leaves the model unchanged, including focus and zoom state.
         // Why it exists: pins the selected-tab-scoped invariant documented by
         //   the .movePane handler comment.
         // Scenario: spec-first; a pane drop dispatch races a tab switch, so
@@ -978,9 +968,8 @@ import Testing
 
     @Test("testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus")
     func testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus() {
-        // Intent: background split on the selected tab adds a pane,
-        //   leaves focus on the existing pane, and emits createSession +
-        //   scheduleCheckpoint without makeFirstResponder.
+        // Intent: background split on the selected tab adds a pane, leaves focus on the
+        //   existing pane, and emits createSession without makeFirstResponder.
         // Why it exists: pins the background-split contract.
         // Scenario: spec-first background-split-selected.
         var model = makeModel()
@@ -1006,10 +995,6 @@ import Testing
             }
             return false
         }, "should create a session for the new pane")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should schedule checkpoint")
         #expect(allPaneIds(model.groups[0].tabs[0].rootNode).contains { newPaneIds.contains($0) },
             "new pane lands in the selected tab's tree (rendered on the rebuild)")
         #expect(!hasEffect(commands) {
@@ -1051,10 +1036,6 @@ import Testing
             }
             return false
         }, "should create a session for the new pane")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should schedule checkpoint")
         #expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false

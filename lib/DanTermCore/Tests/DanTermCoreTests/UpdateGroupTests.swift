@@ -159,9 +159,8 @@ import Testing
 
     @Test("testRenameGroup")
     func testRenameGroup() {
-        // Intent: renameGroup updates the name and emits
-        //   scheduleCheckpoint.
-        // Why it exists: pins the persistence wiring.
+        // Intent: renameGroup updates the name without a side-effect command.
+        // Why it exists: pins the model mutation.
         // Scenario: spec-first rename.
         var model = makeModel()
         update(&model, .createGroup(name: "Work"))
@@ -169,10 +168,7 @@ import Testing
 
         let commands = update(&model, .renameGroup(id: workId, name: "Projects"))
         #expect(model.groups[1].name == "Projects")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
+        #expect(commands.isEmpty)
     }
 
     @Test("renameGroup rejects empty name")
@@ -219,9 +215,8 @@ import Testing
 
     @Test("testReorderGroup")
     func testReorderGroup() {
-        // Intent: reorderGroup repositions a group and emits
-        //   scheduleCheckpoint.
-        // Why it exists: pins the reorder persistence path.
+        // Intent: reorderGroup repositions a group without a side-effect command.
+        // Why it exists: pins the reorder path.
         // Scenario: spec-first reorder -- [General, A, B] -> [General, B, A].
         var model = makeModel()
         update(&model, .createGroup(name: "A"))
@@ -232,10 +227,7 @@ import Testing
         #expect(model.groups[0].name == "General")
         #expect(model.groups[1].name == "B")
         #expect(model.groups[2].name == "A")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testReorderGroupToIndex0")
@@ -250,17 +242,13 @@ import Testing
         let commands = update(&model, .reorderGroup(groupId: aGroupId, toIndex: 0))
         #expect(model.groups[0].name == "A", "A should be at index 0")
         #expect(model.groups[1].name == "General")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testToggleGroupCollapse")
     func testToggleGroupCollapse() {
-        // Intent: toggleGroupCollapse flips isCollapsed and emits exactly
-        //   one scheduleCheckpoint per toggle.
-        // Why it exists: pins the toggle persistence pattern.
+        // Intent: toggleGroupCollapse flips isCollapsed without a side-effect command.
+        // Why it exists: pins the toggle pattern.
         // Scenario: spec-first toggle on then off.
         var model = makeModel()
         update(&model, .createGroup(name: "Work"))
@@ -269,21 +257,18 @@ import Testing
         #expect(model.groups[1].isCollapsed == false)
         let effects1 = update(&model, .toggleGroupCollapse(groupId: workId))
         #expect(model.groups[1].isCollapsed == true)
-        #expect(effects1.count == 1, "toggleGroupCollapse should return only scheduleCheckpoint")
-        #expect(hasEffect(effects1) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(effects1.isEmpty)
 
         let effects2 = update(&model, .toggleGroupCollapse(groupId: workId))
         #expect(model.groups[1].isCollapsed == false)
-        #expect(effects2.count == 1)
+        #expect(effects2.isEmpty)
     }
 
     @Test("testCreateGroupCreatesTabAndFocuses")
     func testCreateGroupCreatesTabAndFocuses() {
-        // Intent: createGroup creates a tab in the new group and selects
-        //   that tab; the tab's pane gets a createSession and
-        //   scheduleCheckpoint.
-        // Why it exists: pins the auto-tab + selection + persistence
-        //   contract.
+        // Intent: createGroup creates a tab in the new group and selects that tab; the
+        //   tab's pane gets a createSession.
+        // Why it exists: pins the auto-tab and selection contract.
         // Scenario: spec-first auto-tab + focus.
         var model = makeModel()
         createTab(&model)
@@ -302,10 +287,6 @@ import Testing
             if case .createSession = $0 { return true }
             return false
         }, "should emit createSession for the new tab's pane")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
     }
 
     @Test("testMoveTabClampsIndex")
@@ -381,15 +362,11 @@ import Testing
 
         let generalTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: generalTabId))
-        let commands = update(&model, .closeTab(id: generalTabId))
+        update(&model, .closeTab(id: generalTabId))
 
         #expect(model.groups.count == 1, "empty General should be pruned")
         #expect(model.groups[0].id == workGroupId, "Work should remain")
         #expect(model.selectedTabId != nil, "some tab should be selected")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
     }
 
     @Test("testMoveTabLeavingEmptyGroupRemovesIt")
@@ -499,10 +476,7 @@ import Testing
         #expect(model.groups[1].tabs[0].id == tab1Id)
         #expect(model.groups[0].tabs.count == 1, "source has tab2 left")
 
-        #expect(commands.count == 1, "should emit exactly scheduleCheckpoint (sidebar reconciles)")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }; return false
-        })
+        #expect(commands.isEmpty)
     }
 
     @Test("testExtractMultipleTabsSameGroup")
@@ -527,7 +501,7 @@ import Testing
         #expect(model.groups[1].tabs[0].id == tab1Id, "order preserved")
         #expect(model.groups[1].tabs[1].id == tab2Id, "order preserved")
         #expect(model.groups[0].tabs.count == 1, "tab3 left in source")
-        #expect(commands.count == 1, "only scheduleCheckpoint (sidebar reconciles)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testExtractMultipleTabsAcrossGroups")
@@ -553,7 +527,7 @@ import Testing
         #expect(model.groups[1].tabs.count == 2)
         #expect(model.groups[1].tabs[0].id == general1, "input order preserved")
         #expect(model.groups[1].tabs[1].id == workAuto, "input order preserved")
-        #expect(commands.count == 1, "only scheduleCheckpoint (sidebar reconciles)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testExtractAllTabsFromOnlyGroupIsNoop")
@@ -621,7 +595,7 @@ import Testing
         #expect(model.groups[1].tabs.count == 2, "duplicate dropped, stale dropped")
         #expect(model.groups[1].tabs[0].id == tab1Id)
         #expect(model.groups[1].tabs[1].id == tab2Id)
-        #expect(commands.count == 1, "only scheduleCheckpoint (sidebar reconciles)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testExtractAllStaleIdsIsNoop")
@@ -687,9 +661,8 @@ import Testing
 
     @Test("testMoveTabsCrossGroup")
     func testMoveTabsCrossGroup() {
-        // Intent: moveTabs across groups inserts the batch at atIndex in
-        //   the destination, preserving input order, and emits exactly
-        //   scheduleCheckpoint.
+        // Intent: moveTabs across groups inserts the batch at atIndex in the destination,
+        //   preserving input order without a side-effect command.
         // Why it exists: pins the cross-group batch contract.
         // Scenario: spec-first cross-group batch.
         var model = makeModel()
@@ -714,10 +687,7 @@ import Testing
         #expect(model.groups[1].tabs[1].id == a0, "input order preserved")
         #expect(model.groups[1].tabs[2].id == a1, "input order preserved")
 
-        #expect(commands.count == 1, "exactly scheduleCheckpoint (sidebar reconciles)")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }; return false
-        })
+        #expect(commands.isEmpty)
     }
 
     @Test("testMoveTabsIntraGroupShiftDown")

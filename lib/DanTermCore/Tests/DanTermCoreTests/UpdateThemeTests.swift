@@ -26,20 +26,16 @@ import Testing
         #expect(model.pane(paneId)?.theme == "Dracula")
     }
 
-    @Test("setPaneTheme projects theme and schedules checkpoint")
-    func setPaneThemeProjectsAndSchedulesCheckpoint() {
-        // Intent: setPaneTheme drives the per-pane config projection and
-        //   emits scheduleCheckpoint.
-        // Why it exists: pins the projection + persistence pair.
-        // Scenario: spec-first projection + checkpoint.
+    @Test("setPaneTheme projects theme")
+    func setPaneThemeProjectsTheme() {
+        // Intent: setPaneTheme drives the per-pane config projection.
+        // Why it exists: pins the projection path.
+        // Scenario: spec-first projection.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
+        update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Nord")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }; return false
-        }, "should emit scheduleCheckpoint")
     }
 
     @Test("clearPaneTheme sets theme to nil")

@@ -175,18 +175,18 @@ class AppRuntime {
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     // Session persistence uses two tiers of checkpoints:
-    //   Light  — pure model serialization (no scrollback), written after a 2s debounce
-    //            following any state-mutating Msg. Cheap and frequent.
+    //   Light  -- model plus semantic recovery (no scrollback), written in a fixed
+    //            2s coalescing window after the persisted projection changes.
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
-    private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
-    private var checkpointDebouncerToken: AppRuntimeSchedulingToken?
+    private var lightCheckpointTimer: DispatchSourceTimer?
+    private var lightCheckpointTimerToken: AppRuntimeSchedulingToken?
+    private var lightCheckpointBaseline: LightCheckpointProjection?
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
     private var enrichedCheckpointTimerToken: AppRuntimeSchedulingToken?
     private var recoveryPolicy = RecoveryCheckpointPolicy(
         window: UInt64(600 * NSEC_PER_SEC)
     )
-    private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
@@ -205,7 +205,7 @@ class AppRuntime {
     private var ipcServerToken: AppRuntimeSchedulingToken?
     private var sessionSubscriptionTokens: [ObjectIdentifier: AppRuntimeSchedulingToken] = [:]
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
-    private static let checkpointDebounceInterval: TimeInterval = 2.0
+    private static let checkpointCoalesceInterval: TimeInterval = 2.0
     // Coalescing window for the reconcile pass, sized for its noisiest driver: a
     // shell that rewrites its OSC 0/2 title on every prompt. 75ms still reads as
     // instant to a human, and it collapses a burst of title writes into one chrome
@@ -236,6 +236,10 @@ class AppRuntime {
         }
         self.model.config = launchConfig
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
+        self.lightCheckpointBaseline = LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: [:]
+        )
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -420,6 +424,8 @@ class AppRuntime {
         for command in commands where command.isPostReconcile {
             perform(command)
         }
+
+        scheduleLightCheckpointIfNeeded()
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
@@ -835,7 +841,6 @@ class AppRuntime {
     func shutdown() {
         guard schedulingLifecycle.isActive else { return }
 
-        checkpointPending = false
         for removal in paneTapeFollowSubscriptions.removeAll() {
             removePaneTapeFollowNotice(removal)
         }
@@ -854,7 +859,8 @@ class AppRuntime {
 
         switcherEventMonitor = nil
         switcherEventMonitorToken = nil
-        checkpointDebouncerToken = nil
+        lightCheckpointTimer = nil
+        lightCheckpointTimerToken = nil
         enrichedCheckpointTimer = nil
         enrichedCheckpointTimerToken = nil
         coalescedReconcileTimer = nil
@@ -1111,9 +1117,6 @@ class AppRuntime {
             // settings still apply.
             send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
-        case .scheduleCheckpoint:
-            scheduleDebouncedCheckpoint()
-
         case .terminate:
             cancelCoalescedReconcile()
             for removal in paneTapeFollowSubscriptions.removeAll() {
@@ -1125,8 +1128,9 @@ class AppRuntime {
             }
             paneTapeFollowSubscriptionTokens.removeAll()
             paneTapeFollowNoticeRegistrations.removeAll()
-            schedulingLifecycle.cancel(checkpointDebouncerToken)
-            checkpointDebouncerToken = nil
+            schedulingLifecycle.cancel(lightCheckpointTimerToken)
+            lightCheckpointTimerToken = nil
+            lightCheckpointTimer = nil
             schedulingLifecycle.cancel(enrichedCheckpointTimerToken)
             enrichedCheckpointTimerToken = nil
             enrichedCheckpointTimer = nil
@@ -1316,27 +1320,34 @@ class AppRuntime {
 
     // MARK: - Session Checkpointing
 
-    /// Schedule a light checkpoint after a debounce delay. Each call resets the
-    /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
-    /// into a single disk write.
-    private func scheduleDebouncedCheckpoint() {
-        guard schedulingLifecycle.isActive else { return }
-        checkpointPending = true
-        schedulingLifecycle.cancel(checkpointDebouncerToken)
-        checkpointDebouncerToken = nil
-        checkpointDebouncer.schedule(
-            after: Self.checkpointDebounceInterval,
+    /// Arm one bounded light-checkpoint window after persisted state diverges. An existing
+    /// window stays fixed so continuous message traffic cannot postpone the write.
+    private func scheduleLightCheckpointIfNeeded() {
+        guard lightCheckpointTimer == nil,
+              schedulingLifecycle.isActive,
+              currentLightCheckpointProjection() != lightCheckpointBaseline
+        else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(
+            deadline: .now() + Self.checkpointCoalesceInterval,
             leeway: .milliseconds(200)
-        ) { [weak self] in
-            guard let self, let token = self.checkpointDebouncerToken else { return }
-            self.checkpointDebouncerToken = nil
+        )
+        guard let token = schedulingLifecycle.arm(.timer, cancel: { timer.cancel() }) else {
+            timer.cancel()
+            return
+        }
+        lightCheckpointTimerToken = token
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lightCheckpointTimer?.cancel()
             self.schedulingLifecycle.run(token) {
+                self.lightCheckpointTimer = nil
+                self.lightCheckpointTimerToken = nil
                 self.performLightCheckpoint(async: true)
             }
         }
-        checkpointDebouncerToken = schedulingLifecycle.arm(.debouncer) { [checkpointDebouncer] in
-            checkpointDebouncer.cancel()
-        }
+        timer.resume()
+        lightCheckpointTimer = timer
     }
 
     /// Defer the whole-model reconcile() sweep while cosmetic title/cwd/progress,
@@ -1374,17 +1385,14 @@ class AppRuntime {
         coalescedReconcileTimer = nil
     }
 
-    /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
-    /// so we don't lose the last 2s of state changes when the user switches away.
+    /// Close the current light-checkpoint window immediately. Called on appResignedActive
+    /// so we do not lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
         guard schedulingLifecycle.isActive else { return }
-        schedulingLifecycle.cancel(checkpointDebouncerToken)
-        checkpointDebouncerToken = nil
-        if checkpointPending {
-            performLightCheckpoint(async: false)
-        } else {
-            Self.checkpointWriter.drain()
-        }
+        schedulingLifecycle.cancel(lightCheckpointTimerToken)
+        lightCheckpointTimerToken = nil
+        lightCheckpointTimer = nil
+        performLightCheckpoint(async: false)
     }
 
     /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
@@ -1457,17 +1465,19 @@ class AppRuntime {
         }
     }
 
-    /// Write a light checkpoint: pure model serialization with scrollback: nil.
-    /// Cheap — no terminal interaction.
+    /// Write the current light projection only when it differs from the last projection handed
+    /// to the serial writer. Advancing the baseline at handoff preserves writer order while an
+    /// earlier write is still in flight.
     private func performLightCheckpoint(async: Bool) {
-        checkpointPending = false
-        // The same pipeline with nothing to read: no pane reads means the graft is the identity
-        // and every leaf goes out with `scrollback: nil`, which is what "light" has always been.
-        let capture = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [:],
-            semanticRecoveryByPaneId: captureSemanticRecovery()
-        )
+        let projection = currentLightCheckpointProjection()
+        guard let capture = lightCheckpointCapture(
+            current: projection,
+            baseline: lightCheckpointBaseline
+        ) else {
+            if !async { Self.checkpointWriter.drain() }
+            return
+        }
+        lightCheckpointBaseline = projection
         Self.checkpointWriter.write(
             to: lightCheckpointURL(),
             async: async,
@@ -1498,6 +1508,14 @@ class AppRuntime {
     /// Capture the pane-owned values needed only for the next process launch.
     private func captureSemanticRecovery() -> [PaneId: PaneSemanticRecoverySnapshot] {
         sessions.mapValues(\.semanticRecoverySnapshot)
+    }
+
+    /// Capture the exact value shared by light scheduling and light encoding.
+    private func currentLightCheckpointProjection() -> LightCheckpointProjection {
+        LightCheckpointProjection(
+            snapshot: toSnapshot(model),
+            semanticRecoveryByPaneId: captureSemanticRecovery()
+        )
     }
 
     /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
@@ -1849,6 +1867,7 @@ class AppRuntime {
         model = staged.model
         sessions = staged.sessions
         replayFiles = staged.replayFiles
+        lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
 
         // Restore bypasses update(); reconcile MRU here so the first
@@ -1903,11 +1922,13 @@ class AppRuntime {
             recordTerminalCharacterizationEvent(event)
             #endif
             guard let self, let session else { return }
-            for message in terminalMessages(
-                for: event,
-                paneId: paneId
-            ) {
-                self.send(message)
+            withExtendedLifetime(session) {
+                for message in terminalMessages(
+                    for: event,
+                    paneId: paneId
+                ) {
+                    self.send(message)
+                }
             }
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""

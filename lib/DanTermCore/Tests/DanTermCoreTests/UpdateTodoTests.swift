@@ -26,21 +26,16 @@ private struct SectionRow {
 
     @Test("addTodo creates item with correct text and isDone false")
     func addTodoCreatesItemWithCorrectFields() {
-        // Intent: addTodo appends a new item with the given text,
-        //   isDone=false, and emits scheduleCheckpoint.
+        // Intent: addTodo appends a new item with the given text and isDone=false.
         // Why it exists: pins the bare add path.
         // Scenario: spec-first add.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let commands = update(&model, .addTodo(paneId: paneId, text: "run tests"))
+        update(&model, .addTodo(paneId: paneId, text: "run tests"))
         #expect(model.pane(paneId)!.todos.count == 1)
         #expect(model.pane(paneId)!.todos[0].text == "run tests")
         #expect(model.pane(paneId)!.todos[0].isDone == false)
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "expected scheduleCheckpoint")
     }
 
     @Test("addTodo trims whitespace")
@@ -72,8 +67,7 @@ private struct SectionRow {
 
     @Test("toggleTodoDone flips isDone")
     func toggleTodoDoneFlipsIsDone() {
-        // Intent: toggleTodoDone flips isDone and emits
-        //   scheduleCheckpoint; toggling back inverts again.
+        // Intent: toggleTodoDone flips isDone; toggling back inverts again.
         // Why it exists: pins the toggle path and persistence.
         // Scenario: spec-first toggle round-trip.
         var model = makeModel()
@@ -81,21 +75,16 @@ private struct SectionRow {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
-        let commands = update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
         #expect(model.pane(paneId)!.todos[0].isDone == true)
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "expected scheduleCheckpoint")
         update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
         #expect(model.pane(paneId)!.todos[0].isDone == false)
     }
 
     @Test("setTodoDone sets explicit value; same value is a no-op")
     func setTodoDoneSetsExplicitValueNoOpWhenUnchanged() {
-        // Intent: setTodoDone(paneId:todoId:isDone:) assigns isDone explicitly and
-        //   emits scheduleCheckpoint, but returns no commands when the value is
-        //   already what was requested.
+        // Intent: setTodoDone(paneId:todoId:isDone:) assigns isDone explicitly, but
+        //   returns no commands when the value is already what was requested.
         // Why it exists: pins the value-unchanged guard the item-3 fold relies on
         //   -- the rewrite reads the pane once and bails on `isDone != isDone`
         //   before mutating, so the no-op contract must be locked first.
@@ -107,12 +96,8 @@ private struct SectionRow {
         update(&model, .addTodo(paneId: paneId, text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
 
-        let setCommands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
+        update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
         #expect(model.pane(paneId)!.todos[0].isDone == true)
-        #expect(hasEffect(setCommands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "expected scheduleCheckpoint on a real change")
 
         let noopCommands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
         #expect(noopCommands.isEmpty, "no-op when value unchanged")
@@ -192,7 +177,7 @@ private struct SectionRow {
     @Test("reorderTodo no-ops on same position")
     func reorderTodoNoOpsOnSamePosition() {
         // Intent: reorderTodo to the same position is a no-op (no
-        //   checkpoint).
+        //   commands).
         // Why it exists: pins the idempotence guard.
         // Scenario: spec-first reorder no-op.
         var model = makeModel()
@@ -203,10 +188,7 @@ private struct SectionRow {
         let idA = model.pane(paneId)!.todos[0].id
         let commands = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 0))
         #expect(model.pane(paneId)!.todos.map(\.text) == ["A", "B"])
-        #expect(!hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should not checkpoint on no-op reorder")
+        #expect(commands.isEmpty)
     }
 
     @Test("reorderTodo clamps out-of-bounds index")

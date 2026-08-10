@@ -397,7 +397,6 @@ import DanTermProtocol
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } == false)
     }
 
     @Test("pane.info explicit pane returns containing pane tab and group")

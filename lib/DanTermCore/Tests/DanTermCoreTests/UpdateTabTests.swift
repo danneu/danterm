@@ -987,8 +987,7 @@ import Testing
 
     @Test("testRequestCloseTabsSingleIdDelegatesToRequestCloseTab")
     func testRequestCloseTabsSingleIdDelegatesToRequestCloseTab() {
-        // Intent: a single-id batch produces the same model + session
-        //   teardown + checkpoint emissions as a direct
+        // Intent: a single-id batch produces the same model and session teardown as a direct
         //   requestCloseTab.
         // Why it exists: pins the dispatcher's single-id delegation
         //   contract (no behavior drift).
@@ -1001,14 +1000,12 @@ import Testing
         var batch = base
 
         let liveBefore = Set(base.allPaneIds)
-        let directEffects = update(&direct, .requestCloseTab(id: firstTabId))
-        let batchEffects = update(&batch, .requestCloseTabs(ids: [firstTabId]))
+        update(&direct, .requestCloseTab(id: firstTabId))
+        update(&batch, .requestCloseTabs(ids: [firstTabId]))
 
         #expect(batch == direct, "single-id batch should match direct request model mutation")
         #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: batch) ==
                         sessionsToTearDown(liveSessionIds: liveBefore, model: direct))
-        #expect(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
-                        effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
     @Test("testRequestCloseTabsEmptyIdsIsNoOp")
@@ -1129,9 +1126,8 @@ import Testing
 
     @Test("testConfirmCloseTabsEmptyingBatchTerminatesWithoutReloadOrCheckpoint")
     func testConfirmCloseTabsEmptyingBatchTerminatesWithoutReloadOrCheckpoint() {
-        // Intent: when a batch closes every live tab, the dispatcher
-        //   emits exactly one terminate (as the last command) and no
-        //   scheduleCheckpoint.
+        // Intent: when a batch closes every live tab, the dispatcher emits exactly one
+        //   terminate as the last command.
         // Why it exists: pins the terminate-only commit so a closing-app
         //   batch doesn't waste a checkpoint write.
         // Scenario: spec-first close-all-and-terminate.
@@ -1146,8 +1142,6 @@ import Testing
         #expect(effectCount(commands) { if case .terminate = $0 { return true }; return false } ==
                         1, "emptying batch should emit exactly one terminate")
         #expect(isTerminateEffect(commands.last), "terminate should be the final command")
-        #expect(effectCount(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
-                        0, "emptying batch should not schedule a checkpoint after terminate")
     }
 
     @Test("testConfirmCloseTabsNonEmptyingBatchReloadsAndCheckpointsOnce")
@@ -1171,8 +1165,7 @@ import Testing
 
         #expect(Set(model.groups.flatMap(\.tabs).map(\.id)) == Set([firstTabId]))
         #expect(model.selectedTabId == firstTabId, "selection should move to a remaining tab")
-        #expect(effectCount(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
-                        1, "non-emptying batch should checkpoint once")
+        #expect(commands.isEmpty)
         #expect(effectCount(commands) { if case .terminate = $0 { return true }; return false } ==
                         0, "non-emptying batch should not terminate")
     }
@@ -1200,10 +1193,8 @@ import Testing
 
     @Test("testSetTabColor")
     func testSetTabColor() {
-        // Intent: setTabColors on a single tab id sets the color and
-        //   emits scheduleCheckpoint (color reconciles via
-        //   reconcileSidebar).
-        // Why it exists: pins the color persistence path.
+        // Intent: setTabColors on a single tab id sets the color.
+        // Why it exists: pins the color mutation path.
         // Scenario: spec-first set color.
         var model = makeModel()
         createTab(&model)
@@ -1211,16 +1202,12 @@ import Testing
 
         let commands = update(&model, .setTabColors(tabIds: [tabId], color: .red))
         #expect(model.groups[0].tabs[0].color == .red)
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testSetTabColorClear")
     func testSetTabColorClear() {
-        // Intent: setTabColors with nil clears the color and emits
-        //   scheduleCheckpoint.
+        // Intent: setTabColors with nil clears the color.
         // Why it exists: pins the explicit-clear branch.
         // Scenario: spec-first clear color.
         var model = makeModel()
@@ -1230,10 +1217,7 @@ import Testing
 
         let commands = update(&model, .setTabColors(tabIds: [tabId], color: nil))
         #expect(model.groups[0].tabs[0].color == nil, "color should be nil")
-        #expect(hasEffect(commands) {
-            if case .scheduleCheckpoint = $0 { return true }
-            return false
-        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
+        #expect(commands.isEmpty)
     }
 
     @Test("testSetTabColorReplaceDifferent")
@@ -1394,8 +1378,7 @@ import Testing
 
     @Test("testSetTabColorsDedupesAndIgnoresStale")
     func testSetTabColorsDedupesAndIgnoresStale() {
-        // Intent: batch setTabColors dedupes ids and ignores stale ids;
-        //   the result emits exactly one scheduleCheckpoint command.
+        // Intent: batch setTabColors dedupes ids and ignores stale ids.
         // Why it exists: pins the dedup + stale-filter guard for the
         //   batch path.
         // Scenario: spec-first batch dedup + stale.
@@ -1411,8 +1394,7 @@ import Testing
 
         #expect(model.groups[0].tabs[0].color == .purple)
         #expect(model.groups[0].tabs[1].color == .purple)
-        #expect(commands.count == 1,
-            "no double-dispatch for duplicates; stale dropped")
+        #expect(commands.isEmpty)
     }
 
     @Test("testSetTabColorsAllStaleIsNoop")

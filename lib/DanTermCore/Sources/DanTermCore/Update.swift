@@ -104,8 +104,6 @@ func update(
             launchCommand: nil,
             waitAfterCommand: true
         ))
-        // Persist new tab + pane + selection so a crash doesn't lose the tab.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .selectAdjacentTab(let direction):
@@ -146,14 +144,12 @@ func update(
             return emitTerminateConfirmation(&model)
         }
 
-        var commands = closeTabBody(&model, id: id)
+        let commands = closeTabBody(&model, id: id)
 
         // Check if all tabs gone
         if !model.hasAnyTab {
             return commands + [.terminate]
         }
-        // Persist tab removal + new selection so closed tabs don't reappear on restore.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     // MARK: - Pane Management
@@ -196,7 +192,7 @@ func update(
             tab.isZoomed = false
         }
 
-        var commands: [Command] = [
+        let commands: [Command] = [
             .createSession(
                 paneId: newPaneId,
                 cwd: cwd,
@@ -205,8 +201,6 @@ func update(
                 waitAfterCommand: true
             ),
         ]
-        // Persist new split tree so the pane layout survives a crash.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .closePane(let paneId):
@@ -254,8 +248,6 @@ func update(
             }
         }
 
-        // Persist pane removal + updated tree so closed panes stay closed on restore.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .movePane(let source, let target, let intent):
@@ -297,8 +289,7 @@ func update(
             tab.focusedPaneId = source
             tab.isZoomed = false
         }
-        // Persist rearranged split tree so pane positions survive a crash.
-        return [.scheduleCheckpoint]
+        return []
 
     case .movePaneToTab(let paneId, let targetTabId):
         // Find source tab containing this pane
@@ -353,8 +344,6 @@ func update(
         }
         model.selectedTabId = targetTabId
         commands.append(.makeFirstResponder(paneId: paneId))
-        // Persist cross-tab pane move so the new tree layout survives a crash.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
@@ -417,8 +406,6 @@ func update(
         }
 
         commands.append(.makeFirstResponder(paneId: paneId))
-        // Persist pane-to-new-tab extraction so the tab structure survives a crash.
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .setTabColors(let tabIds, let color):
@@ -427,13 +414,11 @@ func update(
         // dispatcher via resolveColorForBatch before this Msg is sent.
         let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
-        var commands: [Command] = []
         for id in validIds {
             updateTab(id, in: &model) { t in t.color = color }
         }
         // The color stripe updates via reconcileSidebar (color is in the projection).
-        commands.append(.scheduleCheckpoint)
-        return commands
+        return []
 
     case .clearCustomTitles(let tabIds):
         let validIds = normalizedLiveTabIds(tabIds, in: model)
@@ -442,8 +427,8 @@ func update(
             updateTab(id, in: &model) { t in t.customTitle = nil }
         }
         // The cleared rows reconcile via reconcileSidebar and the selected tab's window
-        // chrome via reconcileWindowChrome. Persist so the batch clear survives a crash.
-        return [.scheduleCheckpoint]
+        // chrome via reconcileWindowChrome.
+        return []
 
     case .clearAlertsForTabs(let tabIds):
         let validIds = normalizedLiveTabIds(tabIds, in: model)
@@ -463,7 +448,7 @@ func update(
 
     case .setPaneTheme(let paneId, let themeName):
         model.updatePane(paneId) { $0.theme = themeName }
-        return [.scheduleCheckpoint]
+        return []
 
     case .adjustPaneFontSize(let paneId, let steps):
         guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
@@ -478,22 +463,21 @@ func update(
         guard next != pane.fontSizeSteps else { return [] }
         model.updatePane(targetId) { $0.fontSizeSteps = next }
         // The pane re-grids via reconcilePaneConfig (font size is in the projection).
-        return [.scheduleCheckpoint]
+        return []
 
     case .resetPaneFontSize(let paneId):
         guard let targetId = paneId ?? selectedTab(in: model)?.focusedPaneId,
               let pane = model.pane(targetId), pane.fontSizeSteps != 0 else { return [] }
         model.updatePane(targetId) { $0.fontSizeSteps = 0 }
-        return [.scheduleCheckpoint]
+        return []
 
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
         // The renamed row updates via reconcileSidebar (displayTitle is in the projection)
-        // and the selected tab's window chrome via reconcileWindowChrome. Persist so the
-        // rename survives a crash.
-        return [.scheduleCheckpoint]
+        // and the selected tab's window chrome via reconcileWindowChrome.
+        return []
 
     case .sidebarRenameEnded:
         guard let tab = selectedTab(in: model) else { return [] }
@@ -525,8 +509,7 @@ func update(
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        // Persist focused pane so restore opens the right pane within each tab.
-        return [.scheduleCheckpoint]
+        return []
 
     // MARK: - Pane Semantics
 
@@ -534,11 +517,8 @@ func update(
         guard model.pane(paneId) != nil else { return [] }
         switch event {
         case .commandStarted, .agentAttached, .agentDetached:
-            return [.scheduleCheckpoint]
+            return []
         case .commandEnded:
-            if case .attached = livePaneState.semantics(for: paneId).agent {
-                return [.scheduleCheckpoint]
-            }
             return []
         case .agentActivityChanged(_, .waiting):
             guard selectedTab(in: model)?.focusedPaneId != paneId else { return [] }
@@ -708,15 +688,13 @@ func update(
         guard title.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.title = title }
         // Tab/window chrome derives from the focused pane title just set above.
-        // Persist so restored tabs show the correct name.
-        return [.scheduleCheckpoint]
+        return []
 
     case .sessionCwd(let paneId, let cwd):
         guard cwd?.fitsTerminalMetadataValueLimit != false else { return [] }
         model.updatePane(paneId) { $0.cwd = cwd }
         // Tab/window chrome derives from the focused pane cwd just set above.
-        // Persist so restored panes open in the right dir.
-        return [.scheduleCheckpoint]
+        return []
 
     case .sessionProgress(let paneId, let state):
         model.updatePane(paneId) { $0.progress = state }
@@ -776,7 +754,6 @@ func update(
                 let tab = model.groups[gi].tabs[ti]
                 let tabId = tab.id
                 let groupId = model.groups[gi].id
-                var commands: [Command] = []
                 for pid in allPaneIds(tab.rootNode) {
                     // Session teardown is reconcileSessionExistence's (these panes leave the
                     // tree below); keep side-table cleanup via clearPaneSideTables.
@@ -790,11 +767,9 @@ func update(
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 }
                 if !model.hasAnyTab {
-                    return commands + [.terminate]
+                    return [.terminate]
                 }
-                // Persist tab removal after a failed session so it doesn't reappear.
-                commands.append(.scheduleCheckpoint)
-                return commands
+                return []
             }
         }
         // A pane in no tree cannot exist now, so this fallback is just defensive
@@ -928,7 +903,6 @@ func update(
         if !model.hasAnyTab {
             return commands + [.terminate]
         }
-        commands.append(.scheduleCheckpoint)
         return commands
 
     case .cancelCloseTabs:
@@ -959,7 +933,6 @@ func update(
             model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
             // Close all tabs' sessions.
-            var commands: [Command] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
                     // Session teardown is reconcileSessionExistence's (these panes leave the
@@ -969,30 +942,25 @@ func update(
             }
             model.groups.remove(at: idx)
             if !model.hasAnyTab {
-                return commands + [.terminate]
+                return [.terminate]
             }
             // Fix selection if needed
             if let selId = model.selectedTabId,
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
             }
-            // Persist group deletion + tab removal so they don't reappear.
-            commands.append(.scheduleCheckpoint)
-            return commands
+            return []
         }
 
         model.groups.remove(at: idx)
-        // Persist group deletion (tabs moved to default group).
-        return [.scheduleCheckpoint]
+        return []
 
     case .renameGroup(let id, let name):
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty,
               let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
         model.groups[idx].name = trimmed
-        // Persist group name so it appears correctly on restore (the row updates via
-        // reconcileSidebar).
-        return [.scheduleCheckpoint]
+        return []
 
     case .moveTabs(let tabIds, let toGroupId, let atIndex):
         let validIds = normalizedLiveTabIds(tabIds, in: model)
@@ -1041,7 +1009,7 @@ func update(
             removeGroupIfEmpty(sgid, from: &model)
         }
 
-        return [.scheduleCheckpoint]
+        return []
 
     case .extractTabsToNewGroup(let tabIds, let groupName):
         let validIds = normalizedLiveTabIds(tabIds, in: model)
@@ -1061,25 +1029,22 @@ func update(
         // Reuse .moveTabs for tabLocation lookup, clamping, and
         // removeGroupIfEmpty pruning of vacated source groups. The new
         // group is empty, so atIndex: 0 is unambiguous; ids are inserted
-        // in the order given. Discard nested commands -- we emit one
-        // scheduleCheckpoint at the end (the sidebar updates via reconcileSidebar).
+        // in the order given. Discard nested commands; the sidebar updates via
+        // reconcileSidebar.
         _ = update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), livePaneState: livePaneState, env: env)
-        return [.scheduleCheckpoint]
+        return []
 
     case .reorderGroup(let groupId, let toIndex):
         guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
         let clamped = max(0, min(toIndex, model.groups.count - 1))
         let group = model.groups.remove(at: currentIdx)
         model.groups.insert(group, at: clamped)
-        // Persist group ordering so sidebar layout survives a restart (the rows reorder
-        // via reconcileSidebar).
-        return [.scheduleCheckpoint]
+        return []
 
     case .toggleGroupCollapse(let groupId):
         guard let idx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
         model.groups[idx].isCollapsed.toggle()
-        // Persist collapse state so sidebar groups restore expanded/collapsed.
-        return [.scheduleCheckpoint]
+        return []
 
     case .toggleZoomPane(let paneId):
         // nil = selected tab (menubar path); non-nil = the pane's own tab
@@ -1113,8 +1078,7 @@ func update(
         updateTab(tab.id, in: &model) { tab in
             tab.rootNode = setRatio(tab.rootNode, splitId: splitId, ratio: ratio)
         }
-        // Persist split ratio so pane proportions are restored accurately.
-        return [.scheduleCheckpoint]
+        return []
 
     // MARK: - Search
 
@@ -1226,7 +1190,7 @@ func update(
         updateTab(tabId, in: &model) { t in
             t.todos.append(TodoItem(id: env.newId(), text: trimmed, isDone: false))
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .toggleTabTodoDone(let tabId, let todoId):
         guard let tab = tabById(tabId, in: model),
@@ -1234,7 +1198,7 @@ func update(
         updateTab(tabId, in: &model) { t in
             t.todos[idx].isDone.toggle()
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .setTabTodoDone(let tabId, let todoId, let isDone):
         guard let tab = tabById(tabId, in: model),
@@ -1243,7 +1207,7 @@ func update(
         updateTab(tabId, in: &model) { t in
             t.todos[idx].isDone = isDone
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .editTabTodoText(let tabId, let todoId, let text):
         let trimmed = text.trimmingCharacters(in: .whitespaces)
@@ -1253,20 +1217,20 @@ func update(
         updateTab(tabId, in: &model) { t in
             t.todos[idx].text = trimmed
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .deleteTabTodo(let tabId, let todoId):
         guard tabById(tabId, in: model) != nil else { return [] }
         updateTab(tabId, in: &model) { t in
             t.todos.removeAll { $0.id == todoId }
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .reorderTabTodo(let tabId, let todoId, let toIndex):
         guard let tab = tabById(tabId, in: model),
               let todos = reorderedTodos(tab.todos, moving: todoId, to: toIndex) else { return [] }
         updateTab(tabId, in: &model) { t in t.todos = todos }
-        return [.scheduleCheckpoint]
+        return []
 
     case .moveTodo(let source, let todoId, let destination, let atIndex):
         let sameBucket: Bool = {
@@ -1334,51 +1298,51 @@ func update(
         case .pane(let paneId):
             model.updatePane(paneId) { $0.todos.insert(sourceItem, at: insertAt) }
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .clearCompletedTabTodos(let tabId):
         guard tabById(tabId, in: model) != nil else { return [] }
         updateTab(tabId, in: &model) { t in
             t.todos.removeAll { $0.isDone }
         }
-        return [.scheduleCheckpoint]
+        return []
 
     case .addTodo(let paneId, let text):
         guard appendTodo(&model, paneId: paneId, text: text, id: env.newId()) != nil else { return [] }
-        return [.scheduleCheckpoint]
+        return []
 
     case .toggleTodoDone(let paneId, let todoId):
         guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
         model.updatePane(paneId) { $0.todos[idx].isDone.toggle() }
-        return [.scheduleCheckpoint]
+        return []
 
     case .setTodoDone(let paneId, let todoId, let isDone):
         guard let pane = model.pane(paneId),
               let idx = pane.todos.firstIndex(where: { $0.id == todoId }),
               pane.todos[idx].isDone != isDone else { return [] }
         model.updatePane(paneId) { $0.todos[idx].isDone = isDone }
-        return [.scheduleCheckpoint]
+        return []
 
     case .editTodoText(let paneId, let todoId, let text):
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
         guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
         model.updatePane(paneId) { $0.todos[idx].text = trimmed }
-        return [.scheduleCheckpoint]
+        return []
 
     case .deleteTodo(let paneId, let todoId):
         model.updatePane(paneId) { $0.todos.removeAll { $0.id == todoId } }
-        return [.scheduleCheckpoint]
+        return []
 
     case .reorderTodo(let paneId, let todoId, let toIndex):
         guard let current = model.pane(paneId)?.todos,
               let todos = reorderedTodos(current, moving: todoId, to: toIndex) else { return [] }
         model.updatePane(paneId) { $0.todos = todos }
-        return [.scheduleCheckpoint]
+        return []
 
     case .clearCompletedTodos(let paneId):
         model.updatePane(paneId) { $0.todos.removeAll { $0.isDone } }
-        return [.scheduleCheckpoint]
+        return []
 
     case .requestClosePane(let paneId):
         guard let pane = model.pane(paneId) else { return [] }
@@ -1798,10 +1762,7 @@ private func dispatchIpc(
             throw IpcParamsError("invalid todo text")
         }
         // Pane toolbar (incl. todo counts) reconciles from the model change above.
-        return [
-            .scheduleCheckpoint,
-            .ipcReply(reqId: reqId, result: todoResult(item)),
-        ]
+        return [.ipcReply(reqId: reqId, result: todoResult(item))]
 
     case Methods.todoEdit:
         guard case .object(let object) = params,
@@ -2231,7 +2192,6 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
-    commands.append(.scheduleCheckpoint)
     return commands
 }
 
@@ -2350,9 +2310,6 @@ private func navigateToPane(
     // paneBecameFirstResponder). A cross-tab navigate clears via the nested selectTab;
     // an unzoom drifts the shape and clears via update()'s reconcileTodoPopover.
     commands.append(.makeFirstResponder(paneId: paneId))
-    if focusChanged {
-        commands.append(.scheduleCheckpoint)
-    }
     return commands
 }
 

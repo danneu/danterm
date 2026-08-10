@@ -315,9 +315,8 @@ import Testing
 
     @Test("testSessionTitleUnfocusedPane")
     func testSessionTitleUnfocusedPane() {
-        // Intent: sessionTitle on an unfocused pane updates the pane's
-        //   title only (no tab chrome change); emits exactly one
-        //   scheduleCheckpoint.
+        // Intent: sessionTitle on an unfocused pane updates the pane's title only, with
+        //   no tab chrome change or side-effect command.
         // Why it exists: pins the per-pane scope of the title update.
         // Scenario: spec-first unfocused title.
         var model = makeModel()
@@ -329,8 +328,7 @@ import Testing
         let commands = update(&model, .sessionTitle(paneId: paneA, title: "htop"))
         #expect(model.pane(paneA)?.title == "htop", "pane title should update")
         #expect(model.groups[0].tabs[0].title == "Terminal", "tab title should not change")
-        #expect(commands.count == 1, "only scheduleCheckpoint for unfocused pane title")
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(commands.isEmpty)
     }
 
     @Test("testSessionPwdFocusedPane")
@@ -352,8 +350,8 @@ import Testing
 
     @Test("testSessionPwdUnfocusedPane")
     func testSessionPwdUnfocusedPane() {
-        // Intent: sessionCwd on an unfocused pane only updates the pane's
-        //   cwd; emits exactly one scheduleCheckpoint.
+        // Intent: sessionCwd on an unfocused pane only updates the pane's cwd, with no
+        //   side-effect command.
         // Why it exists: pins the per-pane scope for cwd updates.
         // Scenario: spec-first unfocused cwd.
         var model = makeModel()
@@ -364,8 +362,7 @@ import Testing
 
         let commands = update(&model, .sessionCwd(paneId: paneA, cwd: "/tmp"))
         #expect(model.pane(paneA)?.cwd == "/tmp", "pane cwd should update")
-        #expect(commands.count == 1, "only scheduleCheckpoint for unfocused pane cwd")
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(commands.isEmpty)
     }
 
     @Test("testSessionTitleBackgroundTab")
@@ -428,12 +425,12 @@ import Testing
 
         #expect(update(&model, .sessionTitle(paneId: paneId, title: rejected)).isEmpty)
         #expect(model.pane(paneId)?.title != rejected)
-        #expect(update(&model, .sessionTitle(paneId: paneId, title: accepted)).count == 1)
+        #expect(update(&model, .sessionTitle(paneId: paneId, title: accepted)).isEmpty)
         #expect(model.pane(paneId)?.title == accepted)
 
         #expect(update(&model, .sessionCwd(paneId: paneId, cwd: rejected)).isEmpty)
         #expect(model.pane(paneId)?.cwd != rejected)
-        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: accepted)).count == 1)
+        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: accepted)).isEmpty)
         #expect(model.pane(paneId)?.cwd == accepted)
 
         model.isAppActive = false

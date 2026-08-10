@@ -14,6 +14,24 @@ import Foundation
 /// canned string.
 typealias CheckpointScrollbackRead = @Sendable (ScrollbackRetention) -> String?
 
+/// The canonical light-checkpoint payload. Equality is the scheduling policy: any value not
+/// represented in the final grafted snapshot is deliberately unable to trigger a light write.
+struct LightCheckpointProjection: Equatable {
+    let snapshot: AppModelSnapshot
+
+    /// Graft pane-owned recovery while constructing the value so comparison and encoding cannot
+    /// disagree about stale sessions or any other recovery input that has no persisted leaf.
+    init(
+        snapshot: AppModelSnapshot,
+        semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
+    ) {
+        self.snapshot = graftSemanticRecovery(
+            onto: snapshot,
+            recoveryByPaneId: semanticRecoveryByPaneId
+        )
+    }
+}
+
 /// Everything a checkpoint needs, taken from live state in a single main-actor pass. Bundling
 /// the model snapshot with the per-pane reads is what makes the pairing structural: a pane's
 /// text can only ever be written against the snapshot captured beside it, so two checkpoints in
@@ -35,6 +53,15 @@ struct CheckpointCapture {
         self.scrollbackReads = scrollbackReads
         self.semanticRecoveryByPaneId = semanticRecoveryByPaneId
         self.retention = retention
+    }
+
+    /// Build the light tier from the same named value its scheduler compares.
+    init(lightProjection: LightCheckpointProjection) {
+        self.init(
+            snapshot: lightProjection.snapshot,
+            scrollbackReads: [:],
+            semanticRecoveryByPaneId: [:]
+        )
     }
 
     /// Work that reads, truncates, grafts, and encodes -- none of which happens here. This is
@@ -62,6 +89,16 @@ struct CheckpointCapture {
             return try encoder.encode(toInitFile(snapshot: enriched))
         }
     }
+}
+
+/// Return work for the current light projection only when it differs from the projection most
+/// recently handed to the serial writer.
+func lightCheckpointCapture(
+    current: LightCheckpointProjection,
+    baseline: LightCheckpointProjection?
+) -> CheckpointCapture? {
+    guard current != baseline else { return nil }
+    return CheckpointCapture(lightProjection: current)
 }
 
 /// Run every captured pane's read and cut what comes back to the same budget. One
