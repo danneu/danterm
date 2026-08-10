@@ -173,7 +173,7 @@ Inside DanTerm, derive the originating pane, tab, and group:
       "connection": {"state": "local"} |
         {"state": "remote", "identity": null | {"user": "...", "host": "..."}},
       "agent": {"state": "none"} |
-        {"state": "attached", "session": {"kind": "...", "id": "..."},
+        {"state": "attached", "session": {"kind": "...", "sessionId": "..."},
          "activity": null | "working" | "waiting" | "idle"}
     }
 
@@ -423,7 +423,7 @@ For broader discovery:
 leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
 `{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
 semantics, ...}`). `semantics` has the same typed live-facet encoding as
-`pane info`, so agent lookup uses `.semantics.agent.session.id`. The `jq` above
+`pane info`, so agent lookup uses `.semantics.agent.session.sessionId`. The `jq` above
 recurses the tree to list every pane. Treat `selectedTabId` as display state,
 not as a targeting source.
 

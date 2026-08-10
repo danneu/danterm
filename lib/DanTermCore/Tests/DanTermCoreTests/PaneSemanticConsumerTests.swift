@@ -26,7 +26,7 @@ struct PaneSemanticConsumerTests {
         #expect(value["connection"]?["identity"]?["host"]?.asString == "caja")
         #expect(value["agent"]?["state"]?.asString == "attached")
         #expect(value["agent"]?["session"]?["kind"]?.asString == "codex")
-        #expect(value["agent"]?["session"]?["id"]?.asString == "thread-1")
+        #expect(value["agent"]?["session"]?["sessionId"]?.asString == "thread-1")
         #expect(value["agent"]?["activity"]?.asString == "waiting")
     }
 
@@ -108,7 +108,7 @@ struct PaneSemanticConsumerTests {
         #expect(firstPane?["semantics"]?["agent"]?["state"]?.asString == "none")
         #expect(secondPane?["semantics"]?["command"]?["state"]?.asString == "idle")
         #expect(secondPane?["semantics"]?["connection"]?["state"]?.asString == "local")
-        #expect(secondPane?["semantics"]?["agent"]?["session"]?["id"]?.asString == "thread-1")
+        #expect(secondPane?["semantics"]?["agent"]?["session"]?["sessionId"]?.asString == "thread-1")
     }
 
     @Test("an applied attachment is visible to the next synchronous inspection")
@@ -120,7 +120,7 @@ struct PaneSemanticConsumerTests {
         let inspected = paneSemanticInspectionValue(stream.snapshot)
 
         #expect(inspected["agent"]?["state"]?.asString == "attached")
-        #expect(inspected["agent"]?["session"]?["id"]?.asString == "session-1")
+        #expect(inspected["agent"]?["session"]?["sessionId"]?.asString == "session-1")
     }
 
     @Test("command chrome shows only a currently running semantic command")

@@ -30,18 +30,6 @@ enum AgentActivity: Equatable {
     case idle
 }
 
-extension AgentActivity {
-    /// Admits only activity states exposed by the bundled root-agent hook contract.
-    init?(rawIpcValue: String) {
-        switch rawIpcValue {
-        case "working": self = .working
-        case "waiting": self = .waiting
-        case "idle": self = .idle
-        default: return nil
-        }
-    }
-}
-
 /// Couples an attached session with its optional reported activity so activity
 /// cannot outlive or precede attachment in stored state.
 enum PaneSemanticAgent: Equatable {

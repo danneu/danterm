@@ -39,7 +39,7 @@ func paneSemanticInspectionValue(_ state: PaneSemanticState) -> JSONValue {
             "state": .string("attached"),
             "session": .object([
                 "kind": .string(session.kind),
-                "id": .string(session.sessionId),
+                "sessionId": .string(session.sessionId),
             ]),
             "activity": activity.map { .string($0.ipcValue) } ?? .null,
         ])
@@ -104,14 +104,4 @@ func paneCommandChromeText(
         return command
     }
     return formatToolbarLabel(title: title, cwd: cwd)
-}
-
-private extension AgentActivity {
-    var ipcValue: String {
-        switch self {
-        case .working: "working"
-        case .waiting: "waiting"
-        case .idle: "idle"
-        }
-    }
 }
