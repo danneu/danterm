@@ -43,9 +43,9 @@ func configFontSizeText(_ size: Double) -> String {
 func effectiveTheme(
   for pane: PaneModel,
   config: DanTermConfig = .default,
-  semantics: PaneSemanticState = PaneSemanticState()
+  lifecycles: PaneLifecycles = PaneLifecycles()
 ) -> String {
-  if case .remote = semantics.connection {
+  if case .remote = lifecycles.connection {
     return config.remoteTheme
   }
   return pane.theme ?? config.resolvedDefaultTheme

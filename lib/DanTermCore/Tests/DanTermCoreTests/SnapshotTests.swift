@@ -792,10 +792,10 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
 
-        let snapshot = graftSemanticRecovery(
+        let snapshot = graftLifecycleRecovery(
             onto: toSnapshot(model),
             recoveryByPaneId: [
-                paneId: PaneSemanticRecoverySnapshot(agentSession: session),
+                paneId: PaneLifecycleRecoverySnapshot(agentSession: session),
             ]
         )
         let pane = try #require(paneSnapshot(paneId.rawValue.uuidString, in: snapshot))

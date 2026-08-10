@@ -1,4 +1,4 @@
-// Tests the pane-semantic product policy that remains in update and the pure
+// Tests the pane-lifecycle product policy that remains in update and the pure
 // theme projection derived from pane-owned connection snapshots.
 import Foundation
 import Testing
@@ -12,15 +12,15 @@ struct UpdateRemoteTests {
         var config = DanTermConfig.default
         config.defaultTheme = "Default"
         config.remoteTheme = "Remote"
-        let local = PaneSemanticState()
-        let remote = PaneSemanticState(connection: .remote(identity: nil))
+        let local = PaneLifecycles()
+        let remote = PaneLifecycles(connection: .remote(identity: nil))
 
-        #expect(effectiveTheme(for: pane, config: config, semantics: local) == "Default")
-        #expect(effectiveTheme(for: pane, config: config, semantics: remote) == "Remote")
+        #expect(effectiveTheme(for: pane, config: config, lifecycles: local) == "Default")
+        #expect(effectiveTheme(for: pane, config: config, lifecycles: remote) == "Remote")
 
         pane.theme = "Pane"
-        #expect(effectiveTheme(for: pane, config: config, semantics: local) == "Pane")
-        #expect(effectiveTheme(for: pane, config: config, semantics: remote) == "Remote")
+        #expect(effectiveTheme(for: pane, config: config, lifecycles: local) == "Pane")
+        #expect(effectiveTheme(for: pane, config: config, lifecycles: remote) == "Remote")
     }
 
     @Test("remote theme changes project immediately without pane mutation")
@@ -28,7 +28,7 @@ struct UpdateRemoteTests {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
         let paneBefore = model.pane(paneId)
 
         var reloaded = model.config
@@ -36,7 +36,7 @@ struct UpdateRemoteTests {
         _ = update(&model, .configLoaded(reloaded, resolvedFontFamily: nil))
         #expect(desiredPaneConfig(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
         )[paneId]?.theme == "Grape")
         #expect(model.pane(paneId) == paneBefore)
 
@@ -45,7 +45,7 @@ struct UpdateRemoteTests {
         _ = update(&model, .prefSave)
         #expect(desiredPaneConfig(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
         )[paneId]?.theme == "Ocean")
         #expect(model.pane(paneId) == paneBefore)
     }
@@ -55,35 +55,35 @@ struct UpdateRemoteTests {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let remote = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        let remote = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
 
         _ = update(&model, .setPaneTheme(paneId: paneId, themeName: "Solarized"))
 
         #expect(desiredPaneConfig(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: remote)
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: remote)
         )[paneId]?.theme == model.config.remoteTheme)
-        #expect(desiredPaneConfig(in: model, livePaneState: LivePaneStateView())[paneId]?.theme == "Solarized")
+        #expect(desiredPaneConfig(in: model, livePaneState: PaneLifecyclesView())[paneId]?.theme == "Solarized")
     }
 
-    @Test("semantic recovery projection changes only for persisted transitions")
-    func semanticRecoveryProjectionChangesOnlyForPersistedTransitions() throws {
+    @Test("lifecycle recovery projection changes only for persisted transitions")
+    func lifecycleRecoveryProjectionChangesOnlyForPersistedTransitions() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneSemanticStream()
-        var recovery = PaneSemanticRecoveryState()
+        var stream = PaneLifecycleStream()
+        var recovery = PaneLifecycleRecoveryState()
 
-        func changesProjection(_ transition: PaneSemanticTransition) -> Bool {
+        func changesProjection(_ transition: PaneLifecycleTransition) -> Bool {
             let before = LightCheckpointProjection(
                 snapshot: toSnapshot(model),
-                semanticRecoveryByPaneId: [paneId: recovery.snapshot]
+                lifecycleRecoveryByPaneId: [paneId: recovery.snapshot]
             )
             recovery.apply(transition)
             let after = LightCheckpointProjection(
                 snapshot: toSnapshot(model),
-                semanticRecoveryByPaneId: [paneId: recovery.snapshot]
+                lifecycleRecoveryByPaneId: [paneId: recovery.snapshot]
             )
             return before != after
         }

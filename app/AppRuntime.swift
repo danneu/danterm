@@ -37,8 +37,8 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.cwdChanged:\(cwd)"
     case .bell:
         description = "session.bell"
-    case .paneSemanticsChanged(let transition):
-        description = "session.paneSemanticsChanged:\(String(describing: transition.event))"
+    case .paneLifecycleChanged(let transition):
+        description = "session.paneLifecycleChanged:\(String(describing: transition.event))"
     case .desktopNotification(let title, let body):
         description = "session.desktopNotification:\(title):\(body)"
     case .progress(let progress):
@@ -138,8 +138,8 @@ class AppRuntime {
     let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
     /// Samples pane-owned state once for each pure update or projection pass.
-    var livePaneStateView: LivePaneStateView {
-        LivePaneStateView(semanticsByPaneId: sessions.mapValues(\.semanticSnapshot))
+    var livePaneStateView: PaneLifecyclesView {
+        PaneLifecyclesView(lifecyclesByPaneId: sessions.mapValues(\.lifecycleSnapshot))
     }
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
@@ -175,7 +175,7 @@ class AppRuntime {
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     // Session persistence uses two tiers of checkpoints:
-    //   Light  -- model plus semantic recovery (no scrollback), written in a fixed
+    //   Light  -- model plus lifecycle recovery (no scrollback), written in a fixed
     //            2s coalescing window after the persisted projection changes.
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
@@ -238,7 +238,7 @@ class AppRuntime {
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
         self.lightCheckpointBaseline = LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
@@ -940,7 +940,7 @@ class AppRuntime {
             let capture = CheckpointCapture(
                 snapshot: snapshot,
                 scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
-                semanticRecoveryByPaneId: captureSemanticRecovery()
+                lifecycleRecoveryByPaneId: captureLifecycleRecovery()
             )
             let encode = capture.encoder(prettyPrinted: true)
             let data: Data
@@ -980,7 +980,7 @@ class AppRuntime {
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
-        case .applyPaneSemanticIpc(let reqId, let paneId, let event):
+        case .applyPaneLifecycleIpc(let reqId, let paneId, let event):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
                 connection.writeError(
@@ -990,7 +990,7 @@ class AppRuntime {
                 )
                 break
             }
-            session.applySemanticEvent(event)
+            session.applyLifecycleEvent(event)
             connection.writeSuccess(reqId: reqId, result: .object(["ok": .bool(true)]))
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
@@ -1506,15 +1506,15 @@ class AppRuntime {
     }
 
     /// Capture the pane-owned values needed only for the next process launch.
-    private func captureSemanticRecovery() -> [PaneId: PaneSemanticRecoverySnapshot] {
-        sessions.mapValues(\.semanticRecoverySnapshot)
+    private func captureLifecycleRecovery() -> [PaneId: PaneLifecycleRecoverySnapshot] {
+        sessions.mapValues(\.lifecycleRecoverySnapshot)
     }
 
     /// Capture the exact value shared by light scheduling and light encoding.
     private func currentLightCheckpointProjection() -> LightCheckpointProjection {
         LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: captureSemanticRecovery()
+            lifecycleRecoveryByPaneId: captureLifecycleRecovery()
         )
     }
 
@@ -1526,7 +1526,7 @@ class AppRuntime {
         return CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: captureScrollbackReads(keeping: retention),
-            semanticRecoveryByPaneId: captureSemanticRecovery(),
+            lifecycleRecoveryByPaneId: captureLifecycleRecovery(),
             retention: retention
         )
     }

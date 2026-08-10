@@ -10,7 +10,7 @@
 // testable without Cocoa or the terminal engine. Cross-layer model helpers these call back into
 // (queries, alert counts, container shapes) stay in ModelOperations.swift; this earns
 // its own file as the named pure peer of Reconcile.swift. Pane-owned live
-// semantics arrive as explicit immutable inputs; they never enter AppModel.
+// lifecycles arrive as explicit immutable inputs; they never enter AppModel.
 import Foundation
 
 // MARK: - Theme Browser
@@ -264,7 +264,7 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
 }
 
 /// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
-/// toolbar. Live semantic fields come only from the pane owner's immutable
+/// toolbar. Live lifecycle fields come only from the pane owner's immutable
 /// snapshot. Equatable lets the diff skip panes whose inputs are unchanged.
 struct PaneToolbarRender: Equatable {
   let title: String
@@ -285,7 +285,7 @@ struct PaneToolbarRender: Equatable {
 /// computed by reconcile.
 func desiredPaneToolbar(
   in model: AppModel,
-  livePaneState: LivePaneStateView
+  livePaneState: PaneLifecyclesView
 ) -> [PaneId: PaneToolbarRender] {
   desiredPaneToolbar(
     in: model,
@@ -301,25 +301,25 @@ func desiredPaneToolbar(
 func desiredPaneToolbar(
   in model: AppModel,
   tally: UnreadAlertTally,
-  livePaneState: LivePaneStateView
+  livePaneState: PaneLifecyclesView
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
-    let semantics = livePaneState.semantics(for: pane.id)
+    let lifecycles = livePaneState.lifecycles(for: pane.id)
     let remoteSession: RemoteSession?
-    if case .remote(let identity) = semantics.connection {
+    if case .remote(let identity) = lifecycles.connection {
       remoteSession = identity
     } else {
       remoteSession = nil
     }
     let agentSession: AgentSession?
-    if case .attached(let session, _) = semantics.agent {
+    if case .attached(let session, _) = lifecycles.agent {
       agentSession = session
     } else {
       agentSession = nil
     }
     let command: String?
-    if case .running(let text) = semantics.command {
+    if case .running(let text) = lifecycles.command {
       command = text
     } else {
       command = nil
@@ -329,7 +329,7 @@ func desiredPaneToolbar(
       cwd: pane.cwd,
       command: command,
       progress: pane.progress,
-      isRemote: remoteSession != nil || semantics.connection != .local,
+      isRemote: remoteSession != nil || lifecycles.connection != .local,
       remoteSession: remoteSession,
       agentSession: agentSession,
       unreadAlertCount: tally.byPane[pane.id] ?? 0,
@@ -390,7 +390,7 @@ struct PaneConfigKey: Equatable {
 /// family, and copy-on-select onto every live pane.
 func desiredPaneConfig(
   in model: AppModel,
-  livePaneState: LivePaneStateView
+  livePaneState: PaneLifecyclesView
 ) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
@@ -398,7 +398,7 @@ func desiredPaneConfig(
       theme: effectiveTheme(
         for: pane,
         config: model.config,
-        semantics: livePaneState.semantics(for: pane.id)
+        lifecycles: livePaneState.lifecycles(for: pane.id)
       ),
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,

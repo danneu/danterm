@@ -17,12 +17,12 @@ struct AlertPresentationTests {
         paneId: PaneId,
         title: String,
         body: String,
-        semantics: PaneSemanticState = PaneSemanticState()
+        lifecycles: PaneLifecycles = PaneLifecycles()
     ) -> (title: String, subtitle: String?, body: String)? {
         let commands = update(
             &model,
             .desktopNotification(paneId: paneId, title: title, body: body),
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
         )
         for command in commands {
             if case .sendNotification(_, _, let title, let subtitle, let body) = command {
@@ -46,25 +46,25 @@ struct AlertPresentationTests {
     }
 
     @Test("live agent and command identity precede sender and pane titles")
-    func liveSemanticTitleTiersPrecedeTerminalTitles() throws {
+    func liveLifecycleTitleTiersPrecedeTerminalTitles() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionTitle(paneId: paneId, title: "pane-title"))
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        var commandState = PaneSemanticState(command: .running("swift test"))
+        var commandState = PaneLifecycles(command: .running("swift test"))
 
         let command = alertPresentation(
             senderTitle: "sender",
             paneId: paneId,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: commandState]),
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: commandState]),
             in: model
         )
         commandState.agent = .attached(session: agent, activity: .waiting)
         let attached = alertPresentation(
             senderTitle: "sender",
             paneId: paneId,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: commandState]),
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: commandState]),
             in: model
         )
 
@@ -72,20 +72,20 @@ struct AlertPresentationTests {
         #expect(attached.title == "Codex thread-1")
     }
 
-    @Test("desktop alert storage and delivery share the live semantic title")
-    func desktopAlertUsesSemanticTitleEndToEnd() {
+    @Test("desktop alert storage and delivery share the live lifecycle title")
+    func desktopAlertUsesLifecycleTitleEndToEnd() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         createTab(&model)
-        let semantics = PaneSemanticState(command: .running("swift test"))
+        let lifecycles = PaneLifecycles(command: .running("swift test"))
 
         let sent = notification(
             &model,
             paneId: paneId,
             title: "sender",
             body: "Done",
-            semantics: semantics
+            lifecycles: lifecycles
         )
 
         #expect(sent?.title == "swift test")

@@ -5,11 +5,11 @@ import TerminalCore
 
 @testable import DanTerm
 
-struct PaneSemanticRoutingTests {
+struct PaneLifecycleRoutingTests {
     @Test("terminal semantic events lower only declared live pane inputs")
     func terminalEventsLowerToPaneInputs() {
         let remote = RemoteSession(user: "dan", host: "caja")
-        let cases: [(TerminalSemanticEvent, PaneSemanticEvent?)] = [
+        let cases: [(TerminalSemanticEvent, PaneLifecycleEvent?)] = [
             (.integrationReady, .integrationReady),
             (.commandStarted("echo ok"), .commandStarted("echo ok")),
             (.commandEnded(exitStatus: 7), .commandEnded(exitStatus: 7)),
@@ -24,7 +24,7 @@ struct PaneSemanticRoutingTests {
         ]
 
         for (event, expected) in cases {
-            #expect(paneSemanticEvent(for: event) == expected)
+            #expect(paneLifecycleEvent(for: event) == expected)
         }
     }
 
@@ -36,10 +36,10 @@ struct PaneSemanticRoutingTests {
         let half = String(repeating: "u", count: limit / 2)
         let otherHalf = String(repeating: "h", count: limit - half.utf8.count)
 
-        #expect(paneSemanticEvent(for: .commandStarted(atLimit)) == .commandStarted(atLimit))
-        #expect(paneSemanticEvent(for: .commandStarted(overLimit)) == nil)
-        #expect(paneSemanticEvent(for: .remoteHost(user: half, host: otherHalf)) ==
+        #expect(paneLifecycleEvent(for: .commandStarted(atLimit)) == .commandStarted(atLimit))
+        #expect(paneLifecycleEvent(for: .commandStarted(overLimit)) == nil)
+        #expect(paneLifecycleEvent(for: .remoteHost(user: half, host: otherHalf)) ==
             .remoteIdentityReported(RemoteSession(user: half, host: otherHalf)))
-        #expect(paneSemanticEvent(for: .remoteHost(user: half + "x", host: otherHalf)) == nil)
+        #expect(paneLifecycleEvent(for: .remoteHost(user: half + "x", host: otherHalf)) == nil)
     }
 }

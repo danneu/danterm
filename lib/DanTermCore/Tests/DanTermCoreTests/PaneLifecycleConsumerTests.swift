@@ -1,22 +1,22 @@
-// Behavioral coverage for read-only consumers of the pane-owned live semantic snapshot.
+// Behavioral coverage for read-only consumers of the pane-owned live lifecycle snapshot.
 import Foundation
 import Testing
 import DanTermProtocol
 
 @testable import DanTermCore
 
-struct PaneSemanticConsumerTests {
-    @Test("pane inspection exposes every semantic facet as typed latest-value data")
-    func paneInspectionExposesTypedFacets() throws {
+struct PaneLifecycleConsumerTests {
+    @Test("pane inspection exposes every lifecycle as typed latest-value data")
+    func paneInspectionExposesTypedLifecycles() throws {
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let state = PaneSemanticState(
+        let state = PaneLifecycles(
             integration: .ready,
             command: .running("swift test"),
             connection: .remote(identity: RemoteSession(user: "dan", host: "caja")),
             agent: .attached(session: agent, activity: .waiting)
         )
 
-        let value = paneSemanticInspectionValue(state)
+        let value = paneLifecyclesInspectionValue(state)
 
         #expect(value["integration"]?["state"]?.asString == "ready")
         #expect(value["command"]?["state"]?.asString == "running")
@@ -30,9 +30,9 @@ struct PaneSemanticConsumerTests {
         #expect(value["agent"]?["activity"]?.asString == "waiting")
     }
 
-    @Test("neutral pane inspection distinguishes absent, idle, local, and unattached facets")
+    @Test("neutral pane inspection distinguishes absent, idle, local, and unattached lifecycles")
     func neutralPaneInspectionUsesExplicitStates() {
-        let value = paneSemanticInspectionValue(PaneSemanticState())
+        let value = paneLifecyclesInspectionValue(PaneLifecycles())
 
         #expect(value["integration"]?["state"]?.asString == "neverReported")
         #expect(value["command"]?["state"]?.asString == "idle")
@@ -41,14 +41,14 @@ struct PaneSemanticConsumerTests {
     }
 
     @Test("inspection preserves remote without identity and attached without activity")
-    func paneInspectionPreservesOptionalFacetPayloads() throws {
+    func paneInspectionPreservesOptionalLifecyclePayloads() throws {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let state = PaneSemanticState(
+        let state = PaneLifecycles(
             connection: .remote(identity: nil),
             agent: .attached(session: agent, activity: nil)
         )
 
-        let value = paneSemanticInspectionValue(state)
+        let value = paneLifecyclesInspectionValue(state)
 
         #expect(value["connection"]?["state"]?.asString == "remote")
         #expect(value["connection"]?["identity"] == .null)
@@ -59,21 +59,21 @@ struct PaneSemanticConsumerTests {
     @Test("an applied attachment is visible to the next synchronous inspection")
     func attachmentPrecedesInspection() throws {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneSemanticStream()
+        var stream = PaneLifecycleStream()
 
         _ = stream.apply(.agentAttached(agent))
-        let inspected = paneSemanticInspectionValue(stream.snapshot)
+        let inspected = paneLifecyclesInspectionValue(stream.snapshot)
 
         #expect(inspected["agent"]?["state"]?.asString == "attached")
         #expect(inspected["agent"]?["session"]?["sessionId"]?.asString == "session-1")
     }
 
-    @Test("command chrome shows only a currently running semantic command")
+    @Test("command chrome shows only a currently running command lifecycle")
     func commandChromeDistinguishesRunningFromIdle() {
-        var running = PaneSemanticState()
+        var running = PaneLifecycles()
         running.command = .running("swift test")
 
-        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", semantics: running) == "swift test")
-        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", semantics: PaneSemanticState()) == "zsh \u{2013} /work")
+        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", lifecycles: running) == "swift test")
+        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", lifecycles: PaneLifecycles()) == "zsh \u{2013} /work")
     }
 }

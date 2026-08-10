@@ -6,7 +6,7 @@ import DanTermProtocol
 func update(
     _ model: inout AppModel,
     _ msg: Msg,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     env: CoreEnv = .live
 ) -> [Command] {
     // Single chokepoint: every code path that mutates tab membership or
@@ -511,9 +511,9 @@ func update(
 
         return []
 
-    // MARK: - Pane Semantics
+    // MARK: - Pane Lifecycles
 
-    case .paneSemanticsChanged(let paneId, let event):
+    case .paneLifecycleChanged(let paneId, let event):
         guard model.pane(paneId) != nil else { return [] }
         switch event {
         case .commandStarted, .agentAttached, .agentDetached:
@@ -1422,7 +1422,7 @@ private func handleIpcRequest(
     method: String,
     params: JSONValue,
     context: IpcRequestContext,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     env: CoreEnv
 ) -> [Command] {
     do {
@@ -1452,7 +1452,7 @@ private func dispatchIpc(
     method: String,
     params: JSONValue,
     context: IpcRequestContext,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     env: CoreEnv
 ) throws -> [Command] {
     switch method {
@@ -1474,7 +1474,7 @@ private func dispatchIpc(
     case Methods.agentAttach:
         let session = try agentSession(from: params)
         let paneId = try resolvePane(params: params, context: context, in: model)
-        return [.applyPaneSemanticIpc(reqId: reqId, paneId: paneId, event: .agentAttached(session))]
+        return [.applyPaneLifecycleIpc(reqId: reqId, paneId: paneId, event: .agentAttached(session))]
 
     case Methods.agentActivity:
         let session = try agentSession(from: params)
@@ -1485,7 +1485,7 @@ private func dispatchIpc(
             throw IpcParamsError("invalid agent activity")
         }
         let paneId = try resolvePane(params: params, context: context, in: model)
-        return [.applyPaneSemanticIpc(
+        return [.applyPaneLifecycleIpc(
             reqId: reqId,
             paneId: paneId,
             event: .agentActivityChanged(session: session, activity: activity)
@@ -1494,7 +1494,7 @@ private func dispatchIpc(
     case Methods.agentDetach:
         let session = try agentSession(from: params)
         let paneId = try resolvePane(params: params, context: context, in: model)
-        return [.applyPaneSemanticIpc(reqId: reqId, paneId: paneId, event: .agentDetached(session))]
+        return [.applyPaneLifecycleIpc(reqId: reqId, paneId: paneId, event: .agentDetached(session))]
 
     case Methods.tabRename:
         guard case .object(let object) = params else {
@@ -2288,7 +2288,7 @@ private func jumpModeCancel(_ model: inout AppModel) -> [Command] {
 private func navigateToPane(
     _ paneId: PaneId,
     in model: inout AppModel,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     env: CoreEnv
 ) -> [Command] {
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
@@ -2430,7 +2430,7 @@ private func desktopAlertCommands(
     paneId: PaneId,
     senderTitle: String,
     body: String,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     env: CoreEnv
 ) -> [Command] {
     guard senderTitle.fitsTerminalMetadataValueLimit,

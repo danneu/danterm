@@ -135,10 +135,10 @@ func paneWrapperViewTests() {
         _ = copy.target?.perform(copy.action, with: copy)
         try uiExpect(
             fx.wrapper.menuPasteboard.string(forType: .string) == "snapshot-session",
-            "copied id should come from the terminal semantic snapshot"
+            "copied id should come from the terminal lifecycle snapshot"
         )
 
-        _ = fx.terminal.applySemanticEvent(.agentDetached(agent))
+        _ = fx.terminal.applyLifecycleEvent(.agentDetached(agent))
         let detachedMenu = fx.wrapper.makePaneMenu(includeClipboard: true)
         try uiExpect(
             detachedMenu.items.allSatisfy { $0.title != "Copy Agent Session ID" },
@@ -264,7 +264,7 @@ private func makePaneMenuFixture(
     let runtime = AppRuntime(model: model)
     let terminal = TerminalView()
     if let agentSession {
-        _ = terminal.applySemanticEvent(.agentAttached(agentSession))
+        _ = terminal.applyLifecycleEvent(.agentAttached(agentSession))
     }
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,

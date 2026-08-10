@@ -7,7 +7,7 @@ enum TerminalSessionEvent: Equatable {
     case titleChanged(String)
     case cwdChanged(String?)
     case bell
-    case paneSemanticsChanged(PaneSemanticTransition)
+    case paneLifecycleChanged(PaneLifecycleTransition)
     case desktopNotification(title: String, body: String)
     case progress(ProgressState?)
     case searchStarted(String)
@@ -29,9 +29,9 @@ func terminalMessages(
         return [.sessionCwd(paneId: paneId, cwd: cwd)]
     case .bell:
         return [.sessionBell(paneId: paneId)]
-    case .paneSemanticsChanged(let transition):
+    case .paneLifecycleChanged(let transition):
         guard transition.didChange else { return [] }
-        return [.paneSemanticsChanged(paneId: paneId, event: transition.event)]
+        return [.paneLifecycleChanged(paneId: paneId, event: transition.event)]
     case .desktopNotification(let title, let body):
         return [.desktopNotification(paneId: paneId, title: title, body: body)]
     case .progress(let state):

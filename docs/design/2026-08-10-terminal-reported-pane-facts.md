@@ -168,7 +168,7 @@ are just `command`, `connection`, `agent`.
 
 ## References
 
-- `lib/DanTermCore/Sources/DanTermCore/LivePaneSemanticReducer.swift#reducePaneSemantics`
+- `lib/DanTermCore/Sources/DanTermCore/PaneLifecycleReducer.swift#reducePaneLifecycles`
   -- the current reducer for pane-owned lifecycle facts.
 - `lib/DanTermCore/Sources/DanTermCore/Model.swift#PaneModel` -- the model that
   owns pane-scoped reported values and user-owned content.

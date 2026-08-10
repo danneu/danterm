@@ -101,7 +101,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 }
 
 /// Build the structural PaneSnapshot embedded in a leaf. Pane-owned scrollback
-/// and semantic recovery values are grafted separately from live-session reads.
+/// and lifecycle recovery values are grafted separately from live-session reads.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
@@ -167,9 +167,9 @@ func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneI
 }
 
 /// Embed pane-owned recovery projections into matching snapshot leaves.
-func graftSemanticRecovery(
+func graftLifecycleRecovery(
   onto snapshot: AppModelSnapshot,
-  recoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
+  recoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
 ) -> AppModelSnapshot {
   AppModelSnapshot(
     groups: snapshot.groups.map { group in
@@ -182,7 +182,7 @@ func graftSemanticRecovery(
             id: tab.id,
             customTitle: tab.customTitle,
             focusedPaneId: tab.focusedPaneId,
-            rootNode: graftSemanticRecoveryIntoNode(tab.rootNode, recoveryByPaneId),
+            rootNode: graftLifecycleRecoveryIntoNode(tab.rootNode, recoveryByPaneId),
             color: tab.color,
             todos: tab.todos
           )
@@ -193,9 +193,9 @@ func graftSemanticRecovery(
   )
 }
 
-private func graftSemanticRecoveryIntoNode(
+private func graftLifecycleRecoveryIntoNode(
   _ node: SplitNodeSnapshot,
-  _ recoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
+  _ recoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
 ) -> SplitNodeSnapshot {
   switch node {
   case .leaf(var pane):
@@ -213,8 +213,8 @@ private func graftSemanticRecoveryIntoNode(
     return .split(
       id: id,
       direction: direction,
-      first: graftSemanticRecoveryIntoNode(first, recoveryByPaneId),
-      second: graftSemanticRecoveryIntoNode(second, recoveryByPaneId),
+      first: graftLifecycleRecoveryIntoNode(first, recoveryByPaneId),
+      second: graftLifecycleRecoveryIntoNode(second, recoveryByPaneId),
       ratio: ratio
     )
   }

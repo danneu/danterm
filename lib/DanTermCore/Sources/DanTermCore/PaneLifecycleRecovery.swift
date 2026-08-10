@@ -1,7 +1,7 @@
-// Pure recovery projection for pane-owned semantics that intentionally outlives live facets.
+// Pure recovery projection for pane-owned state that intentionally outlives live lifecycles.
 
-/// Carries the two semantic values persisted for the next process launch.
-struct PaneSemanticRecoverySnapshot: Equatable {
+/// Carries the two lifecycle-derived values persisted for the next process launch.
+struct PaneLifecycleRecoverySnapshot: Equatable {
     var command: String?
     var agentSession: AgentSession?
 
@@ -11,12 +11,12 @@ struct PaneSemanticRecoverySnapshot: Equatable {
     }
 }
 
-/// Retains recovery-only semantic state beside a pane's live semantic stream.
-struct PaneSemanticRecoveryState {
-    private(set) var snapshot = PaneSemanticRecoverySnapshot()
+/// Retains recovery-only state beside a pane's live lifecycle stream.
+struct PaneLifecycleRecoveryState {
+    private(set) var snapshot = PaneLifecycleRecoverySnapshot()
 
-    /// Applies the semantic transition whose recovery projection may outlive its live facet.
-    mutating func apply(_ transition: PaneSemanticTransition) {
+    /// Applies the transition whose recovery projection may outlive its live lifecycle.
+    mutating func apply(_ transition: PaneLifecycleTransition) {
         switch transition.event {
         case .commandStarted(let command):
             snapshot.command = command

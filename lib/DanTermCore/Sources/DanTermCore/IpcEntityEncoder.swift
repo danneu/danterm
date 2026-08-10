@@ -5,7 +5,7 @@ import DanTermProtocol
 /// Builds wire documents from live model entities so IPC reply shape cannot
 /// drift with the recovery format or require runtime JSON patching.
 struct IpcEntityEncoder {
-    let livePaneState: LivePaneStateView
+    let livePaneState: PaneLifecyclesView
     let home: String
 
     func list(_ model: AppModel) -> JSONValue {
@@ -28,14 +28,14 @@ struct IpcEntityEncoder {
     }
 
     func tab(_ tab: TabModel) -> JSONValue {
-        self.tab(tab, includeSemantics: true)
+        self.tab(tab, includeLive: true)
     }
 
-    private func tab(_ tab: TabModel, includeSemantics: Bool) -> JSONValue {
+    private func tab(_ tab: TabModel, includeLive: Bool) -> JSONValue {
         var object: [String: JSONValue] = [
             "id": .string(tab.id.rawValue.uuidString),
             "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
-            "rootNode": splitNode(tab.rootNode, includeSemantics: includeSemantics),
+            "rootNode": splitNode(tab.rootNode, includeLive: includeLive),
         ]
         if let customTitle = tab.customTitle {
             object["customTitle"] = .string(customTitle)
@@ -49,12 +49,12 @@ struct IpcEntityEncoder {
         return .object(object)
     }
 
-    private func pane(_ pane: PaneModel, includeSemantics: Bool) -> JSONValue {
+    private func pane(_ pane: PaneModel, includeLive: Bool) -> JSONValue {
         var object = paneFields(
             pane,
             cwd: pane.cwd.map { abbreviateHome($0, home: home) },
             includeNullCwd: false,
-            includeSemantics: includeSemantics
+            includeLive: includeLive
         )
         if let theme = pane.theme {
             object["theme"] = .string(theme)
@@ -74,7 +74,7 @@ struct IpcEntityEncoder {
                 pane,
                 cwd: pane.cwd,
                 includeNullCwd: true,
-                includeSemantics: true
+                includeLive: true
             )),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
@@ -91,7 +91,7 @@ struct IpcEntityEncoder {
 
     func tabNew(tab: TabModel?, group: GroupModel?) -> JSONValue {
         var object: [String: JSONValue] = [
-            "tab": tab.map { self.tab($0, includeSemantics: false) } ?? .null,
+            "tab": tab.map { self.tab($0, includeLive: false) } ?? .null,
             "panes": .array(tab.map { tab in
                 allPaneIds(tab.rootNode)
                     .map { .object(["id": .string($0.rawValue.uuidString)]) }
@@ -123,20 +123,20 @@ struct IpcEntityEncoder {
         ])
     }
 
-    private func splitNode(_ node: SplitNodeModel, includeSemantics: Bool) -> JSONValue {
+    private func splitNode(_ node: SplitNodeModel, includeLive: Bool) -> JSONValue {
         switch node {
         case .leaf(let pane):
             return .object([
                 "type": .string("leaf"),
-                "pane": self.pane(pane, includeSemantics: includeSemantics),
+                "pane": self.pane(pane, includeLive: includeLive),
             ])
         case .split(let id, let direction, let first, let second, let ratio):
             return .object([
                 "type": .string("split"),
                 "id": .string(id.rawValue.uuidString),
                 "direction": .string(direction == .horizontal ? "horizontal" : "vertical"),
-                "first": splitNode(first, includeSemantics: includeSemantics),
-                "second": splitNode(second, includeSemantics: includeSemantics),
+                "first": splitNode(first, includeLive: includeLive),
+                "second": splitNode(second, includeLive: includeLive),
                 "ratio": .number(Double(ratio)),
             ])
         }
@@ -146,14 +146,14 @@ struct IpcEntityEncoder {
         _ pane: PaneModel,
         cwd: String?,
         includeNullCwd: Bool,
-        includeSemantics: Bool
+        includeLive: Bool
     ) -> [String: JSONValue] {
         var object: [String: JSONValue] = [
             "id": .string(pane.id.rawValue.uuidString),
             "title": .string(pane.title),
         ]
-        if includeSemantics {
-            object["semantics"] = paneSemanticInspectionValue(livePaneState.semantics(for: pane.id))
+        if includeLive {
+            object["live"] = paneLifecyclesInspectionValue(livePaneState.lifecycles(for: pane.id))
         }
         if let cwd {
             object["cwd"] = .string(cwd)

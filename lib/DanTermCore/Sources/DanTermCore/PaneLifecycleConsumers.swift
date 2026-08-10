@@ -1,10 +1,10 @@
-// Pure read-only projections from one pane's live semantic snapshot.
+// Pure read-only projections from one pane's live lifecycle snapshot.
 import Foundation
 import DanTermProtocol
 
-/// Encodes every live facet with an explicit discriminator so pane inspection
-/// never relies on missing keys to distinguish semantic states.
-func paneSemanticInspectionValue(_ state: PaneSemanticState) -> JSONValue {
+/// Encodes every lifecycle with an explicit discriminator so pane inspection
+/// never relies on missing keys to distinguish current states.
+func paneLifecyclesInspectionValue(_ state: PaneLifecycles) -> JSONValue {
     let integration: JSONValue = .object([
         "state": .string(state.integration == .ready ? "ready" : "neverReported"),
     ])
@@ -54,13 +54,13 @@ func paneSemanticInspectionValue(_ state: PaneSemanticState) -> JSONValue {
 }
 
 /// Shows a complete running command while it is live, then returns to the
-/// ordinary title and cwd label as soon as the command facet becomes idle.
+/// ordinary title and cwd label as soon as the command lifecycle becomes idle.
 func paneCommandChromeText(
     title: String,
     cwd: String?,
-    semantics: PaneSemanticState
+    lifecycles: PaneLifecycles
 ) -> String {
-    if case .running(let command) = semantics.command {
+    if case .running(let command) = lifecycles.command {
         return command
     }
     return formatToolbarLabel(title: title, cwd: cwd)

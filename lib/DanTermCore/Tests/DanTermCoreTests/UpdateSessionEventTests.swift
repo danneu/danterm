@@ -187,13 +187,13 @@ import Testing
                 title: "build",
                 body: "done"
             ),
-            semanticMessage(paneId: paneId, event: .commandStarted("make test")),
-            semanticMessage(
+            lifecycleMessage(paneId: paneId, event: .commandStarted("make test")),
+            lifecycleMessage(
                 paneId: paneId,
                 event: .commandEnded(exitStatus: 0),
                 after: [.commandStarted("make test")]
             ),
-            semanticMessage(
+            lifecycleMessage(
                 paneId: paneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
@@ -220,18 +220,18 @@ import Testing
         }
 
         let inlineMessages: [Msg] = [
-            semanticMessage(paneId: paneId, event: .integrationReady),
-            semanticMessage(paneId: paneId, event: .remoteDetected),
-            semanticMessage(paneId: paneId, event: .remoteIdentityReported(
+            lifecycleMessage(paneId: paneId, event: .integrationReady),
+            lifecycleMessage(paneId: paneId, event: .remoteDetected),
+            lifecycleMessage(paneId: paneId, event: .remoteIdentityReported(
                 RemoteSession(user: "dan", host: "caja")
             )),
-            semanticMessage(
+            lifecycleMessage(
                 paneId: paneId,
                 event: .connectionEnded,
                 after: [.remoteDetected]
             ),
-            semanticMessage(paneId: paneId, event: .agentAttached(agent)),
-            semanticMessage(
+            lifecycleMessage(paneId: paneId, event: .agentAttached(agent)),
+            lifecycleMessage(
                 paneId: paneId,
                 event: .agentDetached(agent),
                 after: [.agentAttached(agent)]
@@ -282,8 +282,8 @@ import Testing
                 title: "build",
                 body: "done"
             ), unfocusedModel),
-            (semanticMessage(paneId: unfocusedPane, event: .commandStarted("make")), unfocusedModel),
-            (semanticMessage(
+            (lifecycleMessage(paneId: unfocusedPane, event: .commandStarted("make")), unfocusedModel),
+            (lifecycleMessage(
                 paneId: unfocusedPane,
                 event: .commandEnded(exitStatus: 0),
                 after: [.commandStarted("make")]
@@ -484,16 +484,16 @@ import Testing
         createTab(&model)
         let focusedPaneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let semantics = PaneSemanticState(
+        let lifecycles = PaneLifecycles(
             agent: .attached(session: agent, activity: .waiting)
         )
-        let livePaneState = LivePaneStateView(semanticsByPaneId: [
-            backgroundPaneId: semantics,
-            focusedPaneId: semantics,
+        let livePaneState = PaneLifecyclesView(lifecyclesByPaneId: [
+            backgroundPaneId: lifecycles,
+            focusedPaneId: lifecycles,
         ])
         let backgroundCommands = update(
             &model,
-            semanticMessage(
+            lifecycleMessage(
                 paneId: backgroundPaneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
@@ -502,7 +502,7 @@ import Testing
         )
         let focusedCommands = update(
             &model,
-            semanticMessage(
+            lifecycleMessage(
                 paneId: focusedPaneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
@@ -539,20 +539,20 @@ import Testing
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
         for transition in [
-            semanticTransition(event: .integrationReady),
-            semanticTransition(
+            lifecycleTransition(event: .integrationReady),
+            lifecycleTransition(
                 event: .agentActivityChanged(session: agent, activity: .working),
                 after: [.agentAttached(agent)]
             ),
-            semanticTransition(
+            lifecycleTransition(
                 event: .agentActivityChanged(session: agent, activity: .idle),
                 after: [.agentAttached(agent)]
             ),
         ] {
             #expect(update(
                 &model,
-                .paneSemanticsChanged(paneId: paneId, event: transition.event),
-                livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: transition.current])
+                .paneLifecycleChanged(paneId: paneId, event: transition.event),
+                livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: transition.current])
             ).isEmpty)
         }
         #expect(model.alerts.isEmpty)
@@ -565,17 +565,17 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let semantics = PaneSemanticState(
+        let lifecycles = PaneLifecycles(
             agent: .attached(session: agent, activity: .waiting)
         )
         #expect(update(
             &model,
-            semanticMessage(
+            lifecycleMessage(
                 paneId: paneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
             ),
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
         ).isEmpty)
         #expect(model.alerts.isEmpty)
     }
@@ -772,22 +772,22 @@ import Testing
     }
 }
 
-private func semanticMessage(
+private func lifecycleMessage(
     paneId: PaneId,
-    event: PaneSemanticEvent,
-    after preceding: [PaneSemanticEvent] = []
+    event: PaneLifecycleEvent,
+    after preceding: [PaneLifecycleEvent] = []
 ) -> Msg {
-    .paneSemanticsChanged(
+    .paneLifecycleChanged(
         paneId: paneId,
-        event: semanticTransition(event: event, after: preceding).event
+        event: lifecycleTransition(event: event, after: preceding).event
     )
 }
 
-private func semanticTransition(
-    event: PaneSemanticEvent,
-    after preceding: [PaneSemanticEvent] = []
-) -> PaneSemanticTransition {
-    var stream = PaneSemanticStream()
+private func lifecycleTransition(
+    event: PaneLifecycleEvent,
+    after preceding: [PaneLifecycleEvent] = []
+) -> PaneLifecycleTransition {
+    var stream = PaneLifecycleStream()
     for event in preceding {
         _ = stream.apply(event)
     }

@@ -42,7 +42,7 @@ not part of this plan and must not be swept into these commits.
 
 - [x] 1. Promote the ADR to `docs/design/`
 - [x] 2. Qualify the PTY process-lifecycle module
-- [ ] 3. Rename the reported-fact stream to lifecycle vocabulary (CLI key `semantics` -> `live`)
+- [x] 3. Rename the reported-fact stream to lifecycle vocabulary (CLI key `semantics` -> `live`)
 - [ ] 4. Group the pane's reported values into `PaneReported`
 
 ---
@@ -292,3 +292,7 @@ are the evidence that the grouping is internal.
 - The executable-vocabulary sweep uses tracked sources because the raw
   recursive grep enters the ignored `.refs/cmux` checkout and finds an
   unrelated `testSplitCustomSidebarPublishesNewPaneLifecycleEvents` method.
+- Commit 3's isolated slot proved `live` in both query shapes and captured a
+  running command under it. Localhost SSH was refused because Remote Login is
+  disabled, so remote identity remained covered by the unchanged reducer and
+  routing suites rather than a live remote session.

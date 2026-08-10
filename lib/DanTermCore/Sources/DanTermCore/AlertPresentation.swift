@@ -28,17 +28,17 @@ struct AlertPresentation: Equatable {
 func alertPresentation(
     senderTitle: String,
     paneId: PaneId,
-    livePaneState: LivePaneStateView,
+    livePaneState: PaneLifecyclesView,
     in model: AppModel
 ) -> AlertPresentation {
-    let semantics = livePaneState.semantics(for: paneId)
+    let lifecycles = livePaneState.lifecycles(for: paneId)
     let paneTitle = model.pane(paneId)?.title ?? "Terminal"
     let title: String
-    switch semantics.agent {
+    switch lifecycles.agent {
     case .attached(let session, _):
         title = "\(AgentCatalog.displayName(for: session.kind)) \(session.sessionId)"
     case .none:
-        if case .running(let command) = semantics.command {
+        if case .running(let command) = lifecycles.command {
             title = command
         } else {
             title = senderTitle.isEmpty ? paneTitle : senderTitle

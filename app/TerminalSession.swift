@@ -108,11 +108,11 @@ protocol TerminalSession: AnyObject {
     var stateObserver: (any TerminalSessionStateObserver)? { get set }
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }
     var onPrimaryHistoryMutation: (() -> Void)? { get set }
-    /// Exposes immutable latest-value semantics without moving mutable terminal
+    /// Exposes immutable latest-value lifecycles without moving mutable terminal
     /// state into the application model.
-    var semanticSnapshot: PaneSemanticState { get }
-    /// Exposes the recovery-only memo captured beside the live semantic snapshot.
-    var semanticRecoverySnapshot: PaneSemanticRecoverySnapshot { get }
+    var lifecycleSnapshot: PaneLifecycles { get }
+    /// Exposes the recovery-only memo captured beside the live lifecycle snapshot.
+    var lifecycleRecoverySnapshot: PaneLifecycleRecoverySnapshot { get }
     var hasSelection: Bool { get }
     #if DANTERM_TERMINAL_BENCHMARK
     /// Exposes only the achieved grid and cell metrics needed for benchmark convergence.
@@ -170,10 +170,10 @@ protocol TerminalSession: AnyObject {
     func pasteClipboard()
     func requestClose()
     func setFocusBorder(_ focused: Bool, hasBell: Bool)
-    /// Applies one pane-scoped IPC semantic event on this session's serialized
+    /// Applies one pane-scoped IPC lifecycle event on this session's serialized
     /// owner before the caller sends any success reply.
     @discardableResult
-    func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition
+    func applyLifecycleEvent(_ event: PaneLifecycleEvent) -> PaneLifecycleTransition
     /// Fences accepted terminal mutations before the final recovery capture.
     func fenceForApplicationExit()
     func tearDown()

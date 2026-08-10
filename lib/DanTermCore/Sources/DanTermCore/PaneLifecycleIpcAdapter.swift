@@ -1,4 +1,4 @@
-// Translates between the IPC activity vocabulary and core semantic values.
+// Translates between the IPC activity vocabulary and core lifecycle values.
 
 extension AgentActivity {
     /// Admits only activity states exposed by the bundled root-agent hook contract.

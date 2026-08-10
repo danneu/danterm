@@ -43,11 +43,11 @@ private func decodeLightCapture(_ capture: CheckpointCapture) throws -> Validate
 /// under test, never the machine running the suite.
 private func lightProjection(
     _ model: AppModel,
-    recovery: [PaneId: PaneSemanticRecoverySnapshot] = [:]
+    recovery: [PaneId: PaneLifecycleRecoverySnapshot] = [:]
 ) -> LightCheckpointProjection {
     LightCheckpointProjection(
         snapshot: toSnapshot(model, home: "/Users/testhome"),
-        semanticRecoveryByPaneId: recovery
+        lifecycleRecoveryByPaneId: recovery
     )
 }
 
@@ -172,19 +172,19 @@ private func lightProjection(
         #expect(lightProjection(model) == baseline, "search")
     }
 
-    @Test("semantic recovery facets alone change the projection")
-    func semanticRecoveryFacetsChangeProjection() throws {
+    @Test("lifecycle recovery values alone change the projection")
+    func lifecycleRecoveryValuesChangeProjection() throws {
         let (model, paneIds) = makeModelWithPanes(1)
         let paneId = paneIds[0]
         let baseline = lightProjection(model)
         let withCommand = lightProjection(
             model,
-            recovery: [paneId: PaneSemanticRecoverySnapshot(command: "swift test")]
+            recovery: [paneId: PaneLifecycleRecoverySnapshot(command: "swift test")]
         )
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let withAgent = lightProjection(
             model,
-            recovery: [paneId: PaneSemanticRecoverySnapshot(
+            recovery: [paneId: PaneLifecycleRecoverySnapshot(
                 command: "swift test",
                 agentSession: agent
             )]
@@ -194,14 +194,14 @@ private func lightProjection(
         #expect(withAgent != withCommand, "agent session")
     }
 
-    @Test("semantic recovery for a missing pane leaves the projection unchanged")
+    @Test("lifecycle recovery for a missing pane leaves the projection unchanged")
     func missingPaneRecoveryLeavesProjectionUnchanged() {
         let (model, _) = makeModelWithPanes(1)
         let baseline = lightProjection(model)
         let missingPane = PaneId(rawValue: UUID())
         let withStaleSession = lightProjection(
             model,
-            recovery: [missingPane: PaneSemanticRecoverySnapshot(command: "ignored")]
+            recovery: [missingPane: PaneLifecycleRecoverySnapshot(command: "ignored")]
         )
 
         #expect(withStaleSession == baseline)
@@ -218,13 +218,13 @@ private func lightProjection(
         createTab(&model)
         let baseline = LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
         let tabId = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: tabId, name: "persisted title"))
         let changed = LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
 
         #expect(lightCheckpointCapture(current: baseline, baseline: baseline) == nil)
@@ -247,13 +247,13 @@ private func lightProjection(
         createTab(&model)
         let projectionA = LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
         let tabId = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: tabId, name: "temporary"))
         let projectionB = LightCheckpointProjection(
             snapshot: toSnapshot(model),
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
 
         _ = try #require(lightCheckpointCapture(current: projectionB, baseline: projectionA))
@@ -397,14 +397,14 @@ private func lightProjection(
     }
 
     @Test("a light capture grafts command and agent recovery state")
-    func lightCaptureGraftsSemanticRecoveryState() throws {
+    func lightCaptureGraftsLifecycleRecoveryState() throws {
         let (model, paneIds) = makeModelWithPanes(1)
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let capture = CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: [:],
-            semanticRecoveryByPaneId: [
-                paneIds[0]: PaneSemanticRecoverySnapshot(
+            lifecycleRecoveryByPaneId: [
+                paneIds[0]: PaneLifecycleRecoverySnapshot(
                     command: "swift test",
                     agentSession: agent
                 ),

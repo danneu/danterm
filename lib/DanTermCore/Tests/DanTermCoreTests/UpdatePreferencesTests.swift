@@ -601,7 +601,7 @@ private func openPrefs(
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
         let paneBefore = model.pane(paneId)
 
         _ = openPrefs(&model)
@@ -610,7 +610,7 @@ private func openPrefs(
         #expect(model.pane(paneId) == paneBefore)
         #expect(desiredPaneConfig(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
         )[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }

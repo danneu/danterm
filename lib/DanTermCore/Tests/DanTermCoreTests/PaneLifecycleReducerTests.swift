@@ -1,13 +1,13 @@
-// Behavioral tests for the pure latest-value pane semantic reducer.
+// Behavioral tests for the pure latest-value pane lifecycle reducer.
 import Testing
 
 @testable import DanTermCore
 
-struct LivePaneSemanticReducerTests {
+struct PaneLifecycleReducerTests {
     @Test("pane stream preserves ordered interleaving")
     func paneStreamPreservesOrdering() throws {
         let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneSemanticStream()
+        var stream = PaneLifecycleStream()
 
         _ = stream.apply(.integrationReady)
         _ = stream.apply(.commandStarted("claude"))
@@ -22,9 +22,9 @@ struct LivePaneSemanticReducerTests {
         #expect(stream.snapshot.agent == .attached(session: session, activity: .waiting))
     }
 
-    @Test("initial state has no reported live semantics")
+    @Test("initial state has no reported live lifecycles")
     func initialStateIsEmpty() {
-        #expect(PaneSemanticState() == PaneSemanticState(
+        #expect(PaneLifecycles() == PaneLifecycles(
             integration: .neverReported,
             command: .idle,
             connection: .local,
@@ -52,8 +52,8 @@ struct LivePaneSemanticReducerTests {
 
         #expect(state.command == .running("replacement command"))
 
-        reducePaneSemantics(&state, event: .commandEnded(exitStatus: 23))
-        reducePaneSemantics(&state, event: .commandEnded(exitStatus: 0))
+        reducePaneLifecycles(&state, event: .commandEnded(exitStatus: 23))
+        reducePaneLifecycles(&state, event: .commandEnded(exitStatus: 0))
 
         #expect(state.command == .idle)
     }
@@ -95,7 +95,7 @@ struct LivePaneSemanticReducerTests {
 
         #expect(state.connection == .remote(identity: nil))
 
-        reducePaneSemantics(&state, event: .remoteIdentityReported(remote))
+        reducePaneLifecycles(&state, event: .remoteIdentityReported(remote))
 
         #expect(state.connection == .remote(identity: remote))
     }
@@ -115,8 +115,8 @@ struct LivePaneSemanticReducerTests {
 
         #expect(state.connection == .remote(identity: outer))
 
-        reducePaneSemantics(&state, event: .connectionEnded)
-        reducePaneSemantics(&state, event: .connectionEnded)
+        reducePaneLifecycles(&state, event: .connectionEnded)
+        reducePaneLifecycles(&state, event: .connectionEnded)
 
         #expect(state.connection == .local)
     }
@@ -148,12 +148,12 @@ struct LivePaneSemanticReducerTests {
 
         #expect(state.agent == .attached(session: session, activity: .idle))
 
-        reducePaneSemantics(&state, event: .agentDetached(session))
-        reducePaneSemantics(
+        reducePaneLifecycles(&state, event: .agentDetached(session))
+        reducePaneLifecycles(
             &state,
             event: .agentActivityChanged(session: session, activity: .working)
         )
-        reducePaneSemantics(&state, event: .agentDetached(session))
+        reducePaneLifecycles(&state, event: .agentDetached(session))
 
         #expect(state.agent == .none)
     }
@@ -167,7 +167,7 @@ struct LivePaneSemanticReducerTests {
             .agentActivityChanged(session: first, activity: .waiting),
         ])
 
-        reducePaneSemantics(&state, event: .agentAttached(replacement))
+        reducePaneLifecycles(&state, event: .agentAttached(replacement))
 
         #expect(state.agent == .attached(session: replacement, activity: .working))
     }
@@ -186,10 +186,10 @@ struct LivePaneSemanticReducerTests {
         #expect(state.agent == .attached(session: current, activity: .working))
     }
 
-    private func reduce(_ events: [PaneSemanticEvent]) -> PaneSemanticState {
-        var state = PaneSemanticState()
+    private func reduce(_ events: [PaneLifecycleEvent]) -> PaneLifecycles {
+        var state = PaneLifecycles()
         for event in events {
-            reducePaneSemantics(&state, event: event)
+            reducePaneLifecycles(&state, event: event)
         }
         return state
     }

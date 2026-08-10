@@ -2857,7 +2857,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredThemeBrowser(in: model).currentThemeName == nil)
     }
 
-    @Test("desiredThemeBrowser reports the user theme independent of live semantics")
+    @Test("desiredThemeBrowser reports the user theme independent of live lifecycles")
     func desiredThemeBrowserReportsUserTheme() {
         var model = makeModel()
         createTab(&model)
@@ -3028,29 +3028,29 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     }
 
     @Test("desiredPaneToolbar reads running command state from immutable pane snapshots")
-    func desiredPaneToolbarReadsSemanticCommand() {
+    func desiredPaneToolbarReadsCommandLifecycle() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        var semantics = PaneSemanticState()
-        semantics.command = .running("swift test")
+        var lifecycles = PaneLifecycles()
+        lifecycles.command = .running("swift test")
 
         let render = desiredPaneToolbar(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
         )[paneId]
 
         #expect(render?.command == "swift test")
     }
 
-    @Test("desiredPaneToolbar reads every semantic chip from immutable pane snapshots")
-    func desiredPaneToolbarReadsEverySemanticChip() throws {
+    @Test("desiredPaneToolbar reads every lifecycle chip from immutable pane snapshots")
+    func desiredPaneToolbarReadsEveryLifecycleChip() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let remote = RemoteSession(user: "dan", host: "caja")
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let semantics = PaneSemanticState(
+        let lifecycles = PaneLifecycles(
             command: .running("swift test"),
             connection: .remote(identity: remote),
             agent: .attached(session: agent, activity: .working)
@@ -3058,9 +3058,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         let populated = desiredPaneToolbar(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
         )[paneId]
-        let absent = desiredPaneToolbar(in: model, livePaneState: LivePaneStateView())[paneId]
+        let absent = desiredPaneToolbar(in: model, livePaneState: PaneLifecyclesView())[paneId]
 
         #expect(populated?.command == "swift test")
         #expect(populated?.isRemote == true)
@@ -3073,8 +3073,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         let unidentifiedRemote = desiredPaneToolbar(
             in: model,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [
-                paneId: PaneSemanticState(connection: .remote(identity: nil)),
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [
+                paneId: PaneLifecycles(connection: .remote(identity: nil)),
             ])
         )[paneId]
         #expect(unidentifiedRemote?.isRemote == true)
@@ -3145,18 +3145,18 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
     }
 
-    @Test("desiredPaneConfig uses remote config for a remote semantic snapshot")
-    func desiredPaneConfigUsesRemoteSemanticSnapshot() {
+    @Test("desiredPaneConfig uses remote config for a remote lifecycle snapshot")
+    func desiredPaneConfigUsesRemoteLifecycleSnapshot() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.updatePane(paneId) { $0.theme = "Dracula" }
-        let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
 
         #expect(
             desiredPaneConfig(
                 in: model,
-                livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+                livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
             )[paneId] ==
             PaneConfigKey(theme: "Purplepeter"),
             "remote connection uses the configured remote theme")

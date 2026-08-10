@@ -55,9 +55,11 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CheckpointCapture.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/LivePaneSemanticReducer.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneSemanticRecovery.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneSemanticConsumers.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleReducer.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleRecovery.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleConsumers.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecyclesView.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleIpcAdapter.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalMetadataBounds.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \

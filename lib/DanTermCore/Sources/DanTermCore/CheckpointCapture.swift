@@ -23,11 +23,11 @@ struct LightCheckpointProjection: Equatable {
     /// disagree about stale sessions or any other recovery input that has no persisted leaf.
     init(
         snapshot: AppModelSnapshot,
-        semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
+        lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
     ) {
-        self.snapshot = graftSemanticRecovery(
+        self.snapshot = graftLifecycleRecovery(
             onto: snapshot,
-            recoveryByPaneId: semanticRecoveryByPaneId
+            recoveryByPaneId: lifecycleRecoveryByPaneId
         )
     }
 }
@@ -40,18 +40,18 @@ struct LightCheckpointProjection: Equatable {
 struct CheckpointCapture {
     let snapshot: AppModelSnapshot
     let scrollbackReads: [PaneId: CheckpointScrollbackRead]
-    let semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
+    let lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
     let retention: ScrollbackRetention
 
     init(
         snapshot: AppModelSnapshot,
         scrollbackReads: [PaneId: CheckpointScrollbackRead],
-        semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot] = [:],
+        lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot] = [:],
         retention: ScrollbackRetention = .checkpoint
     ) {
         self.snapshot = snapshot
         self.scrollbackReads = scrollbackReads
-        self.semanticRecoveryByPaneId = semanticRecoveryByPaneId
+        self.lifecycleRecoveryByPaneId = lifecycleRecoveryByPaneId
         self.retention = retention
     }
 
@@ -60,7 +60,7 @@ struct CheckpointCapture {
         self.init(
             snapshot: lightProjection.snapshot,
             scrollbackReads: [:],
-            semanticRecoveryByPaneId: [:]
+            lifecycleRecoveryByPaneId: [:]
         )
     }
 
@@ -71,12 +71,12 @@ struct CheckpointCapture {
         // Bind values out so the closure does not capture the container itself.
         let snapshot = snapshot
         let reads = scrollbackReads
-        let semanticRecovery = semanticRecoveryByPaneId
+        let lifecycleRecovery = lifecycleRecoveryByPaneId
         let retention = retention
         return {
-            let recovered = graftSemanticRecovery(
+            let recovered = graftLifecycleRecovery(
                 onto: snapshot,
-                recoveryByPaneId: semanticRecovery
+                recoveryByPaneId: lifecycleRecovery
             )
             let enriched = graftScrollback(
                 onto: recovered,

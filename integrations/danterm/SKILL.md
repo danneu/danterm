@@ -165,7 +165,7 @@ Inside DanTerm, derive the originating pane, tab, and group:
     TAB_ID=$(jq -r '.tab.id' <<<"$INFO")
     GROUP_ID=$(jq -r '.group.id' <<<"$INFO")
 
-`pane.semantics` is a typed latest-value snapshot owned by the live pane:
+`pane.live` is a typed latest-value snapshot owned by the live pane:
 
     {
       "integration": {"state": "neverReported" | "ready"},
@@ -177,7 +177,7 @@ Inside DanTerm, derive the originating pane, tab, and group:
          "activity": null | "working" | "waiting" | "idle"}
     }
 
-These are live facets, not command history. They appear in `pane info` and
+These are current lifecycles, not command history. They appear in `pane info` and
 under every pane returned by `ls`; they are not persisted in init files.
 
 Outside DanTerm, do not use implicit app state:
@@ -422,8 +422,8 @@ For broader discovery:
 `ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
 leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
 `{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
-semantics, ...}`). `semantics` has the same typed live-facet encoding as
-`pane info`, so agent lookup uses `.semantics.agent.session.sessionId`. The `jq` above
+live, ...}`). `live` has the same typed lifecycle encoding as
+`pane info`, so agent lookup uses `.live.agent.session.sessionId`. The `jq` above
 recurses the tree to list every pane. Treat `selectedTabId` as display state,
 not as a targeting source.
 
@@ -497,14 +497,14 @@ else prints nothing on success and exits 0.
 | Command | Stdout |
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with live `semantics` in the same encoding as `pane info`) |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, semantics}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `live` state in the same encoding as `pane info`) |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, live}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
-| `pane zoom [--pane <pane-id>] on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and live `pane.semantics` |
+| `pane zoom [--pane <pane-id>] on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current `pane.live` |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 | `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |

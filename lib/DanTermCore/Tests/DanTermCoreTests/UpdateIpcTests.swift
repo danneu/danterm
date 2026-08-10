@@ -49,7 +49,7 @@ import DanTermProtocol
         #expect(error.code == -32602)
     }
 
-    @Test("ls encodes the documented rich model directly with live pane semantics")
+    @Test("ls encodes the documented rich model directly with live pane lifecycles")
     func lsEncodesRichModelDirectly() throws {
         let paneAId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
         let paneBId = PaneId(rawValue: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!)
@@ -103,22 +103,22 @@ import DanTermProtocol
             ],
             selectedTabId: tabAId
         )
-        let semantics = PaneSemanticState(command: .running("swift test"))
+        let lifecycles = PaneLifecycles(command: .running("swift test"))
         let commands = sendIpc(
             &model,
             method: Methods.ls,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneAId: semantics]),
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneAId: lifecycles]),
             env: makeTestEnv(homeDirectory: "/Users/testhome")
         )
 
         let result = try requireIpcReply(commands)
-        let neutralSemantics: JSONValue = .object([
+        let neutralLifecycles: JSONValue = .object([
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("idle")]),
             "connection": .object(["state": .string("local")]),
             "agent": .object(["state": .string("none")]),
         ])
-        let runningSemantics: JSONValue = .object([
+        let runningLifecycles: JSONValue = .object([
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("running"), "text": .string("swift test")]),
             "connection": .object(["state": .string("local")]),
@@ -158,7 +158,7 @@ import DanTermProtocol
                                         "text": .string("ship"),
                                         "isDone": .bool(false),
                                     ])]),
-                                    "semantics": runningSemantics,
+                                    "live": runningLifecycles,
                                 ]),
                             ]),
                             "second": .object([
@@ -172,7 +172,7 @@ import DanTermProtocol
                                         "id": .string(paneBId.rawValue.uuidString),
                                         "title": .string("tests"),
                                         "cwd": .string("/tmp"),
-                                        "semantics": neutralSemantics,
+                                        "live": neutralLifecycles,
                                     ]),
                                 ]),
                                 "second": .object([
@@ -180,7 +180,7 @@ import DanTermProtocol
                                     "pane": .object([
                                         "id": .string(paneCId.rawValue.uuidString),
                                         "title": .string("logs"),
-                                        "semantics": neutralSemantics,
+                                        "live": neutralLifecycles,
                                     ]),
                                 ]),
                             ]),
@@ -199,7 +199,7 @@ import DanTermProtocol
                             "pane": .object([
                                 "id": .string(paneDId.rawValue.uuidString),
                                 "title": .string("archive"),
-                                "semantics": neutralSemantics,
+                                "live": neutralLifecycles,
                             ]),
                         ]),
                     ])]),
@@ -210,8 +210,8 @@ import DanTermProtocol
         #expect(result == expected)
     }
 
-    @Test("ls attaches semantics only to panes when entity ids collide")
-    func lsScopesSemanticsToPaneEntities() throws {
+    @Test("ls attaches live state only to panes when entity ids collide")
+    func lsScopesLiveStateToPaneEntities() throws {
         let rawId = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
         let paneId = PaneId(rawValue: rawId)
         let tabId = TabId(rawValue: rawId)
@@ -222,20 +222,20 @@ import DanTermProtocol
             groups: [GroupModel(id: groupId, name: "collision", tabs: [tab])],
             selectedTabId: tabId
         )
-        let state = PaneSemanticState(command: .running("make test"))
+        let state = PaneLifecycles(command: .running("make test"))
 
         let result = try requireIpcReply(sendIpc(
             &model,
             method: Methods.ls,
-            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: state])
+            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: state])
         ))
         let group = try #require(result["groups"]?.asArray?.first)
         let encodedTab = try #require(group["tabs"]?.asArray?.first)
         let encodedPane = encodedTab["rootNode"]?["pane"]
 
-        #expect(group["semantics"] == nil)
-        #expect(encodedTab["semantics"] == nil)
-        #expect(encodedPane?["semantics"] == paneSemanticInspectionValue(state))
+        #expect(group["live"] == nil)
+        #expect(encodedTab["live"] == nil)
+        #expect(encodedPane?["live"] == paneLifecyclesInspectionValue(state))
     }
 
     @Test("agent.attach routes through the pane owner before its reply")
@@ -261,8 +261,8 @@ import DanTermProtocol
         )
 
         #expect(commands.count == 1)
-        guard case .applyPaneSemanticIpc(_, let commandPaneId, let event) = commands[0] else {
-            Issue.record("expected pane-owner semantic IPC command")
+        guard case .applyPaneLifecycleIpc(_, let commandPaneId, let event) = commands[0] else {
+            Issue.record("expected pane-owner lifecycle IPC command")
             return
         }
         #expect(commandPaneId == paneId)
@@ -273,8 +273,8 @@ import DanTermProtocol
         #expect(event == .agentAttached(session))
     }
 
-    @Test("pane.info replies directly with complete default semantics")
-    func paneInfoRepliesDirectlyWithDefaultSemantics() throws {
+    @Test("pane.info replies directly with complete default lifecycles")
+    func paneInfoRepliesDirectlyWithDefaultLifecycles() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -293,7 +293,7 @@ import DanTermProtocol
                 "id": .string(paneId.rawValue.uuidString),
                 "title": .string("Terminal"),
                 "cwd": .null,
-                "semantics": .object([
+                "live": .object([
                     "integration": .object(["state": .string("neverReported")]),
                     "command": .object(["state": .string("idle")]),
                     "connection": .object(["state": .string("local")]),
@@ -338,10 +338,10 @@ import DanTermProtocol
             context: context
         )
 
-        guard case .applyPaneSemanticIpc(_, let activityPane, let activityEvent) = activity.first,
-              case .applyPaneSemanticIpc(_, let detachPane, let detachEvent) = detach.first
+        guard case .applyPaneLifecycleIpc(_, let activityPane, let activityEvent) = activity.first,
+              case .applyPaneLifecycleIpc(_, let detachPane, let detachEvent) = detach.first
         else {
-            Issue.record("expected pane-owner semantic IPC commands")
+            Issue.record("expected pane-owner lifecycle IPC commands")
             return
         }
         let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
@@ -2954,7 +2954,7 @@ private func sendIpc(
     method: String,
     params: JSONValue = .object([:]),
     context: IpcRequestContext = IpcRequestContext(),
-    livePaneState: LivePaneStateView = LivePaneStateView(),
+    livePaneState: PaneLifecyclesView = PaneLifecyclesView(),
     env: CoreEnv = .live
 ) -> [Command] {
     update(

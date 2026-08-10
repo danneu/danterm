@@ -19,9 +19,9 @@ func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> J
 }
 #endif
 
-/// Lowers only declared live semantics from the engine vocabulary into the
+/// Lowers only declared lifecycle reports from the engine vocabulary into the
 /// pane-owned reducer vocabulary; view-only events remain outside that stream.
-func paneSemanticEvent(for event: TerminalSemanticEvent) -> PaneSemanticEvent? {
+func paneLifecycleEvent(for event: TerminalSemanticEvent) -> PaneLifecycleEvent? {
     switch event {
     case .integrationReady:
         return .integrationReady
@@ -79,8 +79,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
-    private var semanticStream = PaneSemanticStream()
-    private var semanticRecovery = PaneSemanticRecoveryState()
+    private var lifecycleStream = PaneLifecycleStream()
+    private var lifecycleRecovery = PaneLifecycleRecoveryState()
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
@@ -128,8 +128,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
     }
     var hasSelection: Bool { controller.hasSelection }
-    var semanticSnapshot: PaneSemanticState { semanticStream.snapshot }
-    var semanticRecoverySnapshot: PaneSemanticRecoverySnapshot { semanticRecovery.snapshot }
+    var lifecycleSnapshot: PaneLifecycles { lifecycleStream.snapshot }
+    var lifecycleRecoverySnapshot: PaneLifecycleRecoverySnapshot { lifecycleRecovery.snapshot }
     #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
@@ -1047,8 +1047,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     private func publish(_ events: [TerminalSemanticEvent]) {
         for event in events {
-            if let paneEvent = paneSemanticEvent(for: event) {
-                publishSemantic(paneEvent)
+            if let paneEvent = paneLifecycleEvent(for: event) {
+                publishLifecycle(paneEvent)
                 continue
             }
             switch event {
@@ -1080,15 +1080,15 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     @discardableResult
-    func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition {
-        let transition = semanticStream.apply(event)
-        semanticRecovery.apply(transition)
-        callbackGate.emit(.paneSemanticsChanged(transition))
+    func applyLifecycleEvent(_ event: PaneLifecycleEvent) -> PaneLifecycleTransition {
+        let transition = lifecycleStream.apply(event)
+        lifecycleRecovery.apply(transition)
+        callbackGate.emit(.paneLifecycleChanged(transition))
         return transition
     }
 
-    private func publishSemantic(_ event: PaneSemanticEvent) {
-        applySemanticEvent(event)
+    private func publishLifecycle(_ event: PaneLifecycleEvent) {
+        applyLifecycleEvent(event)
     }
 
     /// Maps the engine's total search status onto the overlay's two independently
