@@ -14,9 +14,10 @@ class PaneWrapperView: NSView {
     private let isZoomed: Bool
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
-    /// Destination for the context menu's copy actions (cwd, agent session id). Defaults to the
-    /// system pasteboard so a test can assign a scratch board and neither read nor destroy the
-    /// developer's real clipboard; mirrors `SwiftTerminalSessionView.selectionPasteboard`.
+    /// Destination for the context menu's copy actions (cwd, pane id, agent session id).
+    /// Defaults to the system pasteboard so a test can assign a scratch board and neither
+    /// read nor destroy the developer's real clipboard; mirrors
+    /// `SwiftTerminalSessionView.selectionPasteboard`.
     var menuPasteboard = NSPasteboard.general
 
     // Search overlay
@@ -465,6 +466,8 @@ class PaneWrapperView: NSView {
         copyCwd.isEnabled = runtime?.model.pane(paneId)?.cwd != nil
         menu.addItem(copyCwd)
 
+        menu.addItem(wrapperItem("Copy Pane ID", #selector(copyPaneIdAction)))
+
         // Only shown when the pane reported an agent session. The toolbar chip renders
         // the compact kind label, so this menu item is the full-id copy affordance.
         if case .attached = terminalSession.semanticSnapshot.agent {
@@ -518,6 +521,11 @@ class PaneWrapperView: NSView {
         guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
         menuPasteboard.clearContents()
         menuPasteboard.setString(cwd, forType: .string)
+    }
+
+    @objc private func copyPaneIdAction() {
+        menuPasteboard.clearContents()
+        menuPasteboard.setString(paneId.rawValue.uuidString, forType: .string)
     }
 
     @objc private func copyAgentSessionIdAction() {

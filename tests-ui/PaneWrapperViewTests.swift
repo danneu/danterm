@@ -24,7 +24,8 @@ func paneWrapperViewTests() {
         try uiExpect(
             items.map(\.title) == [
                 "Copy", "Paste", "Split Right", "Split Down",
-                "Copy cwd", "Copy Agent Session ID", "Zoom Pane", "Close Pane",
+                "Copy cwd", "Copy Pane ID", "Copy Agent Session ID",
+                "Zoom Pane", "Close Pane",
             ],
             "unexpected titles: \(items.map(\.title))")
         try uiExpect(items.allSatisfy(\.isEnabled), "all items should be enabled, got \(items.map { ($0.title, $0.isEnabled) })")
@@ -60,7 +61,8 @@ func paneWrapperViewTests() {
 
         let expectedTitles = [
             "Split Right", "Split Down",
-            "Copy cwd", "Copy Agent Session ID", "Zoom Pane", "Close Pane",
+            "Copy cwd", "Copy Pane ID", "Copy Agent Session ID",
+            "Zoom Pane", "Close Pane",
         ]
         for menu in [fx.wrapper.makePaneMenu(includeClipboard: false), fx.wrapper.makePaneMenu()] {
             let items = nonSeparatorItems(menu)
@@ -141,6 +143,22 @@ func paneWrapperViewTests() {
         try uiExpect(
             detachedMenu.items.allSatisfy { $0.title != "Copy Agent Session ID" },
             "agent item should disappear after the snapshot detaches"
+        )
+    }
+
+    uiTest("Copy Pane ID copies the wrapper's full pane UUID") {
+        let fx = makePaneMenuFixture()
+        fx.wrapper.menuPasteboard = NSPasteboard(
+            name: .init("com.danterm.tests.pane-id.\(UUID().uuidString)")
+        )
+
+        let menu = fx.wrapper.makePaneMenu(includeClipboard: true)
+        let copy = try onlyItem(menu, titled: "Copy Pane ID")
+        _ = copy.target?.perform(copy.action, with: copy)
+
+        try uiExpect(
+            fx.wrapper.menuPasteboard.string(forType: .string) == fx.paneId.rawValue.uuidString,
+            "Copy Pane ID should copy the pane represented by this menu"
         )
     }
 
