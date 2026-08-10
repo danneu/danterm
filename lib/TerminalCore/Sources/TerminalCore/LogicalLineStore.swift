@@ -465,6 +465,14 @@ extension Terminal {
 
         var recordCount: Int { offsets.count }
 
+        /// Number of display rows held by records whose bytes can no longer change.
+        var closedPrefixDisplayRowCount: Int {
+            guard offsets.count > 0 else { return 0 }
+            let tail = record(at: offsets[offsets.count - 1])
+            guard tail.isOpen else { return grandDisplayRowTotal }
+            return grandDisplayRowTotal - displayRowCount(recordIndex: offsets.count - 1)
+        }
+
         /// The single quantity `31/I2` bounds, in O(1).
         ///
         /// Read on the write path -- once per admission and once per eviction step -- which is why

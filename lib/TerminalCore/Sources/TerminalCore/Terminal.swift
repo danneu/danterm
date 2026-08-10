@@ -316,7 +316,6 @@ public struct Terminal: Equatable, Sendable {
     private struct DamageActionSnapshot {
         var cursor: TerminalCursor?
         var selection: TerminalTextRange?
-        var searchMatch: TerminalTextRange?
         var hoveredLinkRange: TerminalTextRange?
         var hoveredLinkRevision: UInt64
         /// Eviction-corrected top row, not `scrollProjection.topRow`: at the
@@ -466,46 +465,36 @@ public struct Terminal: Equatable, Sendable {
         case browsing(top: TextAnchor)
     }
 
-    /// Stores only the active query and occurrence so navigation always rescans live text.
-    ///
-    /// `range` is nil while the query matches nothing. That state is deliberately distinct
-    /// from `search == nil`: a needle the user typed that found nothing is still an active
-    /// search reporting an empty status, whereas no search state at all reports none.
+    /// Keeps the user's durable position separate from the occurrence currently nearest it.
     private struct SearchState: Equatable, Sendable {
         var query: String
-        var range: TextAnchorRange?
+        var position: TextAnchor
+        var index: SearchMatchIndex
     }
 
-    /// Memoizes the open needle's whole-history match list, keyed by the needle itself.
-    ///
-    /// Exists because every navigation step rescanned all of history twice -- once in
-    /// `searchNext`/`searchPrevious` and again in `searchStatus` -- which at a saturated
-    /// 10 MiB scrollback priced one keypress above the owner queue's whole budget for it.
-    /// Selecting a different occurrence does not change which occurrences exist, so the
-    /// list survives navigation and only content invalidates it.
-    ///
-    /// Never part of value equality: `TerminalPTYHost.applySearch` publishes a frame when
-    /// `terminal != previousTerminal`, and filling a cache is not a change any consumer
-    /// can observe. Sharing `ObservationGeneration`'s always-equal shape for that reason.
-    private struct SearchMatchCache: Equatable, Sendable {
-        private var query: String?
-        private var stored: [TextAnchorRange] = []
+    /// Stores matches over immutable closed history and leaves only the bounded mutable suffix
+    /// for each read to rescan. Candidates ending in trailing blank history stay dormant until
+    /// later content makes their hard boundaries part of the text projection.
+    private struct SearchMatchIndex: Equatable, Sendable {
+        var needleKeys: [SearchGraphemeKey]
+        var prefixEndRow: Int
+        var prefixMatches: [TextAnchorRange]
+        var confirmedPrefixMatchCount: Int
+    }
 
-        func matches(for query: String) -> [TextAnchorRange]? {
-            self.query == query ? stored : nil
+    /// Presents the immutable prefix and freshly scanned suffix as one ordered collection
+    /// without copying the history-sized prefix on each navigation or status read.
+    private struct SearchMatchSnapshot {
+        var prefix: [TextAnchorRange]
+        var prefixCount: Int
+        var suffix: [TextAnchorRange]
+
+        var count: Int { prefixCount + suffix.count }
+        var isEmpty: Bool { count == 0 }
+
+        subscript(index: Int) -> TextAnchorRange {
+            index < prefixCount ? prefix[index] : suffix[index - prefixCount]
         }
-
-        mutating func store(_ matches: [TextAnchorRange], for query: String) {
-            self.query = query
-            stored = matches
-        }
-
-        mutating func invalidate() {
-            query = nil
-            stored = []
-        }
-
-        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
     }
 
     /// Retains hover presentation against reflowable text anchors without storing platform state.
@@ -537,7 +526,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Keeps search comparison allocation-free for the common one-scalar key while
     /// retaining full folded expansions for Unicode graphemes that need them.
-    private enum SearchGraphemeKey: Equatable {
+    private enum SearchGraphemeKey: Equatable, Sendable {
         case scalar(UInt32)
         case scalars([Unicode.Scalar])
     }
@@ -689,7 +678,6 @@ public struct Terminal: Equatable, Sendable {
     // Reflow needs that provenance to drop only the latter when both anchors collapse.
     private var selectionRequiresNonemptyReflowResult = false
     private var search: SearchState? { didSet { refreshHasContentInspectionState() } }
-    private var searchMatchCache = SearchMatchCache()
     private var hoveredLinkState: InteractionLinkState? {
         didSet {
             refreshHasContentInspectionState()
@@ -972,7 +960,6 @@ public struct Terminal: Equatable, Sendable {
                 )
                 : nil,
             selection: selectionRange,
-            searchMatch: activeSearchMatchRange,
             hoveredLinkRange: hoveredLinkState.flatMap { publicRange($0.range) },
             hoveredLinkRevision: hoveredLinkRevisionCounter.value,
             absoluteTopRow: evictedRowCount + projection.topRow,
@@ -1042,10 +1029,6 @@ public struct Terminal: Equatable, Sendable {
             recordPresentationDamage(rows: damagedViewportRows(for: before.selection))
             recordPresentationDamage(rows: damagedViewportRows(for: after.selection))
         }
-        if before.searchMatch != after.searchMatch {
-            recordPresentationDamage(rows: damagedViewportRows(for: before.searchMatch))
-            recordPresentationDamage(rows: damagedViewportRows(for: after.searchMatch))
-        }
         // Two independent reasons the hovered run can need repainting, and neither implies
         // the other: the stored link changed (`hoveredLinkRevision`), or it did not change
         // while the projection moved under it, so the same anchors now name different
@@ -1065,13 +1048,25 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func recordDamage(row: Int) {
-        recordPresentationDamage(row: row)
+        recordPresentationDamage(rows: widenedSearchDamageRows(for: [row]))
         notePrimaryHistoryDamage()
     }
 
     private mutating func recordDamage(rows: some Sequence<Int>) {
-        recordPresentationDamage(rows: rows)
+        recordPresentationDamage(rows: widenedSearchDamageRows(for: Array(rows)))
         notePrimaryHistoryDamage()
+    }
+
+    private func widenedSearchDamageRows(for source: [Int]) -> [Int] {
+        guard let search else { return source }
+        let radius = max(1, search.index.needleKeys.count - 1)
+        var widened = Set<Int>()
+        for row in source {
+            let lower = max(0, row - radius)
+            let upper = min(rowCount - 1, row + radius)
+            widened.formUnion(lower...upper)
+        }
+        return widened.sorted()
     }
 
     // The non-bumping variants below are the exception, not the rule: bumping stays the default
@@ -1095,15 +1090,6 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func notePrimaryHistoryDamage() {
-        // Deliberately above the alternate-screen guard, and deliberately here rather than
-        // at the invalidation sites: the comment above `recordPresentationFullDamage` makes
-        // this the funnel every cell-storage write reaches and the non-bumping variants the
-        // narrow exception, so hanging the match cache here inherits its fail-safe
-        // direction -- a miscategorized call site costs a redundant rescan, never a stale
-        // answer. The guard below is about primary-history recovery, which the alternate
-        // screen genuinely does not affect; a search scanned under the alternate screen
-        // reads that screen's rows, so its cache must drop on both.
-        searchMatchCache.invalidate()
         if isAlternateScreenActive == false { primaryHistoryObservation.value &+= 1 }
     }
 
@@ -2783,7 +2769,49 @@ public struct Terminal: Equatable, Sendable {
     /// would land on unrelated alt-screen content. Mirrors `revealSearchMatchIfNeeded`.
     public var activeSearchMatchRange: TerminalTextRange? {
         guard isAlternateScreenActive == false else { return nil }
-        return search?.range.flatMap(publicRange)
+        guard let search, let match = resolvedSearchMatch(in: currentSearchMatches(search))?.match
+        else { return nil }
+        return publicRange(match)
+    }
+
+    /// Returns the active search's ordered occurrences that intersect current-stream rows.
+    public func searchMatchRanges(in rows: Range<Int>) -> [TerminalTextRange] {
+        guard isAlternateScreenActive == false, let search, rows.isEmpty == false else { return [] }
+        let absoluteRows = (evictedRowCount + rows.lowerBound)..<(evictedRowCount + rows.upperBound)
+        let matches = currentSearchMatches(search)
+        let contextRows = max(1, search.index.needleKeys.count - 1)
+        let firstPossibleStart = absoluteRows.lowerBound - contextRows
+        var low = 0
+        var high = matches.count
+        while low < high {
+            let middle = (low + high) / 2
+            if matches[middle].start.row < firstPossibleStart {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        var result: [TerminalTextRange] = []
+        var index = low
+        while index < matches.count, matches[index].start.row < absoluteRows.upperBound {
+            if range(matches[index], intersects: absoluteRows),
+               let publicMatch = publicRange(matches[index])
+            {
+                result.append(publicMatch)
+            }
+            index += 1
+        }
+        return result
+    }
+
+    /// Test oracle that bypasses the retained index and scans the requested row window directly.
+    func scannedSearchMatchRanges(in rows: Range<Int>) -> [TerminalTextRange] {
+        guard isAlternateScreenActive == false, let search, rows.isEmpty == false else { return [] }
+        let absoluteRows = (evictedRowCount + rows.lowerBound)..<(evictedRowCount + rows.upperBound)
+        return searchMatches(
+            needleKeys: search.index.needleKeys,
+            intersecting: absoluteRows
+        ).compactMap(publicRange)
     }
 
     /// Reports the active search's live match count and selected index, or nil when
@@ -2793,20 +2821,14 @@ public struct Terminal: Equatable, Sendable {
     /// selected match. Suppressed under the alternate screen for the reason on
     /// `activeSearchMatchRange`.
     ///
-    /// When the retained occurrence is stale or absent -- output arrived while a failed
-    /// search was open, or the selected match was overwritten -- this reports the newest
-    /// match, which is exactly the one the next navigation re-attaches to.
+    /// The durable position resolves to the nearest live occurrence on every read, so output,
+    /// overwrite, and eviction cannot produce a count with no selected match.
     public var searchStatus: TerminalSearchStatus? {
         guard isAlternateScreenActive == false, let search else { return nil }
-        // Read-only counterpart to `memoizedSearchMatches`: a get-only property on a value
-        // type cannot fill the cache, so it answers from one and scans only on a miss.
-        let matches = searchMatchCache.matches(for: search.query)
-            ?? searchMatches(for: search.query)
+        let matches = currentSearchMatches(search)
         guard matches.isEmpty == false else { return .empty }
-        let selected = search.range
-            .flatMap(matches.firstIndex(of:))
-            .map { matches.count - 1 - $0 }
-        return .matched(selected: selected ?? 0, total: matches.count)
+        let selected = resolvedSearchMatch(in: matches)?.index ?? matches.count - 1
+        return .matched(selected: matches.count - 1 - selected, total: matches.count)
     }
 
     /// Selects both endpoint cells after clamping them into the active stream.
@@ -3366,31 +3388,46 @@ public struct Terminal: Equatable, Sendable {
     /// distinguish "found nothing" from "not searching".
     @discardableResult
     public mutating func beginSearch(_ query: String) -> Bool {
-        let before = damageActionSnapshot
         guard query.isEmpty == false else {
+            guard search != nil else { return false }
             search = nil
-            recordDamage(since: before)
+            recordPresentationFullDamage()
             return false
         }
-        let match = memoizedSearchMatches(for: query).last
-        search = SearchState(query: query, range: match)
-        revealSearchMatchIfNeeded()
-        recordDamage(since: before)
-        return match != nil
+        let needleKeys = searchGraphemeKeys(for: query)
+        let streamRows = evictedRowCount..<(evictedRowCount + projectionRowCount)
+        let matches = searchMatches(needleKeys: needleKeys, intersecting: streamRows)
+        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
+        let prefixBoundary = TextAnchor(row: prefixEnd, column: 0)
+        let prefixCandidates = searchMatches(
+            needleKeys: needleKeys,
+            intersecting: evictedRowCount..<prefixEnd,
+            lastContentRow: prefixEnd
+        ).filter { $0.end <= prefixBoundary }
+        let index = SearchMatchIndex(
+            needleKeys: needleKeys,
+            prefixEndRow: prefixEnd,
+            prefixMatches: prefixCandidates,
+            confirmedPrefixMatchCount: matches.lazy.filter { $0.end <= prefixBoundary }.count
+        )
+        let position = matches.last?.start
+            ?? TextAnchor(row: streamRows.upperBound, column: 0)
+        search = SearchState(query: query, position: position, index: index)
+        revealSearchMatchIfNeeded(matches.last)
+        recordPresentationFullDamage()
+        return matches.isEmpty == false
     }
 
     /// Moves to the next older match, wrapping past the oldest back to the newest.
     @discardableResult
     public mutating func searchNext() -> Bool {
         guard let search else { return false }
-        let matches = memoizedSearchMatches(for: search.query)
-        guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
-            return reattachToNewestMatch(among: matches)
-        }
-        let before = damageActionSnapshot
-        self.search?.range = current > 0 ? matches[current - 1] : matches[matches.count - 1]
-        revealSearchMatchIfNeeded()
-        recordDamage(since: before)
+        let matches = currentSearchMatches(search)
+        guard let current = resolvedSearchMatch(in: matches)?.index else { return false }
+        let target = current > 0 ? matches[current - 1] : matches[matches.count - 1]
+        self.search?.position = target.start
+        revealSearchMatchIfNeeded(target)
+        recordPresentationFullDamage()
         return true
     }
 
@@ -3398,36 +3435,20 @@ public struct Terminal: Equatable, Sendable {
     @discardableResult
     public mutating func searchPrevious() -> Bool {
         guard let search else { return false }
-        let matches = memoizedSearchMatches(for: search.query)
-        guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
-            return reattachToNewestMatch(among: matches)
-        }
-        let before = damageActionSnapshot
-        self.search?.range = current + 1 < matches.count ? matches[current + 1] : matches[0]
-        revealSearchMatchIfNeeded()
-        recordDamage(since: before)
+        let matches = currentSearchMatches(search)
+        guard let current = resolvedSearchMatch(in: matches)?.index else { return false }
+        let target = current + 1 < matches.count ? matches[current + 1] : matches[0]
+        self.search?.position = target.start
+        revealSearchMatchIfNeeded(target)
+        recordPresentationFullDamage()
         return true
     }
 
-    /// Selects the newest match for a search whose occurrence is missing or stale.
-    ///
-    /// Reached when output arrives under a failed needle, or overwrites the selected
-    /// match: without it the engine would stay in "matches exist, none selected" and
-    /// navigation would refuse to move until the user retyped the needle.
-    private mutating func reattachToNewestMatch(among matches: [TextAnchorRange]) -> Bool {
-        guard let newest = matches.last else { return false }
-        let before = damageActionSnapshot
-        search?.range = newest
-        revealSearchMatchIfNeeded()
-        recordDamage(since: before)
-        return true
-    }
-
-    /// Clears the query and its active occurrence together.
+    /// Clears the needle, position, and retained match index together.
     public mutating func clearSearch() {
-        let before = damageActionSnapshot
+        guard search != nil else { return }
         search = nil
-        recordDamage(since: before)
+        recordPresentationFullDamage()
     }
 
     private func projectedHistoryText(from stream: [GridRow]) -> String {
@@ -3581,8 +3602,18 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    private mutating func revealSearchMatchIfNeeded() {
-        guard isAlternateScreenActive == false, let match = search.flatMap(\.range) else { return }
+    private mutating func revealSearchMatchIfNeeded(_ knownMatch: TextAnchorRange? = nil) {
+        guard isAlternateScreenActive == false else { return }
+        let match: TextAnchorRange
+        if let knownMatch {
+            match = knownMatch
+        } else if let search,
+                  let resolved = resolvedSearchMatch(in: currentSearchMatches(search))?.match
+        {
+            match = resolved
+        } else {
+            return
+        }
         let projection = scrollProjection
         let top = evictedRowCount + projection.topRow
         let target: Int
@@ -4048,22 +4079,143 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Returns the needle's matches, scanning only when the cache cannot answer.
-    ///
-    /// The mutating counterpart of the read in `searchStatus`: navigation runs first and
-    /// fills the cache, so the status read that follows it in the same owner-queue job is
-    /// a hit rather than a second full scan.
-    private mutating func memoizedSearchMatches(for query: String) -> [TextAnchorRange] {
-        if let cached = searchMatchCache.matches(for: query) { return cached }
-        let computed = searchMatches(for: query)
-        searchMatchCache.store(computed, for: query)
-        return computed
+    /// Resolves the index's immutable prefix together with its bounded mutable suffix.
+    private func currentSearchMatches(_ search: SearchState) -> SearchMatchSnapshot {
+        let streamEndRow = evictedRowCount + projectionRowCount
+        guard search.index.prefixEndRow < streamEndRow else {
+            return SearchMatchSnapshot(
+                prefix: search.index.prefixMatches,
+                prefixCount: search.index.confirmedPrefixMatchCount,
+                suffix: []
+            )
+        }
+        let suffixRows = search.index.prefixEndRow..<streamEndRow
+        let suffixLastContentRow = lastProjectedContentRow(in: suffixRows)
+        let suffix = searchMatches(
+            needleKeys: search.index.needleKeys,
+            intersecting: suffixRows,
+            lastContentRow: suffixLastContentRow
+        ).filter { $0.end > TextAnchor(row: search.index.prefixEndRow, column: 0) }
+        return SearchMatchSnapshot(
+            prefix: search.index.prefixMatches,
+            prefixCount: suffixLastContentRow == nil
+                ? search.index.confirmedPrefixMatchCount
+                : search.index.prefixMatches.count,
+            suffix: suffix
+        )
     }
 
-    private func searchMatches(for query: String) -> [TextAnchorRange] {
-        let needleKeys = searchGraphemeKeys(for: query)
-        guard needleKeys.isEmpty == false else { return [] }
-        let units = projectionUnits()
+    /// Advances or trims the immutable prefix after the store changes record ownership.
+    private mutating func synchronizeSearchIndexPrefix() {
+        guard var search else { return }
+        let newEnd = evictedRowCount + history.closedPrefixDisplayRowCount
+        let oldEnd = search.index.prefixEndRow
+        let boundary = TextAnchor(row: newEnd, column: 0)
+        let firstRetainedRow = evictedRowCount
+        let confirmed = search.index.prefixMatches.prefix(search.index.confirmedPrefixMatchCount)
+        let retainedConfirmedCount = confirmed.lazy.filter {
+            $0.start.row >= firstRetainedRow && $0.end <= boundary
+        }.count
+        search.index.prefixMatches.removeAll {
+            $0.start.row < firstRetainedRow || $0.end > boundary
+        }
+        search.index.confirmedPrefixMatchCount = retainedConfirmedCount
+        if newEnd > oldEnd {
+            let mutableRows = oldEnd..<(evictedRowCount + projectionRowCount)
+            let additions = searchMatches(
+                needleKeys: search.index.needleKeys,
+                intersecting: oldEnd..<newEnd,
+                lastContentRow: newEnd
+            ).filter {
+                $0.end > TextAnchor(row: oldEnd, column: 0) && $0.end <= boundary
+            }
+            search.index.prefixMatches.append(contentsOf: additions)
+            if let lastContentRow = lastProjectedContentRow(in: mutableRows) {
+                search.index.confirmedPrefixMatchCount = prefixMatchCount(
+                    in: search.index.prefixMatches,
+                    throughContentRow: lastContentRow
+                )
+            }
+        }
+        search.index.prefixEndRow = newEnd
+        self.search = search
+    }
+
+    private func prefixMatchCount(
+        in matches: [TextAnchorRange],
+        throughContentRow row: Int
+    ) -> Int {
+        var low = 0
+        var high = matches.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if matches[middle].end.row <= row {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
+    /// Rebuilds the index after width reflow changes every display-row coordinate.
+    private mutating func rebuildSearchIndex() {
+        guard var search else { return }
+        let streamRows = evictedRowCount..<(evictedRowCount + projectionRowCount)
+        let matches = searchMatches(
+            needleKeys: search.index.needleKeys,
+            intersecting: streamRows
+        )
+        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
+        let boundary = TextAnchor(row: prefixEnd, column: 0)
+        let prefixCandidates = searchMatches(
+            needleKeys: search.index.needleKeys,
+            intersecting: evictedRowCount..<prefixEnd,
+            lastContentRow: prefixEnd
+        ).filter { $0.end <= boundary }
+        search.index.prefixEndRow = prefixEnd
+        search.index.prefixMatches = prefixCandidates
+        search.index.confirmedPrefixMatchCount = matches.lazy.filter { $0.end <= boundary }.count
+        self.search = search
+    }
+
+    /// Scans only enough surrounding rows to decide which matches intersect `absoluteRows`.
+    private func searchMatches(
+        needleKeys: [SearchGraphemeKey],
+        intersecting absoluteRows: Range<Int>,
+        lastContentRow suppliedLastContentRow: Int? = nil
+    ) -> [TextAnchorRange] {
+        guard needleKeys.isEmpty == false, absoluteRows.isEmpty == false else { return [] }
+        let stream = activeProjection()
+        let streamStart = evictedRowCount
+        let streamEnd = evictedRowCount + stream.count
+        let lastContentRow = suppliedLastContentRow
+            ?? lastProjectedContentRow(in: streamStart..<streamEnd)
+        guard let lastContentRow else { return [] }
+        let contextRows = max(1, needleKeys.count - 1)
+        let scanStart = max(streamStart, absoluteRows.lowerBound - contextRows)
+        let scanEnd = min(lastContentRow + 1, absoluteRows.upperBound + contextRows)
+        guard scanStart < scanEnd else { return [] }
+        ProjectionRowCounter.record(rows: scanEnd - scanStart)
+
+        var units: [ProjectionUnit] = []
+        for absoluteRow in scanStart..<scanEnd {
+            let relativeRow = absoluteRow - evictedRowCount
+            let row = stream[relativeRow]
+            forEachRowTextUnit(
+                in: row,
+                rowIndex: relativeRow,
+                absoluteBase: evictedRowCount
+            ) { units.append($0) }
+            if absoluteRow < lastContentRow, row.isSoftWrapped == false {
+                units.append(ProjectionUnit(
+                    scalars: ["\n"],
+                    start: TextAnchor(row: absoluteRow, column: projectedCellEnd(in: row)),
+                    end: TextAnchor(row: absoluteRow + 1, column: 0),
+                    isHardBoundary: true
+                ))
+            }
+        }
         guard needleKeys.count <= units.count else { return [] }
         var matches: [TextAnchorRange] = []
         var window = [SearchGraphemeKey?](repeating: nil, count: needleKeys.count)
@@ -4080,12 +4232,50 @@ public struct Terminal: Equatable, Sendable {
                 }
             }
             guard matchesNeedle else { continue }
-            matches.append(TextAnchorRange(
+            let match = TextAnchorRange(
                 start: units[startIndex].start,
                 end: units[endIndex].end
-            ))
+            )
+            if range(match, intersects: absoluteRows) { matches.append(match) }
         }
         return matches
+    }
+
+    private func lastProjectedContentRow(in absoluteRows: Range<Int>) -> Int? {
+        let stream = activeProjection()
+        let lower = max(evictedRowCount, absoluteRows.lowerBound)
+        let upper = min(evictedRowCount + stream.count, absoluteRows.upperBound)
+        guard lower < upper else { return nil }
+        for absoluteRow in (lower..<upper).reversed()
+        where rowContainsContent(stream[absoluteRow - evictedRowCount])
+        {
+            return absoluteRow
+        }
+        return nil
+    }
+
+    /// Picks the nearest occurrence to the durable position, resolving equal distance later.
+    private func resolvedSearchMatch(
+        in matches: SearchMatchSnapshot
+    ) -> (index: Int, match: TextAnchorRange)? {
+        guard let position = search?.position, matches.isEmpty == false else { return nil }
+        var low = 0
+        var high = matches.count
+        while low < high {
+            let middle = (low + high) / 2
+            if matches[middle].start < position { low = middle + 1 } else { high = middle }
+        }
+        if low == 0 { return (0, matches[0]) }
+        if low == matches.count { return (matches.count - 1, matches[matches.count - 1]) }
+        let earlier = low - 1
+        let earlierDistance = searchDistance(from: position, to: matches[earlier].start)
+        let laterDistance = searchDistance(from: position, to: matches[low].start)
+        let bestIndex = laterDistance <= earlierDistance ? low : earlier
+        return (bestIndex, matches[bestIndex])
+    }
+
+    private func searchDistance(from lhs: TextAnchor, to rhs: TextAnchor) -> Int {
+        abs((lhs.row - rhs.row) * columnCount + lhs.column - rhs.column)
     }
 
     private func searchGraphemeKeys(for query: String) -> [SearchGraphemeKey] {
@@ -4148,8 +4338,8 @@ public struct Terminal: Equatable, Sendable {
 
     /// The state half of `invalidateInspection(inViewportRows:)` alone, for the
     /// row-scroll path whose damage is the shift `recordScrollDamage` records:
-    /// content still leaves the range in absolute coordinates, so search and
-    /// link state anchored there must drop, but the whole-range row damage the
+    /// content still leaves the range in absolute coordinates, so link state
+    /// anchored there must drop, but the whole-range row damage the
     /// combined form records is exactly what the shift representation deletes.
     private mutating func invalidateInspectionState(inViewportRows range: Range<Int>) {
         guard range.isEmpty == false, hasContentInspectionState else { return }
@@ -4168,16 +4358,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func invalidateInspection(inAbsoluteRows rows: ClosedRange<Int>) {
-        // Search and link state assert facts about cell content, so an overwrite retires
-        // them. A selection is the user's geometrically anchored region: it survives and
-        // `selectedText` reads whatever content now occupies that region.
-        // Only the occurrence, never the needle: a search whose match was overwritten is
-        // still an open search, and `reattachToNewestMatch` is what re-selects for it.
-        // Dropping the whole search here would strand the user in a state only retyping
-        // the needle can leave, because navigation short-circuits on a nil query.
-        if let match = search?.range, range(match, intersects: rows) {
-            self.search?.range = nil
-        }
+        // Link state asserts facts about cell content, so an overwrite retires it. Search
+        // keeps a position rather than a content assertion and resolves against live matches.
         if let hoveredLinkState, range(hoveredLinkState.range, intersects: rows) {
             self.hoveredLinkState = nil
         }
@@ -4194,6 +4376,11 @@ public struct Terminal: Equatable, Sendable {
             ? range.end.row - 1
             : range.end.row
         return range.start.row <= rows.upperBound && lastIncludedRow >= rows.lowerBound
+    }
+
+    private func range(_ range: TextAnchorRange, intersects rows: Range<Int>) -> Bool {
+        guard rows.isEmpty == false else { return false }
+        return self.range(range, intersects: rows.lowerBound...(rows.upperBound - 1))
     }
 
     private mutating func clampSelectionToRetainedStream() {
@@ -4222,13 +4409,6 @@ public struct Terminal: Equatable, Sendable {
                 selection.range.start = max(selection.range.start, firstRetained)
                 self.selection = selection
             }
-        }
-        // Occurrence only, for the reason on `invalidateInspection`. Note the contrast
-        // with `selection` just above, which clamps its start forward and drops only
-        // when it is entirely gone -- an evicted match has no equivalent clamp, so it
-        // releases the occurrence and leaves the needle for navigation to re-attach.
-        if let match = search?.range, match.start < firstRetained {
-            self.search?.range = nil
         }
         if let hoveredLinkState, hoveredLinkState.range.start < firstRetained {
             self.hoveredLinkState = nil
@@ -4283,6 +4463,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func enforceScrollbackBudget() {
         history.evictToBudget()
         syncHistoryEvictions()
+        synchronizeSearchIndexPrefix()
     }
 
     /// Reports whatever history has evicted since this terminal last looked, exactly once.
@@ -4768,6 +4949,7 @@ public struct Terminal: Equatable, Sendable {
                     // of the history/live seam they sit on, so no anchor moves and
                     // `evictedRowCount` does not advance.
                     var pulled = history.truncateTail(displayRows: pulledCount)
+                    synchronizeSearchIndexPrefix()
                     pulledCount = pulled.count
                     restoreSeamSpacer(in: &pulled)
                     rows.insert(
@@ -4921,6 +5103,7 @@ public struct Terminal: Equatable, Sendable {
         let deficit = rowCount - rebuiltRows.count
         if deficit > 0, historyRowCount > 0 {
             var pulled = history.truncateTail(displayRows: min(deficit, historyRowCount))
+            synchronizeSearchIndexPrefix()
             columnCount = newColumnCount
             restoreSeamSpacer(in: &pulled, before: rebuiltRows.first)
             columnCount = oldColumnCount
@@ -4953,6 +5136,7 @@ public struct Terminal: Equatable, Sendable {
             appendToScrollback(Array(rebuiltRows[..<viewportStart]))
         }
         enforceScrollbackBudget()
+        rebuildSearchIndex()
         clampViewportAnchorToRetainedStream(previousTopBeforeReflow: viewportTopBeforeReflow)
     }
 
@@ -4961,8 +5145,7 @@ public struct Terminal: Equatable, Sendable {
     private enum WidthChangeAnchor: Hashable {
         case selectionStart
         case selectionEnd
-        case searchStart
-        case searchEnd
+        case searchPosition
         case hoverStart
         case hoverEnd
         case armStart
@@ -5027,8 +5210,7 @@ public struct Terminal: Equatable, Sendable {
         }
         capture(.selectionStart, selection?.range.start)
         capture(.selectionEnd, selection?.range.end)
-        capture(.searchStart, search?.range?.start)
-        capture(.searchEnd, search?.range?.end)
+        capture(.searchPosition, search?.position)
         capture(.hoverStart, hoveredLinkState?.range.start)
         capture(.hoverEnd, hoveredLinkState?.range.end)
         capture(.armStart, armedLinkState?.range.start)
@@ -5112,11 +5294,7 @@ public struct Terminal: Equatable, Sendable {
             }
         case .dropped: selection = nil
         }
-        switch restate(.searchStart, .searchEnd) {
-        case .untouched: break
-        case let .restated(range): search?.range = range
-        case .dropped: search = nil
-        }
+        if let position = restated[.searchPosition] { search?.position = position }
         switch restate(.hoverStart, .hoverEnd) {
         case .untouched: break
         case let .restated(range): hoveredLinkState?.range = range
@@ -6028,6 +6206,7 @@ public struct Terminal: Equatable, Sendable {
         case 3:
             history.removeAll()
             syncHistoryEvictions()
+            synchronizeSearchIndexPrefix()
             clearPendingMotionState()
         default:
             return
@@ -7100,8 +7279,11 @@ public struct Terminal: Equatable, Sendable {
             recordPresentationDamage(rows: range)
             return
         }
+        if search != nil {
+            recordPresentationFullDamage()
+            return
+        }
         let overlayActive = selection != nil
-            || search?.range != nil
             || hoveredLinkState != nil
             || armedLinkState != nil
         let wholeViewport = range == 0..<rowCount
@@ -7281,6 +7463,7 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inScrollbackRow: historyRowCount - 1)
         history.repairClearedSpacer(styleId: replacementStyleId)
         history.closeOpenRecord()
+        synchronizeSearchIndexPrefix()
     }
 
     private mutating func restoreWrapClaimBeforeCursor() {
@@ -7292,6 +7475,7 @@ public struct Terminal: Equatable, Sendable {
             guard history.hasOpenTailRecord == false else { return }
             invalidateInspection(inScrollbackRow: historyRowCount - 1)
             history.reopenTailRecord()
+            synchronizeSearchIndexPrefix()
         }
     }
 

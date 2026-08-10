@@ -1,7 +1,7 @@
 // The public counter a find UI needs from an active search: how many matches the
 // needle has right now, and which one the engine currently has selected. The engine
-// stores no derived count -- `Terminal.searchStatus` recomputes this from the same
-// live match scan navigation uses -- so this type exists to hand the counter across
+// stores no separate count -- `Terminal.searchStatus` reads this from the same ordered
+// match index navigation uses -- so this type exists to hand the counter across
 // the module boundary as one atomic value, which is what keeps a counter from ever
 // showing a total and an index taken from different scans.
 // It is an enum rather than a `(total, selected?)` pair so the states a counter must

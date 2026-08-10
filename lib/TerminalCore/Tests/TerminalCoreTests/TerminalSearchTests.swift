@@ -218,15 +218,12 @@ struct TerminalSearchTests {
         #expect(terminal.searchStatus == nil)
     }
 
-    @Test("navigating a failed search adopts the newest match once output supplies one")
-    func navigationReattachesAfterAFailedNeedleStartsMatching() throws {
+    @Test("a failed search resolves immediately once output supplies a match")
+    func failedNeedleResolvesWhenItStartsMatching() throws {
         // Intent: a needle that matched nothing when it was typed, followed by output
-        //   containing it, has the next `searchNext`/`searchPrevious` adopt the newest
-        //   match instead of refusing to move.
-        // Why it exists: without the re-attach the engine sits in "matches exist but
-        //   none is selected" -- the overlay shows a count with no highlight and Cmd-G
-        //   does nothing until the user retypes a character. That state is exactly what
-        //   the total status enum forbids, so navigation has to close it.
+        //   containing it, immediately selects the occurrence nearest its stored position.
+        // Why it exists: the old occurrence-based model sat in "matches exist but none
+        //   selected" until a navigation command reattached it.
         var terminal = try #require(Terminal(columns: 8, rows: 4))
         terminal.feed(Array("zzz".utf8))
 
@@ -234,11 +231,10 @@ struct TerminalSearchTests {
         #expect(found == false)
         #expect(terminal.searchStatus == .empty)
 
-        // The status read has no occurrence to point at yet, so it names the match the
-        // re-attach below is about to select rather than an unselected count.
+        // The position resolves immediately when the new occurrence arrives.
         terminal.feed(Array("\r\nhit".utf8))
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.activeSearchMatchRange?.start.row == 1)
 
         let moved = terminal.searchNext()
         #expect(moved)
@@ -246,15 +242,13 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange?.start.row == 1)
     }
 
-    @Test("evicting the selected match keeps the needle and lets navigation re-attach")
-    func evictingTheSelectedMatchKeepsTheNeedle() throws {
+    @Test("evicting the selected match resolves the needle to a surviving occurrence")
+    func evictingTheSelectedMatchResolvesToASurvivor() throws {
         // Intent: when the row holding the selected match falls off the end of
         //   scrollback, the search stays open -- the needle survives, the status keeps
-        //   reporting the matches that remain, and the next navigation adopts one.
+        //   reporting the matches that remain, with a surviving one selected.
         // Why it exists: eviction used to drop the whole search rather than just its
-        //   occurrence, which made `searchNext` return false forever. The recovery for
-        //   exactly this state already existed (`reattachToNewestMatch`) and eviction
-        //   bypassed it by nulling the query too.
+        //   occurrence, which made `searchNext` return false forever.
         // Scenario: a user searches a busy pane, walks to an old match, and the tail
         //   keeps streaming until that match scrolls out of history. Enter then stopped
         //   responding and the overlay froze on its last count, with no way back except
@@ -275,34 +269,35 @@ struct TerminalSearchTests {
         terminal.feed(Array("\r\nb\r\nc\r\nhit".utf8))
 
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.activeSearchMatchRange != nil)
         let moved = terminal.searchNext()
         #expect(moved)
         #expect(terminal.activeSearchMatchRange != nil)
     }
 
-    @Test("overwriting the selected match keeps the needle and lets navigation re-attach")
-    func overwritingTheSelectedMatchKeepsTheNeedle() throws {
-        // Intent: output that rewrites the row holding the selected match drops the
-        //   occurrence and keeps the search itself open.
-        // Why it exists: the sibling of the eviction defect above, on the path that
-        //   invalidates by row intersection rather than by retention. It is reachable
-        //   without any scrollback at all -- a `\r`-redrawn progress line is enough.
-        // Scenario: a user searches, then the running program repaints the matched row.
-        var terminal = try #require(Terminal(columns: 8, rows: 3))
-        terminal.feed(Array("hit\r\nzzz\r\nhit".utf8))
+    @Test("overwriting the selected match resolves to the nearest survivor and ties later")
+    func overwritingTheSelectedMatchResolvesToTheNearestSurvivor() throws {
+        // Intent: output that destroys the selected occurrence leaves exactly one
+        //   surviving occurrence selected, choosing the later one when distances tie.
+        // Why it exists: dropping the occurrence created a state with matches but no
+        //   highlight, and at-or-after selection could jump arbitrarily far through a pane.
+        // Scenario: a progress row has three evenly spaced matches, the middle one is
+        //   selected, and a redraw overwrites only that middle occurrence.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("hit hit hit".utf8))
 
         let found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
-
-        // Rewrites row 1 -- where `beginSearch` left the selected (newest) match.
-        terminal.feed(Array("\u{1B}[3;1HZZZ".utf8))
-
-        #expect(terminal.activeSearchMatchRange == nil)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
         let moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.activeSearchMatchRange?.start.column == 4)
+        let viewportTop = terminal.scrollProjection.topRow
+
+        terminal.feed(Array("\u{1B}[1;5Hxxx".utf8))
+
+        #expect(terminal.activeSearchMatchRange?.start.column == 8)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.scrollProjection.topRow == viewportTop)
     }
 
     @Test("the alternate screen suppresses both search reads")
@@ -332,40 +327,166 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange != nil)
     }
 
-    @Test("every search mutation damages the departing and arriving match rows")
-    func searchMutationsRecordRowDamage() throws {
-        // Intent: begin, next, previous, clear, and a needle that transitions from
-        //   matching to not matching each record row damage covering both the match
-        //   that left and the match that arrived -- including when the match moves
-        //   entirely within the current viewport, so nothing scrolls.
-        // Why it exists: the renderer redraws only damaged rows. A search mutation
-        //   that publishes `.none` damage leaves the previous highlight painted and
-        //   the new one invisible.
+    @Test("every search mutation damages the whole viewport")
+    func searchMutationsRecordFullDamage() throws {
+        // Intent: begin, next, previous, clear, and needle replacement repaint every
+        //   viewport row because any row's visible match set may have changed.
+        // Why it exists: per-match damage encoded the old one-highlight model and can
+        //   leave stale pixels when the renderer consumes the complete visible set.
         var terminal = try #require(Terminal(columns: 8, rows: 4))
         terminal.feed(Array("hit\r\nzzz\r\nhit\r\nyyy".utf8))
         _ = terminal.drainDamage()
 
         var moved = terminal.beginSearch("hit")
         #expect(moved)
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+        #expect(terminal.drainDamage() == .full)
 
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 2]))
+        #expect(terminal.drainDamage() == .full)
 
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 2]))
+        #expect(terminal.drainDamage() == .full)
 
         moved = terminal.beginSearch("nope")
         #expect(moved == false)
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+        #expect(terminal.drainDamage() == .full)
 
         moved = terminal.beginSearch("hit")
         #expect(moved)
         _ = terminal.drainDamage()
         terminal.clearSearch()
-        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+        #expect(terminal.drainDamage() == .full)
+    }
+
+    @Test("content damage reaches rows where a multiline match begins")
+    func contentDamageWidensByNeedleSpan() throws {
+        // Intent: writing the last unit of a multiline match damages the earlier row
+        //   where the newly highlighted occurrence begins.
+        // Why it exists: row-local content damage otherwise leaves the first half of a
+        //   cross-row highlight unchanged until an unrelated repaint.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("ABC\r\n".utf8))
+        _ = terminal.beginSearch("ABC\nZ")
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("Z".utf8))
+        let damage = terminal.drainDamage()
+
+        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        #expect(damage.contains(row: 0))
+        #expect(damage.contains(row: 1))
+    }
+
+    @Test("scroll shifts are refused while a search is open")
+    func openSearchForcesFullScrollDamage() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("a\r\nb\r\nc".utf8))
+        _ = terminal.beginSearch("a")
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\r\nd".utf8))
+
+        #expect(terminal.drainDamage() == .full)
+    }
+
+    @Test("windowed matches equal the whole ordered sequence restricted to the window")
+    func windowedMatchesEqualWholeSequenceRestriction() throws {
+        // Intent: every row-window read returns the whole search sequence restricted
+        //   to matches intersecting that window across blanks, wraps, and storage seams.
+        // Why it exists: rendering must stay bounded without inventing separate matching
+        //   semantics at viewport edges or the history/live seam.
+        let cases = [
+            (columns: 4, rows: 4, before: "ABCDABCDABCD", after: "", needle: "DAB"),
+            (columns: 4, rows: 2, before: "one\r\ntwo\r\nthr", after: "", needle: "o\nt"),
+            (columns: 4, rows: 2, before: "old\r\nABCDEFG", after: "HIJK", needle: "\nA"),
+            (columns: 4, rows: 2, before: "A", after: "\r\n\r\nB", needle: "\n"),
+            (columns: 4, rows: 2, before: "A", after: "\r\n\r\n", needle: "\n"),
+        ]
+
+        for testCase in cases {
+            var terminal = try #require(Terminal(columns: testCase.columns, rows: testCase.rows))
+            terminal.feed(Array(testCase.before.utf8))
+            _ = terminal.beginSearch(testCase.needle)
+            terminal.feed(Array(testCase.after.utf8))
+
+            let totalRows = terminal.scrollProjection.totalRows
+            for lower in 0..<totalRows {
+                for upper in (lower + 1)...totalRows {
+                    let window = lower..<upper
+                    #expect(
+                        terminal.searchMatchRanges(in: window)
+                            == terminal.scannedSearchMatchRanges(in: window)
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("the retained index equals a full rescan across output tail changes and resize")
+    func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ABCDAB".utf8))
+        _ = terminal.beginSearch("DAB")
+
+        assertSearchIndexMatchesFullScan(terminal)
+        terminal.feed(Array("CD\r\nDAB".utf8))
+        assertSearchIndexMatchesFullScan(terminal)
+        terminal.resize(columns: 3, rows: 3)
+        assertSearchIndexMatchesFullScan(terminal)
+        terminal.resize(columns: 6, rows: 2)
+        assertSearchIndexMatchesFullScan(terminal)
+    }
+
+    @Test("blank rows contribute boundaries only when later content exists")
+    func blankRowBoundariesFollowTheFullProjection() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("A".utf8))
+        _ = terminal.beginSearch("\n")
+        #expect(terminal.searchStatus == .empty)
+
+        terminal.feed(Array("\r\n\r\nB".utf8))
+
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        assertSearchIndexMatchesFullScan(terminal)
+
+        var trailing = try #require(Terminal(columns: 4, rows: 4))
+        trailing.feed(Array("A\r\n".utf8))
+        _ = trailing.beginSearch("\n")
+        #expect(trailing.searchStatus == .empty)
+        assertSearchIndexMatchesFullScan(trailing)
+    }
+
+    @Test("navigation cost stays bounded across quiet and streaming history depths")
+    func navigationUsesTheOrderedIndex() throws {
+        func measuredRows(depth: Int, streaming: Bool) throws -> Int {
+            var terminal = try #require(Terminal(columns: 8, rows: 3))
+            terminal.feed(Array("hit\r\n".utf8))
+            if streaming { _ = terminal.beginSearch("hit") }
+            for index in 0..<depth {
+                terminal.feed(Array("row\(index)\r\n".utf8))
+            }
+            terminal.feed(Array("hit\r\nlast".utf8))
+            if streaming == false { _ = terminal.beginSearch("hit") }
+
+            let materializations = WholeProjectionCounter.measure {
+                _ = terminal.searchNext()
+                _ = terminal.searchPrevious()
+                _ = terminal.searchStatus
+            }
+            #expect(materializations == 0)
+            return ProjectionRowCounter.measure {
+                _ = terminal.searchNext()
+            }
+        }
+
+        for streaming in [false, true] {
+            let shallowRows = try measuredRows(depth: 20, streaming: streaming)
+            let deepRows = try measuredRows(depth: 200, streaming: streaming)
+            #expect(shallowRows <= 6)
+            #expect(deepRows <= shallowRows)
+        }
     }
 
     @Test("the reported total grows as matching output arrives under an open search")
@@ -386,9 +507,11 @@ struct TerminalSearchTests {
 
         terminal.feed(Array("\r\nhit".utf8))
         #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+        assertSearchIndexMatchesFullScan(terminal)
 
         terminal.feed(Array("\r\nhit".utf8))
         #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+        assertSearchIndexMatchesFullScan(terminal)
     }
 
     @Test("re-searching a needle after it was cleared sees output that arrived meanwhile")
@@ -443,8 +566,21 @@ struct TerminalSearchTests {
         // Each further row now evicts one from the front, taking a match with it.
         terminal.feed(Array("\r\nd".utf8))
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        assertSearchIndexMatchesFullScan(terminal)
 
         terminal.feed(Array("\r\ne\r\nf".utf8))
         #expect(terminal.searchStatus == .empty)
+        assertSearchIndexMatchesFullScan(terminal)
     }
+}
+
+private func assertSearchIndexMatchesFullScan(
+    _ terminal: Terminal,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let rows = 0..<terminal.scrollProjection.totalRows
+    #expect(
+        terminal.searchMatchRanges(in: rows) == terminal.scannedSearchMatchRanges(in: rows),
+        sourceLocation: sourceLocation
+    )
 }

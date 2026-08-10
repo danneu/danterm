@@ -1,4 +1,4 @@
-// Row-intersection invalidation proofs for content-derived inspection state and selection survival.
+// Row-mutation proofs for position-based search, content-derived links, and selection survival.
 import Testing
 
 @testable import TerminalCore
@@ -50,7 +50,7 @@ struct TerminalInspectionInvalidationTests {
         }
     }
 
-    @Test("row rotations preserve selection and clear intersecting search matches")
+    @Test("row rotations preserve selection and resolve search against surviving matches")
     func rowMutationMatrix() throws {
         let sequences = [
             "\u{1B}[2;3r\u{1B}[2;1H\u{1B}[L",
@@ -64,7 +64,11 @@ struct TerminalInspectionInvalidationTests {
             var intersecting = try makeSubject(selectedRow: 1)
             intersecting.feed(Array(sequence.utf8))
             #expect(intersecting.selectionRange != nil)
-            #expect(intersecting.activeSearchMatchRange == nil)
+            let intersectingRows = 0..<intersecting.scrollProjection.totalRows
+            #expect(
+                (intersecting.activeSearchMatchRange != nil)
+                    == (intersecting.scannedSearchMatchRanges(in: intersectingRows).isEmpty == false)
+            )
 
             var disjoint = try makeSubject(selectedRow: 0)
             disjoint.feed(Array(sequence.utf8))
@@ -88,7 +92,7 @@ struct TerminalInspectionInvalidationTests {
         }
     }
 
-    @Test("scrollback-tail wrap and spacer edits invalidate that retained row")
+    @Test("scrollback-tail wrap and spacer edits resolve search from live content")
     func scrollbackTailEdits() throws {
         var wrap = try #require(Terminal(columns: 4, rows: 2))
         wrap.feed(Array("ABCDEFGHI".utf8))
@@ -100,7 +104,7 @@ struct TerminalInspectionInvalidationTests {
         #expect(foundWrap)
         wrap.feed(Array("\u{1B}[1;1H\u{1B}[L".utf8))
         #expect(wrap.selectionRange != nil)
-        #expect(wrap.activeSearchMatchRange == nil)
+        #expect(wrap.activeSearchMatchRange != nil)
 
         var spacer = try #require(Terminal(columns: 3, rows: 1))
         spacer.moveCursor(row: 0, column: 2)
@@ -131,12 +135,12 @@ struct TerminalInspectionInvalidationTests {
         #expect(terminal.activeSearchMatchRange == nil)
     }
 
-    @Test("a hard-boundary match excludes its end row at column zero")
+    @Test("a hard-boundary match survives edits on either adjacent row while the break remains")
     func hardBoundaryEndRowIsExclusive() throws {
-        // Intent: a newline-only match is invalidated by its source row, not by
-        //   content changes on the row reached by its exclusive endpoint.
-        // Why it exists: row intersection can accidentally treat the end row as
-        //   inclusive even when the half-open range ends at column zero.
+        // Intent: a newline-only match remains selected while edits preserve the
+        //   hard boundary itself, regardless of which adjacent row changes.
+        // Why it exists: row-based invalidation used to retire a still-valid occurrence
+        //   even though a full rescan continued to find the same hard break.
         // Scenario: search selects the hard break between A and B, then B is
         //   overwritten without changing that break.
         var terminal = try #require(Terminal(columns: 4, rows: 2))
@@ -148,7 +152,7 @@ struct TerminalInspectionInvalidationTests {
 
         #expect(terminal.activeSearchMatchRange != nil)
         terminal.feed(Array("\u{1B}[1;1HD".utf8))
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.activeSearchMatchRange != nil)
     }
 
     @Test("wide wrapping invalidates overwritten continuation rows")
