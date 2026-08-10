@@ -1,14 +1,15 @@
 # By-construction performance survey
 
 Research started: 2026-08-06.
+Research completed: 2026-08-09.
 Continues: [18-cpu-renderer-optimization-leads.md](../18-cpu-renderer-optimization-leads.md) (`18/D7`),
 [28-retained-row-optimizations/README.md](../28-retained-row-optimizations/README.md) (`28/D10`),
 [31-logical-line-scrollback/README.md](../31-logical-line-scrollback/README.md) (`31/D5`).
 
 - [findings.md](findings.md) -- the append-only evidence chain; F1-F8 are the
   survey's directly verified code-reads and probes.
-- [decisions.md](decisions.md) -- the auditable decision log; currently holds
-  the three standing tensions this survey inherited rather than resolved.
+- [decisions.md](decisions.md) -- the auditable decision log for the survey's
+  standing rules, selected directions, and rejected experiments.
 - [2026-08-07-stale-wrap-claim-line-fusion.md](2026-08-07-stale-wrap-claim-line-fusion.md) -- session notes
   for the stale-wrap-claim scrollback fusion found and fixed while this
   survey ran: the ablated bug, the two refuted fix designs, and the shipped
@@ -212,7 +213,7 @@ core at the 75 ms coalescing rate. `H4` is therefore **answered for the sweep an
 still open for the rest**: checkpoint capture, IPC encode, snapshot construction
 and the key monitor remain uninstrumented.
 
-## Candidate direction, pending evidence
+## Candidate directions and evidence gates
 
 Provisional, and deliberately ordered by *confidence times reach* rather than by
 predicted percentage:
@@ -831,7 +832,8 @@ reopening condition, and argues that condition is met.
   arms both arrive without a timer. The compile-only app build and all 75 local
   gate steps pass. Doc 25 records the energy-side correction and result in
   `25/F7` and its Phase 1 ledger.
-- [ ] `T23` RESEARCH -- **Scope the reconcile sweep.** Gated on `T6`. Every
+- [x] `T23` **REJECTED as a speed task; PARKED as a complexity refactor
+  (`F14`, `F44`)** -- **Scope the reconcile sweep.** Gated on `T6`. Every
   sweep rebuilds the whole model's view state for an event that named one pane,
   up to 13 Hz under shell-driven title/cwd/progress messages, and boxes a fresh
   `ContainerShape` tree per tab to compare it. Ideal: `update()` returns a
@@ -852,6 +854,10 @@ reopening condition, and argues that condition is met.
   tab per sweep (each one a tree walk plus two `NSHomeDirectory()` calls) and is
   half the sweep at the realistic size, and `sessionBell`'s `tabForPane` scan is
   the only `update()` half whose cost grows with the model.
+  **Closure:** the measured 61 us at the realistic three-pane size does not meet
+  the reconciliation ADR's reopening bar, and no independent correctness problem
+  requires the scoped design. Do not implement it for this survey. Reopen only
+  for a concrete high-pane report or a separately approved complexity objective.
 
 ## Rejected
 
@@ -927,14 +933,15 @@ future reopening needs a new rule against new evidence.
 - **`sparse-spans-max` and `synchronized-frames` issue no verdict** (`29/D3`,
   `23/D4`). Their topology and coverage checks are still useful for diagnosis;
   their CPU differences are not decision-bearing.
-- The survey was read-only. No benchmark and no profile was run, because six
-  concurrent agents would have poisoned any measurement. The only measurement
-  taken is `F6`'s font ink-extent probe, which is a static query with no timing
-  and no contention.
+- The initial six-agent sweep was read-only. No benchmark or profile ran during
+  that concurrent pass because the agents would have poisoned each other's
+  measurements. The later gated tasks ran their own isolated instruments and
+  recorded them in the findings.
 
 ## Outcome
 
-Investigation in progress. **Phase 1 is complete: `T1` through `T6` have all
+Investigation complete. **Every ledger task is landed, parked, or rejected, and
+no unchecked task remains.** Phase 1 completed with `T1` through `T6` all
 run. Phase 2 is banked: `T8` and `T7` landed as one change (`F16`,
 `F17`, `D6`), `T10` landed against `D8` (`F20`), and `T9` landed against `D7`
 in both halves with `T20` riding along -- the engine/planner half in `F21`,

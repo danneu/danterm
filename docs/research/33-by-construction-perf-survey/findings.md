@@ -3514,3 +3514,27 @@ performance verdict.
 - Decision and next action: reject T19 and restore the pre-experiment production
   representation. `28/H8` becomes the next ranked option, subject to its own
   decision. Do not start T23.
+
+### F44 -- T23 fails its reopening bar, and the survey is closed
+
+- Status: T23 closed without implementation; research 33 complete.
+- Date, baseline, and investigator: 2026-08-09, documentation closure after
+  `d5166532`, Codex. No new probe or production change was needed.
+- Evidence: F14 already ran T23's prescribed T6 counter. A message naming one
+  pane performs four whole-model pane walks, twelve projections, and a rebuilt
+  shape forest, but costs 61 us at the realistic 3-tab / 3-pane size and 169 us
+  at 8 tabs / 16 panes. Those are 0.08% and 0.23% of one core at the 75 ms
+  coalescing rate. The reconciliation ADR's written reopening bar is a concrete
+  high-pane report; this evidence does not meet it.
+- Decision: reject T23 as a speed task. Park the scoped-pass design as a possible
+  complexity refactor under D1, but do not implement it absent either a concrete
+  high-pane report or a separately approved correctness or complexity objective.
+  The ideal remains explicit: `update()` would emit a change set from existing
+  mutation chokepoints and structural identity would be a setter-maintained
+  revision, not a shared precomputed `allPanes` context bag.
+- Closure audit: T23 was the only unchecked ledger item. D2's stale "pending T3"
+  status was updated to its F21 landing, and D9's stale pre-implementation status
+  was updated to its F27 landing. Every research 33 task is now landed, parked,
+  or rejected, with no implementation work hidden by the closure.
+- Next action outside this survey: decide whether to open `28/H8` deferred
+  packing under its own decision. Research 33 does not authorize that work.

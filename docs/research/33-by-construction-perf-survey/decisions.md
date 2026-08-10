@@ -1,9 +1,8 @@
 # Decisions -- by-construction performance survey
 
-One entry per stable ID. `D1` is a standing rule for the whole doc; `D2`-`D4`
-record the three tensions the survey inherited from earlier docs rather than
-resolved, so that the next agent argues them deliberately instead of
-rediscovering them.
+One entry per stable ID. `D1` is a standing rule for the whole doc; the later
+entries record the directions, landings, and rejections that resolved the
+survey's inherited tensions.
 
 ### D1 -- a complexity win counts as a win, on its own evidence
 
@@ -50,7 +49,8 @@ rediscovering them.
 
 ### D2 -- damage carrying words: reopened as a complexity change, not as a speed claim
 
-- Status: **recommendation only; no direction taken.** Gated on `T3`.
+- Status: **implemented and verified as T20 riding on T9's engine/planner half
+  (`F21`).** No standalone damage-representation task remains.
 - Evidence used: `F2` (four independent verticals reached the same
   representation); `30/D2`, which rejected precisely this change and wrote *"do
   not reopen this for the sort"*; `27/F9`/`27/D2`, which rejected
@@ -83,7 +83,11 @@ rediscovering them.
 - Behavioral verification: the row set a consumer sees must be identical before
   and after -- an equality test over the two representations across the four
   corpora, plus the existing damage tests.
-- Decision and rationale: pending `T3`.
+- Decision and rationale: **take the word-carrying representation only as the
+  complexity rider D2 described.** T3 measured the redundant conversions, and
+  T9 supplied the independent representation change required by `30/D2`'s
+  reopening clause. F21 records the landed word seam, structural absence gate,
+  and behavioral equivalence coverage.
 
 ### D3 -- reject terminal-owned POD `GridCell` after its bounded experiment
 
@@ -159,7 +163,8 @@ rediscovering them.
   calibrated `slower` verdict of +190.33% on `terminal-feed`. The written gate
   says any such result rejects the experiment without a tuning pass. The
   implementation and its tests were removed; only the research record remains.
-  Exact next action: decide whether to open `28/H8`. Do not start T23.
+  Exact next action outside this survey: decide whether to open `28/H8`. T23 is
+  closed by F44.
 
 ### D4 -- `lastPlannedTerminal`: split the retention from the check
 
@@ -683,7 +688,7 @@ rediscovering them.
 
 ### D9 -- the glyph halo is derived per row from a measured ink envelope, with the full-row halo as the per-row fallback
 
-- Status: **direction set; implementation follows this entry.** The claim is a
+- Status: **implemented and verified in `F27`.** The claim is a
   **countable one under `D1`**: on an all-ASCII paced scroll, the store's apply
   shape falls from three erased and five planned full-width rows per damaged
   row (halo of the damage, halo of the halo) to the damaged rows themselves
@@ -794,3 +799,8 @@ rediscovering them.
   - `just test`, `just test-ui`, and `benchmark-confirm` against the pre-T14
     commit as the non-regression check with `F25`'s caveat on the three
     serialized-draw cells.
+- Decision and rationale: **derive reach per row and land the measured envelope.**
+  F27 records the implementation and gates: paced-scroll glyph submission fell
+  from 1,086 to 375 per frame, `bare-newline` fell from 76 to 20, byte equality
+  held across the directed arms, and the calibrated ladder reported
+  `incremental-mixed` faster by 13.23% with no standing regression.
