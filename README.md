@@ -435,7 +435,18 @@ open `/skills`; if `danterm` is not listed, restart the session.
 
 ## OpenAI Codex Integration
 
-Codex already works out of the box.
+Codex has native OSC 9 notifications, but its automatic terminal detection does
+not currently recognize DanTerm and falls back to a message-free terminal bell.
+Force OSC 9 in Codex's global settings file at `~/.codex/config.toml`:
+
+```toml
+[tui]
+notification_method = "osc9"
+```
+
+If the file already has a `[tui]` table, add only the
+`notification_method = "osc9"` line to that table instead of creating a second
+one. Restart existing Codex sessions after changing the setting.
 
 ## Shell Integration
 
