@@ -778,7 +778,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
         commands.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .bell, paneId: paneId,
-            title: "DanTerm", body: paneTitle, model: &model, now: now
+            title: "DanTerm", subtitle: nil, body: paneTitle, model: &model, now: now
         ))
         return commands
 
@@ -798,10 +798,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // rather than total alert volume. May replace with a better system later.
         markAlertsReadForPane(paneId, in: &model)
 
+        // OSC 9 carries no title field, so the resolved title -- not the raw
+        // report -- is what both the banner and the popover row show.
+        let presentation = alertPresentation(senderTitle: title, paneId: paneId, in: model)
+
         let now = env.now()
         let alert = AlertModel(
             id: AlertId(rawValue: env.newId()), kind: .desktopNotification, paneId: paneId,
-            title: title, body: body, createdAt: now, isUnread: true
+            title: presentation.title, body: body, createdAt: now, isUnread: true
         )
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
@@ -811,7 +815,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
         commands.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .desktopNotification, paneId: paneId,
-            title: title, body: body, model: &model, now: now
+            title: presentation.title, subtitle: presentation.subtitle, body: body,
+            model: &model, now: now
         ))
         return commands
 
@@ -2552,7 +2557,7 @@ private let notificationThrottleInterval: TimeInterval = 1
 /// Throttle macOS notification delivery: one per pane per kind every throttle interval.
 private func throttledNotification(
     alertId: AlertId, kind: AlertKind, paneId: PaneId,
-    title: String, body: String, model: inout AppModel, now: Date
+    title: String, subtitle: String?, body: String, model: inout AppModel, now: Date
 ) -> [Command] {
     let shouldNotify: Bool
     if let last = model.lastNotificationTime[paneId]?[kind] {
@@ -2565,5 +2570,7 @@ private func throttledNotification(
 
     model.lastNotificationTime[paneId, default: [:]][kind] = now
 
-    return [.sendNotification(alertId: alertId, title: title, body: body)]
+    return [.sendNotification(
+        alertId: alertId, paneId: paneId, title: title, subtitle: subtitle, body: body
+    )]
 }

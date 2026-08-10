@@ -51,7 +51,10 @@ enum Command {
     case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
 
     // System
-    case sendNotification(alertId: AlertId, title: String, body: String)
+    // `paneId` is carried for grouping alone: it becomes the banner's thread
+    // identifier so a chatty pane stacks into one Notification Center entry
+    // instead of one per alert. Click routing still keys off `alertId`.
+    case sendNotification(alertId: AlertId, paneId: PaneId, title: String, subtitle: String?, body: String)
     // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
     // todos in that tab (the same number the chrome's tab-todo badge shows).
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)

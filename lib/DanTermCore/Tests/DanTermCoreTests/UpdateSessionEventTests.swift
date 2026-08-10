@@ -486,7 +486,7 @@ import Testing
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
         #expect(model.alerts[0].paneId == paneId)
         #expect(hasEffect(commands) {
-            if case .sendNotification(_, let title, let body) = $0,
+            if case .sendNotification(_, _, let title, _, let body) = $0,
                title == "Hello", body == "World" { return true }
             return false
         }, "should send notification with OSC title/body")
@@ -508,7 +508,7 @@ import Testing
         #expect(model.alerts.count == 1, "should create alert")
         #expect(model.alerts[0].isUnread == true, "background pane alert should be unread")
         #expect(hasEffect(commands) {
-            if case .sendNotification(_, let t, let b) = $0,
+            if case .sendNotification(_, _, let t, _, let b) = $0,
                t == "Hello", b == "World" { return true }
             return false
         }, "should send notification with OSC 777 title/body")
@@ -532,7 +532,7 @@ import Testing
 
         let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
         #expect(hasEffect(commands) {
-            if case .sendNotification(_, let t, _) = $0, t == "Done" { return true }
+            if case .sendNotification(_, _, let t, _, _) = $0, t == "Done" { return true }
             return false
         }, "desktop notification should not be throttled by bell")
         #expect(model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] != nil, "should set lastNotificationTime for desktopNotification")

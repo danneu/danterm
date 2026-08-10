@@ -214,6 +214,13 @@ The first useful consumers are deliberately narrow:
 - an attached agent entering a genuinely supported waiting state in an
   unfocused pane fires the existing needs-attention notification whose click
   focuses that pane
+- notification titles name who raised the alert. `alertPresentation` already
+  resolves that title through a fallback chain -- the sender's own OSC 777
+  title, else the pane title -- and the attached agent session and the running
+  command report become the earlier tiers. This is the cheapest consumer that
+  proves a read-only snapshot actually reaches one, and it shares its title
+  formatting with the needs-attention notification above rather than growing a
+  second formatter
 
 CLI surface changes carry the standing `integrations/danterm/SKILL.md`
 co-update rule.
