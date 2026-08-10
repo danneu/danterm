@@ -29,10 +29,8 @@ extension TabColor {
 
 // MARK: - SidebarRowView
 
-/// NSTableRowView subclass that lets us pin a single row to AppKit's
-/// emphasized (accent-colored) selection drawing regardless of first-
-/// responder state. The terminal pane always holds first responder, so
-/// without this the focused tab would draw grey instead of blue.
+/// Owns full-width sidebar cell placement and keeps the focused row's selection
+/// emphasized while the terminal pane holds first responder.
 final class SidebarRowView: NSTableRowView {
     var forceEmphasizedSelection = false {
         didSet {
@@ -47,6 +45,23 @@ final class SidebarRowView: NSTableRowView {
     override var isEmphasized: Bool {
         get { (isSelected && forceEmphasizedSelection) || super.isEmphasized }
         set { super.isEmphasized = newValue }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // NSOutlineView resizes materialized rows without necessarily scheduling layout.
+        resizeHostedCells()
+    }
+
+    override func layout() {
+        super.layout()
+        resizeHostedCells()
+    }
+
+    private func resizeHostedCells() {
+        for cell in subviews.compactMap({ $0 as? NSTableCellView }) {
+            cell.frame = bounds
+        }
     }
 }
 
@@ -76,14 +91,6 @@ class SidebarOutlineView: NSOutlineView {
     /// custom caret button on the right side instead.
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         return .zero
-    }
-
-    /// Stretch all cells to full width (no indentation for child rows).
-    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
-        var frame = super.frameOfCell(atColumn: column, row: row)
-        frame.origin.x = 0
-        frame.size.width = bounds.width
-        return frame
     }
 
     /// Returns the tab whose alert badge contains `point` (in outline-view coords), or nil.
@@ -1266,6 +1273,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         accessoryStack.alignment = .centerY
         accessoryStack.spacing = 2
         accessoryStack.identifier = NSUserInterfaceItemIdentifier("groupAccessoryStack")
+        accessoryStack.setHuggingPriority(.required, for: .horizontal)
+        accessoryStack.setContentCompressionResistancePriority(.required, for: .horizontal)
         cell.addSubview(accessoryStack)
 
         // Thin separator line at top edge, hidden for the first group
@@ -1381,6 +1390,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             accessoryStack.alignment = .top
             accessoryStack.spacing = 3
             accessoryStack.identifier = accessoryStackId
+            accessoryStack.setHuggingPriority(.required, for: .horizontal)
+            accessoryStack.setContentCompressionResistancePriority(.required, for: .horizontal)
             cell.addSubview(accessoryStack)
 
             NSLayoutConstraint.activate([

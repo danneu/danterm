@@ -10,6 +10,148 @@ import Cocoa
 func sidebarRenameRecycleTests() {
     print("SidebarRenameRecycle")
 
+    uiTest("a resized sidebar row immediately resizes its materialized cell") {
+        // Intent: a hosted cell follows the row's complete bounds as soon as AppKit
+        //   changes the row frame, without requiring a later layout pass.
+        // Why it exists: NSOutlineView can resize an NSTableRowView without scheduling
+        //   layout on that row, leaving an already-materialized cell stale.
+        // Scenario: the sidebar row grows from 200 to 300 points after its cell exists,
+        //   through the same setFrameSize hook AppKit uses during sidebar resizing.
+        let row = SidebarRowView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        let cell = NSTableCellView(frame: row.bounds)
+        row.addSubview(cell)
+
+        row.setFrameSize(NSSize(width: 300, height: 40))
+
+        try uiExpect(cell.frame == row.bounds,
+            "materialized cell should follow the resized row without a layout pass")
+    }
+
+    uiTest("sidebar cells and accessories track the visible content width") {
+        // Intent: group and tab cells span the clip view, and their trailing
+        //   accessories keep the declared inset at initial, narrow, and wide sizes.
+        // Why it exists: NSOutlineView can resize a row while leaving its already-
+        //   materialized cell at the old width, which strands accessories beside titles.
+        // Scenario: a visible legacy scroller narrows the content area while the user
+        //   drags the sidebar through its supported 200...300 point range.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let groupA = GroupId(); let groupB = GroupId()
+        let tab = TabId(); let anchor = TabId()
+        let overflowTabs = (0..<12).map { _ in
+            (TabId(), "overflow")
+        }
+        var model = renameRecycleModel([
+            (groupA, "Primary", false, [(tab, "short")] + overflowTabs),
+            (groupB, "Secondary", false, [(anchor, "anchor")]),
+        ], selected: tab)
+        model.alerts = [renameRecycleBellAlert(paneId: model.groups[0].tabs[0].focusedPaneId)]
+
+        let scroll = findRenameRecycleScrollView(in: sidebar)!
+        scroll.scrollerStyle = .legacy
+        scroll.autohidesScrollers = false
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+
+        for width in [260.0, 200.0, 300.0] {
+            window.setContentSize(NSSize(width: width, height: 140))
+            materializeRenameRecycleRows(sidebar, outline: outline)
+
+            let groupCell = try renameRecycleCell(for: .group(groupA), in: outline)
+            let tabCell = try renameRecycleCell(for: .tab(tab), in: outline)
+            try expectCellFillsVisibleContent(groupCell, scroll: scroll, label: "group at \(width)")
+            try expectCellFillsVisibleContent(tabCell, scroll: scroll, label: "tab at \(width)")
+            try expectAccessoryTrailingInset(
+                in: groupCell, identifier: "groupCaretButton", inset: 2,
+                scroll: scroll, label: "group at \(width)")
+            try expectAccessoryTrailingInset(
+                in: tabCell, identifier: "bellDot", inset: 2,
+                scroll: scroll, label: "tab at \(width)")
+        }
+    }
+
+    uiTest("titles and inline rename do not move the accessory lane") {
+        // Intent: short and long titles truncate before a visible alert badge and
+        //   preserve its trailing alignment through rename commit and cancellation.
+        // Why it exists: title intrinsic size and field-editor teardown must not become
+        //   accidental authorities for accessory placement.
+        // Scenario: the user renames a badged tab at the narrow sidebar limit, commits
+        //   a long draft, then starts another rename and cancels it.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        window.setContentSize(NSSize(width: 200, height: 180))
+        let groupA = GroupId(); let groupB = GroupId()
+        let tab = TabId(); let anchor = TabId()
+        var model = renameRecycleModel([
+            (groupA, "Primary", false, [(tab, "short")]),
+            (groupB, "Secondary", false, [(anchor, "anchor")]),
+        ], selected: tab)
+        model.alerts = [renameRecycleBellAlert(paneId: model.groups[0].tabs[0].focusedPaneId)]
+        var projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        let scroll = findRenameRecycleScrollView(in: sidebar)!
+        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
+        guard let titleField = cell.textField else {
+            throw UITestFailure(message: "tab cell should have a title field")
+        }
+
+        try expectTabTitlePrecedesAccessory(in: cell)
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "short display title")
+
+        sidebar.beginRenamingTab(tab)
+        let longTitle = String(repeating: "long title ", count: 12)
+        titleField.stringValue = longTitle
+        window.contentView?.layoutSubtreeIfNeeded()
+        try expectTabTitlePrecedesAccessory(in: cell)
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "long rename draft")
+        guard let commitEditor = titleField.currentEditor() as? NSTextView else {
+            throw UITestFailure(message: "rename should install a field editor")
+        }
+        _ = sidebar.control(
+            titleField, textView: commitEditor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        model.groups[0].tabs[0].customTitle = longTitle
+        projection = applyRenameRecycleTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        materializeRenameRecycleRows(sidebar, outline: outline)
+        try uiExpect(titleField.stringValue == longTitle,
+            "committed long title should reach display mode")
+        try expectTabTitlePrecedesAccessory(in: cell)
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "after rename commit")
+
+        sidebar.beginRenamingTab(tab)
+        titleField.stringValue = "cancelled draft"
+        guard let cancelEditor = titleField.currentEditor() as? NSTextView else {
+            throw UITestFailure(message: "second rename should install a field editor")
+        }
+        _ = sidebar.control(
+            titleField, textView: cancelEditor,
+            doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        materializeRenameRecycleRows(sidebar, outline: outline)
+        try uiExpect(titleField.stringValue == longTitle,
+            "rename cancellation should restore the committed title")
+        try expectTabTitlePrecedesAccessory(in: cell)
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "after rename cancellation")
+
+        model.groups[0].tabs[0].customTitle = "changed"
+        _ = applyRenameRecycleTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+        materializeRenameRecycleRows(sidebar, outline: outline)
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "after title change")
+    }
+
     uiTest("tab and group rename fields retain their title lanes") {
         // Intent: editable tab and group title fields keep useful horizontal space,
         //   including when the tab shares its leading lane with a jump badge.
@@ -341,22 +483,31 @@ func sidebarRenameRecycleTests() {
 
         // Spawn a new tab in the other group -- the insertTab op makes a cell,
         // and NSOutlineView may hand back the stranded one from its reuse pool.
-        let spawnedModel = renameRecycleModel([
+        var spawnedModel = renameRecycleModel([
             (groupA, "A", true, [(edited, "alpha")]),
             (groupB, "B", false, [(anchor, "anchor"), (spawned, "fresh tab")]),
         ])
+        spawnedModel.alerts = [renameRecycleBellAlert(
+            paneId: spawnedModel.groups[1].tabs[1].focusedPaneId)]
         _ = applyRenameRecycleTransition(
             old: collapsedProjection, newModel: spawnedModel,
             to: sidebar, outline: outline, runtime: runtime)
 
         let row = try renameRecycleRow(for: spawned, in: outline)
         let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as! NSTableCellView
+        try uiExpect(cell === editedCell,
+            "precondition: the inserted row should reuse the edited cell")
         try uiExpect(cell.textField?.isEditable == false,
             "freshly inserted tab row must not inherit rename editability from a recycled cell")
         try uiExpect(cell.textField?.currentEditor() == nil,
             "freshly inserted tab row must not have a live field editor")
         try uiExpect(cell.textField?.stringValue == "fresh tab",
             "freshly inserted tab row must display the model title")
+        let scroll = findRenameRecycleScrollView(in: sidebar)!
+        try expectCellFillsVisibleContent(cell, scroll: scroll, label: "recycled tab")
+        try expectAccessoryTrailingInset(
+            in: cell, identifier: "bellDot", inset: 2,
+            scroll: scroll, label: "recycled tab")
     }
 }
 
@@ -521,4 +672,88 @@ private func findRenameRecycleOutlineView(in view: NSView) -> NSOutlineView? {
         }
     }
     return nil
+}
+
+/// Finds the production scroll view without exposing it on SidebarView solely for tests.
+private func findRenameRecycleScrollView(in view: NSView) -> NSScrollView? {
+    if let scroll = view as? NSScrollView { return scroll }
+    for subview in view.subviews {
+        if let found = findRenameRecycleScrollView(in: subview) {
+            return found
+        }
+    }
+    return nil
+}
+
+/// Builds the unread alert needed to keep the tab's trailing badge visible.
+private func renameRecycleBellAlert(paneId: PaneId) -> AlertModel {
+    AlertModel(
+        id: AlertId(),
+        kind: .bell,
+        paneId: paneId,
+        title: "Bell",
+        body: "",
+        createdAt: Date(timeIntervalSince1970: 0),
+        isUnread: true)
+}
+
+/// Compares a materialized cell with the clip view in one coordinate space.
+private func expectCellFillsVisibleContent(
+    _ cell: NSTableCellView,
+    scroll: NSScrollView,
+    label: String
+) throws {
+    let clip = scroll.contentView
+    let frame = clip.convert(cell.bounds, from: cell)
+    try uiExpect(abs(frame.minX - clip.bounds.minX) < 0.5,
+        "\(label) cell should meet the visible leading edge")
+    try uiExpect(abs(frame.maxX - clip.bounds.maxX) < 0.5,
+        "\(label) cell should meet the visible trailing edge")
+}
+
+/// Verifies a cell-relative accessory keeps its production trailing inset from the clip view.
+private func expectAccessoryTrailingInset(
+    in cell: NSTableCellView,
+    identifier: String,
+    inset: CGFloat,
+    scroll: NSScrollView,
+    label: String
+) throws {
+    guard let accessory = findRenameRecycleDescendant(
+        in: cell, identifier: NSUserInterfaceItemIdentifier(identifier))
+    else {
+        throw UITestFailure(message: "missing \(identifier)")
+    }
+    let clip = scroll.contentView
+    let frame = clip.convert(accessory.bounds, from: accessory)
+    let actualInset = clip.bounds.maxX - frame.maxX
+    try uiExpect(abs(actualInset - inset) <= 0.5,
+        "\(label) accessory should keep inset \(inset), got \(actualInset)")
+}
+
+/// Finds an identified control inside the cell's nested stack-view hierarchy.
+private func findRenameRecycleDescendant(
+    in view: NSView,
+    identifier: NSUserInterfaceItemIdentifier
+) -> NSView? {
+    if view.identifier == identifier { return view }
+    for subview in view.subviews {
+        if let found = findRenameRecycleDescendant(in: subview, identifier: identifier) {
+            return found
+        }
+    }
+    return nil
+}
+
+/// Pins truncation behavior without depending on the title's exact rendered width.
+private func expectTabTitlePrecedesAccessory(in cell: NSTableCellView) throws {
+    guard let leading = cell.subviews.first(where: {
+        $0.identifier?.rawValue == "tabLeadingStack"
+    }), let accessory = cell.subviews.first(where: {
+        $0.identifier?.rawValue == "tabAccessoryStack"
+    }) else {
+        throw UITestFailure(message: "missing tab title or accessory lane")
+    }
+    try uiExpect(leading.frame.maxX <= accessory.frame.minX + 0.5,
+        "tab title lane should truncate before the accessory lane")
 }
