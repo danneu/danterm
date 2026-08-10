@@ -6,6 +6,47 @@ import TerminalCore
 
 /// Pins selection highlights to half-open current-stream ranges without perturbing other layers.
 struct SelectionRenderPlanningTests {
+    // Intent: selection over nearby painted surfaces follows one pane-wide
+    //   direction and remains distinct from the pane canvas.
+    // Why it exists: under Monokai Remastered, selection over Claude Code's
+    //   user-message band was darkened to near-canvas pixels while the nearby
+    //   Codex band was lightened, making one drag read as two different effects.
+    // Scenario: truecolor SGR paints the two observed band colors and one
+    //   selection spans both cells.
+    @Test("Selection across nearby dark surfaces stays light and clear of the canvas")
+    func selectionUsesPanePolarityAcrossPaintedSurfaces() throws {
+        let canvas = RenderColor(red: 12, green: 12, blue: 12)
+        let theme = try selectionTheme(
+            defaultForeground: RenderColor(red: 217, green: 217, blue: 217),
+            defaultBackground: canvas,
+            selectionBackground: RenderColor(red: 52, green: 52, blue: 52)
+        )
+        let backgrounds = [
+            RenderColor(red: 55, green: 55, blue: 55),
+            RenderColor(red: 41, green: 41, blue: 41),
+        ]
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+        terminal.feed(Array(
+            "\u{1B}[48;2;55;55;55mA\u{1B}[48;2;41;41;41mB".utf8
+        ))
+        terminal.setSelection(.init(
+            start: .init(row: 0, column: 0),
+            end: .init(row: 0, column: 2)
+        ))
+
+        let plan = planFrame(
+            for: terminal,
+            presentation: .init(theme: theme, isCursorVisible: false, cursorShape: .block)
+        )
+
+        #expect(plan.overlayRuns.count == 2)
+        for (run, background) in zip(plan.overlayRuns, backgrounds) {
+            #expect(perceivedBrightness(of: run.color) > perceivedBrightness(of: background))
+            #expect(brightnessSeparation(run.color, background) >= 40)
+            #expect(brightnessSeparation(run.color, canvas) >= 40)
+        }
+    }
+
     @Test("Selection adapts fill and text when a cell background matches the theme seed")
     func selectionAdaptsToResolvedCellBackground() throws {
         let collision = RenderColor(red: 56, green: 88, blue: 140)
@@ -140,7 +181,11 @@ struct SelectionRenderPlanningTests {
         ])
     }
 
-    private func selectionTheme() throws -> RenderTheme {
+    private func selectionTheme(
+        defaultForeground: RenderColor = RenderColor(red: 100, green: 101, blue: 102),
+        defaultBackground: RenderColor = RenderColor(red: 1, green: 2, blue: 3),
+        selectionBackground: RenderColor = RenderColor(red: 4, green: 5, blue: 6)
+    ) throws -> RenderTheme {
         let colors: [RenderColor] = (0..<16).map { index in
             let red = UInt8(index)
             let green = UInt8(index + 20)
@@ -150,10 +195,10 @@ struct SelectionRenderPlanningTests {
         let palette = try #require(RenderANSIColors(exactly: colors))
         return RenderTheme(
             ansiColors: palette,
-            defaultForeground: RenderColor(red: 100, green: 101, blue: 102),
-            defaultBackground: RenderColor(red: 1, green: 2, blue: 3),
+            defaultForeground: defaultForeground,
+            defaultBackground: defaultBackground,
             selectionForeground: RenderColor(red: 200, green: 201, blue: 202),
-            selectionBackground: RenderColor(red: 4, green: 5, blue: 6),
+            selectionBackground: selectionBackground,
             cursor: RenderColor(red: 7, green: 8, blue: 9),
             cursorText: RenderColor(red: 10, green: 11, blue: 12)
         )

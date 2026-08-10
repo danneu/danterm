@@ -49,6 +49,11 @@ struct OverlayContrastPropertyTests {
                 for style in styles {
                     try requireSeparation(style.foreground, style.fill, minimum: 100)
                 }
+                try requireSelectionContract(
+                    fill: styles[0].fill,
+                    background: background,
+                    theme: theme
+                )
                 #expect(resolveBrightnessSeparatedColor(
                     seed: styles[0].fill,
                     avoiding: [background],
@@ -75,9 +80,6 @@ struct OverlayContrastPropertyTests {
                     ) == cursor.fill)
                 }
 
-                if brightnessSeparation(theme.selectionBackground, background) >= 40 {
-                    #expect(styles[0].fill == theme.selectionBackground)
-                }
                 if brightnessSeparation(theme.cursor, background) >= 60 {
                     #expect(resolveCursorStyle(background: background, theme: theme).fill == theme.cursor)
                 }
@@ -114,30 +116,55 @@ struct OverlayContrastPropertyTests {
         }
     }
 
-    @Test("A fixed seed changes push direction at most once across background brightness")
-    func pushDirectionHasSingleDiscontinuity() {
-        let seed = RenderColor(red: 48, green: 132, blue: 216)
-        let seedBrightness = perceivedBrightness(of: seed)
-        var previousDirection: Int?
-        var flips = 0
+    @Test("Selection keeps the theme's ink-facing polarity over the full background domain")
+    func selectionPolarityOverFullBackgroundDomain() throws {
+        let themes = [
+            try grayscaleTheme(foreground: 240, canvas: 10, seed: 120),
+            try grayscaleTheme(foreground: 10, canvas: 240, seed: 120),
+            try grayscaleTheme(foreground: 220, canvas: 35, seed: 35),
+        ]
 
-        for component in UInt8.min...UInt8.max {
-            let background = RenderColor(red: component, green: component, blue: component)
-            let resolved = resolveBrightnessSeparatedColor(
-                seed: seed,
-                avoiding: [background],
-                minimumSeparation: 40
-            )
-            let direction = perceivedBrightness(of: resolved) - seedBrightness
-            guard direction != 0 else { continue }
-            let normalized = direction < 0 ? -1 : 1
-            if let previousDirection, previousDirection != normalized {
-                flips += 1
+        for theme in themes {
+            for component in UInt8.min...UInt8.max {
+                let background = grayscale(component)
+                let fill = resolveOverlayFill(
+                    state: .selection,
+                    background: background,
+                    theme: theme
+                )
+                try requireSelectionContract(fill: fill, background: background, theme: theme)
             }
-            previousDirection = normalized
         }
+    }
 
-        #expect(flips <= 1)
+    @Test("Selection remains total for adversarial canvas seed and surface positions")
+    func selectionTotalityAtGamutEdges() throws {
+        let probes: [(foreground: UInt8, canvas: UInt8, seed: UInt8, background: UInt8)] = [
+            (255, 250, 230, 0),
+            (255, 0, 0, 255),
+            (0, 255, 255, 0),
+            (0, 5, 5, 250),
+            (128, 128, 128, 128),
+        ]
+
+        for (index, probe) in probes.enumerated() {
+            let theme = try grayscaleTheme(
+                foreground: probe.foreground,
+                canvas: probe.canvas,
+                seed: probe.seed
+            )
+            let background = grayscale(probe.background)
+            let fill = resolveOverlayFill(
+                state: .selection,
+                background: background,
+                theme: theme
+            )
+            try requireSelectionContract(fill: fill, background: background, theme: theme)
+
+            if index == 0 {
+                #expect(perceivedBrightness(of: fill) == 210)
+            }
+        }
     }
 
     // Intent: the resolver returns an admissible color at the minimum achieved-
@@ -293,6 +320,134 @@ struct OverlayContrastPropertyTests {
             brightnessSeparation(first, second) >= minimum,
             sourceLocation: sourceLocation
         )
+    }
+
+    private func requireSelectionContract(
+        fill: RenderColor,
+        background: RenderColor,
+        theme: RenderTheme,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws {
+        let separation = overlayFillMinimumBrightnessSeparation
+        try requireSeparation(fill, background, minimum: separation, sourceLocation: sourceLocation)
+        try requireSeparation(
+            fill,
+            theme.defaultBackground,
+            minimum: separation,
+            sourceLocation: sourceLocation
+        )
+
+        let prefersLighter = perceivedBrightness(of: theme.defaultForeground)
+            >= perceivedBrightness(of: theme.defaultBackground)
+        let preferredOutcome = selectionOracleOutcome(
+            seed: theme.selectionBackground,
+            background: background,
+            canvas: theme.defaultBackground,
+            lighter: prefersLighter
+        )
+        let chosenSideIsLighter = preferredOutcome == nil ? !prefersLighter : prefersLighter
+        let expected = preferredOutcome ?? selectionOracleOutcome(
+            seed: theme.selectionBackground,
+            background: background,
+            canvas: theme.defaultBackground,
+            lighter: chosenSideIsLighter
+        )
+        #expect(expected != nil, sourceLocation: sourceLocation)
+        #expect(
+            OracleOutcome(
+                distance: abs(
+                    perceivedBrightness(of: fill)
+                        - perceivedBrightness(of: theme.selectionBackground)
+                ),
+                brightness: perceivedBrightness(of: fill)
+            ) == expected,
+            sourceLocation: sourceLocation
+        )
+        #expect(
+            isOnSelectionSide(
+                perceivedBrightness(of: fill),
+                background: perceivedBrightness(of: background),
+                lighter: chosenSideIsLighter
+            ),
+            sourceLocation: sourceLocation
+        )
+
+        let seedQualifies = brightnessSeparation(theme.selectionBackground, background) >= separation
+            && brightnessSeparation(theme.selectionBackground, theme.defaultBackground) >= separation
+            && isOnSelectionSide(
+                perceivedBrightness(of: theme.selectionBackground),
+                background: perceivedBrightness(of: background),
+                lighter: chosenSideIsLighter
+            )
+        #expect((fill == theme.selectionBackground) == seedQualifies, sourceLocation: sourceLocation)
+        #expect(
+            (0...255).contains(where: { target in
+                colorMoved(theme.selectionBackground, toBrightness: target) == fill
+            }),
+            sourceLocation: sourceLocation
+        )
+    }
+
+    private func selectionOracleOutcome(
+        seed: RenderColor,
+        background: RenderColor,
+        canvas: RenderColor,
+        lighter: Bool
+    ) -> OracleOutcome? {
+        let seedBrightness = perceivedBrightness(of: seed)
+        var best: OracleOutcome?
+        for target in 0...255 {
+            let candidate = colorMoved(seed, toBrightness: target)
+            let brightness = perceivedBrightness(of: candidate)
+            guard brightnessSeparation(candidate, background) >= overlayFillMinimumBrightnessSeparation
+                && brightnessSeparation(candidate, canvas) >= overlayFillMinimumBrightnessSeparation
+                && isOnSelectionSide(
+                    brightness,
+                    background: perceivedBrightness(of: background),
+                    lighter: lighter
+                )
+            else { continue }
+            let outcome = OracleOutcome(
+                distance: abs(brightness - seedBrightness),
+                brightness: brightness
+            )
+            if let best,
+               outcome.distance > best.distance
+                || (outcome.distance == best.distance && outcome.brightness >= best.brightness)
+            {
+                continue
+            }
+            best = outcome
+        }
+        return best
+    }
+
+    private func isOnSelectionSide(_ brightness: Int, background: Int, lighter: Bool) -> Bool {
+        if lighter {
+            return brightness >= background + overlayFillMinimumBrightnessSeparation
+        }
+        return brightness <= background - overlayFillMinimumBrightnessSeparation
+    }
+
+    private func grayscaleTheme(
+        foreground: UInt8,
+        canvas: UInt8,
+        seed: UInt8
+    ) throws -> RenderTheme {
+        let palette = try #require(RenderANSIColors(exactly: (0..<16).map { grayscale(UInt8($0)) }))
+        return RenderTheme(
+            ansiColors: palette,
+            defaultForeground: grayscale(foreground),
+            defaultBackground: grayscale(canvas),
+            selectionForeground: grayscale(foreground),
+            selectionBackground: grayscale(seed),
+            cursor: grayscale(seed),
+            cursorText: grayscale(foreground)
+        )
+    }
+
+    private func grayscale(_ component: UInt8) -> RenderColor {
+        RenderColor(red: component, green: component, blue: component)
     }
 
     private func loadBundledThemes() throws -> [RenderTheme] {

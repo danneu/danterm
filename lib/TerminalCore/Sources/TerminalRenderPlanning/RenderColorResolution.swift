@@ -52,6 +52,26 @@ func brightnessSeparation(_ first: RenderColor, _ second: RenderColor) -> Int {
 /// re-enters scaled by at most one. Three units, probed with one to spare.
 private let brightnessQuantizationDrift = 4
 
+/// Names which brightness pole gives selection one coherent meaning across a pane.
+private enum BrightnessDirection {
+    case lighter
+    case darker
+
+    var opposite: BrightnessDirection {
+        switch self {
+        case .lighter: .darker
+        case .darker: .lighter
+        }
+    }
+
+    func contains(_ brightness: Int, relativeTo background: Int, separation: Int) -> Bool {
+        switch self {
+        case .lighter: brightness >= background + separation
+        case .darker: brightness <= background - separation
+        }
+    }
+}
+
 /// Keeps a qualifying seed exact or moves it to the nearest brightness that
 /// clears every competing color, preferring the darker result on a tie.
 ///
@@ -67,9 +87,40 @@ func resolveBrightnessSeparatedColor(
     minimumSeparation: Int
 ) -> RenderColor {
     precondition((0...255).contains(minimumSeparation))
+    guard let best = bestBrightnessSeparatedColor(
+        seed: seed,
+        avoiding: colors,
+        minimumSeparation: minimumSeparation,
+        on: nil
+    ) else {
+        // Unreachable for the ladders this planner builds -- the widest is four
+        // points spaced by 40 in a 0...255 domain -- but a caller asking for a
+        // separation no color can satisfy has no answer to be given.
+        preconditionFailure("no color clears \(minimumSeparation) from every competing color")
+    }
+    return best
+}
+
+/// Finds the seed-nearest admissible color, optionally restricted to one side
+/// of a background so selection can prefer one pole without changing other rungs.
+private func bestBrightnessSeparatedColor(
+    seed: RenderColor,
+    avoiding colors: [RenderColor],
+    minimumSeparation: Int,
+    on side: (direction: BrightnessDirection, background: RenderColor)?
+) -> RenderColor? {
     let seedBrightness = perceivedBrightness(of: seed)
     let competing = colors.map(perceivedBrightness(of:))
-    guard competing.contains(where: { abs(seedBrightness - $0) < minimumSeparation }) else {
+    let seedIsOnRequestedSide = side.map { side in
+        side.direction.contains(
+            seedBrightness,
+            relativeTo: perceivedBrightness(of: side.background),
+            separation: minimumSeparation
+        )
+    } ?? true
+    guard !seedIsOnRequestedSide
+        || competing.contains(where: { abs(seedBrightness - $0) < minimumSeparation })
+    else {
         return seed
     }
 
@@ -87,6 +138,15 @@ func resolveBrightnessSeparatedColor(
             guard competing.allSatisfy({ abs(brightness - $0) >= minimumSeparation }) else {
                 continue
             }
+            if let side,
+               !side.direction.contains(
+                   brightness,
+                   relativeTo: perceivedBrightness(of: side.background),
+                   separation: minimumSeparation
+               )
+            {
+                continue
+            }
             let distance = abs(brightness - seedBrightness)
             if distance < bestDistance
                 || (distance == bestDistance && brightness < bestBrightness)
@@ -98,13 +158,34 @@ func resolveBrightnessSeparatedColor(
         }
     }
 
-    guard let best else {
-        // Unreachable for the ladders this planner builds -- the widest is four
-        // points spaced by 40 in a 0...255 domain -- but a caller asking for a
-        // separation no color can satisfy has no answer to be given.
-        preconditionFailure("no color clears \(minimumSeparation) from every competing color")
-    }
     return best
+}
+
+/// Resolves selection against both its cell surface and the pane canvas on the
+/// theme's ink-facing side, crossing sides only when the preferred gamut is empty.
+private func resolveSelectionFill(background: RenderColor, theme: RenderTheme) -> RenderColor {
+    let preferred: BrightnessDirection = perceivedBrightness(of: theme.defaultForeground)
+        >= perceivedBrightness(of: theme.defaultBackground)
+        ? .lighter
+        : .darker
+    let competitors = [background, theme.defaultBackground]
+    if let fill = bestBrightnessSeparatedColor(
+        seed: theme.selectionBackground,
+        avoiding: competitors,
+        minimumSeparation: overlayFillMinimumBrightnessSeparation,
+        on: (preferred, background)
+    ) {
+        return fill
+    }
+    guard let fill = bestBrightnessSeparatedColor(
+        seed: theme.selectionBackground,
+        avoiding: competitors,
+        minimumSeparation: overlayFillMinimumBrightnessSeparation,
+        on: (preferred.opposite, background)
+    ) else {
+        preconditionFailure("selection has no brightness clear of its surface and canvas")
+    }
+    return fill
 }
 
 /// Resolves one overlay fill against the cell background and every earlier
@@ -119,11 +200,7 @@ func resolveOverlayFill(
     background: RenderColor,
     theme: RenderTheme
 ) -> RenderColor {
-    let selection = resolveBrightnessSeparatedColor(
-        seed: theme.selectionBackground,
-        avoiding: [background],
-        minimumSeparation: overlayFillMinimumBrightnessSeparation
-    )
+    let selection = resolveSelectionFill(background: background, theme: theme)
     if state == .selection {
         return selection
     }
