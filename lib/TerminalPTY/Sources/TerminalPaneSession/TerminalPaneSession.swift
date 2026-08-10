@@ -245,8 +245,6 @@ public final class TerminalPaneSessionController {
     private let deliveryBoundary = TerminalPaneDeliveryBoundary()
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
-    private var lastPlannedTerminal: Terminal?
-    private var lastPlannedTheme: RenderTheme?
     /// This pane's own frame stream, so undamaged rows are copied from the frame
     /// this controller planned last rather than re-inspected. One planner per
     /// controller is what keeps the retained rows and `pendingDamage` in lineage.
@@ -255,7 +253,6 @@ public final class TerminalPaneSessionController {
     private var lastSubmittedDimensions: TerminalDimensions
     private var isVisible: Bool
     private var isRenderingAvailable = true
-    private var requiresCompleteFrame = false
     private var isTornDown = false
     private var didChildExit = false
     private var didEmitSessionEnded = false
@@ -717,7 +714,6 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false, available != isRenderingAvailable else { return }
         isRenderingAvailable = available
         guard available else { return }
-        requiresCompleteFrame = true
         pendingDamage.formUnion(.full)
         let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
         guard case .frameState(let frameState) = fence else {
@@ -1173,10 +1169,6 @@ public final class TerminalPaneSessionController {
     private func planIfNeeded(_ terminal: Terminal) {
         guard isVisible, isRenderingAvailable else { return }
         guard pendingDamage != .none else { return }
-        guard requiresCompleteFrame
-            || terminal != lastPlannedTerminal
-            || renderTheme != lastPlannedTheme
-        else { return }
         let presentation = terminal.presentation
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
         #if DANTERM_TERMINAL_BENCHMARK
@@ -1202,13 +1194,10 @@ public final class TerminalPaneSessionController {
         // forward to the next one instead of losing it.
         lastFenceStallNanoseconds = unflushedDeliveryFenceWaitNanoseconds
         unflushedDeliveryFenceWaitNanoseconds = 0
-        lastPlannedTerminal = terminal
-        lastPlannedTheme = renderTheme
         currentPlan = plan
         currentDamage = pendingDamage
         let frame = TerminalPaneFrame(plan: plan, damage: pendingDamage)
         pendingDamage = .none
-        requiresCompleteFrame = false
         onFrame?(frame)
     }
 }

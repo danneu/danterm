@@ -3323,3 +3323,76 @@ performance verdict.
   no pane-tape follower means no append observer, a silent follower has no
   scheduled work, and an active follower is bounded by its socket delivery.
 - Next action: none for T22.
+
+### F40 -- pending damage and terminal change agree on every committed corpus observation
+
+- Status: `T21` vetted; recommend removing the equality comparison and retained
+  terminal generation together. No production change was made.
+- Date, baseline, and investigator: 2026-08-09, `5ca4bfe1`, Codex. The
+  worktree contained one unrelated untracked WIP plan throughout; this task did
+  not modify it.
+- Ephemeral test-first instrument: a benchmark-only recorder ran inside
+  `TerminalPaneSessionController.planIfNeeded` after its visibility and
+  rendering-availability gate and before its damage gate. It counted all four
+  combinations of `pendingDamage != .none` and
+  `terminal != lastPlannedTerminal`. The benchmark observer sampled the
+  cumulative counter at the start marker and subtracted that baseline at the
+  completion marker, so setup and shell-startup calls did not enter a corpus's
+  result. A focused counter/delta test first failed because the recorder did
+  not exist, then passed. The recorder and test were removed after capture.
+- Results at the canonical 179x66 geometry:
+  - `scrollback-stream-v1-25000-lines`: 9 both true, 0 disagreements;
+  - `styled-screen-redraw-v1-3500-frames`: 15 both true, 0 disagreements;
+  - `unicode-wrapping-v1-9000-lines`: 4 both true, 0 disagreements;
+  - `incremental-screen-updates-v1-100000-cycles`: 57 both true, 0
+    disagreements;
+  - `synchronized-frames-v1-btop-95-frames`: 9 both true, 0 disagreements.
+  The total is 94 observations with both signals true, zero damage-without-
+  terminal-change observations, zero terminal-change-without-damage
+  observations, and zero neither-signal observations. Every block passed the
+  harness's visibility, thermal, geometry, identity, and final-draw validity
+  checks.
+- Artifacts: `.build/terminal-benchmark-runs/2026-08-09-174123-80076`,
+  `2026-08-09-174137-80338`, `2026-08-09-174148-80576`,
+  `2026-08-09-174157-80823`, and `2026-08-09-174205-81062`. One earlier
+  `scrollback-stream` attempt timed out before producing any geometry or metric
+  artifact and was discarded rather than read.
+- Decision: the prescribed gate has no cases for the equality check to
+  preserve. Make pending damage the sole post-visibility planning witness and
+  do not introduce a generation token. `F41` records the exact
+  behavior-preserving removal after a focused test rejected the too-literal
+  rewrite that left the rest of the second guard in place. This finding remains
+  the direction gate; no runtime code changed during its capture.
+- Verification: the focused recorder test passed before removal. After removal,
+  the compile-only app build and all 75 `just test` steps pass;
+  `git diff --check` passes.
+- Next action: completed in `F41`.
+
+### F41 -- pending damage is the pane planner's sole retained change witness
+
+- Status: `T21` implemented and verified; no terminal generation or replacement
+  generation token is retained.
+- Date, baseline, and investigator: 2026-08-09, implementation based on
+  `5ca4bfe1`, Codex. The unrelated untracked WIP plan remained untouched.
+- Test-first correction: `scripts/research/33/t21-last-planned-terminal-structure.sh`
+  first failed on the retained terminal, its deep comparison, and its post-plan
+  assignment. The first implementation removed those sites but left the other
+  terms of the OR guard. The focused synchronized-output test then failed for
+  the expected reason: ordinary pending damage had neither a complete-frame bit
+  nor a theme change, so the shortened guard rejected it. This established the
+  behavior-preserving form before the implementation was accepted: once damage
+  passes, no second witness gate remains.
+- Production shape: `TerminalPaneSessionController.planIfNeeded` now gates on
+  visibility, rendering availability, nonempty `pendingDamage`, and synchronized
+  output only. `lastPlannedTerminal`, `lastPlannedTheme`, and
+  `requiresCompleteFrame` are deleted. Rendering availability and theme changes
+  still union `.full` into `pendingDamage`, so their complete repaint behavior
+  remains expressed by the one damage authority instead of parallel witness
+  state.
+- Verification: the structural probe passes. Four focused pane tests cover idle
+  synchronization, theme-only full repaint, synchronized-output accumulation,
+  and result-only/equal-snapshot suppression; all pass. The 24 focused damage
+  and translated-planning tests pass. The compile-only app build and all 75
+  `just test` steps pass; `git diff --check` passes. No paired speed comparison
+  is claimed or required by `F40`'s correctness gate.
+- Next action: none for T21.

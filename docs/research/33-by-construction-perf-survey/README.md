@@ -784,7 +784,7 @@ reopening condition, and argues that condition is met.
   the drain still copies the accumulator's one-or-two-word array into the
   drained value, so "zero allocations" holds for sets and hashing, not to
   the last array.
-- [ ] `T21` RESEARCH -- **Stop retaining `lastPlannedTerminal`.** `planIfNeeded`
+- [x] `T21` DONE -- **Stop retaining `lastPlannedTerminal`.** `planIfNeeded`
   runs a deep whole-`Terminal` equality one line after `pendingDamage != .none`,
   and retaining the previous generation holds a second reference to every arena
   chunk, so the next in-place append finds it non-uniquely referenced and copies.
@@ -793,7 +793,15 @@ reopening condition, and argues that condition is met.
   silent-wrong-answer (torn frame) mode. Verification: first, an assertion under
   the benchmark recording whether the equality check ever disagrees with
   `pendingDamage != .none` -- if it never does, the check is provably redundant
-  and its deletion is evidence-backed rather than argued.
+  and its deletion is evidence-backed rather than argued. **The gate passed
+  (`F40`):** all 94 in-block `planIfNeeded` observations across the five
+  committed corpora had both signals true. Neither disagreement direction
+  occurred. Remove the equality comparison and retained generation together;
+  do not replace them with a generation token. **Implemented in `F41`:**
+  `pendingDamage` is now the sole post-visibility planning witness. The whole
+  second guard, both retained comparison witnesses, and the redundant
+  `requiresCompleteFrame` bit are gone; the rendering-availability and theme
+  paths still form `.full` damage before planning.
 - [x] `T22` DONE -- **Push, don't poll, for `pane tape --follow`.** `F38`
   measured the 50 ms timer adding 19.83 process interrupt wakeups/s to one
   silent follower. `F39` replaces it with a per-subscription edge notice from

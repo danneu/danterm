@@ -120,7 +120,8 @@ rediscovering them.
 
 ### D4 -- `lastPlannedTerminal`: split the retention from the check
 
-- Status: **no direction taken.** Gated on the assertion described below.
+- Status: **implemented and verified** in `F41` after the assertion passed in
+  `F40`.
 - Evidence used: survey code-read of
   `TerminalPaneSession.swift#planIfNeeded` -- `guard pendingDamage != .none`
   at line 990, then `|| terminal != lastPlannedTerminal` at 992; `31/DD52`,
@@ -140,14 +141,20 @@ rediscovering them.
   generation stops repainting, which is the worst failure mode in that file. The
   second option's risk is much smaller and is mostly a question of what the
   cheaper witness is.
-- Recommendation: before either, land a temporary assertion under the benchmark
-  recording whether `terminal != lastPlannedTerminal` **ever** disagrees with
-  `pendingDamage != .none`. If it never disagrees across the corpora, the check
-  is provably redundant and its removal becomes evidence-backed rather than
-  argued -- and that same evidence is what `31/DD52` lacked. If it does
-  disagree, the cases it catches are the specification for what a generation
-  counter would have to cover.
-- Decision and rationale: pending the assertion.
+- Recommendation: make `pendingDamage` the sole post-visibility planning
+  witness. Remove the whole second guard, both retained comparison witnesses,
+  and `requiresCompleteFrame`; keep the rendering-availability and theme paths
+  forming `.full` damage before they call the planner. Do not add a generation
+  token: the benchmark found no case for one to preserve, while `31/DD52`
+  already records its silent torn-frame failure mode.
+- Decision and rationale: the temporary benchmark-only recorder observed both
+  signal directions before the damage guard. Across all 94 in-block calls in
+  the five committed corpora, damage and terminal change were both true; both
+  disagreement counts were zero (`F40`). Retaining and deep-comparing a second
+  terminal generation therefore preserves no behavior in the prescribed gate.
+  `F41`'s first focused run caught that deleting only the equality term left the
+  remaining OR terms able to reject ordinary damage; deleting that redundant
+  guard whole is the behavior-preserving form.
 
 ### D5 -- the parser streams, but not one token at a time: `T7` waits for `T8`
 
