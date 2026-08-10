@@ -166,8 +166,8 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
-/// Raw form state for the preferences panel. Stores what the user actually typed,
-/// not yet normalized. Normalization happens only on save.
+/// Form state for the settings window. Text-entry values remain raw until save;
+/// picker values retain the exact catalog name that was selected.
 ///
 /// `fontSize` is text rather than a number precisely because it is mid-edit
 /// state: a half-typed "1" must stay "1" until save, not be reinterpreted as a
@@ -176,8 +176,8 @@ struct GroupModel: Equatable {
 /// never stores a second copy of it.
 struct PreferencesDraft: Equatable {
     var alertClearMode: AlertClearMode
-    var remoteTheme: String  // raw text from the field; may have whitespace or be empty
-    var theme: String?       // nil = no `theme` key; use the catalog default
+    var remoteTheme: String  // selected catalog name
+    var theme: String?       // selected catalog name; nil uses the catalog default
     var fontSize: String?    // nil = no `fontSize` key; use the built-in default
     var fontFamily: String?  // nil = use the system monospace font (remove key from config)
     var copyOnSelect: Bool
@@ -230,6 +230,9 @@ struct AppModel: Equatable {
     // syntax-only core never queries CoreText and cannot enumerate them, and the
     // catalog is deliberately a snapshot per open rather than a live view.
     var installedFontFamilies: [String] = []
+    // Bundled theme names injected when Settings opens. Ephemeral and
+    // panel-scoped for the same reason as `installedFontFamilies`.
+    var availableThemeNames: [String] = []
     var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held

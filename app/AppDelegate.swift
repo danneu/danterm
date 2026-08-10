@@ -263,7 +263,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(withTitle: "Import State...", action: #selector(importState(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Settings...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
         let openConfigItem = NSMenuItem(title: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: ",")
         openConfigItem.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(openConfigItem)

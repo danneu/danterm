@@ -1,58 +1,42 @@
-// Preferences panel: a floating utility window for editing DanTerm-specific settings.
-// Changes are staged in a draft and committed to disk only when the user clicks Save.
-// Each dirty field shows its previous committed value with a Reset button.
+// DanTerm's single-pane settings window and its native AppKit form controls.
 import Cocoa
 
-class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
+/// Owns the application-wide settings controls and commits each completed edit.
+class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     weak var runtime: AppRuntime?
 
     // Terminal appearance settings
     private let themeField = NSTextField()
     private let themeBrowseButton = NSButton()
-    private let fontSizeField = NSTextField()
-    // Font-family row. Not private: the UI harness reads these three to prove the
-    // projection reaches the controls and that gestures dispatch the right Msg.
+    private let themeWarningLabel = NSTextField(labelWithString: "")
+    private var themeWarningRow: NSGridRow?
+    // The UI harness drives the paired controls to prove a step updates the
+    // visible text and commits one settings change.
+    let fontSizeField = NSTextField()
+    let fontSizeStepper = NSStepper()
+    // The UI harness reads these three to prove the projection reaches the
+    // font-family controls and that gestures dispatch the right Msg.
     let fontFamilyCombo = NSComboBox()
     let fontFamilyWarningLabel = NSTextField(labelWithString: "")
+    private var fontFamilyWarningRow: NSGridRow?
 
     // DanTerm settings
     private let alertClearModePopup = NSPopUpButton()
     let copyOnSelectCheckbox = NSButton()
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
-
-    // Dirty indicators (hidden when clean)
-    private let themeDirtyRow = NSStackView()
-    private let themePrevLabel = NSTextField(labelWithString: "")
-    private let themeResetButton = NSButton()
-    private let fontSizeDirtyRow = NSStackView()
-    private let fontSizePrevLabel = NSTextField(labelWithString: "")
-    private let fontSizeResetButton = NSButton()
-    let fontFamilyDirtyRow = NSStackView()
-    private let fontFamilyPrevLabel = NSTextField(labelWithString: "")
-    let fontFamilyResetButton = NSButton()
-    private let alertClearModeDirtyRow = NSStackView()
-    private let alertClearModePrevLabel = NSTextField(labelWithString: "")
-    private let alertClearModeResetButton = NSButton()
-    let copyOnSelectDirtyRow = NSStackView()
-    private let copyOnSelectPrevLabel = NSTextField(labelWithString: "")
-    let copyOnSelectResetButton = NSButton()
-    private let remoteThemeDirtyRow = NSStackView()
-    private let remoteThemePrevLabel = NSTextField(labelWithString: "")
-    private let remoteThemeResetButton = NSButton()
-
-    private let saveButton = NSButton()
-
+    private let remoteThemeWarningLabel = NSTextField(labelWithString: "")
+    private var remoteThemeWarningRow: NSGridRow?
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 10),  // height is auto-sized
-            styleMask: [.titled, .closable, .utilityWindow],
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 10),
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        title = "Preferences"
+        title = "DanTerm Settings"
         isReleasedWhenClosed = false
         level = .normal  // don't float above modal dialogs
         isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
@@ -67,49 +51,48 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         guard let contentView = contentView else { return }
 
         // -- Form grid --
+        let themeControls = makeHStack([themeField, themeBrowseButton])
+        let remoteThemeControls = makeHStack([remoteThemeField, browseButton])
+        themeControls.distribution = .fill
+        remoteThemeControls.distribution = .fill
         let grid = NSGridView(views: [
-            // Terminal appearance settings
-            formRow("Theme", makeHStack([themeField, themeBrowseButton])),
-            dirtyRow(themeDirtyRow, themePrevLabel, themeResetButton,
-                     action: #selector(resetTheme(_:))),
+            formRow("Theme", themeControls),
+            [NSGridCell.emptyContentView, themeWarningLabel],
             formRow("Font Family", fontFamilyCombo),
-            dirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, fontFamilyResetButton,
-                     action: #selector(resetFontFamily(_:))),
             [NSGridCell.emptyContentView, fontFamilyWarningLabel],
-            formRow("Font Size", fontSizeField),
-            dirtyRow(fontSizeDirtyRow, fontSizePrevLabel, fontSizeResetButton,
-                     action: #selector(resetFontSize(_:))),
-            // Behavior settings
-            formRow("Alert Clear Mode", alertClearModePopup),
-            dirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, alertClearModeResetButton,
-                     action: #selector(resetAlertClearMode(_:))),
-            formRow("Selection", copyOnSelectCheckbox),
-            dirtyRow(copyOnSelectDirtyRow, copyOnSelectPrevLabel, copyOnSelectResetButton,
-                     action: #selector(resetCopyOnSelect(_:))),
-            formRow("Remote Theme", makeHStack([remoteThemeField, browseButton])),
-            dirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, remoteThemeResetButton,
-                     action: #selector(resetRemoteTheme(_:))),
+            formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])),
+            formRow("Clear Alerts", alertClearModePopup),
+            [NSGridCell.emptyContentView, copyOnSelectCheckbox],
+            formRow("Remote Theme", remoteThemeControls),
+            [NSGridCell.emptyContentView, remoteThemeWarningLabel],
             formRow("Config file", makeHStack([
-                makeButton("Open in editor", action: #selector(openConfigFile(_:))),
-                makeButton("Reload", action: #selector(reloadConfig(_:))),
+                makeButton("Open Config File", action: #selector(openConfigFile(_:))),
+                makeButton("Reload Config", action: #selector(reloadConfig(_:))),
             ])),
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
+        themeControls.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        remoteThemeControls.setContentHuggingPriority(.defaultLow, for: .horizontal)
         grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 0).width = 130  // fixed label column width
         grid.column(at: 1).xPlacement = .fill
         // Vertically center labels with their adjacent controls. NSGridView rows
         // default to top alignment, which leaves labels sticking to the top of
         // rows containing taller controls (text fields, popups).
         grid.rowAlignment = .firstBaseline
-        grid.rowSpacing = 4
-        // Add extra spacing before DanTerm section (Alert Clear Mode row).
-        grid.row(at: 7).topPadding = 12
-        // Add extra spacing before the "Config file" row.
-        grid.row(at: 13).topPadding = 8
+        grid.rowSpacing = 8
+        grid.row(at: 5).topPadding = 8
+        grid.row(at: 7).topPadding = 8
+        grid.row(at: 9).topPadding = 4
+        themeWarningRow = grid.row(at: 1)
+        themeWarningRow?.isHidden = true
+        fontFamilyWarningRow = grid.row(at: 3)
+        fontFamilyWarningRow?.isHidden = true
+        remoteThemeWarningRow = grid.row(at: 8)
+        remoteThemeWarningRow?.isHidden = true
 
         // Configure terminal appearance controls.
-        themeField.delegate = self
+        themeField.isEditable = false
+        themeField.isSelectable = true
         themeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
         themeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -130,14 +113,15 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         fontFamilyCombo.numberOfVisibleItems = 12
         fontFamilyCombo.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        fontFamilyWarningLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        fontFamilyWarningLabel.textColor = .systemOrange
-        fontFamilyWarningLabel.lineBreakMode = .byWordWrapping
-        fontFamilyWarningLabel.maximumNumberOfLines = 0
+        configureWarningLabel(themeWarningLabel)
+        configureWarningLabel(fontFamilyWarningLabel)
+        configureWarningLabel(remoteThemeWarningLabel)
         // NSGridView gives a wrapping label no width to wrap against, so it would
         // otherwise stretch the panel to one long line.
-        fontFamilyWarningLabel.preferredMaxLayoutWidth = 250
-        fontFamilyWarningLabel.isHidden = true
+        for label in [themeWarningLabel, fontFamilyWarningLabel, remoteThemeWarningLabel] {
+            label.preferredMaxLayoutWidth = 250
+            label.isHidden = true
+        }
 
         fontSizeField.delegate = self
         fontSizeField.placeholderString = configFontSizeText(DanTermConfig.default.resolvedFontSize)
@@ -146,9 +130,16 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         fontSizeWidth.priority = .defaultHigh
         fontSizeField.addConstraint(fontSizeWidth)
 
+        fontSizeStepper.minValue = DanTermConfig.fontSizeRange.lowerBound
+        fontSizeStepper.maxValue = DanTermConfig.fontSizeRange.upperBound
+        fontSizeStepper.increment = 1
+        fontSizeStepper.valueWraps = false
+        fontSizeStepper.target = self
+        fontSizeStepper.action = #selector(fontSizeStepped(_:))
+
         // Configure DanTerm controls.
         alertClearModePopup.removeAllItems()
-        alertClearModePopup.addItems(withTitles: ["Focus", "Manual"])
+        alertClearModePopup.addItems(withTitles: ["On Focus", "Manually"])
         alertClearModePopup.target = self
         alertClearModePopup.action = #selector(alertClearModeChanged(_:))
 
@@ -157,7 +148,8 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         copyOnSelectCheckbox.target = self
         copyOnSelectCheckbox.action = #selector(copyOnSelectChanged(_:))
 
-        remoteThemeField.delegate = self
+        remoteThemeField.isEditable = false
+        remoteThemeField.isSelectable = true
         remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
         remoteThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -168,80 +160,23 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         browseButton.setContentHuggingPriority(.required, for: .horizontal)
         browseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        // -- Separator --
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-
-        // -- Footer buttons --
-        saveButton.title = "Save"
-        saveButton.bezelStyle = .push
-        saveButton.keyEquivalent = "\r"
-        saveButton.target = self
-        saveButton.action = #selector(savePreferences(_:))
-        saveButton.isEnabled = false
-
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelPreferences(_:)))
-        cancelButton.bezelStyle = .push
-        cancelButton.keyEquivalent = "\u{1b}"
-
-        let footerStack = NSStackView(views: [cancelButton, saveButton])
-        footerStack.translatesAutoresizingMaskIntoConstraints = false
-        footerStack.orientation = .horizontal
-        footerStack.spacing = 8
-
         // -- Assemble --
         contentView.addSubview(grid)
-        contentView.addSubview(separator)
-        contentView.addSubview(footerStack)
 
         let padding: CGFloat = 20
         NSLayoutConstraint.activate([
             grid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: padding),
             grid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
             grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
-
-            separator.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 12),
-            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-
-            footerStack.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 12),
-            footerStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
-            footerStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
+            grid.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
+            themeControls.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
+            remoteThemeControls.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
         ])
     }
 
     /// Build a [label, control] row for the grid.
     private func formRow(_ labelText: String, _ control: NSView) -> [NSView] {
         [makeLabel(labelText), control]
-    }
-
-    /// Build a dirty-indicator row: empty label column, [prevLabel, resetButton] in control column.
-    /// The row's container is hidden by default; apply() shows it when dirty.
-    private func dirtyRow(
-        _ container: NSStackView,
-        _ prevLabel: NSTextField,
-        _ resetButton: NSButton,
-        action: Selector
-    ) -> [NSView] {
-        prevLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        prevLabel.textColor = .secondaryLabelColor
-        prevLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        resetButton.title = "Reset"
-        resetButton.bezelStyle = .inline
-        resetButton.controlSize = .small
-        resetButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        resetButton.target = self
-        resetButton.action = action
-        resetButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        container.orientation = .horizontal
-        container.spacing = 4
-        container.addArrangedSubview(prevLabel)
-        container.addArrangedSubview(resetButton)
-        container.isHidden = true
-        return [NSGridCell.emptyContentView, container]
     }
 
     private func makeLabel(_ text: String) -> NSTextField {
@@ -287,6 +222,8 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         if fontSizeField.stringValue != projection.fontSizeText {
             fontSizeField.stringValue = projection.fontSizeText
         }
+        fontSizeStepper.doubleValue = Double(projection.fontSizeText)
+            .map(DanTermConfig.boundedFontSize) ?? DanTermConfig.default.resolvedFontSize
         if fontFamilyCombo.objectValues as? [String] != projection.fontFamilyChoices {
             fontFamilyCombo.removeAllItems()
             fontFamilyCombo.addItems(withObjectValues: projection.fontFamilyChoices)
@@ -295,42 +232,40 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
             fontFamilyCombo.stringValue = projection.fontFamilyText
         }
 
-        applyWarning(projection.fontFamilyWarning)
+        applyWarning(projection.themeWarning, label: themeWarningLabel, row: themeWarningRow)
+        applyWarning(
+            projection.fontFamilyWarning,
+            label: fontFamilyWarningLabel,
+            row: fontFamilyWarningRow
+        )
+        applyWarning(
+            projection.remoteThemeWarning,
+            label: remoteThemeWarningLabel,
+            row: remoteThemeWarningRow
+        )
+    }
 
-        applyDirtyRow(themeDirtyRow, themePrevLabel, label: projection.themeDirtyLabel)
-        applyDirtyRow(fontFamilyDirtyRow, fontFamilyPrevLabel, label: projection.fontFamilyDirtyLabel)
-        applyDirtyRow(fontSizeDirtyRow, fontSizePrevLabel, label: projection.fontSizeDirtyLabel)
-        applyDirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, label: projection.alertClearModeDirtyLabel)
-        applyDirtyRow(copyOnSelectDirtyRow, copyOnSelectPrevLabel, label: projection.copyOnSelectDirtyLabel)
-        applyDirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, label: projection.remoteThemeDirtyLabel)
-
-        if saveButton.isEnabled != projection.saveEnabled {
-            saveButton.isEnabled = projection.saveEnabled
-        }
+    private func configureWarningLabel(_ label: NSTextField) {
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .systemOrange
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
     }
 
     /// Show or hide the inline font warning. This is the whole feedback channel
     /// for a font that is configured but not installed: the failure is soft and
     /// already recovered, so it must never become a modal that re-fires every
     /// launch.
-    private func applyWarning(_ warning: String?) {
+    private func applyWarning(_ warning: String?, label: NSTextField, row: NSGridRow?) {
         let shouldHide = warning == nil
-        if fontFamilyWarningLabel.isHidden != shouldHide {
-            fontFamilyWarningLabel.isHidden = shouldHide
+        if label.isHidden != shouldHide {
+            label.isHidden = shouldHide
         }
-        if let warning, fontFamilyWarningLabel.stringValue != warning {
-            fontFamilyWarningLabel.stringValue = warning
+        if row?.isHidden != shouldHide {
+            row?.isHidden = shouldHide
         }
-    }
-
-    /// Apply one dirty row while leaving unchanged labels alone.
-    private func applyDirtyRow(_ row: NSStackView, _ labelField: NSTextField, label: String?) {
-        let shouldHide = label == nil
-        if row.isHidden != shouldHide {
-            row.isHidden = shouldHide
-        }
-        if let label, labelField.stringValue != label {
-            labelField.stringValue = label
+        if let warning, label.stringValue != warning {
+            label.stringValue = warning
         }
     }
 
@@ -339,6 +274,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     // NSWindowDelegate: red-X / performClose. Translate the gesture to a model
     // intent; reconcile orders the panel out before AppKit performs its close.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        runtime?.send(.prefSave)
         runtime?.send(.preferencesClosed)
         return true
     }
@@ -347,28 +283,28 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
 
     @objc private func alertClearModeChanged(_ sender: NSPopUpButton) {
         let mode: AlertClearMode = sender.indexOfSelectedItem == 0 ? .focus : .manual
-        runtime?.send(.prefSetAlertClearMode(mode))
+        applyPreferenceChange(.prefSetAlertClearMode(mode))
     }
 
     @objc private func copyOnSelectChanged(_ sender: NSButton) {
-        runtime?.send(.prefSetCopyOnSelect(sender.state == .on))
+        applyPreferenceChange(.prefSetCopyOnSelect(sender.state == .on))
     }
 
-    // NSTextFieldDelegate: update draft as the user types for live dirty tracking.
+    // NSTextFieldDelegate: retain partial text in the model until editing ends.
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
-        if field === remoteThemeField {
-            runtime?.send(.prefSetRemoteTheme(field.stringValue))
-        } else if field === themeField {
-            let text = field.stringValue
-            runtime?.send(.prefSetTheme(text.isEmpty ? nil : text))
-        } else if field === fontSizeField {
+        if field === fontSizeField {
             let text = field.stringValue
             runtime?.send(.prefSetFontSize(text.isEmpty ? nil : text))
         } else if field === fontFamilyCombo {
             let text = field.stringValue
             runtime?.send(.prefSetFontFamily(text.isEmpty ? nil : text))
         }
+    }
+
+    // NSTextFieldDelegate: a completed text edit is one atomic config change.
+    func controlTextDidEndEditing(_ obj: Notification) {
+        runtime?.send(.prefSave)
     }
 
     // NSComboBoxDelegate: the user picked a family from the list. The selected
@@ -379,39 +315,13 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
         guard let combo = notification.object as? NSComboBox, combo === fontFamilyCombo,
               let title = combo.objectValueOfSelectedItem as? String
         else { return }
-        runtime?.send(.prefSetFontFamily(title))
+        applyPreferenceChange(.prefSetFontFamily(title))
     }
 
-    @objc private func savePreferences(_ sender: Any?) {
-        runtime?.send(.prefSave)
-    }
-
-    @objc private func cancelPreferences(_ sender: Any?) {
-        runtime?.send(.preferencesClosed)
-    }
-
-    @objc private func resetAlertClearMode(_ sender: Any?) {
-        runtime?.send(.prefResetAlertClearMode)
-    }
-
-    @objc private func resetCopyOnSelect(_ sender: Any?) {
-        runtime?.send(.prefResetCopyOnSelect)
-    }
-
-    @objc private func resetRemoteTheme(_ sender: Any?) {
-        runtime?.send(.prefResetRemoteTheme)
-    }
-
-    @objc private func resetTheme(_ sender: Any?) {
-        runtime?.send(.prefResetTheme)
-    }
-
-    @objc private func resetFontSize(_ sender: Any?) {
-        runtime?.send(.prefResetFontSize)
-    }
-
-    @objc private func resetFontFamily(_ sender: Any?) {
-        runtime?.send(.prefResetFontFamily)
+    @objc private func fontSizeStepped(_ sender: NSStepper) {
+        let text = configFontSizeText(sender.doubleValue)
+        fontSizeField.stringValue = text
+        applyPreferenceChange(.prefSetFontSize(text))
     }
 
     /// Present the theme picker sheet so the user can browse DanTerm's catalog.
@@ -421,7 +331,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
             ? runtime?.model.config.defaultTheme
             : themeField.stringValue
         picker.onSelect = { [weak self] themeName in
-            self?.runtime?.send(.prefSetTheme(themeName))
+            self?.applyPreferenceChange(.prefSetTheme(themeName))
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
@@ -436,7 +346,7 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
             ? runtime?.model.config.remoteTheme
             : remoteThemeField.stringValue
         picker.onSelect = { [weak self] themeName in
-            self?.runtime?.send(.prefSetRemoteTheme(themeName))
+            self?.applyPreferenceChange(.prefSetRemoteTheme(themeName))
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
@@ -445,10 +355,17 @@ class PreferencesPanel: NSPanel, NSComboBoxDelegate, NSWindowDelegate {
     }
 
     @objc private func openConfigFile(_ sender: Any?) {
+        runtime?.send(.prefSave)
         runtime?.openDanTermConfig()
     }
 
     @objc private func reloadConfig(_ sender: Any?) {
+        runtime?.send(.prefSave)
         runtime?.reloadDanTermConfig()
+    }
+
+    private func applyPreferenceChange(_ msg: Msg) {
+        runtime?.send(msg)
+        runtime?.send(.prefSave)
     }
 }

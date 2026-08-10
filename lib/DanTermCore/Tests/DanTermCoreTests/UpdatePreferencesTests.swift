@@ -26,11 +26,12 @@ import Testing
 private func openPrefs(
     _ model: inout AppModel,
     theme: String? = nil,
-    fontSize: Double? = nil
+    fontSize: Double? = nil,
+    availableThemeNames: [String] = []
 ) -> [Command] {
     model.config.defaultTheme = theme
     model.config.fontSize = fontSize
-    return update(&model, .preferencesOpened())
+    return update(&model, .preferencesOpened(availableThemeNames: availableThemeNames))
 }
 
 @Suite struct UpdatePreferencesTests {
@@ -111,6 +112,36 @@ private func openPrefs(
         #expect(projection.alertClearModeDirtyLabel == nil, "alert row hidden")
         #expect(projection.remoteThemeDirtyLabel == nil, "remote theme row hidden")
         #expect(!projection.saveEnabled, "clean draft disables Save")
+    }
+
+    @Test("unavailable configured themes report the dark fallback")
+    func unavailableConfiguredThemesReportFallback() throws {
+        // Intent: picker-only theme fields explain invalid values that arrived
+        //   through a hand-edited config file.
+        // Why it exists: both render paths recover to the built-in dark theme;
+        //   without this warning the displayed name appears to have taken effect.
+        // Scenario: the config names unavailable local and remote themes before
+        //   Settings opens against the bundled catalog.
+        var model = makeModel()
+        model.config.remoteTheme = "Missing Remote"
+        _ = openPrefs(&model, theme: "Missing Local", availableThemeNames: ["Known"])
+
+        let projection = try #require(desiredPreferencesPanel(in: model))
+        #expect(projection.themeWarning
+            == "Theme \"Missing Local\" is not available -- using the built-in dark theme.")
+        #expect(projection.remoteThemeWarning
+            == "Theme \"Missing Remote\" is not available -- using the built-in dark theme.")
+    }
+
+    @Test("available configured themes carry no warning")
+    func availableConfiguredThemesCarryNoWarning() throws {
+        var model = makeModel()
+        model.config.remoteTheme = "Remote"
+        _ = openPrefs(&model, theme: "Local", availableThemeNames: ["Local", "Remote"])
+
+        let projection = try #require(desiredPreferencesPanel(in: model))
+        #expect(projection.themeWarning == nil)
+        #expect(projection.remoteThemeWarning == nil)
     }
 
     @Test("desiredPreferencesPanel renders alert clear mode dirty label")

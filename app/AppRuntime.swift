@@ -1613,9 +1613,10 @@ class AppRuntime {
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
         send(.preferencesOpened(
-            // Snapshot on each open: the syntax-only core may not query CoreText,
-            // and a font installed while the panel sits open is not worth a watcher.
-            installedFontFamilies: installedFontFamilyNames()
+            // Snapshot on each open: the pure core may not query CoreText or
+            // inspect bundled resources, and neither catalog needs a live watcher.
+            installedFontFamilies: installedFontFamilyNames(),
+            availableThemeNames: ThemeCatalog.shared.names
         ))
         preferencesPanel?.makeKeyAndOrderFront(nil)
     }

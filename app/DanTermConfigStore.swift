@@ -13,7 +13,7 @@ enum DanTermConfigStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidDocument(let url):
-            "DanTerm could not use \(url.path). The file must be valid JSON with schemaVersion 1. Defaults remain active, and Preferences saves are disabled until the file is fixed."
+            "DanTerm could not use \(url.path). The file must be valid JSON with schemaVersion 1. Defaults remain active, and Settings changes cannot be saved until the file is fixed."
         case .readFailed(let url, let message):
             "DanTerm could not read \(url.path): \(message). Defaults remain active."
         case .writeFailed(let url, let message):

@@ -168,7 +168,7 @@ import DanTermProtocol
             configFont: .notInstalled(requested: "Fira Codee")
         )))
         #expect(missing.status == .warn)
-        #expect(missing.message == "Font \"Fira Codee\" is not installed -- using the system monospace font. Install it, or pick an installed family in Preferences > Font Family.")
+        #expect(missing.message == "Font \"Fira Codee\" is not installed -- using the system monospace font. Install it, or pick an installed family in Settings > Font Family.")
 
         for facts in [DoctorFacts.ConfigFont.unset, .unreadableConfig, .installed, .notInstalled(requested: "Fira Codee")] {
             #expect(doctorExitCode(for: evaluateDoctor(makeFacts(configFont: facts))) == 0)

@@ -10,6 +10,93 @@ import Cocoa
 func preferencesPanelTests() {
     print("PreferencesPanel")
 
+    uiTest("settings use a standard Mac window") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        try uiExpect(fx.panel.title == "DanTerm Settings", "single-pane settings should name the app")
+        try uiExpect(!fx.panel.styleMask.contains(.utilityWindow),
+                     "settings should not use the compact utility-panel title bar")
+        try uiExpect(!fx.panel.styleMask.contains(.miniaturizable), "settings should not minimize")
+        try uiExpect(!fx.panel.styleMask.contains(.resizable), "single-pane settings should not resize")
+    }
+
+    uiTest("settings use user-facing alert and config action labels") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let titles = descendantControlTitles(in: fx.panel.contentView)
+
+        try uiExpect(titles.contains("Clear Alerts"), "the alert setting should describe its effect")
+        try uiExpect(titles.contains("On Focus"), "the selected alert value should read naturally")
+        try uiExpect(titles.contains("Open Config File"), "the immediate config action should omit an ellipsis")
+        try uiExpect(!titles.contains("Alert Clear Mode"), "the implementation label should not reach the UI")
+        try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
+    }
+
+    uiTest("the absent font warning collapses its grid row") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
+            throw UITestFailure(message: "expected settings grid")
+        }
+
+        try uiExpect(grid.row(at: 3).isHidden, "a hidden warning must not reserve vertical space")
+    }
+
+    uiTest("theme names are picker-only") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(themeText: "Monokai", remoteThemeText: "Purplepeter"))
+        let fields = descendantTextFields(in: fx.panel.contentView)
+
+        let theme = try uiRequire(fields.first { $0.stringValue == "Monokai" }, "expected theme field")
+        let remote = try uiRequire(fields.first { $0.stringValue == "Purplepeter" }, "expected remote theme field")
+        try uiExpect(!theme.isEditable, "theme changes should go through the picker")
+        try uiExpect(!remote.isEditable, "remote theme changes should go through the picker")
+    }
+
+    uiTest("theme fields fill the same remaining row width") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
+        fx.panel.contentView?.layoutSubtreeIfNeeded()
+        let fields = descendantTextFields(in: fx.panel.contentView)
+        let theme = try uiRequire(
+            fields.first { $0.stringValue == "Monokai Remastered" },
+            "expected theme field"
+        )
+        let remote = try uiRequire(
+            fields.first { $0.stringValue == "Purplepeter" },
+            "expected remote theme field"
+        )
+
+        try uiExpect(
+            abs(theme.frame.width - remote.frame.width) < 0.5,
+            "theme fields should consume the same available width: \(theme.frame.width), \(remote.frame.width)"
+        )
+    }
+
+    uiTest("theme fallback warnings show inline and collapse when resolved") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        guard let grid = fx.panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first else {
+            throw UITestFailure(message: "expected settings grid")
+        }
+        let localWarning = "Theme \"Missing Local\" is not available -- using the built-in dark theme."
+        let remoteWarning = "Theme \"Missing Remote\" is not available -- using the built-in dark theme."
+
+        fx.panel.apply(makeProjection(themeWarning: localWarning, remoteThemeWarning: remoteWarning))
+        let visibleTitles = descendantControlTitles(in: fx.panel.contentView)
+        try uiExpect(visibleTitles.contains(localWarning), "expected local fallback warning")
+        try uiExpect(visibleTitles.contains(remoteWarning), "expected remote fallback warning")
+        try uiExpect(!grid.row(at: 1).isHidden, "local warning row should expand")
+        try uiExpect(!grid.row(at: 8).isHidden, "remote warning row should expand")
+
+        fx.panel.apply(makeProjection())
+        try uiExpect(grid.row(at: 1).isHidden, "resolved local warning row should collapse")
+        try uiExpect(grid.row(at: 8).isHidden, "resolved remote warning row should collapse")
+    }
+
     uiTest("the font-family combo box lists the projected choices in order") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -25,21 +112,24 @@ func preferencesPanelTests() {
                      "an unset family should display the system-monospace entry")
     }
 
-    uiTest("picking a family from the list drafts that family") {
+    uiTest("picking a family from the list applies that family immediately") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         fx.panel.apply(makeProjection(choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
 
         fx.panel.fontFamilyCombo.selectItem(at: 1)
 
-        try uiExpect(fx.runtime.sentMessages.count == 1, "expected exactly one message")
+        try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
         guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages[0] else {
             throw UITestFailure(message: "expected prefSetFontFamily, got \(fx.runtime.sentMessages[0])")
         }
         try uiExpect(family == "Menlo", "expected the picked family, got \(family ?? "nil")")
+        guard case .prefSave = fx.runtime.sentMessages[1] else {
+            throw UITestFailure(message: "expected prefSave, got \(fx.runtime.sentMessages[1])")
+        }
     }
 
-    uiTest("picking the system-monospace entry drafts the sentinel, not a font name") {
+    uiTest("picking the system-monospace entry applies the sentinel, not a font name") {
         // Intent: the one non-font entry round-trips through the same message as
         //   every family, and the core is what turns it back into "no family".
         // Why it exists: pins the seam that keeps the AppKit side free of
@@ -53,8 +143,8 @@ func preferencesPanelTests() {
 
         fx.panel.fontFamilyCombo.selectItem(at: 0)
 
-        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefSetFontFamily, got \(String(describing: fx.runtime.sentMessages.last))")
+        guard case .prefSetFontFamily(let family) = fx.runtime.sentMessages.first else {
+            throw UITestFailure(message: "expected prefSetFontFamily, got \(String(describing: fx.runtime.sentMessages.first))")
         }
         try uiExpect(family == systemMonospaceFontChoiceTitle,
                      "expected the sentinel title, got \(family ?? "nil")")
@@ -92,6 +182,41 @@ func preferencesPanelTests() {
         try uiExpect(family == nil, "an empty field means no family, got \(family ?? "nil")")
     }
 
+    uiTest("ending a text edit applies the drafted value") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        fx.panel.controlTextDidEndEditing(
+            Notification(name: NSControl.textDidEndEditingNotification, object: fx.panel.fontFamilyCombo)
+        )
+
+        guard case .prefSave = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected prefSave, got \(String(describing: fx.runtime.sentMessages.last))")
+        }
+    }
+
+    uiTest("the font-size stepper updates the field and applies the size") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(fontSizeText: "13"))
+
+        fx.panel.fontSizeStepper.doubleValue = 14
+        _ = fx.panel.fontSizeStepper.sendAction(
+            fx.panel.fontSizeStepper.action,
+            to: fx.panel.fontSizeStepper.target
+        )
+
+        try uiExpect(fx.panel.fontSizeField.stringValue == "14", "the field should mirror the stepped size")
+        try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
+        guard case .prefSetFontSize(let text) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected prefSetFontSize, got \(fx.runtime.sentMessages[0])")
+        }
+        try uiExpect(text == "14", "expected stepped size 14, got \(text ?? "nil")")
+        guard case .prefSave = fx.runtime.sentMessages[1] else {
+            throw UITestFailure(message: "expected prefSave, got \(fx.runtime.sentMessages[1])")
+        }
+    }
+
     uiTest("a projected warning shows inline and lays out") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -120,7 +245,7 @@ func preferencesPanelTests() {
                      "hiding the warning must not leave the panel ambiguously laid out")
     }
 
-    uiTest("the copy-on-select checkbox shows the projected value and drafts a toggle") {
+    uiTest("the copy-on-select checkbox shows and immediately applies the projected value") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
@@ -129,41 +254,19 @@ func preferencesPanelTests() {
 
         fx.panel.copyOnSelectCheckbox.performClick(nil)
 
-        guard case .prefSetCopyOnSelect(let enabled) = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefSetCopyOnSelect, got \(String(describing: fx.runtime.sentMessages.last))")
+        try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
+        guard case .prefSetCopyOnSelect(let enabled) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected prefSetCopyOnSelect, got \(fx.runtime.sentMessages[0])")
         }
         try uiExpect(enabled == false, "unticking should draft the option off")
+        guard case .prefSave = fx.runtime.sentMessages[1] else {
+            throw UITestFailure(message: "expected prefSave, got \(fx.runtime.sentMessages[1])")
+        }
 
         fx.panel.apply(makeProjection(copyOnSelect: false))
         try uiExpect(fx.panel.copyOnSelectCheckbox.state == .off, "a disarmed option should untick the box")
     }
 
-    uiTest("the copy-on-select Reset button asks the model to restore the committed value") {
-        let fx = makePreferencesFixture()
-        defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(copyOnSelect: false, copyOnSelectDirtyLabel: "Prev: On"))
-
-        try uiExpect(fx.panel.copyOnSelectDirtyRow.isHidden == false,
-                     "dirty row should show for an edited option")
-        fx.panel.copyOnSelectResetButton.performClick(nil)
-
-        guard case .prefResetCopyOnSelect = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefResetCopyOnSelect, got \(String(describing: fx.runtime.sentMessages.last))")
-        }
-    }
-
-    uiTest("the font-family Reset button asks the model to restore the committed family") {
-        let fx = makePreferencesFixture()
-        defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(text: "Courier", dirtyLabel: "Prev: Menlo"))
-
-        try uiExpect(fx.panel.fontFamilyDirtyRow.isHidden == false, "dirty row should show for an edited family")
-        fx.panel.fontFamilyResetButton.performClick(nil)
-
-        guard case .prefResetFontFamily = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "expected prefResetFontFamily, got \(String(describing: fx.runtime.sentMessages.last))")
-        }
-    }
 }
 
 // MARK: - Fixture
@@ -182,26 +285,55 @@ private func makePreferencesFixture() -> PreferencesFixture {
 private func makeProjection(
     text: String = systemMonospaceFontChoiceTitle,
     choices: [String] = [systemMonospaceFontChoiceTitle],
+    fontSizeText: String = "",
+    themeText: String = "",
+    remoteThemeText: String = "",
     warning: String? = nil,
-    dirtyLabel: String? = nil,
-    copyOnSelect: Bool = true,
-    copyOnSelectDirtyLabel: String? = nil
+    themeWarning: String? = nil,
+    remoteThemeWarning: String? = nil,
+    copyOnSelect: Bool = true
 ) -> PreferencesPanelProjection {
     PreferencesPanelProjection(
         selectedAlertClearMode: .focus,
-        remoteThemeText: "",
-        themeText: "",
-        fontSizeText: "",
+        remoteThemeText: remoteThemeText,
+        themeText: themeText,
+        fontSizeText: fontSizeText,
         fontFamilyText: text,
         copyOnSelect: copyOnSelect,
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
+        themeWarning: themeWarning,
+        remoteThemeWarning: remoteThemeWarning,
         themeDirtyLabel: nil,
         fontSizeDirtyLabel: nil,
-        fontFamilyDirtyLabel: dirtyLabel,
+        fontFamilyDirtyLabel: nil,
         alertClearModeDirtyLabel: nil,
-        copyOnSelectDirtyLabel: copyOnSelectDirtyLabel,
+        copyOnSelectDirtyLabel: nil,
         remoteThemeDirtyLabel: nil,
         saveEnabled: false
     )
+}
+
+private func descendantControlTitles(in view: NSView?) -> [String] {
+    guard let view else { return [] }
+    let ownTitle: [String]
+    if let button = view as? NSButton {
+        ownTitle = [button.title]
+    } else if let field = view as? NSTextField, !field.isEditable {
+        ownTitle = [field.stringValue]
+    } else {
+        ownTitle = []
+    }
+    return ownTitle + view.subviews.flatMap { descendantControlTitles(in: $0) }
+}
+
+private func descendantTextFields(in view: NSView?) -> [NSTextField] {
+    guard let view else { return [] }
+    let ownField = (view as? NSTextField).map { [$0] } ?? []
+    return ownField + view.subviews.flatMap { descendantTextFields(in: $0) }
+}
+
+private func uiRequire<Value>(_ value: Value?, _ message: String) throws -> Value {
+    guard let value else { throw UITestFailure(message: message) }
+    return value
 }

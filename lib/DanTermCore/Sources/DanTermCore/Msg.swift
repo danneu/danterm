@@ -126,11 +126,13 @@ enum Msg {
     case fontFamilyResolved(String?)
 
     // Preferences panel
-    // The installed-family catalog is injected for the same reason the font
-    // resolution is: the syntax-only core may not ask CoreText which families exist.
-    // It rides in on open so the picker's choices are a snapshot taken when the panel
-    // appeared, not a live query.
-    case preferencesOpened(installedFontFamilies: [String] = [])
+    // Machine and bundle catalogs ride in on open because the pure core cannot
+    // query CoreText or read packaged theme resources. Each is one snapshot for
+    // the lifetime of the panel rather than a live query.
+    case preferencesOpened(
+        installedFontFamilies: [String] = [],
+        availableThemeNames: [String] = []
+    )
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)
     case prefSetRemoteTheme(String)

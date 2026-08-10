@@ -297,7 +297,7 @@ private func evaluateConfigFont(_ facts: DoctorFacts) -> DoctorCheck {
             id: .configFont,
             title: title,
             status: .warn,
-            message: "Font \"\(requested)\" is not installed -- using the system monospace font. Install it, or pick an installed family in Preferences > Font Family."
+            message: "Font \"\(requested)\" is not installed -- using the system monospace font. Install it, or pick an installed family in Settings > Font Family."
         )
     }
 }

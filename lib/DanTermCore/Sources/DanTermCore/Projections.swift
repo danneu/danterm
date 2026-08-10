@@ -51,6 +51,10 @@ struct PreferencesPanelProjection: Equatable {
     /// Inline, non-modal report that the committed family is not installed.
     /// Non-nil only while the field still holds the name it describes.
     var fontFamilyWarning: String?
+    /// Reports explicit config names absent from the bundled catalog. Both
+    /// render paths recover to the built-in dark theme.
+    var themeWarning: String?
+    var remoteThemeWarning: String?
     var themeDirtyLabel: String?
     var fontSizeDirtyLabel: String?
     var fontFamilyDirtyLabel: String?
@@ -84,6 +88,16 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     let unresolvedFamily = committed.fontFamily.flatMap {
         model.resolvedFontFamily == nil && resolveFontFamilyDraft(draft.fontFamily) == $0 ? $0 : nil
     }
+    let availableThemeNames = Set(model.availableThemeNames)
+    let unresolvedTheme = committed.defaultTheme.flatMap {
+        draft.theme == $0 && !availableThemeNames.contains($0) ? $0 : nil
+    }
+    let unresolvedRemoteTheme: String? = {
+        let name = committed.remoteTheme
+        return resolveRemoteTheme(draft.remoteTheme) == name && !availableThemeNames.contains(name)
+            ? name
+            : nil
+    }()
     return PreferencesPanelProjection(
         selectedAlertClearMode: draft.alertClearMode,
         remoteThemeText: draft.remoteTheme,
@@ -97,6 +111,12 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."
+        },
+        themeWarning: unresolvedTheme.map {
+            "Theme \"\($0)\" is not available -- using the built-in dark theme."
+        },
+        remoteThemeWarning: unresolvedRemoteTheme.map {
+            "Theme \"\($0)\" is not available -- using the built-in dark theme."
         },
         themeDirtyLabel: themeDirty ? "Prev: \(committed.defaultTheme ?? "(default)")" : nil,
         fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(committedFontSizeText ?? "(default)")" : nil,

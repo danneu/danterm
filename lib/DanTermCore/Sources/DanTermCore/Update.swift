@@ -600,10 +600,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Preferences Panel
 
-    case .preferencesOpened(let installedFontFamilies):
+    case .preferencesOpened(let installedFontFamilies, let availableThemeNames):
         // Only create draft on closed → open transition; re-focus is a no-op.
         if model.preferencesDraft == nil {
             model.installedFontFamilies = installedFontFamilies
+            model.availableThemeNames = availableThemeNames
             model.preferencesDraft = PreferencesDraft(
                 alertClearMode: model.config.alertClearMode,
                 remoteTheme: model.config.remoteTheme,
@@ -618,6 +619,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .preferencesClosed:
         model.preferencesDraft = nil
         model.installedFontFamilies = []
+        model.availableThemeNames = []
         return []
 
     case .prefSetAlertClearMode(let mode):
