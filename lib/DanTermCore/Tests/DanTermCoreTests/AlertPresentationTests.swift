@@ -19,12 +19,11 @@ struct AlertPresentationTests {
         body: String,
         semantics: PaneSemanticState = PaneSemanticState()
     ) -> (title: String, subtitle: String?, body: String)? {
-        let commands = update(&model, .desktopNotification(
-            paneId: paneId,
-            title: title,
-            body: body,
-            semantics: semantics
-        ))
+        let commands = update(
+            &model,
+            .desktopNotification(paneId: paneId, title: title, body: body),
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+        )
         for command in commands {
             if case .sendNotification(_, _, let title, let subtitle, let body) = command {
                 return (title, subtitle, body)
@@ -56,11 +55,17 @@ struct AlertPresentationTests {
         var commandState = PaneSemanticState(command: .running("swift test"))
 
         let command = alertPresentation(
-            senderTitle: "sender", paneId: paneId, semantics: commandState, in: model
+            senderTitle: "sender",
+            paneId: paneId,
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: commandState]),
+            in: model
         )
         commandState.agent = .attached(session: agent, activity: .waiting)
         let attached = alertPresentation(
-            senderTitle: "sender", paneId: paneId, semantics: commandState, in: model
+            senderTitle: "sender",
+            paneId: paneId,
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: commandState]),
+            in: model
         )
 
         #expect(command.title == "swift test")

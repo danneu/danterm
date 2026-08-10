@@ -137,6 +137,10 @@ class AppRuntime {
     var viewLocalState = ViewLocalState()
     let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
+    /// Samples pane-owned state once for each pure update or projection pass.
+    var livePaneStateView: LivePaneStateView {
+        LivePaneStateView(semanticsByPaneId: sessions.mapValues(\.semanticSnapshot))
+    }
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
     // Cross-file presentation lifecycle forwarding diffs effective visibility here.
@@ -391,7 +395,7 @@ class AppRuntime {
 
     func send(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
-        let commands = update(&model, msg)
+        let commands = update(&model, msg, livePaneState: livePaneStateView)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
         // whose search field reconcilePaneChrome builds) run after. See
@@ -1926,8 +1930,7 @@ class AppRuntime {
             guard let self, let session else { return }
             for message in terminalMessages(
                 for: event,
-                paneId: paneId,
-                semanticSnapshot: session.semanticSnapshot
+                paneId: paneId
             ) {
                 self.send(message)
             }

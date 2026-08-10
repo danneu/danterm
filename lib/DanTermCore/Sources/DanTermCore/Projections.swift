@@ -281,20 +281,16 @@ struct PaneToolbarRender: Equatable {
 
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
 /// precomputed unread-alert tally to avoid rescanning alerts.
-func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
-  desiredPaneToolbar(in: model, tally: unreadAlertTally(for: model), semanticSnapshots: [:])
-}
-
-/// Convenience wrapper for callers that supply immutable pane semantics but do
-/// not already hold the alert tally computed by reconcile.
+/// Convenience wrapper for callers that do not already hold the alert tally
+/// computed by reconcile.
 func desiredPaneToolbar(
   in model: AppModel,
-  semanticSnapshots: [PaneId: PaneSemanticState]
+  livePaneState: LivePaneStateView
 ) -> [PaneId: PaneToolbarRender] {
   desiredPaneToolbar(
     in: model,
     tally: unreadAlertTally(for: model),
-    semanticSnapshots: semanticSnapshots
+    livePaneState: livePaneState
   )
 }
 
@@ -305,11 +301,11 @@ func desiredPaneToolbar(
 func desiredPaneToolbar(
   in model: AppModel,
   tally: UnreadAlertTally,
-  semanticSnapshots: [PaneId: PaneSemanticState] = [:]
+  livePaneState: LivePaneStateView
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
-    let semantics = semanticSnapshots[pane.id] ?? PaneSemanticState()
+    let semantics = livePaneState.semantics(for: pane.id)
     let remoteSession: RemoteSession?
     if case .remote(let identity) = semantics.connection {
       remoteSession = identity
@@ -394,7 +390,7 @@ struct PaneConfigKey: Equatable {
 /// family, and copy-on-select onto every live pane.
 func desiredPaneConfig(
   in model: AppModel,
-  semanticSnapshots: [PaneId: PaneSemanticState] = [:]
+  livePaneState: LivePaneStateView
 ) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
@@ -402,7 +398,7 @@ func desiredPaneConfig(
       theme: effectiveTheme(
         for: pane,
         config: model.config,
-        semantics: semanticSnapshots[pane.id] ?? PaneSemanticState()
+        semantics: livePaneState.semantics(for: pane.id)
       ),
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,

@@ -191,10 +191,9 @@ extension AppRuntime {
     /// Push each themed pane's config through its terminal session, diffed against
     /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
-        let semanticSnapshots = sessions.mapValues(\.semanticSnapshot)
         applyDiff(desiredPaneConfig(
             in: model,
-            semanticSnapshots: semanticSnapshots
+            livePaneState: livePaneStateView
         ), &caches.paneConfig, apply: { paneId, key in
             sessions[paneId]?.applyTheme(key.theme)
             sessions[paneId]?.setFontSize(key.fontSize)
@@ -218,12 +217,11 @@ extension AppRuntime {
     /// disappears on `.endSearch` while the wrapper survives -- a non-default `remove`
     /// tears the overlay down (the disappear-but-host-survives discipline).
     func reconcilePaneChrome(tally: UnreadAlertTally) {
-        let semanticSnapshots = sessions.mapValues(\.semanticSnapshot)
         applyDiff(
             desiredPaneToolbar(
                 in: model,
                 tally: tally,
-                semanticSnapshots: semanticSnapshots
+                livePaneState: livePaneStateView
             ),
             &caches.paneToolbar,
             apply: { paneId, render in

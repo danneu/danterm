@@ -3,7 +3,12 @@ import Foundation
 import DanTermProtocol
 
 @discardableResult
-func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Command] {
+func update(
+    _ model: inout AppModel,
+    _ msg: Msg,
+    livePaneState: LivePaneStateView,
+    env: CoreEnv = .live
+) -> [Command] {
     // Single chokepoint: every code path that mutates tab membership or
     // selectedTabId reaches this point. `defer` fires after the matched case
     // returns, and `inout model` makes the reconciled state visible to
@@ -27,6 +32,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             method: method,
             params: params,
             context: context,
+            livePaneState: livePaneState,
             env: env
         )
 
@@ -104,7 +110,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .selectAdjacentTab(let direction):
         guard let targetId = adjacentTabId(direction: direction, in: model) else { return [] }
-        return update(&model, .selectTab(id: targetId), env: env)
+        return update(&model, .selectTab(id: targetId), livePaneState: livePaneState, env: env)
 
     case .selectTab(let id):
         return applySelectTab(&model, id: id)
@@ -123,13 +129,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             )
         }
 
-        return update(&model, .closeTab(id: id), env: env)
+        return update(&model, .closeTab(id: id), livePaneState: livePaneState, env: env)
 
     case .requestCloseTabs(let ids):
         let normalized = normalizedLiveTabIds(ids, in: model)
         guard !normalized.isEmpty else { return [] }
         guard normalized.count > 1 else {
-            return update(&model, .requestCloseTab(id: normalized[0]), env: env)
+            return update(&model, .requestCloseTab(id: normalized[0]), livePaneState: livePaneState, env: env)
         }
         return emitCloseTabsConfirmation(&model, ids: normalized)
 
@@ -229,7 +235,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
         guard let newRoot = newTree else {
             // Last pane — close the pane's own tab
-            return update(&model, .closeTab(id: tab.id), env: env)
+            return update(&model, .closeTab(id: tab.id), livePaneState: livePaneState, env: env)
         }
 
         // Focus-mode alert clearing only applies when the close happens in the
@@ -524,13 +530,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Pane Semantics
 
-    case .paneSemanticsChanged(let paneId, let transition):
+    case .paneSemanticsChanged(let paneId, let event):
         guard model.pane(paneId) != nil else { return [] }
-        switch transition.event {
+        switch event {
         case .commandStarted, .agentAttached, .agentDetached:
             return [.scheduleCheckpoint]
         case .commandEnded:
-            if case .attached = transition.current.agent {
+            if case .attached = livePaneState.semantics(for: paneId).agent {
                 return [.scheduleCheckpoint]
             }
             return []
@@ -541,7 +547,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 paneId: paneId,
                 senderTitle: "",
                 body: "Waiting for input",
-                semantics: transition.current,
+                livePaneState: livePaneState,
                 env: env
             )
         case .integrationReady, .remoteDetected, .remoteIdentityReported,
@@ -749,18 +755,18 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         ))
         return commands
 
-    case .desktopNotification(let paneId, let title, let body, let semantics):
+    case .desktopNotification(let paneId, let title, let body):
         return desktopAlertCommands(
             model: &model,
             paneId: paneId,
             senderTitle: title,
             body: body,
-            semantics: semantics,
+            livePaneState: livePaneState,
             env: env
         )
 
     case .sessionClosed(let paneId):
-        return update(&model, .closePane(paneId: paneId), env: env)
+        return update(&model, .closePane(paneId: paneId), livePaneState: livePaneState, env: env)
 
     case .sessionCreationFailed(let paneId):
         // Session creation failure removes the whole containing tab, so every
@@ -843,7 +849,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
            let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
             model.alerts[idx].isUnread = false
         }
-        var commands = navigateToPane(alert.paneId, in: &model, env: env)
+        var commands = navigateToPane(alert.paneId, in: &model, livePaneState: livePaneState, env: env)
         commands.append(.activateApp)
         commands.append(.dismissAlertsPopover)
         return commands
@@ -856,7 +862,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             guard let alert = model.alerts.first(where: { $0.isUnread && tabForPane($0.paneId, in: model) != nil }) else {
                 return []
             }
-            return navigateToPane(alert.paneId, in: &model, env: env)
+            return navigateToPane(alert.paneId, in: &model, livePaneState: livePaneState, env: env)
         }
 
         let currentTabId = currentTab.id
@@ -869,13 +875,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
         if let target = liveUnreadAlerts.first(where: { $0.tab.id != currentTabId }) {
             for paneId in currentPaneIds { markAlertsReadForPane(paneId, in: &model) }
-            return navigateToPane(target.alert.paneId, in: &model, env: env)
+            return navigateToPane(target.alert.paneId, in: &model, livePaneState: livePaneState, env: env)
         }
 
         if let target = liveUnreadAlerts.first(where: {
             currentPaneIds.contains($0.alert.paneId) && $0.alert.paneId != currentFocusedPaneId
         }) {
-            let commands = navigateToPane(target.alert.paneId, in: &model, env: env)
+            let commands = navigateToPane(target.alert.paneId, in: &model, livePaneState: livePaneState, env: env)
             for paneId in currentPaneIds { markAlertsReadForPane(paneId, in: &model) }
             return commands
         }
@@ -903,7 +909,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .confirmCloseTab(let id):
         model.pendingConfirmation = nil
-        return update(&model, .closeTab(id: id), env: env)
+        return update(&model, .closeTab(id: id), livePaneState: livePaneState, env: env)
 
     case .cancelCloseTab:
         model.pendingConfirmation = nil
@@ -938,7 +944,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         let groupId = GroupId(rawValue: env.newId())
         let group = GroupModel(id: groupId, name: name)
         model.groups.append(group)
-        return update(&model, .createTab(inGroupId: groupId, launch: launch), env: env)
+        return update(&model, .createTab(inGroupId: groupId, launch: launch), livePaneState: livePaneState, env: env)
 
     case .deleteGroup(let id, let moveTabs):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }),
@@ -1057,7 +1063,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // group is empty, so atIndex: 0 is unambiguous; ids are inserted
         // in the order given. Discard nested commands -- we emit one
         // scheduleCheckpoint at the end (the sidebar updates via reconcileSidebar).
-        _ = update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), env: env)
+        _ = update(&model, .moveTabs(tabIds: validIds, toGroupId: newGroupId, atIndex: 0), livePaneState: livePaneState, env: env)
         return [.scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
@@ -1142,7 +1148,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // The menu items stay enabled, so Cmd-G with no open overlay lands here and
         // must do nothing rather than drive engine search state invisibly.
         guard let tab = selectedTab(in: model) else { return [] }
-        return update(&model, .searchNavigate(paneId: tab.focusedPaneId, direction: direction), env: env)
+        return update(&model, .searchNavigate(paneId: tab.focusedPaneId, direction: direction), livePaneState: livePaneState, env: env)
 
     case .endSearch(let paneId):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1392,13 +1398,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                     uncompletedTodoCount: rollup.uncompleted
                 )
             }
-            return update(&model, .closePane(paneId: paneId), env: env)
+            return update(&model, .closePane(paneId: paneId), livePaneState: livePaneState, env: env)
         }
         let uncompletedCount = pane.todos.count { !$0.isDone }
         if uncompletedCount > 0 {
             return [.showClosePaneConfirmation(paneId: paneId, uncompletedCount: uncompletedCount)]
         }
-        return update(&model, .closePane(paneId: paneId), env: env)
+        return update(&model, .closePane(paneId: paneId), livePaneState: livePaneState, env: env)
 
     // MRU tab switcher (real implementations follow in MRU section below)
     case .mruCycleStepped(let direction):
@@ -1452,6 +1458,7 @@ private func handleIpcRequest(
     method: String,
     params: JSONValue,
     context: IpcRequestContext,
+    livePaneState: LivePaneStateView,
     env: CoreEnv
 ) -> [Command] {
     do {
@@ -1461,6 +1468,7 @@ private func handleIpcRequest(
             method: method,
             params: params,
             context: context,
+            livePaneState: livePaneState,
             env: env
         )
     } catch let error as IpcParamsError {
@@ -1480,6 +1488,7 @@ private func dispatchIpc(
     method: String,
     params: JSONValue,
     context: IpcRequestContext,
+    livePaneState: LivePaneStateView,
     env: CoreEnv
 ) throws -> [Command] {
     switch method {
@@ -1538,7 +1547,7 @@ private func dispatchIpc(
         default:
             throw IpcParamsError("invalid title")
         }
-        let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
+        let commands = update(&model, .renameTab(id: tabId, name: title), livePaneState: livePaneState, env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
     case Methods.tabClose:
@@ -1549,7 +1558,7 @@ private func dispatchIpc(
         if wouldQuitFromClose(model) {
             throw IpcParamsError("cannot close the last tab")
         }
-        let commands = update(&model, .closeTab(id: tabId), env: env)
+        let commands = update(&model, .closeTab(id: tabId), livePaneState: livePaneState, env: env)
         return commands + [.ipcReply(reqId: reqId, result: .object([
             "tab": .object(["id": .string(tabId.rawValue.uuidString)])
         ]))]
@@ -1568,6 +1577,7 @@ private func dispatchIpc(
         let commands = update(
             &model,
             .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
+            livePaneState: livePaneState,
             env: env
         )
         let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
@@ -1598,7 +1608,7 @@ private func dispatchIpc(
         } else {
             createTabMsg = .createTab(inGroupId: groupId, launch: effectiveLaunch, background: background)
         }
-        let commands = update(&model, createTabMsg, env: env)
+        let commands = update(&model, createTabMsg, livePaneState: livePaneState, env: env)
         let tabId = newestTabId(excluding: before, in: model)
         return commands + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model, home: env.homeDirectory()))]
 
@@ -1612,7 +1622,7 @@ private func dispatchIpc(
             focusParams = .object(object)
         }
         let paneId = try resolvePane(params: focusParams, context: context, in: model, requireExplicit: true)
-        let commands = navigateToPane(paneId, in: &model, env: env)
+        let commands = navigateToPane(paneId, in: &model, livePaneState: livePaneState, env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
 
     case Methods.themeSet:
@@ -1631,7 +1641,7 @@ private func dispatchIpc(
         default:
             throw IpcParamsError("invalid theme name")
         }
-        let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName), env: env)
+        let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName), livePaneState: livePaneState, env: env)
         return commands + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
 
     case Methods.paneInput:
@@ -1715,7 +1725,7 @@ private func dispatchIpc(
         // only a split tab may zoom lives there and is the reason a request can be
         // honoured and still report `isZoomed: false`.
         if tab.isZoomed != target {
-            _ = update(&model, .toggleZoomPane(paneId: paneId))
+            _ = update(&model, .toggleZoomPane(paneId: paneId), livePaneState: livePaneState, env: env)
         }
         guard let result = paneInfoResult(paneId, in: model) else {
             throw IpcParamsError("pane not found")
@@ -1792,7 +1802,7 @@ private func dispatchIpc(
         guard todoExists(todoId, paneId: paneId, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let commands = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text), env: env)
+        let commands = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text), livePaneState: livePaneState, env: env)
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
@@ -1810,7 +1820,7 @@ private func dispatchIpc(
             throw IpcParamsError("invalid todo")
         }
         let shouldBeDone = method == Methods.todoDone
-        let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone), env: env)
+        let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone), livePaneState: livePaneState, env: env)
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
@@ -1827,14 +1837,14 @@ private func dispatchIpc(
         guard todoExists(todoId, paneId: paneId, in: model) else {
             throw IpcParamsError("invalid todo")
         }
-        let commands = update(&model, .deleteTodo(paneId: paneId, todoId: todoId), env: env)
+        let commands = update(&model, .deleteTodo(paneId: paneId, todoId: todoId), livePaneState: livePaneState, env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
     case Methods.todoClearCompleted:
         let paneId = try resolvePane(params: params, context: context, in: model)
-        let commands = update(&model, .clearCompletedTodos(paneId: paneId), env: env)
+        let commands = update(&model, .clearCompletedTodos(paneId: paneId), livePaneState: livePaneState, env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
@@ -2379,12 +2389,17 @@ private func jumpModeCancel(_ model: inout AppModel) -> [Command] {
 // MARK: - Helpers
 
 /// Navigate to a pane: select its current tab, clear zoom if needed, focus the pane.
-private func navigateToPane(_ paneId: PaneId, in model: inout AppModel, env: CoreEnv) -> [Command] {
+private func navigateToPane(
+    _ paneId: PaneId,
+    in model: inout AppModel,
+    livePaneState: LivePaneStateView,
+    env: CoreEnv
+) -> [Command] {
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
     let wasZoomed = currentTab.isZoomed
     let oldFocusedPaneId = currentTab.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
-    var commands = update(&model, .selectTab(id: currentTab.id), env: env)
+    var commands = update(&model, .selectTab(id: currentTab.id), livePaneState: livePaneState, env: env)
     updateTab(currentTab.id, in: &model) { tab in
         tab.focusedPaneId = paneId
     }
@@ -2522,7 +2537,7 @@ private func desktopAlertCommands(
     paneId: PaneId,
     senderTitle: String,
     body: String,
-    semantics: PaneSemanticState,
+    livePaneState: LivePaneStateView,
     env: CoreEnv
 ) -> [Command] {
     guard senderTitle.fitsTerminalMetadataValueLimit,
@@ -2537,7 +2552,7 @@ private func desktopAlertCommands(
     let presentation = alertPresentation(
         senderTitle: senderTitle,
         paneId: paneId,
-        semantics: semantics,
+        livePaneState: livePaneState,
         in: model
     )
     let now = env.now()

@@ -3035,7 +3035,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var semantics = PaneSemanticState()
         semantics.command = .running("swift test")
 
-        let render = desiredPaneToolbar(in: model, semanticSnapshots: [paneId: semantics])[paneId]
+        let render = desiredPaneToolbar(
+            in: model,
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
+        )[paneId]
 
         #expect(render?.command == "swift test")
     }
@@ -3055,9 +3058,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         let populated = desiredPaneToolbar(
             in: model,
-            semanticSnapshots: [paneId: semantics]
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
         )[paneId]
-        let absent = desiredPaneToolbar(in: model, semanticSnapshots: [:])[paneId]
+        let absent = desiredPaneToolbar(in: model, livePaneState: LivePaneStateView())[paneId]
 
         #expect(populated?.command == "swift test")
         #expect(populated?.isRemote == true)
@@ -3070,7 +3073,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
         let unidentifiedRemote = desiredPaneToolbar(
             in: model,
-            semanticSnapshots: [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+            livePaneState: LivePaneStateView(semanticsByPaneId: [
+                paneId: PaneSemanticState(connection: .remote(identity: nil)),
+            ])
         )[paneId]
         #expect(unidentifiedRemote?.isRemote == true)
         #expect(unidentifiedRemote?.remoteSession == nil)
@@ -3149,7 +3154,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
 
         #expect(
-            desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId] ==
+            desiredPaneConfig(
+                in: model,
+                livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+            )[paneId] ==
             PaneConfigKey(theme: "Purplepeter"),
             "remote connection uses the configured remote theme")
     }

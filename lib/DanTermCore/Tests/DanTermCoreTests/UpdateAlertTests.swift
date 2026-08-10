@@ -438,8 +438,7 @@ import Testing
         let effects2 = update(&model, .desktopNotification(
             paneId: paneId,
             title: "Done",
-            body: "ok",
-            semantics: PaneSemanticState()
+            body: "ok"
         ))
         #expect(hasEffect(effects2) {
             if case .sendNotification = $0 { return true }

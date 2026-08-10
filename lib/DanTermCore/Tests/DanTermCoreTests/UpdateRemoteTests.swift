@@ -34,13 +34,19 @@ struct UpdateRemoteTests {
         var reloaded = model.config
         reloaded.remoteTheme = "Grape"
         _ = update(&model, .configLoaded(reloaded, resolvedFontFamily: nil))
-        #expect(desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId]?.theme == "Grape")
+        #expect(desiredPaneConfig(
+            in: model,
+            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+        )[paneId]?.theme == "Grape")
         #expect(model.pane(paneId) == paneBefore)
 
         _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetRemoteTheme("Ocean"))
         _ = update(&model, .prefSave)
-        #expect(desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId]?.theme == "Ocean")
+        #expect(desiredPaneConfig(
+            in: model,
+            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+        )[paneId]?.theme == "Ocean")
         #expect(model.pane(paneId) == paneBefore)
     }
 
@@ -53,8 +59,11 @@ struct UpdateRemoteTests {
 
         _ = update(&model, .setPaneTheme(paneId: paneId, themeName: "Solarized"))
 
-        #expect(desiredPaneConfig(in: model, semanticSnapshots: remote)[paneId]?.theme == model.config.remoteTheme)
-        #expect(desiredPaneConfig(in: model, semanticSnapshots: [:])[paneId]?.theme == "Solarized")
+        #expect(desiredPaneConfig(
+            in: model,
+            livePaneState: LivePaneStateView(semanticsByPaneId: remote)
+        )[paneId]?.theme == model.config.remoteTheme)
+        #expect(desiredPaneConfig(in: model, livePaneState: LivePaneStateView())[paneId]?.theme == "Solarized")
     }
 
     @Test("semantic transition scheduling follows product policy")
@@ -66,7 +75,11 @@ struct UpdateRemoteTests {
         var stream = PaneSemanticStream()
 
         func sendsCheckpoint(_ transition: PaneSemanticTransition) -> Bool {
-            update(&model, .paneSemanticsChanged(paneId: paneId, transition: transition)).contains {
+            update(
+                &model,
+                .paneSemanticsChanged(paneId: paneId, event: transition.event),
+                livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: transition.current])
+            ).contains {
                 if case .scheduleCheckpoint = $0 { return true }
                 return false
             }

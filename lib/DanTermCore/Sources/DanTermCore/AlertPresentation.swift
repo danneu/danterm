@@ -28,9 +28,10 @@ struct AlertPresentation: Equatable {
 func alertPresentation(
     senderTitle: String,
     paneId: PaneId,
-    semantics: PaneSemanticState = PaneSemanticState(),
+    livePaneState: LivePaneStateView,
     in model: AppModel
 ) -> AlertPresentation {
+    let semantics = livePaneState.semantics(for: paneId)
     let paneTitle = model.pane(paneId)?.title ?? "Terminal"
     let title: String
     switch semantics.agent {

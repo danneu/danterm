@@ -32,34 +32,33 @@ struct TerminalBackendBoundaryTests {
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .commandStarted("echo ok"))), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .commandStarted("echo ok")
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .commandStarted("echo ok")
             }
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .commandEnded(exitStatus: 7), after: [.commandStarted("echo ok")])), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .commandEnded(exitStatus: 7)
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .commandEnded(exitStatus: 7)
             }
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .remoteDetected)), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .remoteDetected
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .remoteDetected
             }
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .remoteIdentityReported(RemoteSession(user: "dan", host: "caja")))), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
+            if case .paneSemanticsChanged(let id, let event) = $0 {
                 return id == paneId
-                    && transition.event == .remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))
+                    && event == .remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))
             }
             return false
         }
         assertSessionMessage(.desktopNotification(title: "Build", body: "Done"), paneId: paneId) {
-            if case .desktopNotification(let id, let title, let body, let semantics) = $0 {
+            if case .desktopNotification(let id, let title, let body) = $0 {
                 return id == paneId && title == "Build" && body == "Done"
-                    && semantics == PaneSemanticState()
             }
             return false
         }
@@ -98,8 +97,8 @@ struct TerminalBackendBoundaryTests {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
 
         assertSessionMessage(.paneSemanticsChanged(transition(for: .integrationReady)), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .integrationReady
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .integrationReady
             }
             return false
         }
@@ -107,8 +106,9 @@ struct TerminalBackendBoundaryTests {
             for: .agentActivityChanged(session: agent, activity: .waiting),
             after: [.agentAttached(agent)]
         )), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.current.agent == .attached(session: agent, activity: .waiting)
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId
+                    && event == .agentActivityChanged(session: agent, activity: .waiting)
             }
             return false
         }
@@ -117,32 +117,30 @@ struct TerminalBackendBoundaryTests {
                 for: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent), .agentActivityChanged(session: agent, activity: .waiting)]
             )),
-            paneId: paneId,
-            semanticSnapshot: PaneSemanticState()
+            paneId: paneId
         ).isEmpty)
         #expect(terminalMessages(
             for: .paneSemanticsChanged(transition(
                 for: .remoteDetected,
                 after: [.remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))]
             )),
-            paneId: paneId,
-            semanticSnapshot: PaneSemanticState()
+            paneId: paneId
         ).isEmpty)
         assertSessionMessage(.paneSemanticsChanged(transition(for: .connectionEnded, after: [.remoteDetected])), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .connectionEnded
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .connectionEnded
             }
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .agentAttached(agent))), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .agentAttached(agent)
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .agentAttached(agent)
             }
             return false
         }
         assertSessionMessage(.paneSemanticsChanged(transition(for: .agentDetached(agent), after: [.agentAttached(agent)])), paneId: paneId) {
-            if case .paneSemanticsChanged(let id, let transition) = $0 {
-                return id == paneId && transition.event == .agentDetached(agent)
+            if case .paneSemanticsChanged(let id, let event) = $0 {
+                return id == paneId && event == .agentDetached(agent)
             }
             return false
         }
@@ -157,8 +155,7 @@ private func assertSessionMessage(
 ) {
     let messages = terminalMessages(
         for: event,
-        paneId: paneId,
-        semanticSnapshot: PaneSemanticState()
+        paneId: paneId
     )
     #expect(messages.count == 1)
     #expect(messages.first.map(matches) == true)

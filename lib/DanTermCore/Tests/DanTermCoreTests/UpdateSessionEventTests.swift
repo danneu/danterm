@@ -185,8 +185,7 @@ import Testing
             .desktopNotification(
                 paneId: paneId,
                 title: "build",
-                body: "done",
-                semantics: PaneSemanticState()
+                body: "done"
             ),
             semanticMessage(paneId: paneId, event: .commandStarted("make test")),
             semanticMessage(
@@ -281,8 +280,7 @@ import Testing
             (.desktopNotification(
                 paneId: unfocusedPane,
                 title: "build",
-                body: "done",
-                semantics: PaneSemanticState()
+                body: "done"
             ), unfocusedModel),
             (semanticMessage(paneId: unfocusedPane, event: .commandStarted("make")), unfocusedModel),
             (semanticMessage(
@@ -442,22 +440,19 @@ import Testing
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: rejected,
-            body: "body",
-            semantics: PaneSemanticState()
+            body: "body"
         )).isEmpty)
         #expect(model.alerts.isEmpty)
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: "title",
-            body: rejected,
-            semantics: PaneSemanticState()
+            body: rejected
         )).isEmpty)
         #expect(model.alerts.isEmpty)
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: "title",
-            body: "body",
-            semantics: PaneSemanticState()
+            body: "body"
         )).count == 1)
         #expect(model.alerts.count == 1)
     }
@@ -478,8 +473,7 @@ import Testing
         let commands = update(&model, .desktopNotification(
             paneId: paneId,
             title: "Build complete",
-            body: "make finished",
-            semantics: PaneSemanticState()
+            body: "make finished"
         ))
         #expect(model.alerts.count == 0, "should not create alert for focused pane")
         #expect(commands.count == 0, "should produce no commands for focused pane")
@@ -493,13 +487,21 @@ import Testing
         createTab(&model)
         let focusedPaneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        let semantics = PaneSemanticState(
+            agent: .attached(session: agent, activity: .waiting)
+        )
+        let livePaneState = LivePaneStateView(semanticsByPaneId: [
+            backgroundPaneId: semantics,
+            focusedPaneId: semantics,
+        ])
         let backgroundCommands = update(
             &model,
             semanticMessage(
                 paneId: backgroundPaneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
-            )
+            ),
+            livePaneState: livePaneState
         )
         let focusedCommands = update(
             &model,
@@ -507,7 +509,8 @@ import Testing
                 paneId: focusedPaneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
-            )
+            ),
+            livePaneState: livePaneState
         )
 
         #expect(model.alerts.count == 1)
@@ -551,7 +554,8 @@ import Testing
         ] {
             #expect(update(
                 &model,
-                .paneSemanticsChanged(paneId: paneId, transition: transition)
+                .paneSemanticsChanged(paneId: paneId, event: transition.event),
+                livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: transition.current])
             ).isEmpty)
         }
         #expect(model.alerts.isEmpty)
@@ -564,13 +568,17 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let semantics = PaneSemanticState(
+            agent: .attached(session: agent, activity: .waiting)
+        )
         #expect(update(
             &model,
             semanticMessage(
                 paneId: paneId,
                 event: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent)]
-            )
+            ),
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: semantics])
         ).isEmpty)
         #expect(model.alerts.isEmpty)
     }
@@ -595,8 +603,7 @@ import Testing
         let commands = update(&model, .desktopNotification(
             paneId: paneId,
             title: "Hello",
-            body: "World",
-            semantics: PaneSemanticState()
+            body: "World"
         ))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .desktopNotification)
@@ -624,8 +631,7 @@ import Testing
         let commands = update(&model, .desktopNotification(
             paneId: firstTabPaneId,
             title: "Hello",
-            body: "World",
-            semantics: PaneSemanticState()
+            body: "World"
         ))
         #expect(model.alerts.count == 1, "should create alert")
         #expect(model.alerts[0].isUnread == true, "background pane alert should be unread")
@@ -655,8 +661,7 @@ import Testing
         let commands = update(&model, .desktopNotification(
             paneId: firstTabPaneId,
             title: "Done",
-            body: "Task finished",
-            semantics: PaneSemanticState()
+            body: "Task finished"
         ))
         #expect(hasEffect(commands) {
             if case .sendNotification(_, _, let t, _, _) = $0, t == "Done" { return true }
@@ -667,8 +672,7 @@ import Testing
         let effects2 = update(&model, .desktopNotification(
             paneId: firstTabPaneId,
             title: "Done2",
-            body: "Again",
-            semantics: PaneSemanticState()
+            body: "Again"
         ))
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
@@ -778,7 +782,7 @@ private func semanticMessage(
 ) -> Msg {
     .paneSemanticsChanged(
         paneId: paneId,
-        transition: semanticTransition(event: event, after: preceding)
+        event: semanticTransition(event: event, after: preceding).event
     )
 }
 

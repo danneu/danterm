@@ -608,7 +608,10 @@ private func openPrefs(
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
         #expect(model.pane(paneId) == paneBefore)
-        #expect(desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId]?.theme == "Grape")
+        #expect(desiredPaneConfig(
+            in: model,
+            livePaneState: LivePaneStateView(semanticsByPaneId: semantics)
+        )[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false

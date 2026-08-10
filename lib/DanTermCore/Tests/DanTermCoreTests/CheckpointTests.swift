@@ -126,10 +126,42 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         var stream = PaneSemanticStream()
         let commands = update(&model, .paneSemanticsChanged(
             paneId: paneId,
-            transition: stream.apply(.commandStarted("ls"))
+            event: stream.apply(.commandStarted("ls")).event
         ))
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
             "commandStarted should emit scheduleCheckpoint")
+    }
+
+    @Test("command-ended checkpoint decision reads the live pane-state view")
+    func commandEndedCheckpointReadsLivePaneState() throws {
+        // Intent: one semantic event produces different checkpoint behavior from
+        //   different views of the pane owner's current state.
+        // Why it exists: prevents message payloads from becoming a second owner
+        //   of pane semantics after update() gains its live-state view.
+        // Scenario: spec-first comparison of an attached-agent pane and a local pane.
+        var attachedModel = makeModel()
+        createTab(&attachedModel)
+        let paneId = attachedModel.groups[0].tabs[0].focusedPaneId
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let attachedView = LivePaneStateView(semanticsByPaneId: [
+            paneId: PaneSemanticState(agent: .attached(session: agent, activity: .idle)),
+        ])
+        let localView = LivePaneStateView()
+
+        var localModel = attachedModel
+        let attachedCommands = update(
+            &attachedModel,
+            .paneSemanticsChanged(paneId: paneId, event: .commandEnded(exitStatus: 0)),
+            livePaneState: attachedView
+        )
+        let localCommands = update(
+            &localModel,
+            .paneSemanticsChanged(paneId: paneId, event: .commandEnded(exitStatus: 0)),
+            livePaneState: localView
+        )
+
+        #expect(hasEffect(attachedCommands) { if case .scheduleCheckpoint = $0 { true } else { false } })
+        #expect(localCommands.isEmpty)
     }
 
     @Test("renameTab emits scheduleCheckpoint")
