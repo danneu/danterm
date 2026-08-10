@@ -525,7 +525,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // MARK: - Pane Semantics
 
     case .paneSemanticsChanged(let paneId, let transition):
-        guard model.pane(paneId) != nil, transition.didChange else { return [] }
+        guard model.pane(paneId) != nil else { return [] }
         switch transition.event {
         case .commandStarted, .agentAttached, .agentDetached:
             return [.scheduleCheckpoint]
