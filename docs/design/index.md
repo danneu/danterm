@@ -44,3 +44,4 @@ Default statuses are:
 - [2026-08-05: Pane and Session Lexicon](2026-08-05-pane-session-lexicon.md)
 - [2026-08-06: The AppKit UI Harness Is a Whole-Module Substitution Seam, Not a Test Target](2026-08-06-ui-harness-whole-module-substitution.md)
 - [2026-08-06: The Swift Terminal Engine -- Migration Record and Decision Register](2026-08-06-swift-terminal-engine.md)
+- [2026-08-10: Terminal-Reported Pane Facts -- the Model Owns Values, the Stream Owns Lifecycles](2026-08-10-terminal-reported-pane-facts.md)
