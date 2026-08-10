@@ -264,9 +264,8 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
 }
 
 /// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
-/// toolbar. Model fields stay beside the one running-command value projected
-/// from the pane owner's immutable semantic snapshot. Equatable lets the diff
-/// skip panes whose toolbar inputs are unchanged.
+/// toolbar. Live semantic fields come only from the pane owner's immutable
+/// snapshot. Equatable lets the diff skip panes whose inputs are unchanged.
 struct PaneToolbarRender: Equatable {
   let title: String
   let cwd: String?
@@ -310,17 +309,33 @@ func desiredPaneToolbar(
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
+    let semantics = semanticSnapshots[pane.id] ?? PaneSemanticState()
+    let remoteSession: RemoteSession?
+    if case .remote(let identity) = semantics.connection {
+      remoteSession = identity
+    } else {
+      remoteSession = nil
+    }
+    let agentSession: AgentSession?
+    if case .attached(let session, _) = semantics.agent {
+      agentSession = session
+    } else {
+      agentSession = nil
+    }
+    let command: String?
+    if case .running(let text) = semantics.command {
+      command = text
+    } else {
+      command = nil
+    }
     result[pane.id] = PaneToolbarRender(
       title: pane.title,
       cwd: pane.cwd,
-      command: semanticSnapshots[pane.id].flatMap {
-        if case .running(let command) = $0.command { return command }
-        return nil
-      },
+      command: command,
       progress: pane.progress,
-      isRemote: pane.isRemote,
-      remoteSession: pane.remoteSession,
-      agentSession: pane.agentSession,
+      isRemote: remoteSession != nil || semantics.connection != .local,
+      remoteSession: remoteSession,
+      agentSession: agentSession,
       unreadAlertCount: tally.byPane[pane.id] ?? 0,
       totalTodoCount: pane.todos.count,
       uncompletedTodoCount: pane.todos.count { !$0.isDone }
@@ -377,11 +392,18 @@ struct PaneConfigKey: Equatable {
 
 /// Projects the resolved theme, per-pane effective font size, resolved font
 /// family, and copy-on-select onto every live pane.
-func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
+func desiredPaneConfig(
+  in model: AppModel,
+  semanticSnapshots: [PaneId: PaneSemanticState] = [:]
+) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneConfigKey(
-      theme: effectiveTheme(for: pane, config: model.config),
+      theme: effectiveTheme(
+        for: pane,
+        config: model.config,
+        semantics: semanticSnapshots[pane.id] ?? PaneSemanticState()
+      ),
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,
       copyOnSelect: model.config.copyOnSelect

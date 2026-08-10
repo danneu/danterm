@@ -121,6 +121,29 @@ func paneWrapperViewTests() {
                      "agent session item should be absent when the pane has no agent session")
     }
 
+    uiTest("agent menu visibility and copied id follow the terminal snapshot") {
+        let agent = AgentSession(kind: "claude", sessionId: "snapshot-session")!
+        let fx = makePaneMenuFixture(agentSession: agent)
+        fx.wrapper.menuPasteboard = NSPasteboard(
+            name: .init("com.danterm.tests.agent-session.\(UUID().uuidString)")
+        )
+
+        let attachedMenu = fx.wrapper.makePaneMenu(includeClipboard: true)
+        let copy = try onlyItem(attachedMenu, titled: "Copy Agent Session ID")
+        _ = copy.target?.perform(copy.action, with: copy)
+        try uiExpect(
+            fx.wrapper.menuPasteboard.string(forType: .string) == "snapshot-session",
+            "copied id should come from the terminal semantic snapshot"
+        )
+
+        _ = fx.terminal.applySemanticEvent(.agentDetached(agent))
+        let detachedMenu = fx.wrapper.makePaneMenu(includeClipboard: true)
+        try uiExpect(
+            detachedMenu.items.allSatisfy { $0.title != "Copy Agent Session ID" },
+            "agent item should disappear after the snapshot detaches"
+        )
+    }
+
     uiTest("zoom item reflects zoom and split state") {
         // Intent: a single-pane unzoomed wrapper shows a disabled "Zoom Pane";
         //   a zoomed wrapper shows an enabled "Unzoom Pane".
@@ -195,13 +218,11 @@ private struct PaneMenuFixture {
 /// hasSplits) so model-driven items (Copy cwd, agent session) see real state.
 private func makeSinglePaneModel(
     cwd: String? = "/tmp/project",
-    agentSession: AgentSession? = AgentSession(kind: "claude", sessionId: "abc123"),
     hasSplits: Bool = true
 ) -> (model: AppModel, paneId: PaneId) {
     let paneId = PaneId()
     var pane = PaneModel(id: paneId)
     pane.cwd = cwd
-    pane.agentSession = agentSession
 
     let rootNode: SplitNodeModel = hasSplits
         ? .split(id: SplitId(), direction: .horizontal,
@@ -214,15 +235,19 @@ private func makeSinglePaneModel(
     return (model, paneId)
 }
 
+@MainActor
 private func makePaneMenuFixture(
     cwd: String? = "/tmp/project",
     agentSession: AgentSession? = AgentSession(kind: "claude", sessionId: "abc123"),
     isZoomed: Bool = false,
     hasSplits: Bool = true
 ) -> PaneMenuFixture {
-    let (model, paneId) = makeSinglePaneModel(cwd: cwd, agentSession: agentSession, hasSplits: hasSplits)
+    let (model, paneId) = makeSinglePaneModel(cwd: cwd, hasSplits: hasSplits)
     let runtime = AppRuntime(model: model)
     let terminal = TerminalView()
+    if let agentSession {
+        _ = terminal.applySemanticEvent(.agentAttached(agentSession))
+    }
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,
         isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)

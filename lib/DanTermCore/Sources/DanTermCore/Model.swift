@@ -93,7 +93,6 @@ struct PaneModel: Equatable {
     let id: PaneId
     var title: String = "Terminal"
     var cwd: String?
-    var lastCommand: String?
     var progress: ProgressState? = nil
     var theme: String? = nil  // catalog theme name; nil = app default
     /// Font-size zoom relative to the configured size, in `paneFontSizeStepPoints`
@@ -101,10 +100,6 @@ struct PaneModel: Equatable {
     /// configuration change moves zoomed and unzoomed panes alike. Always inside
     /// `paneFontSizeStepRange` -- every ingress bounds it.
     var fontSizeSteps: Int = 0
-    var isRemote: Bool = false              // detected via shell wrapper; not persisted
-    var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
-    var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
-    var agentSession: AgentSession? = nil    // reported by agent hook; persisted only as raw recovery hint
     var todos: [TodoItem] = []
 }
 

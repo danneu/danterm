@@ -467,7 +467,7 @@ class PaneWrapperView: NSView {
 
         // Only shown when the pane reported an agent session. The toolbar chip renders
         // the compact kind label, so this menu item is the full-id copy affordance.
-        if runtime?.model.pane(paneId)?.agentSession != nil {
+        if case .attached = terminalSession.semanticSnapshot.agent {
             let copySessionId = wrapperItem("Copy Agent Session ID", #selector(copyAgentSessionIdAction))
             copySessionId.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
             menu.addItem(copySessionId)
@@ -521,9 +521,9 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func copyAgentSessionIdAction() {
-        guard let sessionId = runtime?.model.pane(paneId)?.agentSession?.sessionId else { return }
+        guard case .attached(let session, _) = terminalSession.semanticSnapshot.agent else { return }
         menuPasteboard.clearContents()
-        menuPasteboard.setString(sessionId, forType: .string)
+        menuPasteboard.setString(session.sessionId, forType: .string)
     }
 
     @objc private func zoomPaneAction() {

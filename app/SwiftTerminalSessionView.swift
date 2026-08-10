@@ -26,12 +26,16 @@ func paneSemanticEvent(for event: TerminalSemanticEvent) -> PaneSemanticEvent? {
     case .integrationReady:
         return .integrationReady
     case .commandStarted(let command):
+        guard command.fitsTerminalMetadataValueLimit else { return nil }
         return .commandStarted(command)
     case .commandEnded(let exitStatus):
         return .commandEnded(exitStatus: exitStatus)
     case .remoteStarted:
         return .remoteDetected
     case let .remoteHost(user, host):
+        guard user.utf8.count + host.utf8.count <= TerminalMetadataBounds.maximumValueBytes else {
+            return nil
+        }
         return .remoteIdentityReported(RemoteSession(user: user, host: host))
     case .connectionEnded:
         return .connectionEnded

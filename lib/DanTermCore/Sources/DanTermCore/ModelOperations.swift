@@ -39,9 +39,16 @@ func configFontSizeText(_ size: Double) -> String {
     return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
 }
 
-/// Resolves remote and pane overrides ahead of the catalog-backed local default.
-func effectiveTheme(for pane: PaneModel, config: DanTermConfig = .default) -> String {
-  pane.remoteThemeOverride ?? pane.theme ?? config.resolvedDefaultTheme
+/// Resolves the live connection theme ahead of the pane's local theme choice.
+func effectiveTheme(
+  for pane: PaneModel,
+  config: DanTermConfig = .default,
+  semantics: PaneSemanticState = PaneSemanticState()
+) -> String {
+  if case .remote = semantics.connection {
+    return config.remoteTheme
+  }
+  return pane.theme ?? config.resolvedDefaultTheme
 }
 
 /// Points one zoom step moves a pane. Whole points: a fractional step would

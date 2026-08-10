@@ -150,10 +150,8 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
         if case .leaf(var pane) = model.groups[0].tabs[0].rootNode {
             pane.title = "vim"
             pane.cwd = "/tmp/work"
-            pane.lastCommand = "vim"
             pane.theme = "Dracula"
             pane.todos = [TodoItem(id: UUID(), text: "pane todo", isDone: false)]
-            pane.agentSession = AgentSession(kind: "claude", sessionId: "abc123")
             model.groups[0].tabs[0].rootNode = .leaf(pane)
         } else {
             Issue.record("a fresh tab should be a single leaf")

@@ -2857,23 +2857,15 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredThemeBrowser(in: model).currentThemeName == nil)
     }
 
-    @Test("desiredThemeBrowser: reports the user theme, not the remote override")
-    func desiredThemeBrowserReportsUserNotRemoteOverride() {
-        // Intent: the browser shows the user-set pane.theme, not the
-        //   transient remoteThemeOverride.
-        // Why it exists: pins the "show the user's choice" rule so the
-        //   browser doesn't drift to remote themes during SSH sessions.
-        // Scenario: spec-first override-vs-user -- pane has theme
-        //   "Dracula" and a remote override "Purplepeter"; the browser
-        //   reports Dracula.
+    @Test("desiredThemeBrowser reports the user theme independent of live semantics")
+    func desiredThemeBrowserReportsUserTheme() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
-        model.updatePane(paneId) { $0.remoteThemeOverride = "Purplepeter" }
 
         #expect(desiredThemeBrowser(in: model).currentThemeName == "Dracula",
-            "projection reads pane.theme, never effectiveTheme")
+            "projection reads the user's pane theme")
     }
 
     // MARK: - alert projection tally overloads
@@ -2994,11 +2986,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
     // MARK: - desiredPaneToolbar (pane-toolbar projection, Stage 4)
 
-    @Test("desiredPaneToolbar: derives all toolbar fields from the model + pane")
-    func desiredPaneToolbarDerivesAllFields() {
-        // Intent: the projection derives title, cwd, progress, isRemote,
-        //   remoteSession, agentSession, unreadAlertCount, totalTodoCount,
-        //   and uncompletedTodoCount from the pane + model.alerts.
+    @Test("desiredPaneToolbar derives structural fields and counts from the model")
+    func desiredPaneToolbarDerivesStructuralFields() {
         // Why it exists: pins the toolbar render contract so a UI refactor
         //   cannot silently drop a field.
         // Scenario: spec-first full-field check -- a populated pane with
@@ -3011,9 +3000,6 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             $0.title = "vim"
             $0.cwd = "/work/proj"
             $0.progress = .set(percent: 42)
-            $0.isRemote = true
-            $0.remoteSession = RemoteSession(user: "dan", host: "caja")
-            $0.agentSession = AgentSession(kind: "claude", sessionId: "4f3a2b1c")
             $0.todos = [
                 TodoItem(id: UUID(), text: "a", isDone: false),
                 TodoItem(id: UUID(), text: "b", isDone: true),
@@ -3032,9 +3018,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                 cwd: "/work/proj",
                 command: nil,
                 progress: .set(percent: 42),
-                isRemote: true,
-                remoteSession: RemoteSession(user: "dan", host: "caja"),
-                agentSession: AgentSession(kind: "claude", sessionId: "4f3a2b1c"),
+                isRemote: false,
+                remoteSession: nil,
+                agentSession: nil,
                 unreadAlertCount: 2,
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2),
@@ -3052,6 +3038,42 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let render = desiredPaneToolbar(in: model, semanticSnapshots: [paneId: semantics])[paneId]
 
         #expect(render?.command == "swift test")
+    }
+
+    @Test("desiredPaneToolbar reads every semantic chip from immutable pane snapshots")
+    func desiredPaneToolbarReadsEverySemanticChip() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let remote = RemoteSession(user: "dan", host: "caja")
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        let semantics = PaneSemanticState(
+            command: .running("swift test"),
+            connection: .remote(identity: remote),
+            agent: .attached(session: agent, activity: .working)
+        )
+
+        let populated = desiredPaneToolbar(
+            in: model,
+            semanticSnapshots: [paneId: semantics]
+        )[paneId]
+        let absent = desiredPaneToolbar(in: model, semanticSnapshots: [:])[paneId]
+
+        #expect(populated?.command == "swift test")
+        #expect(populated?.isRemote == true)
+        #expect(populated?.remoteSession == remote)
+        #expect(populated?.agentSession == agent)
+        #expect(absent?.command == nil)
+        #expect(absent?.isRemote == false)
+        #expect(absent?.remoteSession == nil)
+        #expect(absent?.agentSession == nil)
+
+        let unidentifiedRemote = desiredPaneToolbar(
+            in: model,
+            semanticSnapshots: [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        )[paneId]
+        #expect(unidentifiedRemote?.isRemote == true)
+        #expect(unidentifiedRemote?.remoteSession == nil)
     }
 
     @Test("desiredPaneToolbar: keyed over every live pane")
@@ -3118,26 +3140,18 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
     }
 
-    @Test("desiredPaneConfig: remote override takes priority over user theme")
-    func desiredPaneConfigRemoteOverridePrioritized() {
-        // Intent: when remoteThemeOverride is set, the projected theme
-        //   matches the override.
-        // Why it exists: pins effective-theme semantics in the pane-
-        //   config projection.
-        // Scenario: spec-first override -- theme "Dracula" + override
-        //   "Purplepeter" -> Purplepeter.
+    @Test("desiredPaneConfig uses remote config for a remote semantic snapshot")
+    func desiredPaneConfigUsesRemoteSemanticSnapshot() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        model.updatePane(paneId) { pane in
-            pane.theme = "Dracula"
-            pane.remoteThemeOverride = "Purplepeter"
-        }
+        model.updatePane(paneId) { $0.theme = "Dracula" }
+        let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
 
         #expect(
-            desiredPaneConfig(in: model)[paneId] ==
+            desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId] ==
             PaneConfigKey(theme: "Purplepeter"),
-            "effective theme prefers remote override")
+            "remote connection uses the configured remote theme")
     }
 
     // MARK: - desiredSidebar (sidebar projection, Stage 5)

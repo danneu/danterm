@@ -161,7 +161,7 @@ import Testing
     }
 
     @Test("reconcileDecision coalesces only eligible high-frequency messages")
-    func reconcileDecisionCoalescesOnlyEligibleMessages() {
+    func reconcileDecisionCoalescesOnlyEligibleMessages() throws {
         // Intent: high-frequency split-ratio, search-count, background alert,
         //   and command-event messages classify as coalesce-eligible while
         //   post-reconcile commands still force inline.
@@ -173,6 +173,7 @@ import Testing
         //   or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
         //   incident to cite, and none should be invented.
         let paneId = PaneId()
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let coalescedMessages: [Msg] = [
             .sessionTitle(paneId: paneId, title: "vim"),
             .sessionCwd(paneId: paneId, cwd: "/tmp"),
@@ -187,8 +188,17 @@ import Testing
                 body: "done",
                 semantics: PaneSemanticState()
             ),
-            .commandStarted(paneId: paneId, command: "make test"),
-            .commandEnded(paneId: paneId)
+            semanticMessage(paneId: paneId, event: .commandStarted("make test")),
+            semanticMessage(
+                paneId: paneId,
+                event: .commandEnded(exitStatus: 0),
+                after: [.commandStarted("make test")]
+            ),
+            semanticMessage(
+                paneId: paneId,
+                event: .agentActivityChanged(session: agent, activity: .waiting),
+                after: [.agentAttached(agent)]
+            ),
         ]
 
         for msg in coalescedMessages {
@@ -211,6 +221,22 @@ import Testing
         }
 
         let inlineMessages: [Msg] = [
+            semanticMessage(paneId: paneId, event: .integrationReady),
+            semanticMessage(paneId: paneId, event: .remoteDetected),
+            semanticMessage(paneId: paneId, event: .remoteIdentityReported(
+                RemoteSession(user: "dan", host: "caja")
+            )),
+            semanticMessage(
+                paneId: paneId,
+                event: .connectionEnded,
+                after: [.remoteDetected]
+            ),
+            semanticMessage(paneId: paneId, event: .agentAttached(agent)),
+            semanticMessage(
+                paneId: paneId,
+                event: .agentDetached(agent),
+                after: [.agentAttached(agent)]
+            ),
             .preferencesOpened(),
             .preferencesClosed
         ]
@@ -244,11 +270,6 @@ import Testing
         let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
         update(&unfocusedModel, .splitPane(direction: .horizontal))
 
-        var agentCommandEndedModel = unfocusedModel
-        agentCommandEndedModel.updatePane(unfocusedPane) {
-            $0.agentSession = AgentSession(kind: "claude", sessionId: "4f3a2b1c")
-        }
-
         let scenarios: [(Msg, AppModel)] = [
             (.sessionTitle(paneId: focusedPane, title: "vim"), focusedModel),
             (.sessionCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
@@ -263,8 +284,12 @@ import Testing
                 body: "done",
                 semantics: PaneSemanticState()
             ), unfocusedModel),
-            (.commandStarted(paneId: unfocusedPane, command: "make"), unfocusedModel),
-            (.commandEnded(paneId: unfocusedPane), agentCommandEndedModel)
+            (semanticMessage(paneId: unfocusedPane, event: .commandStarted("make")), unfocusedModel),
+            (semanticMessage(
+                paneId: unfocusedPane,
+                event: .commandEnded(exitStatus: 0),
+                after: [.commandStarted("make")]
+            ), unfocusedModel)
         ]
 
         for (msg, seedModel) in scenarios {
@@ -394,9 +419,9 @@ import Testing
         //   TerminalCore's parser-side validation, now that there is no
         //   aggregate per-pane budget to fall back on -- the per-value guard is
         //   the entire model-side contract.
-        // Scenario: a backend sends title, cwd, command, remote-session (both
-        //   user and host), and notification (both title and body) values at
-        //   and just beyond the advertised limit, oversized-then-valid.
+        // Scenario: a backend sends title, cwd, and notification values at and
+        //   just beyond the advertised limit, oversized-then-valid. Command and
+        //   remote identity enter through the engine-to-pane admission tests.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -412,27 +437,6 @@ import Testing
         #expect(model.pane(paneId)?.cwd != rejected)
         #expect(update(&model, .sessionCwd(paneId: paneId, cwd: accepted)).count == 1)
         #expect(model.pane(paneId)?.cwd == accepted)
-
-        #expect(update(&model, .commandStarted(paneId: paneId, command: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.lastCommand != rejected)
-        #expect(update(&model, .commandStarted(paneId: paneId, command: accepted)).count == 1)
-        #expect(model.pane(paneId)?.lastCommand == accepted)
-
-        #expect(update(&model, .remoteSessionReported(
-            paneId: paneId,
-            session: RemoteSession(user: rejected, host: "host")
-        )).isEmpty)
-        #expect(model.pane(paneId)?.remoteSession == nil)
-        #expect(update(&model, .remoteSessionReported(
-            paneId: paneId,
-            session: RemoteSession(user: "user", host: rejected)
-        )).isEmpty)
-        #expect(model.pane(paneId)?.remoteSession == nil)
-        update(&model, .remoteSessionReported(
-            paneId: paneId,
-            session: RemoteSession(user: accepted, host: accepted)
-        ))
-        #expect(model.pane(paneId)?.remoteSession == RemoteSession(user: accepted, host: accepted))
 
         model.isAppActive = false
         #expect(update(&model, .desktopNotification(
@@ -489,17 +493,21 @@ import Testing
         createTab(&model)
         let focusedPaneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let waiting = PaneSemanticState(
-            agent: .attached(session: agent, activity: .waiting)
-        )
-
         let backgroundCommands = update(
             &model,
-            .agentNeedsAttention(paneId: backgroundPaneId, semantics: waiting)
+            semanticMessage(
+                paneId: backgroundPaneId,
+                event: .agentActivityChanged(session: agent, activity: .waiting),
+                after: [.agentAttached(agent)]
+            )
         )
         let focusedCommands = update(
             &model,
-            .agentNeedsAttention(paneId: focusedPaneId, semantics: waiting)
+            semanticMessage(
+                paneId: focusedPaneId,
+                event: .agentActivityChanged(session: agent, activity: .waiting),
+                after: [.agentAttached(agent)]
+            )
         )
 
         #expect(model.alerts.count == 1)
@@ -530,14 +538,20 @@ import Testing
         createTab(&model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
-        for semantics in [
-            PaneSemanticState(),
-            PaneSemanticState(agent: .attached(session: agent, activity: .working)),
-            PaneSemanticState(agent: .attached(session: agent, activity: .idle)),
+        for transition in [
+            semanticTransition(event: .integrationReady),
+            semanticTransition(
+                event: .agentActivityChanged(session: agent, activity: .working),
+                after: [.agentAttached(agent)]
+            ),
+            semanticTransition(
+                event: .agentActivityChanged(session: agent, activity: .idle),
+                after: [.agentAttached(agent)]
+            ),
         ] {
             #expect(update(
                 &model,
-                .agentNeedsAttention(paneId: paneId, semantics: semantics)
+                .paneSemanticsChanged(paneId: paneId, transition: transition)
             ).isEmpty)
         }
         #expect(model.alerts.isEmpty)
@@ -550,13 +564,13 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let waiting = PaneSemanticState(
-            agent: .attached(session: agent, activity: .waiting)
-        )
-
         #expect(update(
             &model,
-            .agentNeedsAttention(paneId: paneId, semantics: waiting)
+            semanticMessage(
+                paneId: paneId,
+                event: .agentActivityChanged(session: agent, activity: .waiting),
+                after: [.agentAttached(agent)]
+            )
         ).isEmpty)
         #expect(model.alerts.isEmpty)
     }
@@ -755,4 +769,26 @@ import Testing
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
+}
+
+private func semanticMessage(
+    paneId: PaneId,
+    event: PaneSemanticEvent,
+    after preceding: [PaneSemanticEvent] = []
+) -> Msg {
+    .paneSemanticsChanged(
+        paneId: paneId,
+        transition: semanticTransition(event: event, after: preceding)
+    )
+}
+
+private func semanticTransition(
+    event: PaneSemanticEvent,
+    after preceding: [PaneSemanticEvent] = []
+) -> PaneSemanticTransition {
+    var stream = PaneSemanticStream()
+    for event in preceding {
+        _ = stream.apply(event)
+    }
+    return stream.apply(event)
 }

@@ -66,6 +66,33 @@ func paneInfoResult(
     return .object(result)
 }
 
+/// Adds each pane owner's live semantics to an encoded structural ls result.
+func paneListResult(
+    adding semanticsByPaneId: [PaneId: PaneSemanticState],
+    to base: JSONValue
+) -> JSONValue {
+    func addSemantics(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case .array(let values):
+            return .array(values.map(addSemantics))
+        case .object(var object):
+            if case .string(let rawId)? = object["id"],
+               let uuid = UUID(uuidString: rawId),
+               let semantics = semanticsByPaneId[PaneId(rawValue: uuid)] {
+                object["semantics"] = paneSemanticInspectionValue(semantics)
+            }
+            for (key, child) in object where key != "semantics" {
+                object[key] = addSemantics(child)
+            }
+            return .object(object)
+        case .string, .number, .bool, .null:
+            return value
+        }
+    }
+
+    return addSemantics(base)
+}
+
 /// Shows a complete running command while it is live, then returns to the
 /// ordinary title and cwd label as soon as the command facet becomes idle.
 func paneCommandChromeText(

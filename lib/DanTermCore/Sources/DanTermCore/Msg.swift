@@ -86,16 +86,6 @@ enum Msg {
     case confirmCloseTabs(ids: [TabId])
     case cancelCloseTabs
 
-    // Command tracking
-    case commandStarted(paneId: PaneId, command: String)
-    case commandEnded(paneId: PaneId)
-
-    // Remote detection
-    case remoteSessionStarted(paneId: PaneId)
-    case remoteSessionReported(paneId: PaneId, session: RemoteSession)
-    case remoteSessionEnded(paneId: PaneId)
-    case agentSessionChanged(paneId: PaneId, session: AgentSession?)
-
     // Export
     case exportState
 
@@ -103,8 +93,8 @@ enum Msg {
     case sessionTitle(paneId: PaneId, title: String)
     case sessionCwd(paneId: PaneId, cwd: String?)
     case sessionBell(paneId: PaneId)
+    case paneSemanticsChanged(paneId: PaneId, transition: PaneSemanticTransition)
     case desktopNotification(paneId: PaneId, title: String, body: String, semantics: PaneSemanticState)
-    case agentNeedsAttention(paneId: PaneId, semantics: PaneSemanticState)
     case sessionProgress(paneId: PaneId, state: ProgressState?)
     case sessionClosed(paneId: PaneId)
     case sessionCreationFailed(paneId: PaneId)
@@ -215,16 +205,15 @@ enum Msg {
 extension Msg {
     /// Whether this message is eligible to defer its reconcile() sweep so bursts
     /// coalesce. A message opts in when its sweep is either empty (split-ratio:
-    /// ContainerShape drops ratios; commandStarted: no projection reads
-    /// lastCommand) or merely cosmetic and safe to throttle to ~13 Hz (title/cwd/
+    /// ContainerShape drops ratios) or merely cosmetic and safe to throttle to ~13 Hz (title/cwd/
     /// progress, live search match count, background-pane alert badges, the
     /// remote/agent toolbar + per-pane theme a command event clears). update()
     /// still runs immediately, so the model stays current and the final value is
     /// never dropped; only the whole-model view sweep is deferred -- and the
     /// side-effecting commands these emit (.sendNotification, .scheduleCheckpoint)
     /// are not post-reconcile, so they still run inline. The runtime evaluates this
-    /// on the pane-scoped message, so commandStarted/commandEnded opt in here;
-    /// remoteSession start/report events stay inline. Eligibility is
+    /// on the pane-scoped message, so command and activity transitions opt in
+    /// here while remote and attach/detach transitions stay inline. Eligibility is
     /// necessary but not sufficient: reconcileDecision still forces an inline
     /// reconcile when update() emitted a post-reconcile command, so opting a message
     /// in here is always safe.
@@ -247,14 +236,16 @@ extension Msg {
         // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
-        case .sessionBell, .desktopNotification, .agentNeedsAttention:
+        case .sessionBell, .desktopNotification:
             return true
-        // Shell-integration command events, one per prompt in a command loop.
-        // The pane-owned snapshot drives command chrome, while the top-level
-        // lastCommand projection remains recovery-only. Both start and end are
-        // cosmetic pane-toolbar changes, never ContainerShape changes.
-        case .commandStarted, .commandEnded:
-            return true
+        case .paneSemanticsChanged(_, let transition):
+            switch transition.event {
+            case .commandStarted, .commandEnded, .agentActivityChanged:
+                return true
+            case .integrationReady, .remoteDetected, .remoteIdentityReported,
+                 .connectionEnded, .agentAttached, .agentDetached, .paneTornDown:
+                return false
+            }
         default:
             return false
         }

@@ -27,4 +27,19 @@ struct PaneSemanticRoutingTests {
             #expect(paneSemanticEvent(for: event) == expected)
         }
     }
+
+    @Test("semantic admission bounds command and combined remote identity bytes")
+    func semanticAdmissionBoundsCommandAndRemoteIdentity() {
+        let limit = TerminalMetadataBounds.maximumValueBytes
+        let atLimit = String(repeating: "a", count: limit)
+        let overLimit = atLimit + "b"
+        let half = String(repeating: "u", count: limit / 2)
+        let otherHalf = String(repeating: "h", count: limit - half.utf8.count)
+
+        #expect(paneSemanticEvent(for: .commandStarted(atLimit)) == .commandStarted(atLimit))
+        #expect(paneSemanticEvent(for: .commandStarted(overLimit)) == nil)
+        #expect(paneSemanticEvent(for: .remoteHost(user: half, host: otherHalf)) ==
+            .remoteIdentityReported(RemoteSession(user: half, host: otherHalf)))
+        #expect(paneSemanticEvent(for: .remoteHost(user: half + "x", host: otherHalf)) == nil)
+    }
 }

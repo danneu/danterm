@@ -522,63 +522,36 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Persist focused pane so restore opens the right pane within each tab.
         return [.scheduleCheckpoint]
 
-    // MARK: - Command Tracking
+    // MARK: - Pane Semantics
 
-    case .commandStarted(let paneId, let command):
-        guard command.fitsTerminalMetadataValueLimit else { return [] }
-        model.updatePane(paneId) { $0.lastCommand = command }
-        // Persist last command so restore can prefill it in the shell.
-        return [.scheduleCheckpoint]
-
-    case .commandEnded(let paneId):
-        guard let pane = model.pane(paneId) else { return [] }
-        return pane.agentSession == nil ? [] : [.scheduleCheckpoint]
-
-    // MARK: - Remote Detection
-
-    case .remoteSessionStarted(let paneId):
-        guard model.pane(paneId) != nil else { return [] }
-        let remoteTheme = model.config.remoteTheme
-        model.updatePane(paneId) { p in
-            p.isRemote = true
-            p.remoteSession = nil
-            p.remoteThemeOverride = remoteTheme
-        }
-        return []
-
-    case .remoteSessionReported(let paneId, let session):
-        guard session.user.fitsTerminalMetadataValueLimit,
-              session.host.fitsTerminalMetadataValueLimit
-        else { return [] }
-        let remoteTheme = model.config.remoteTheme
-        model.updatePane(paneId) { p in
-            let wasRemote = p.isRemote
-            p.isRemote = true
-            p.remoteSession = session
-            if !wasRemote {
-                p.remoteThemeOverride = remoteTheme
+    case .paneSemanticsChanged(let paneId, let transition):
+        guard model.pane(paneId) != nil, transition.didChange else { return [] }
+        switch transition.event {
+        case .commandStarted, .agentAttached, .agentDetached:
+            return [.scheduleCheckpoint]
+        case .commandEnded:
+            if case .attached = transition.current.agent {
+                return [.scheduleCheckpoint]
             }
+            return []
+        case .agentActivityChanged(_, .waiting):
+            guard selectedTab(in: model)?.focusedPaneId != paneId else { return [] }
+            return desktopAlertCommands(
+                model: &model,
+                paneId: paneId,
+                senderTitle: "",
+                body: "Waiting for input",
+                semantics: transition.current,
+                env: env
+            )
+        case .integrationReady, .remoteDetected, .remoteIdentityReported,
+             .connectionEnded, .agentActivityChanged, .paneTornDown:
+            return []
         }
-        return []
-
-    case .remoteSessionEnded(let paneId):
-        guard model.pane(paneId) != nil else { return [] }
-        model.updatePane(paneId) { pane in
-            pane.isRemote = false
-            pane.remoteSession = nil
-            pane.remoteThemeOverride = nil
-        }
-        return []
-
-    case .agentSessionChanged(let paneId, let session):
-        guard model.pane(paneId)?.agentSession != session else { return [] }
-        model.updatePane(paneId) { $0.agentSession = session }
-        return [.scheduleCheckpoint]
 
     // MARK: - Config (external reload)
 
     case .configLoaded(let newConfig, let resolvedFontFamily):
-        let oldConfig = model.config
         model.config = newConfig
         // Written as a pair with the config it was resolved from so config, resolution,
         // warning, and pane projection stay coherent and panes never render a stale family.
@@ -591,13 +564,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
             model.preferencesDraft!.fontFamily = newConfig.fontFamily
             model.preferencesDraft!.copyOnSelect = newConfig.copyOnSelect
-        }
-        if newConfig.remoteTheme != oldConfig.remoteTheme {
-            // Two passes: collect remote pane ids, then updatePane
-            // (can't mutate via updatePane while iterating model.allPanes).
-            for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
-                model.updatePane(paneId) { $0.remoteThemeOverride = newConfig.remoteTheme }
-            }
         }
         return []
 
@@ -723,12 +689,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         if validFontSize {
             model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
         }
-        // Update remote panes if theme changed.
-        if resolvedTheme != oldConfig.remoteTheme {
-            for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
-                model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
-            }
-        }
         return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 
     // MARK: - Export
@@ -795,18 +755,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             paneId: paneId,
             senderTitle: title,
             body: body,
-            semantics: semantics,
-            env: env
-        )
-
-    case .agentNeedsAttention(let paneId, let semantics):
-        guard case .attached(_, .waiting) = semantics.agent else { return [] }
-        guard selectedTab(in: model)?.focusedPaneId != paneId else { return [] }
-        return desktopAlertCommands(
-            model: &model,
-            paneId: paneId,
-            senderTitle: "",
-            body: "Waiting for input",
             semantics: semantics,
             env: env
         )
@@ -1539,7 +1487,7 @@ private func dispatchIpc(
         let snapshot = toSnapshot(model, home: env.homeDirectory())
         let data = try JSONEncoder().encode(snapshot)
         let value = try JSONDecoder().decode(JSONValue.self, from: data)
-        return [.ipcReply(reqId: reqId, result: value)]
+        return [.readPaneList(reqId: reqId, baseResult: value)]
 
     case Methods.paneInfo:
         let paneId = try resolvePane(params: params, context: context, in: model)

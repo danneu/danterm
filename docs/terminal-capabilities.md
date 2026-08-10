@@ -222,10 +222,13 @@ replies are limited to 64 KiB. Bell, shell, and notification events share a
 complete value.
 
 Metadata retention is bounded independently at each layer rather than by one
-cross-layer sum: the engine caps its own retention at 256 KiB; the model caps
-every terminal-originated field at 64 KiB per value and retains at most 100
-alerts, so its total metadata scales with live pane count rather than a fixed
-app-wide byte bound. Scrollback is limited to 16 MiB and damage is bounded by
-current grid state. Oversized or malformed input has no partial effect, does
-not retain a second unbounded copy, and cannot prevent later valid input from
-being processed. A query reply that cannot fit is dropped as one complete unit.
+cross-layer sum: the engine caps its own retention at 256 KiB. DanTerm then
+bounds terminal-originated command text at 64 KiB and remote identity at 64 KiB
+for the combined user-plus-host bytes before either enters pane-owned semantic
+state. The model separately caps title, cwd, and notification fields at 64 KiB
+per value and retains at most 100 alerts, so its total metadata scales with live
+pane count rather than a fixed app-wide byte bound. Scrollback is limited to 16
+MiB and damage is bounded by current grid state. Oversized or malformed input
+has no partial effect, does not retain a second unbounded copy, and cannot
+prevent later valid input from being processed. A query reply that cannot fit
+is dropped as one complete unit.

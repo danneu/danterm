@@ -596,22 +596,19 @@ private func openPrefs(
             "should be clean after save")
     }
 
-    @Test("prefSave with remoteTheme change updates remote panes")
-    func prefSaveWithRemoteThemeChangeUpdatesRemotePanes() {
-        // Intent: saving a new remote theme propagates to remote panes'
-        //   remoteThemeOverride and the per-pane config projection.
-        // Why it exists: pins the live remote-theme propagation.
-        // Scenario: spec-first remote panes update.
+    @Test("prefSave with remoteTheme change updates the remote pane projection")
+    func prefSaveWithRemoteThemeChangeUpdatesRemoteProjection() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        _ = update(&model, .remoteSessionStarted(paneId: paneId))
+        let semantics = [paneId: PaneSemanticState(connection: .remote(identity: nil))]
+        let paneBefore = model.pane(paneId)
 
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
-        #expect(model.pane(paneId)?.remoteThemeOverride == "Grape")
-        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
+        #expect(model.pane(paneId) == paneBefore)
+        #expect(desiredPaneConfig(in: model, semanticSnapshots: semantics)[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false

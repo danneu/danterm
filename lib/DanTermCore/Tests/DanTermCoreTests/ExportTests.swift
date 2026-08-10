@@ -1,5 +1,5 @@
 // Swift Testing migration of the legacy `tests/ExportTests.swift` harness
-// suite. Pins commandStarted Msg side effects, truncateScrollback's char/line/whitespace
+// suite. Pins truncateScrollback's char/line/whitespace
 // rules, exportState's snapshot payload, the toSnapshot/validateAndBuild
 // round-trip + launch field projection, and the JSON encode/decode contract.
 // `guard case` patterns that the legacy suite asserted via `throw
@@ -10,74 +10,6 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct ExportTests {
-    // MARK: - commandStarted Msg
-
-    @Test("commandStarted sets lastCommand")
-    func commandStartedSetsLastCommand() {
-        // Intent: dispatching .commandStarted updates the pane's
-        //   lastCommand to the supplied command string.
-        // Why it exists: pins the model update for the .commandStarted Msg
-        //   that the title-channel translation feeds.
-        // Scenario: spec-first update -- pane gets lastCommand = "vim".
-        var model = makeModel()
-        createTab(&model)
-        let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
-        update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        #expect(model.pane(paneId)?.lastCommand == "vim")
-    }
-
-    @Test("commandStarted overwrites previous command")
-    func commandStartedOverwritesPreviousCommand() {
-        // Intent: a second .commandStarted overwrites the prior
-        //   lastCommand (no history list).
-        // Why it exists: pins the latest-only semantics; the field tracks
-        //   the most recent command, not a history.
-        // Scenario: spec-first overwrite -- vim then ssh -> lastCommand
-        //   is "ssh".
-        var model = makeModel()
-        createTab(&model)
-        let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
-        update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        update(&model, .commandStarted(paneId: paneId, command: "ssh"))
-        #expect(model.pane(paneId)?.lastCommand == "ssh")
-    }
-
-    @Test("commandStarted does not affect title")
-    func commandStartedDoesNotAffectTitle() {
-        // Intent: .commandStarted updates lastCommand but never the pane
-        //   title (those are separate channels).
-        // Why it exists: pins the channel separation so a command-event
-        //   does not rename the pane.
-        // Scenario: spec-first separation -- title is unchanged after
-        //   .commandStarted.
-        var model = makeModel()
-        createTab(&model)
-        let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
-        let titleBefore = model.pane(paneId)?.title
-        update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        #expect(model.pane(paneId)?.title == titleBefore)
-    }
-
-    @Test("sessionTitle does not affect lastCommand")
-    func sessionTitleDoesNotAffectLastCommand() {
-        // Intent: a subsequent .sessionTitle does NOT clear or change
-        //   lastCommand (only .commandStarted/.commandEnded do).
-        // Why it exists: pins the inverse of the previous test --
-        //   ordinary title updates do not regress the command field.
-        // Scenario: spec-first preservation -- after a title change,
-        //   lastCommand still equals the previously started command.
-        var model = makeModel()
-        createTab(&model)
-        let tab = model.groups[0].tabs[0]
-        let paneId = tab.focusedPaneId
-        update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        update(&model, .sessionTitle(paneId: paneId, title: "new title"))
-        #expect(model.pane(paneId)?.lastCommand == "vim")
-    }
-
     // MARK: - truncateScrollback
 
     @Test("truncateScrollback: empty string returns nil")
@@ -308,7 +240,6 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.lastCommand = "vim" }
         model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/projects" }
         let expected = toSnapshot(model)
         let commands = update(&model, .exportState)
@@ -457,8 +388,6 @@ import Testing
     func structuralSnapshotExcludesModelCommandMirror() {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.lastCommand = "vim" }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].command == nil)
     }
@@ -469,7 +398,6 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.cwd = nil }
-        model.updatePane(paneId) { $0.lastCommand = nil }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].command == nil)
         #expect(allPaneSnapshots(snapshot)[0].cwd == nil)
@@ -536,7 +464,6 @@ import Testing
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.lastCommand = "claude" }
         model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
         let snapshot = graftSemanticRecovery(
             onto: toSnapshot(model),

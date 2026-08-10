@@ -177,8 +177,8 @@ Inside DanTerm, derive the originating pane, tab, and group:
          "activity": null | "working" | "waiting" | "idle"}
     }
 
-These are live facets, not command history, and they are absent from the
-persisted snapshot returned by `ls`.
+These are live facets, not command history. They appear in `pane info` and
+under every pane returned by `ls`; they are not persisted in init files.
 
 Outside DanTerm, do not use implicit app state:
 
@@ -422,10 +422,10 @@ For broader discovery:
 `ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
 leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
 `{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
-agentSession?, ...}`). `agentSession`, when present, is `{kind, sessionId}` for
-the agent currently reported in that pane. The `jq` above recurses the tree to
-list every pane. Treat `selectedTabId` as display state, not as a targeting
-source.
+semantics, ...}`). `semantics` has the same typed live-facet encoding as
+`pane info`, so agent lookup uses `.semantics.agent.session.id`. The `jq` above
+recurses the tree to list every pane. Treat `selectedTabId` as display state,
+not as a targeting source.
 
 ### Check integration health
 
@@ -497,7 +497,7 @@ else prints nothing on success and exits 0.
 | Command | Stdout |
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, optionally with `agentSession: {kind, sessionId}`) |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with live `semantics` in the same encoding as `pane info`) |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, semantics}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |

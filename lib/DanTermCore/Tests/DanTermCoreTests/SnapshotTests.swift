@@ -791,7 +791,6 @@ import DanTermProtocol
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
-        model.updatePane(paneId) { $0.agentSession = session }
 
         let snapshot = graftSemanticRecovery(
             onto: toSnapshot(model),
@@ -804,7 +803,7 @@ import DanTermProtocol
         #expect(pane.agentSession?.sessionId == "4f3a2b1c")
 
         let rebuilt = try #require(validateAndBuild(snapshot), "snapshot should rebuild")
-        #expect(rebuilt.pane(paneId)?.agentSession == nil)
+        #expect(rebuilt.pane(paneId) != nil)
     }
 
     @Test("recovery replay defensively validates a directly constructed agent snapshot")

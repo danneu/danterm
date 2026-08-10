@@ -123,7 +123,11 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let commands = update(&model, .commandStarted(paneId: paneId, command: "ls"))
+        var stream = PaneSemanticStream()
+        let commands = update(&model, .paneSemanticsChanged(
+            paneId: paneId,
+            transition: stream.apply(.commandStarted("ls"))
+        ))
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
             "commandStarted should emit scheduleCheckpoint")
     }

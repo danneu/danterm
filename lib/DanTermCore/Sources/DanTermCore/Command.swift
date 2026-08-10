@@ -45,6 +45,8 @@ enum Command {
     // IPC
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
+    /// Defers ls until the runtime can add every pane owner's live snapshot.
+    case readPaneList(reqId: UUID, baseResult: JSONValue)
     /// Defers pane.info until the runtime can add the pane owner's live snapshot.
     case readPaneInfo(reqId: UUID, paneId: PaneId, baseResult: JSONValue)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
@@ -110,7 +112,7 @@ extension Command {
             return true
         case .createSession, .sendText, .sendInputText, .sendInputKey,
              .focusSession, .exportState, .ipcReply, .ipcError,
-             .readPaneInfo, .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
+             .readPaneList, .readPaneInfo, .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
              .applyPaneSemanticIpc,
              .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,

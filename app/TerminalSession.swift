@@ -80,7 +80,7 @@ final class TerminalSessionCallbackGate {
 ///
 /// The three appearance fields are passed in rather than read from `DanTermConfig` at
 /// the creation seam, and that is deliberate on two counts. `themeName` is genuinely
-/// per-pane: it resolves `remoteThemeOverride ?? pane.theme ?? config default`, so the
+/// per-pane: it resolves the live connection, pane theme, and config default, so the
 /// global value is only the last fallback. `fontSize` and `fontFamily` are global, but
 /// *which* model they come from is not -- restore builds its sessions against a staged
 /// model that has not replaced the live one yet, so a seam that read `self.model` would

@@ -32,26 +32,7 @@ func terminalMessages(
         return [.sessionBell(paneId: paneId)]
     case .paneSemanticsChanged(let transition):
         guard transition.didChange else { return [] }
-        switch transition.event {
-        case .commandStarted(let command):
-            return [.commandStarted(paneId: paneId, command: command)]
-        case .commandEnded:
-            return [.commandEnded(paneId: paneId)]
-        case .remoteDetected:
-            return [.remoteSessionStarted(paneId: paneId)]
-        case .remoteIdentityReported(let session):
-            return [.remoteSessionReported(paneId: paneId, session: session)]
-        case .connectionEnded:
-            return [.remoteSessionEnded(paneId: paneId)]
-        case .agentAttached(let session):
-            return [.agentSessionChanged(paneId: paneId, session: session)]
-        case .agentDetached:
-            return [.agentSessionChanged(paneId: paneId, session: nil)]
-        case .agentActivityChanged(_, .waiting):
-            return [.agentNeedsAttention(paneId: paneId, semantics: transition.current)]
-        case .integrationReady, .agentActivityChanged, .paneTornDown:
-            return []
-        }
+        return [.paneSemanticsChanged(paneId: paneId, transition: transition)]
     case .desktopNotification(let title, let body):
         return [.desktopNotification(
             paneId: paneId,

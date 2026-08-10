@@ -970,6 +970,16 @@ class AppRuntime {
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
+        case .readPaneList(let reqId, let baseResult):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            let semantics = Dictionary(uniqueKeysWithValues: model.allPaneIds.map { paneId in
+                (paneId, sessions[paneId]?.semanticSnapshot ?? PaneSemanticState())
+            })
+            connection.writeSuccess(
+                reqId: reqId,
+                result: paneListResult(adding: semantics, to: baseResult)
+            )
+
         case .readPaneInfo(let reqId, let paneId, let baseResult):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {

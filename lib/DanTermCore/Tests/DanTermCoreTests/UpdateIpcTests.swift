@@ -49,17 +49,16 @@ import DanTermProtocol
         #expect(error.code == -32602)
     }
 
-    @Test("ls returns full snapshot")
-    func lsReturnsFullSnapshot() throws {
-        // Intent: ls returns an object snapshot with groups; panes are
-        //   embedded in tree leaves, not a top-level array.
-        // Why it exists: pins the snapshot shape.
-        // Scenario: spec-first ls.
+    @Test("ls defers its structural snapshot for live semantic enrichment")
+    func lsDefersStructuralSnapshotForLiveSemantics() {
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(&model, method: Methods.ls)
-        let reply = try requireIpcReply(commands)
-        guard case .object(let object) = reply else {
+        guard case .readPaneList(_, let baseResult) = commands.first else {
+            Issue.record("expected deferred pane list read")
+            return
+        }
+        guard case .object(let object) = baseResult else {
             Issue.record("expected object snapshot")
             return
         }
@@ -102,7 +101,6 @@ import DanTermProtocol
             sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"
         ))
         #expect(event == .agentAttached(session))
-        #expect(model.pane(paneId)?.agentSession == nil)
     }
 
     @Test("pane.info defers its reply until the pane owner supplies live semantics")
@@ -185,7 +183,6 @@ import DanTermProtocol
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
-        #expect(model.pane(paneId)?.agentSession == nil)
     }
 
     @Test("agent.attach rejects invalid params without changing pane")
@@ -211,7 +208,6 @@ import DanTermProtocol
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
-        #expect(model.pane(paneId)?.agentSession == nil)
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } == false)
     }
 

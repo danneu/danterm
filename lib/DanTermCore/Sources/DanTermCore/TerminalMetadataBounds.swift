@@ -1,7 +1,6 @@
-// Deterministic per-value byte guard for terminal-originated pane metadata.
-// This is DanTerm's independent model-side cap; it does not sum against the
-// engine's own retention budget -- see docs/terminal-capabilities.md for the
-// per-layer contract.
+// Deterministic byte guards at DanTerm's engine-to-pane and model admission
+// boundaries. These are independent of the engine parser's own cap; see
+// docs/terminal-capabilities.md for the per-layer contract.
 import Foundation
 
 /// Defines DanTerm's defensive per-value share of the terminal metadata
