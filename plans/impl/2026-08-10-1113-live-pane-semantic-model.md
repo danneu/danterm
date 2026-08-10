@@ -212,8 +212,9 @@ The first useful consumers are deliberately narrow:
 - command chrome can distinguish idle from running without treating
   `lastCommand` as permanent running state
 - an attached agent entering a genuinely supported waiting state in an
-  unfocused pane fires the existing needs-attention notification whose click
-  focuses that pane
+  unfocused pane raises an alert through the existing alert/notification
+  pipeline; its click follows the existing `.activateAlert` path to focus that
+  pane, and it shares `alertPresentation` with the title behavior below
 - notification titles name who raised the alert. `alertPresentation` already
   resolves that title through a fallback chain -- the sender's own OSC 777
   title, else the pane title -- and the attached agent session and the running
@@ -281,9 +282,11 @@ co-update rule.
   partial state or resurrecting a detached session.
 - Hook fixtures prove the exact activity subset claimed for Claude Code and
   Codex. Unsupported or malformed activity reports apply nothing.
-- A waiting transition in an unfocused pane produces one needs-attention
-  notification, and its existing click behavior focuses the originating pane;
-  focused panes and repeated unchanged state do not duplicate it.
+- A waiting transition in an unfocused pane raises one alert through the
+  existing alert/notification pipeline, and its click focuses the originating
+  pane; focused panes and repeated unchanged state do not duplicate it.
+- After command-end inside an attached agent session, a recovery checkpoint
+  still carries the agent resume hint; after agent detach, it does not.
 - Pane inspection returns a typed live semantic snapshot matching reducer
   state, and an `agent attach` reply is followed by an inspection that observes
   the attachment.
@@ -345,11 +348,12 @@ dependency of this plan.
   the dialect itself is
   [dialect.md](../../docs/research/24-osc-133-dialect/dialect.md). The zsh, Bash,
   and fish integrations now ship emitters for that dialect.
-- [ ] **R2: Characterize declared-event forwarding and lifetime-end sources.**
+- [x] **R2: Characterize declared-event forwarding and lifetime-end sources.**
   Capture how the private envelope traverses ssh, mosh, tmux, and nested PTYs,
   including whether the local wrapper's connection-end report survives each;
   audit the exact activity states and end-of-session surfaces the current
-  Claude Code and Codex hooks can report.
+  Claude Code and Codex hooks can report. Recorded in
+  [Live semantic event forwarding](../../docs/research/34-live-semantic-event-forwarding/README.md).
 - [ ] **1: Extend bundled shell reports.** Version the private envelope; emit
   integration-ready; keep complete command text on command-start and add exit
   status on command-end; emit connection-end from each remote wrapper, paired
@@ -367,3 +371,18 @@ dependency of this plan.
   distinguish running from idle in command chrome, and ship needs-attention
   only for activity states proven by the hook audit; update
   `integrations/danterm/SKILL.md` with any CLI surface change.
+
+## Commit progress
+
+- [x] 1. docs: characterize live semantic event forwarding
+- [ ] 2. feat(shell): extend bundled semantic reports
+- [ ] 3. feat(core): add the live pane semantic reducer
+- [ ] 4. feat(app): route pane-owned semantic events
+- [ ] 5. feat(app): ship live semantic consumers
+
+## Implementation notes
+
+- R2 found that direct PTYs, nested PTYs, and SSH preserve the private envelope;
+  mosh filters far-side OSC, while tmux requires its explicit DCS passthrough
+  form and an already-enabled `allow-passthrough` policy. Both bundled agents
+  expose `SessionEnd`, so detach does not need a pane-teardown-only fallback.
