@@ -2,6 +2,13 @@
 
 `Status`: Accepted
 `Date`: 2026-08-10
+`Superseded by`: [Session-Owned Terminal-Reported Facts](2026-08-10-session-owned-terminal-reported-facts.md)
+
+> **2026-08-10: superseded by session-owned terminal-reported facts.** The
+> value/lifecycle distinction still determines how a report reduces, but it no
+> longer determines where the result lives. Every terminal-reported fact ends
+> with its terminal session, so the session model owns both kinds. The body is
+> unedited as the record of the former split-ownership design.
 
 ## Context
 
