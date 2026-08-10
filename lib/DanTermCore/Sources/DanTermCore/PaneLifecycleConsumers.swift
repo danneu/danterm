@@ -4,7 +4,7 @@ import DanTermProtocol
 
 /// Encodes every lifecycle with an explicit discriminator so pane inspection
 /// never relies on missing keys to distinguish current states.
-func paneLifecyclesInspectionValue(_ state: PaneLifecycles) -> JSONValue {
+func paneLifecycleInspectionFields(_ state: PaneLifecycles) -> [String: JSONValue] {
     let integration: JSONValue = .object([
         "state": .string(state.integration == .ready ? "ready" : "neverReported"),
     ])
@@ -45,12 +45,12 @@ func paneLifecyclesInspectionValue(_ state: PaneLifecycles) -> JSONValue {
         ])
     }
 
-    return .object([
+    return [
         "integration": integration,
         "command": command,
         "connection": connection,
         "agent": agent,
-    ])
+    ]
 }
 
 /// Shows a complete running command while it is live, then returns to the

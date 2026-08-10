@@ -16,7 +16,7 @@ struct PaneLifecycleConsumerTests {
             agent: .attached(session: agent, activity: .waiting)
         )
 
-        let value = paneLifecyclesInspectionValue(state)
+        let value = paneLifecycleInspectionFields(state)
 
         #expect(value["integration"]?["state"]?.asString == "ready")
         #expect(value["command"]?["state"]?.asString == "running")
@@ -32,7 +32,7 @@ struct PaneLifecycleConsumerTests {
 
     @Test("neutral pane inspection distinguishes absent, idle, local, and unattached lifecycles")
     func neutralPaneInspectionUsesExplicitStates() {
-        let value = paneLifecyclesInspectionValue(PaneLifecycles())
+        let value = paneLifecycleInspectionFields(PaneLifecycles())
 
         #expect(value["integration"]?["state"]?.asString == "neverReported")
         #expect(value["command"]?["state"]?.asString == "idle")
@@ -48,7 +48,7 @@ struct PaneLifecycleConsumerTests {
             agent: .attached(session: agent, activity: nil)
         )
 
-        let value = paneLifecyclesInspectionValue(state)
+        let value = paneLifecycleInspectionFields(state)
 
         #expect(value["connection"]?["state"]?.asString == "remote")
         #expect(value["connection"]?["identity"] == .null)
@@ -62,7 +62,7 @@ struct PaneLifecycleConsumerTests {
         var stream = PaneLifecycleStream()
 
         _ = stream.apply(.agentAttached(agent))
-        let inspected = paneLifecyclesInspectionValue(stream.snapshot)
+        let inspected = paneLifecycleInspectionFields(stream.snapshot)
 
         #expect(inspected["agent"]?["state"]?.asString == "attached")
         #expect(inspected["agent"]?["session"]?["sessionId"]?.asString == "session-1")

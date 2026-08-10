@@ -12,11 +12,11 @@ structurally like the mirrored fields that were just deleted.
 
 The draft cannot be cited yet: its own Consequences section forbids any code
 comment pointing at the scratch path. So this plan promotes it to
-`docs/design/`, then makes the code say the rule. Three things follow from the
-ADR text: the stream side renames from the retired word "semantic" to
-lifecycle vocabulary (its one observable change is the CLI key), the
-reported values group into a `PaneReported` struct, and both carry header
-comments citing the ADR by clause.
+`docs/design/`, then makes the code say the rule. The stream side renames from
+the retired word "semantic" to lifecycle vocabulary, while the pane model
+keeps its independent latest-value fields flat. IPC projects both owners into
+one flat pane document: `command`, `connection`, `agent`, and `integration`
+sit beside `title` and `cwd` instead of exposing the internal ownership split.
 
 Exploration turned up two things the ADR did not anticipate, both settled
 with the user:
@@ -43,7 +43,7 @@ not part of this plan and must not be swept into these commits.
 - [x] 1. Promote the ADR to `docs/design/`
 - [x] 2. Qualify the PTY process-lifecycle module
 - [x] 3. Rename the reported-fact stream to lifecycle vocabulary (CLI key `semantics` -> `live`)
-- [ ] 4. Group the pane's reported values into `PaneReported`
+- [x] 4. Flatten lifecycle fields in pane IPC and keep model values flat
 
 ---
 
@@ -210,49 +210,39 @@ and the value under it carries the same fields and discriminators `semantics`
 carried. Key ordering inside the JSON object is not part of the contract and
 is not what these checks establish.
 
-## 4. Group the pane's reported values into `PaneReported`
+## 4. Flatten lifecycle fields in pane IPC and keep model values flat
 
-The model side of D1, and the visible half of the rule: the shape of
-`PaneModel` should show the reported-vs-owned split without a comment having
-to assert it.
+The storage boundary and the consumer projection answer different questions.
+`PaneModel` keeps `title`, `cwd`, and `progress` as direct independent fields;
+the pane-owned stream keeps `command`, `connection`, `agent`, and
+`integration`. `IpcEntityEncoder` projects both owners into one flat pane
+snapshot rather than making clients understand the internal split.
 
-- Replace `PaneModel`'s `title`, `cwd`, and `progress` with
-  `var reported: PaneReported`. `theme`, `fontSizeSteps`, and `todos` stay
-  where they are -- they are owned content, not reported facts, and the ADR
-  puts them outside the struct on purpose.
-- `PaneReported` carries the mirror sentence in its header, citing the ADR:
-  the latest report is the whole truth, no report is refused for what the
-  state currently is, and nothing here is also stored in the stream.
-- Call sites are a mechanical `pane.title` -> `pane.reported.title` sweep
-  across core, app, and the test suites -- the `update()` handlers, the two
-  pane-seeding sites, the IPC encoder, persistence, projections, and every
-  fixture.
-- **No wire or disk change.** `IpcEntityEncoder` still emits flat `title` and
-  `cwd` keys, and `PaneSnapshot` keeps its flat fields.
+The observable CLI contract becomes:
 
-**What "no wire change" means for the tests.** Test fixtures build panes with
-the synthesized flat initializer (`PaneModel(id:title:cwd:)`), so replacing
-those fields necessarily changes how the fixtures are constructed. Those
-edits are permitted and expected. What must not change is the *expected*
-side: the asserted IPC JSON and the asserted snapshot values stay byte-for-byte
-as they are. Their staying green against edited fixtures is the proof the
-grouping is internal. Do not add a compatibility initializer to keep the
-fixtures untouched -- it would hide the very model shape this commit exists
-to establish.
+- `pane.command`, `pane.connection`, `pane.agent`, and `pane.integration`
+  carry the same typed objects that commit 3 placed under `pane.live`.
+- Neither `pane.live` nor `pane.semantics` survives in `ls`, `pane info`, or
+  commands that reuse the `pane info` reply.
+- Existing pane fields keep their current wire shape. This change does not add
+  `progress` to IPC and does not change persistence.
 
-**One asymmetry to settle, not paper over.** The title and cwd handlers guard
-on `fitsTerminalMetadataValueLimit`; the progress handler has no guard. The
-reason is not that the payload is bounded -- `ProgressState` carries `UInt8`
-percentages whose documented `0-100` range lives in a trailing comment, so
-101 through 255 are representable. The reason is that today's only producer is
-the engine boundary lowering, whose parser refuses anything above 100, so no
-out-of-range percentage can reach the model. Say exactly that in a comment at
-the handler, naming the producer the guarantee depends on, rather than
-implying the type enforces the range.
+Land the contract TDD: change the whole-reply expectations for `ls` and
+`pane.info` first and confirm they fail against the nested `live` object, then
+flatten the encoder projection and confirm they pass. The entity-id collision
+test continues to prove that lifecycle fields attach only to pane objects, not
+to tabs or groups with the same raw id.
 
-Verification: `just test`. The unchanged expectations in the IPC, snapshot, and
-export suites -- green against fixtures that now construct `PaneReported` --
-are the evidence that the grouping is internal.
+Amend the ADR in the same commit. It must distinguish storage ownership from
+external projection, keep the internal `PaneLifecycle*` vocabulary, state that
+model values remain flat, and describe the flat IPC shape. Remove the
+`PaneReported` and `live` decisions from Naming and Consequences. Update
+`integrations/danterm/SKILL.md` everywhere it documents the pane JSON or jq
+paths.
+
+Verification: the exact-shape core IPC tests, `just test`, and a live slot
+check of both `ls` and `pane info`. The live replies expose the four lifecycle
+objects directly on each pane and contain neither `live` nor `semantics`.
 
 ## Accepted risks
 
@@ -277,9 +267,10 @@ are the evidence that the grouping is internal.
 3. `swift build --package-path lib/TerminalPTY` after commit 2, since the
    module rename touches Package.swift targets that the app build resolves
    separately.
-4. End to end after commit 3: `just launch-slot`, drive a pane through a real
-   command and an ssh, and confirm `danterm --socket <slot> ls` reports the
-   running command and remote identity under `live` with the documented shape.
+4. End to end after commit 4: `just launch-slot`, drive a pane through a real
+   command, and confirm `danterm --socket <slot> ls` and `pane info` report the
+   four lifecycle objects directly on the pane with no `live` or `semantics`
+   wrapper.
 5. `git diff --stat` before each commit to confirm the staged tree excludes
    the unrelated `lib/TerminalCore` search changes already in the tree.
 
@@ -296,3 +287,10 @@ are the evidence that the grouping is internal.
   running command under it. Localhost SSH was refused because Remote Login is
   disabled, so remote identity remained covered by the unchanged reducer and
   routing suites rather than a live remote session.
+- After commit 3, the user chose a flatter consumer contract: pane IPC should
+  project lifecycle fields beside model fields instead of exposing either
+  owner's storage grouping. The unchecked remainder was re-sliced around that
+  decision; the completed rename commits remain unchanged.
+- Commit 4's isolated slot verified the flat fields in both `ls` and
+  `pane info`, with no `live` or `semantics` wrapper. A background `sleep 15`
+  appeared synchronously under `pane.command` as a running command.

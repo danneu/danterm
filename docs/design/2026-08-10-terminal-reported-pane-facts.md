@@ -9,7 +9,7 @@ A terminal program can tell DanTerm things about a pane: its title, its
 working directory, a progress bar, "a command just started", "you are now on
 a remote host". Every such fact needs a home, and there are two: flat fields
 on the pane model, fed by Msgs and guarded in `update()`, or the pane-owned
-semantic stream, reduced by the pure per-pane reducer and read as snapshots.
+lifecycle stream, reduced by the pure per-pane reducer and read as snapshots.
 
 Until now the boundary between the two was picked by accident: the facts a
 plan happened to cover became stream state, and the rest stayed model
@@ -70,6 +70,11 @@ Two clauses follow from the rule rather than standing beside it:
   for values), and persistence saves values directly from the model while
   lifecycles are never saved -- only grafted projections are.
 
+Storage ownership does not dictate presentation shape. IPC reads both owners
+and projects one flat pane snapshot: model values such as `title` and `cwd`
+sit beside the stream's `command`, `connection`, `agent`, and `integration`
+objects. Flattening the read does not create another stored copy.
+
 ### Classification
 
 | Fact | Kind | Home |
@@ -115,13 +120,13 @@ phase of a recurring machine, not a span.
   in `DanTermCore`. The PTY child-process launch, exit, and teardown machine
   uses `PaneProcessLifecycle*`, including its module name, so the two meanings
   cannot collide at an import site.
-- Model side: the terminal-reported values group into a `PaneReported`
-  struct (`pane.reported.title`), whose header carries the mirror rule.
-  Owned content (`todos`, `theme`, `fontSizeSteps`) stays outside it, so the
-  model's shape shows the reported-vs-owned split directly.
-- CLI: the `ls` and `pane.info` key for this state is `live`, not
-  `lifecycles` -- a CLI consumer cares that the state is current and not
-  history; the enforcement axis is irrelevant to them.
+- Model side: terminal-reported values remain direct `PaneModel` fields
+  (`pane.title`, `pane.cwd`, `pane.progress`). They are independent values,
+  not one atomic aggregate. Owned content (`todos`, `theme`, `fontSizeSteps`)
+  remains beside them.
+- CLI: `ls` and `pane.info` flatten the four lifecycle objects directly onto
+  each pane as `command`, `connection`, `agent`, and `integration`. The CLI
+  exposes the pane snapshot clients need, not the internal ownership split.
 
 The word "facet" retires with "semantic": the fields of `PaneLifecycles`
 are just `command`, `connection`, `agent`.
@@ -134,10 +139,9 @@ are just `command`, `connection`, `agent`.
   owners, and values have one.
 - Uniform model ownership -- every fact in `PaneModel`, the lifecycle
   reducer applied inside `update()`, value-vs-lifecycle deciding only data
-  shape. Out of scope, not refuted here: it re-opens the shipped ownership
-  decision of the live-pane-semantic-model plan, which is a separate plan,
-  not this document. Such a plan owes two proofs this document does not
-  carry: that every path that ends a session also ends model-held
+  shape. Out of scope, not refuted here: it re-opens the previously shipped
+  stream-ownership decision. Such a change owes two proofs this document does
+  not carry: that every path that ends a session also ends model-held
   session-scoped state (today the session owns that state, so the guarantee
   is structural rather than maintained), and that pane IPC replies stay
   ordered after the transition they report once the reducer moves inside
@@ -150,16 +154,15 @@ are just `command`, `connection`, `agent`.
 - This document graduates to `docs/design/` (with an index entry) before
   any code comment cites it; comments cite the final path and clause, never
   the scratch path.
-- The rename above is mechanical and lands as its own commit. Its one
-  observable change, the CLI key, lands TDD: the exact-shape IPC reply
-  tests fail first on the old key, then pin `live` in both `ls` and
-  `pane.info` -- same nested encoding, no `semantics` key -- while the
-  value, reducer, recovery, and routing suites stay green to prove the rest
-  of the rename is behavior-preserving. The key change carries the standing
-  SKILL.md co-update rule.
-- The rule travels to the point of edit as two header comments that cite
-  this document by clause: a few sentences on `PaneLifecycles` (D1, the
-  per-fact test, D2, D3) and a mirror sentence on `PaneReported`.
+- The internal rename is mechanical. The observable CLI change lands TDD:
+  exact-shape IPC reply tests pin the four flat lifecycle objects in both
+  `ls` and `pane.info`, with no `semantics` or `live` wrapper, while the value,
+  reducer, recovery, and routing suites stay green. The CLI change carries
+  the standing SKILL.md co-update rule.
+- The rule travels to the lifecycle point of edit in the `PaneLifecycles`
+  header, which cites D1 and its per-fact test, D2, and D3. Direct model values
+  stay ordinary fields because their independent latest-value behavior needs
+  no aggregate type.
 - A fact moves the day a lifecycle is decided for it, and not before its
   source contracts to report that lifecycle. Worked example: if a progress
   bar's validity ever becomes bounded by the command that set it, that

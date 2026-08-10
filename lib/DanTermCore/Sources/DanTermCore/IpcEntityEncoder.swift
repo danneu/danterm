@@ -28,14 +28,14 @@ struct IpcEntityEncoder {
     }
 
     func tab(_ tab: TabModel) -> JSONValue {
-        self.tab(tab, includeLive: true)
+        self.tab(tab, includeLifecycles: true)
     }
 
-    private func tab(_ tab: TabModel, includeLive: Bool) -> JSONValue {
+    private func tab(_ tab: TabModel, includeLifecycles: Bool) -> JSONValue {
         var object: [String: JSONValue] = [
             "id": .string(tab.id.rawValue.uuidString),
             "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
-            "rootNode": splitNode(tab.rootNode, includeLive: includeLive),
+            "rootNode": splitNode(tab.rootNode, includeLifecycles: includeLifecycles),
         ]
         if let customTitle = tab.customTitle {
             object["customTitle"] = .string(customTitle)
@@ -49,12 +49,12 @@ struct IpcEntityEncoder {
         return .object(object)
     }
 
-    private func pane(_ pane: PaneModel, includeLive: Bool) -> JSONValue {
+    private func pane(_ pane: PaneModel, includeLifecycles: Bool) -> JSONValue {
         var object = paneFields(
             pane,
             cwd: pane.cwd.map { abbreviateHome($0, home: home) },
             includeNullCwd: false,
-            includeLive: includeLive
+            includeLifecycles: includeLifecycles
         )
         if let theme = pane.theme {
             object["theme"] = .string(theme)
@@ -74,7 +74,7 @@ struct IpcEntityEncoder {
                 pane,
                 cwd: pane.cwd,
                 includeNullCwd: true,
-                includeLive: true
+                includeLifecycles: true
             )),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
@@ -91,7 +91,7 @@ struct IpcEntityEncoder {
 
     func tabNew(tab: TabModel?, group: GroupModel?) -> JSONValue {
         var object: [String: JSONValue] = [
-            "tab": tab.map { self.tab($0, includeLive: false) } ?? .null,
+            "tab": tab.map { self.tab($0, includeLifecycles: false) } ?? .null,
             "panes": .array(tab.map { tab in
                 allPaneIds(tab.rootNode)
                     .map { .object(["id": .string($0.rawValue.uuidString)]) }
@@ -123,20 +123,20 @@ struct IpcEntityEncoder {
         ])
     }
 
-    private func splitNode(_ node: SplitNodeModel, includeLive: Bool) -> JSONValue {
+    private func splitNode(_ node: SplitNodeModel, includeLifecycles: Bool) -> JSONValue {
         switch node {
         case .leaf(let pane):
             return .object([
                 "type": .string("leaf"),
-                "pane": self.pane(pane, includeLive: includeLive),
+                "pane": self.pane(pane, includeLifecycles: includeLifecycles),
             ])
         case .split(let id, let direction, let first, let second, let ratio):
             return .object([
                 "type": .string("split"),
                 "id": .string(id.rawValue.uuidString),
                 "direction": .string(direction == .horizontal ? "horizontal" : "vertical"),
-                "first": splitNode(first, includeLive: includeLive),
-                "second": splitNode(second, includeLive: includeLive),
+                "first": splitNode(first, includeLifecycles: includeLifecycles),
+                "second": splitNode(second, includeLifecycles: includeLifecycles),
                 "ratio": .number(Double(ratio)),
             ])
         }
@@ -146,14 +146,17 @@ struct IpcEntityEncoder {
         _ pane: PaneModel,
         cwd: String?,
         includeNullCwd: Bool,
-        includeLive: Bool
+        includeLifecycles: Bool
     ) -> [String: JSONValue] {
         var object: [String: JSONValue] = [
             "id": .string(pane.id.rawValue.uuidString),
             "title": .string(pane.title),
         ]
-        if includeLive {
-            object["live"] = paneLifecyclesInspectionValue(livePaneState.lifecycles(for: pane.id))
+        if includeLifecycles {
+            let lifecycleFields = paneLifecycleInspectionFields(
+                livePaneState.lifecycles(for: pane.id)
+            )
+            object.merge(lifecycleFields) { _, lifecycle in lifecycle }
         }
         if let cwd {
             object["cwd"] = .string(cwd)

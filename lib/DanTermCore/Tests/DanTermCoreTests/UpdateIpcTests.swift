@@ -49,7 +49,7 @@ import DanTermProtocol
         #expect(error.code == -32602)
     }
 
-    @Test("ls encodes the documented rich model directly with live pane lifecycles")
+    @Test("ls encodes the documented rich model with current pane lifecycles")
     func lsEncodesRichModelDirectly() throws {
         let paneAId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
         let paneBId = PaneId(rawValue: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!)
@@ -112,18 +112,21 @@ import DanTermProtocol
         )
 
         let result = try requireIpcReply(commands)
-        let neutralLifecycles: JSONValue = .object([
+        let neutralLifecycles: [String: JSONValue] = [
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("idle")]),
             "connection": .object(["state": .string("local")]),
             "agent": .object(["state": .string("none")]),
-        ])
-        let runningLifecycles: JSONValue = .object([
+        ]
+        let runningLifecycles: [String: JSONValue] = [
             "integration": .object(["state": .string("neverReported")]),
             "command": .object(["state": .string("running"), "text": .string("swift test")]),
             "connection": .object(["state": .string("local")]),
             "agent": .object(["state": .string("none")]),
-        ])
+        ]
+        func pane(_ fields: [String: JSONValue], lifecycles: [String: JSONValue]) -> JSONValue {
+            .object(fields.merging(lifecycles) { _, lifecycle in lifecycle })
+        }
         let expected: JSONValue = .object([
             "groups": .array([
                 .object([
@@ -147,7 +150,7 @@ import DanTermProtocol
                             "ratio": .number(0.6),
                             "first": .object([
                                 "type": .string("leaf"),
-                                "pane": .object([
+                                "pane": pane([
                                     "id": .string(paneAId.rawValue.uuidString),
                                     "title": .string("shell"),
                                     "cwd": .string("~/work"),
@@ -158,8 +161,7 @@ import DanTermProtocol
                                         "text": .string("ship"),
                                         "isDone": .bool(false),
                                     ])]),
-                                    "live": runningLifecycles,
-                                ]),
+                                ], lifecycles: runningLifecycles),
                             ]),
                             "second": .object([
                                 "type": .string("split"),
@@ -168,20 +170,18 @@ import DanTermProtocol
                                 "ratio": .number(0.4),
                                 "first": .object([
                                     "type": .string("leaf"),
-                                    "pane": .object([
+                                    "pane": pane([
                                         "id": .string(paneBId.rawValue.uuidString),
                                         "title": .string("tests"),
                                         "cwd": .string("/tmp"),
-                                        "live": neutralLifecycles,
-                                    ]),
+                                    ], lifecycles: neutralLifecycles),
                                 ]),
                                 "second": .object([
                                     "type": .string("leaf"),
-                                    "pane": .object([
+                                    "pane": pane([
                                         "id": .string(paneCId.rawValue.uuidString),
                                         "title": .string("logs"),
-                                        "live": neutralLifecycles,
-                                    ]),
+                                    ], lifecycles: neutralLifecycles),
                                 ]),
                             ]),
                         ]),
@@ -196,11 +196,10 @@ import DanTermProtocol
                         "focusedPaneId": .string(paneDId.rawValue.uuidString),
                         "rootNode": .object([
                             "type": .string("leaf"),
-                            "pane": .object([
+                            "pane": pane([
                                 "id": .string(paneDId.rawValue.uuidString),
                                 "title": .string("archive"),
-                                "live": neutralLifecycles,
-                            ]),
+                            ], lifecycles: neutralLifecycles),
                         ]),
                     ])]),
                 ]),
@@ -210,8 +209,8 @@ import DanTermProtocol
         #expect(result == expected)
     }
 
-    @Test("ls attaches live state only to panes when entity ids collide")
-    func lsScopesLiveStateToPaneEntities() throws {
+    @Test("ls attaches lifecycle fields only to panes when entity ids collide")
+    func lsScopesLifecycleFieldsToPaneEntities() throws {
         let rawId = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
         let paneId = PaneId(rawValue: rawId)
         let tabId = TabId(rawValue: rawId)
@@ -233,9 +232,13 @@ import DanTermProtocol
         let encodedTab = try #require(group["tabs"]?.asArray?.first)
         let encodedPane = encodedTab["rootNode"]?["pane"]
 
-        #expect(group["live"] == nil)
-        #expect(encodedTab["live"] == nil)
-        #expect(encodedPane?["live"] == paneLifecyclesInspectionValue(state))
+        let expectedFields = paneLifecycleInspectionFields(state)
+        for key in ["integration", "command", "connection", "agent"] {
+            #expect(group[key] == nil)
+            #expect(encodedTab[key] == nil)
+            #expect(encodedPane?[key] == expectedFields[key])
+        }
+        #expect(encodedPane?["live"] == nil)
     }
 
     @Test("agent.attach routes through the pane owner before its reply")
@@ -293,12 +296,10 @@ import DanTermProtocol
                 "id": .string(paneId.rawValue.uuidString),
                 "title": .string("Terminal"),
                 "cwd": .null,
-                "live": .object([
-                    "integration": .object(["state": .string("neverReported")]),
-                    "command": .object(["state": .string("idle")]),
-                    "connection": .object(["state": .string("local")]),
-                    "agent": .object(["state": .string("none")]),
-                ]),
+                "integration": .object(["state": .string("neverReported")]),
+                "command": .object(["state": .string("idle")]),
+                "connection": .object(["state": .string("local")]),
+                "agent": .object(["state": .string("none")]),
             ]),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
