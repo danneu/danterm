@@ -15,6 +15,7 @@ struct TerminalSelectionTests {
             to: TerminalTextPosition(row: 0, column: 0)
         )
 
+        #expect(terminal.selectionGranularity == .character)
         #expect(terminal.selectionRange == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 1)
@@ -25,6 +26,7 @@ struct TerminalSelectionTests {
         #expect(found)
         terminal.clearSelection()
         #expect(terminal.selectionRange == nil)
+        #expect(terminal.selectionGranularity == nil)
         #expect(terminal.activeSearchMatchRange != nil)
         terminal.clearSearch()
         #expect(terminal.activeSearchMatchRange == nil)
@@ -110,8 +112,11 @@ struct TerminalSelectionTests {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
         terminal.feed(Array("xx target xx target".utf8))
         terminal.setSelection(
-            from: TerminalTextPosition(row: 1, column: 3),
-            to: TerminalTextPosition(row: 2, column: 0)
+            TerminalTextRange(
+                start: TerminalTextPosition(row: 1, column: 3),
+                end: TerminalTextPosition(row: 2, column: 1)
+            ),
+            granularity: .terminalToken
         )
         let foundTarget = terminal.beginSearch("target")
         #expect(foundTarget)
@@ -123,11 +128,13 @@ struct TerminalSelectionTests {
         terminal.resize(columns: 8, rows: 3)
 
         #expect(terminal.selectionRange == selection)
+        #expect(terminal.selectionGranularity == .terminalToken)
         #expect(terminal.activeSearchMatchRange == match)
         #expect(terminal.selectedText == text)
 
         terminal.resize(columns: 8, rows: 1)
         #expect(terminal.selectedText == text)
+        #expect(terminal.selectionGranularity == .terminalToken)
         terminal.resize(columns: 8, rows: 3)
         #expect(terminal.selectedText == text)
 
@@ -224,15 +231,22 @@ struct TerminalSelectionTests {
         ))
         terminal.feed(Array("A\r\nB\r\nC".utf8))
         terminal.setSelection(
-            from: TerminalTextPosition(row: 0, column: 0),
-            to: TerminalTextPosition(row: 2, column: 0)
+            TerminalTextRange(
+                start: TerminalTextPosition(row: 0, column: 0),
+                end: TerminalTextPosition(row: 2, column: 1)
+            ),
+            granularity: .line
         )
         let foundA = terminal.beginSearch("A")
         #expect(foundA)
 
+        terminal.scroll(toTopRow: 0)
+        #expect(terminal.selectionGranularity == .line)
+
         terminal.feed(Array("\r\nD".utf8))
 
         #expect(terminal.selectedText == "B\nC")
+        #expect(terminal.selectionGranularity == .line)
         #expect(terminal.activeSearchMatchRange == nil)
 
         terminal.setSelection(
@@ -258,6 +272,7 @@ struct TerminalSelectionTests {
         )
         whole.feed(Array("\r\nC".utf8))
         #expect(whole.selectionRange == nil)
+        #expect(whole.selectionGranularity == nil)
 
         var reflow = try #require(Terminal(
             columns: 4,
@@ -326,6 +341,7 @@ struct TerminalSelectionTests {
         #expect(terminal.fullHistoryText == "B\nC\nD")
         #expect(terminal.selectedText == terminal.fullHistoryText)
         #expect(terminal.selectionRange?.start == TerminalTextPosition(row: 0, column: 0))
+        #expect(terminal.selectionGranularity == .character)
     }
 
     @Test("select-all on an empty buffer yields a present empty selection")
@@ -371,6 +387,7 @@ struct TerminalSelectionTests {
         #expect(terminal.selectionRange != nil)
         terminal.feed(Array("\u{1B}c".utf8))
         #expect(terminal.selectionRange == nil)
+        #expect(terminal.selectionGranularity == nil)
     }
 
     @Test("every alternate transition arm follows whether it replaces the projection")

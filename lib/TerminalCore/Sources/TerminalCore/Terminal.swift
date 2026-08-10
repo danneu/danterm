@@ -419,6 +419,12 @@ public struct Terminal: Equatable, Sendable {
         var end: TextAnchor
     }
 
+    /// Keeps selection extent and extension behavior on one replacement and drop lifetime.
+    private struct SettledSelection: Equatable, Sendable {
+        var range: TextAnchorRange
+        var granularity: TerminalSelectionGranularity
+    }
+
     /// Counts the events after which an absolute retained row no longer names the text it
     /// named -- a hard reset, a width reflow, a screen replacement.
     ///
@@ -665,7 +671,7 @@ public struct Terminal: Equatable, Sendable {
     // Each observer keeps `hasContentInspectionState` exact so that guard is one Bool load
     // instead of three optional loads. Selection is deliberately outside this cache because
     // overwrites preserve it and therefore have no selection work to gate.
-    private var selection: TextAnchorRange? {
+    private var selection: SettledSelection? {
         didSet {
             if selection == nil { selectionRequiresNonemptyReflowResult = false }
         }
@@ -2610,7 +2616,12 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns the current half-open selection endpoints in stream coordinates.
     public var selectionRange: TerminalTextRange? {
-        selection.flatMap(publicRange)
+        selection.flatMap { publicRange($0.range) }
+    }
+
+    /// Returns the unit future Shift gestures inherit from the current selection.
+    public var selectionGranularity: TerminalSelectionGranularity? {
+        selection?.granularity
     }
 
     /// Returns the currently indicated HTTP(S) run in current retained-stream coordinates.
@@ -2715,7 +2726,7 @@ public struct Terminal: Equatable, Sendable {
     /// Serializes the selected projection units, preserving an intentionally empty selection.
     public var selectedText: String? {
         guard let selection else { return nil }
-        return text(in: selection)
+        return text(in: selection.range)
     }
 
     /// Returns the current half-open search occurrence in stream coordinates.
@@ -2760,9 +2771,12 @@ public struct Terminal: Equatable, Sendable {
         let first = normalizedCellPosition(from)
         let second = normalizedCellPosition(to)
         let ordered = positionPrecedes(first, second) ? (first, second) : (second, first)
-        selection = TextAnchorRange(
-            start: anchor(before: ordered.0),
-            end: anchor(after: ordered.1)
+        selection = SettledSelection(
+            range: TextAnchorRange(
+                start: anchor(before: ordered.0),
+                end: anchor(after: ordered.1)
+            ),
+            granularity: .character
         )
         selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
@@ -2770,13 +2784,24 @@ public struct Terminal: Equatable, Sendable {
 
     /// Applies an already-computed half-open selection unit without losing wrap boundaries.
     public mutating func setSelection(_ range: TerminalTextRange) {
+        setSelection(range, granularity: .character)
+    }
+
+    /// Applies a pointer-computed range and keeps its selection unit for later Shift extension.
+    public mutating func setSelection(
+        _ range: TerminalTextRange,
+        granularity: TerminalSelectionGranularity
+    ) {
         let before = damageActionSnapshot
         let ordered = textPositionPrecedes(range.start, range.end)
             ? (range.start, range.end)
             : (range.end, range.start)
-        selection = TextAnchorRange(
-            start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-            end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+        selection = SettledSelection(
+            range: TextAnchorRange(
+                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+            ),
+            granularity: granularity
         )
         selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
@@ -2791,10 +2816,16 @@ public struct Terminal: Equatable, Sendable {
         let before = damageActionSnapshot
         let units = projectionUnits()
         if let first = units.first, let last = units.last {
-            selection = TextAnchorRange(start: first.start, end: last.end)
+            selection = SettledSelection(
+                range: TextAnchorRange(start: first.start, end: last.end),
+                granularity: .character
+            )
         } else {
             let anchor = TextAnchor(row: evictedRowCount, column: 0)
-            selection = TextAnchorRange(start: anchor, end: anchor)
+            selection = SettledSelection(
+                range: TextAnchorRange(start: anchor, end: anchor),
+                granularity: .character
+            )
         }
         selectionRequiresNonemptyReflowResult = units.contains { $0.scalars.isEmpty == false }
         recordDamage(since: before)
@@ -3672,10 +3703,11 @@ public struct Terminal: Equatable, Sendable {
     /// is the same degenerate accepted by the other point-local projection queries.
     private func selectionContainsProjectedText() -> Bool {
         guard let selection else { return false }
+        let range = selection.range
         let stream = activeProjection()
         guard let lastContentRow = stream.lastIndex(where: rowContainsContent) else { return false }
-        let firstRow = max(0, selection.start.row - evictedRowCount)
-        let lastRow = min(lastContentRow, selection.end.row - evictedRowCount)
+        let firstRow = max(0, range.start.row - evictedRowCount)
+        let lastRow = min(lastContentRow, range.end.row - evictedRowCount)
         guard firstRow <= lastRow else { return false }
 
         for rowIndex in firstRow...lastRow {
@@ -3687,8 +3719,8 @@ public struct Terminal: Equatable, Sendable {
                 absoluteBase: evictedRowCount
             ) { unit in
                 if unit.scalars.isEmpty == false,
-                   unit.start >= selection.start,
-                   unit.end <= selection.end {
+                   unit.start >= range.start,
+                   unit.end <= range.end {
                     containsText = true
                 }
             }
@@ -3704,8 +3736,8 @@ public struct Terminal: Equatable, Sendable {
                 end: TextAnchor(row: evictedRowCount + rowIndex + 1, column: 0),
                 isHardBoundary: true
             )
-            if boundary.start >= selection.start,
-               boundary.end <= selection.end {
+            if boundary.start >= range.start,
+               boundary.end <= range.end {
                 return true
             }
         }
@@ -4119,15 +4151,15 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func clampSelectionToRetainedStream() {
         guard var selection else { return }
-        selection.start.column = min(max(selection.start.column, 0), columnCount)
-        selection.end.column = min(max(selection.end.column, 0), columnCount)
+        selection.range.start.column = min(max(selection.range.start.column, 0), columnCount)
+        selection.range.end.column = min(max(selection.range.end.column, 0), columnCount)
         let lastRow = evictedRowCount + historyRowCount + rows.count - 1
         let lastAnchor = TextAnchor(row: lastRow, column: projectedCellEnd(in: rows.last!))
-        if selection.start > lastAnchor {
-            selection.start = lastAnchor
+        if selection.range.start > lastAnchor {
+            selection.range.start = lastAnchor
         }
-        if selection.end > lastAnchor {
-            selection.end = lastAnchor
+        if selection.range.end > lastAnchor {
+            selection.range.end = lastAnchor
         }
         self.selection = selection
     }
@@ -4137,10 +4169,10 @@ public struct Terminal: Equatable, Sendable {
         evictedRowCount += rowCount
         let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
         if var selection {
-            if selection.end <= firstRetained {
+            if selection.range.end <= firstRetained {
                 self.selection = nil
             } else {
-                selection.start = max(selection.start, firstRetained)
+                selection.range.start = max(selection.range.start, firstRetained)
                 self.selection = selection
             }
         }
@@ -4946,8 +4978,8 @@ public struct Terminal: Equatable, Sendable {
             else { return }
             captured.append((slot, address))
         }
-        capture(.selectionStart, selection?.start)
-        capture(.selectionEnd, selection?.end)
+        capture(.selectionStart, selection?.range.start)
+        capture(.selectionEnd, selection?.range.end)
         capture(.searchStart, search?.range?.start)
         capture(.searchEnd, search?.range?.end)
         capture(.hoverStart, hoveredLinkState?.range.start)
@@ -5025,9 +5057,12 @@ public struct Terminal: Equatable, Sendable {
         switch restate(.selectionStart, .selectionEnd) {
         case .untouched: break
         case let .restated(range):
-            selection = selectionRequiresNonemptyReflowResult && range.start == range.end
-                ? nil
-                : range
+            if selectionRequiresNonemptyReflowResult && range.start == range.end {
+                selection = nil
+            } else if var selection {
+                selection.range = range
+                self.selection = selection
+            }
         case .dropped: selection = nil
         }
         switch restate(.searchStart, .searchEnd) {

@@ -1565,12 +1565,13 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
-    @Test("Shift drag selects locally while captured and replays exactly", .timeLimit(.minutes(1)))
+    @Test("Shift extension stays local while captured and replays exactly", .timeLimit(.minutes(1)))
     func capturedShiftSelectionReplays() async throws {
         let host = try makeHost()
-        let command = "printf '\\033[?1000;1006halpha beta'; exec \(try probeExecutable()) hold \"$0\""
+        let command = "exec \(try probeExecutable()) hold \"$0\""
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.deliverOutputForTesting(Array("\u{1B}[2J\u{1B}[H\u{1B}[?1000halpha beta".utf8))
         let baseline = await host.inputWrites().count
         let lines = host.fencedSnapshot().viewportText
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -1582,12 +1583,21 @@ struct TerminalPTYHostTests {
             .left,
             column: column,
             row: row,
-            modifiers: [.shift]
+            modifiers: [.shift],
+            clickCount: 2
         ))
-        // Out to the trailing edge of "alpha"'s last cell, so the whole word is inside the
-        // two boundaries the drag names.
-        host.sendPointer(.move(column: column + 4, row: row, offsetX: 1, modifiers: [.shift]))
-        host.sendPointer(.up(.left, column: column + 4, row: row, modifiers: [.shift]))
+        host.sendPointer(.up(.left, column: column, row: row, modifiers: [.shift]))
+        // The extending click count maps to line selection on a fresh gesture, but the settled
+        // token granularity wins and entering beta includes that token as one unit.
+        host.sendPointer(.down(
+            .left,
+            column: column + 6,
+            row: row,
+            offsetX: 0.75,
+            modifiers: [.shift],
+            clickCount: 3
+        ))
+        host.sendPointer(.up(.left, column: column + 6, row: row, modifiers: [.shift]))
         let snapshot = host.fencedSnapshot()
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "captured-shift-selection"),
@@ -1595,7 +1605,8 @@ struct TerminalPTYHostTests {
             events: (await host.transitions()).map(\.recordingEvent)
         )
 
-        #expect(snapshot.selectedText == "alpha")
+        #expect(snapshot.selectedText == "alpha beta")
+        #expect(snapshot.selectionGranularity == .terminalToken)
         #expect(await host.inputWrites().count == baseline)
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
         await host.close()

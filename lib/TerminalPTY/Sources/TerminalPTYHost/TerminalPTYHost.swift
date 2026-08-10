@@ -1079,7 +1079,10 @@ public actor TerminalPTYHost {
         case .clear:
             terminal.clearSelection()
         case .set(let range):
-            terminal.setSelection(range)
+            terminal.setSelection(
+                range,
+                granularity: decision.selectionGranularity ?? .character
+            )
         case nil:
             break
         }

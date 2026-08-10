@@ -151,6 +151,8 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let inputBytes: [UInt8]
     /// Carries a local selection update for the selection arm.
     public let selectionMutation: TerminalSelectionMutation?
+    /// Carries the unit that a set mutation must settle with the range.
+    public let selectionGranularity: TerminalSelectionGranularity?
     /// Requests the pane menu only after an uncaptured right-button release.
     public let paneMenuCell: TerminalViewportCell?
     /// Applies hover presentation independently from the event's byte-owning arm.
@@ -222,10 +224,16 @@ public struct TerminalWheelDecision: Equatable, Sendable {
     public let localRowDelta: Int
 }
 
-private enum SelectionGranularity: Equatable, Sendable {
+/// Names the unit a settled selection and any later Shift extension use together.
+public enum TerminalSelectionGranularity: Equatable, Sendable {
     case character
     case terminalToken
     case line
+}
+
+private enum SelectionDragKind: Equatable, Sendable {
+    case fresh(anchorsTrailingBoundary: Bool)
+    case extending(fixedUsesEnd: Bool)
 }
 
 /// The end of an in-flight drag the pointer does not hold, kept as a `Terminal`-minted pin
@@ -233,11 +241,8 @@ private enum SelectionGranularity: Equatable, Sendable {
 /// coordinates stop meaning what they meant the moment a row is evicted.
 private struct SelectionDrag: Equatable, Sendable {
     var anchor: Terminal.PinnedTextRange
-    var granularity: SelectionGranularity
-    /// Which of the pressed character's two boundaries the gesture is anchored to. A character
-    /// drag needs a boundary, but pins the whole character range so eviction clamping and
-    /// epoch retirement reach it, then re-derives this end from the resolved range every move.
-    var anchorsTrailingBoundary = false
+    var granularity: TerminalSelectionGranularity
+    var kind: SelectionDragKind
 }
 
 private enum WheelMetadata: Equatable, Sendable {
@@ -262,6 +267,7 @@ public struct TerminalInteractionState: Equatable, Sendable {
     fileprivate var mouseTracker = TerminalMouseTracker()
     fileprivate var pointerOwners: [TerminalPointerConsumption?] = [nil, nil, nil]
     fileprivate var selectionDrag: SelectionDrag?
+    fileprivate var selectionGestureCompletes = false
     fileprivate var activeWheelRoute: TerminalWheelRoute?
     fileprivate var localWheel = WheelRemainder()
     fileprivate var reportWheel = WheelRemainder()
@@ -318,6 +324,7 @@ public func decideTerminalPointer(
             column: column,
             row: row,
             offsetX: offsetX,
+            modifiers: modifiers,
             clickCount: clickCount,
             terminal: terminal,
             reportBytes: reportBytes,
@@ -349,6 +356,7 @@ public func decideTerminalPointer(
                 consumption: .link,
                 inputBytes: [],
                 selectionMutation: nil,
+                selectionGranularity: nil,
                 paneMenuCell: nil,
                 hoverMutation: .clear,
                 openLink: link.hyperlink,
@@ -362,17 +370,25 @@ public func decideTerminalPointer(
             modes: modes
         )
         state.pointerOwners[button.rawValue] = nil
-        if button == .left { state.selectionDrag = nil }
+        let completesSelection = state.selectionGestureCompletes
+        if button == .left {
+            state.selectionDrag = nil
+            state.selectionGestureCompletes = false
+        }
         switch owner {
         case .report:
             return pointerDecision(.report, bytes: reportBytes)
         case .selection:
-            return pointerDecision(.selection, completedSelectionGesture: true)
+            return pointerDecision(
+                .selection,
+                completedSelectionGesture: completesSelection
+            )
         case .paneMenu:
             return TerminalPointerDecision(
                 consumption: .paneMenu,
                 inputBytes: [],
                 selectionMutation: nil,
+                selectionGranularity: nil,
                 paneMenuCell: .init(column: column, row: row),
                 hoverMutation: nil,
                 openLink: nil,
@@ -418,6 +434,17 @@ public func decideTerminalPointer(
                 return pointerDecision(.selection, hoverMutation: dragHover)
             }
             let position = streamPosition(column: column, row: row, terminal: terminal)
+            if case let .extending(fixedUsesEnd) = drag.kind {
+                return extensionDecision(
+                    fixedRange: anchor,
+                    fixedUsesEnd: fixedUsesEnd,
+                    position: position,
+                    offsetX: offsetX,
+                    granularity: drag.granularity,
+                    terminal: terminal,
+                    hoverMutation: dragHover
+                )
+            }
             guard drag.granularity == .character else {
                 let current = selectionUnit(
                     at: position,
@@ -427,15 +454,19 @@ public func decideTerminalPointer(
                 return pointerDecision(
                     .selection,
                     selectionMutation: .set(union(anchor, current)),
+                    selectionGranularity: drag.granularity,
                     hoverMutation: dragHover
                 )
             }
             // Both ends are boundaries, so ordering them is the whole direction rule: a
             // reversed drag is the same pair swapped, and a coincident pair is not an empty
             // selection but no selection at all.
-            let pressBoundary = terminal.canonicalBoundary(
-                drag.anchorsTrailingBoundary ? anchor.end : anchor.start
-            )
+            let pressBoundary: TerminalTextPosition = switch drag.kind {
+            case let .fresh(anchorsTrailingBoundary):
+                terminal.canonicalBoundary(anchorsTrailingBoundary ? anchor.end : anchor.start)
+            case let .extending(fixedUsesEnd):
+                terminal.canonicalBoundary(fixedUsesEnd ? anchor.end : anchor.start)
+            }
             let currentBoundary = terminal.characterBoundary(at: position, offsetX: offsetX)
             guard pressBoundary != currentBoundary else {
                 return pointerDecision(
@@ -447,6 +478,7 @@ public func decideTerminalPointer(
             return pointerDecision(
                 .selection,
                 selectionMutation: .set(orderedRange(pressBoundary, currentBoundary)),
+                selectionGranularity: drag.granularity,
                 hoverMutation: dragHover
             )
         }
@@ -458,6 +490,9 @@ public func decideTerminalPointer(
         }
         if state.pointerOwners.contains(where: { $0 == .paneMenu }) {
             return pointerDecision(.paneMenu, hoverMutation: hover)
+        }
+        if state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
+            return pointerDecision(.selection, hoverMutation: hover)
         }
         if modes.mouseTracking == .anyMotion {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
@@ -552,6 +587,7 @@ private func pointerDownDecision(
     column: Int,
     row: Int,
     offsetX: Double,
+    modifiers: TerminalKeyModifiers,
     clickCount: Int,
     terminal: Terminal,
     reportBytes: [UInt8],
@@ -569,12 +605,56 @@ private func pointerDownDecision(
         return pointerDecision(.ignored)
     case .selection:
         guard button == .left else { return pointerDecision(.ignored) }
-        let granularity: SelectionGranularity = switch max(clickCount, 1) % 3 {
+        let position = streamPosition(column: column, row: row, terminal: terminal)
+        if modifiers.contains(.shift),
+           let settledRange = terminal.selectionRange,
+           let settledGranularity = terminal.selectionGranularity
+        {
+            let boundary = terminal.characterBoundary(at: position, offsetX: offsetX)
+            let start = terminal.canonicalBoundary(settledRange.start)
+            let end = terminal.canonicalBoundary(settledRange.end)
+            if positionLessThan(start, boundary) == false {
+                state.selectionDrag = SelectionDrag(
+                    anchor: terminal.pinnedRange(settledRange),
+                    granularity: settledGranularity,
+                    kind: .extending(fixedUsesEnd: true)
+                )
+                state.selectionGestureCompletes = true
+                return extensionDecision(
+                    fixedRange: settledRange,
+                    fixedUsesEnd: true,
+                    position: position,
+                    offsetX: offsetX,
+                    granularity: settledGranularity,
+                    terminal: terminal
+                )
+            }
+            if positionLessThan(end, boundary) {
+                state.selectionDrag = SelectionDrag(
+                    anchor: terminal.pinnedRange(settledRange),
+                    granularity: settledGranularity,
+                    kind: .extending(fixedUsesEnd: false)
+                )
+                state.selectionGestureCompletes = true
+                return extensionDecision(
+                    fixedRange: settledRange,
+                    fixedUsesEnd: false,
+                    position: position,
+                    offsetX: offsetX,
+                    granularity: settledGranularity,
+                    terminal: terminal
+                )
+            }
+            state.selectionDrag = nil
+            state.selectionGestureCompletes = false
+            return pointerDecision(.selection)
+        }
+
+        let granularity: TerminalSelectionGranularity = switch max(clickCount, 1) % 3 {
         case 1: .character
         case 2: .terminalToken
         default: .line
         }
-        let position = streamPosition(column: column, row: row, terminal: terminal)
         let anchor = selectionUnit(
             at: position,
             granularity: granularity,
@@ -583,21 +663,60 @@ private func pointerDownDecision(
         state.selectionDrag = SelectionDrag(
             anchor: terminal.pinnedRange(anchor),
             granularity: granularity,
-            anchorsTrailingBoundary: granularity == .character
-                && terminal.characterBoundary(at: position, offsetX: offsetX)
-                    == terminal.canonicalBoundary(anchor.end)
+            kind: .fresh(
+                anchorsTrailingBoundary: granularity == .character
+                    && terminal.characterBoundary(at: position, offsetX: offsetX)
+                        == terminal.canonicalBoundary(anchor.end)
+            )
         )
+        state.selectionGestureCompletes = true
         return pointerDecision(
             .selection,
-            selectionMutation: granularity == .character ? .clear : .set(anchor)
+            selectionMutation: granularity == .character ? .clear : .set(anchor),
+            selectionGranularity: granularity == .character ? nil : granularity
         )
     }
+}
+
+private func extensionDecision(
+    fixedRange: TerminalTextRange,
+    fixedUsesEnd: Bool,
+    position: TerminalTextPosition,
+    offsetX: Double,
+    granularity: TerminalSelectionGranularity,
+    terminal: Terminal,
+    hoverMutation: TerminalHoverMutation? = nil
+) -> TerminalPointerDecision {
+    let fixed = terminal.canonicalBoundary(fixedUsesEnd ? fixedRange.end : fixedRange.start)
+    let pointerBoundary = terminal.characterBoundary(at: position, offsetX: offsetX)
+    let moving: TerminalTextPosition
+    if granularity == .character || pointerBoundary == fixed {
+        moving = pointerBoundary
+    } else {
+        let unit = selectionUnit(at: position, granularity: granularity, terminal: terminal)
+        if positionLessThan(pointerBoundary, fixed) {
+            moving = pointerBoundary == terminal.canonicalBoundary(unit.end)
+                ? terminal.canonicalBoundary(unit.end)
+                : terminal.canonicalBoundary(unit.start)
+        } else {
+            moving = pointerBoundary == terminal.canonicalBoundary(unit.start)
+                ? terminal.canonicalBoundary(unit.start)
+                : terminal.canonicalBoundary(unit.end)
+        }
+    }
+    return pointerDecision(
+        .selection,
+        selectionMutation: fixed == moving ? .clear : .set(orderedRange(fixed, moving)),
+        selectionGranularity: fixed == moving ? nil : granularity,
+        hoverMutation: hoverMutation
+    )
 }
 
 private func pointerDecision(
     _ consumption: TerminalPointerConsumption,
     bytes: [UInt8] = [],
     selectionMutation: TerminalSelectionMutation? = nil,
+    selectionGranularity: TerminalSelectionGranularity? = nil,
     hoverMutation: TerminalHoverMutation? = nil,
     armMutation: TerminalLinkArmMutation? = nil,
     completedSelectionGesture: Bool = false
@@ -606,6 +725,7 @@ private func pointerDecision(
         consumption: consumption,
         inputBytes: bytes,
         selectionMutation: selectionMutation,
+        selectionGranularity: selectionGranularity,
         paneMenuCell: nil,
         hoverMutation: hoverMutation,
         openLink: nil,
@@ -645,7 +765,7 @@ private func streamPosition(column: Int, row: Int, terminal: Terminal) -> Termin
 
 private func selectionUnit(
     at position: TerminalTextPosition,
-    granularity: SelectionGranularity,
+    granularity: TerminalSelectionGranularity,
     terminal: Terminal
 ) -> TerminalTextRange {
     switch granularity {

@@ -521,11 +521,39 @@ struct TerminalPaneSessionControllerTests {
 
         #expect(copied == ["gamm"])
 
+        controller.sendPointer(.down(
+            .left,
+            column: column + 1,
+            row: row,
+            modifiers: [.shift]
+        ))
+        controller.sendPointer(.move(column: 0, row: row, modifiers: [.shift]))
+        controller.sendPointer(.up(.left, column: 0, row: row, modifiers: [.shift]))
+        controller.synchronizeState()
+        await drainMainQueue()
+        #expect(copied == ["gamm"], "an inside-selection gesture does not complete")
+
+        controller.sendPointer(.down(
+            .left,
+            column: 2,
+            row: row,
+            offsetX: 0.75,
+            modifiers: [.shift],
+            clickCount: 3
+        ))
+        controller.sendPointer(.up(.left, column: 2, row: row, modifiers: [.shift]))
+        controller.synchronizeState()
+        await drainMainQueue()
+        #expect(copied == ["gamm", "alpha delt"])
+
         controller.selectAll()
         controller.synchronizeState()
         await drainMainQueue()
         #expect(controller.readSelectedText()?.isEmpty == false, "Select All did select")
-        #expect(copied == ["gamm"], "Select All is not a pointer gesture and never copies")
+        #expect(
+            copied == ["gamm", "alpha delt"],
+            "Select All is not a pointer gesture and never copies"
+        )
 
         controller.tearDown()
         await host.close()

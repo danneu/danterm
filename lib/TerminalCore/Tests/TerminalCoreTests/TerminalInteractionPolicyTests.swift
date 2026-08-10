@@ -1377,6 +1377,206 @@ struct TerminalInteractionPolicyTests {
         ).completedSelectionGesture == false)
     }
 
+    @Test("Shift-click extends around a settled selection with native boundary regions")
+    func shiftClickExtendsSettledCharacterSelection() throws {
+        // Intent: Shift-click uses the settled selection's native before, inside, and after
+        //   regions, and an armed outside gesture keeps its opposite endpoint through reversal.
+        // Why it exists: every Shift press previously started a fresh selection, so a click
+        //   cleared the range and a drag could not retain the settled opposite endpoint.
+        // Scenario: a captured-mouse application has "cde" selected. The user extends on both
+        //   sides, tests both canonical boundaries, then drags a before-arm through collapse.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("abcdefghij\u{1B}[?1003h".utf8))
+        terminal.setSelection(range(0, 2, 0, 5))
+
+        var before = TerminalInteractionState()
+        let beforeDown = decideTerminalPointer(
+            .down(
+                .left,
+                column: 1,
+                row: 0,
+                offsetX: 0.25,
+                modifiers: [.shift]
+            ),
+            terminal: terminal,
+            state: &before
+        )
+        #expect(beforeDown.selectionMutation == .set(range(0, 1, 0, 5)))
+        #expect(beforeDown.inputBytes.isEmpty)
+        #expect(decideTerminalPointer(
+            .move(column: 5, row: 0, modifiers: [.shift]),
+            terminal: terminal,
+            state: &before
+        ).selectionMutation == .clear)
+        #expect(decideTerminalPointer(
+            .move(column: 7, row: 0, offsetX: 0.5, modifiers: [.shift]),
+            terminal: terminal,
+            state: &before
+        ).selectionMutation == .set(range(0, 5, 0, 8)))
+        let beforeRelease = decideTerminalPointer(
+            .up(.left, column: 7, row: 0, modifiers: [.shift]),
+            terminal: terminal,
+            state: &before
+        )
+        #expect(beforeRelease.completedSelectionGesture)
+        #expect(beforeRelease.inputBytes.isEmpty)
+
+        for clickCount in 1...3 {
+            var after = TerminalInteractionState()
+            #expect(decideTerminalPointer(
+                .down(
+                    .left,
+                    column: 6,
+                    row: 0,
+                    offsetX: 0.5,
+                    modifiers: [.shift],
+                    clickCount: clickCount
+                ),
+                terminal: terminal,
+                state: &after
+            ).selectionMutation == .set(range(0, 2, 0, 7)))
+        }
+
+        var startBoundary = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.shift]),
+            terminal: terminal,
+            state: &startBoundary
+        ).selectionMutation == .set(range(0, 2, 0, 5)))
+        #expect(decideTerminalPointer(
+            .up(.left, column: 2, row: 0, modifiers: [.shift]),
+            terminal: terminal,
+            state: &startBoundary
+        ).completedSelectionGesture)
+
+        for column in [3, 5] {
+            var inside = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: column, row: 0, modifiers: [.shift]),
+                terminal: terminal,
+                state: &inside
+            )
+            #expect(down.selectionMutation == nil, "column \(column)")
+            #expect(down.inputBytes.isEmpty, "column \(column)")
+            let move = decideTerminalPointer(
+                .move(column: 9, row: 0, modifiers: [.shift]),
+                terminal: terminal,
+                state: &inside
+            )
+            #expect(move.selectionMutation == nil, "column \(column)")
+            #expect(move.inputBytes.isEmpty, "column \(column)")
+            let release = decideTerminalPointer(
+                .up(.left, column: 9, row: 0, modifiers: [.shift]),
+                terminal: terminal,
+                state: &inside
+            )
+            #expect(release.completedSelectionGesture == false, "column \(column)")
+            #expect(release.inputBytes.isEmpty, "column \(column)")
+        }
+    }
+
+    @Test("Shift extension inherits token granularity and excludes an adjacent unit boundary")
+    func shiftExtensionInheritsTokenGranularity() throws {
+        // Intent: settled token selection, not the extending click count, controls each sample;
+        //   an exact next-token boundary excludes that token while entering it includes it whole.
+        // Why it exists: recomputing granularity from the Shift click breaks native word
+        //   extension, and union-only dragging cannot shrink or reverse around a fixed endpoint.
+        // Scenario: "two" is selected, each click count reaches the boundary before "three",
+        //   then one token gesture enters "three" and reverses through the fixed start.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("one two three".utf8))
+        terminal.setSelection(
+            range(0, 4, 0, 7),
+            granularity: .terminalToken
+        )
+
+        for clickCount in 1...3 {
+            var state = TerminalInteractionState()
+            let boundary = decideTerminalPointer(
+                .down(
+                    .left,
+                    column: 8,
+                    row: 0,
+                    modifiers: [.shift],
+                    clickCount: clickCount
+                ),
+                terminal: terminal,
+                state: &state
+            )
+            #expect(boundary.selectionMutation == .set(range(0, 4, 0, 8)))
+            #expect(boundary.inputBytes.isEmpty)
+        }
+
+        var reversal = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(
+                .left,
+                column: 8,
+                row: 0,
+                offsetX: 0.75,
+                modifiers: [.shift],
+                clickCount: 1
+            ),
+            terminal: terminal,
+            state: &reversal
+        ).selectionMutation == .set(range(0, 4, 0, 13)))
+        #expect(decideTerminalPointer(
+            .move(column: 4, row: 0, modifiers: [.shift]),
+            terminal: terminal,
+            state: &reversal
+        ).selectionMutation == .clear)
+        #expect(decideTerminalPointer(
+            .move(column: 2, row: 0, offsetX: 0.25, modifiers: [.shift]),
+            terminal: terminal,
+            state: &reversal
+        ).selectionMutation == .set(range(0, 0, 0, 4)))
+    }
+
+    @Test("Shift extension inherits trimmed-line granularity for every click count")
+    func shiftExtensionInheritsTrimmedLineGranularity() throws {
+        // Intent: line selection extends by trimmed logical lines, with the adjacent line
+        //   excluded at its exact start and included after the pointer enters it.
+        // Why it exists: line granularity must survive release just like token granularity;
+        //   otherwise a later Shift click would use its own character or token click count.
+        // Scenario: "second" is selected, then click counts one through three extend toward
+        //   the indented third line at its start boundary and just inside its first character.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array(" first \r\n second \r\n third ".utf8))
+        terminal.setSelection(
+            range(1, 1, 1, 7),
+            granularity: .line
+        )
+
+        for clickCount in 1...3 {
+            var boundaryState = TerminalInteractionState()
+            #expect(decideTerminalPointer(
+                .down(
+                    .left,
+                    column: 1,
+                    row: 2,
+                    modifiers: [.shift],
+                    clickCount: clickCount
+                ),
+                terminal: terminal,
+                state: &boundaryState
+            ).selectionMutation == .set(range(1, 1, 2, 1)))
+
+            var enteredState = TerminalInteractionState()
+            #expect(decideTerminalPointer(
+                .down(
+                    .left,
+                    column: 1,
+                    row: 2,
+                    offsetX: 0.75,
+                    modifiers: [.shift],
+                    clickCount: clickCount
+                ),
+                terminal: terminal,
+                state: &enteredState
+            ).selectionMutation == .set(range(1, 1, 2, 6)))
+        }
+    }
+
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
         switch mutation {
         case .clear:
