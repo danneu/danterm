@@ -307,8 +307,14 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
-        toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
+    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
+        var semantics = PaneSemanticState()
+        if let command { semantics.command = .running(command) }
+        toolbarLabel.stringValue = paneCommandChromeText(
+            title: title,
+            cwd: cwd,
+            semantics: semantics
+        )
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
         remoteSessionLabel.stringValue = remoteSession?.displayString ?? ""

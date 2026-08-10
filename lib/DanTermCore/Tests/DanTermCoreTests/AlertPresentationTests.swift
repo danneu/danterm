@@ -16,9 +16,15 @@ struct AlertPresentationTests {
         _ model: inout AppModel,
         paneId: PaneId,
         title: String,
-        body: String
+        body: String,
+        semantics: PaneSemanticState = PaneSemanticState()
     ) -> (title: String, subtitle: String?, body: String)? {
-        let commands = update(&model, .desktopNotification(paneId: paneId, title: title, body: body))
+        let commands = update(&model, .desktopNotification(
+            paneId: paneId,
+            title: title,
+            body: body,
+            semantics: semantics
+        ))
         for command in commands {
             if case .sendNotification(_, _, let title, let subtitle, let body) = command {
                 return (title, subtitle, body)
@@ -38,6 +44,47 @@ struct AlertPresentationTests {
 
         #expect(sent?.title == "claude")
         #expect(sent?.body == "Build finished")
+    }
+
+    @Test("live agent and command identity precede sender and pane titles")
+    func liveSemanticTitleTiersPrecedeTerminalTitles() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .sessionTitle(paneId: paneId, title: "pane-title"))
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        var commandState = PaneSemanticState(command: .running("swift test"))
+
+        let command = alertPresentation(
+            senderTitle: "sender", paneId: paneId, semantics: commandState, in: model
+        )
+        commandState.agent = .attached(session: agent, activity: .waiting)
+        let attached = alertPresentation(
+            senderTitle: "sender", paneId: paneId, semantics: commandState, in: model
+        )
+
+        #expect(command.title == "swift test")
+        #expect(attached.title == "Codex thread-1")
+    }
+
+    @Test("desktop alert storage and delivery share the live semantic title")
+    func desktopAlertUsesSemanticTitleEndToEnd() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let semantics = PaneSemanticState(command: .running("swift test"))
+
+        let sent = notification(
+            &model,
+            paneId: paneId,
+            title: "sender",
+            body: "Done",
+            semantics: semantics
+        )
+
+        #expect(sent?.title == "swift test")
+        #expect(model.alerts.first?.title == "swift test")
     }
 
     // OSC 9 carries no title field at all (Terminal.dispatchOSC9 passes empty

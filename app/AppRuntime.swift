@@ -37,6 +37,8 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.cwdChanged:\(cwd)"
     case .bell:
         description = "session.bell"
+    case .paneSemanticsChanged(let transition):
+        description = "session.paneSemanticsChanged:\(String(describing: transition.event))"
     case .desktopNotification(let title, let body):
         description = "session.desktopNotification:\(title):\(body)"
     case .progress(let progress):
@@ -967,6 +969,21 @@ class AppRuntime {
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
+        case .readPaneInfo(let reqId, let paneId, let baseResult):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "pane session no longer available"
+                )
+                break
+            }
+            connection.writeSuccess(
+                reqId: reqId,
+                result: paneInfoResult(adding: session.semanticSnapshot, to: baseResult)
+            )
+
         case .applyPaneSemanticIpc(let reqId, let paneId, let event):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
@@ -1881,12 +1898,16 @@ class AppRuntime {
             fontFamily: fontFamily
         )
         guard let session = terminalBackend.createSession(request) else { return nil }
-        session.onEvent = { [weak self] event in
+        session.onEvent = { [weak self, weak session] event in
             #if DANTERM_TERMINAL_CHARACTERIZATION
             recordTerminalCharacterizationEvent(event)
             #endif
-            guard let self else { return }
-            for message in terminalMessages(for: event, paneId: paneId) {
+            guard let self, let session else { return }
+            for message in terminalMessages(
+                for: event,
+                paneId: paneId,
+                semanticSnapshot: session.semanticSnapshot
+            ) {
                 self.send(message)
             }
         }

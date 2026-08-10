@@ -18,7 +18,11 @@ enum TerminalSessionEvent: Equatable {
 }
 
 /// Translates the closed session-event vocabulary into the existing pane messages.
-func terminalMessages(for event: TerminalSessionEvent, paneId: PaneId) -> [Msg] {
+func terminalMessages(
+    for event: TerminalSessionEvent,
+    paneId: PaneId,
+    semanticSnapshot: PaneSemanticState = PaneSemanticState()
+) -> [Msg] {
     switch event {
     case .titleChanged(let title):
         return [.sessionTitle(paneId: paneId, title: title)]
@@ -43,11 +47,18 @@ func terminalMessages(for event: TerminalSessionEvent, paneId: PaneId) -> [Msg] 
             return [.agentSessionChanged(paneId: paneId, session: session)]
         case .agentDetached:
             return [.agentSessionChanged(paneId: paneId, session: nil)]
+        case .agentActivityChanged(_, .waiting):
+            return [.agentNeedsAttention(paneId: paneId, semantics: transition.current)]
         case .integrationReady, .agentActivityChanged, .paneTornDown:
             return []
         }
     case .desktopNotification(let title, let body):
-        return [.desktopNotification(paneId: paneId, title: title, body: body)]
+        return [.desktopNotification(
+            paneId: paneId,
+            title: title,
+            body: body,
+            semantics: semanticSnapshot
+        )]
     case .progress(let state):
         return [.sessionProgress(paneId: paneId, state: state)]
     case .searchStarted(let needle):

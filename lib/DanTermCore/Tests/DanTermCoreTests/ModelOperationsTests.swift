@@ -3030,6 +3030,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             PaneToolbarRender(
                 title: "vim",
                 cwd: "/work/proj",
+                command: nil,
                 progress: .set(percent: 42),
                 isRemote: true,
                 remoteSession: RemoteSession(user: "dan", host: "caja"),
@@ -3038,6 +3039,19 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2),
             "all toolbar fields derive from the pane + model.alerts")
+    }
+
+    @Test("desiredPaneToolbar reads running command state from immutable pane snapshots")
+    func desiredPaneToolbarReadsSemanticCommand() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        var semantics = PaneSemanticState()
+        semantics.command = .running("swift test")
+
+        let render = desiredPaneToolbar(in: model, semanticSnapshots: [paneId: semantics])[paneId]
+
+        #expect(render?.command == "swift test")
     }
 
     @Test("desiredPaneToolbar: keyed over every live pane")

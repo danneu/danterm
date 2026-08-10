@@ -214,10 +214,19 @@ extension AppRuntime {
     /// disappears on `.endSearch` while the wrapper survives -- a non-default `remove`
     /// tears the overlay down (the disappear-but-host-survives discipline).
     func reconcilePaneChrome(tally: UnreadAlertTally) {
-        applyDiff(desiredPaneToolbar(in: model, tally: tally), &caches.paneToolbar, apply: { paneId, render in
+        let semanticSnapshots = sessions.mapValues(\.semanticSnapshot)
+        applyDiff(
+            desiredPaneToolbar(
+                in: model,
+                tally: tally,
+                semanticSnapshots: semanticSnapshots
+            ),
+            &caches.paneToolbar,
+            apply: { paneId, render in
             findPaneWrapper(for: paneId)?.updateToolbar(
                 title: render.title,
                 cwd: render.cwd,
+                command: render.command,
                 progress: render.progress,
                 isRemote: render.isRemote,
                 remoteSession: render.remoteSession,

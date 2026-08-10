@@ -52,8 +52,9 @@ struct TerminalBackendBoundaryTests {
             return false
         }
         assertSessionMessage(.desktopNotification(title: "Build", body: "Done"), paneId: paneId) {
-            if case .desktopNotification(let id, let title, let body) = $0 {
+            if case .desktopNotification(let id, let title, let body, let semantics) = $0 {
                 return id == paneId && title == "Build" && body == "Done"
+                    && semantics == PaneSemanticState()
             }
             return false
         }
@@ -92,10 +93,20 @@ struct TerminalBackendBoundaryTests {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
 
         #expect(terminalMessages(for: .paneSemanticsChanged(transition(for: .integrationReady)), paneId: paneId).isEmpty)
+        assertSessionMessage(.paneSemanticsChanged(transition(
+            for: .agentActivityChanged(session: agent, activity: .waiting),
+            after: [.agentAttached(agent)]
+        )), paneId: paneId) {
+            if case .agentNeedsAttention(let id, let semantics) = $0 {
+                return id == paneId
+                    && semantics.agent == .attached(session: agent, activity: .waiting)
+            }
+            return false
+        }
         #expect(terminalMessages(
             for: .paneSemanticsChanged(transition(
                 for: .agentActivityChanged(session: agent, activity: .waiting),
-                after: [.agentAttached(agent)]
+                after: [.agentAttached(agent), .agentActivityChanged(session: agent, activity: .waiting)]
             )),
             paneId: paneId
         ).isEmpty)

@@ -20,19 +20,29 @@ struct AlertPresentation: Equatable {
 /// Resolve the title and subtitle for an alert raised by `paneId`.
 ///
 /// The title answers "who": the sender's own title when it supplies one (OSC 777
-/// does, OSC 9 does not), otherwise the pane title. When the live pane semantic
-/// model lands, an attached agent session and the running command report become
-/// earlier tiers in this same chain and the pane title stays as the last resort.
+/// does, OSC 9 does not), otherwise the pane title. An attached agent session
+/// and the running command report are earlier tiers in that order.
 ///
 /// The subtitle answers "where", and is dropped when it would only restate the
 /// title: an unnamed single-pane tab derives its own title from that same pane.
 func alertPresentation(
     senderTitle: String,
     paneId: PaneId,
+    semantics: PaneSemanticState = PaneSemanticState(),
     in model: AppModel
 ) -> AlertPresentation {
     let paneTitle = model.pane(paneId)?.title ?? "Terminal"
-    let title = senderTitle.isEmpty ? paneTitle : senderTitle
+    let title: String
+    switch semantics.agent {
+    case .attached(let session, _):
+        title = "\(AgentCatalog.displayName(for: session.kind)) \(session.sessionId)"
+    case .none:
+        if case .running(let command) = semantics.command {
+            title = command
+        } else {
+            title = senderTitle.isEmpty ? paneTitle : senderTitle
+        }
+    }
 
     guard let tab = tabForPane(paneId, in: model) else {
         return AlertPresentation(title: title, subtitle: nil)

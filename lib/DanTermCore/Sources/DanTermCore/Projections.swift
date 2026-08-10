@@ -9,7 +9,8 @@
 // `import Foundation` only -- no AppKit -- which is what keeps the projection layer
 // testable without Cocoa or the terminal engine. Cross-layer model helpers these call back into
 // (queries, alert counts, container shapes) stay in ModelOperations.swift; this earns
-// its own file as the named pure peer of Reconcile.swift.
+// its own file as the named pure peer of Reconcile.swift. Pane-owned live
+// semantics arrive as explicit immutable inputs; they never enter AppModel.
 import Foundation
 
 // MARK: - Theme Browser
@@ -263,12 +264,13 @@ func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId
 }
 
 /// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
-/// toolbar. Carries exactly the eight values the old imperative `refreshPaneToolbar`
-/// read from the model before calling `PaneWrapperView.updateToolbar`. Equatable so
-/// the diff skips panes whose toolbar inputs are unchanged.
+/// toolbar. Model fields stay beside the one running-command value projected
+/// from the pane owner's immutable semantic snapshot. Equatable lets the diff
+/// skip panes whose toolbar inputs are unchanged.
 struct PaneToolbarRender: Equatable {
   let title: String
   let cwd: String?
+  let command: String?
   let progress: ProgressState?
   let isRemote: Bool
   let remoteSession: RemoteSession?
@@ -281,19 +283,40 @@ struct PaneToolbarRender: Equatable {
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
 /// precomputed unread-alert tally to avoid rescanning alerts.
 func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
-  desiredPaneToolbar(in: model, tally: unreadAlertTally(for: model))
+  desiredPaneToolbar(in: model, tally: unreadAlertTally(for: model), semanticSnapshots: [:])
+}
+
+/// Convenience wrapper for callers that supply immutable pane semantics but do
+/// not already hold the alert tally computed by reconcile.
+func desiredPaneToolbar(
+  in model: AppModel,
+  semanticSnapshots: [PaneId: PaneSemanticState]
+) -> [PaneId: PaneToolbarRender] {
+  desiredPaneToolbar(
+    in: model,
+    tally: unreadAlertTally(for: model),
+    semanticSnapshots: semanticSnapshots
+  )
 }
 
 /// Pane-toolbar projection: one `PaneToolbarRender` per live pane. Keyed over every
 /// pane (`allPanes`) so a key leaves only when its pane is gone -- at which point the
 /// container pass has already torn down the host wrapper -- so `reconcilePaneChrome`
 /// diffs this with the default no-op `remove`.
-func desiredPaneToolbar(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: PaneToolbarRender] {
+func desiredPaneToolbar(
+  in model: AppModel,
+  tally: UnreadAlertTally,
+  semanticSnapshots: [PaneId: PaneSemanticState] = [:]
+) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneToolbarRender(
       title: pane.title,
       cwd: pane.cwd,
+      command: semanticSnapshots[pane.id].flatMap {
+        if case .running(let command) = $0.command { return command }
+        return nil
+      },
       progress: pane.progress,
       isRemote: pane.isRemote,
       remoteSession: pane.remoteSession,

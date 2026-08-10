@@ -103,7 +103,8 @@ enum Msg {
     case sessionTitle(paneId: PaneId, title: String)
     case sessionCwd(paneId: PaneId, cwd: String?)
     case sessionBell(paneId: PaneId)
-    case desktopNotification(paneId: PaneId, title: String, body: String)
+    case desktopNotification(paneId: PaneId, title: String, body: String, semantics: PaneSemanticState)
+    case agentNeedsAttention(paneId: PaneId, semantics: PaneSemanticState)
     case sessionProgress(paneId: PaneId, state: ProgressState?)
     case sessionClosed(paneId: PaneId)
     case sessionCreationFailed(paneId: PaneId)
@@ -246,13 +247,12 @@ extension Msg {
         // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
-        case .sessionBell, .desktopNotification:
+        case .sessionBell, .desktopNotification, .agentNeedsAttention:
             return true
         // Shell-integration command events, one per prompt in a command loop.
-        // commandStarted only sets pane.lastCommand, which no projection reads --
-        // an empty view diff; commandEnded clears agent/remote/theme, which feed
-        // only the pane toolbar (desiredPaneToolbar) and per-pane theme
-        // (desiredPaneConfig) -- cosmetic, never ContainerShape.
+        // The pane-owned snapshot drives command chrome, while the top-level
+        // lastCommand projection remains recovery-only. Both start and end are
+        // cosmetic pane-toolbar changes, never ContainerShape changes.
         case .commandStarted, .commandEnded:
             return true
         default:

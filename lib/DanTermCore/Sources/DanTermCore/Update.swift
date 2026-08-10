@@ -789,43 +789,27 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         ))
         return commands
 
-    case .desktopNotification(let paneId, let title, let body):
-        guard title.fitsTerminalMetadataValueLimit,
-              body.fitsTerminalMetadataValueLimit
-        else { return [] }
-        // Same as bell: suppress focused-pane noise only while the app is active.
-        if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
-            return []
-        }
-
-        guard tabForPane(paneId, in: model) != nil else { return [] }
-
-        // Hack: ack previous alerts so each pane has at most 1 unread alert.
-        // This keeps pane badges boolean and tab badges count panes-with-alerts
-        // rather than total alert volume. May replace with a better system later.
-        markAlertsReadForPane(paneId, in: &model)
-
-        // OSC 9 carries no title field, so the resolved title -- not the raw
-        // report -- is what both the banner and the popover row show.
-        let presentation = alertPresentation(senderTitle: title, paneId: paneId, in: model)
-
-        let now = env.now()
-        let alert = AlertModel(
-            id: AlertId(rawValue: env.newId()), kind: .desktopNotification, paneId: paneId,
-            title: presentation.title, body: body, createdAt: now, isUnread: true
+    case .desktopNotification(let paneId, let title, let body, let semantics):
+        return desktopAlertCommands(
+            model: &model,
+            paneId: paneId,
+            senderTitle: title,
+            body: body,
+            semantics: semantics,
+            env: env
         )
-        model.alerts.insert(alert, at: 0)
-        if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        // Tab/group bell badges ride reconcileSidebar (see sessionBell).
-        var commands: [Command] = []
-
-        commands.append(contentsOf: throttledNotification(
-            alertId: alert.id, kind: .desktopNotification, paneId: paneId,
-            title: presentation.title, subtitle: presentation.subtitle, body: body,
-            model: &model, now: now
-        ))
-        return commands
+    case .agentNeedsAttention(let paneId, let semantics):
+        guard case .attached(_, .waiting) = semantics.agent else { return [] }
+        guard selectedTab(in: model)?.focusedPaneId != paneId else { return [] }
+        return desktopAlertCommands(
+            model: &model,
+            paneId: paneId,
+            senderTitle: "",
+            body: "Waiting for input",
+            semantics: semantics,
+            env: env
+        )
 
     case .sessionClosed(let paneId):
         return update(&model, .closePane(paneId: paneId), env: env)
@@ -1562,7 +1546,7 @@ private func dispatchIpc(
         guard let result = paneInfoResult(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
-        return [.ipcReply(reqId: reqId, result: result)]
+        return [.readPaneInfo(reqId: reqId, paneId: paneId, baseResult: result)]
 
     case Methods.agentAttach:
         let session = try agentSession(from: params)
@@ -1788,7 +1772,7 @@ private func dispatchIpc(
         guard let result = paneInfoResult(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
-        return [.ipcReply(reqId: reqId, result: result)]
+        return [.readPaneInfo(reqId: reqId, paneId: paneId, baseResult: result)]
 
     case Methods.paneRows:
         let paneId = try resolvePane(params: params, context: context, in: model, requireExplicit: true)
@@ -2582,6 +2566,56 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
 
 /// Throttle macOS notification delivery: one per pane per kind every 1 second.
 private let notificationThrottleInterval: TimeInterval = 1
+
+/// Raises one pane alert through the shared stored-alert and macOS notification
+/// path after resolving its semantic title tiers.
+private func desktopAlertCommands(
+    model: inout AppModel,
+    paneId: PaneId,
+    senderTitle: String,
+    body: String,
+    semantics: PaneSemanticState,
+    env: CoreEnv
+) -> [Command] {
+    guard senderTitle.fitsTerminalMetadataValueLimit,
+          body.fitsTerminalMetadataValueLimit
+    else { return [] }
+    if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+        return []
+    }
+    guard tabForPane(paneId, in: model) != nil else { return [] }
+
+    markAlertsReadForPane(paneId, in: &model)
+    let presentation = alertPresentation(
+        senderTitle: senderTitle,
+        paneId: paneId,
+        semantics: semantics,
+        in: model
+    )
+    let now = env.now()
+    let alert = AlertModel(
+        id: AlertId(rawValue: env.newId()),
+        kind: .desktopNotification,
+        paneId: paneId,
+        title: presentation.title,
+        body: body,
+        createdAt: now,
+        isUnread: true
+    )
+    model.alerts.insert(alert, at: 0)
+    if model.alerts.count > 100 { model.alerts.removeLast() }
+
+    return throttledNotification(
+        alertId: alert.id,
+        kind: .desktopNotification,
+        paneId: paneId,
+        title: presentation.title,
+        subtitle: presentation.subtitle,
+        body: body,
+        model: &model,
+        now: now
+    )
+}
 
 /// Throttle macOS notification delivery: one per pane per kind every throttle interval.
 private func throttledNotification(

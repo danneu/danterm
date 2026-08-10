@@ -181,7 +181,12 @@ import Testing
             .searchTotalReported(paneId: paneId, total: 42),
             .searchSelectionReported(paneId: paneId, selected: 3),
             .sessionBell(paneId: paneId),
-            .desktopNotification(paneId: paneId, title: "build", body: "done"),
+            .desktopNotification(
+                paneId: paneId,
+                title: "build",
+                body: "done",
+                semantics: PaneSemanticState()
+            ),
             .commandStarted(paneId: paneId, command: "make test"),
             .commandEnded(paneId: paneId)
         ]
@@ -252,7 +257,12 @@ import Testing
             (.sessionCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
             (.sessionProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel),
             (.sessionBell(paneId: unfocusedPane), unfocusedModel),
-            (.desktopNotification(paneId: unfocusedPane, title: "build", body: "done"), unfocusedModel),
+            (.desktopNotification(
+                paneId: unfocusedPane,
+                title: "build",
+                body: "done",
+                semantics: PaneSemanticState()
+            ), unfocusedModel),
             (.commandStarted(paneId: unfocusedPane, command: "make"), unfocusedModel),
             (.commandEnded(paneId: unfocusedPane), agentCommandEndedModel)
         ]
@@ -428,19 +438,22 @@ import Testing
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: rejected,
-            body: "body"
+            body: "body",
+            semantics: PaneSemanticState()
         )).isEmpty)
         #expect(model.alerts.isEmpty)
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: "title",
-            body: rejected
+            body: rejected,
+            semantics: PaneSemanticState()
         )).isEmpty)
         #expect(model.alerts.isEmpty)
         #expect(update(&model, .desktopNotification(
             paneId: paneId,
             title: "title",
-            body: "body"
+            body: "body",
+            semantics: PaneSemanticState()
         )).count == 1)
         #expect(model.alerts.count == 1)
     }
@@ -458,9 +471,94 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
+        let commands = update(&model, .desktopNotification(
+            paneId: paneId,
+            title: "Build complete",
+            body: "make finished",
+            semantics: PaneSemanticState()
+        ))
         #expect(model.alerts.count == 0, "should not create alert for focused pane")
         #expect(commands.count == 0, "should produce no commands for focused pane")
+    }
+
+    @Test("agent waiting alerts once only when its pane is not focused")
+    func agentWaitingAlertsOnlyForUnfocusedPane() throws {
+        var model = makeModel()
+        createTab(&model)
+        let backgroundPaneId = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let focusedPaneId = selectedTab(in: model)!.focusedPaneId
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        let waiting = PaneSemanticState(
+            agent: .attached(session: agent, activity: .waiting)
+        )
+
+        let backgroundCommands = update(
+            &model,
+            .agentNeedsAttention(paneId: backgroundPaneId, semantics: waiting)
+        )
+        let focusedCommands = update(
+            &model,
+            .agentNeedsAttention(paneId: focusedPaneId, semantics: waiting)
+        )
+
+        #expect(model.alerts.count == 1)
+        #expect(model.alerts.first?.paneId == backgroundPaneId)
+        #expect(model.alerts.first?.title == "Claude session-1")
+        #expect(model.alerts.first?.body == "Waiting for input")
+        #expect(hasEffect(backgroundCommands) {
+            if case .sendNotification(_, let paneId, let title, _, let body) = $0 {
+                return paneId == backgroundPaneId
+                    && title == "Claude session-1"
+                    && body == "Waiting for input"
+            }
+            return false
+        })
+        #expect(focusedCommands.isEmpty)
+
+        let alertId = try #require(model.alerts.first?.id)
+        _ = update(&model, .activateAlert(alertId: alertId))
+        #expect(model.selectedTabId == tabForPane(backgroundPaneId, in: model)?.id)
+        #expect(tabForPane(backgroundPaneId, in: model)?.focusedPaneId == backgroundPaneId)
+    }
+
+    @Test("agent attention rejects unsupported live states")
+    func agentAttentionRequiresAttachedWaitingState() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+
+        for semantics in [
+            PaneSemanticState(),
+            PaneSemanticState(agent: .attached(session: agent, activity: .working)),
+            PaneSemanticState(agent: .attached(session: agent, activity: .idle)),
+        ] {
+            #expect(update(
+                &model,
+                .agentNeedsAttention(paneId: paneId, semantics: semantics)
+            ).isEmpty)
+        }
+        #expect(model.alerts.isEmpty)
+    }
+
+    @Test("agent waiting stays silent for the focused pane while the app is inactive")
+    func agentWaitingRequiresAnUnfocusedPaneEvenWhenInactive() throws {
+        var model = makeModel()
+        model.isAppActive = false
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let waiting = PaneSemanticState(
+            agent: .attached(session: agent, activity: .waiting)
+        )
+
+        #expect(update(
+            &model,
+            .agentNeedsAttention(paneId: paneId, semantics: waiting)
+        ).isEmpty)
+        #expect(model.alerts.isEmpty)
     }
 
     @Test("testDesktopNotificationOnFocusedPaneWhileInactiveCreatesAlertAndNotification")
@@ -480,7 +578,12 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .desktopNotification(paneId: paneId, title: "Hello", body: "World"))
+        let commands = update(&model, .desktopNotification(
+            paneId: paneId,
+            title: "Hello",
+            body: "World",
+            semantics: PaneSemanticState()
+        ))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .desktopNotification)
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
@@ -504,7 +607,12 @@ import Testing
 
         createTab(&model)
 
-        let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Hello", body: "World"))
+        let commands = update(&model, .desktopNotification(
+            paneId: firstTabPaneId,
+            title: "Hello",
+            body: "World",
+            semantics: PaneSemanticState()
+        ))
         #expect(model.alerts.count == 1, "should create alert")
         #expect(model.alerts[0].isUnread == true, "background pane alert should be unread")
         #expect(hasEffect(commands) {
@@ -530,14 +638,24 @@ import Testing
         update(&model, .sessionBell(paneId: firstTabPaneId))
         #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "bell should set lastNotificationTime")
 
-        let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
+        let commands = update(&model, .desktopNotification(
+            paneId: firstTabPaneId,
+            title: "Done",
+            body: "Task finished",
+            semantics: PaneSemanticState()
+        ))
         #expect(hasEffect(commands) {
             if case .sendNotification(_, _, let t, _, _) = $0, t == "Done" { return true }
             return false
         }, "desktop notification should not be throttled by bell")
         #expect(model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] != nil, "should set lastNotificationTime for desktopNotification")
 
-        let effects2 = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done2", body: "Again"))
+        let effects2 = update(&model, .desktopNotification(
+            paneId: firstTabPaneId,
+            title: "Done2",
+            body: "Again",
+            semantics: PaneSemanticState()
+        ))
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false

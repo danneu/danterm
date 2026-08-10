@@ -105,6 +105,28 @@ import DanTermProtocol
         #expect(model.pane(paneId)?.agentSession == nil)
     }
 
+    @Test("pane.info defers its reply until the pane owner supplies live semantics")
+    func paneInfoReadsPaneOwnedSemantics() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneInfo,
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        #expect(commands.count == 1)
+        guard case .readPaneInfo(_, let commandPaneId, let baseResult) = commands[0] else {
+            Issue.record("expected pane-owner info read")
+            return
+        }
+        #expect(commandPaneId == paneId)
+        #expect(baseResult["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
+        #expect(baseResult["pane"]?["semantics"] == nil)
+    }
+
     @Test("agent activity and detach route session-qualified events")
     func agentActivityAndDetachRouteSessionQualifiedEvents() throws {
         var model = makeModel()
@@ -2764,6 +2786,7 @@ private func expectAfterTabInserted(
 private func requireIpcReply(_ commands: [Command]) throws -> JSONValue {
     let reply = commands.compactMap { command -> JSONValue? in
         if case .ipcReply(_, let result) = command { return result }
+        if case .readPaneInfo(_, _, let baseResult) = command { return baseResult }
         return nil
     }.first
     return try #require(reply, "expected ipcReply")

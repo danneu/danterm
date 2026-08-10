@@ -165,6 +165,21 @@ Inside DanTerm, derive the originating pane, tab, and group:
     TAB_ID=$(jq -r '.tab.id' <<<"$INFO")
     GROUP_ID=$(jq -r '.group.id' <<<"$INFO")
 
+`pane.semantics` is a typed latest-value snapshot owned by the live pane:
+
+    {
+      "integration": {"state": "neverReported" | "ready"},
+      "command": {"state": "idle"} | {"state": "running", "text": "..."},
+      "connection": {"state": "local"} |
+        {"state": "remote", "identity": null | {"user": "...", "host": "..."}},
+      "agent": {"state": "none"} |
+        {"state": "attached", "session": {"kind": "...", "id": "..."},
+         "activity": null | "working" | "waiting" | "idle"}
+    }
+
+These are live facets, not command history, and they are absent from the
+persisted snapshot returned by `ls`.
+
 Outside DanTerm, do not use implicit app state:
 
     danterm ls
@@ -483,13 +498,13 @@ else prints nothing on success and exits 0.
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, optionally with `agentSession: {kind, sessionId}`) |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd}, tab: {id, title, groupId}, group: {id, name}}` |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, semantics}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
-| `pane zoom [--pane <pane-id>] on\|off\|toggle` | JSON: pane, tab (with `isZoomed`), group |
+| `pane zoom [--pane <pane-id>] on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and live `pane.semantics` |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 | `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |

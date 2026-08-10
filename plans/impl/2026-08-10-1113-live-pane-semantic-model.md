@@ -378,7 +378,7 @@ dependency of this plan.
 - [x] 2. feat(shell): extend bundled semantic reports
 - [x] 3. feat(core): add the live pane semantic reducer
 - [x] 4. feat(app): route pane-owned semantic events
-- [ ] 5. feat(app): ship live semantic consumers
+- [x] 5. feat(app): ship live semantic consumers
 
 ## Implementation notes
 
@@ -398,3 +398,7 @@ dependency of this plan.
 - The stable main-actor `TerminalSession` owns the semantic stream beside its
   terminal callback lifetime. Terminal events apply there directly; agent IPC
   uses one runtime command that applies synchronously before writing success.
+- Live consumers receive immutable session snapshots at their existing seams:
+  pane inspection defers its reply until runtime can enrich it, reconciliation
+  projects command chrome from a snapshot map, and alert messages carry only
+  the snapshot needed for immediate title and needs-attention effects.
