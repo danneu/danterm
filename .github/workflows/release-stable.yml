@@ -172,10 +172,15 @@ jobs:
               --clobber
           else
             NOTES_FILE="$RUNNER_TEMP/release-notes.md"
-            nix run nixpkgs#git-cliff -- \
-              --current \
-              --strip all \
-              --output "$NOTES_FILE"
+            CURATED_NOTES="release-notes/${tag}.md"
+            if [ -f "$CURATED_NOTES" ]; then
+              cp "$CURATED_NOTES" "$NOTES_FILE"
+            else
+              nix run nixpkgs#git-cliff -- \
+                --current \
+                --strip all \
+                --output "$NOTES_FILE"
+            fi
             if [ ! -s "$NOTES_FILE" ]; then
               printf '_No notable changes._\n' > "$NOTES_FILE"
             fi
