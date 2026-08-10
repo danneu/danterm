@@ -1488,11 +1488,14 @@ public struct Terminal: Equatable, Sendable {
             omittingEmptySubsequences: false
         )
         guard fields.count >= 2,
-              fields[0].elementsEqual("DanTermShell=1".utf8),
+              fields[0].elementsEqual("DanTermShell=2".utf8),
               let eventName = String(validating: fields[1], as: UTF8.self)
         else { return }
 
         switch eventName {
+        case "integration-ready":
+            guard fields.count == 2 else { return }
+            admitDiscreteSemanticEvent(.integrationReady)
         case "command-start":
             guard fields.count == 3,
                   let command = decodedCanonicalBase64(fields[2]),
@@ -1501,8 +1504,10 @@ public struct Terminal: Equatable, Sendable {
             else { return }
             admitDiscreteSemanticEvent(.commandStarted(command))
         case "command-end":
-            guard fields.count == 2 else { return }
-            admitDiscreteSemanticEvent(.commandEnded)
+            guard fields.count == 3,
+                  let exitStatus = canonicalExitStatus(fields[2])
+            else { return }
+            admitDiscreteSemanticEvent(.commandEnded(exitStatus: exitStatus))
         case "remote-start":
             guard fields.count == 2 else { return }
             admitDiscreteSemanticEvent(.remoteStarted)
@@ -1513,6 +1518,9 @@ public struct Terminal: Equatable, Sendable {
                   user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
             else { return }
             admitDiscreteSemanticEvent(.remoteHost(user: user, host: host))
+        case "connection-end":
+            guard fields.count == 2 else { return }
+            admitDiscreteSemanticEvent(.connectionEnded)
         default:
             return
         }
@@ -1590,6 +1598,15 @@ public struct Terminal: Equatable, Sendable {
               let value = Int(String(decoding: bytes, as: UTF8.self)), value <= 100
         else { return nil }
         return UInt8(value)
+    }
+
+    private func canonicalExitStatus(_ bytes: ArraySlice<UInt8>) -> UInt8? {
+        guard bytes.isEmpty == false,
+              bytes.allSatisfy({ (0x30...0x39).contains($0) }),
+              bytes.first != 0x30 || bytes.count == 1,
+              let value = UInt8(String(decoding: bytes, as: UTF8.self))
+        else { return nil }
+        return value
     }
 
     private func decodedCanonicalBase64(_ bytes: ArraySlice<UInt8>) -> String? {

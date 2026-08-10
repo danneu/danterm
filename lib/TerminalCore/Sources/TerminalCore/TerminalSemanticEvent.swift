@@ -5,10 +5,12 @@ public enum TerminalSemanticEvent: Equatable, Sendable {
     case title(String)
     case workingDirectory(String?)
     case bell
+    case integrationReady
     case commandStarted(String)
-    case commandEnded
+    case commandEnded(exitStatus: UInt8)
     case remoteStarted
     case remoteHost(user: String, host: String)
+    case connectionEnded
     case desktopNotification(title: String, body: String)
     case progress(TerminalProgress?)
 }
@@ -36,7 +38,7 @@ struct PendingTerminalSemanticEvent: Equatable, Sendable {
             user.utf8.count + host.utf8.count
         case let .workingDirectory(value):
             value?.utf8.count ?? 0
-        case .bell, .commandEnded, .remoteStarted, .progress:
+        case .bell, .integrationReady, .commandEnded, .remoteStarted, .connectionEnded, .progress:
             0
         }
     }

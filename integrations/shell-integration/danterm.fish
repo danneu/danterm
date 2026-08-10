@@ -32,17 +32,24 @@ else if set -q LC_DANTERM; and test -n "$LC_DANTERM"
 else
     set -g _danterm_enabled ''
 end
+set -g _danterm_st (printf '\e\\')
 
 function danterm_base64
     printf %s "$argv[1]" | base64 | string collect | string replace -a '\n' ''
 end
 function danterm_emit
     test -n "$_danterm_enabled"; or return 0
-    printf '\e]1337;DanTermShell=1;%s\e\\' "$argv[1]"
+    if set -q TMUX; and test -n "$TMUX"
+        printf '\ePtmux;\e\e]1337;DanTermShell=2;%s\e%s%s' "$argv[1]" "$_danterm_st" "$_danterm_st"
+    else
+        printf '\e]1337;DanTermShell=2;%s%s' "$argv[1]" "$_danterm_st"
+    end
 end
+function danterm_emit_integration_ready; danterm_emit integration-ready; end
 function danterm_emit_command_start; danterm_emit "command-start;"(danterm_base64 "$argv[1]"); end
-function danterm_emit_command_end; danterm_emit command-end; end
+function danterm_emit_command_end; danterm_emit "command-end;$argv[1]"; end
 function danterm_emit_remote_start; danterm_emit remote-start; end
+function danterm_emit_connection_end; danterm_emit connection-end; end
 function danterm_emit_remote_host
     danterm_emit "remote-host;"(danterm_base64 "$argv[1]")";"(danterm_base64 "$argv[2]")
 end
@@ -69,8 +76,9 @@ function _danterm_preexec --on-event fish_preexec
     set -g _danterm_command_active 1
 end
 function _danterm_postexec --on-event fish_postexec
+    set -l _danterm_exit_status $status
     if set -q _danterm_command_active
-        danterm_emit_command_end
+        danterm_emit_command_end "$_danterm_exit_status"
         set -e _danterm_command_active
     end
 end
@@ -91,17 +99,27 @@ end
 function danterm_ssh
     danterm_emit_remote_start
     env LC_DANTERM=1 ssh -o SendEnv=LC_DANTERM $argv
+    set -l _danterm_exit_status $status
+    danterm_emit_connection_end
     if set -q _danterm_remote_user
         danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
     end
+    return $_danterm_exit_status
 end
 function danterm_mosh
     danterm_emit_remote_start
     env LC_DANTERM=1 mosh $argv
+    set -l _danterm_exit_status $status
+    danterm_emit_connection_end
+    if set -q _danterm_remote_user
+        danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
+    end
+    return $_danterm_exit_status
 end
 function ssh; danterm_ssh $argv; end
 function mosh; danterm_mosh $argv; end
 
+danterm_emit_integration_ready
 if test -n "$_danterm_enabled"; and test $_danterm_is_remote = 1
     set -g _danterm_remote_user (whoami)
     set -g _danterm_remote_host (hostname)

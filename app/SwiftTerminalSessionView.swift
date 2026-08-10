@@ -1028,6 +1028,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 callbackGate.emit(.cwdChanged(cwd))
             case .bell:
                 callbackGate.emit(.bell)
+            case .integrationReady:
+                break
             case .commandStarted(let command):
                 callbackGate.emit(.commandStarted(command))
             case .commandEnded:
@@ -1036,6 +1038,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 callbackGate.emit(.remoteStarted)
             case let .remoteHost(user, host):
                 callbackGate.emit(.remoteHost(user: user, host: host))
+            case .connectionEnded:
+                break
             case let .desktopNotification(title, body):
                 callbackGate.emit(.desktopNotification(title: title, body: body))
             case .progress(let progress):

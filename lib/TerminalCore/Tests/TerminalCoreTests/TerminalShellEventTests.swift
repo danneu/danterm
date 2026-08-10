@@ -13,18 +13,22 @@ struct TerminalShellEventTests {
         let host = Data("caja".utf8).base64EncodedString()
         terminal.feed(Array((
             "\u{1B}]2;editor\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;command-start;\(command)\u{1B}\\"
-                + "\u{1B}]1337;DanTermShell=1;command-end\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;remote-start\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;remote-host;\(user);\(host)\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=2;integration-ready\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=2;command-start;\(command)\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=2;command-end;17\u{7}"
+                + "\u{1B}]1337;DanTermShell=2;remote-start\u{7}"
+                + "\u{1B}]1337;DanTermShell=2;remote-host;\(user);\(host)\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=2;connection-end\u{1B}\\"
         ).utf8))
 
         #expect(terminal.drainSemanticEvents() == [
             .title("editor"),
+            .integrationReady,
             .commandStarted("printf 'hola'"),
-            .commandEnded,
+            .commandEnded(exitStatus: 17),
             .remoteStarted,
             .remoteHost(user: "dan", host: "caja"),
+            .connectionEnded,
         ])
     }
 
@@ -33,7 +37,7 @@ struct TerminalShellEventTests {
         let command = Data("printf before\0after".utf8).base64EncodedString()
         var terminal = try #require(Terminal(columns: 20, rows: 2))
 
-        terminal.feed(Array("\u{1B}]1337;DanTermShell=1;command-start;\(command)\u{1B}\\".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=2;command-start;\(command)\u{1B}\\".utf8))
 
         #expect(terminal.drainSemanticEvents().isEmpty)
     }
@@ -43,10 +47,10 @@ struct TerminalShellEventTests {
         var terminal = try #require(Terminal(columns: 20, rows: 2))
         let valid = Data("echo ok".utf8).base64EncodedString()
         terminal.feed(Array((
-            "\u{1B}]1337;Wrong=1;command-end\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;command-end\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;command-start;abcd===\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;command-start;\(valid)\u{7}"
+            "\u{1B}]1337;Wrong=2;command-end;0\u{7}"
+                + "\u{1B}]1337;DanTermShell=1;command-end;0\u{7}"
+                + "\u{1B}]1337;DanTermShell=2;command-start;abcd===\u{7}"
+                + "\u{1B}]1337;DanTermShell=2;command-start;\(valid)\u{7}"
         ).utf8))
 
         #expect(terminal.drainSemanticEvents() == [.commandStarted("echo ok")])
@@ -56,7 +60,7 @@ struct TerminalShellEventTests {
     func everyByteSplit() throws {
         let encoded = Data("echo español".utf8).base64EncodedString()
         let bytes = Array(
-            "\u{1B}]1337;DanTermShell=1;command-start;\(encoded)\u{1B}\\".utf8
+            "\u{1B}]1337;DanTermShell=2;command-start;\(encoded)\u{1B}\\".utf8
         )
 
         for split in 0...bytes.count {
@@ -106,7 +110,7 @@ struct TerminalShellEventTests {
     @Test("encoded OSC content accepts the 88 KiB boundary and recovers after overflow")
     func encodedLimitAndRecovery() throws {
         var terminal = try #require(Terminal(columns: 20, rows: 2))
-        let prefix = "1337;DanTermShell=1;unknown;"
+        let prefix = "1337;DanTermShell=2;unknown;"
         let exactPayload = prefix + String(
             repeating: "x",
             count: Terminal.maximumShellOSCBytes - prefix.utf8.count
@@ -115,9 +119,9 @@ struct TerminalShellEventTests {
 
         terminal.feed(Array("\u{1B}]\(exactPayload)\u{7}".utf8))
         terminal.feed(Array("\u{1B}]\(oversizedPayload)\u{7}".utf8))
-        terminal.feed(shellEvent("command-end"))
+        terminal.feed(shellEvent("command-end", fields: ["0"]))
 
-        #expect(terminal.drainSemanticEvents() == [.commandEnded])
+        #expect(terminal.drainSemanticEvents() == [.commandEnded(exitStatus: 0)])
     }
 
     @Test("every malformed envelope class is inert and later input recovers")
@@ -125,25 +129,30 @@ struct TerminalShellEventTests {
         let invalidUTF8 = Data([0xFF]).base64EncodedString()
         let empty = Data().base64EncodedString()
         let malformedEvents = [
-            "\u{1B}]1337;DanTermShell=1\u{7}",
-            "\u{1B}]1337;DanTermShell=1;unknown\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start;\(empty);extra\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-end;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=1;remote-start;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=1;remote-host;ZGFu\u{7}",
-            "\u{1B}]1337;DanTermShell=1;remote-host;ZGFu;Y2FqYQ==;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start;\(invalidUTF8)\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start;\(empty)\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start;ZGE\u{7}",
-            "\u{1B}]1337;DanTermShell=1;command-start; ZGFu\u{7}",
+            "\u{1B}]1337;DanTermShell=2\u{7}",
+            "\u{1B}]1337;DanTermShell=2;unknown\u{7}",
+            "\u{1B}]1337;DanTermShell=2;integration-ready;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start;\(empty);extra\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-end\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-end;00\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-end;256\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-end;-1\u{7}",
+            "\u{1B}]1337;DanTermShell=2;remote-start;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=2;remote-host;ZGFu\u{7}",
+            "\u{1B}]1337;DanTermShell=2;remote-host;ZGFu;Y2FqYQ==;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=2;connection-end;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start;\(invalidUTF8)\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start;\(empty)\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start;ZGE\u{7}",
+            "\u{1B}]1337;DanTermShell=2;command-start; ZGFu\u{7}",
         ]
         var terminal = try #require(Terminal(columns: 20, rows: 2))
 
         for event in malformedEvents { terminal.feed(Array(event.utf8)) }
-        terminal.feed(shellEvent("command-end"))
+        terminal.feed(shellEvent("command-end", fields: ["255"]))
 
-        #expect(terminal.drainSemanticEvents() == [.commandEnded])
+        #expect(terminal.drainSemanticEvents() == [.commandEnded(exitStatus: 255)])
     }
 
     @Test("native events do not change ordinary title fallback state")
@@ -155,11 +164,11 @@ struct TerminalShellEventTests {
         ))
         terminal.feed(Array("\u{1B}]7;file://mac/one\u{7}\u{1B}]0;\u{7}".utf8))
         _ = terminal.drainSemanticEvents()
-        terminal.feed(shellEvent("command-end"))
+        terminal.feed(shellEvent("command-end", fields: ["9"]))
         terminal.feed(Array("\u{1B}]7;file://mac/two\u{7}".utf8))
 
         #expect(terminal.drainSemanticEvents() == [
-            .commandEnded,
+            .commandEnded(exitStatus: 9),
             .workingDirectory("/two"),
             .title("/two"),
         ])
@@ -168,7 +177,7 @@ struct TerminalShellEventTests {
 
 private func shellEvent(_ event: String, fields: [String] = []) -> [UInt8] {
     let suffix = fields.isEmpty ? "" : ";" + fields.joined(separator: ";")
-    return Array("\u{1B}]1337;DanTermShell=1;\(event)\(suffix)\u{1B}\\".utf8)
+    return Array("\u{1B}]1337;DanTermShell=2;\(event)\(suffix)\u{1B}\\".utf8)
 }
 
 private func encode(_ value: String) -> String {

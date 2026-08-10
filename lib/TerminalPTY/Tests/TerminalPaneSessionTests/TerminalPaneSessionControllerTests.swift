@@ -165,13 +165,13 @@ struct TerminalPaneSessionControllerTests {
                     + "\(shellQuote(shell)) --no-config -c "
                     + shellQuote("source \(asset); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
-                        + "danterm_emit_command_end; exit")
+                        + "danterm_emit_command_end 0; exit")
             } else {
                 invocation = "DANTERM=1 "
                     + "\(shellQuote(shell)) -f -c "
                     + shellQuote("source \(shellQuote(asset)); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
-                        + "danterm_emit_command_end; exit")
+                        + "danterm_emit_command_end 0; exit")
             }
             let host = try makeHost()
             let controller = TerminalPaneSessionController(
@@ -185,8 +185,9 @@ struct TerminalPaneSessionControllerTests {
 
             #expect(await host.waitForResult() == .exited(.exited(0)))
             controller.synchronizeState()
+            #expect(received.contains(.integrationReady))
             #expect(received.contains(.commandStarted(command)))
-            #expect(received.contains(.commandEnded))
+            #expect(received.contains(.commandEnded(exitStatus: 0)))
 
             controller.tearDown()
             await host.close()
@@ -201,7 +202,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
             + "\\033]7;file://localhost/tmp/pane\\007"
-            + "\\033]1337;DanTermShell=1;command-end\\007\\007'; exec sleep 30"
+            + "\\033]1337;DanTermShell=2;command-end;7\\007\\007'; exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command),
@@ -216,7 +217,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(await iterator.next() == [
             .title("hidden-title"),
             .workingDirectory("/tmp/pane"),
-            .commandEnded,
+            .commandEnded(exitStatus: 7),
             .bell,
         ])
         #expect(controller.currentPlan == nil)

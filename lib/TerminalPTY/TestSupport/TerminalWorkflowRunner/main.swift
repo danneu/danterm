@@ -224,10 +224,12 @@ private enum TerminalWorkflowRunner {
         case .title(let value): "title=\(value)"
         case .workingDirectory(let value): "cwd=\(value ?? "")"
         case .bell: "bell"
+        case .integrationReady: "integration-ready"
         case .commandStarted(let value): "command-start=\(value)"
-        case .commandEnded: "command-end"
+        case .commandEnded(let exitStatus): "command-end=\(exitStatus)"
         case .remoteStarted: "remote-start"
         case .remoteHost(let user, let host): "remote-host=\(user)@\(host)"
+        case .connectionEnded: "connection-end"
         case let .desktopNotification(title, body): "notification=\(title):\(body)"
         case .progress(let state): "progress=\(String(describing: state))"
         }
@@ -238,14 +240,16 @@ private enum TerminalWorkflowRunner {
         events: [TerminalSemanticEvent]
     ) throws {
         if ["zsh", "bash", "fish"].contains(workflow) {
-            guard events.contains(where: { if case .commandStarted = $0 { true } else { false } }),
-                  events.contains(.commandEnded),
+            guard events.contains(.integrationReady),
+                  events.contains(where: { if case .commandStarted = $0 { true } else { false } }),
+                  events.contains(where: { if case .commandEnded = $0 { true } else { false } }),
                   events.contains(where: { if case .workingDirectory = $0 { true } else { false } })
             else { throw RunnerError.missingSemantics(workflow) }
         }
         if workflow == "ssh" {
             guard events.contains(.remoteStarted),
-                  events.contains(where: { if case .remoteHost = $0 { true } else { false } })
+                  events.contains(where: { if case .remoteHost = $0 { true } else { false } }),
+                  events.contains(.connectionEnded)
             else { throw RunnerError.missingSemantics(workflow) }
         }
     }
