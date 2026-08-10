@@ -1493,17 +1493,19 @@ private func dispatchIpc(
 ) throws -> [Command] {
     switch method {
     case Methods.ls:
-        let snapshot = toSnapshot(model, home: env.homeDirectory())
-        let data = try JSONEncoder().encode(snapshot)
-        let value = try JSONDecoder().decode(JSONValue.self, from: data)
-        return [.readPaneList(reqId: reqId, baseResult: value)]
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return [.ipcReply(reqId: reqId, result: encoder.list(model))]
 
     case Methods.paneInfo:
         let paneId = try resolvePane(params: params, context: context, in: model)
-        guard let result = paneInfoResult(paneId, in: model) else {
+        guard let pane = model.pane(paneId),
+              let tab = tabForPane(paneId, in: model),
+              let group = groupForTab(tab.id, in: model)
+        else {
             throw IpcParamsError("pane not found")
         }
-        return [.readPaneInfo(reqId: reqId, paneId: paneId, baseResult: result)]
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return [.ipcReply(reqId: reqId, result: encoder.paneInfo(pane: pane, tab: tab, group: group))]
 
     case Methods.agentAttach:
         let session = try agentSession(from: params)
@@ -1581,7 +1583,8 @@ private func dispatchIpc(
             env: env
         )
         let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
-        return commands + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return commands + [.ipcReply(reqId: reqId, result: encoder.paneReference(newPaneId.flatMap(model.pane)))]
 
     case Methods.tabNew:
         guard case .object(let object) = params else {
@@ -1610,7 +1613,10 @@ private func dispatchIpc(
         }
         let commands = update(&model, createTabMsg, livePaneState: livePaneState, env: env)
         let tabId = newestTabId(excluding: before, in: model)
-        return commands + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model, home: env.homeDirectory()))]
+        let tab = tabId.flatMap { tabById($0, in: model) }
+        let group = model.groups.first(where: { $0.id == groupId })
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return commands + [.ipcReply(reqId: reqId, result: encoder.tabNew(tab: tab, group: group))]
 
     case Methods.paneFocus:
         var focusParams = params
@@ -1642,7 +1648,8 @@ private func dispatchIpc(
             throw IpcParamsError("invalid theme name")
         }
         let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName), livePaneState: livePaneState, env: env)
-        return commands + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return commands + [.ipcReply(reqId: reqId, result: encoder.paneTheme(model.pane(paneId)))]
 
     case Methods.paneInput:
         let paneId = try resolvePane(params: params, context: context, in: model)
@@ -1727,10 +1734,17 @@ private func dispatchIpc(
         if tab.isZoomed != target {
             _ = update(&model, .toggleZoomPane(paneId: paneId), livePaneState: livePaneState, env: env)
         }
-        guard let result = paneInfoResult(paneId, in: model) else {
+        guard let pane = model.pane(paneId),
+              let currentTab = tabForPane(paneId, in: model),
+              let group = groupForTab(currentTab.id, in: model)
+        else {
             throw IpcParamsError("pane not found")
         }
-        return [.readPaneInfo(reqId: reqId, paneId: paneId, baseResult: result)]
+        let encoder = IpcEntityEncoder(livePaneState: livePaneState, home: env.homeDirectory())
+        return [.ipcReply(
+            reqId: reqId,
+            result: encoder.paneInfo(pane: pane, tab: currentTab, group: group)
+        )]
 
     case Methods.paneRows:
         let paneId = try resolvePane(params: params, context: context, in: model, requireExplicit: true)
@@ -2132,27 +2146,6 @@ private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> Ta
     model.groups.flatMap(\.tabs).first(where: { !before.contains($0.id) })?.id
 }
 
-private func tabNewResult(tabId: TabId?, groupId: GroupId?, in model: AppModel, home: String) -> JSONValue {
-    var object: [String: JSONValue] = [
-        "tab": .null,
-        "panes": .array([]),
-    ]
-    if let tabId {
-        object["tab"] = tabSnapshotJSON(tabId, in: model, home: home) ?? .object(["id": .string(tabId.rawValue.uuidString)])
-        object["panes"] = .array(paneIdsForTab(tabId, in: model).map { paneId in
-            .object(["id": .string(paneId.rawValue.uuidString)])
-        })
-    }
-    if let groupId,
-       let group = model.groups.first(where: { $0.id == groupId }) {
-        object["group"] = .object([
-            "id": .string(group.id.rawValue.uuidString),
-            "name": .string(group.name),
-        ])
-    }
-    return .object(object)
-}
-
 private func tabRenameResult(_ tab: TabModel?) -> JSONValue {
     guard let tab else {
         return .object(["tab": .null])
@@ -2177,50 +2170,6 @@ private func tabFocusResult(_ tab: TabModel?) -> JSONValue {
     ])
 }
 
-private func paneResult(_ paneId: PaneId?) -> JSONValue {
-    guard let paneId else {
-        return .object(["pane": .null])
-    }
-    return .object(["pane": .object(["id": .string(paneId.rawValue.uuidString)])])
-}
-
-private func paneInfoResult(_ paneId: PaneId, in model: AppModel) -> JSONValue? {
-    guard let pane = model.pane(paneId),
-          let tab = tabForPane(paneId, in: model),
-          let group = groupForTab(tab.id, in: model)
-    else {
-        return nil
-    }
-    return .object([
-        "pane": .object([
-            "id": .string(pane.id.rawValue.uuidString),
-            "title": .string(pane.title),
-            "cwd": pane.cwd.map(JSONValue.string) ?? .null,
-        ]),
-        "tab": .object([
-            "id": .string(tab.id.rawValue.uuidString),
-            "title": .string(tab.displayTitle),
-            "groupId": .string(group.id.rawValue.uuidString),
-            // Zoom is transient and so never reaches the persisted snapshot `ls` returns.
-            // Reporting it here is what lets a caller observe the state it just set.
-            "isZoomed": .bool(tab.isZoomed),
-        ]),
-        "group": .object([
-            "id": .string(group.id.rawValue.uuidString),
-            "name": .string(group.name),
-        ]),
-    ])
-}
-
-private func paneThemeResult(_ paneId: PaneId, in model: AppModel) -> JSONValue {
-    .object([
-        "pane": .object([
-            "id": .string(paneId.rawValue.uuidString),
-            "theme": model.pane(paneId)?.theme.map(JSONValue.string) ?? .null,
-        ])
-    ])
-}
-
 private func todoResult(_ item: TodoItem?) -> JSONValue {
     .object(["todo": item.map(todoJSON) ?? .null])
 }
@@ -2231,19 +2180,6 @@ private func todoListResult(_ todos: [TodoItem]) -> JSONValue {
 
 private func okResult() -> JSONValue {
     .object(["ok": .bool(true)])
-}
-
-private func tabSnapshotJSON(_ tabId: TabId, in model: AppModel, home: String) -> JSONValue? {
-    let snapshot = toSnapshot(model, home: home)
-    guard let tab = snapshot.groups.flatMap(\.tabs).first(where: { $0.id == tabId.rawValue.uuidString }) else {
-        return nil
-    }
-    return encodeJSONValue(tab)
-}
-
-private func encodeJSONValue<T: Encodable>(_ value: T) -> JSONValue? {
-    guard let data = try? JSONEncoder().encode(value) else { return nil }
-    return try? JSONDecoder().decode(JSONValue.self, from: data)
 }
 
 private func launchSpecErrorMessage(_ error: LaunchSpecParseError) -> String {

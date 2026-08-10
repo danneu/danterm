@@ -49,23 +49,193 @@ import DanTermProtocol
         #expect(error.code == -32602)
     }
 
-    @Test("ls defers its structural snapshot for live semantic enrichment")
-    func lsDefersStructuralSnapshotForLiveSemantics() {
-        var model = makeModel()
-        createTab(&model)
-        let commands = sendIpc(&model, method: Methods.ls)
-        guard case .readPaneList(_, let baseResult) = commands.first else {
-            Issue.record("expected deferred pane list read")
-            return
-        }
-        guard case .object(let object) = baseResult else {
-            Issue.record("expected object snapshot")
-            return
-        }
-        #expect(object["groups"] != nil, "snapshot should include groups")
-        #expect(object["panes"] == nil, "snapshot should not include a top-level panes array")
-        let leaf = object["groups"]?.asArray?.first?["tabs"]?.asArray?.first?["rootNode"]
-        #expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
+    @Test("ls encodes the documented rich model directly with live pane semantics")
+    func lsEncodesRichModelDirectly() throws {
+        let paneAId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
+        let paneBId = PaneId(rawValue: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!)
+        let paneCId = PaneId(rawValue: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!)
+        let paneDId = PaneId(rawValue: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!)
+        let splitAId = SplitId(rawValue: UUID(uuidString: "dddddddd-dddd-4ddd-8ddd-dddddddddddd")!)
+        let splitBId = SplitId(rawValue: UUID(uuidString: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")!)
+        let tabAId = TabId(rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!)
+        let tabBId = TabId(rawValue: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
+        let groupAId = GroupId(rawValue: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!)
+        let groupBId = GroupId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
+        let paneTodoId = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
+        let tabTodoId = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let paneA = PaneModel(
+            id: paneAId,
+            title: "shell",
+            cwd: "/Users/testhome/work",
+            theme: "Tokyo Night",
+            fontSizeSteps: 2,
+            todos: [TodoItem(id: paneTodoId, text: "ship", isDone: false)]
+        )
+        let paneB = PaneModel(id: paneBId, title: "tests", cwd: "/tmp")
+        let paneC = PaneModel(id: paneCId, title: "logs")
+        let paneD = PaneModel(id: paneDId, title: "archive")
+        let nestedRoot: SplitNodeModel = .split(
+            id: splitAId,
+            direction: .horizontal,
+            first: .leaf(paneA),
+            second: .split(
+                id: splitBId,
+                direction: .vertical,
+                first: .leaf(paneB),
+                second: .leaf(paneC),
+                ratio: 0.4
+            ),
+            ratio: 0.6
+        )
+        let tabA = TabModel(
+            id: tabAId,
+            customTitle: "work",
+            focusedPaneId: paneBId,
+            rootNode: nestedRoot,
+            color: .purple,
+            todos: [TodoItem(id: tabTodoId, text: "review", isDone: true)]
+        )
+        let tabB = TabModel(id: tabBId, focusedPaneId: paneDId, rootNode: .leaf(paneD))
+        var model = AppModel(
+            groups: [
+                GroupModel(id: groupAId, name: "General", tabs: [tabA]),
+                GroupModel(id: groupBId, name: "Archive", isCollapsed: true, tabs: [tabB]),
+            ],
+            selectedTabId: tabAId
+        )
+        let semantics = PaneSemanticState(command: .running("swift test"))
+        let commands = sendIpc(
+            &model,
+            method: Methods.ls,
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneAId: semantics]),
+            env: makeTestEnv(homeDirectory: "/Users/testhome")
+        )
+
+        let result = try requireIpcReply(commands)
+        let neutralSemantics: JSONValue = .object([
+            "integration": .object(["state": .string("neverReported")]),
+            "command": .object(["state": .string("idle")]),
+            "connection": .object(["state": .string("local")]),
+            "agent": .object(["state": .string("none")]),
+        ])
+        let runningSemantics: JSONValue = .object([
+            "integration": .object(["state": .string("neverReported")]),
+            "command": .object(["state": .string("running"), "text": .string("swift test")]),
+            "connection": .object(["state": .string("local")]),
+            "agent": .object(["state": .string("none")]),
+        ])
+        let expected: JSONValue = .object([
+            "groups": .array([
+                .object([
+                    "id": .string(groupAId.rawValue.uuidString),
+                    "name": .string("General"),
+                    "isCollapsed": .bool(false),
+                    "tabs": .array([.object([
+                        "id": .string(tabAId.rawValue.uuidString),
+                        "customTitle": .string("work"),
+                        "focusedPaneId": .string(paneBId.rawValue.uuidString),
+                        "color": .string("purple"),
+                        "todos": .array([.object([
+                            "id": .string(tabTodoId.uuidString),
+                            "text": .string("review"),
+                            "isDone": .bool(true),
+                        ])]),
+                        "rootNode": .object([
+                            "type": .string("split"),
+                            "id": .string(splitAId.rawValue.uuidString),
+                            "direction": .string("horizontal"),
+                            "ratio": .number(0.6),
+                            "first": .object([
+                                "type": .string("leaf"),
+                                "pane": .object([
+                                    "id": .string(paneAId.rawValue.uuidString),
+                                    "title": .string("shell"),
+                                    "cwd": .string("~/work"),
+                                    "theme": .string("Tokyo Night"),
+                                    "fontSizeSteps": .number(2),
+                                    "todos": .array([.object([
+                                        "id": .string(paneTodoId.uuidString),
+                                        "text": .string("ship"),
+                                        "isDone": .bool(false),
+                                    ])]),
+                                    "semantics": runningSemantics,
+                                ]),
+                            ]),
+                            "second": .object([
+                                "type": .string("split"),
+                                "id": .string(splitBId.rawValue.uuidString),
+                                "direction": .string("vertical"),
+                                "ratio": .number(0.4),
+                                "first": .object([
+                                    "type": .string("leaf"),
+                                    "pane": .object([
+                                        "id": .string(paneBId.rawValue.uuidString),
+                                        "title": .string("tests"),
+                                        "cwd": .string("/tmp"),
+                                        "semantics": neutralSemantics,
+                                    ]),
+                                ]),
+                                "second": .object([
+                                    "type": .string("leaf"),
+                                    "pane": .object([
+                                        "id": .string(paneCId.rawValue.uuidString),
+                                        "title": .string("logs"),
+                                        "semantics": neutralSemantics,
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ])]),
+                ]),
+                .object([
+                    "id": .string(groupBId.rawValue.uuidString),
+                    "name": .string("Archive"),
+                    "isCollapsed": .bool(true),
+                    "tabs": .array([.object([
+                        "id": .string(tabBId.rawValue.uuidString),
+                        "focusedPaneId": .string(paneDId.rawValue.uuidString),
+                        "rootNode": .object([
+                            "type": .string("leaf"),
+                            "pane": .object([
+                                "id": .string(paneDId.rawValue.uuidString),
+                                "title": .string("archive"),
+                                "semantics": neutralSemantics,
+                            ]),
+                        ]),
+                    ])]),
+                ]),
+            ]),
+            "selectedTabId": .string(tabAId.rawValue.uuidString),
+        ])
+        #expect(result == expected)
+    }
+
+    @Test("ls attaches semantics only to panes when entity ids collide")
+    func lsScopesSemanticsToPaneEntities() throws {
+        let rawId = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+        let paneId = PaneId(rawValue: rawId)
+        let tabId = TabId(rawValue: rawId)
+        let groupId = GroupId(rawValue: rawId)
+        let pane = PaneModel(id: paneId)
+        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
+        var model = AppModel(
+            groups: [GroupModel(id: groupId, name: "collision", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        let state = PaneSemanticState(command: .running("make test"))
+
+        let result = try requireIpcReply(sendIpc(
+            &model,
+            method: Methods.ls,
+            livePaneState: LivePaneStateView(semanticsByPaneId: [paneId: state])
+        ))
+        let group = try #require(result["groups"]?.asArray?.first)
+        let encodedTab = try #require(group["tabs"]?.asArray?.first)
+        let encodedPane = encodedTab["rootNode"]?["pane"]
+
+        #expect(group["semantics"] == nil)
+        #expect(encodedTab["semantics"] == nil)
+        #expect(encodedPane?["semantics"] == paneSemanticInspectionValue(state))
     }
 
     @Test("agent.attach routes through the pane owner before its reply")
@@ -103,8 +273,8 @@ import DanTermProtocol
         #expect(event == .agentAttached(session))
     }
 
-    @Test("pane.info defers its reply until the pane owner supplies live semantics")
-    func paneInfoReadsPaneOwnedSemantics() {
+    @Test("pane.info replies directly with complete default semantics")
+    func paneInfoRepliesDirectlyWithDefaultSemantics() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -115,14 +285,33 @@ import DanTermProtocol
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
 
-        #expect(commands.count == 1)
-        guard case .readPaneInfo(_, let commandPaneId, let baseResult) = commands[0] else {
-            Issue.record("expected pane-owner info read")
-            return
-        }
-        #expect(commandPaneId == paneId)
-        #expect(baseResult["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
-        #expect(baseResult["pane"]?["semantics"] == nil)
+        let result = try requireIpcReply(commands)
+        let tab = try #require(selectedTab(in: model))
+        let group = try #require(model.groups.first)
+        let expected: JSONValue = .object([
+            "pane": .object([
+                "id": .string(paneId.rawValue.uuidString),
+                "title": .string("Terminal"),
+                "cwd": .null,
+                "semantics": .object([
+                    "integration": .object(["state": .string("neverReported")]),
+                    "command": .object(["state": .string("idle")]),
+                    "connection": .object(["state": .string("local")]),
+                    "agent": .object(["state": .string("none")]),
+                ]),
+            ]),
+            "tab": .object([
+                "id": .string(tab.id.rawValue.uuidString),
+                "title": .string("Terminal"),
+                "groupId": .string(group.id.rawValue.uuidString),
+                "isZoomed": .bool(false),
+            ]),
+            "group": .object([
+                "id": .string(group.id.rawValue.uuidString),
+                "name": .string("General"),
+            ]),
+        ])
+        #expect(result == expected)
     }
 
     @Test("agent activity and detach route session-qualified events")
@@ -1039,6 +1228,48 @@ import DanTermProtocol
         #expect(reply["group"]?["id"]?.asString == groupId.rawValue.uuidString)
         #expect(reply["group"]?["name"]?.asString == "Builds")
         #expect(reply["panes"]?.asArray?.count == 1)
+    }
+
+    @Test("tab.new returns the explicit entity document from the core encoder")
+    func tabNewReturnsExplicitEntityDocument() throws {
+        let groupId = GroupId(rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!)
+        let paneId = PaneId(rawValue: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
+        let tabId = TabId(rawValue: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!)
+        var model = AppModel(groups: [GroupModel(id: groupId, name: "Builds")])
+        let env = makeTestEnv(idSequence: [paneId.rawValue, tabId.rawValue])
+
+        let result = try requireIpcReply(sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string(groupId.rawValue.uuidString),
+                "launch": .object([
+                    "cwd": .string("/Users/testhome/project"),
+                    "title": .string("tests"),
+                ]),
+            ]),
+            env: env
+        ))
+        let expected: JSONValue = .object([
+            "tab": .object([
+                "id": .string(tabId.rawValue.uuidString),
+                "customTitle": .string("tests"),
+                "focusedPaneId": .string(paneId.rawValue.uuidString),
+                "rootNode": .object([
+                    "type": .string("leaf"),
+                    "pane": .object([
+                        "id": .string(paneId.rawValue.uuidString),
+                        "title": .string("tests"),
+                    ]),
+                ]),
+            ]),
+            "panes": .array([.object(["id": .string(paneId.rawValue.uuidString)])]),
+            "group": .object([
+                "id": .string(groupId.rawValue.uuidString),
+                "name": .string("Builds"),
+            ]),
+        ])
+        #expect(result == expected)
     }
 
     @Test("tab.new explicit group id wins over pane context group")
@@ -2723,9 +2954,16 @@ private func sendIpc(
     _ model: inout AppModel,
     method: String,
     params: JSONValue = .object([:]),
-    context: IpcRequestContext = IpcRequestContext()
+    context: IpcRequestContext = IpcRequestContext(),
+    livePaneState: LivePaneStateView = LivePaneStateView(),
+    env: CoreEnv = .live
 ) -> [Command] {
-    update(&model, .ipcRequest(reqId: UUID(), method: method, params: params, context: context))
+    update(
+        &model,
+        .ipcRequest(reqId: UUID(), method: method, params: params, context: context),
+        livePaneState: livePaneState,
+        env: env
+    )
 }
 
 private func contextForSelectedPane(in model: AppModel) -> IpcRequestContext {
@@ -2782,7 +3020,6 @@ private func expectAfterTabInserted(
 private func requireIpcReply(_ commands: [Command]) throws -> JSONValue {
     let reply = commands.compactMap { command -> JSONValue? in
         if case .ipcReply(_, let result) = command { return result }
-        if case .readPaneInfo(_, _, let baseResult) = command { return baseResult }
         return nil
     }.first
     return try #require(reply, "expected ipcReply")

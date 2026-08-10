@@ -208,4 +208,4 @@ production code cannot omit the view.
 ## Commit progress
 
 - [x] 1. refactor(core): read pane semantics through a live-state view
-- [ ] 2. refactor(ipc): encode entity replies directly in core
+- [x] 2. refactor(ipc): encode entity replies directly in core

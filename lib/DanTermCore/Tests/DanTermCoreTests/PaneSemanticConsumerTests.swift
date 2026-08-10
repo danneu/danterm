@@ -56,61 +56,6 @@ struct PaneSemanticConsumerTests {
         #expect(value["agent"]?["activity"] == .null)
     }
 
-    @Test("pane info nests the owner snapshot without disturbing location fields")
-    func paneInfoAddsSemanticSnapshot() {
-        var semantics = PaneSemanticState()
-        semantics.command = .running("swift test")
-        let base: JSONValue = .object([
-            "pane": .object(["id": .string("pane-1")]),
-            "tab": .object(["id": .string("tab-1")]),
-        ])
-
-        let value = paneInfoResult(adding: semantics, to: base)
-
-        #expect(value["pane"]?["id"]?.asString == "pane-1")
-        #expect(value["pane"]?["semantics"]?["command"]?["state"]?.asString == "running")
-        #expect(value["tab"]?["id"]?.asString == "tab-1")
-    }
-
-    @Test("pane list attaches each live snapshot only to its matching pane")
-    func paneListAddsDistinctLiveSnapshots() throws {
-        let firstId = PaneId()
-        let secondId = PaneId()
-        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let first = PaneSemanticState(
-            command: .running("swift test"),
-            connection: .remote(identity: RemoteSession(user: "dan", host: "caja"))
-        )
-        let second = PaneSemanticState(agent: .attached(session: agent, activity: .waiting))
-        let base: JSONValue = .object([
-            "groups": .array([.object([
-                "tabs": .array([.object([
-                    "rootNode": .object([
-                        "first": .object(["pane": .object(["id": .string(firstId.rawValue.uuidString)])]),
-                        "second": .object(["pane": .object(["id": .string(secondId.rawValue.uuidString)])]),
-                    ]),
-                ])]),
-            ])]),
-        ])
-
-        let value = paneListResult(
-            adding: [firstId: first, secondId: second],
-            to: base
-        )
-        let root = value["groups"]?.asArray?.first?["tabs"]?.asArray?.first?["rootNode"]
-        let firstPane = root?["first"]?["pane"]
-        let secondPane = root?["second"]?["pane"]
-
-        #expect(firstPane?["semantics"] == paneSemanticInspectionValue(first))
-        #expect(secondPane?["semantics"] == paneSemanticInspectionValue(second))
-        #expect(firstPane?["semantics"]?["command"]?["text"]?.asString == "swift test")
-        #expect(firstPane?["semantics"]?["connection"]?["identity"]?["host"]?.asString == "caja")
-        #expect(firstPane?["semantics"]?["agent"]?["state"]?.asString == "none")
-        #expect(secondPane?["semantics"]?["command"]?["state"]?.asString == "idle")
-        #expect(secondPane?["semantics"]?["connection"]?["state"]?.asString == "local")
-        #expect(secondPane?["semantics"]?["agent"]?["session"]?["sessionId"]?.asString == "thread-1")
-    }
-
     @Test("an applied attachment is visible to the next synchronous inspection")
     func attachmentPrecedesInspection() throws {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
