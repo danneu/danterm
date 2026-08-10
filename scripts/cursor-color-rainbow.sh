@@ -10,7 +10,9 @@ restore() {
     stty "$old_stty"
 }
 
-trap restore EXIT INT TERM
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 draw() {
     cols=$(tput cols)
