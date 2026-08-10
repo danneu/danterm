@@ -40,10 +40,11 @@ func update(
 
     case .createTab(let inGroupId, let position, let launch, let background):
         let paneId = PaneId(rawValue: env.newId())
+        let sessionId = SessionId(rawValue: env.newId())
         let tabId = TabId(rawValue: env.newId())
         let cwd = launch?.cwd ?? currentCwd(in: model)
 
-        var pane = PaneModel(id: paneId)
+        var pane = PaneModel(id: paneId, session: SessionModel(id: sessionId))
         if let title = launch?.title {
             pane.title = title
         }
@@ -165,12 +166,13 @@ func update(
         }
         let targetPaneId = paneId ?? tab.focusedPaneId
         let newPaneId = PaneId(rawValue: env.newId())
+        let newSessionId = SessionId(rawValue: env.newId())
         let newSplitId = SplitId(rawValue: env.newId())
         let cwd = launch?.cwd ?? model.pane(targetPaneId)?.cwd
         let theme = model.pane(targetPaneId)?.theme
         let fontSizeSteps = model.pane(targetPaneId)?.fontSizeSteps ?? 0
 
-        var newPane = PaneModel(id: newPaneId)
+        var newPane = PaneModel(id: newPaneId, session: SessionModel(id: newSessionId))
         if let title = launch?.title {
             newPane.title = title
         }

@@ -1234,9 +1234,10 @@ import DanTermProtocol
     func tabNewReturnsExplicitEntityDocument() throws {
         let groupId = GroupId(rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!)
         let paneId = PaneId(rawValue: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!)
+        let sessionId = SessionId(rawValue: UUID(uuidString: "22222222-2222-4222-8222-222222222223")!)
         let tabId = TabId(rawValue: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!)
         var model = AppModel(groups: [GroupModel(id: groupId, name: "Builds")])
-        let env = makeTestEnv(idSequence: [paneId.rawValue, tabId.rawValue])
+        let env = makeTestEnv(idSequence: [paneId.rawValue, sessionId.rawValue, tabId.rawValue])
 
         let result = try requireIpcReply(sendIpc(
             &model,

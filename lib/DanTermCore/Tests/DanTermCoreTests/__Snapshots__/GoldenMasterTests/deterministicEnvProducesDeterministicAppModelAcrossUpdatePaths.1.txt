@@ -6,15 +6,18 @@ AppModel(
       isCollapsed: false,
       tabs: [
         [0]: TabModel(
-          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
           customTitle: nil,
           focusedPaneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
           rootNode: .split(
-            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
+            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000006)),
             direction: .horizontal,
             first: .leaf(
               PaneModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
+                session: SessionModel(
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002))
+                ),
                 title: "Terminal",
                 cwd: nil,
                 progress: nil,
@@ -25,7 +28,10 @@ AppModel(
             ),
             second: .leaf(
               PaneModel(
-                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
+                session: SessionModel(
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005))
+                ),
                 title: "Terminal",
                 cwd: nil,
                 progress: nil,
@@ -43,20 +49,23 @@ AppModel(
       ]
     ),
     [1]: GroupModel(
-      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005)),
+      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000007)),
       name: "Golden",
       isCollapsed: false,
       tabs: [
         [0]: TabModel(
-          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000007)),
+          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000A)),
           customTitle: nil,
-          focusedPaneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
+          focusedPaneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000B)),
           rootNode: .split(
-            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009)),
+            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000D)),
             direction: .vertical,
             first: .leaf(
               PaneModel(
-                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000006)),
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
+                session: SessionModel(
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009))
+                ),
                 title: "Terminal",
                 cwd: nil,
                 progress: nil,
@@ -67,7 +76,10 @@ AppModel(
             ),
             second: .leaf(
               PaneModel(
-                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000B)),
+                session: SessionModel(
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C))
+                ),
                 title: "Terminal",
                 cwd: nil,
                 progress: nil,
@@ -85,11 +97,11 @@ AppModel(
       ]
     )
   ],
-  selectedTabId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+  selectedTabId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
   isAppActive: false,
   alerts: [
     [0]: AlertModel(
-      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000A)),
+      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000E)),
       kind: .bell,
       paneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
       title: "DanTerm",
@@ -119,8 +131,8 @@ AppModel(
   availableThemeNames: [],
   todoPopover: nil,
   mruOrder: [
-    [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
-    [1]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000007))
+    [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
+    [1]: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000A))
   ],
   mruCycle: nil,
   jumpMode: nil,

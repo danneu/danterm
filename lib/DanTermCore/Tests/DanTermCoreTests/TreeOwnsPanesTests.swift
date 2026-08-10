@@ -65,8 +65,11 @@ import Testing
         #expect(Set(model.allPaneIds) == Set([a, b]))
         #expect(Set(model.allPaneIds) == Set(allPaneIds(model.groups[0].tabs[0].rootNode)))
 
-        // Re-encode and rebuild: the embedded format round-trips to an identical model.
-        expectNoDifference(validateAndBuild(toSnapshot(model)), model)
+        // Re-encode and rebuild: persisted pane data round-trips identically while
+        // restore deliberately mints fresh, unpersisted session identities.
+        let snapshot = toSnapshot(model)
+        let rebuilt = try #require(validateAndBuild(snapshot))
+        expectNoDifference(toSnapshot(rebuilt), snapshot)
     }
 
     @Test("updatePane mutates only the target leaf, leaving structure and siblings intact")

@@ -317,7 +317,7 @@ their file.
 
 - [x] 1. docs: supersede terminal-reported-pane-facts with the session-owned
   facts ADR
-- [ ] 2. core: add SessionId and the pane-nested SessionModel (mint on
+- [x] 2. core: add SessionId and the pane-nested SessionModel (mint on
   create/restore; no facts move yet; SessionStoreTests + GoldenMaster regen)
 - [ ] 3. core!: reduce session lifecycles inside update(); runtime stops
   owning terminal-reported state (SessionReport lifecycle cases, unified

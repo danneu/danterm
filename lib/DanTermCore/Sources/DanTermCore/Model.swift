@@ -5,6 +5,8 @@ import Foundation
 
 enum TabTag {}
 enum PaneTag {}
+/// Keeps terminal-session identity distinct from its owning pane identity.
+enum SessionTag {}
 enum GroupTag {}
 enum SplitTag {}
 enum AlertTag {}
@@ -16,6 +18,8 @@ struct TypedId<Tag>: Hashable, RawRepresentable, Codable {
 
 typealias TabId = TypedId<TabTag>
 typealias PaneId = TypedId<PaneTag>
+/// Identifies one terminal lifetime so late reports cannot target its replacement.
+typealias SessionId = TypedId<SessionTag>
 typealias GroupId = TypedId<GroupTag>
 typealias SplitId = TypedId<SplitTag>
 typealias AlertId = TypedId<AlertTag>
@@ -89,8 +93,15 @@ struct TodoItem: Equatable, Codable {
 
 // MARK: - Model
 
+/// Gives terminal-reported state the identity of the terminal session whose
+/// lifetime bounds it; later migration slices move that state into this value.
+struct SessionModel: Equatable {
+    let id: SessionId
+}
+
 struct PaneModel: Equatable {
     let id: PaneId
+    var session: SessionModel? = nil
     var title: String = "Terminal"
     var cwd: String?
     var progress: ProgressState? = nil
@@ -258,6 +269,12 @@ extension AppModel {
         return nil
     }
 
+    /// Finds the pane that owns a live session, so inbound session identity can
+    /// never resolve independently from the pane tree that owns its state.
+    func pane(owning sessionId: SessionId) -> PaneModel? {
+        allPanes.first { $0.session?.id == sessionId }
+    }
+
     /// All panes, in tab then tree (left-to-right) order. A few reconcile passes
     /// rebuild this per sweep, which is acceptable for the same per-`Msg`,
     /// never-per-render-frame reason above; see `Projection Scan Cost` in
@@ -282,6 +299,16 @@ extension AppModel {
                     return
                 }
             }
+        }
+    }
+
+    /// Mutates a session only through the pane leaf that owns its complete value.
+    mutating func updateSession(_ id: SessionId, _ body: (inout SessionModel) -> Void) {
+        guard let paneId = pane(owning: id)?.id else { return }
+        updatePane(paneId) { pane in
+            guard var session = pane.session, session.id == id else { return }
+            body(&session)
+            pane.session = session
         }
     }
 }
@@ -434,7 +461,7 @@ func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> App
 /// `env.homeDirectory()`. App restore omits `env` (live ambient); a test passes a
 /// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
-    // Panes, groups, tabs, and splits share one UUID namespace. A leaf pane id
+    // Panes, sessions, groups, tabs, and splits share one UUID namespace. A leaf pane id
     // colliding with any other domain's id is rejected -- sessions / searchState /
     // lastNotificationTime / updatePane are all id-keyed, so a dup would
     // reintroduce exactly the drift this refactor removes.
@@ -615,10 +642,21 @@ private func parseSplitNode(
             print("[init] Duplicate ID: \(paneId)")
             return nil
         }
+        let sessionId = SessionId(rawValue: env.newId())
+        guard allIds.insert(sessionId.rawValue).inserted else {
+            print("[init] Duplicate ID: \(sessionId)")
+            return nil
+        }
         // Build the PaneModel from the embedded snapshot; record the snapshot for
         // the returned paneSnapshots map (the restore replay/scrollback source).
         let expandedCwd = resolveLaunch(ps, home: env.homeDirectory()).cwd
-        var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        var paneModel = PaneModel(
+            id: paneId,
+            session: SessionModel(id: sessionId),
+            title: ps.title ?? "Terminal",
+            cwd: expandedCwd,
+            theme: ps.theme
+        )
         // A hand-edited or corrupt step count is bounded here rather than at
         // projection, so the restored pane responds to the next adjustment
         // exactly as one the user zoomed to that bound would.

@@ -53,7 +53,7 @@ import Testing
         }
         """
         let data = json.data(using: .utf8)!
-        // id-less group + tab + leaf mint 3 ids; the values are irrelevant here.
+        // id-less group + tab + leaf + session mint 4 ids; the values are irrelevant here.
         let env = makeTestEnv(idSequence: Self.idSequence, homeDirectory: Self.fakeHome)
         let loaded = try loadValidatedInitFile(from: data, env: env)
         let paneId = loaded.model.allPaneIds[0]
@@ -84,17 +84,19 @@ import Testing
 
     // MARK: - id-less-restore (reproducible minting from an injected sequence)
 
-    @Test("id-less restore mints group/tab/pane ids from the injected sequence in order")
+    @Test("id-less restore mints group/tab/pane/session ids from the injected sequence in order")
     func idLessRestoreMintsFromInjectedSequence() throws {
         // Intent: id-less snapshot entries mint ids via env.newId(), in
-        //   group -> tab -> pane order, so restore is reproducible.
+        //   group -> tab -> pane -> session order, so restore is reproducible.
         // Why it exists: pins the restore id seam (the 4 bare XxxId() mints became
         //   env.newId()); a deterministic sequence must produce matching ids.
         // Scenario: spec-first reproducibility -- an id-less group/tab/leaf loaded
-        //   with [g, t, p] yields exactly those ids on the group, tab, and pane.
+        //   with [g, t, p, s] yields exactly those ids on the group, tab, pane,
+        //   and nested session.
         let g = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         let t = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
         let p = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        let s = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
         let json = """
         {
           "version": 3,
@@ -107,12 +109,13 @@ import Testing
         }
         """
         let data = json.data(using: .utf8)!
-        let env = makeTestEnv(idSequence: [g, t, p], homeDirectory: Self.fakeHome)
+        let env = makeTestEnv(idSequence: [g, t, p, s], homeDirectory: Self.fakeHome)
         let loaded = try loadValidatedInitFile(from: data, env: env)
 
         #expect(loaded.model.groups[0].id.rawValue == g, "group id minted from sequence[0]")
         #expect(loaded.model.groups[0].tabs[0].id.rawValue == t, "tab id minted from sequence[1]")
         #expect(loaded.model.allPaneIds == [PaneId(rawValue: p)], "pane id minted from sequence[2]")
+        #expect(loaded.model.allPanes[0].session?.id == SessionId(rawValue: s), "session id minted from sequence[3]")
     }
 
     // MARK: - model-stays-home-clean (the premise that justifies the narrow seam)
@@ -180,7 +183,7 @@ import Testing
         #expect(expandTilde("~danielle/foo", home: "/Users/dan") == "~danielle/foo")
     }
 
-    // Five distinct fixed ids -- enough to cover an id-less group/tab/leaf (3 mints)
+    // Five distinct fixed ids -- enough to cover an id-less group/tab/leaf/session (4 mints)
     // with headroom, for tests that do not assert on the minted values.
     private static let idSequence: [UUID] = (1...5).map {
         UUID(uuidString: "AAAAAAAA-AAAA-4AAA-8AAA-00000000000\($0)")!
