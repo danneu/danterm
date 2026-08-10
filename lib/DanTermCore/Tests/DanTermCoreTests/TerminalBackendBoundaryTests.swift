@@ -117,14 +117,16 @@ struct TerminalBackendBoundaryTests {
                 for: .agentActivityChanged(session: agent, activity: .waiting),
                 after: [.agentAttached(agent), .agentActivityChanged(session: agent, activity: .waiting)]
             )),
-            paneId: paneId
+            paneId: paneId,
+            semanticSnapshot: PaneSemanticState()
         ).isEmpty)
         #expect(terminalMessages(
             for: .paneSemanticsChanged(transition(
                 for: .remoteDetected,
                 after: [.remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))]
             )),
-            paneId: paneId
+            paneId: paneId,
+            semanticSnapshot: PaneSemanticState()
         ).isEmpty)
         assertSessionMessage(.paneSemanticsChanged(transition(for: .connectionEnded, after: [.remoteDetected])), paneId: paneId) {
             if case .paneSemanticsChanged(let id, let transition) = $0 {
@@ -153,7 +155,11 @@ private func assertSessionMessage(
     paneId: PaneId,
     matches: (Msg) -> Bool
 ) {
-    let messages = terminalMessages(for: event, paneId: paneId)
+    let messages = terminalMessages(
+        for: event,
+        paneId: paneId,
+        semanticSnapshot: PaneSemanticState()
+    )
     #expect(messages.count == 1)
     #expect(messages.first.map(matches) == true)
 }

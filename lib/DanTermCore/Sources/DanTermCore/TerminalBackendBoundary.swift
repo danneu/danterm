@@ -21,7 +21,7 @@ enum TerminalSessionEvent: Equatable {
 func terminalMessages(
     for event: TerminalSessionEvent,
     paneId: PaneId,
-    semanticSnapshot: PaneSemanticState = PaneSemanticState()
+    semanticSnapshot: PaneSemanticState
 ) -> [Msg] {
     switch event {
     case .titleChanged(let title):
