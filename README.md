@@ -96,8 +96,15 @@ Press Cmd+, to edit settings. DanTerm stores them in
 }
 ```
 
-Press Cmd+Shift+, to reload the file. Set `ui.alertClearMode` to `manual` if
-alerts should remain until you dismiss them.
+Press Cmd+Shift+, to reload the file.
+
+Keep alerts until you dismiss them:
+
+```json
+{
+  "ui": { "alertClearMode": "manual" }
+}
+```
 
 Nix users can keep the writable config in a dotfiles repository:
 
@@ -169,6 +176,12 @@ ln -s /absolute/path/to/danterm/integrations/danterm ~/.claude/skills/danterm
 ln -s /absolute/path/to/danterm/integrations/danterm ~/.codex/skills/danterm
 ```
 
+Verify it in Claude Code or Codex:
+
+```text
+/skills
+```
+
 For immediate Claude Code alerts, add this to `~/.claude/settings.json`:
 
 ```json
@@ -233,9 +246,6 @@ notification_method = "osc9"
 
 Restart existing Codex sessions after changing this setting.
 
-DanTerm also includes notification and session hooks for Claude Code and Codex
-under `/Applications/DanTerm.app/Contents/Resources/danterm-hooks/`.
-
 ## Shortcuts
 
 | Action            | Shortcut          |
@@ -257,9 +267,14 @@ The app menus list all shortcuts.
 
 ## Command-line interface
 
-DanTerm can create layouts, control panes, capture pane output, and save or load
-state. See the bundled
-[`integrations/danterm/SKILL.md`](integrations/danterm/SKILL.md) for the current
+```sh
+danterm ls
+danterm tab new --cmd 'just test'
+danterm pane split -h
+danterm pane read --pane "$DANTERM_PANE" --lines 50
+```
+
+See [`integrations/danterm/SKILL.md`](integrations/danterm/SKILL.md) for all
 commands and examples.
 
 Terminal behavior is defined by the
@@ -269,9 +284,7 @@ Terminal behavior is defined by the
 
 ```sh
 bash ./dev-build.sh --no-install  # Build without replacing an installed app.
+just provision-worktree           # Run once in a new Git worktree.
 just launch-slot                  # Run an isolated development copy.
 just test                         # Run the test suite.
 ```
-
-After creating a Git worktree, run `just provision-worktree` once before
-building.
