@@ -437,7 +437,9 @@ struct RenderFramePlanningTests {
         let states: [RenderOverlayState?] = [
             nil,
             .selection,
+            .searchMatch,
             .activeSearchMatch,
+            .selectionAndSearchMatch,
             .selectionAndActiveSearchMatch,
         ]
 
@@ -463,14 +465,26 @@ struct RenderFramePlanningTests {
 
             for shape in [TerminalCursorShape.block, .underline, .bar] {
                 var terminal = try #require(Terminal(columns: 2, rows: 1))
-                feed("\u{1B}[38;2;96;96;96;48;2;96;96;96mA\u{1B}[1;1H", to: &terminal)
-                if state == .selection || state == .selectionAndActiveSearchMatch {
+                let isQuietMatch = state == .searchMatch || state == .selectionAndSearchMatch
+                let text = isQuietMatch ? "AA" : "A"
+                feed(
+                    "\u{1B}[38;2;96;96;96;48;2;96;96;96m\(text)\u{1B}[1;1H",
+                    to: &terminal
+                )
+                if state == .selection
+                    || state == .selectionAndSearchMatch
+                    || state == .selectionAndActiveSearchMatch
+                {
                     terminal.setSelection(.init(
                         start: .init(row: 0, column: 0),
                         end: .init(row: 0, column: 1)
                     ))
                 }
-                if state == .activeSearchMatch || state == .selectionAndActiveSearchMatch {
+                if state == .searchMatch
+                    || state == .activeSearchMatch
+                    || state == .selectionAndSearchMatch
+                    || state == .selectionAndActiveSearchMatch
+                {
                     let found = terminal.beginSearch("A")
                     try #require(found)
                 }

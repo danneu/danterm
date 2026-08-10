@@ -1,8 +1,8 @@
-// Active-search-match overlay planning proofs: semantic overlap, viewport clipping,
+// Search-match overlay planning proofs: semantic overlap, viewport clipping,
 // and survival through the damage-clipped plan the app actually draws.
 import Testing
 
-import TerminalCore
+@testable import TerminalCore
 @testable import TerminalRenderPlanning
 
 /// Pins active matches and selections to one semantic overlay layer so their overlap
@@ -43,6 +43,91 @@ struct SearchMatchRenderPlanningTests {
 
         terminal.clearSearch()
         #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
+    }
+
+    @Test("every visible search occurrence plans an overlay")
+    func everyVisibleMatchPlansAnOverlay() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("hit hit\r\nhit".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+
+        let plan = planFrame(for: terminal, presentation: presentation)
+        #expect(plan.overlayRuns.map(\.row) == [0, 0, 1])
+        #expect(plan.overlayRuns.map(\.startColumn) == [0, 4, 0])
+        #expect(plan.overlayRuns.map(\.columnCount) == [3, 3, 3])
+        #expect(plan.overlayRuns.map(\.state) == [
+            .searchMatch,
+            .searchMatch,
+            .activeSearchMatch,
+        ])
+    }
+
+    @Test("navigation moves the active overlay without changing visible match coverage")
+    func navigationMovesOnlyTheActiveOverlay() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("hit hit".utf8))
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+
+        let newest = planFrame(for: terminal, presentation: presentation).overlayRuns
+        #expect(newest.map(\.state) == [.searchMatch, .activeSearchMatch])
+
+        let moved = terminal.searchNext()
+        #expect(moved)
+        let older = planFrame(for: terminal, presentation: presentation).overlayRuns
+        #expect(older.map(\.startColumn) == newest.map(\.startColumn))
+        #expect(older.map(\.columnCount) == newest.map(\.columnCount))
+        #expect(older.map(\.state) == [.activeSearchMatch, .searchMatch])
+    }
+
+    @Test("matches crossing both viewport edges and soft wraps stay visible")
+    func edgeCrossingMatchesStayVisible() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("xxxhit\r\nxxxhit\r\nmore".utf8))
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        terminal.scroll(toTopRow: 1)
+
+        let plan = planFrame(for: terminal, presentation: presentation)
+        #expect(plan.overlayRuns.map(\.row) == [0, 1])
+        #expect(plan.overlayRuns.map(\.startColumn) == [0, 3])
+        #expect(plan.overlayRuns.map(\.columnCount) == [2, 1])
+        #expect(plan.overlayRuns.map(\.state) == [.searchMatch, .activeSearchMatch])
+    }
+
+    @Test("selection overlap preserves selected and unselected match identities")
+    func selectionOverlapPreservesMatchIdentity() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("hit hit".utf8))
+        terminal.setSelection(TerminalTextRange(
+            start: TerminalTextPosition(row: 0, column: 0),
+            end: TerminalTextPosition(row: 0, column: 7)
+        ))
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+
+        let states = planFrame(for: terminal, presentation: presentation).overlayRuns.map(\.state)
+        #expect(states == [
+            .selectionAndSearchMatch,
+            .selection,
+            .selectionAndActiveSearchMatch,
+        ])
+    }
+
+    @Test("planning visible matches never materializes the whole terminal projection")
+    func visibleMatchPlanningStaysWindowBounded() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        for _ in 0..<100 {
+            terminal.feed(Array("hit row\r\n".utf8))
+        }
+        _ = terminal.beginSearch("hit")
+
+        let materializations = WholeProjectionCounter.measure {
+            _ = planFrame(for: terminal, presentation: presentation)
+        }
+        #expect(materializations == 0)
     }
 
     @Test("a match scrolled out of the viewport plans no runs")

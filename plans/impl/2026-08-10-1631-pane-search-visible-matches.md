@@ -224,7 +224,7 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
 ## Commit progress
 
 - [x] 1. Replace search rescans with a position-based ordered match index
-- [ ] 2. Render every visible match with distinct selected and unselected overlays
+- [x] 2. Render every visible match with distinct selected and unselected overlays
 - [ ] 3. Publish live search status with regular coalesced terminal updates
 
 ## Implementation notes
@@ -238,3 +238,7 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
   on each side, because a one-unit hard boundary starts on the preceding row.
   Selection distance uses row-major cell coordinates and resolves equal
   distances toward the later match.
+- A non-selected match keeps the same quiet fill when local selection overlaps
+  it. Selection still changes the glyph source, while the stable fill preserves
+  selected-versus-unselected match identity and keeps the brightness ladder
+  total over every cell background.

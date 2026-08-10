@@ -128,13 +128,17 @@ struct PlannedFrame {
 private func overlayState(
     at column: Int,
     selected: Range<Int>?,
-    matched: Range<Int>?
+    matches: [(columns: Range<Int>, isActive: Bool)]
 ) -> RenderOverlayState? {
-    switch (selected?.contains(column) == true, matched?.contains(column) == true) {
+    let isSelected = selected?.contains(column) == true
+    guard let match = matches.first(where: { $0.columns.contains(column) }) else {
+        return isSelected ? .selection : nil
+    }
+    return switch (isSelected, match.isActive) {
     case (true, true): .selectionAndActiveSearchMatch
-    case (true, false): .selection
+    case (true, false): .selectionAndSearchMatch
     case (false, true): .activeSearchMatch
-    case (false, false): nil
+    case (false, false): .searchMatch
     }
 }
 
@@ -319,8 +323,11 @@ struct FramePlanner {
         }
 
         let selectionRange = terminal.selectionRange
-        let searchMatchRange = terminal.activeSearchMatchRange
-        let overlaysActive = selectionRange != nil || searchMatchRange != nil
+        let activeSearchMatchRange = terminal.activeSearchMatchRange
+        let viewportTop = terminal.scrollProjection.topRow
+        let viewportRows = viewportTop..<(viewportTop + rowCount)
+        let searchMatchRanges = terminal.searchMatchRanges(in: viewportRows)
+        let overlaysActive = selectionRange != nil || searchMatchRanges.isEmpty == false
         var overlays: [[RenderOverlayRun]]? =
             if overlaysActive || reusable?.overlays != nil {
                 [[RenderOverlayRun]](repeating: [], count: rowCount)
@@ -358,8 +365,13 @@ struct FramePlanner {
         ) { row, visit in
             let hovered = hoveredColumns(row: row, columns: columnCount)
             let selected = columns(for: selectionRange, row: row, columns: columnCount)
-            let matched = columns(for: searchMatchRange, row: row, columns: columnCount)
-            let rowHasOverlays = selected != nil || matched != nil
+            let matches = searchMatchRanges.compactMap { match -> (Range<Int>, Bool)? in
+                guard let columns = columns(for: match, row: row, columns: columnCount) else {
+                    return nil
+                }
+                return (columns, match == activeSearchMatchRange)
+            }
+            let rowHasOverlays = selected != nil || matches.isEmpty == false
             let rowCursor = cursorSpan.flatMap { $0.row == row ? $0 : nil }
             let blockCursorColumns = rowCursor.flatMap { cursor -> Range<Int>? in
                 guard presentation.cursorShape == .block else { return nil }
@@ -395,7 +407,7 @@ struct FramePlanner {
                     // Resolve the overlay against the cell's own background before a block cursor
                     // bakes its colors into the same column.
                     let state = rowHasOverlays
-                        ? overlayState(at: column, selected: selected, matched: matched)
+                        ? overlayState(at: column, selected: selected, matches: matches)
                         : nil
                     let overlayFill: RenderColor?
                     if let state {

@@ -46,6 +46,8 @@ struct RenderColorResolutionTests {
             .selection,
             .activeSearchMatch,
             .selectionAndActiveSearchMatch,
+            .searchMatch,
+            .selectionAndSearchMatch,
         ]
         let styles = states.map {
             resolveOverlayStyle(
@@ -55,7 +57,7 @@ struct RenderColorResolutionTests {
                 theme: theme
             )
         }
-        let fills = [collision] + styles.map(\.fill)
+        let fills = [collision] + styles.prefix(4).map(\.fill)
 
         for first in fills.indices {
             for second in fills.indices where second > first {
@@ -65,6 +67,7 @@ struct RenderColorResolutionTests {
         for style in styles {
             #expect(brightnessSeparation(style.foreground, style.fill) >= 100)
         }
+        #expect(styles[3].fill == styles[4].fill)
     }
 
     @Test("Cursor fill and text separate from the color beneath the cursor")

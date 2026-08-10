@@ -93,7 +93,7 @@ func resolveBrightnessSeparatedColor(
         minimumSeparation: minimumSeparation,
         on: nil
     ) else {
-        // Unreachable for the ladders this planner builds -- the widest is four
+        // Unreachable for the ladders this planner builds -- the widest is five
         // points spaced by 40 in a 0...255 domain -- but a caller asking for a
         // separation no color can satisfy has no answer to be given.
         preconditionFailure("no color clears \(minimumSeparation) from every competing color")
@@ -189,7 +189,7 @@ private func resolveSelectionFill(background: RenderColor, theme: RenderTheme) -
 }
 
 /// Resolves one overlay fill against the cell background and every earlier
-/// semantic state so the fill ladder stays pairwise distinguishable.
+/// visual identity so the fill ladder stays pairwise distinguishable.
 ///
 /// Split from the glyph push because the two vary at different granularities:
 /// a fill is fixed by the fragment it covers, while the push follows each run's
@@ -212,11 +212,23 @@ func resolveOverlayFill(
     if state == .activeSearchMatch {
         return match
     }
-    return resolveBrightnessSeparatedColor(
+    let combinedActiveMatch = resolveBrightnessSeparatedColor(
         seed: RenderColor(red: 80, green: 127, blue: 235),
         avoiding: [background, selection, match],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
+    if state == .selectionAndActiveSearchMatch {
+        return combinedActiveMatch
+    }
+    let quietMatch = resolveBrightnessSeparatedColor(
+        seed: RenderColor(red: 110, green: 90, blue: 45),
+        avoiding: [background, selection, match, combinedActiveMatch],
+        minimumSeparation: overlayFillMinimumBrightnessSeparation
+    )
+    // Selection changes the quiet match's glyph source, not its fill. Keeping
+    // the fill stable preserves selected-versus-unselected identity through
+    // selection overlap without adding a ladder rung that has no total solution.
+    return quietMatch
 }
 
 /// Moves one glyph color clear of the overlay fill it will be drawn over.

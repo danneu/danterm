@@ -39,8 +39,20 @@ struct OverlayContrastPropertyTests {
                         foreground: theme.selectionForeground,
                         theme: theme
                     ),
+                    resolveOverlayStyle(
+                        state: .searchMatch,
+                        background: background,
+                        foreground: theme.defaultForeground,
+                        theme: theme
+                    ),
+                    resolveOverlayStyle(
+                        state: .selectionAndSearchMatch,
+                        background: background,
+                        foreground: theme.selectionForeground,
+                        theme: theme
+                    ),
                 ]
-                let fills = [background] + styles.map(\.fill)
+                let fills = [background] + styles.prefix(4).map(\.fill)
                 for first in fills.indices {
                     for second in fills.indices where second > first {
                         try requireSeparation(fills[first], fills[second], minimum: 40)
@@ -69,6 +81,12 @@ struct OverlayContrastPropertyTests {
                     avoiding: [background, styles[0].fill, styles[1].fill],
                     minimumSeparation: 40
                 ) == styles[2].fill)
+                #expect(resolveBrightnessSeparatedColor(
+                    seed: styles[3].fill,
+                    avoiding: [background, styles[0].fill, styles[1].fill, styles[2].fill],
+                    minimumSeparation: 40
+                ) == styles[3].fill)
+                #expect(styles[4].fill == styles[3].fill)
                 for cursorBackground in fills {
                     let cursor = resolveCursorStyle(background: cursorBackground, theme: theme)
                     try requireSeparation(cursor.fill, cursorBackground, minimum: 60)

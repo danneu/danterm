@@ -269,13 +269,19 @@ public struct RenderFramePlan: Equatable, Sendable {
 
 /// Identifies the semantic coverage represented by one overlay fragment.
 public enum RenderOverlayState: Equatable, Sendable {
-    /// Local selection without the active search match.
+    /// Local selection without a search match.
     case selection
 
-    /// Active search match outside the local selection.
+    /// A visible search match that is not the current navigation target.
+    case searchMatch
+
+    /// The current search navigation target outside the local selection.
     case activeSearchMatch
 
-    /// A cell covered by both the local selection and active search match.
+    /// A cell covered by both the local selection and a non-current search match.
+    case selectionAndSearchMatch
+
+    /// A cell covered by both the local selection and the current search target.
     case selectionAndActiveSearchMatch
 }
 
