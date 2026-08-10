@@ -1,6 +1,6 @@
 // Exhaustive two-event race permutations proving lifecycle invariants by behavior.
 import Testing
-@testable import PaneLifecycle
+@testable import PaneProcessLifecycle
 
 @Suite struct LifecycleInterleavingTests {
     @Test("named lifecycle races converge from host-owned census evidence")
@@ -15,7 +15,7 @@ import Testing
         checkSpawnRace(with: .spawnFailed(.workingDirectoryUnavailable))
 
         for event in [
-            PaneLifecycleEvent.output([0x78]),
+            PaneProcessLifecycleEvent.output([0x78]),
             .outputEOF,
             .childExited(.exited(4)),
             .resize(TerminalDimensions(columns: 90, rows: 30)),
@@ -27,9 +27,9 @@ import Testing
         checkEOFExitRace()
     }
 
-    private func checkSpawnRace(with outcome: PaneLifecycleEvent) {
+    private func checkSpawnRace(with outcome: PaneProcessLifecycleEvent) {
         for events in permutations(.requestClose, outcome) {
-            var reducer = PaneLifecycleReducer()
+            var reducer = PaneProcessLifecycleReducer()
             var commands = reducer.handle(.start(lifecycleInput()))
             var closeSeen = false
 
@@ -46,10 +46,10 @@ import Testing
         }
     }
 
-    private func checkRunningRace(with racingEvent: PaneLifecycleEvent) {
+    private func checkRunningRace(with racingEvent: PaneProcessLifecycleEvent) {
         for events in permutations(.requestClose, racingEvent) {
             var reducer = runningReducer()
-            var commands: [PaneLifecycleCommand] = []
+            var commands: [PaneProcessLifecycleCommand] = []
             var closeSeen = false
 
             for event in events {
@@ -78,7 +78,7 @@ import Testing
     private func checkEOFExitRace() {
         for events in permutations(.outputEOF, .childExited(.exited(3))) {
             var reducer = runningReducer()
-            var commands: [PaneLifecycleCommand] = []
+            var commands: [PaneProcessLifecycleCommand] = []
             for event in events { commands += reducer.handle(event) }
             commands += converge(&reducer)
             assertInvariants(commands, reducer: reducer)
@@ -86,8 +86,8 @@ import Testing
         }
     }
 
-    private func converge(_ reducer: inout PaneLifecycleReducer) -> [PaneLifecycleCommand] {
-        var commands: [PaneLifecycleCommand] = []
+    private func converge(_ reducer: inout PaneProcessLifecycleReducer) -> [PaneProcessLifecycleCommand] {
+        var commands: [PaneProcessLifecycleCommand] = []
         switch reducer.phase {
         case .spawning:
             commands += reducer.handle(.spawnFailed(.systemError(99)))
@@ -102,7 +102,7 @@ import Testing
         return commands
     }
 
-    private func assertInvariants(_ commands: [PaneLifecycleCommand], reducer: PaneLifecycleReducer) {
+    private func assertInvariants(_ commands: [PaneProcessLifecycleCommand], reducer: PaneProcessLifecycleReducer) {
         var reducer = reducer
         #expect(reducer.phase == .finished)
         #expect(commands.filter { if case .report = $0 { true } else { false } }.count <= 1)
@@ -113,12 +113,12 @@ import Testing
         }
         #expect(zip(stages, stages.dropFirst()).allSatisfy { $0.rawValue <= $1.rawValue })
 
-        for event in [PaneLifecycleEvent.requestClose, .output([1]), .childExited(.exited(0)), .sessionDrained] {
+        for event in [PaneProcessLifecycleEvent.requestClose, .output([1]), .childExited(.exited(0)), .sessionDrained] {
             #expect(reducer.handle(event).isEmpty)
         }
     }
 }
 
-private func permutations(_ first: PaneLifecycleEvent, _ second: PaneLifecycleEvent) -> [[PaneLifecycleEvent]] {
+private func permutations(_ first: PaneProcessLifecycleEvent, _ second: PaneProcessLifecycleEvent) -> [[PaneProcessLifecycleEvent]] {
     [[first, second], [second, first]]
 }

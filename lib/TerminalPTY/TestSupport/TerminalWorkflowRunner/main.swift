@@ -1,7 +1,7 @@
 // Opt-in real-PTY compatibility driver that records each application at the pane-session seam.
 import Foundation
 import Darwin
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession

@@ -1,7 +1,7 @@
 // Opt-in external protocol driver that launches pinned probes through a real pane session.
 import Darwin
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalCoreRecording
 import TerminalPaneSession
 import TerminalProtocolProbeSupport

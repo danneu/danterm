@@ -1,6 +1,6 @@
 // Behavioral proofs for pure shell, cwd, environment, and geometry resolution.
 import Testing
-@testable import PaneLifecycle
+@testable import PaneProcessLifecycle
 
 @Suite struct LaunchPolicyTests {
     @Test("launch policy selects the account shell as a login shell")

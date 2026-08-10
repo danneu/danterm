@@ -40,7 +40,7 @@ func readPublicAPI(_ controller: TerminalPaneSessionController) {
 EOF
 
 cat >"$TEST_ROOT/initializer-probe.swift" <<'EOF'
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalPaneSession
 
 @MainActor

@@ -2,7 +2,7 @@
 // these because they depend on local machine services and installed tools.
 import Darwin
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport

@@ -41,7 +41,7 @@ not part of this plan and must not be swept into these commits.
 ## Commit progress
 
 - [x] 1. Promote the ADR to `docs/design/`
-- [ ] 2. Qualify the PTY process-lifecycle module
+- [x] 2. Qualify the PTY process-lifecycle module
 - [ ] 3. Rename the reported-fact stream to lifecycle vocabulary (CLI key `semantics` -> `live`)
 - [ ] 4. Group the pane's reported values into `PaneReported`
 
@@ -122,6 +122,12 @@ nothing -- at this point in the sequence the reported-fact side is still named
 `PaneSemantic*`, so any hit is a missed process-machine site. No new tests; a
 rename that changes behavior is a bug.
 
+Non-green until slice 3: `just test-ui` cannot reach the renamed shim against
+the current harness source list. `test-ui.sh` omits `LivePaneStateView.swift`
+and `PaneSemanticIpcAdapter.swift`; after supplying them, compilation reaches
+the already-recorded nonexistent `.paneTornDown` call. Slice 3 owns the source
+list catch-up and call removal together.
+
 ## 3. Rename the reported-fact stream to lifecycle vocabulary
 
 The ADR's Naming section, applied. Everything is behavior-preserving except
@@ -183,7 +189,9 @@ scratch one.
 **Two loose ends in the same commit:**
 
 - `test-ui.sh` hardcodes source paths by filename for the substituted files;
-  those that rename must be updated there too.
+  those that rename must be updated there too. Its current source list also
+  omits `LivePaneStateView.swift` and `PaneSemanticIpcAdapter.swift`; add their
+  renamed files so the harness compiles the complete reported-fact surface.
 - `tests-ui/SidebarViewTestShim.swift` calls `.paneTornDown`, a case that does
   not exist on the event type. Drop the call so `tearDown()` does nothing, and
   confirm `just test-ui` compiles and passes. `just test-ui` is outside `just
@@ -274,3 +282,13 @@ are the evidence that the grouping is internal.
    running command and remote identity under `live` with the documented shape.
 5. `git diff --stat` before each commit to confirm the staged tree excludes
    the unrelated `lib/TerminalCore` search changes already in the tree.
+
+## Implementation notes
+
+- Commit 2 declares `just test-ui` non-green until commit 3. The harness first
+  fails because its raw `swiftc` source list omits two existing semantic files;
+  once those are supplied, it reaches the known nonexistent `.paneTornDown`
+  call that commit 3 already owns.
+- The executable-vocabulary sweep uses tracked sources because the raw
+  recursive grep enters the ignored `.refs/cmux` checkout and finds an
+  unrelated `testSplitCustomSidebarPublishesNewPaneLifecycleEvents` method.

@@ -2,7 +2,7 @@
 // inspection text, complete render plans, child-ended evidence, and one exit notification.
 import Dispatch
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 import Synchronization
 import TerminalCore
 import TerminalCoreRecording
@@ -299,7 +299,7 @@ public final class TerminalPaneSessionController {
     public var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
 
     /// Receives the first child-originated lifecycle result on the main actor.
-    public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
+    public var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
 
     /// Receives scrollbar-relevant state only when its projection or screen availability changes.
     public var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
@@ -1071,7 +1071,7 @@ public final class TerminalPaneSessionController {
 
     private func consume(
         frameState: TerminalPTYFrameState,
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         // First, so a synchronous checkpoint fence cannot overtake urgent work

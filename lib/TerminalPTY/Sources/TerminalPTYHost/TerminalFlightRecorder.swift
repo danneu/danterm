@@ -1,6 +1,6 @@
 // Bounded in-memory capture of one live pane's feed and resize drive sequence. The PTY
 // owner records without encoding or IO; dump callers fence a value snapshot for later work.
-import PaneLifecycle
+import PaneProcessLifecycle
 import DequeModule
 import Foundation
 import TerminalCoreRecording

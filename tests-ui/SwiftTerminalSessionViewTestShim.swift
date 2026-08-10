@@ -2,7 +2,7 @@
 import Cocoa
 import IOSurface
 
-enum PaneLifecycleResult {
+enum PaneProcessLifecycleResult {
     case exited
 }
 
@@ -427,7 +427,7 @@ final class TerminalPaneSessionController {
     var onClipboardWrite: ((String) -> Void)?
     var onSelectionCopy: ((String) -> Void)?
     var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
-    var onSessionEnded: ((PaneLifecycleResult) -> Void)?
+    var onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var onOpenLink: ((TerminalHyperlink) -> Void)?

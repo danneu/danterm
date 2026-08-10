@@ -1,11 +1,11 @@
 // Golden lifecycle traces proving exact ordered commands at the pure PTY boundary.
 import Testing
-@testable import PaneLifecycle
+@testable import PaneProcessLifecycle
 
 @Suite struct LifecycleReducerTests {
     @Test("launch becomes ready and preserves ordered input, resize, and output")
     func launchReadinessAndIO() throws {
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
         var input = lifecycleInput()
         input.launchCommand = "printf ready"
         let firstSpec = try resolveLaunchPlan(input).get().attempts[0]
@@ -26,7 +26,7 @@ import Testing
 
     @Test("cwd spawn failures advance through the resolved fallback chain")
     func cwdSpawnFallback() throws {
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
         let plan = try resolveLaunchPlan(lifecycleInput()).get()
 
         #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.attempts[0])])
@@ -104,7 +104,7 @@ import Testing
         // Why it exists: letting both exit observation and session drain request
         //   a reap can double-wait, while finishing first can abandon a zombie.
         // Scenario: the exit observer and session census race after a pane closes.
-        let orderings: [[PaneLifecycleEvent]] = [
+        let orderings: [[PaneProcessLifecycleEvent]] = [
             [.childExited(.signaled(1)), .sessionDrained],
             [.sessionDrained, .childExited(.signaled(1))],
         ]
@@ -129,7 +129,7 @@ import Testing
 
     @Test("close while spawning converges without retrying or orphaning a child")
     func closeWhileSpawning() {
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
         var input = lifecycleInput()
         input.launchCommand = "must not run"
 
@@ -146,7 +146,7 @@ import Testing
 
     @Test("close while a spawn failure is pending finishes without reporting failure")
     func closeWhileSpawnFails() {
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
 
         _ = reducer.handle(.start(lifecycleInput()))
         #expect(reducer.handle(.requestClose).isEmpty)
@@ -155,10 +155,10 @@ import Testing
 
     @Test("finished lifecycle ignores every later event")
     func finishedStateIsTerminal() {
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
         #expect(reducer.handle(.requestClose) == [.finishTeardown])
 
-        let events: [PaneLifecycleEvent] = [
+        let events: [PaneProcessLifecycleEvent] = [
             .start(lifecycleInput()), .spawnSucceeded,
             .spawnFailed(.systemError(1)), .sendInput([1]),
             .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
@@ -184,7 +184,7 @@ import Testing
         // Scenario: a duplicate launch request arrives at a pane that is still
         //   spawning, then again once it is running, then again while it drains
         //   after the child exits.
-        var reducer = PaneLifecycleReducer()
+        var reducer = PaneProcessLifecycleReducer()
         let plan = try resolveLaunchPlan(lifecycleInput()).get()
         #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.attempts[0])])
 
@@ -201,24 +201,24 @@ import Testing
     }
 }
 
-let beginCloseCommands: [PaneLifecycleCommand] = [
+let beginCloseCommands: [PaneProcessLifecycleCommand] = [
     .closeMaster,
     .signalSession(.hangup),
     .scheduleGrace(.hangup),
 ]
 
-let beginSelfExitCommands: [PaneLifecycleCommand] = [
+let beginSelfExitCommands: [PaneProcessLifecycleCommand] = [
     .reapLeader,
     .closeMaster,
     .signalSession(.hangup),
     .scheduleGrace(.hangup),
 ]
 
-func finishCommands(for result: PaneLifecycleResult) -> [PaneLifecycleCommand] {
+func finishCommands(for result: PaneProcessLifecycleResult) -> [PaneProcessLifecycleCommand] {
     [.cancelGrace, .report(result), .finishTeardown]
 }
 
-let finishCancelledCommands: [PaneLifecycleCommand] = [.cancelGrace, .finishTeardown]
+let finishCancelledCommands: [PaneProcessLifecycleCommand] = [.cancelGrace, .finishTeardown]
 
 func lifecycleInput() -> LaunchPolicyInput {
     LaunchPolicyInput(
@@ -236,8 +236,8 @@ func lifecycleInput() -> LaunchPolicyInput {
     )
 }
 
-func runningReducer() -> PaneLifecycleReducer {
-    var reducer = PaneLifecycleReducer()
+func runningReducer() -> PaneProcessLifecycleReducer {
+    var reducer = PaneProcessLifecycleReducer()
     _ = reducer.handle(.start(lifecycleInput()))
     _ = reducer.handle(.spawnSucceeded)
     return reducer

@@ -1,6 +1,6 @@
 // Real-PTY session tests for planning, visibility, capture, exit, and teardown.
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 @testable import TerminalCore
 import TerminalCoreRecording
 import TerminalRenderPlanning
@@ -1004,7 +1004,7 @@ struct TerminalPaneSessionControllerTests {
             )
         )
         var visiblePlans: [RenderFramePlan] = []
-        let visibleResults = AsyncStream<PaneLifecycleResult>.makeStream(
+        let visibleResults = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var visibleResultIterator = visibleResults.stream.makeAsyncIterator()
@@ -1024,7 +1024,7 @@ struct TerminalPaneSessionControllerTests {
             isVisible: false
         )
         var hiddenPlans: [RenderFramePlan] = []
-        let hiddenResults = AsyncStream<PaneLifecycleResult>.makeStream(
+        let hiddenResults = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var hiddenResultIterator = hiddenResults.stream.makeAsyncIterator()
@@ -1121,8 +1121,8 @@ struct TerminalPaneSessionControllerTests {
         invalidInput.initialDimensions = .init(columns: 0, rows: 0)
         let controller = TerminalPaneSessionController(host: host, launchInput: invalidInput)
         var planCount = 0
-        var results: [PaneLifecycleResult] = []
-        let resultChannel = AsyncStream<PaneLifecycleResult>.makeStream(
+        var results: [PaneProcessLifecycleResult] = []
+        let resultChannel = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = resultChannel.stream.makeAsyncIterator()
@@ -1372,8 +1372,8 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: printMarker("READY"))
         )
-        var ended: [PaneLifecycleResult] = []
-        let resultChannel = AsyncStream<PaneLifecycleResult>.makeStream(
+        var ended: [PaneProcessLifecycleResult] = []
+        let resultChannel = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = resultChannel.stream.makeAsyncIterator()
@@ -1420,7 +1420,7 @@ struct TerminalPaneSessionControllerTests {
         )
         let plans = AsyncStream<RenderFramePlan>.makeStream(bufferingPolicy: .bufferingNewest(1))
         var planIterator = plans.stream.makeAsyncIterator()
-        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+        let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = results.stream.makeAsyncIterator()
@@ -1644,7 +1644,7 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: "printf '__CAPTURE_OFF__\\n'; exit")
         )
-        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+        let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = results.stream.makeAsyncIterator()
@@ -2003,7 +2003,7 @@ struct TerminalPaneSessionControllerTests {
             bootstrapExecutable: bootstrapExecutable(),
             captureTransitions: true
         )
-        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+        let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var iterator = results.stream.makeAsyncIterator()

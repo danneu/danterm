@@ -3,7 +3,7 @@
 import Darwin
 import Dispatch
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 
@@ -52,13 +52,13 @@ package struct TerminalPTYUpdateSignal: Sendable {
     package let primaryHistoryGeneration: UInt64
     /// The reported child lifecycle result, so an exit is consumed immediately
     /// rather than at the deadline.
-    package let result: PaneLifecycleResult?
+    package let result: PaneProcessLifecycleResult?
 
     package init(
         clipboardWrite: String?,
         semanticEvents: [TerminalSemanticEvent],
         primaryHistoryGeneration: UInt64,
-        result: PaneLifecycleResult?
+        result: PaneProcessLifecycleResult?
     ) {
         self.clipboardWrite = clipboardWrite
         self.semanticEvents = semanticEvents
@@ -108,7 +108,7 @@ package enum TerminalPTYProductionFenceOutput: Sendable {
     case frameState(TerminalPTYFrameState)
     case consumptionState(
         frameState: TerminalPTYFrameState,
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     )
     case diagnosticState(
@@ -192,7 +192,7 @@ public actor TerminalPTYHost {
     /// actor state: every `nonisolated` submission below either enters a resize into
     /// the open run or closes it.
     private let resizeCoalescer = ResizeCoalescer()
-    private var reducer = PaneLifecycleReducer()
+    private var reducer = PaneProcessLifecycleReducer()
     private var terminal: Terminal
     private let initialDimensions: TerminalDimensions
     package nonisolated let captureTransitions: Bool
@@ -225,7 +225,7 @@ public actor TerminalPTYHost {
     private var reusedDescriptor: Int32?
     private var descriptorOwnershipSealed = false
     private var masterCloseRequested = false
-    private var deferredCommandsAfterMasterClose: [PaneLifecycleCommand] = []
+    private var deferredCommandsAfterMasterClose: [PaneProcessLifecycleCommand] = []
     private var forcedCleanupAfterMasterClose = false
     private var teardownFinalizationRequested = false
     /// Bumped by every new launch and by teardown. A returning spawn compares the
@@ -244,7 +244,7 @@ public actor TerminalPTYHost {
 
     private var pendingInput: [UInt8] = []
     private var pendingInputOffset = 0
-    private var pendingEvents: [PaneLifecycleEvent] = []
+    private var pendingEvents: [PaneProcessLifecycleEvent] = []
     private var isReducing = false
 
     #if DEBUG
@@ -268,7 +268,7 @@ public actor TerminalPTYHost {
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
     private var capturedReplyWrites: [[UInt8]] = []
-    private var reportedResult: PaneLifecycleResult?
+    private var reportedResult: PaneProcessLifecycleResult?
     private var teardownFinished = false
     private let applicationExitBound: DispatchTimeInterval
     private var shutdownRequested = false
@@ -285,7 +285,7 @@ public actor TerminalPTYHost {
     private var consumerWorkWasSignaled = false
     private var updateHandler: (@Sendable (TerminalPTYUpdateSignal) -> Void)?
     private var testUpdateHandler:
-        (@Sendable (PaneLifecycleResult?) -> Void)?
+        (@Sendable (PaneProcessLifecycleResult?) -> Void)?
     private var productionFenceEntryCount: UInt64 = 0
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
@@ -862,7 +862,7 @@ public actor TerminalPTYHost {
     /// Drains test frame effects and lifecycle evidence as one owner transaction.
     package nonisolated func fencedConsumptionState() -> (
         frameState: TerminalPTYFrameState,
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         fence(countsAsProduction: false) { owner in owner.drainedConsumptionState() }.value
@@ -875,7 +875,7 @@ public actor TerminalPTYHost {
     /// drifting apart.
     private func drainedConsumptionState() -> (
         frameState: TerminalPTYFrameState,
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         let transitions: [TerminalPTYAppliedTransition]?
@@ -934,9 +934,9 @@ public actor TerminalPTYHost {
 
     /// Installs the test-support wakeup separately so adapters do not displace the pane consumer.
     package nonisolated func setTestUpdateHandler(
-        _ handler: @escaping @Sendable (PaneLifecycleResult?) -> Void
+        _ handler: @escaping @Sendable (PaneProcessLifecycleResult?) -> Void
     ) -> (
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         hasEmittedUpdate: Bool
     ) {
         fence(countsAsProduction: false) { owner in
@@ -986,7 +986,7 @@ public actor TerminalPTYHost {
     }
 
     /// Returns the reported child result without waiting for future lifecycle work.
-    public func result() -> PaneLifecycleResult? {
+    public func result() -> PaneProcessLifecycleResult? {
         reportedResult
     }
 
@@ -1032,7 +1032,7 @@ public actor TerminalPTYHost {
         )
     }
 
-    private func process(_ event: PaneLifecycleEvent) {
+    private func process(_ event: PaneProcessLifecycleEvent) {
         pendingEvents.append(event)
         guard isReducing == false else { return }
         isReducing = true
@@ -1239,7 +1239,7 @@ public actor TerminalPTYHost {
         if publishUpdate { publishPendingUpdate() }
     }
 
-    private func execute(_ commands: [PaneLifecycleCommand]) {
+    private func execute(_ commands: [PaneProcessLifecycleCommand]) {
         for (index, command) in commands.enumerated() {
             if command == .closeMaster {
                 closeMaster()
@@ -1255,7 +1255,7 @@ public actor TerminalPTYHost {
         }
     }
 
-    private func execute(_ command: PaneLifecycleCommand) {
+    private func execute(_ command: PaneProcessLifecycleCommand) {
         switch command {
         case .spawn(let spec):
             spawn(spec)
@@ -1989,7 +1989,7 @@ public actor TerminalPTYHost {
         return true
     }
 
-    private func report(_ result: PaneLifecycleResult) {
+    private func report(_ result: PaneProcessLifecycleResult) {
         guard reportedResult == nil else { return }
         reportedResult = result
         markUpdatePending()

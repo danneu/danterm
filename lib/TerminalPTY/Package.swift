@@ -5,7 +5,7 @@ let package = Package(
     name: "TerminalPTY",
     platforms: [.macOS(.v26)],
     products: [
-        .library(name: "PaneLifecycle", targets: ["PaneLifecycle"]),
+        .library(name: "PaneProcessLifecycle", targets: ["PaneProcessLifecycle"]),
         .library(name: "TerminalPTYHost", targets: ["TerminalPTYHost"]),
         .library(name: "TerminalPaneSession", targets: ["TerminalPaneSession"]),
         .executable(name: "PTYSessionBootstrap", targets: ["PTYSessionBootstrap"]),
@@ -19,14 +19,14 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "PaneLifecycle",
-            path: "Sources/PaneLifecycle",
+            name: "PaneProcessLifecycle",
+            path: "Sources/PaneProcessLifecycle",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalPTYHost",
             dependencies: [
-                "PaneLifecycle",
+                "PaneProcessLifecycle",
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "DequeModule", package: "swift-collections"),
@@ -37,7 +37,7 @@ let package = Package(
         .target(
             name: "TerminalPaneSession",
             dependencies: [
-                "PaneLifecycle",
+                "PaneProcessLifecycle",
                 "TerminalPTYHost",
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
@@ -75,7 +75,7 @@ let package = Package(
         .target(
             name: "TerminalPTYTestSupport",
             dependencies: [
-                "PaneLifecycle",
+                "PaneProcessLifecycle",
                 "TerminalPTYHost",
             ],
             path: "TestSupport/TerminalPTYTestSupport",
@@ -106,16 +106,16 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
-            name: "PaneLifecycleTests",
-            dependencies: ["PaneLifecycle"],
-            path: "Tests/PaneLifecycleTests",
+            name: "PaneProcessLifecycleTests",
+            dependencies: ["PaneProcessLifecycle"],
+            path: "Tests/PaneProcessLifecycleTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalPTYHostTests",
             dependencies: [
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
-                "PaneLifecycle",
+                "PaneProcessLifecycle",
                 "TerminalPTYHost",
                 "TerminalPTYTestSupport",
                 "PTYSessionBootstrap",
@@ -128,7 +128,7 @@ let package = Package(
         .testTarget(
             name: "TerminalPaneSessionTests",
             dependencies: [
-                "PaneLifecycle",
+                "PaneProcessLifecycle",
                 "TerminalPTYHost",
                 "TerminalPTYTestSupport",
                 "TerminalPaneSession",

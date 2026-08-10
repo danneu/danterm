@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 ENGINE_MODULES=(
-    PaneLifecycle
+    PaneProcessLifecycle
     TerminalCore
     TerminalCoreRecording
     TerminalPTYHost

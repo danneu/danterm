@@ -4,7 +4,7 @@
 // and delivers the urgent classes -- clipboard, semantic events, primary-history
 // mutation, child exit -- without waiting on that deadline.
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 @testable import TerminalCore
 import TerminalRenderPlanning
 import Testing
@@ -287,7 +287,7 @@ struct TerminalPanePublishDeadlineTests {
         var now: UInt64 = 0
         let timer = ManualDeadlineTimer()
         let host = try makeHost()
-        let results = AsyncStream<PaneLifecycleResult>.makeStream()
+        let results = AsyncStream<PaneProcessLifecycleResult>.makeStream()
         var iterator = results.stream.makeAsyncIterator()
         let controller = TerminalPaneSessionController(
             host: host,

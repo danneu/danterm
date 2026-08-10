@@ -26,7 +26,7 @@ let package = Package(
             name: "DanTerm",
             dependencies: [
                 "DanTermProtocol",
-                .product(name: "PaneLifecycle", package: "TerminalPTY"),
+                .product(name: "PaneProcessLifecycle", package: "TerminalPTY"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "TerminalPaneSession", package: "TerminalPTY"),

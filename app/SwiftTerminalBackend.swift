@@ -3,7 +3,7 @@
 import Cocoa
 import DanTermProtocol
 import Darwin
-import PaneLifecycle
+import PaneProcessLifecycle
 #if DANTERM_TERMINAL_CHARACTERIZATION
 import TerminalCoreRecording
 #endif

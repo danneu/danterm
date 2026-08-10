@@ -1,5 +1,5 @@
 // Pure conversion from explicit point-space geometry to valid terminal dimensions.
-import PaneLifecycle
+import PaneProcessLifecycle
 
 /// Keeps width and height explicit without importing CoreGraphics into the headless target.
 public struct TerminalPointSize: Equatable, Sendable {

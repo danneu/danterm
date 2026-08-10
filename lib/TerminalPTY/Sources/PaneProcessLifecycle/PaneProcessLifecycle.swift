@@ -22,7 +22,7 @@ public enum LaunchFailureReason: Equatable, Sendable {
 }
 
 /// Exactly-once terminal result reported only after lifecycle ownership converges.
-public enum PaneLifecycleResult: Equatable, Sendable {
+public enum PaneProcessLifecycleResult: Equatable, Sendable {
     case exited(ChildExitStatus)
     case launchFailed(LaunchFailureReason)
 }
@@ -35,7 +35,7 @@ public enum TeardownStage: Int, Equatable, Sendable {
 }
 
 /// Coarse state exposed for host assertions without exposing reducer bookkeeping.
-public enum PaneLifecyclePhase: Equatable, Sendable {
+public enum PaneProcessLifecyclePhase: Equatable, Sendable {
     case idle
     case spawning
     case running
@@ -45,7 +45,7 @@ public enum PaneLifecyclePhase: Equatable, Sendable {
 }
 
 /// Explicit inputs serialized by the future pane owner before reduction.
-public enum PaneLifecycleEvent: Equatable, Sendable {
+public enum PaneProcessLifecycleEvent: Equatable, Sendable {
     case start(LaunchPolicyInput)
     case spawnSucceeded
     case spawnFailed(SpawnFailure)
@@ -60,7 +60,7 @@ public enum PaneLifecycleEvent: Equatable, Sendable {
 }
 
 /// Ordered effects interpreted by the PTY host on the same serialized owner.
-public enum PaneLifecycleCommand: Equatable, Sendable {
+public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     case spawn(PTYLaunchSpec)
     case activateIO
     case writeInput([UInt8])
@@ -72,16 +72,16 @@ public enum PaneLifecycleCommand: Equatable, Sendable {
     case signalSession(TeardownStage)
     case scheduleGrace(TeardownStage)
     case cancelGrace
-    case report(PaneLifecycleResult)
+    case report(PaneProcessLifecycleResult)
     case finishTeardown
 }
 
 /// Owns the pure lifecycle state machine so identical event order yields identical commands.
-public struct PaneLifecycleReducer: Sendable {
+public struct PaneProcessLifecycleReducer: Sendable {
     private var storage: Storage = .idle
 
     /// Coarse lifecycle state used by the host to gate ownership-sensitive work.
-    public var phase: PaneLifecyclePhase {
+    public var phase: PaneProcessLifecyclePhase {
         switch storage {
         case .idle: .idle
         case .spawning, .closingWhileSpawning: .spawning
@@ -96,7 +96,7 @@ public struct PaneLifecycleReducer: Sendable {
     public init() {}
 
     /// Applies one serialized event and returns effects in their required execution order.
-    public mutating func handle(_ event: PaneLifecycleEvent) -> [PaneLifecycleCommand] {
+    public mutating func handle(_ event: PaneProcessLifecycleEvent) -> [PaneProcessLifecycleCommand] {
         switch storage {
         case .idle:
             return handleIdle(event)
@@ -115,7 +115,7 @@ public struct PaneLifecycleReducer: Sendable {
         }
     }
 
-    private mutating func handleIdle(_ event: PaneLifecycleEvent) -> [PaneLifecycleCommand] {
+    private mutating func handleIdle(_ event: PaneProcessLifecycleEvent) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .start(let input):
             switch resolveLaunchPlan(input) {
@@ -136,13 +136,13 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func handleSpawning(
-        _ event: PaneLifecycleEvent,
+        _ event: PaneProcessLifecycleEvent,
         context: SpawnContext
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .spawnSucceeded:
             storage = .running(outputEOF: false)
-            var commands: [PaneLifecycleCommand] = [.activateIO]
+            var commands: [PaneProcessLifecycleCommand] = [.activateIO]
             if let dimensions = context.pendingDimensions {
                 commands.append(.resize(dimensions))
             }
@@ -184,8 +184,8 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func handleClosingWhileSpawning(
-        _ event: PaneLifecycleEvent
-    ) -> [PaneLifecycleCommand] {
+        _ event: PaneProcessLifecycleEvent
+    ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .spawnSucceeded:
             return beginTeardown(result: nil, leaderStatus: nil, reapLeader: false)
@@ -198,9 +198,9 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func handleRunning(
-        _ event: PaneLifecycleEvent,
+        _ event: PaneProcessLifecycleEvent,
         outputEOF: Bool
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .sendInput(let bytes):
             return [.writeInput(bytes)]
@@ -225,9 +225,9 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func handleDraining(
-        _ event: PaneLifecycleEvent,
+        _ event: PaneProcessLifecycleEvent,
         status: ChildExitStatus
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .output(let bytes):
             return [.deliverOutput(bytes)]
@@ -241,9 +241,9 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func handleTeardown(
-        _ event: PaneLifecycleEvent,
+        _ event: PaneProcessLifecycleEvent,
         context: TeardownContext
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         var next = context
         switch event {
         case .childExited(let status) where next.leaderStatus == nil:
@@ -278,17 +278,17 @@ public struct PaneLifecycleReducer: Sendable {
     }
 
     private mutating func beginTeardown(
-        result: PaneLifecycleResult?,
+        result: PaneProcessLifecycleResult?,
         leaderStatus: ChildExitStatus?,
         reapLeader: Bool
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         storage = .tearingDown(TeardownContext(
             stage: .hangup,
             result: result,
             leaderStatus: leaderStatus,
             sessionDrained: false
         ))
-        var commands: [PaneLifecycleCommand] = []
+        var commands: [PaneProcessLifecycleCommand] = []
         if reapLeader { commands.append(.reapLeader) }
         commands += [.closeMaster, .signalSession(.hangup), .scheduleGrace(.hangup)]
         return commands
@@ -296,9 +296,9 @@ public struct PaneLifecycleReducer: Sendable {
 
     private mutating func finishTeardown(
         _ context: TeardownContext
-    ) -> [PaneLifecycleCommand] {
+    ) -> [PaneProcessLifecycleCommand] {
         storage = .finished
-        var commands: [PaneLifecycleCommand] = [.cancelGrace]
+        var commands: [PaneProcessLifecycleCommand] = [.cancelGrace]
         if let result = context.result { commands.append(.report(result)) }
         commands.append(.finishTeardown)
         return commands
@@ -315,7 +315,7 @@ private struct SpawnContext: Sendable {
 /// Reducer-only convergence facts needed to report a result after ownership ends.
 private struct TeardownContext: Sendable {
     var stage: TeardownStage
-    let result: PaneLifecycleResult?
+    let result: PaneProcessLifecycleResult?
     var leaderStatus: ChildExitStatus?
     var sessionDrained: Bool
 }

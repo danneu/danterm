@@ -1,7 +1,7 @@
 // Proves the app bundle selected for a Swift terminal backend supplies the child
 // environment's shell-integration directory instead of a reconstructed install path.
 import Foundation
-import PaneLifecycle
+import PaneProcessLifecycle
 import Testing
 @testable import DanTerm
 import TerminalPaneSession

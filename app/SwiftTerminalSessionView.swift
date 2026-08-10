@@ -3,7 +3,7 @@
 import Cocoa
 import DanTermProtocol
 #if !DANTERM_UI_TEST
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
@@ -171,7 +171,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
-        onSessionEnded: ((PaneLifecycleResult) -> Void)? = nil
+        onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
         self.fontSize = CGFloat(fontSize)

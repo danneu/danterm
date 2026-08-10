@@ -1,7 +1,7 @@
 // macOS PTY allocation and posix_spawn recipe. This file owns only the
 // synchronous launch mechanism; lifecycle ordering remains in TerminalPTYHost.
 import Darwin
-import PaneLifecycle
+import PaneProcessLifecycle
 
 /// File descriptors and identity returned atomically after a successful spawn.
 struct SpawnedPTY: Sendable {

@@ -1,5 +1,5 @@
 // Pure assembly of pane request values and injected ambient launch facts.
-import PaneLifecycle
+import PaneProcessLifecycle
 
 /// Initial geometry shared by host construction and launch policy for every pane.
 public let terminalPaneInitialDimensions = TerminalDimensions(columns: 80, rows: 24)

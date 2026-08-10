@@ -1,5 +1,5 @@
 // Pure fixtures for grid sizing and app-request launch assembly.
-import PaneLifecycle
+import PaneProcessLifecycle
 import Testing
 @testable import TerminalPaneSession
 

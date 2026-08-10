@@ -6,7 +6,7 @@
 // moment it is armed -- which no volume of later output can defeat -- or reported as
 // unanswerable at once. It never suspends on a question whose answer was discarded.
 import Dispatch
-import PaneLifecycle
+import PaneProcessLifecycle
 import Synchronization
 import Testing
 import TerminalPTYHost
@@ -28,8 +28,8 @@ public extension TerminalPTYHost {
     }
 
     /// Waits for the first reported result while keeping task cancellation test-local.
-    nonisolated func waitForResult() async -> PaneLifecycleResult? {
-        let waiter = CallbackWaiter<PaneLifecycleResult?>()
+    nonisolated func waitForResult() async -> PaneProcessLifecycleResult? {
+        let waiter = CallbackWaiter<PaneProcessLifecycleResult?>()
         let initial = setTestUpdateHandler { result in
             if let result {
                 waiter.complete(with: result)

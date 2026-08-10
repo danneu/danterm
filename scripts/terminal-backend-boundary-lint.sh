@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Confine the Swift terminal engine's modules to the app's adapter files.
 #
-# The engine (PaneLifecycle, TerminalCore, TerminalPTYHost, ...) is DanTerm's
+# The engine (PaneProcessLifecycle, TerminalCore, TerminalPTYHost, ...) is DanTerm's
 # implementation detail, not its app-wide vocabulary. Only the handful of
 # adapter files below may name those modules; everything else in the app talks
 # to the engine through the backend protocol. Without this check, engine types
@@ -16,7 +16,7 @@ TARGET="${1:-$SCRIPT_DIR/../app}"
 # theme bridge that translates DanTerm colors into engine colors, and the
 # benchmark harness that drives the engine directly on purpose.
 ADAPTER_ALLOWLIST='SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalBenchmark.swift'
-ENGINE_MODULES='PaneLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution'
+ENGINE_MODULES='PaneProcessLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution'
 
 failed=0
 while IFS= read -r file; do

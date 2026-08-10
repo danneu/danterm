@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import TerminalPTYHost
 import TerminalPTYTestSupport
-import PaneLifecycle
+import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 
@@ -397,7 +397,7 @@ struct TerminalPTYHostTests {
         #expect(observedResize)
 
         host.send(Array("done\n".utf8))
-        var observedResult: PaneLifecycleResult?
+        var observedResult: PaneProcessLifecycleResult?
         while let _ = await updates.next() {
             observedResult = await host.result()
             if observedResult != nil { break }
