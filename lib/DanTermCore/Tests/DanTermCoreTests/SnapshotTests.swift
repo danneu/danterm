@@ -797,7 +797,12 @@ import DanTermProtocol
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
         model.updatePane(paneId) { $0.agentSession = session }
 
-        let snapshot = toSnapshot(model)
+        let snapshot = graftSemanticRecovery(
+            onto: toSnapshot(model),
+            recoveryByPaneId: [
+                paneId: PaneSemanticRecoverySnapshot(agentSession: session),
+            ]
+        )
         let pane = try #require(paneSnapshot(paneId.rawValue.uuidString, in: snapshot))
         #expect(pane.agentSession?.kind == "claude")
         #expect(pane.agentSession?.sessionId == "4f3a2b1c")

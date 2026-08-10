@@ -65,7 +65,9 @@ class TerminalView: NSView, TerminalSession {
     var onEvent: ((TerminalSessionEvent) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
     private var semanticStream = PaneSemanticStream()
+    private var semanticRecovery = PaneSemanticRecoveryState()
     var semanticSnapshot: PaneSemanticState { semanticStream.snapshot }
+    var semanticRecoverySnapshot: PaneSemanticRecoverySnapshot { semanticRecovery.snapshot }
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
     var revealCount = 0
@@ -111,10 +113,14 @@ class TerminalView: NSView, TerminalSession {
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
     func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition {
-        semanticStream.apply(event)
+        let transition = semanticStream.apply(event)
+        semanticRecovery.apply(transition)
+        return transition
     }
     func fenceForApplicationExit() {}
-    func tearDown() {}
+    func tearDown() {
+        semanticRecovery.apply(semanticStream.apply(.paneTornDown))
+    }
 }
 
 class ScrollableTerminalView: NSView {

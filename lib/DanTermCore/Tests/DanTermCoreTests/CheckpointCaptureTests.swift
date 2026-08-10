@@ -168,6 +168,29 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
         #expect(try capture.encoder()() == expected)
     }
 
+    @Test("a light capture grafts command and agent recovery state")
+    func lightCaptureGraftsSemanticRecoveryState() throws {
+        let (model, paneIds) = makeModelWithPanes(1)
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        let capture = CheckpointCapture(
+            snapshot: toSnapshot(model),
+            scrollbackReads: [:],
+            semanticRecoveryByPaneId: [
+                paneIds[0]: PaneSemanticRecoverySnapshot(
+                    command: "swift test",
+                    agentSession: agent
+                ),
+            ]
+        )
+
+        let restore = try loadValidatedInitFile(from: capture.encoder()())
+        let pane = try #require(restore.paneSnapshots[paneIds[0]])
+        #expect(pane.launch?.command == "swift test")
+        #expect(pane.agentSession?.kind == "claude")
+        #expect(pane.agentSession?.sessionId == "session-1")
+        #expect(pane.scrollback == nil)
+    }
+
     @Test("the capture's retention reaches both the pane read and the truncation")
     func captureThreadsOneRetentionThroughBothHalves() throws {
         // Intent: the retention a capture carries is the value handed to each pane's read, and

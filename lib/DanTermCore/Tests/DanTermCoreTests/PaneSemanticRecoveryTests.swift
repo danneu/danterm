@@ -1,0 +1,43 @@
+// Behavioral tests for the recovery-only pane semantic memo.
+import Testing
+
+@testable import DanTermCore
+
+@Suite struct PaneSemanticRecoveryTests {
+    @Test("the last started command survives command end")
+    func commandSurvivesEnd() {
+        var stream = PaneSemanticStream()
+        var recovery = PaneSemanticRecoveryState()
+
+        recovery.apply(stream.apply(.commandStarted("vim")))
+        recovery.apply(stream.apply(.commandEnded(exitStatus: 0)))
+
+        #expect(recovery.snapshot.command == "vim")
+    }
+
+    @Test("agent recovery follows attach and detach")
+    func agentFollowsAttachAndDetach() throws {
+        let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        var stream = PaneSemanticStream()
+        var recovery = PaneSemanticRecoveryState()
+
+        recovery.apply(stream.apply(.agentAttached(session)))
+        #expect(recovery.snapshot.agentSession == session)
+
+        recovery.apply(stream.apply(.agentDetached(session)))
+        #expect(recovery.snapshot.agentSession == nil)
+    }
+
+    @Test("pane teardown clears recovery state")
+    func teardownClearsRecoveryState() throws {
+        let session = try #require(AgentSession(kind: "codex", sessionId: "session-2"))
+        var stream = PaneSemanticStream()
+        var recovery = PaneSemanticRecoveryState()
+        recovery.apply(stream.apply(.commandStarted("make test")))
+        recovery.apply(stream.apply(.agentAttached(session)))
+
+        recovery.apply(stream.apply(.paneTornDown))
+
+        #expect(recovery.snapshot == PaneSemanticRecoverySnapshot())
+    }
+}

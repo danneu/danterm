@@ -22,15 +22,18 @@ typealias CheckpointScrollbackRead = @Sendable (ScrollbackRetention) -> String?
 struct CheckpointCapture {
     let snapshot: AppModelSnapshot
     let scrollbackReads: [PaneId: CheckpointScrollbackRead]
+    let semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot]
     let retention: ScrollbackRetention
 
     init(
         snapshot: AppModelSnapshot,
         scrollbackReads: [PaneId: CheckpointScrollbackRead],
+        semanticRecoveryByPaneId: [PaneId: PaneSemanticRecoverySnapshot] = [:],
         retention: ScrollbackRetention = .checkpoint
     ) {
         self.snapshot = snapshot
         self.scrollbackReads = scrollbackReads
+        self.semanticRecoveryByPaneId = semanticRecoveryByPaneId
         self.retention = retention
     }
 
@@ -38,13 +41,18 @@ struct CheckpointCapture {
     /// the capture's only route to bytes, so a caller cannot pay the expensive half on the
     /// thread it captured from; it hands the closure to the checkpoint queue instead.
     func encoder(prettyPrinted: Bool = false) -> @Sendable () throws -> Data {
-        // Bound out so the closure carries the three values rather than the capture itself.
+        // Bind values out so the closure does not capture the container itself.
         let snapshot = snapshot
         let reads = scrollbackReads
+        let semanticRecovery = semanticRecoveryByPaneId
         let retention = retention
         return {
-            let enriched = graftScrollback(
+            let recovered = graftSemanticRecovery(
                 onto: snapshot,
+                recoveryByPaneId: semanticRecovery
+            )
+            let enriched = graftScrollback(
+                onto: recovered,
                 scrollbackByPaneId: resolveScrollback(reads, keeping: retention)
             )
             let encoder = JSONEncoder()

@@ -297,14 +297,14 @@ import Testing
         // Intent: dispatching .exportState produces exactly one
         //   .exportState Command whose snapshot agrees with what
         //   toSnapshot(model) would have produced (groups, panes,
-        //   selectedTabId, IDs, launch.command, launch.cwd) AND whose
+        //   selectedTabId, IDs, and launch.cwd) AND whose
         //   focused pane's leaf embeds the pane.
         // Why it exists: pins the export wire payload, including the
         //   leaf-embedded pane shape and the pure-snapshot scrollback
         //   contract (nil here -- enrichment happens at runtime).
         // Scenario: spec-first export -- a tab with a vim-running pane at
-        //   ~/projects exports a snapshot whose launch surfaces the cwd
-        //   abbreviated to "~/projects" and the command "vim".
+        //   ~/projects exports a structural snapshot whose launch surfaces
+        //   the abbreviated cwd; runtime grafts the pane-owned command later.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -327,7 +327,7 @@ import Testing
         // Verify launch fields (panes now live embedded in the tree leaves)
         let snapPane = allPaneSnapshots(snapshot)[0]
         #expect(snapPane.id == allPaneSnapshots(expected)[0].id)
-        #expect(snapPane.launch?.command == "vim")
+        #expect(snapPane.launch?.command == nil)
         #expect(snapPane.launch?.cwd == "~/projects")
         // Pure snapshot has nil scrollback (enrichment happens in runtime)
         #expect(snapPane.scrollback == nil, "pure snapshot should have nil scrollback")
@@ -453,20 +453,14 @@ import Testing
 
     // MARK: - Launch field
 
-    @Test("lastCommand maps to launch.command in snapshot")
-    func lastCommandMapsToLaunchCommandInSnapshot() {
-        // Intent: a pane's lastCommand surfaces in its snapshot
-        //   pane.launch.command.
-        // Why it exists: pins the lastCommand -> launch.command projection
-        //   that the encoder uses.
-        // Scenario: spec-first projection -- set lastCommand="vim",
-        //   snapshot.launch.command == "vim".
+    @Test("the structural snapshot excludes the model command mirror")
+    func structuralSnapshotExcludesModelCommandMirror() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.lastCommand = "vim" }
         let snapshot = toSnapshot(model)
-        #expect(allPaneSnapshots(snapshot)[0].launch?.command == "vim")
+        #expect(allPaneSnapshots(snapshot)[0].launch?.command == nil)
     }
 
     @Test("launch omitted when no command and no cwd")
@@ -518,21 +512,17 @@ import Testing
         #expect(allPaneSnapshots(snapshot)[0].launch?.cwd == "~/work")
     }
 
-    @Test("launch has both command and cwd when both set")
-    func launchHasBothCommandAndCwdWhenBothSet() {
-        // Intent: with both lastCommand and cwd set, launch is present
-        //   and carries both fields.
-        // Why it exists: pins the combined projection from the model into
-        //   the snapshot.launch object.
-        // Scenario: spec-first projection -- cwd + command -> snapshot
-        //   launch has both.
+    @Test("semantic recovery graft combines command with structural cwd")
+    func semanticRecoveryGraftCombinesCommandAndCwd() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.cwd = home + "/code" }
-        model.updatePane(paneId) { $0.lastCommand = "claude" }
-        let snapshot = toSnapshot(model)
+        let snapshot = graftSemanticRecovery(
+            onto: toSnapshot(model),
+            recoveryByPaneId: [paneId: PaneSemanticRecoverySnapshot(command: "claude")]
+        )
         let launch = allPaneSnapshots(snapshot)[0].launch
         #expect(launch != nil, "launch should be present")
         #expect(launch?.command == "claude")
@@ -558,7 +548,11 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.lastCommand = "claude" }
         model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
-        let initFile = toInitFile(model)
+        let snapshot = graftSemanticRecovery(
+            onto: toSnapshot(model),
+            recoveryByPaneId: [paneId: PaneSemanticRecoverySnapshot(command: "claude")]
+        )
+        let initFile = toInitFile(snapshot: snapshot)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(initFile)

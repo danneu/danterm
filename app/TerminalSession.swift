@@ -111,6 +111,8 @@ protocol TerminalSession: AnyObject {
     /// Exposes immutable latest-value semantics without moving mutable terminal
     /// state into the application model.
     var semanticSnapshot: PaneSemanticState { get }
+    /// Exposes the recovery-only memo captured beside the live semantic snapshot.
+    var semanticRecoverySnapshot: PaneSemanticRecoverySnapshot { get }
     var hasSelection: Bool { get }
     #if DANTERM_TERMINAL_BENCHMARK
     /// Exposes only the achieved grid and cell metrics needed for benchmark convergence.

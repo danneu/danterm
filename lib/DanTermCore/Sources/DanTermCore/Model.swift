@@ -425,7 +425,7 @@ struct PaneSnapshot: Codable {
     let id: String?
     let title: String?
     let cwd: String?
-    let launch: PaneLaunchSnapshot?
+    var launch: PaneLaunchSnapshot?
     var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
     let theme: String?       // raw catalog theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat

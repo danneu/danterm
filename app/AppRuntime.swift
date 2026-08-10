@@ -929,7 +929,8 @@ class AppRuntime {
             // user action that blocks on a save panel anyway, and its bytes are human-readable.
             let capture = CheckpointCapture(
                 snapshot: snapshot,
-                scrollbackReads: captureScrollbackReads(keeping: .checkpoint)
+                scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
+                semanticRecoveryByPaneId: captureSemanticRecovery()
             )
             let encode = capture.encoder(prettyPrinted: true)
             let data: Data
@@ -1473,7 +1474,11 @@ class AppRuntime {
         checkpointPending = false
         // The same pipeline with nothing to read: no pane reads means the graft is the identity
         // and every leaf goes out with `scrollback: nil`, which is what "light" has always been.
-        let capture = CheckpointCapture(snapshot: toSnapshot(model), scrollbackReads: [:])
+        let capture = CheckpointCapture(
+            snapshot: toSnapshot(model),
+            scrollbackReads: [:],
+            semanticRecoveryByPaneId: captureSemanticRecovery()
+        )
         Self.checkpointWriter.write(
             to: lightCheckpointURL(),
             async: async,
@@ -1501,6 +1506,11 @@ class AppRuntime {
         return reads
     }
 
+    /// Capture the pane-owned values needed only for the next process launch.
+    private func captureSemanticRecovery() -> [PaneId: PaneSemanticRecoverySnapshot] {
+        sessions.mapValues(\.semanticRecoverySnapshot)
+    }
+
     /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
     /// Everything after this is a pure function of the returned value, which is what lets the
     /// projection, truncation, graft, and encode run on the checkpoint queue instead of here.
@@ -1509,6 +1519,7 @@ class AppRuntime {
         return CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: captureScrollbackReads(keeping: retention),
+            semanticRecoveryByPaneId: captureSemanticRecovery(),
             retention: retention
         )
     }

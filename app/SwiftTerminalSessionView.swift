@@ -76,6 +76,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var semanticStream = PaneSemanticStream()
+    private var semanticRecovery = PaneSemanticRecoveryState()
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
@@ -124,6 +125,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
     var hasSelection: Bool { controller.hasSelection }
     var semanticSnapshot: PaneSemanticState { semanticStream.snapshot }
+    var semanticRecoverySnapshot: PaneSemanticRecoverySnapshot { semanticRecovery.snapshot }
     #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
@@ -1030,7 +1032,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             removeTrackingArea(mouseTrackingArea)
             self.mouseTrackingArea = nil
         }
-        _ = semanticStream.apply(.paneTornDown)
+        semanticRecovery.apply(semanticStream.apply(.paneTornDown))
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
@@ -1077,6 +1079,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     @discardableResult
     func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition {
         let transition = semanticStream.apply(event)
+        semanticRecovery.apply(transition)
         callbackGate.emit(.paneSemanticsChanged(transition))
         return transition
     }
