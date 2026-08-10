@@ -4,6 +4,32 @@ import Testing
 @testable import DanTermCore
 
 struct LivePaneSemanticReducerTests {
+    @Test("pane stream preserves ordered interleaving and teardown cannot resurrect stale activity")
+    func paneStreamPreservesOrderingThroughTeardown() throws {
+        let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        var stream = PaneSemanticStream()
+
+        _ = stream.apply(.integrationReady)
+        _ = stream.apply(.commandStarted("claude"))
+        _ = stream.apply(.agentAttached(session))
+        _ = stream.apply(.remoteDetected)
+        _ = stream.apply(.agentActivityChanged(session: session, activity: .waiting))
+        _ = stream.apply(.commandEnded(exitStatus: 0))
+
+        #expect(stream.snapshot.integration == .ready)
+        #expect(stream.snapshot.command == .idle)
+        #expect(stream.snapshot.connection == .remote(identity: nil))
+        #expect(stream.snapshot.agent == .attached(session: session, activity: .waiting))
+
+        let teardown = stream.apply(.paneTornDown)
+        let stale = stream.apply(.agentActivityChanged(session: session, activity: .working))
+
+        #expect(teardown.previous.agent == .attached(session: session, activity: .waiting))
+        #expect(teardown.current == PaneSemanticState())
+        #expect(stale.didChange == false)
+        #expect(stream.snapshot == PaneSemanticState())
+    }
+
     @Test("initial state has no reported live semantics")
     func initialStateIsEmpty() {
         #expect(PaneSemanticState() == PaneSemanticState(

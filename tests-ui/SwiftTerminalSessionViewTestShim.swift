@@ -33,10 +33,12 @@ enum TerminalSemanticEvent {
     case title(String)
     case workingDirectory(String?)
     case bell
+    case integrationReady
     case commandStarted(String)
-    case commandEnded
+    case commandEnded(exitStatus: UInt8)
     case remoteStarted
     case remoteHost(user: String, host: String)
+    case connectionEnded
     case desktopNotification(title: String, body: String)
     case progress(TerminalProgress?)
 }

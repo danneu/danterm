@@ -69,12 +69,12 @@ import DanTermProtocol
         #expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
     }
 
-    @Test("agent.attach stores session on context pane and schedules checkpoint")
-    func agentAttachStoresSessionOnContextPane() throws {
-        // Intent: agent.attach validates the reported agent session and
-        //   stores it on the pane named by IPC context.
-        // Why it exists: pins the hook -> CLI -> IPC path that drives the
-        //   live toolbar chip and crash-recovery checkpoint.
+    @Test("agent.attach routes through the pane owner before its reply")
+    func agentAttachRoutesThroughPaneOwnerBeforeReply() throws {
+        // Intent: agent.attach validates the session and returns one owner-routed
+        //   command instead of mutating AppModel or replying from pure update.
+        // Why it exists: success must be written only after the live session has
+        //   applied and projected the attachment.
         // Scenario: a Claude SessionStart hook reports its session id from
         //   inside a DanTerm pane.
         var model = makeModel()
@@ -91,10 +91,79 @@ import DanTermProtocol
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
 
-        let reply = try requireIpcReply(commands)
-        #expect(reply["ok"]?.asBool == true)
-        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
-        #expect(model.pane(paneId)?.agentSession == AgentSession(kind: "claude", sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"))
+        #expect(commands.count == 1)
+        guard case .applyPaneSemanticIpc(_, let commandPaneId, let event) = commands[0] else {
+            Issue.record("expected pane-owner semantic IPC command")
+            return
+        }
+        #expect(commandPaneId == paneId)
+        let session = try #require(AgentSession(
+            kind: "claude",
+            sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"
+        ))
+        #expect(event == .agentAttached(session))
+        #expect(model.pane(paneId)?.agentSession == nil)
+    }
+
+    @Test("agent activity and detach route session-qualified events")
+    func agentActivityAndDetachRouteSessionQualifiedEvents() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+
+        let activity = sendIpc(
+            &model,
+            method: Methods.agentActivity,
+            params: .object([
+                "kind": .string("codex"),
+                "id": .string("thread-1"),
+                "state": .string("waiting"),
+            ]),
+            context: context
+        )
+        let detach = sendIpc(
+            &model,
+            method: Methods.agentDetach,
+            params: .object(["kind": .string("codex"), "id": .string("thread-1")]),
+            context: context
+        )
+
+        guard case .applyPaneSemanticIpc(_, let activityPane, let activityEvent) = activity.first,
+              case .applyPaneSemanticIpc(_, let detachPane, let detachEvent) = detach.first
+        else {
+            Issue.record("expected pane-owner semantic IPC commands")
+            return
+        }
+        let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        #expect(activity.count == 1)
+        #expect(activityPane == paneId)
+        #expect(activityEvent == .agentActivityChanged(session: session, activity: .waiting))
+        #expect(detach.count == 1)
+        #expect(detachPane == paneId)
+        #expect(detachEvent == .agentDetached(session))
+    }
+
+    @Test("agent activity rejects unsupported states before pane mutation")
+    func agentActivityRejectsUnsupportedStates() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.agentActivity,
+            params: .object([
+                "kind": .string("codex"),
+                "id": .string("thread-1"),
+                "state": .string("busy"),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(model.pane(paneId)?.agentSession == nil)
     }
 
     @Test("agent.attach rejects invalid params without changing pane")

@@ -38,6 +38,8 @@ targeting, or contact the app.
     danterm pane tape --pane <pane-id> [--follow] [--from-now]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
+    danterm agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>
+    danterm agent detach --kind <kind> --id <session-id>
     danterm skill
     danterm doctor
     danterm todo list [--pane <pane-id>]
@@ -98,8 +100,8 @@ For agent commands:
   background. Pass `--foreground` only when the user asked to focus the new pane
   within its tab.
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
-- `agent attach`: hooks may use the implicit `$DANTERM_PANE` context; ordinary
-  agent recipes should not call it.
+- `agent attach`, `agent activity`, and `agent detach`: hooks may use the
+  implicit `$DANTERM_PANE` context; ordinary agent recipes should not call them.
 - `pane focus`, `pane read`, and `pane tape` already require explicit pane ids; keep them
   explicit.
 
@@ -492,8 +494,10 @@ else prints nothing on success and exits 0.
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 | `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
 
-`agent attach --kind <kind> --id <session-id>` is a silent mutation: no stdout
-on success.
+The `agent attach`, `agent activity`, and `agent detach` commands are silent
+mutations: no stdout on success. Activity accepts only `working`, `waiting`, or
+`idle`; every activity and detach report is qualified by the root session id so
+a stale hook cannot mutate a replacement session.
 
 ## Rules for agents
 

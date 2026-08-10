@@ -59,8 +59,11 @@ struct DanTermCLI {
           theme set [--pane <pane-id>] <name>|--clear
                                       Set or clear a pane theme
           agent attach --kind <kind> --id <session-id>
-                                      Report an active coding-agent session for
-                                      the caller's pane
+                                      Attach the caller's root agent session
+          agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>
+                                      Report explicit root-agent activity
+          agent detach --kind <kind> --id <session-id>
+                                      Detach the matching root agent session
           skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
           todo list [--pane <pane-id>]

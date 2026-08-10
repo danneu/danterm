@@ -93,6 +93,8 @@ enum Msg {
     // Remote detection
     case remoteSessionStarted(paneId: PaneId)
     case remoteSessionReported(paneId: PaneId, session: RemoteSession)
+    case remoteSessionEnded(paneId: PaneId)
+    case agentSessionChanged(paneId: PaneId, session: AgentSession?)
 
     // Export
     case exportState

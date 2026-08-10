@@ -3,8 +3,8 @@
 // remoteSessionStarted (isRemote + remoteThemeOverride from config.remoteTheme,
 // user theme preserved, stale remoteSession cleared), remoteSessionReported
 // (first-call sets, second-call no-ops on same session, theme apply only on
-// first transition), commandEnded (clears isRemote / remoteSession /
-// remoteThemeOverride, no command emission), missing-pane fail-closed,
+// first transition), independent command/connection/agent lifetime ends,
+// missing-pane fail-closed,
 // effectiveTheme override-vs-user-vs-nil resolution, setPaneTheme during
 // remote (user theme only), and configLoaded propagation (model.config update
 // + remote-pane theme reapply).
@@ -155,58 +155,51 @@ import Testing
         #expect(commands.count == 0, "no commands for missing pane")
     }
 
-    @Test("commandEnded clears isRemote and remoteThemeOverride")
-    func commandEndedClearsIsRemoteAndOverride() {
-        // Intent: commandEnded clears isRemote, remoteSession, and the
-        //   override; the per-pane config returns to the local default.
-        // Why it exists: pins the exit-from-remote cleanup.
-        // Scenario: spec-first exit clean.
+    @Test("commandEnded preserves independent remote and agent lifetimes")
+    func commandEndedPreservesRemoteAndAgentLifetimes() throws {
+        // Intent: command end leaves connection and agent product projections
+        //   intact while checkpointing the still-live recovery hint.
+        // Why it exists: command, connection, and agent lifetimes have distinct
+        //   authoritative end events.
+        // Scenario: a command completes inside a remote shell while Claude remains attached.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.isRemote = true }
         model.updatePane(paneId) { $0.remoteSession = RemoteSession(user: "dan", host: "caja") }
         model.updatePane(paneId) { $0.remoteThemeOverride = "Purplepeter" }
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        model.updatePane(paneId) { $0.agentSession = agent }
         let commands = update(&model, .commandEnded(paneId: paneId))
-        #expect(model.pane(paneId)?.isRemote == false)
-        #expect(model.pane(paneId)?.remoteSession == nil, "remote session should be cleared")
-        #expect(model.pane(paneId)?.remoteThemeOverride == nil, "override should be cleared")
-        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
-        #expect(commands.count == 0)
+        #expect(model.pane(paneId)?.isRemote == true)
+        #expect(model.pane(paneId)?.remoteSession == RemoteSession(user: "dan", host: "caja"))
+        #expect(model.pane(paneId)?.remoteThemeOverride == "Purplepeter")
+        #expect(model.pane(paneId)?.agentSession == agent)
+        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
-    @Test("commandEnded clears remoteSession too")
-    func commandEndedClearsRemoteSession() {
-        // Intent: commandEnded clears remoteSession even when no
-        //   override is set.
-        // Why it exists: pins the symmetric cleanup branch.
-        // Scenario: spec-first commandEnded clears session.
+    @Test("connection end clears remote product projections")
+    func connectionEndClearsRemoteProductProjections() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.isRemote = true }
         model.updatePane(paneId) { $0.remoteSession = RemoteSession(user: "dan", host: "caja") }
-        let commands = update(&model, .commandEnded(paneId: paneId))
+        let commands = update(&model, .remoteSessionEnded(paneId: paneId))
         #expect(model.pane(paneId)?.isRemote == false)
         #expect(model.pane(paneId)?.remoteSession == nil, "remote session should be cleared")
         #expect(commands.count == 0, "no theme command when no override was set")
     }
 
-    @Test("commandEnded clears agentSession and checkpoints local pane")
-    func commandEndedClearsAgentSessionAndCheckpointsLocalPane() throws {
-        // Intent: commandEnded clears a live agentSession even for the
-        //   common local-pane case with no remoteThemeOverride.
-        // Why it exists: prevents a stale crash-recovery hint from being
-        //   persisted after the agent returns control to the prompt.
-        // Scenario: Claude exits in a local pane, so CMD_END is the detach
-        //   signal and must checkpoint the cleared agent session.
+    @Test("agent detach clears recovery hint and checkpoints local pane")
+    func agentDetachClearsRecoveryHintAndCheckpointsLocalPane() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
         model.updatePane(paneId) { $0.agentSession = session }
 
-        let commands = update(&model, .commandEnded(paneId: paneId))
+        let commands = update(&model, .agentSessionChanged(paneId: paneId, session: nil))
 
         #expect(model.pane(paneId)?.agentSession == nil)
         #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
@@ -262,7 +255,7 @@ import Testing
         #expect(model.pane(paneId)?.remoteThemeOverride == "Purplepeter")
         #expect(model.pane(paneId)?.theme == "Dracula", "user theme preserved")
 
-        _ = update(&model, .commandEnded(paneId: paneId))
+        _ = update(&model, .remoteSessionEnded(paneId: paneId))
         #expect(model.pane(paneId)?.remoteThemeOverride == nil)
         #expect(model.pane(paneId)?.theme == "Dracula", "user theme still there")
     }

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 
-# Codex SessionStart hook: report the current Codex session id to DanTerm so
-# the pane toolbar and crash-recovery checkpoint know which conversation was
-# active. Success and no-op paths are stdout-silent because Codex adds
-# SessionStart hook stdout as extra developer context.
+# Codex root-session hook: report only explicit attachment, activity, and detach
+# transitions to the owning DanTerm pane. Success and no-op paths are
+# stdout-silent because Codex adds hook stdout as extra developer context.
 
 INPUT=$(cat)
 
@@ -22,5 +21,33 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-danterm agent attach --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
+EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty')
+AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')
+if [ -n "$AGENT_ID" ]; then
+  exit 0
+fi
+
+case "$EVENT" in
+  SessionStart)
+    danterm agent attach --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
+    ;;
+  UserPromptSubmit)
+    danterm agent activity --kind codex --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
+    ;;
+  PreToolUse)
+    TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
+    if [ "$TOOL" = "AskUserQuestion" ] || [ "$TOOL" = "request_user_input" ]; then
+      danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+    fi
+    ;;
+  PermissionRequest|Elicitation)
+    danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+    ;;
+  Stop)
+    danterm agent activity --kind codex --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
+    ;;
+  SessionEnd)
+    danterm agent detach --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
+    ;;
+esac
 exit 0

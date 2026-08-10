@@ -64,6 +64,8 @@ class TerminalView: NSView, TerminalSession {
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
+    private var semanticStream = PaneSemanticStream()
+    var semanticSnapshot: PaneSemanticState { semanticStream.snapshot }
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
     var revealCount = 0
@@ -108,6 +110,9 @@ class TerminalView: NSView, TerminalSession {
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
+    func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition {
+        semanticStream.apply(event)
+    }
     func fenceForApplicationExit() {}
     func tearDown() {}
 }

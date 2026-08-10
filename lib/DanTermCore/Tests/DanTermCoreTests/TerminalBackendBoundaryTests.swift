@@ -31,21 +31,21 @@ struct TerminalBackendBoundaryTests {
             if case .sessionBell(let id) = $0 { return id == paneId }
             return false
         }
-        assertSessionMessage(.commandStarted("echo ok"), paneId: paneId) {
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .commandStarted("echo ok"))), paneId: paneId) {
             if case .commandStarted(let id, let command) = $0 {
                 return id == paneId && command == "echo ok"
             }
             return false
         }
-        assertSessionMessage(.commandEnded, paneId: paneId) {
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .commandEnded(exitStatus: 7), after: [.commandStarted("echo ok")])), paneId: paneId) {
             if case .commandEnded(let id) = $0 { return id == paneId }
             return false
         }
-        assertSessionMessage(.remoteStarted, paneId: paneId) {
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .remoteDetected)), paneId: paneId) {
             if case .remoteSessionStarted(let id) = $0 { return id == paneId }
             return false
         }
-        assertSessionMessage(.remoteHost(user: "dan", host: "caja"), paneId: paneId) {
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .remoteIdentityReported(RemoteSession(user: "dan", host: "caja")))), paneId: paneId) {
             if case .remoteSessionReported(let id, let session) = $0 {
                 return id == paneId && session == RemoteSession(user: "dan", host: "caja")
             }
@@ -85,6 +85,41 @@ struct TerminalBackendBoundaryTests {
         }
     }
 
+    @Test("semantic transitions project only pane product state")
+    func semanticTransitionsProjectOnlyPaneProductState() throws {
+        let rawPaneId = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let paneId = PaneId(rawValue: rawPaneId)
+        let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+
+        #expect(terminalMessages(for: .paneSemanticsChanged(transition(for: .integrationReady)), paneId: paneId).isEmpty)
+        #expect(terminalMessages(
+            for: .paneSemanticsChanged(transition(
+                for: .agentActivityChanged(session: agent, activity: .waiting),
+                after: [.agentAttached(agent)]
+            )),
+            paneId: paneId
+        ).isEmpty)
+        #expect(terminalMessages(
+            for: .paneSemanticsChanged(transition(
+                for: .remoteDetected,
+                after: [.remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))]
+            )),
+            paneId: paneId
+        ).isEmpty)
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .connectionEnded, after: [.remoteDetected])), paneId: paneId) {
+            if case .remoteSessionEnded(let id) = $0 { return id == paneId }
+            return false
+        }
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .agentAttached(agent))), paneId: paneId) {
+            if case .agentSessionChanged(let id, let session) = $0 { return id == paneId && session == agent }
+            return false
+        }
+        assertSessionMessage(.paneSemanticsChanged(transition(for: .agentDetached(agent), after: [.agentAttached(agent)])), paneId: paneId) {
+            if case .agentSessionChanged(let id, let session) = $0 { return id == paneId && session == nil }
+            return false
+        }
+    }
+
 }
 
 private func assertSessionMessage(
@@ -92,5 +127,18 @@ private func assertSessionMessage(
     paneId: PaneId,
     matches: (Msg) -> Bool
 ) {
-    #expect(matches(terminalMessage(for: event, paneId: paneId)))
+    let messages = terminalMessages(for: event, paneId: paneId)
+    #expect(messages.count == 1)
+    #expect(messages.first.map(matches) == true)
+}
+
+private func transition(
+    for event: PaneSemanticEvent,
+    after preceding: [PaneSemanticEvent] = []
+) -> PaneSemanticTransition {
+    var stream = PaneSemanticStream()
+    for event in preceding {
+        _ = stream.apply(event)
+    }
+    return stream.apply(event)
 }

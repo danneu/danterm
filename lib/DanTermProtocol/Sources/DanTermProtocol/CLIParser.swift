@@ -118,10 +118,27 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         return try parseThemeSetCommand(Array(args.dropFirst(2)))
 
     case "agent":
-        guard args.count >= 2, args[1] == "attach" else {
-            throw CLIParseError("usage: danterm agent attach --kind <kind> --id <session-id>")
+        guard args.count >= 2 else {
+            throw CLIParseError("usage: danterm agent <attach|activity|detach>")
         }
-        return try parseAgentAttachCommand(Array(args.dropFirst(2)))
+        switch args[1] {
+        case "attach":
+            return try parseAgentSessionCommand(
+                Array(args.dropFirst(2)),
+                action: "attach",
+                method: Methods.agentAttach
+            )
+        case "activity":
+            return try parseAgentActivityCommand(Array(args.dropFirst(2)))
+        case "detach":
+            return try parseAgentSessionCommand(
+                Array(args.dropFirst(2)),
+                action: "detach",
+                method: Methods.agentDetach
+            )
+        default:
+            throw CLIParseError("usage: danterm agent <attach|activity|detach>")
+        }
 
     case "todo":
         return try parseTodo(Array(args.dropFirst()))
@@ -427,8 +444,12 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
-private func parseAgentAttachCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm agent attach --kind <kind> --id <session-id>"
+private func parseAgentSessionCommand(
+    _ args: [String],
+    action: String,
+    method: String
+) throws -> CLICommand {
+    let usage = "usage: danterm agent \(action) --kind <kind> --id <session-id>"
     var remaining = args
     var kind: String?
     var sessionId: String?
@@ -456,8 +477,40 @@ private func parseAgentAttachCommand(_ args: [String]) throws -> CLICommand {
         throw CLIParseError(usage)
     }
     return CLICommand(
-        method: Methods.agentAttach,
+        method: method,
         params: ["kind": .string(kind), "id": .string(sessionId)],
+        outputMode: .none
+    )
+}
+
+private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>"
+    var remaining = args
+    var kind: String?
+    var sessionId: String?
+    var state: String?
+
+    while remaining.isEmpty == false {
+        let flag = remaining.removeFirst()
+        guard let value = remaining.first else { throw CLIParseError(usage) }
+        remaining.removeFirst()
+        switch flag {
+        case "--kind": kind = value
+        case "--id": sessionId = value
+        case "--state": state = value
+        default:
+            if flag.hasPrefix("--") { throw CLIParseError("unknown flag: \(flag)") }
+            throw CLIParseError("unexpected argument: \(flag)")
+        }
+    }
+
+    guard let kind, let sessionId, let state else { throw CLIParseError(usage) }
+    guard ["working", "waiting", "idle"].contains(state) else {
+        throw CLIParseError("agent activity state must be working, waiting, or idle")
+    }
+    return CLICommand(
+        method: Methods.agentActivity,
+        params: ["kind": .string(kind), "id": .string(sessionId), "state": .string(state)],
         outputMode: .none
     )
 }

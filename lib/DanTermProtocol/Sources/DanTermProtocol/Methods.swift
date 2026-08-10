@@ -18,6 +18,8 @@ public enum Methods {
     public static let paneTapeEvent = "pane.tape.event"
     public static let themeSet = "theme.set"
     public static let agentAttach = "agent.attach"
+    public static let agentActivity = "agent.activity"
+    public static let agentDetach = "agent.detach"
     public static let todoList = "todo.list"
     public static let todoAdd = "todo.add"
     public static let todoEdit = "todo.edit"

@@ -19,6 +19,27 @@ func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> J
 }
 #endif
 
+/// Lowers only declared live semantics from the engine vocabulary into the
+/// pane-owned reducer vocabulary; view-only events remain outside that stream.
+func paneSemanticEvent(for event: TerminalSemanticEvent) -> PaneSemanticEvent? {
+    switch event {
+    case .integrationReady:
+        return .integrationReady
+    case .commandStarted(let command):
+        return .commandStarted(command)
+    case .commandEnded(let exitStatus):
+        return .commandEnded(exitStatus: exitStatus)
+    case .remoteStarted:
+        return .remoteDetected
+    case let .remoteHost(user, host):
+        return .remoteIdentityReported(RemoteSession(user: user, host: host))
+    case .connectionEnded:
+        return .connectionEnded
+    case .title, .workingDirectory, .bell, .desktopNotification, .progress:
+        return nil
+    }
+}
+
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: TerminalPaneSessionController
@@ -54,6 +75,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
+    private var semanticStream = PaneSemanticStream()
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
@@ -101,6 +123,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
     }
     var hasSelection: Bool { controller.hasSelection }
+    var semanticSnapshot: PaneSemanticState { semanticStream.snapshot }
     #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
@@ -1007,6 +1030,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             removeTrackingArea(mouseTrackingArea)
             self.mouseTrackingArea = nil
         }
+        _ = semanticStream.apply(.paneTornDown)
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
@@ -1018,6 +1042,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     private func publish(_ events: [TerminalSemanticEvent]) {
         for event in events {
+            if let paneEvent = paneSemanticEvent(for: event) {
+                publishSemantic(paneEvent)
+                continue
+            }
             switch event {
             case .title(let title):
                 #if DANTERM_TERMINAL_BENCHMARK
@@ -1028,18 +1056,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 callbackGate.emit(.cwdChanged(cwd))
             case .bell:
                 callbackGate.emit(.bell)
-            case .integrationReady:
-                break
-            case .commandStarted(let command):
-                callbackGate.emit(.commandStarted(command))
-            case .commandEnded:
-                callbackGate.emit(.commandEnded)
-            case .remoteStarted:
-                callbackGate.emit(.remoteStarted)
-            case let .remoteHost(user, host):
-                callbackGate.emit(.remoteHost(user: user, host: host))
-            case .connectionEnded:
-                break
+            case .integrationReady, .commandStarted, .commandEnded,
+                 .remoteStarted, .remoteHost, .connectionEnded:
+                continue
             case let .desktopNotification(title, body):
                 callbackGate.emit(.desktopNotification(title: title, body: body))
             case .progress(let progress):
@@ -1053,6 +1072,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 }))
             }
         }
+    }
+
+    @discardableResult
+    func applySemanticEvent(_ event: PaneSemanticEvent) -> PaneSemanticTransition {
+        let transition = semanticStream.apply(event)
+        callbackGate.emit(.paneSemanticsChanged(transition))
+        return transition
+    }
+
+    private func publishSemantic(_ event: PaneSemanticEvent) {
+        applySemanticEvent(event)
     }
 
     /// Maps the engine's total search status onto the overlay's two independently

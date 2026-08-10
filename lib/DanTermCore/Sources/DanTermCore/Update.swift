@@ -532,14 +532,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .commandEnded(let paneId):
         guard let pane = model.pane(paneId) else { return [] }
-        let hadAgentSession = pane.agentSession != nil
-        model.updatePane(paneId) { p in
-            p.isRemote = false
-            p.remoteSession = nil
-            p.agentSession = nil
-            p.remoteThemeOverride = nil
-        }
-        return hadAgentSession ? [.scheduleCheckpoint] : []
+        return pane.agentSession == nil ? [] : [.scheduleCheckpoint]
 
     // MARK: - Remote Detection
 
@@ -567,6 +560,20 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             }
         }
         return []
+
+    case .remoteSessionEnded(let paneId):
+        guard model.pane(paneId) != nil else { return [] }
+        model.updatePane(paneId) { pane in
+            pane.isRemote = false
+            pane.remoteSession = nil
+            pane.remoteThemeOverride = nil
+        }
+        return []
+
+    case .agentSessionChanged(let paneId, let session):
+        guard model.pane(paneId)?.agentSession != session else { return [] }
+        model.updatePane(paneId) { $0.agentSession = session }
+        return [.scheduleCheckpoint]
 
     // MARK: - Config (external reload)
 
@@ -1558,19 +1565,29 @@ private func dispatchIpc(
         return [.ipcReply(reqId: reqId, result: result)]
 
     case Methods.agentAttach:
+        let session = try agentSession(from: params)
+        let paneId = try resolvePane(params: params, context: context, in: model)
+        return [.applyPaneSemanticIpc(reqId: reqId, paneId: paneId, event: .agentAttached(session))]
+
+    case Methods.agentActivity:
+        let session = try agentSession(from: params)
         guard case .object(let object) = params,
-              case .string(let kind)? = object["kind"],
-              case .string(let sessionId)? = object["id"],
-              let session = AgentSession(kind: kind, sessionId: sessionId)
+              case .string(let rawActivity)? = object["state"],
+              let activity = AgentActivity(rawIpcValue: rawActivity)
         else {
-            throw IpcParamsError("invalid agent session")
+            throw IpcParamsError("invalid agent activity")
         }
         let paneId = try resolvePane(params: params, context: context, in: model)
-        model.updatePane(paneId) { $0.agentSession = session }
-        return [
-            .scheduleCheckpoint,
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
-        ]
+        return [.applyPaneSemanticIpc(
+            reqId: reqId,
+            paneId: paneId,
+            event: .agentActivityChanged(session: session, activity: activity)
+        )]
+
+    case Methods.agentDetach:
+        let session = try agentSession(from: params)
+        let paneId = try resolvePane(params: params, context: context, in: model)
+        return [.applyPaneSemanticIpc(reqId: reqId, paneId: paneId, event: .agentDetached(session))]
 
     case Methods.tabRename:
         guard case .object(let object) = params else {
@@ -1929,6 +1946,18 @@ private func resolveIpcPaneId(_ context: IpcRequestContext, in model: AppModel) 
 private struct IpcParamsError: Error {
     let message: String
     init(_ message: String) { self.message = message }
+}
+
+/// Validates the session identity shared by every pane-scoped agent mutation.
+private func agentSession(from params: JSONValue) throws -> AgentSession {
+    guard case .object(let object) = params,
+          case .string(let kind)? = object["kind"],
+          case .string(let sessionId)? = object["id"],
+          let session = AgentSession(kind: kind, sessionId: sessionId)
+    else {
+        throw IpcParamsError("invalid agent session")
+    }
+    return session
 }
 
 private func parseOptionalBool(_ value: JSONValue?, name: String) throws -> Bool {

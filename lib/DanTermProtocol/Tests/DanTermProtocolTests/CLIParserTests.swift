@@ -146,6 +146,34 @@ struct CLIParserTests {
         #expect(error?.message == "usage: danterm agent attach --kind <kind> --id <session-id>")
     }
 
+    @Test("agent activity and detach parse to silent mutations")
+    func agentLifecycleParsesToSilentMutations() throws {
+        let activity = try parseCLI([
+            "agent", "activity", "--kind", "codex", "--id", "thread-1", "--state", "waiting",
+        ])
+        #expect(activity.method == Methods.agentActivity)
+        #expect(activity.outputMode == .none)
+        #expect(activity.params["kind"] == .string("codex"))
+        #expect(activity.params["id"] == .string("thread-1"))
+        #expect(activity.params["state"] == .string("waiting"))
+
+        let detach = try parseCLI(["agent", "detach", "--kind", "claude", "--id", "session-1"])
+        #expect(detach.method == Methods.agentDetach)
+        #expect(detach.outputMode == .none)
+        #expect(detach.params["kind"] == .string("claude"))
+        #expect(detach.params["id"] == .string("session-1"))
+    }
+
+    @Test("agent activity accepts only declared states", arguments: ["busy", "question", "done"])
+    func agentActivityRejectsUnsupportedStates(_ state: String) {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI([
+                "agent", "activity", "--kind", "codex", "--id", "thread-1", "--state", state,
+            ])
+        }
+        #expect(error?.message == "agent activity state must be working, waiting, or idle")
+    }
+
     @Test("explicit target flags parse")
     func explicitTargetFlagsParse() throws {
         let newTab = try parseCLI(["tab", "new", "--group", "G1"])

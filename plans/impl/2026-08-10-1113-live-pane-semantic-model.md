@@ -377,7 +377,7 @@ dependency of this plan.
 - [x] 1. docs: characterize live semantic event forwarding
 - [x] 2. feat(shell): extend bundled semantic reports
 - [x] 3. feat(core): add the live pane semantic reducer
-- [ ] 4. feat(app): route pane-owned semantic events
+- [x] 4. feat(app): route pane-owned semantic events
 - [ ] 5. feat(app): ship live semantic consumers
 
 ## Implementation notes
@@ -395,3 +395,6 @@ dependency of this plan.
 - Agent activity and detach inputs carry the reporting session. The reducer
   ignores stale events from a replaced session instead of relying on app routing
   to preserve the attached-session lifetime.
+- The stable main-actor `TerminalSession` owns the semantic stream beside its
+  terminal callback lifetime. Terminal events apply there directly; agent IPC
+  uses one runtime command that applies synchronously before writing success.

@@ -967,6 +967,19 @@ class AppRuntime {
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
+        case .applyPaneSemanticIpc(let reqId, let paneId, let event):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = sessions[paneId] else {
+                connection.writeError(
+                    reqId: reqId,
+                    code: -32603,
+                    message: "pane session no longer available"
+                )
+                break
+            }
+            session.applySemanticEvent(event)
+            connection.writeSuccess(reqId: reqId, result: .object(["ok": .bool(true)]))
+
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = sessions[paneId] else {
@@ -1872,7 +1885,10 @@ class AppRuntime {
             #if DANTERM_TERMINAL_CHARACTERIZATION
             recordTerminalCharacterizationEvent(event)
             #endif
-            self?.send(terminalMessage(for: event, paneId: paneId))
+            guard let self else { return }
+            for message in terminalMessages(for: event, paneId: paneId) {
+                self.send(message)
+            }
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }

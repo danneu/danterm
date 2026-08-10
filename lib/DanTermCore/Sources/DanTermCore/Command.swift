@@ -49,6 +49,9 @@ enum Command {
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)
     case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
+    /// Routes one hook mutation through the live session owner and writes the
+    /// IPC reply only after that owner has reduced and projected the event.
+    case applyPaneSemanticIpc(reqId: UUID, paneId: PaneId, event: PaneSemanticEvent)
 
     // System
     // `paneId` is carried for grouping alone: it becomes the banner's thread
@@ -106,6 +109,7 @@ extension Command {
         case .createSession, .sendText, .sendInputText, .sendInputKey,
              .focusSession, .exportState, .ipcReply, .ipcError,
              .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
+             .applyPaneSemanticIpc,
              .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .dismissAlertsPopover,

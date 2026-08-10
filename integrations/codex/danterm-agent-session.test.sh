@@ -81,6 +81,26 @@ check_case "session start attaches silently" \
   '{"hook_event_name":"SessionStart","session_id":"4f3a2b1c-0000-4000-9000-abcdef123456"}' \
   'agent attach --kind codex --id 4f3a2b1c-0000-4000-9000-abcdef123456'
 
+check_case "prompt submit reports working" \
+  '{"hook_event_name":"UserPromptSubmit","session_id":"4f3a2b1c"}' \
+  'agent activity --kind codex --id 4f3a2b1c --state working'
+check_case "request user input reports waiting" \
+  '{"hook_event_name":"PreToolUse","tool_name":"request_user_input","session_id":"4f3a2b1c"}' \
+  'agent activity --kind codex --id 4f3a2b1c --state waiting'
+check_case "permission request reports waiting" \
+  '{"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"4f3a2b1c"}' \
+  'agent activity --kind codex --id 4f3a2b1c --state waiting'
+check_case "ordinary tool use is ignored" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"4f3a2b1c"}'
+check_case "root stop reports idle" \
+  '{"hook_event_name":"Stop","session_id":"4f3a2b1c"}' \
+  'agent activity --kind codex --id 4f3a2b1c --state idle'
+check_case "session end detaches" \
+  '{"hook_event_name":"SessionEnd","session_id":"4f3a2b1c"}' \
+  'agent detach --kind codex --id 4f3a2b1c'
+check_case "subagent event is ignored" \
+  '{"hook_event_name":"Stop","session_id":"4f3a2b1c","agent_id":"worker-1"}'
+
 unset DANTERM_SOCK
 export DANTERM_PANE=11111111-1111-4111-8111-111111111111
 check_case "missing socket is silent no-op" \
