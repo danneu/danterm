@@ -376,7 +376,7 @@ dependency of this plan.
 
 - [x] 1. docs: characterize live semantic event forwarding
 - [x] 2. feat(shell): extend bundled semantic reports
-- [ ] 3. feat(core): add the live pane semantic reducer
+- [x] 3. feat(core): add the live pane semantic reducer
 - [ ] 4. feat(app): route pane-owned semantic events
 - [ ] 5. feat(app): ship live semantic consumers
 
@@ -390,3 +390,8 @@ dependency of this plan.
   pane-owner routing slice, the app adapter keeps its existing command-end
   projection and deliberately does not project integration-ready or
   connection-end into the top-level model.
+- The pure reducer discards command exit status after ending the live command;
+  this slice has no immediate completion consumer that earns a separate effect.
+- Agent activity and detach inputs carry the reporting session. The reducer
+  ignores stale events from a replaced session instead of relying on app routing
+  to preserve the attached-session lifetime.
