@@ -566,13 +566,21 @@ public struct Terminal: Equatable, Sendable {
         var breakState = GraphemeBreakState()
     }
 
-    /// Retains primary cells and resize-only cursor semantics while the alternate grid is active.
-    private struct InactivePrimaryScreen: Equatable, Sendable {
+    /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
+    private struct ScreenState: Equatable, Sendable {
         var rows: [GridRow]
-        var resizeCursor: CellPosition
-        var isResizePendingWrap: Bool
+        var cursor: CellPosition
+        var isPendingWrap: Bool
+        var savedCursor: SavedCursorState
         var semanticContent: SemanticContent
         var semanticContentClearsAtEndOfLine: Bool
+        var kittyKeyboardStack: [UInt16]
+    }
+
+    /// Identifies which retained screen is installed in the terminal's live fields.
+    private enum ActiveScreen: Equatable, Sendable {
+        case primary
+        case alternate
     }
 
     /// Carries one atomic cell unit and the old coordinates that must follow it.
@@ -633,7 +641,8 @@ public struct Terminal: Equatable, Sendable {
     /// explicit budget pass are reported through exactly one path.
     private var historyEvictionsObserved = 0
     private var rows: [GridRow]
-    private var inactivePrimaryScreen: InactivePrimaryScreen?
+    private var inactiveScreen: ScreenState?
+    private var activeScreen = ActiveScreen.primary
     private var scrollRegion: Range<Int>?
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
@@ -662,8 +671,7 @@ public struct Terminal: Equatable, Sendable {
     private var replyBytes: [UInt8] = []
     private var programVersion: String
     private var defaultColors: TerminalDefaultColors
-    private var primaryKittyKeyboardStack: [UInt16] = []
-    private var alternateKittyKeyboardStack: [UInt16] = []
+    private var kittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
     private var rowNumberingEpoch = RowNumberingEpoch()
     // The three content-derived inspection fields below are read together, per printed
@@ -854,17 +862,42 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot,
-    /// and is the one way this file asks which screen is active. Matches the optional's tag in
-    /// place instead of comparing it against `nil`: `InactivePrimaryScreen` is `Equatable` and
-    /// holds a row array, so `== nil` resolves to the generic two-operand `==`, which copies
-    /// both operands -- retaining and releasing that array -- to answer a question about
-    /// nothing but whether the optional is populated. The feed path asks it several times per
-    /// action, and the resulting pair of comparison temporaries was 22.5% of the live app's
-    /// PTY-host thread.
+    /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot.
     public var isAlternateScreenActive: Bool {
-        if case .some = inactivePrimaryScreen { return true }
-        return false
+        activeScreen == .alternate
+    }
+
+    /// Extracts and installs the screen-scoped fields that are live on `Terminal`.
+    private var liveScreenState: ScreenState {
+        get {
+            ScreenState(
+                rows: rows,
+                cursor: cursor,
+                isPendingWrap: isPendingWrap,
+                savedCursor: savedCursor,
+                semanticContent: semanticContent,
+                semanticContentClearsAtEndOfLine: semanticContentClearsAtEndOfLine,
+                kittyKeyboardStack: kittyKeyboardStack
+            )
+        }
+        set {
+            rows = newValue.rows
+            cursor = newValue.cursor
+            isPendingWrap = newValue.isPendingWrap
+            savedCursor = newValue.savedCursor
+            semanticContent = newValue.semanticContent
+            semanticContentClearsAtEndOfLine = newValue.semanticContentClearsAtEndOfLine
+            kittyKeyboardStack = newValue.kittyKeyboardStack
+        }
+    }
+
+    /// Selects the primary grid regardless of which screen is currently live.
+    private var primaryScreenRows: [GridRow] {
+        if activeScreen == .primary { return rows }
+        guard let inactiveScreen else {
+            preconditionFailure("the primary screen must be retained while the alternate is live")
+        }
+        return inactiveScreen.rows
     }
 
     /// Projects all child-controlled modes that affect deterministic user-input bytes.
@@ -877,7 +910,7 @@ public struct Terminal: Equatable, Sendable {
             bracketedPaste: isBracketedPasteMode,
             mouseTracking: mouseTrackingMode,
             sgrMouseEncoding: isSGRMouseEncodingMode,
-            kittyKeyboardFlags: activeKittyKeyboardStack.last ?? 0
+            kittyKeyboardFlags: kittyKeyboardStack.last ?? 0
         )
     }
 
@@ -1156,13 +1189,13 @@ public struct Terminal: Equatable, Sendable {
         }
         history.forEachStyleId { live.insert($0) }
         collect(rows, into: &live)
-        if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
+        if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         return live
     }
 
     /// Drops table entries no cell points at, on the same invariant `allocateHyperlinkId` states:
     /// **every id held by a cell is a key of `styleTable`**. `liveStyleIds` walks history, the
-    /// active grid, and the retained primary screen, which is every place a cell lives; the pens
+    /// active grid, and the inactive screen, which is every place a cell lives; the pens
     /// are covered by dropping their caches rather than by walking them, since a pen's id is
     /// re-interned on demand.
     private mutating func reclaimDeadStyleEntries() {
@@ -1873,7 +1906,7 @@ public struct Terminal: Equatable, Sendable {
         }
         history.forEachHyperlinkId { live.insert($0) }
         collect(rows, into: &live)
-        if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
+        if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
         return live
     }
@@ -2001,47 +2034,44 @@ public struct Terminal: Equatable, Sendable {
             resizeTabStops(from: oldColumnCount, to: columns)
         }
 
-        if var primary = inactivePrimaryScreen {
-            let alternateRows = self.rows
-            let liveCursor = cursor
-            let livePendingWrap = isPendingWrap
-            let liveSemanticContent = semanticContent
-            let liveSemanticContentClearsAtEndOfLine = semanticContentClearsAtEndOfLine
-
-            self.rows = primary.rows
-            cursor = primary.resizeCursor
-            isPendingWrap = primary.isResizePendingWrap
-            semanticContent = primary.semanticContent
-            semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
+        if activeScreen == .alternate, let primary = inactiveScreen {
+            let alternate = liveScreenState
+            liveScreenState = primary
             if columns != oldColumnCount {
                 clearPromptForResizeIfNeeded()
             }
             resizePrimaryScreen(columns: columns, rows: rows)
-            primary.rows = self.rows
-            primary.resizeCursor = cursor
-            primary.isResizePendingWrap = isPendingWrap
-            primary.semanticContent = semanticContent
-            primary.semanticContentClearsAtEndOfLine = semanticContentClearsAtEndOfLine
+            clampCursorStateToActiveGrid()
+            let resizedPrimary = liveScreenState
 
+            liveScreenState = alternate
             self.rows = resizedRectangle(
-                alternateRows,
+                self.rows,
                 columns: columns,
                 rows: rows,
                 clearsSoftWrap: columns != oldColumnCount
             )
-            cursor = liveCursor
-            isPendingWrap = livePendingWrap
-            semanticContent = liveSemanticContent
-            semanticContentClearsAtEndOfLine = liveSemanticContentClearsAtEndOfLine
-            inactivePrimaryScreen = primary
+            clampCursorStateToActiveGrid()
+            inactiveScreen = resizedPrimary
         } else {
             if columns != oldColumnCount {
                 clearPromptForResizeIfNeeded()
             }
             resizePrimaryScreen(columns: columns, rows: rows)
+            clampCursorStateToActiveGrid()
+
+            if var alternate = inactiveScreen {
+                alternate.rows = resizedRectangle(
+                    alternate.rows,
+                    columns: columns,
+                    rows: rows,
+                    clearsSoftWrap: columns != oldColumnCount
+                )
+                clampScreenCursorState(&alternate)
+                inactiveScreen = alternate
+            }
         }
 
-        clampCursorStateToActiveGrid()
         clampSelectionToRetainedStream()
         clusterContext = nil
     }
@@ -2332,10 +2362,10 @@ public struct Terminal: Equatable, Sendable {
         var styles: Set<StyleId> = []
         var identities: Set<ContentIdentity> = []
 
-        // The retained primary screen counts as resident: under the alternate screen the process
-        // holds both grids, and a census that reported only the visible one would understate a
-        // full-screen TUI by an entire screen.
-        let screens = [rows, inactivePrimaryScreen?.rows].compactMap { $0 }
+        // The inactive screen counts as resident: after the first alternate-screen entry the
+        // process holds both grids, and a census that reported only the visible one would
+        // understate a full-screen TUI by an entire screen.
+        let screens = [rows, inactiveScreen?.rows].compactMap { $0 }
         census.screenRowCount = screens.reduce(0) { $0 + $1.count }
 
         // Only live rows have a per-row allocation left to count: history's cells all live in the
@@ -2504,7 +2534,7 @@ public struct Terminal: Equatable, Sendable {
     /// is exactly when the row is leaving the window a viewport projection would show.
     public var rowStructure: [TerminalRowStructure] {
         var retained = history.allPaintedDisplayRows()
-        let liveRows = isAlternateScreenActive ? rows : (inactivePrimaryScreen?.rows ?? rows)
+        let liveRows = rows
         // The projection's seam rules, so the dump reports what a reader would see: the open
         // tail's final display row gets back the `.spacerHead` admission dropped, and an
         // active alternate screen severs the wrap into the rows appended after history.
@@ -2538,7 +2568,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
-        let primaryRows = (inactivePrimaryScreen?.rows ?? rows).map(\.withGatedContinuation)
+        let primaryRows = primaryScreenRows.map(\.withGatedContinuation)
         return projectedHistoryText(from: history.allPaintedDisplayRows() + primaryRows)
     }
 
@@ -2556,7 +2586,7 @@ public struct Terminal: Equatable, Sendable {
     /// few hundred KB of it made a checkpoint cost the scrollback *capacity* rather than the
     /// budget it stores, which is tens of seconds per pane at a full 16 MiB history.
     public func primaryHistoryTailText(maxLines: Int, maxChars: Int) -> String {
-        let primaryRows = inactivePrimaryScreen?.rows ?? rows
+        let primaryRows = primaryScreenRows
         let totalRows = historyRowCount + primaryRows.count
         // A display row carries at most one hard break, so the budget's line count is the floor
         // on rows worth reading. Past it: one row for the last content row, which projects no
@@ -5415,7 +5445,7 @@ public struct Terminal: Equatable, Sendable {
                 replyToStatusQuery(sequence.parameters, isDECPrivate: true)
             case 0x75:
                 guard sequence.parameters.isEmpty else { return }
-                appendReply("\u{1B}[?\(activeKittyKeyboardStack.last ?? 0)u")
+                appendReply("\u{1B}[?\(kittyKeyboardStack.last ?? 0)u")
             default:
                 break
             }
@@ -6205,42 +6235,50 @@ public struct Terminal: Equatable, Sendable {
             // in both directions -- including a redundant enable, which blanks them again.
             renumberRows()
             if isAlternateScreenActive == false {
-                inactivePrimaryScreen = InactivePrimaryScreen(
-                    rows: rows,
-                    resizeCursor: cursor,
-                    isResizePendingWrap: isPendingWrap,
-                    semanticContent: semanticContent,
-                    semanticContentClearsAtEndOfLine: semanticContentClearsAtEndOfLine
-                )
+                swapActiveScreen()
             }
             rows = (0..<rowCount).map { _ in
                 makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
             }
             semanticContent = .output
             semanticContentClearsAtEndOfLine = false
-        } else if let primary = inactivePrimaryScreen {
+        } else if isAlternateScreenActive {
             clearInspection()
             renumberRows()
-            rows = primary.rows
-            semanticContent = primary.semanticContent
-            semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
-            inactivePrimaryScreen = nil
+            swapActiveScreen()
         }
         clearPendingMotionState()
     }
 
     private mutating func selectPrimaryScreen() {
-        guard let primary = inactivePrimaryScreen else { return }
+        guard isAlternateScreenActive else { return }
         recordFullDamage()
         clearInspection()
         // Guarded above, so a reset that finds the primary screen already active renumbers
         // nothing -- which is why a soft reset stops a drag only when taken from the
         // alternate screen.
         renumberRows()
-        rows = primary.rows
-        semanticContent = primary.semanticContent
-        semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
-        inactivePrimaryScreen = nil
+        swapActiveScreen()
+    }
+
+    /// Symmetrically exchanges the live and inactive screen while carrying the live cursor.
+    private mutating func swapActiveScreen() {
+        let carriedCursor = cursor
+        let outgoing = liveScreenState
+        var incoming = inactiveScreen ?? ScreenState(
+            rows: (0..<rowCount).map { _ in makeBlankRow(columns: columnCount) },
+            cursor: carriedCursor,
+            isPendingWrap: false,
+            savedCursor: SavedCursorState(),
+            semanticContent: .output,
+            semanticContentClearsAtEndOfLine: false,
+            kittyKeyboardStack: []
+        )
+        incoming.cursor = carriedCursor
+        incoming.isPendingWrap = false
+        liveScreenState = incoming
+        inactiveScreen = outgoing
+        activeScreen = activeScreen == .primary ? .alternate : .primary
     }
 
     private mutating func clampCursorStateToActiveGrid() {
@@ -6249,6 +6287,14 @@ public struct Terminal: Equatable, Sendable {
         isPendingWrap = isPendingWrap
             && isAutoWrapMode
             && cursor.column == columnCount - 1
+    }
+
+    private mutating func clampScreenCursorState(_ screen: inout ScreenState) {
+        clampPosition(&screen.cursor, in: screen.rows)
+        clampPosition(&screen.savedCursor.position, in: screen.rows)
+        screen.isPendingWrap = screen.isPendingWrap
+            && isAutoWrapMode
+            && screen.cursor.column == columnCount - 1
     }
 
     private func clampPosition(_ position: inout CellPosition, in grid: [GridRow]) {
@@ -6337,42 +6383,32 @@ public struct Terminal: Equatable, Sendable {
         cursorShape = .block
         isCursorBlinking = false
         isSynchronizedOutputActive = false
-        primaryKittyKeyboardStack.removeAll(keepingCapacity: true)
-        alternateKittyKeyboardStack.removeAll(keepingCapacity: true)
+        kittyKeyboardStack.removeAll(keepingCapacity: true)
+        if var inactive = inactiveScreen {
+            inactive.kittyKeyboardStack.removeAll(keepingCapacity: true)
+            inactiveScreen = inactive
+        }
         tabStops = Self.defaultTabStops(columns: columnCount)
         currentStyle = TerminalStyle()
     }
 
-    private var activeKittyKeyboardStack: [UInt16] {
-        get {
-            isAlternateScreenActive ? alternateKittyKeyboardStack : primaryKittyKeyboardStack
-        }
-        set {
-            if isAlternateScreenActive {
-                alternateKittyKeyboardStack = newValue
-            } else {
-                primaryKittyKeyboardStack = newValue
-            }
-        }
-    }
-
     private mutating func pushKittyKeyboardFlags(_ flags: UInt16) {
-        var stack = activeKittyKeyboardStack
+        var stack = kittyKeyboardStack
         if stack.count == Self.kittyKeyboardStackDepth {
             stack.removeFirst()
         }
         stack.append(flags & 1)
-        activeKittyKeyboardStack = stack
+        kittyKeyboardStack = stack
     }
 
     private mutating func popKittyKeyboardFlags(_ count: UInt16) {
-        var stack = activeKittyKeyboardStack
+        var stack = kittyKeyboardStack
         stack.removeLast(min(Int(count), stack.count))
-        activeKittyKeyboardStack = stack
+        kittyKeyboardStack = stack
     }
 
     private mutating func setKittyKeyboardFlags(_ flags: UInt16, mode: UInt16) {
-        var stack = activeKittyKeyboardStack
+        var stack = kittyKeyboardStack
         let previous = stack.last ?? 0
         let masked = flags & 1
         let updated: UInt16
@@ -6387,7 +6423,7 @@ public struct Terminal: Equatable, Sendable {
         } else {
             stack[stack.count - 1] = updated
         }
-        activeKittyKeyboardStack = stack
+        kittyKeyboardStack = stack
     }
 
     /// Prints a run of printable ASCII, taking as much of it in bulk as the grid state allows.

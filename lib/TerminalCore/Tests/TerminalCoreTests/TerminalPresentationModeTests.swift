@@ -98,12 +98,20 @@ struct TerminalPresentationModeTests {
         #expect(terminal.presentation.isCursorBlinking == false)
     }
 
-    @Test("appearance saved on the alternate screen restores on the primary screen")
-    func savedAppearanceCrossesScreens() throws {
+    @Test("saved cursor appearance is independent on the primary and alternate screens")
+    func savedAppearanceIsScreenScoped() throws {
+        // Intent: cursor visibility, shape, and blink restore from the active screen's save.
+        // Why it exists: position isolation alone would leave half of DECSC shared by accident.
+        // Scenario: the primary and alternate screens save visibly different cursor appearances.
         var terminal = try #require(Terminal(columns: 4, rows: 2))
-        terminal.feed(Array("\u{1B}[?1047h\u{1B}[?25l\u{1B}[6 q\u{1B}7".utf8))
-        terminal.feed(Array("\u{1B}[?1047l\u{1B}[?25h\u{1B}[3 q\u{1B}8".utf8))
+        terminal.feed(Array("\u{1B}[?25h\u{1B}[3 q\u{1B}7\u{1B}[?1047h".utf8))
+        terminal.feed(Array("\u{1B}[?25l\u{1B}[6 q\u{1B}7\u{1B}[?1047l\u{1B}8".utf8))
 
+        #expect(terminal.presentation.isCursorVisible)
+        #expect(terminal.presentation.cursorShape == .underline)
+        #expect(terminal.presentation.isCursorBlinking)
+
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}8".utf8))
         #expect(terminal.presentation.isCursorVisible == false)
         #expect(terminal.presentation.cursorShape == .bar)
         #expect(terminal.presentation.isCursorBlinking == false)

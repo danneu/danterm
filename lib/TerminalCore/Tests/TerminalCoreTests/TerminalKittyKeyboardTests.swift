@@ -39,6 +39,8 @@ struct TerminalKittyKeyboardTests {
             #expect(screens.drainReplyBytes() == Array("\u{1B}[?0u".utf8))
             screens.feed(Array("\u{1B}[>1u\u{1B}[?\(screenMode)l\u{1B}[?u".utf8))
             #expect(screens.drainReplyBytes() == Array("\u{1B}[?1u".utf8))
+            screens.feed(Array("\u{1B}[?\(screenMode)h\u{1B}[?u".utf8))
+            #expect(screens.drainReplyBytes() == Array("\u{1B}[?1u".utf8))
         }
     }
 

@@ -35,7 +35,7 @@ struct TerminalAlternateScreenTests {
         expectValidGrid(terminal)
     }
 
-    @Test("1049 saves before entry and restores after exit, including redundant operations")
+    @Test("nested 1049 saves each screen independently and redundant exits are idempotent")
     func mode1049OrderingAndRedundantOperations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("AB\u{1B}[?1049h".utf8))
@@ -46,7 +46,7 @@ struct TerminalAlternateScreenTests {
         terminal.feed(Array("\u{1B}[2;1H\u{1B}[?1049l".utf8))
 
         #expect(terminal.screenText == "AB  \n    ")
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
 
         terminal.feed(Array("\u{1B}[2;4H\u{1B}[?1048h\u{1B}[1;1H\u{1B}[?1049l".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 3, isPendingWrap: false))
@@ -56,6 +56,29 @@ struct TerminalAlternateScreenTests {
         #expect(pending.geometry.cursor?.isPendingWrap == true)
         pending.feed(Array("X".utf8))
         #expect(pending.screenText == "AB\nX ")
+    }
+
+    @Test(
+        "saved cursor aliases use independent slots on the primary and alternate screens",
+        arguments: [
+            ("\u{1B}7", "\u{1B}8"),
+            ("\u{1B}[s", "\u{1B}[u"),
+            ("\u{1B}[?1048h", "\u{1B}[?1048l"),
+        ]
+    )
+    func savedCursorSlotsAreScreenScoped(save: String, restore: String) throws {
+        // Intent: every save/restore spelling reads and writes only the active screen's slot.
+        // Why it exists: a shared slot lets a full-screen application destroy the shell's save.
+        // Scenario: each screen saves a different position, then restores it after a round trip.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("\u{1B}[2;3H\(save)\u{1B}[?1047h\(restore)".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+
+        terminal.feed(Array("\u{1B}[3;5H\(save)\u{1B}[?1047l\u{1B}[1;1H\(restore)".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
+
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}[1;1H\(restore)".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: false))
     }
 
     @Test("recognized switches clear pending wrap and cluster attachment while mode 47 stays inert")
@@ -79,7 +102,7 @@ struct TerminalAlternateScreenTests {
         #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}"])
     }
 
-    @Test("screen switches preserve shared modes, tabs, margins, REP memory, pen, and saved slot")
+    @Test("screen switches preserve shared modes, tabs, margins, REP memory, and pen")
     func switchesPreserveSharedState() throws {
         var penAndModes = try #require(Terminal(columns: 5, rows: 3))
         penAndModes.feed(Array("Q\u{1B}[31m\u{1B}[4;20h\u{1B}[?7l\u{1B}[?1047h".utf8))
@@ -195,13 +218,53 @@ struct TerminalAlternateScreenTests {
         terminal.feed(Array("\u{1B}[1;1H".utf8))
         #expect(terminal.geometry.cursor?.row == 0)
 
-        terminal.feed(Array("\u{1B}[?1047l\u{1B}[?1048l".utf8))
+        terminal.feed(Array("\u{1B}[?1048l".utf8))
         #expect(terminal.geometry.cursor?.column == 1)
 
         var restore = try #require(Terminal(columns: 4, rows: 2))
         restore.moveCursor(row: 0, column: 2)
         restore.feed(Array("\u{1B}[?1048h\u{1B}[1;2H\u{754C}\u{1B}[?1048l".utf8))
         #expect(restore.geometry.cursor?.column == 1)
+    }
+
+    @Test("inactive screens resize their grids and saved cursors from either active side")
+    func inactiveScreenResizeClampsSavedCursors() throws {
+        // Intent: resize updates both retained grids and clamps each grid's saved cursor locally.
+        // Why it exists: switching which screen is live must not decide which state gets resized.
+        // Scenario: each screen takes a save on a wide tail before it becomes inactive and shrinks.
+        var primaryInactive = try #require(Terminal(columns: 5, rows: 3))
+        primaryInactive.feed(Array("\u{1B}[1;4H\u{754C}\u{1B}[1;5H\u{1B}7\u{1B}[?1047h".utf8))
+        primaryInactive.feed(Array("\u{1B}[3;1H\u{1B}7".utf8))
+        primaryInactive.resize(columns: 4, rows: 3)
+        primaryInactive.feed(Array("\u{1B}[?1047l\u{1B}8".utf8))
+        #expect(primaryInactive.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(primaryInactive.cell(row: 0, column: 3)?.kind != .wideTail)
+
+        var alternateInactive = try #require(Terminal(columns: 5, rows: 3))
+        alternateInactive.feed(Array("\u{1B}[?1047h\u{1B}[1;4H\u{754C}\u{1B}[1;5H\u{1B}7\u{1B}[?1047l".utf8))
+        alternateInactive.feed(Array("\u{1B}[3;1H\u{1B}7".utf8))
+        alternateInactive.resize(columns: 4, rows: 3)
+        alternateInactive.feed(Array("\u{1B}[?1047h\u{1B}8".utf8))
+        #expect(alternateInactive.geometry.rows.allSatisfy { $0.cells.count == 4 })
+        #expect(alternateInactive.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(alternateInactive.cell(row: 0, column: 3)?.kind != .wideTail)
+    }
+
+    @Test("primary projections and active row structure select screens explicitly")
+    func projectionRoutesStayDistinctAfterAlternateExit() throws {
+        // Intent: recovery reads primary rows while diagnostics always report the live grid.
+        // Why it exists: retaining both screens makes the old optional-based projection wrong.
+        // Scenario: the primary says PRIMARY while an alternate frame says ALT, then exits.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("PRIMARY\u{1B}[?1047h\u{1B}[HALT".utf8))
+        #expect(terminal.primaryHistoryText == "PRIMARY")
+        #expect(terminal.primaryHistoryTailText(maxLines: 10, maxChars: 100) == "PRIMARY")
+        #expect(terminal.rowStructure.suffix(2).first?.contentEnd == 3)
+
+        terminal.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(terminal.primaryHistoryText == "PRIMARY")
+        #expect(terminal.primaryHistoryTailText(maxLines: 10, maxChars: 100) == "PRIMARY")
+        #expect(terminal.rowStructure.suffix(2).first?.contentEnd == 4)
     }
 
     @Test("inactive primary resize is content-equivalent to resizing before alt entry")

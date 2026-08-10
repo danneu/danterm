@@ -24,10 +24,11 @@
       "type": "expect",
       "expect": {
         "viewportContains": [
-          " xxxst",
+          "  test",
           "[undeadleech@archhq saved_cursor_alt]$ exit"
         ],
         "viewportExcludes": [
+          " xxxst",
           "\u23bd\u251c",
           "\u2502\u2502\u2502"
         ]
