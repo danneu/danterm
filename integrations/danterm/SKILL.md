@@ -9,7 +9,8 @@ allowed-tools: Bash(danterm *)
 
 `danterm` is the shell client for the DanTerm terminal. Run
 `danterm help` for the authoritative command list. The recipes below cover the
-cases agents hit in practice.
+cases agents hit in practice. Run `danterm skill` to print this exact,
+version-matched file without installing the skill or starting DanTerm.
 
 ## CLI API
 
@@ -19,6 +20,9 @@ Keep this section synced with `danterm help` and the parser in
 Every IPC command accepts `--socket <path>` before the command name. This
 explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
 lookup.
+
+The local `skill` and `doctor` commands do not accept `--socket`, inspect pane
+targeting, or contact the app.
 
     danterm ls
     danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
@@ -34,6 +38,7 @@ lookup.
     danterm pane tape --pane <pane-id> [--follow] [--from-now]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
+    danterm skill
     danterm doctor
     danterm todo list [--pane <pane-id>]
     danterm todo add [--pane <pane-id>] <text>
@@ -184,6 +189,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` |
 | "check DanTerm integration health" | `doctor` |
+| "show DanTerm's agent instructions" | `skill` |
 
 ## Recipes
 
@@ -412,6 +418,10 @@ configured font setup is healthy:
 
     danterm doctor
 
+When skill discovery is not installed, `doctor` points to `danterm skill` for
+on-demand instructions. The installed discovery paths remain useful when an
+agent should select this skill automatically.
+
 The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
 
@@ -469,6 +479,7 @@ else prints nothing on success and exits 0.
 
 | Command | Stdout |
 |---|---|
+| `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, optionally with `agentSession: {kind, sessionId}`) |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd}, tab: {id, title, groupId}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |

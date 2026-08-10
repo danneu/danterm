@@ -86,6 +86,7 @@ grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <
 grep -qF 'agent attach --kind <kind> --id <session-id>' "$err"
 grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
 grep -qE '^ *doctor +Check DanTerm integration health' "$err"
+grep -qE '^ *skill +Print DanTerm' "$err"
 ! grep -qF 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
 grep -qF 'danterm [--socket <path>] <command> [args]' "$err"
@@ -110,6 +111,7 @@ for help_arg in help --help -h; do
     grep -qF 'agent attach --kind <kind> --id <session-id>' "$out"
     grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
     grep -qE '^ *doctor +Check DanTerm integration health' "$out"
+    grep -qE '^ *skill +Print DanTerm' "$out"
     ! grep -qF 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
     grep -qF 'danterm [--socket <path>] <command> [args]' "$out"
@@ -117,6 +119,55 @@ for help_arg in help --help -h; do
     grep -qF 'DANTERM_PANE' "$out"
     ! grep -qF 'DANTERM_TAB' "$out"
 done
+
+# `skill` is local-only and emits the canonical bundled skill bytes without
+# consulting pane targeting or the control socket. Exercise the helper directly
+# and through the shape installed on PATH.
+export DANTERM_SOCK="$launch_output/unusable.sock"
+run_cli skill
+[[ $status -eq 0 ]]
+[[ ! -s "$err" ]]
+cmp "$SCRIPT_DIR/integrations/danterm/SKILL.md" "$out"
+
+skill_bin=$(mktemp -d)
+ln -s "$CLI_PATH" "$skill_bin/danterm"
+: >"$out"
+: >"$err"
+if PATH="$skill_bin:$PATH" danterm skill >"$out" 2>"$err"; then
+    status=0
+else
+    status=$?
+fi
+[[ $status -eq 0 ]]
+[[ ! -s "$err" ]]
+cmp "$SCRIPT_DIR/integrations/danterm/SKILL.md" "$out"
+
+run_cli skill extra
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: unexpected argument: extra' "$err"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+run_cli skill --bogus
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: unknown flag: --bogus' "$err"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+
+missing_bundle="$skill_bin/Missing.app"
+mkdir -p "$missing_bundle/Contents/Helpers"
+cp "$CLI_PATH" "$missing_bundle/Contents/Helpers/danterm"
+: >"$out"
+: >"$err"
+if "$missing_bundle/Contents/Helpers/danterm" skill >"$out" 2>"$err"; then
+    status=0
+else
+    status=$?
+fi
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: bundled skill is missing or unreadable' "$err"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+rm -rf "$skill_bin"
 
 # `doctor` is local-only like help: it must work before the app launches and
 # must not surface the socket error text.

@@ -70,6 +70,11 @@ chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"
 cp "$SCRIPT_DIR/icon/AppIcon-dev/Assets.car" "$APP_PATH/Contents/Resources/"
+mkdir -p "$APP_PATH/Contents/Resources/danterm"
+cp "$SCRIPT_DIR/integrations/danterm/SKILL.md" \
+    "$APP_PATH/Contents/Resources/danterm/SKILL.md"
+cmp "$SCRIPT_DIR/integrations/danterm/SKILL.md" \
+    "$APP_PATH/Contents/Resources/danterm/SKILL.md"
 
 # Bundle agent hook scripts under Resources, matching release builds. These are
 # raw scripts, so jq and, for session hooks, danterm must be on PATH at runtime.

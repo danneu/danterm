@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract tests for the release bundle's Helpers directory produced by build-app.sh.
+# Contract tests for release helpers and version-matched resources from build-app.sh.
 #
 # The GUI refuses to start a Swift terminal session without an executable
 # Contents/Helpers/PTYSessionBootstrap, so a release bundle that omits it passes
@@ -25,6 +25,7 @@ mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/icon/AppIcon" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
+    "$BUILD_ROOT/integrations/danterm" \
     "$BUILD_ROOT/integrations/shell-integration/vendor" \
     "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
@@ -41,6 +42,7 @@ cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/integrations/claude-code/claude-notify-osc777.sh"
 : > "$BUILD_ROOT/integrations/claude-code/danterm-agent-session.sh"
 : > "$BUILD_ROOT/integrations/codex/danterm-agent-session.sh"
+printf '%s\n' '# fixture DanTerm skill' > "$BUILD_ROOT/integrations/danterm/SKILL.md"
 for shell in zsh bash fish; do
     printf '# fixture %s integration\n' "$shell" > "$BUILD_ROOT/integrations/shell-integration/danterm.$shell"
 done
@@ -120,6 +122,14 @@ if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm
     fail "GUI and CLI bundle binaries have identical content"
 fi
 
+# Intent: the release bundle preserves the sole authored agent skill byte-for-byte.
+# Why it exists: `danterm skill` must report instructions from the same version as
+#   the helper even when no agent discovery path is installed.
+# Scenario: build-app.sh assembles the production bundle.
+cmp "$BUILD_ROOT/integrations/danterm/SKILL.md" \
+    "$APP_PATH/Contents/Resources/danterm/SKILL.md" \
+    || fail "release bundle did not preserve the canonical DanTerm skill"
+
 # Intent: the workflows that gate a release assert the helper is present.
 # Why it exists: build-app.sh once produced a bundle whose default terminal
 #   backend could not start, and every packaging check still passed.
@@ -128,6 +138,10 @@ grep -q 'Contents/Helpers/PTYSessionBootstrap' "$ROOT_DIR/.github/workflows/ci.y
     || fail "ci.yml bundle-layout check does not require PTYSessionBootstrap"
 grep -q 'Contents/Helpers/PTYSessionBootstrap' "$ROOT_DIR/.github/workflows/release-stable.yml" \
     || fail "release-stable.yml layout check does not require PTYSessionBootstrap"
+grep -q 'Contents/Resources/danterm/SKILL.md' "$ROOT_DIR/.github/workflows/ci.yml" \
+    || fail "ci.yml release checks do not require the bundled DanTerm skill"
+grep -q 'Contents/Resources/danterm/SKILL.md' "$ROOT_DIR/.github/workflows/release-stable.yml" \
+    || fail "release-stable.yml checks do not require the bundled DanTerm skill"
 
 # Nested code must be signed before its container, or the outer signature seals a
 # helper whose own signature is then replaced.

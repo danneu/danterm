@@ -174,7 +174,7 @@ private func evaluateSkill(
             id: id,
             title: title,
             status: .warn,
-            message: "Skill missing. Symlink the DanTerm agent skill into \(destination) -- source it from the Nix danterm-agent-skill output or the repo's integrations/danterm (see README \"Agent Skill\"); it isn't shipped in the app bundle."
+            message: "Skill discovery is not installed at \(destination). Run `danterm skill` for on-demand instructions, or symlink the Nix danterm-agent-skill output or the repo's integrations/danterm there (see README \"Agent Skill\")."
         )
     }
     return DoctorCheck(id: id, title: title, status: .ok, message: nil)

@@ -122,6 +122,11 @@ PATH, the manual `.app` `/usr/local/bin/danterm` link when relevant, app
 translocation, and `jq` on PATH. The command is local-only, so it works even
 when the app is not running.
 
+Run `danterm skill` to print the agent instructions shipped with that CLI
+version. This local command works without a running app, network access, or an
+installed discovery symlink; installed skills remain available for automatic
+agent discovery.
+
 Claude Code's default notification path waits on a roughly 60-second idle
 timer before emitting terminal notifications. DanTerm ships Claude Code hooks
 that bypass that delay and emit immediate per-pane OSC 777 notifications when

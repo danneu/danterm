@@ -1,4 +1,4 @@
-// Command-line client for DanTerm's JSON-RPC control socket.
+// Local utility commands and the command-line client for DanTerm's JSON-RPC socket.
 import Foundation
 import DanTermProtocol
 import Darwin
@@ -61,6 +61,7 @@ struct DanTermCLI {
           agent attach --kind <kind> --id <session-id>
                                       Report an active coding-agent session for
                                       the caller's pane
+          skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
           todo list [--pane <pane-id>]
                                       List todos as JSON
@@ -106,6 +107,10 @@ struct DanTermCLI {
             if rawArgs == ["help"] || rawArgs == ["--help"] || rawArgs == ["-h"] {
                 print(usageText, terminator: "")
                 exit(0)
+            }
+            if rawArgs.first == "skill" {
+                try runSkill(Array(rawArgs.dropFirst()))
+                return
             }
             if rawArgs.first == "doctor" {
                 try runDoctor(Array(rawArgs.dropFirst()))
@@ -223,6 +228,27 @@ struct DanTermCLI {
         let checks = evaluateDoctor(gatherDoctorFacts(configFont: gatherConfigFontFacts()))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
+    }
+
+    private static func runSkill(_ args: [String]) throws {
+        for arg in args {
+            if arg.hasPrefix("-") {
+                throw CLIParseError("unknown flag: \(arg)")
+            }
+            throw CLIParseError("unexpected argument: \(arg)")
+        }
+
+        do {
+            let data = try loadBundledSkill(
+                argv0: CommandLine.arguments.first ?? "",
+                environment: ProcessInfo.processInfo.environment,
+                fileManager: .default
+            )
+            try FileHandle.standardOutput.write(contentsOf: data)
+            exit(0)
+        } catch is SkillCommandError {
+            throw CLIError("bundled skill is missing or unreadable")
+        }
     }
 
     private static func validateHello(_ line: String) throws {

@@ -19,6 +19,7 @@ mkdir -p "$BUILD_ROOT/lib/TerminalPTY" \
     "$BUILD_ROOT/icon/AppIcon-dev" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
+    "$BUILD_ROOT/integrations/danterm" \
     "$BUILD_ROOT/integrations/shell-integration/vendor" \
     "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
@@ -36,6 +37,7 @@ cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/integrations/claude-code/claude-notify-osc777.sh"
 : > "$BUILD_ROOT/integrations/claude-code/danterm-agent-session.sh"
 : > "$BUILD_ROOT/integrations/codex/danterm-agent-session.sh"
+printf '%s\n' '# fixture DanTerm skill' > "$BUILD_ROOT/integrations/danterm/SKILL.md"
 for shell in zsh bash fish; do
     printf '# fixture %s integration\n' "$shell" > "$BUILD_ROOT/integrations/shell-integration/danterm.$shell"
 done
@@ -119,6 +121,9 @@ run_build debug
     || fail "debug bundle omitted the Nerd Font symbols face"
 [[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/NerdFontsSymbolsOnly/LICENSE" ]] \
     || fail "debug bundle omitted the Nerd Font license"
+cmp "$BUILD_ROOT/integrations/danterm/SKILL.md" \
+    "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/danterm/SKILL.md" \
+    || fail "debug bundle did not preserve the canonical DanTerm skill"
 for shell in zsh bash fish; do
     cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \

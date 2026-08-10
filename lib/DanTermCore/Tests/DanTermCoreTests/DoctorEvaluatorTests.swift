@@ -88,7 +88,7 @@ import DanTermProtocol
 
         let claudeMissing = check(.claudeSkill, in: evaluateDoctor(makeFacts(claude: agent(present: true, skillInstalled: false))))
         #expect(claudeMissing.status == .warn)
-        #expect(claudeMissing.message == "Skill missing. Symlink the DanTerm agent skill into /home/.claude/skills/danterm -- source it from the Nix danterm-agent-skill output or the repo's integrations/danterm (see README \"Agent Skill\"); it isn't shipped in the app bundle.")
+        #expect(claudeMissing.message == "Skill discovery is not installed at /home/.claude/skills/danterm. Run `danterm skill` for on-demand instructions, or symlink the Nix danterm-agent-skill output or the repo's integrations/danterm there (see README \"Agent Skill\").")
 
         let claudeAbsent = check(.claudeSkill, in: evaluateDoctor(makeFacts(claude: agent(present: false))))
         #expect(claudeAbsent.status == .skip)
