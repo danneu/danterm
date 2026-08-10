@@ -140,7 +140,7 @@ import Testing
         // Scenario: spec-first unknown-theme decode.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -194,11 +194,11 @@ import Testing
         let p1 = PaneId()
         let light = ValidatedAppRestore(
             snapshot: toSnapshot(makeModel()), model: makeModel(),
-            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", launch: nil, scrollback: nil, theme: "Dracula")]
+            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", command: nil, scrollback: nil, theme: "Dracula")]
         )
         let enriched = ValidatedAppRestore(
             snapshot: toSnapshot(makeModel()), model: makeModel(),
-            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", launch: nil, scrollback: "text", theme: "Dracula")]
+            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", command: nil, scrollback: "text", theme: "Dracula")]
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)
         #expect(merged.paneSnapshots[p1]?.theme == "Dracula")
@@ -227,7 +227,7 @@ import Testing
         // Scenario: spec-first unknown round-trip.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",

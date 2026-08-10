@@ -314,10 +314,9 @@ struct ViewLocalState {
 
 // MARK: - Init Snapshot Types
 
-// Current on-disk/wire format version. v2 is the leaf-embedded format: each
-// split-tree leaf carries its full PaneSnapshot inline (no separate flat `panes`
-// array). v1 (flat array) is rejected outright -- see loadValidatedInitFile.
-let appInitFileVersion = 2
+// Current on-disk/wire format version. v3 keeps one pane cwd, stores the launch
+// command directly on the pane, and rejects invalid persisted agent sessions.
+let appInitFileVersion = 3
 
 struct AppInitFile: Codable {
     let version: Int
@@ -346,7 +345,7 @@ struct TabSnapshot: Codable {
 }
 
 indirect enum SplitNodeSnapshot: Codable {
-    // v2 leaf-embedded format: a leaf owns its full PaneSnapshot inline.
+    // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
     case split(id: String?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
 
@@ -363,7 +362,7 @@ indirect enum SplitNodeSnapshot: Codable {
             // `{ "type": "leaf" }` (id and all fields minted/defaulted on decode) --
             // preserving the v1 omitted-id authoring affordance.
             let pane = try container.decodeIfPresent(PaneSnapshot.self, forKey: .pane)
-            self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, launch: nil, scrollback: nil, theme: nil))
+            self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, command: nil, scrollback: nil, theme: nil))
         case "split":
             let id = try container.decodeIfPresent(String.self, forKey: .id)
             let direction = try container.decode(String.self, forKey: .direction)
@@ -399,8 +398,7 @@ struct TodoSnapshot: Codable {
     let isDone: Bool
 }
 
-/// Raw checkpoint DTO for an agent session; validate through `AgentSession`
-/// before printing or showing any of these strings.
+/// Strictly decoded checkpoint DTO validated through `AgentSession` during load.
 struct AgentSessionSnapshot: Codable {
     let kind: String
     let sessionId: String
@@ -409,23 +407,13 @@ struct AgentSessionSnapshot: Codable {
         self.kind = kind
         self.sessionId = sessionId
     }
-
-    init(from decoder: Decoder) throws {
-        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-            kind = ""
-            sessionId = ""
-            return
-        }
-        kind = (try? container.decode(String.self, forKey: .kind)) ?? ""
-        sessionId = (try? container.decode(String.self, forKey: .sessionId)) ?? ""
-    }
 }
 
 struct PaneSnapshot: Codable {
     let id: String?
     let title: String?
     let cwd: String?
-    var launch: PaneLaunchSnapshot?
+    var command: String?
     var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
     let theme: String?       // raw catalog theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
@@ -433,11 +421,6 @@ struct PaneSnapshot: Codable {
     // Absent for an unzoomed pane, so a pane at the configured size persists
     // exactly as it did before per-pane zoom existed.
     var fontSizeSteps: Int? = nil
-}
-
-struct PaneLaunchSnapshot: Codable {
-    let command: String?
-    let cwd: String?
 }
 
 // MARK: - Snapshot Validation & Build
@@ -588,16 +571,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
 /// expand against the live home unless a test pins one.
 func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: String?, command: String?) {
     let h = home ?? CoreEnv.live.homeDirectory()
-    let cwd: String?
-    if let launchCwd = paneSnapshot.launch?.cwd {
-        cwd = expandTilde(launchCwd, home: h)
-    } else if let paneCwd = paneSnapshot.cwd {
-        cwd = expandTilde(paneCwd, home: h)
-    } else {
-        cwd = nil
-    }
-    let command = paneSnapshot.launch?.command
-    return (cwd, command)
+    let cwd = paneSnapshot.cwd.map { expandTilde($0, home: h) }
+    return (cwd, paneSnapshot.command)
 }
 
 /// Expand a leading `~` to an absolute path. `home` defaults to the real ambient
@@ -618,6 +593,11 @@ private func parseSplitNode(
 ) -> SplitNodeModel? {
     switch snapshot {
     case .leaf(let ps):
+        if let persistedAgent = ps.agentSession,
+           AgentSession(kind: persistedAgent.kind, sessionId: persistedAgent.sessionId) == nil {
+            print("[init] Invalid agent session")
+            return nil
+        }
         // Resolve the pane id: explicit (validated UUID) or freshly minted for an
         // id-less leaf. The mint is the hand-authoring affordance that the old
         // autoPaneIds / autoPaneCursor pre-pass provided; it now happens inline.

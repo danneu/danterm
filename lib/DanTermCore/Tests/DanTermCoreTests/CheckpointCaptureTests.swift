@@ -185,7 +185,7 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
 
         let restore = try loadValidatedInitFile(from: capture.encoder()())
         let pane = try #require(restore.paneSnapshots[paneIds[0]])
-        #expect(pane.launch?.command == "swift test")
+        #expect(pane.command == "swift test")
         #expect(pane.agentSession?.kind == "claude")
         #expect(pane.agentSession?.sessionId == "session-1")
         #expect(pane.scrollback == nil)

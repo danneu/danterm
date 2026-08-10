@@ -259,7 +259,7 @@ import Testing
         let home = NSHomeDirectory()
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -281,19 +281,19 @@ import Testing
 
     @Test("testImportDerivesSubtitleFromLaunchCwd")
     func testImportDerivesSubtitleFromLaunchCwd() throws {
-        // Intent: on import, the tab subtitle derives from launch.cwd.
-        // Why it exists: pins the launch.cwd source for subtitle.
-        // Scenario: spec-first launch.cwd subtitle.
+        // Intent: on import, the tab subtitle derives from the pane cwd.
+        // Why it exists: pins the pane cwd source for subtitle.
+        // Scenario: spec-first pane cwd subtitle.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T", "launch": { "cwd": "~/projects" } } }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T", "cwd": "~/projects" } }
               }]
             }]
           }
@@ -313,7 +313,7 @@ import Testing
         // Scenario: spec-first nil subtitle.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -335,14 +335,14 @@ import Testing
 
     @Test("testLegacySnapshotWithTitleSubtitleDecodesSuccessfully")
     func testLegacySnapshotWithTitleSubtitleDecodesSuccessfully() throws {
-        // Intent: legacy v2 snapshots that include tab-level title +
+        // Intent: v3 snapshots that include tab-level title +
         //   subtitle decode (the fields are ignored; title/subtitle
         //   derive from pane).
         // Why it exists: pins backward compat for old snapshots.
         // Scenario: spec-first legacy snapshot.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -578,7 +578,7 @@ import Testing
         // Scenario: spec-first omitted customTitle.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",

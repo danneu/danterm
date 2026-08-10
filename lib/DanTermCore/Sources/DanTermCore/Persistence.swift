@@ -35,8 +35,8 @@ func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> Vali
     throw AppInitFileLoadError.decodeFailed
   }
 
-  // Require the current leaf-embedded version. v1 (flat panes array) is rejected
-  // outright -- no version-dispatch fork, no one-shot importer. A v1 checkpoint
+  // Require the current format. Older formats are rejected outright -- no
+  // version-dispatch fork or one-shot importer. An old checkpoint
   // on the first post-upgrade launch falls through to a fresh session.
   guard initFile.version == appInitFileVersion else {
     throw AppInitFileLoadError.unsupportedVersion(initFile.version)
@@ -104,7 +104,6 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 /// and semantic recovery values are grafted separately from live-session reads.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
-  let launch = abbrevCwd.map { PaneLaunchSnapshot(command: nil, cwd: $0) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
     TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
   }
@@ -112,7 +111,7 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     id: pane.id.rawValue.uuidString,
     title: pane.title,
     cwd: abbrevCwd,
-    launch: launch,
+    command: nil,
     scrollback: nil,
     theme: pane.theme
   )
@@ -205,10 +204,7 @@ private func graftSemanticRecoveryIntoNode(
     else {
       return .leaf(pane)
     }
-    let cwd = pane.launch?.cwd
-    pane.launch = recovery.command == nil && cwd == nil
-      ? nil
-      : PaneLaunchSnapshot(command: recovery.command, cwd: cwd)
+    pane.command = recovery.command
     pane.agentSession = recovery.agentSession.map {
       AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
     }

@@ -287,5 +287,11 @@ agent replay hint still appear.
 ## Commit progress
 
 - [x] 1. feat(recovery): graft pane semantic recovery state
-- [ ] 2. feat(persistence): validate the version 3 pane format
+- [x] 2. feat(persistence): validate the version 3 pane format
 - [ ] 3. refactor(semantics): remove pane semantic mirrors
+
+## Implementation notes
+
+- Commit 2 keeps `AgentSessionSnapshot` as a strict DTO. Wrongly typed fields
+  fail decoding, while `validateAndBuildDetailed` validates decoded values
+  through `AgentSession` and rejects invalid values before restore succeeds.

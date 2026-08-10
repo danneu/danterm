@@ -13,21 +13,21 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct TreeOwnsPanesTests {
-    @Test("v2 snapshot decodes embedded panes into leaf-owned panes and re-encodes identically")
-    func v2SnapshotDecodesEmbeddedPanesAndReencodesIdentically() throws {
-        // Intent: a v2 snapshot (panes nested in tree leaves) decodes into
+    @Test("v3 snapshot decodes embedded panes into leaf-owned panes and re-encodes identically")
+    func v3SnapshotDecodesEmbeddedPanesAndReencodesIdentically() throws {
+        // Intent: a v3 snapshot (panes nested in tree leaves) decodes into
         //   leaf-owned panes -- each reachable via model.pane(id) with its
         //   title/cwd/theme/todos -- and re-encodes back to an identical model.
         // Why it exists: pins the embedded native round-trip the format
         //   restructure rests on; a regression that re-introduced a separate
         //   top-level panes dict would silently desync from the tree.
         // Scenario: spec-first on-disk contract -- the user's persisted init
-        //   file (v2 format) must round-trip without losing pane state.
+        //   file (v3 format) must round-trip without losing pane state.
         let paneAId = "A13076E4-A29C-4358-A771-B4B4DF84C6C5"
         let paneBId = "B2222222-0000-4000-8000-000000000002"
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -49,7 +49,7 @@ import Testing
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        let model = try #require(validateAndBuild(initFile.model), "v2 snapshot should validate")
+        let model = try #require(validateAndBuild(initFile.model), "v3 snapshot should validate")
         let a = PaneId(rawValue: UUID(uuidString: paneAId)!)
         let b = PaneId(rawValue: UUID(uuidString: paneBId)!)
 
@@ -350,11 +350,11 @@ import Testing
         #expect(model.lastNotificationTime[paneId] == nil, "stale throttle data should be removed")
     }
 
-    // MARK: - Stage 2: leaf-embedded v2 wire format
+    // MARK: - Leaf-embedded v3 wire format
 
-    @Test("toInitFile writes version 2")
-    func toInitFileWritesVersion2() throws {
-        // Intent: the written init file's top-level `version` field is 2.
+    @Test("toInitFile writes version 3")
+    func toInitFileWritesVersion3() throws {
+        // Intent: the written init file's top-level `version` field is 3.
         // Why it exists: pins the on-disk version contract independent of the
         //   snapshot Swift types -- a refactor that bumped the version
         //   silently would break older builds reading newer files.
@@ -364,7 +364,7 @@ import Testing
         createTab(&model)
         let data = try JSONEncoder().encode(toInitFile(model))
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        #expect((obj?["version"] as? Int) == 2, "init file version should be 2")
+        #expect((obj?["version"] as? Int) == 3, "init file version should be 3")
     }
 
     @Test("toSnapshot JSON embeds panes in tree leaves with no top-level panes array")
@@ -405,7 +405,7 @@ import Testing
         //   honor the rest of the leaf.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -425,23 +425,22 @@ import Testing
         #expect(model.groups[0].tabs[0].focusedPaneId == minted, "focus defaults to the minted leaf")
     }
 
-    @Test("restore chrome derives from the focused leaf's embedded PaneSnapshot, launch.cwd wins, sibling does not leak")
-    func restoreChromeDerivesFromFocusedLeafLaunchCwdWinsSiblingNoLeak() throws {
+    @Test("restore chrome derives from the focused leaf's pane cwd and ignores siblings")
+    func restoreChromeDerivesFromFocusedLeafPaneCwd() throws {
         // Intent: tab chrome (title/subtitle) is recomputed at decode from
-        //   the FOCUSED leaf's embedded PaneSnapshot, with launch.cwd
-        //   preferred over pane.cwd; a non-focused sibling's cwd must not
-        //   leak into the chrome.
+        //   the FOCUSED leaf's embedded PaneSnapshot cwd; a non-focused
+        //   sibling's cwd must not leak into the chrome.
         // Why it exists: chrome is derived, not stored, so the encode/decode
         //   round-trip test cannot catch a mis-relocated read -- this test
         //   is its dedicated net.
         // Scenario: spec-first chrome derivation -- a split tab whose
-        //   focused leaf has both pane.cwd and launch.cwd set must surface
-        //   the launch.cwd in the chrome, never the sibling's cwd.
+        //   focused leaf must surface its cwd in the chrome, never the
+        //   sibling's cwd.
         let focusedId = "F1111111-0000-4000-8000-000000000001"
         let siblingId = "55555555-0000-4000-8000-000000000002"
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -453,8 +452,7 @@ import Testing
                   "first": { "type": "leaf", "pane": { "id": "\(siblingId)", "title": "Sibling", "cwd": "~/sibling" } },
                   "second": { "type": "leaf", "pane": {
                     "id": "\(focusedId)", "title": "Editor",
-                    "cwd": "~/focused-pane",
-                    "launch": { "cwd": "~/focused-launch" } } }
+                    "cwd": "~/focused-pane" } }
                 }
               }]
             }]
@@ -466,9 +464,9 @@ import Testing
         let model = try #require(validateAndBuild(initFile.model), "split snapshot should validate")
         let tab = model.groups[0].tabs[0]
 
-        // launch.cwd wins over pane.cwd for the subtitle.
+        // The focused pane cwd supplies the subtitle.
         #expect(tab.title == "Editor")
-        #expect(tab.subtitle == "~/focused-launch")
+        #expect(tab.subtitle == "~/focused-pane")
         // The sibling's cwd never bleeds into the tab chrome.
         #expect(tab.subtitle != "~/sibling", "sibling cwd must not leak into the tab subtitle")
     }

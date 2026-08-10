@@ -26,7 +26,7 @@ import Testing
         // Why it exists: pins the leaf of the restore home seam so a regression
         //   that reverts to bare NSHomeDirectory() fails loudly under a fake home.
         // Scenario: spec-first machine-independence check for the restore path.
-        let ps = PaneSnapshot(id: nil, title: "T", cwd: "~/foo", launch: nil, scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: nil, title: "T", cwd: "~/foo", command: nil, scrollback: nil, theme: nil)
         let (cwd, _) = resolveLaunch(ps, home: Self.fakeHome)
         #expect(cwd == Self.fakeHome + "/foo")
     }
@@ -43,7 +43,7 @@ import Testing
         //   `~/foo` cwd loaded under home=/fake/home yields /fake/home/foo.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -97,7 +97,7 @@ import Testing
         let p = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",

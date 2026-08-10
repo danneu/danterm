@@ -149,7 +149,7 @@ import Testing
         // Scenario: spec-first -- a snapshot leaf carrying Int.max steps.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",

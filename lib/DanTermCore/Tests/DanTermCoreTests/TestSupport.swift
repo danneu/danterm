@@ -58,7 +58,7 @@ func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
     commands.contains(where: check)
 }
 
-// MARK: - Snapshot (v2 leaf-embedded) test helpers
+// MARK: - Snapshot (v3 leaf-embedded) test helpers
 
 /// Collect every leaf's embedded PaneSnapshot from a snapshot split tree.
 func paneSnapshots(in node: SplitNodeSnapshot) -> [PaneSnapshot] {

@@ -297,7 +297,7 @@ import Testing
         // Intent: dispatching .exportState produces exactly one
         //   .exportState Command whose snapshot agrees with what
         //   toSnapshot(model) would have produced (groups, panes,
-        //   selectedTabId, IDs, and launch.cwd) AND whose
+        //   selectedTabId, IDs, and pane cwd) AND whose
         //   focused pane's leaf embeds the pane.
         // Why it exists: pins the export wire payload, including the
         //   leaf-embedded pane shape and the pure-snapshot scrollback
@@ -324,11 +324,11 @@ import Testing
         #expect(snapshot.groups[0].id == expected.groups[0].id)
         #expect(snapshot.groups[0].tabs[0].id == expected.groups[0].tabs[0].id)
         #expect(snapshot.groups[0].tabs[0].focusedPaneId == expected.groups[0].tabs[0].focusedPaneId)
-        // Verify launch fields (panes now live embedded in the tree leaves)
+        // Verify pane fields (panes now live embedded in the tree leaves)
         let snapPane = allPaneSnapshots(snapshot)[0]
         #expect(snapPane.id == allPaneSnapshots(expected)[0].id)
-        #expect(snapPane.launch?.command == nil)
-        #expect(snapPane.launch?.cwd == "~/projects")
+        #expect(snapPane.command == nil)
+        #expect(snapPane.cwd == "~/projects")
         // Pure snapshot has nil scrollback (enrichment happens in runtime)
         #expect(snapPane.scrollback == nil, "pure snapshot should have nil scrollback")
         // Verify rootNode type -- the leaf embeds the focused pane.
@@ -451,7 +451,7 @@ import Testing
         #expect(snapshot.groups[1].isCollapsed == true)
     }
 
-    // MARK: - Launch field
+    // MARK: - Recovery command
 
     @Test("the structural snapshot excludes the model command mirror")
     func structuralSnapshotExcludesModelCommandMirror() {
@@ -460,23 +460,19 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.lastCommand = "vim" }
         let snapshot = toSnapshot(model)
-        #expect(allPaneSnapshots(snapshot)[0].launch?.command == nil)
+        #expect(allPaneSnapshots(snapshot)[0].command == nil)
     }
 
-    @Test("launch omitted when no command and no cwd")
-    func launchOmittedWhenNoCommandAndNoCwd() {
-        // Intent: a pane with neither cwd nor lastCommand has a nil launch
-        //   field on its snapshot (no spurious empty launch object).
-        // Why it exists: pins the snapshot's optional-empty convention.
-        // Scenario: spec-first projection -- clear both fields, snapshot
-        //   launch is nil.
+    @Test("command and cwd are nil when their sources are absent")
+    func commandAndCwdAreNilWhenSourcesAreAbsent() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.cwd = nil }
         model.updatePane(paneId) { $0.lastCommand = nil }
         let snapshot = toSnapshot(model)
-        #expect(allPaneSnapshots(snapshot)[0].launch == nil, "launch should be nil when no command and no cwd")
+        #expect(allPaneSnapshots(snapshot)[0].command == nil)
+        #expect(allPaneSnapshots(snapshot)[0].cwd == nil)
     }
 
     @Test("cwd abbreviated with ~ in export")
@@ -496,20 +492,15 @@ import Testing
         #expect(allPaneSnapshots(snapshot)[0].cwd == "~/projects")
     }
 
-    @Test("launch.cwd present when cwd is set")
-    func launchCwdPresentWhenCwdIsSet() {
-        // Intent: with a cwd set (and no command), launch is present and
-        //   carries the abbreviated cwd.
-        // Why it exists: pins the "cwd alone implies a launch" projection.
-        // Scenario: spec-first projection -- cwd = ~/work, snapshot
-        //   launch.cwd = "~/work".
+    @Test("pane cwd is present when cwd is set")
+    func paneCwdPresentWhenCwdIsSet() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.cwd = home + "/work" }
         let snapshot = toSnapshot(model)
-        #expect(allPaneSnapshots(snapshot)[0].launch?.cwd == "~/work")
+        #expect(allPaneSnapshots(snapshot)[0].cwd == "~/work")
     }
 
     @Test("semantic recovery graft combines command with structural cwd")
@@ -523,10 +514,9 @@ import Testing
             onto: toSnapshot(model),
             recoveryByPaneId: [paneId: PaneSemanticRecoverySnapshot(command: "claude")]
         )
-        let launch = allPaneSnapshots(snapshot)[0].launch
-        #expect(launch != nil, "launch should be present")
-        #expect(launch?.command == "claude")
-        #expect(launch?.cwd == "~/code")
+        let pane = allPaneSnapshots(snapshot)[0]
+        #expect(pane.command == "claude")
+        #expect(pane.cwd == "~/code")
     }
 
     // MARK: - JSON round-trip
@@ -535,12 +525,12 @@ import Testing
     func jsonRoundTripPreservesCommandMetadata() throws {
         // Intent: a model with a split tab and a vim-running pane at
         //   ~/work survives encode (with sorted-keys + pretty-print) and
-        //   decode + validateAndBuild, with the launch fields intact and
+        //   decode + validateAndBuild, with the recovery fields intact and
         //   both panes reachable.
         // Why it exists: pins the JSON-side round-trip distinct from the
         //   in-memory snapshot round-trip (different code paths).
         // Scenario: spec-first JSON round-trip -- the decoded pane's
-        //   launch.command/cwd match what was set; the rebuilt model has
+        //   command/cwd match what was set; the rebuilt model has
         //   the expected pane count.
         var model = makeModel()
         createTab(&model)
@@ -558,11 +548,11 @@ import Testing
         let data = try encoder.encode(initFile)
         let decoded = try JSONDecoder().decode(AppInitFile.self, from: data)
 
-        // Verify snapshot-level launch fields survive encoding (panes embedded in leaves)
+        // Verify snapshot-level recovery fields survive encoding.
         let exportedPane = paneSnapshot(paneId.rawValue.uuidString, in: decoded.model)
         #expect(exportedPane != nil, "pane should exist in decoded snapshot")
-        #expect(exportedPane?.launch?.command == "claude")
-        #expect(exportedPane?.launch?.cwd == "~/work")
+        #expect(exportedPane?.command == "claude")
+        #expect(exportedPane?.cwd == "~/work")
 
         // Verify full rebuild succeeds
         let rebuilt = validateAndBuild(decoded.model)

@@ -1,13 +1,14 @@
 // Pure representation of coding-agent sessions reported from a pane. This file
-// owns validation of untrusted hook/snapshot strings plus the small known-agent
+// owns validation of untrusted hook strings and defensively validates directly
+// constructed snapshot DTOs, plus the small known-agent
 // catalog used for toolbar and recovery text. Keep it free of AppKit and IPC
 // transport details; callers hand raw strings in and get safe display text out.
 import Foundation
 
 /// An agent session reported as currently running inside a pane.
 ///
-/// The live value is intentionally not Codable: checkpoints persist the raw
-/// `AgentSessionSnapshot` DTO, then validate again at recovery-message consumption.
+/// The live value is intentionally not Codable: checkpoints use a strict DTO
+/// that the shared init-file loader validates before restore succeeds.
 struct AgentSession: Equatable {
     private static let toolbarLabelPrefixLength = 6
 

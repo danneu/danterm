@@ -1,6 +1,6 @@
 // Swift Testing migration of the legacy `tests/SnapshotTests.swift` harness
 // suite. Pins the AppInitFile / snapshot wire format: decode/validate, version
-// gating (v2 only), pane-id and tab-id uniqueness checks, normalized
+// gating (v3 only), pane-id and tab-id uniqueness checks, normalized
 // selectedTabId, optional-id minting, session launch resolution, scrollback
 // backward-compat, tab color round-trip, preferences-draft dropping, and the
 // todo round-trips on both panes and tabs. The do/catch-and-assert-error
@@ -18,7 +18,7 @@ import DanTermProtocol
 
     @Test("decode valid AppInitFile JSON")
     func decodeValidAppInitFileJSON() throws {
-        // Intent: a well-formed v2 init file decodes into the expected field
+        // Intent: a well-formed v3 init file decodes into the expected field
         //   values (version, group count, pane count, selectedTabId).
         // Why it exists: pins the happy decode path that every restore flow
         //   relies on at startup.
@@ -27,7 +27,7 @@ import DanTermProtocol
         //   nominated selectedTabId.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -49,7 +49,7 @@ import DanTermProtocol
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        #expect(initFile.version == 2)
+        #expect(initFile.version == 3)
         #expect(initFile.model.groups.count == 1)
         #expect(allPaneSnapshots(initFile.model).count == 1)
         #expect(initFile.model.selectedTabId == "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")
@@ -91,22 +91,21 @@ import DanTermProtocol
         } catch {}
     }
 
-    @Test("loadValidatedInitFile accepts v2 and rejects v1 / v3")
-    func loadValidatedInitFileAcceptsV2RejectsV1AndV3() throws {
-        // Intent: the version guard accepts v2 only -- v1 (the old flat
-        //   panes array) and v3+ are rejected outright with no
+    @Test("loadValidatedInitFile accepts v3 and rejects v1 / v2 / v4")
+    func loadValidatedInitFileAcceptsV3RejectsOldAndFutureVersions() throws {
+        // Intent: the version guard accepts v3 only -- old formats and v4+
+        //   are rejected outright with no
         //   version-dispatch fork.
         // Why it exists: pins the single-version contract so a refactor
         //   that re-introduces v1 silent-import (or grandfathered v3)
         //   cannot reopen format-drift bugs.
         // Scenario: spec-first version-gate check -- the loader round-trips
-        //   v2, rejects v1 with .unsupportedVersion(1), and rejects v3 with
-        //   .unsupportedVersion(3).
-        // v2 round-trips through the loader.
+        //   v3, rejects v1/v2, and rejects v4 with .unsupportedVersion.
+        // v3 round-trips through the loader.
         var model = makeModel()
         createTab(&model)
-        let v2data = try JSONEncoder().encode(toInitFile(model))
-        _ = try loadValidatedInitFile(from: v2data)
+        let v3data = try JSONEncoder().encode(toInitFile(model))
+        _ = try loadValidatedInitFile(from: v3data)
 
         // v1 (flat panes array) is rejected on version, not silently imported.
         let v1json = """
@@ -131,10 +130,19 @@ import DanTermProtocol
             #expect(error == .unsupportedVersion(1))
         }
 
-        // v3 (a future format) is rejected too.
-        let v3json = """
+        let v2json = v1json.replacingOccurrences(of: "\"version\": 1", with: "\"version\": 2")
+        do {
+            _ = try loadValidatedInitFile(from: v2json.data(using: .utf8)!)
+            Issue.record("expected v2 to be rejected")
+            return
+        } catch let error as AppInitFileLoadError {
+            #expect(error == .unsupportedVersion(2))
+        }
+
+        // v4 (a future format) is rejected too.
+        let v4json = """
         {
-          "version": 3,
+          "version": 4,
           "model": {
             "groups": [{
               "name": "General",
@@ -144,17 +152,17 @@ import DanTermProtocol
         }
         """
         do {
-            _ = try loadValidatedInitFile(from: v3json.data(using: .utf8)!)
-            Issue.record("expected v3 to be rejected")
+            _ = try loadValidatedInitFile(from: v4json.data(using: .utf8)!)
+            Issue.record("expected v4 to be rejected")
             return
         } catch let error as AppInitFileLoadError {
-            #expect(error == .unsupportedVersion(3))
+            #expect(error == .unsupportedVersion(4))
         }
     }
 
     @Test("loadValidatedInitFile rejects invalid snapshot")
     func loadValidatedInitFileRejectsInvalidSnapshot() {
-        // Intent: a well-formed v2 file whose snapshot fails validation
+        // Intent: a well-formed v3 file whose snapshot fails validation
         //   surfaces .invalidSnapshot (not a decode error).
         // Why it exists: pins the post-decode validation boundary so a
         //   structurally-empty init file is rejected with the user-visible
@@ -163,7 +171,7 @@ import DanTermProtocol
         //   groups must surface .invalidSnapshot.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": { "groups": [] }
         }
         """
@@ -225,7 +233,7 @@ import DanTermProtocol
         //   leaves at ratio 0.6 must build into 2 panes.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -276,7 +284,7 @@ import DanTermProtocol
         //   single leaf with the same pane UUID; validation must return nil.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -312,7 +320,7 @@ import DanTermProtocol
         //   and second leaves share a pane id; validation must return nil.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -350,7 +358,7 @@ import DanTermProtocol
         //   UUID; validation must return nil.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -381,7 +389,7 @@ import DanTermProtocol
         //   selectedTabId, rebuild succeeds, selectedTabId == first tab id.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -412,7 +420,7 @@ import DanTermProtocol
         //   selectedTabId rebuilds the model with the first tab selected.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -446,7 +454,7 @@ import DanTermProtocol
         //   minted tab id and focused pane == the minted leaf.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -483,7 +491,7 @@ import DanTermProtocol
         //   surfaced via the typed-id accessors.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -509,45 +517,33 @@ import DanTermProtocol
         #expect(model.selectedTabId == TabId(rawValue: UUID(uuidString: "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")!))
     }
 
-    @Test("launch.cwd wins over cwd for session creation")
-    func launchCwdWinsOverCwdForSessionCreation() {
-        // Intent: when both pane.cwd and launch.cwd are present,
-        //   resolveLaunch prefers launch.cwd (with tilde expansion).
-        // Why it exists: pins the precedence rule so a hand-authored
-        //   launch override always wins over a passive pane.cwd.
-        // Scenario: spec-first precedence check -- a snapshot with
-        //   cwd=~/fallback and launch.cwd=~/override resolves to
-        //   ~/override after tilde expansion.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/fallback", launch: PaneLaunchSnapshot(command: nil, cwd: "~/override"), scrollback: nil, theme: nil)
+    @Test("session creation resolves cwd from the pane cwd")
+    func sessionCreationResolvesPaneCwd() {
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/pane", command: nil, scrollback: nil, theme: nil)
         let (cwd, _) = resolveLaunch(ps)
         let home = NSHomeDirectory()
-        #expect(cwd == home + "/override")
+        #expect(cwd == home + "/pane")
     }
 
-    @Test("pane without launch uses expanded cwd")
-    func paneWithoutLaunchUsesExpandedCwd() {
-        // Intent: with no launch field, resolveLaunch returns the
-        //   tilde-expanded pane.cwd and a nil command.
-        // Why it exists: pins the cwd fallback when no launch override
-        //   exists; the command must be absent (no implicit shell program).
-        // Scenario: spec-first fallback check -- a snapshot with only
-        //   cwd=~/mydir and no launch surfaces ~/mydir + nil command.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", launch: nil, scrollback: nil, theme: nil)
+    @Test("pane without command uses expanded cwd")
+    func paneWithoutCommandUsesExpandedCwd() {
+        // Intent: resolveLaunch returns the tilde-expanded pane cwd and a nil command.
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", command: nil, scrollback: nil, theme: nil)
         let (cwd, command) = resolveLaunch(ps)
         let home = NSHomeDirectory()
         #expect(cwd == home + "/mydir")
         #expect(command == nil)
     }
 
-    @Test("pane with launch.command passes command")
-    func paneWithLaunchCommandPassesCommand() {
-        // Intent: a launch.command in the snapshot surfaces through
+    @Test("pane command scalar passes command")
+    func paneCommandScalarPassesCommand() {
+        // Intent: a command in the snapshot surfaces through
         //   resolveLaunch verbatim.
         // Why it exists: pins the command pass-through so a hand-authored
         //   "lazygit"-as-shell init file actually launches lazygit.
-        // Scenario: spec-first command pass-through -- launch.command =
+        // Scenario: spec-first command pass-through -- command =
         //   "lazygit" round-trips to the resolver's command output.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: PaneLaunchSnapshot(command: "lazygit", cwd: nil), scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: "lazygit", scrollback: nil, theme: nil)
         let (_, command) = resolveLaunch(ps)
         #expect(command == "lazygit")
     }
@@ -560,12 +556,12 @@ import DanTermProtocol
         //   produces a snapshot with scrollback == nil.
         // Why it exists: pins the backward-compat shape so older init
         //   files (pre-scrollback) decode without modification.
-        // Scenario: spec-first decode-compat check -- a v2 file from
+        // Scenario: spec-first decode-compat check -- a v3 file from
         //   before scrollback existed produces a snapshot whose
         //   scrollback field is nil.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -596,7 +592,7 @@ import DanTermProtocol
         //   with literal newlines decodes back to the same value.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -627,7 +623,7 @@ import DanTermProtocol
         //   fidelity.
         // Scenario: spec-first symmetric round-trip -- a known scrollback
         //   string ("line1\nline2\n") survives encode + decode.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: "line1\nline2\n", theme: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: nil, scrollback: "line1\nline2\n", theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         #expect(decoded.scrollback == "line1\nline2\n")
@@ -640,7 +636,7 @@ import DanTermProtocol
         // Why it exists: pins the optional encoding so the absence of
         //   scrollback stays meaningful (vs. a present-but-empty value).
         // Scenario: spec-first symmetric round-trip -- nil in, nil out.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: nil, scrollback: nil, theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         #expect(decoded.scrollback == nil, "nil scrollback should survive round-trip")
@@ -732,7 +728,7 @@ import DanTermProtocol
         // Use same UUID for group and tab
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -811,14 +807,8 @@ import DanTermProtocol
         #expect(rebuilt.pane(paneId)?.agentSession == nil)
     }
 
-    @Test("agentSession snapshot validates only at recovery-message consumption")
-    func agentSessionSnapshotValidatesAtRecoveryConsumption() throws {
-        // Intent: raw on-disk AgentSessionSnapshot data must pass through
-        //   AgentSession validation before it can become replayed terminal text.
-        // Why it exists: one corrupted or malicious saved hint must not
-        //   print terminal escapes or shell-shaped text into a restored pane.
-        // Scenario: a valid stored Claude id yields replay text; an invalid
-        //   stored id is silently dropped while history remains.
+    @Test("recovery replay defensively validates a directly constructed agent snapshot")
+    func recoveryReplayDefensivelyValidatesDirectAgentSnapshot() throws {
         let valid = AgentSessionSnapshot(kind: "claude", sessionId: "4f3a2b1c")
         #expect(recoveryReplayText(scrollback: nil, agentSession: valid) == """
         [DanTerm] Restored Claude session. Resume with:
@@ -830,17 +820,13 @@ import DanTermProtocol
         #expect(recoveryReplayText(scrollback: "old output\n", agentSession: invalid) == "old output\n")
     }
 
-    @Test("malformed agentSession snapshot does not reject restore")
-    func malformedAgentSessionSnapshotDoesNotRejectRestore() throws {
-        // Intent: malformed optional agentSession data is treated as a bad
-        //   recovery hint, not as a reason to reject the whole checkpoint.
-        // Why it exists: one corrupted on-disk hint must not prevent the pane
-        //   tree from restoring.
+    @Test("malformed agentSession snapshot rejects restore")
+    func malformedAgentSessionSnapshotRejectsRestore() throws {
         // Scenario: an imported or hand-edited checkpoint has an agentSession
         //   object with a non-string kind and no sessionId.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -860,12 +846,53 @@ import DanTermProtocol
           }
         }
         """
-        let loaded = try loadValidatedInitFile(from: json.data(using: .utf8)!)
-        let pane = try #require(allPaneSnapshots(loaded.snapshot).first)
+        #expect(throws: AppInitFileLoadError.decodeFailed) {
+            try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        }
+    }
 
-        #expect(loaded.model.allPaneIds.count == 1)
-        #expect(pane.agentSession != nil)
-        #expect(recoveryReplayText(scrollback: pane.scrollback, agentSession: pane.agentSession) == nil)
+    @Test("invalid agentSession value rejects restore")
+    func invalidAgentSessionValueRejectsRestore() throws {
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf", "pane": {
+                  "title": "Terminal",
+                  "agentSession": { "kind": "claude", "sessionId": "bad;id" }
+                } }
+              }]
+            }]
+          }
+        }
+        """
+
+        #expect(throws: AppInitFileLoadError.invalidSnapshot) {
+            try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        }
+    }
+
+    @Test("omitted agentSession loads as no agent")
+    func omittedAgentSessionLoadsAsNoAgent() throws {
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf", "pane": { "title": "Terminal" } }
+              }]
+            }]
+          }
+        }
+        """
+
+        let loaded = try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        #expect(try #require(loaded.paneSnapshots.values.first).agentSession == nil)
     }
 
     @Test("cwd reset checkpoints and restores as nil")
@@ -888,7 +915,6 @@ import DanTermProtocol
         #expect(commands.contains { if case .scheduleCheckpoint = $0 { true } else { false } })
         #expect(model.pane(paneId)?.cwd == nil)
         #expect(paneSnapshot.cwd == nil)
-        #expect(paneSnapshot.launch?.cwd == nil)
         #expect(restored.pane(paneId)?.cwd == nil)
     }
 
@@ -942,11 +968,11 @@ import DanTermProtocol
         //   model with an empty tab.todos list.
         // Why it exists: pins the decoder's nil -> empty-list normalization
         //   so older init files (pre-tab-todos) decode cleanly.
-        // Scenario: spec-first decode-compat check -- a v2 file with no
+        // Scenario: spec-first decode-compat check -- a v3 file with no
         //   tab.todos field rebuilds with tab.todos.count == 0.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
@@ -975,11 +1001,11 @@ import DanTermProtocol
         //   model with an empty pane.todos array.
         // Why it exists: pins the pane-side of the nil -> empty
         //   normalization symmetric to tab.todos.
-        // Scenario: spec-first decode-compat check -- a v2 file with no
+        // Scenario: spec-first decode-compat check -- a v3 file with no
         //   pane.todos field rebuilds with pane.todos.count == 0.
         let json = """
         {
-          "version": 2,
+          "version": 3,
           "model": {
             "groups": [{
               "name": "General",
