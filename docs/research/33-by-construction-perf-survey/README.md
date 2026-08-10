@@ -741,7 +741,8 @@ Each of these reopens something a prior doc closed. None may start without a
 `decisions.md` entry that states the prior decision, quotes its written
 reopening condition, and argues that condition is met.
 
-- [ ] `T19` RESEARCH -- **POD `GridCell` via a terminal-owned spill table.**
+- [x] `T19` **REJECTED after the bounded experiment (`F42`, `F43`, `D3`): POD
+  `GridCell` via a terminal-owned spill table.**
   `TerminalScalars.Storage.spill` is the only non-trivial member, so every
   `[GridCell]` operation is a per-element value-witness loop instead of a
   `memcpy`, and `appendCells` decodes and re-encodes each cell at the
@@ -752,15 +753,30 @@ reopening condition, and argues that condition is met.
   decision:** `12/F8` implemented and reverted this at +6.74% on
   `scrollback-stream`. Its written reopening clause is *"either row-move traffic
   stops being hot on `scrollback-stream`, or cluster scalars find an owner that
-  does not enlarge the row"* -- and the survey argues both now hold, because
-  `9ad7cc5` deleted `[GridRow]` scrollback and a terminal-owned table adds no
-  refcounted field to the row. Verification: assert `MemoryLayout<GridCell>.stride`
+  does not enlarge the row"*. The second half holds because `9ad7cc5` deleted
+  `[GridRow]` scrollback and a terminal-owned table adds no refcounted field to
+  the row. Verification: assert `MemoryLayout<GridCell>.stride`
   rather than reasoning about it (`15/F15`), and check the malloc bucket at
   **both** 80 and 179 columns (`15/F12`) before predicting anything. Watch
   `incremental-mixed`, since `16/F3`'s revert was a scattered-read effect.
   **Do not pitch this as "a smaller cell"** -- `28/D10` and `16/D1` settled
   stride-for-its-own-sake, and this competes with `28/H8`, which moves *when* the
-  encode runs where this deletes *what* it encodes.
+  encode runs where this deletes the C1-word conversion itself.
+  **Research decision:** the first half of the reopening argument is false at
+  HEAD: live-row movement remains hot. The second half is met: terminal ownership
+  removes the row field and the owning-row relocation invariant that killed the
+  prior attempt. A fresh profile also keeps both target mechanisms material.
+  Take T19 ahead of `28/H8` as an experiment because it removes non-POD live-row
+  destruction and the C1-word conversion rather than scheduling the conversion
+  later. This is not a speed claim and not a smaller-cell pitch. The experiment
+  must stop if the full ladder regresses, and it must treat the known stride-24
+  scattered-read risk as unresolved because `incremental-mixed` no longer has a
+  directional GUI rule. **Experiment result:** the final ownership-safe candidate
+  made `scrollback-stream` faster by 14.10% but made calibrated `terminal-feed`
+  **slower by 190.33%**. D3's no-tuning stop gate therefore rejects T19 and
+  restores the original representation. `28/H8` is the next ranked option; T23
+  remains untouched. See `F42` for the reopening evidence and `F43` for the
+  implementation and gate result.
 - [x] `T20` **LANDED as `T9`'s rider (`F21`)** -- **Damage carries words end to end.** Named independently
   by four of six verticals (`F2`). Claims **complexity, not speed**, and that is
   sufficient under `D1`: a width-bounded bitset makes an out-of-range row

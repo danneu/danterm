@@ -3396,3 +3396,121 @@ performance verdict.
   `just test` steps pass; `git diff --check` passes. No paired speed comparison
   is claimed or required by `F40`'s correctness gate.
 - Next action: none for T21.
+
+### F42 -- terminal ownership meets the POD-cell reopening clause, and both target costs remain material
+
+- Status: T19 research complete; no production implementation made.
+- Date, commit, and investigator: 2026-08-09, `5a8fb12b`, Codex. The worktree
+  contained the unrelated untracked selection-provenance plan throughout; this
+  task did not read or modify it. The temporary layout probe was removed after
+  capture.
+- Prior condition: `12/F8` permits another POD-cell attempt if *"either row-move
+  traffic stops being hot on `scrollback-stream`, or cluster scalars find an
+  owner that does not enlarge the row"*.
+- Code result:
+  - `TerminalScalars.Storage.spill([Unicode.Scalar])` is still the only
+    non-trivial `GridCell` member.
+  - `LogicalLineStore.appendCells` still visits every admitted live cell and
+    reconstructs `PackedRetainedRow.Header`'s scalar/kind/style word. It also
+    encodes hyperlink and identity side tables, which a direct C1 word alone
+    cannot remove.
+  - `9ad7cc5` removed retained `[GridRow]` storage. `GridRow` now owns only its
+    live `[GridCell]` array and row flags. A scalar table owned once by
+    `Terminal` therefore adds no row field, and its ids survive every cell move
+    within that terminal. The complete ownership set is the live screen,
+    inactive primary screen, and history, the same shape
+    `reclaimDeadStyleEntries` already sweeps for style ids.
+- Layout and allocator probe: a temporary release test used the exact live-row
+  construction `(0..<columns).map`, printed `_isPOD`, `MemoryLayout`, and the
+  resulting `Array.capacity`, then was deleted.
+
+  | cell | size | stride | POD | 80-column cell bucket | 179-column cell bucket |
+  | --- | ---: | ---: | --- | ---: | ---: |
+  | current `GridCell` | 25 | 32 | no | 3,040 B (capacity 95) | 6,112 B (capacity 191) |
+  | C1 word + current optional ids | 17 | 24 | yes | 2,016 B (capacity 84) | 5,088 B (capacity 212) |
+
+  These are capacity measurements, not stride-derived buckets. The separate
+  requested empty-terminal probes at 80x24 and 179x66 both report
+  `cellStrideBytes: 32`; their exact live cell bytes are 61,440 and 378,048.
+  The candidate's buckets happen to reproduce `16/F1`'s stride-24 buckets, so
+  `16/F3`'s cache-line-straddling risk remains live. No speed is inferred from
+  any layout number.
+- Current profile: `just benchmark-feed-sample scrollback-stream 15` at HEAD
+  recorded 12,087 weighted samples in
+  `.build/terminal-feed-profiles/2026-08-09-193015`. It is attribution-only.
+  `LogicalLineStore.appendCells` is **22.60% inclusive and 15.29% self**.
+  `moveAndFillRows` remains **84.98% inclusive and 17.32% self**. Four reported
+  stacks under it pass through live-row array deallocation and
+  `swift_arrayDestroy`; together they carry 1,736 samples, **14.36%** of the
+  profile. The capture also contains compiler-emitted `GridCell` destroy and
+  `TerminalScalars.Storage` copy symbols. This proves that the encoding frame
+  and non-POD row cleanup remain material; it does not say how much of either a
+  candidate removes.
+- Reopening verdict: the survey's claim that both halves now hold was too
+  strong. **Row movement remains hot.** The other half is met: terminal ownership
+  removes both costs that made `12/F8` reject its row-owned version -- the second
+  refcounted row field and the rule that every relocation must re-intern against
+  a different owner. Because the condition is disjunctive, T19 may reopen.
+- Comparison with `28/H8`: T19 removes non-POD live-cell destruction and the C1
+  conversion; H8 schedules conversion away from the drain thread but retains
+  both the non-POD live grid and the total encoding work, while adding a bounded
+  unpacked tail. T19 is the simpler end state and ranks first. H8 remains the
+  fallback if T19's synchronous direct-word path cannot clear the ladder.
+- Remaining risks: the natural POD layout is stride 24, the exact scattered-read
+  shape `16/F3` rejected; the scalar sweep must cover every terminal-owned cell
+  and history word without stale id reuse; and the current ladder has no healthy
+  directional rule for localized frame planning after `F28`. The profile's
+  `appendCells` share is only a ceiling because identity/hyperlink encoding and
+  the arena write remain.
+- Decision and next action at this finding: `D3` takes T19 as a bounded third experiment ahead of
+  `28/H8`. Implement only in a follow-on task, with behavioral ownership tests,
+  asserted POD/layout/buckets, and `benchmark-confirm` against `5a8fb12b`. A
+  standing `slower` verdict rejects the experiment; do not tune it or start T23.
+  `F43` records that verdict and supersedes this next action.
+
+### F43 -- the ownership-safe POD-cell candidate fails the terminal-feed gate
+
+- Status: T19 implemented as a bounded experiment, measured, rejected, and
+  removed. No production implementation remains.
+- Date, baseline, and investigator: 2026-08-09, `5a8fb12b`, Codex. The unrelated
+  untracked selection-provenance plan remained untouched. The benchmark snapshot
+  listed it because the harness captures every worktree path, but it was not part
+  of any build target and this task did not read or modify it.
+- Implemented shape: `GridCell` held the retained C1 word plus the existing sparse
+  hyperlink and content-identity ids. A `Terminal`-owned table interned only
+  multi-scalar clusters, swept ids across live rows, the inactive primary screen,
+  and retained words, and resolved them at public and renderer reads.
+  `LogicalLineStore.appendCells` copied the C1 word directly and continued to
+  encode only hyperlink and identity side tables. The frozen doc 28 reference
+  encoder was adjusted to preserve scalar ids rather than own payloads.
+- Structural measurements: release tests proved `_isPOD(GridCell.self)`, size 17,
+  and stride 24. The exact 80-column live-row allocation was capacity 84 / 2,016
+  bytes; the 179-column allocation was capacity 212 / 5,088 bytes. The requested
+  empty-terminal probes then reported `cellStrideBytes: 24`, 46,080 live cell
+  bytes at 80x24, and 283,536 at 179x66. No speed claim was inferred from them.
+- Test-first evidence: the initial layout/bucket tests failed against the old
+  representation at non-POD, size 25, stride 32, and the 3,040 / 6,112-byte row
+  buckets. After implementation, ownership tests forced a sweep while history
+  and the inactive primary screen held a cluster, then cleared all owners and
+  proved a later cluster still resolved. The complete release `TerminalCore`
+  suite passed 1,109 tests with its one pre-existing known Ghostty divergence.
+- A minimally functional intermediate candidate produced `terminal-feed` faster
+  by 25.10% and `scrollback-stream` faster by 15.57%, but it did not yet preserve
+  retained scalar storage inside the history byte bound. That result is not the
+  decision result.
+- The final candidate added conservative retained scalar-table charging and
+  eviction. Its immutable snapshot was tree
+  `af9ea43747bf54aba7d663a21cd901b452010c84`; artifacts are
+  `.build/terminal-benchmark-comparisons/confirm/af9ea43747bf-0000`.
+  `benchmark-confirm` reads **`terminal-feed` slower +190.33%** and
+  `scrollback-stream` faster -14.10%. `retained-browse` is equivalent -0.74%; the
+  two serialized-draw guards are inconclusive at +0.92% and +0.84%; descriptive
+  `incremental-mixed` is -0.68%. The calibrated `terminal-feed` result alone
+  triggers D3's stop rule.
+- The final shape performed a retained-id scan when a spill-bearing row changed
+  the charged ownership set. Its depth-scaled work is the leading explanation
+  for the cluster-heavy `terminal-feed` result, but no ablation was run: D3
+  explicitly forbids a tuning pass after a calibrated `slower` verdict.
+- Decision and next action: reject T19 and restore the pre-experiment production
+  representation. `28/H8` becomes the next ranked option, subject to its own
+  decision. Do not start T23.

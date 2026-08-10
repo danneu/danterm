@@ -85,38 +85,81 @@ rediscovering them.
   corpora, plus the existing damage tests.
 - Decision and rationale: pending `T3`.
 
-### D3 -- POD `GridCell`: the reopening clause is arguable, and must be argued in writing first
+### D3 -- reject terminal-owned POD `GridCell` after its bounded experiment
 
-- Status: **no direction taken.** `T19` may not begin without this entry
-  completed.
-- Evidence used: `12/F7`, `12/F8` (implemented, +6.74% on `scrollback-stream`,
-  reverted at `94a1528`); `16/D1`/`16/F3` (stride 24 reverted; 32 divides 64 and
-  is a resting point); `28/D10` (a smaller retained cell rejected; `H8` named as
-  the successor); `15/F12`, `15/F15` (measure the stride and the malloc bucket,
-  do not reason about them); `9ad7cc5` (deleted `[GridRow]` scrollback).
+- Status: **decided: reject T19 and leave `28/H8` as the next ranked option.**
+  `F42` admitted the experiment; `F43` records its implementation, calibrated
+  failure, and removal.
+- Date and investigator: 2026-08-09, Codex.
+- Evidence used: `F42`, `F43`; `12/F7`, `12/F8` (implemented, +6.74% on
+  `scrollback-stream`, reverted at `94a1528`); `16/D1`/`16/F3` (stride 24
+  reverted; 32 divides 64 and is a resting point); `28/D10` (a smaller retained
+  cell rejected; `H8` named as the successor); `15/F12`, `15/F15` (measure the
+  stride and the malloc bucket, do not reason about them); `9ad7cc5` (deleted
+  `[GridRow]` scrollback).
 - Candidate solutions:
   - Do nothing; treat `12/F8` as settled.
   - `28/H8` deferred packing: move *when* the encode runs, off the drain thread.
   - `T19`: make the live cell word identical to the retained word and give
-    cluster scalars a `Terminal`-owned table, so the encode has nothing left to
-    do and every `[GridCell]` operation becomes a `memcpy`.
-- Tradeoffs and correctness risks: `12/F8`'s written reopening clause is *"either
-  row-move traffic stops being hot on `scrollback-stream`, or cluster scalars
-  find an owner that does not enlarge the row"*, and the survey argues both
-  halves now hold -- doc 12's version put the store on `GridRow` (16 B and one
-  refcounted field, to 32 B and two), whereas a terminal-owned table adds no
-  refcounted field at all, and `9ad7cc5` confined `[GridRow]` move traffic to the
-  live viewport. `12/F8`'s stated killer invariant -- that a cell's scalars
-  resolve only against its owning row, so every relocation must re-intern --
-  evaporates when the owner is the terminal, because cells relocate freely within
-  a terminal and never across one. Against that: this is the third attempt at
-  this area, spill reclamation needs a sweep, and a stride change is a history
-  depth change that must be checked in malloc buckets at both 80 and 179 columns
-  before anything is predicted.
-- Recommendation: write the argument out here, with the clause quoted and each
-  half answered, before writing code. If the argument cannot be made in writing
-  without hedging, that is the answer.
-- Decision and rationale: pending.
+    cluster scalars a `Terminal`-owned table, so scalar/kind/style admission is
+    a direct word store and every `[GridCell]` operation becomes a `memcpy`.
+- Reopening condition, quoted exactly from `12/F8`: *"either row-move traffic
+  stops being hot on `scrollback-stream`, or cluster scalars find an owner that
+  does not enlarge the row"*.
+  - **The row-move half is rejected.** `9ad7cc5` removed retained `[GridRow]`
+    storage and therefore removed the old row-owned spill field's specific tax.
+    It did not make live-row movement cold. At HEAD, `moveAndFillRows` is 84.98%
+    inclusive and 17.32% self in the headless `scrollback-stream` feed profile;
+    four hot live-row destruction stacks through `swift_arrayDestroy` total
+    14.36% of profile weight.
+  - **The owner half is met.** The previous design enlarged `GridRow` from 16 to
+    32 bytes and tied every scalar lookup to the cell's current row. A table
+    owned once by `Terminal` adds no `GridRow` field, and a table id stays valid
+    when a cell moves anywhere inside that terminal. History and the live and
+    inactive screens are already all owned by that terminal, the same complete
+    live set `reclaimDeadStyleEntries` walks. This changes the rejected cost
+    model rather than tuning the rejected row-owned design.
+- Measured layout, not a stride prediction: today's `GridCell` is size 25,
+  stride 32, non-POD. The direct C1 word plus today's two optional ids is size
+  17, stride 24, POD. The exact live-row construction reserves 3,040 -> 2,016
+  cell bytes at 80 columns and 6,112 -> 5,088 at 179 columns. Both are measured
+  `Array.capacity` results. They do not support a speed claim: stride 24 is the
+  same cache-line-straddling shape `16/F3` rejected.
+- Current materiality: `LogicalLineStore.appendCells` remains 22.60% inclusive
+  and 15.29% self in the same current profile. It still rebuilds the scalar,
+  kind, and style C1 word one live cell at a time. The profile is attribution,
+  not a predicted T19 effect: direct word storage cannot remove the identity and
+  hyperlink side-table work or the arena write that also sit inside that frame.
+  The live-row destruction stacks establish that non-POD cleanup remains
+  material even though the old retained-row movement no longer exists.
+- Ranking against `28/H8`: the research ranking put T19 first because it deletes
+  both non-POD live-cell destruction and scalar/kind/style conversion. The
+  experiment did not clear the gate, so the actionable ranking is now **H8
+  first, T19 rejected**. H8 still carries its stated complexity -- a bounded
+  unpacked tail plus scheduling and backpressure policy -- and must earn its own
+  decision before implementation.
+- Risks and experiment gates:
+  - The spill id must stay valid across live rows, the inactive primary screen,
+    history, reflow, resize, publication, and every reset. Reclamation needs the
+    style table's swept-live-set discipline, with behavioral tests for cluster
+    fidelity and id reuse across those owners.
+  - Assert POD and exact layout, and repeat both capacity probes in the
+    implementation. Do not turn the 24-byte result into a memory rationale.
+  - Run `benchmark-confirm` against the pre-experiment tree. No calibrated rung
+    may answer `slower`; `terminal-feed` and `scrollback-stream` are the expected
+    payoffs, while retained browsing and both full-grid plan-time rules guard
+    reads.
+  - The known localized scattered-read risk has no healthy directional GUI rule
+    after `F28` made `incremental-mixed` descriptive. Record that coverage gap;
+    neither a descriptive percentage nor headless drawing, which excludes frame
+    planning, may be used to waive it.
+- Decision and rationale: **reject the third attempt.** The ownership clause was
+  genuinely met and the target costs were material, so running the experiment
+  was justified. The final ownership-safe candidate nevertheless produced a
+  calibrated `slower` verdict of +190.33% on `terminal-feed`. The written gate
+  says any such result rejects the experiment without a tuning pass. The
+  implementation and its tests were removed; only the research record remains.
+  Exact next action: decide whether to open `28/H8`. Do not start T23.
 
 ### D4 -- `lastPlannedTerminal`: split the retention from the check
 
