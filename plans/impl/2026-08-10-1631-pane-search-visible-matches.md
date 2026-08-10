@@ -225,7 +225,7 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
 
 - [x] 1. Replace search rescans with a position-based ordered match index
 - [x] 2. Render every visible match with distinct selected and unselected overlays
-- [ ] 3. Publish live search status with regular coalesced terminal updates
+- [x] 3. Publish live search status with regular coalesced terminal updates
 
 ## Implementation notes
 

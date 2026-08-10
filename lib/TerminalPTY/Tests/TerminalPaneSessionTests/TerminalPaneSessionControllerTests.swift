@@ -1923,12 +1923,12 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("controller search enqueues report status on the main actor", .timeLimit(.minutes(1)))
+    @Test("controller search publishes consumed status on the main actor", .timeLimit(.minutes(1)))
     func controllerSearchReportsStatus() async throws {
-        // Intent: the controller's search wrappers reach the owner and hop the owner's
-        //   status report back onto the main actor for the find overlay.
-        // Why it exists: the status callback fires on the host queue; delivering it
-        //   without the hop would touch main-actor view state off the main actor.
+        // Intent: the controller's search wrappers reach the owner and publish the
+        //   consumed terminal status to the find overlay on the main actor.
+        // Why it exists: search status shares the terminal update path so commands and
+        //   output cannot report from different snapshots.
         let host = try makeHost()
         // Octal-escaped so the needle never appears in the echoed command line itself.
         let command = "printf '\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
@@ -1947,6 +1947,44 @@ struct TerminalPaneSessionControllerTests {
         controller.clearSearch()
         #expect(await iterator.next() == .some(nil))
 
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("matching output publishes live search status without another search command")
+    func matchingOutputPublishesLiveSearchStatus() async throws {
+        // Intent: an ordinary coalesced terminal update republishes the open search's
+        //   status after matching output changes its ordered match index.
+        // Why it exists: command-only status delivery leaves the mounted find overlay's
+        //   counter stale while a tailing pane receives new matches.
+        // Scenario: a user opens search on one match, then output appends a second match
+        //   without the user editing or navigating the search again.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        host.deliverOutputForTesting(Array("hit\r\n".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        var reported: [TerminalSearchStatus?] = []
+
+        await confirmation(expectedCount: 2) { confirm in
+            controller.onSearchStatus = { status in
+                reported.append(status)
+                confirm()
+            }
+
+            controller.beginSearch("hit")
+            controller.synchronizeState()
+
+            host.deliverOutputForTesting(Array("hit\r\n".utf8))
+            controller.consumePendingHostUpdateForTesting()
+        }
+
+        #expect(reported == [
+            .matched(selected: 0, total: 1),
+            .matched(selected: 1, total: 2),
+        ])
         controller.tearDown()
         await host.close()
     }

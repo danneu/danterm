@@ -258,6 +258,7 @@ public final class TerminalPaneSessionController {
     private var didEmitSessionEnded = false
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
     private var lastEmittedViewportState: TerminalPaneViewportState?
+    private var lastEmittedSearchStatus: TerminalSearchStatus?
     private var lastPrimaryHistoryGeneration: UInt64
     private let fenceClock: () -> UInt64
     /// Arms the deferred-fence one-shot and returns its cancellation. Injected
@@ -320,8 +321,7 @@ public final class TerminalPaneSessionController {
     /// rather than read the selection again.
     public var onSelectionCopy: ((String) -> Void)?
 
-    /// Receives the owner's search status after every begin/navigate/clear, including the
-    /// ones that mutate nothing -- the find overlay's counter is driven entirely from here.
+    /// Receives search status when a consumed terminal update changes it, including output.
     public var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
 
     /// The latest complete plan delivered for the visible pane, retained for scale-only redraws.
@@ -499,6 +499,7 @@ public final class TerminalPaneSessionController {
         lastSubmittedDimensions = launchInput.initialDimensions
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
+        lastEmittedSearchStatus = cachedTerminal.searchStatus
 
         if isVisible { planIfNeeded(cachedTerminal) }
 
@@ -838,35 +839,25 @@ public final class TerminalPaneSessionController {
     /// Enqueues a new search needle on the sole terminal owner.
     public func beginSearch(_ query: String) {
         guard isTornDown == false else { return }
-        host.beginSearch(query, onStatus: searchStatusRelay())
+        host.beginSearch(query)
     }
 
     /// Enqueues a step to the next-older match on the sole terminal owner.
     public func searchNext() {
         guard isTornDown == false else { return }
-        host.searchNext(onStatus: searchStatusRelay())
+        host.searchNext()
     }
 
     /// Enqueues a step to the next-newer match on the sole terminal owner.
     public func searchPrevious() {
         guard isTornDown == false else { return }
-        host.searchPrevious(onStatus: searchStatusRelay())
+        host.searchPrevious()
     }
 
     /// Enqueues dropping the search, which also removes the active-match highlight.
     public func clearSearch() {
         guard isTornDown == false else { return }
-        host.clearSearch(onStatus: searchStatusRelay())
-    }
-
-    private func searchStatusRelay() -> @Sendable (TerminalSearchStatus?) -> Void {
-        let deliveryBoundary = deliveryBoundary
-        return { [weak self] status in
-            deliveryBoundary.enqueue { [weak self] in
-                guard let self, self.isTornDown == false else { return }
-                self.onSearchStatus?(status)
-            }
-        }
+        host.clearSearch()
     }
 
     /// Returns primary-screen history for persistence consumers that exclude transient screens.
@@ -1104,6 +1095,7 @@ public final class TerminalPaneSessionController {
             onSemanticEvents?(frameState.semanticEvents)
         }
         emitViewportStateIfNeeded()
+        emitSearchStatusIfNeeded()
         if case .some(.exited) = result {
             didChildExit = true
         }
@@ -1128,6 +1120,13 @@ public final class TerminalPaneSessionController {
         guard state != lastEmittedViewportState else { return }
         lastEmittedViewportState = state
         onViewportStateChange?(state)
+    }
+
+    private func emitSearchStatusIfNeeded() {
+        let status = cachedTerminal.searchStatus
+        guard status != lastEmittedSearchStatus else { return }
+        lastEmittedSearchStatus = status
+        onSearchStatus?(status)
     }
 
     private func neutralMouseEvent(for event: TerminalPointerEvent) -> NeutralTerminalMouseEvent {
