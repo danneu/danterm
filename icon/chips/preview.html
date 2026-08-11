@@ -60,6 +60,9 @@ h3{font-size:11px;opacity:.45;margin:15px 0 6px;font-weight:600}
 
 .chip{flex:none;display:inline-flex;align-items:center;justify-content:center}
 .chip svg{display:block;overflow:visible}
+.chipwrap{position:relative;display:inline-flex;flex:none}
+.dot{position:absolute;border-radius:50%;pointer-events:none}
+.scen{font-size:10px;opacity:.45;width:96px;flex:none}
 </style>
 </head>
 <body>
@@ -75,15 +78,16 @@ h3{font-size:11px;opacity:.45;margin:15px 0 6px;font-weight:600}
 let KINDS = [];
 
 // `panes` stands in for a multi-pane tab: that row spends its second line
-// enumerating its panes instead of showing a cwd, and every chip but the
-// focused one is grey.
+// enumerating its panes instead of showing a cwd, every chip but the focused
+// one is grey, and each carries at most one state dot. Entries are
+// [kind, state]; the states are the ones DOT_STATES describes.
 const TABS = [
   {kind: "terminal", stripe: "#5b8def", t1: "danterm",         t2: "~/Code/danterm"},
   {kind: "claude",   stripe: "#e0a44b", t1: "engine refactor", t2: "claude · lib/TerminalCore",
-   panes: ["terminal", "claude", "codex"], focused: 1},
+   panes: [["terminal","none"], ["claude","working"], ["codex","alert"]], focused: 1},
   {kind: "codex",    stripe: "#57b86b", t1: "review",          t2: "codex · ~/Code/danterm"},
   {kind: "agent",    stripe: "#8b7ad6", t1: "prompt tuning",   t2: "aider · lib/TerminalPTY",
-   panes: ["agent", "terminal"], focused: 0},
+   panes: [["agent","waiting"], ["terminal","none"]], focused: 0},
   {kind: "terminal", stripe: "#c96ab8", t1: "btop",            t2: "~"}
 ];
 
@@ -181,7 +185,8 @@ const PANE_TREATMENTS = [
 ];
 
 // The treatment that ships, so the sidebar mock below predicts the real row
-// instead of showing a candidate that lost.
+// instead of showing a candidate that lost. `SHIPPED_DOT` is defined with the
+// dot variants further down and pairs with it.
 const SHIPPED = PANE_TREATMENTS.find(t => t[0] === "fixed")[2];
 
 // An 8-digit color with its alpha taken to full. The strong neutral is declared
@@ -192,7 +197,89 @@ function opaque(hex) {
   return m ? `#${m[1]}FF` : hex;
 }
 
-function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active) {
+// --- state dots ----------------------------------------------------------
+//
+// The strip says which pane you are in. These candidates add a third channel:
+// which pane wants you, and which is still churning. One dot slot per chip,
+// precedence-ordered -- a pane can be mid-turn *and* have rung a bell, and the
+// bell is the more urgent fact, so it takes the slot.
+//
+// The states are the ones the hooks actually report (`agent activity --state`)
+// plus the unread-alert tally the sidebar already computes per pane:
+//   alert   unread bell or notification    "it wanted you"
+//   waiting blocked on a prompt right now  "it is stalled on you"
+//   working turn in flight                 "still churning"
+//   idle    turn finished, nothing running
+//   none    no agent attached, or attached with nothing reported yet
+// `idle` and `none` share a rendering on purpose: a turn that finished worth
+// knowing about already rang a bell, and an unreported activity is a state the
+// hooks have not claimed -- neither earns a mark.
+const DOT_STATES = ["alert", "waiting", "working", "idle", "none"];
+
+// Each variant maps a state to {d, color, alpha} or null for no dot. `d` is the
+// diameter in points at the 12pt pane-row chip.
+const DOT_VARIANTS = [
+  // The literal proposal: one slot, hue carries everything, both weights equal.
+  ["sym-yellow", "red / yellow, equal weight", (s, mode) =>
+      s === "alert" || s === "waiting" ? {d: 4, color: mode === "light" ? "#FF3B30" : "#FF453A"}
+    : s === "working"                  ? {d: 4, color: mode === "light" ? "#FFCC00" : "#FFD60A"}
+    : null],
+  // Yellow pushed to amber, which is the only way it holds up on a light row --
+  // at the cost of narrowing the gap against red, which is the thing to judge.
+  ["sym-amber", "red / amber, equal weight", (s, mode) =>
+      s === "alert" || s === "waiting" ? {d: 4, color: mode === "light" ? "#FF3B30" : "#FF453A"}
+    : s === "working"                  ? {d: 4, color: mode === "light" ? "#C77700" : "#FF9F0A"}
+    : null],
+  // What ships, read from the manifest rather than restated, so tuning a color
+  // or a diameter there shows up here and in the app together. Busy is ambient
+  // and wants-you is an interrupt, so they are separated by weight as well as
+  // hue -- which is also what keeps them apart without hue at all, for a
+  // protanope who sees red darken toward amber.
+  ["asym", "red full / amber small, muted (ships)", (s, mode, M, surface) => {
+      const P = M.paneList[mode].stateDot, G = M.stateDot;
+      const spec = s === "alert" || s === "waiting" ? G.attention
+                 : s === "working"                  ? G.busy
+                 : null;
+      if (!spec) return null;
+      // The ring matches the row, so it reads as a gap around the dot rather
+      // than a halo. On a selected row that is the accent, which the app gets
+      // from SidebarRowView; the fixed neutral covers every other row.
+      return {d: spec.diameter, color: spec === G.attention ? P.attention : P.busy,
+              alpha: spec.alpha, ringWidth: spec.ringWidth,
+              ring: surface === "sel" ? undefined : P.ring};
+  }],
+  // The control: attention only, busy shown nowhere in the strip. Worth seeing
+  // beside the others, because the case against marking `working` is that a
+  // strip whose dots are usually lit stops reading as an alarm.
+  ["alert-only", "red only, busy unmarked", (s, mode) =>
+      s === "alert" || s === "waiting" ? {d: 4.5, color: mode === "light" ? "#FF3B30" : "#FF453A"}
+    : null]
+];
+
+const SHIPPED_DOT = DOT_VARIANTS.find(v => v[0] === "asym")[2];
+
+// Mirrors PaneStripView.drawStateDot. The dot bleeds past the chip's corner --
+// held fully inside a 12pt chip it would cover a third of the mark that
+// identifies the pane -- and is ringed so it reads against the mark, the chip,
+// and the row it overhangs alike. `ringFor` supplies that ring color: the
+// shipping variant takes a fixed neutral from the manifest, while the
+// exploratory ones fall back to the row they sit on.
+function stateDot(spec, size, M, mode, surfaceBg) {
+  if (!spec) return "";
+  const k = size / M.sizes.paneRow;
+  const d = spec.d * k;
+  const rw = (spec.ringWidth === undefined ? 1 : spec.ringWidth) * k;
+  const ring = spec.ring === undefined ? surfaceBg : spec.ring;
+  return `<span class="dot" style="width:${d.toFixed(2)}px;height:${d.toFixed(2)}px;` +
+         `top:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
+         `right:${(-M.stateDot.bleed * k).toFixed(2)}px;` +
+         `background:${spec.color};` +
+         `opacity:${spec.alpha === undefined ? 1 : spec.alpha};` +
+         (rw > 0 ? `box-shadow:0 0 0 ${rw.toFixed(2)}px ${ring}` : "") + `"></span>`;
+}
+
+function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active, opts) {
+  opts = opts || {};
   const P = M.paneList[mode];
   const S = P[surface];
   const style = treat(P, S, surfaceBg, active);
@@ -210,9 +297,13 @@ function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active) {
 
   const r = (size * M.cornerRadius).toFixed(2);
   const ring = style.ring ? `box-shadow:0 0 0 1.5px ${style.ring};` : "";
-  return `<span class="chip" style="width:${size}px;height:${size}px;` +
-         `background:${bg};border-radius:${r}px;${ring}">` +
-         glyph(art[kind], size, k.fill, fg, k.dilate) + `</span>`;
+  const body = `<span class="chip" style="width:${size}px;height:${size}px;` +
+               `background:${bg};border-radius:${r}px;${ring}">` +
+               glyph(art[kind], size, k.fill, fg, k.dilate) + `</span>`;
+  if (!opts.dot) return body;
+  return `<span class="chipwrap">` + body +
+         stateDot(opts.dot(opts.state || "none", mode, M, surface), size, M, mode, surfaceBg) +
+         `</span>`;
 }
 
 function chip(M, art, kind, size, mode, opts) {
@@ -258,6 +349,33 @@ function paneStrip(M, art, mode, treat, surface, surfaceBg, selected) {
          `<span class="panerow">${chips}</span></span></div>`;
 }
 
+// Strips built to stress the dot rather than to look plausible: the question is
+// whether red still reads as an interrupt on a row where most dots are already
+// lit, so the density cases matter more than the tidy ones.
+const DOT_SCENARIOS = [
+  ["all quiet",    0, [["terminal","none"],["claude","idle"],["codex","idle"],["agent","none"]]],
+  ["one busy",     1, [["terminal","none"],["claude","working"],["codex","idle"],["agent","none"]]],
+  ["one wants you",0, [["terminal","none"],["claude","alert"],["codex","working"],["agent","idle"]]],
+  ["waiting vs working", 2,
+                      [["claude","working"],["codex","working"],["agent","waiting"],["claude","working"]]],
+  ["mostly busy",  3, [["claude","working"],["codex","working"],["agent","working"],
+                       ["claude","alert"],["codex","working"],["terminal","none"],
+                       ["agent","working"],["claude","idle"]]]
+];
+
+function dotStrip(M, art, mode, surface, surfaceBg, selected, scen, dot) {
+  const [, focused, panes] = scen;
+  const chips = panes.map(([k, state], i) =>
+    paneChip(M, art, k, M.sizes.paneRow, mode, SHIPPED, surface, surfaceBg,
+             i === focused, {state, dot})
+  ).join("");
+  return `<div class="striprow${selected ? " sel" : ""}">` +
+         `<span class="stripe" style="background:#e0a44b"></span>` +
+         chip(M, art, panes[focused][0], M.sizes.sidebar, mode) +
+         `<span class="tabtext"><span class="t1">engine refactor</span>` +
+         `<span class="panerow">${chips}</span></span></div>`;
+}
+
 function build(M, art, mode) {
   let h = "";
   const C = (kind, size, opts) => chip(M, art, kind, size, mode, opts);
@@ -282,6 +400,22 @@ function build(M, art, mode) {
          paneStrip(M, art, mode, treat, "sel", selBg, true) + `</div>`;
   }
 
+  h += `<h2>pane list &mdash; showing state</h2>`;
+  h += `<p class="note2">One dot slot per chip, on top of the shipped
+        treatment. The dot is punched out of the row color so it survives both
+        the lifted active chip and the dim ones. Judge on <b>mostly busy</b>:
+        the alert dot has to still pull your eye on a row where six others are
+        already lit, and that is the case that decides whether marking
+        <code>working</code> at all is worth it.</p>`;
+  for (const [id, label, dot] of DOT_VARIANTS) {
+    h += `<h3>${id} &mdash; ${label}</h3>`;
+    for (const scen of DOT_SCENARIOS) {
+      h += `<div class="trow"><span class="scen">${scen[0]}</span>` +
+           dotStrip(M, art, mode, "rest", rowBg, false, scen, dot) +
+           dotStrip(M, art, mode, "sel", selBg, true, scen, dot) + `</div>`;
+    }
+  }
+
   h += `<h3>sidebar &mdash; ${M.sizes.sidebar}pt chip, 40pt row</h3><div class="sidebar">`;
   TABS.forEach((t, i) => {
     h += `<div class="tab${i === 1 ? " sel" : ""}">` +
@@ -289,10 +423,10 @@ function build(M, art, mode) {
          C(t.kind, M.sizes.sidebar) +
          `<span class="tabtext"><span class="t1">${t.t1}</span>` +
          (t.panes
-           ? `<span class="panerow">` + t.panes.map((k, j) =>
+           ? `<span class="panerow">` + t.panes.map(([k, state], j) =>
                paneChip(M, art, k, M.sizes.paneRow, mode, SHIPPED, "rest",
                         mode === "light" ? "#fafafa" : "#232326",
-                        j === t.focused)).join("") + `</span>`
+                        j === t.focused, {state, dot: SHIPPED_DOT})).join("") + `</span>`
            : `<span class="t2">${t.t2}</span>`) +
          `</span></div>`;
   });

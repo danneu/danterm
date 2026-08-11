@@ -17,10 +17,28 @@ import AppKit
 /// count of the ones left out. The run always contains the focused pane --
 /// the strip exists to answer "which pane am I in", so that chip is the one
 /// thing it may never elide.
+///
+/// Each chip may carry one state dot on its corner: red for a pane that wants
+/// you, a smaller and dimmer amber for one whose agent is mid-turn. Which of
+/// those a pane gets is decided in the core by `paneChipState`, not here.
 final class PaneStripView: NSView {
     var chips: [TabPaneChip] = [] {
         didSet {
             guard chips != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// What the strip should punch its attention rings out of, or nil for the
+    /// appearance's fixed neutral.
+    ///
+    /// The strip cannot work this out for itself: a selected row is painted by
+    /// AppKit in a color that depends on selection *and* emphasis, and neither
+    /// reaches the cell through the sidebar projection. `SidebarRowView` is the
+    /// one object that knows what it painted, so it pushes the answer down.
+    var rowBackground: NSColor? {
+        didSet {
+            guard rowBackground != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -31,6 +49,11 @@ final class PaneStripView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
+        // State dots bleed a point past the chips they mark, and past the
+        // strip's own bounds at the top and trailing edges. Set explicitly
+        // rather than left to the default so the bleed does not depend on
+        // whether AppKit decided to back this view with a layer.
+        clipsToBounds = false
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([heightAnchor.constraint(equalToConstant: edge)])
@@ -116,6 +139,60 @@ final class PaneStripView: NSView {
             ])
     }
 
+    private func dotSize(for state: PaneChipState) -> ChipStateDotSize? {
+        switch state {
+        case .quiet: return nil
+        case .attention: return ChipArtwork.attentionDotSize
+        case .busy: return ChipArtwork.busyDotSize
+        }
+    }
+
+    /// Where a chip's state dot lands, or nil for a pane with nothing to say.
+    ///
+    /// The dot deliberately bleeds past the chip's top-right corner: the strip's
+    /// own margins have room for it, and a dot held fully inside a 12pt chip
+    /// would cover a third of the mark that identifies the pane. That bleed is
+    /// what `clipsToBounds = false` is for, so it has to stay bounded --
+    /// internal so the harness can hold this to the budget.
+    func stateDotRect(_ state: PaneChipState, on chip: NSRect) -> NSRect? {
+        guard let size = dotSize(for: state) else { return nil }
+        let scale = edge / ChipArtwork.paneRowSize
+        let diameter = size.diameter * scale
+        let bleed = ChipArtwork.stateDotBleed * scale
+        return NSRect(
+            x: chip.maxX + bleed - diameter,
+            y: isFlipped ? chip.minY - bleed : chip.maxY + bleed - diameter,
+            width: diameter,
+            height: diameter)
+    }
+
+    /// Paints one chip's state dot, ringed so it reads against the mark, the
+    /// chip, and the row it overhangs alike. Only the attention dot is ringed;
+    /// busy is muted on purpose and a ring would undo that.
+    private func drawStateDot(
+        _ state: PaneChipState,
+        on chip: NSRect,
+        in context: CGContext,
+        appearance: ChipAppearance
+    ) {
+        guard let size = dotSize(for: state), let dot = stateDotRect(state, on: chip) else { return }
+        let palette = appearance == .light ? ChipArtwork.paneListLight : ChipArtwork.paneListDark
+
+        context.saveGState()
+        if size.ringWidth > 0 {
+            let ring = size.ringWidth * (edge / ChipArtwork.paneRowSize)
+            // The ring matches the row it sits on, so it reads as a gap around
+            // the dot rather than as a halo of its own. Over the chip it does
+            // the separating; over the row it disappears.
+            context.setFillColor(rowBackground?.cgColor ?? palette.stateDotRing)
+            context.fillEllipse(in: dot.insetBy(dx: -ring, dy: -ring))
+        }
+        context.setAlpha(size.alpha)
+        context.setFillColor(state == .attention ? palette.attentionDot : palette.busyDot)
+        context.fillEllipse(in: dot)
+        context.restoreGState()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext, !chips.isEmpty else { return }
         let plan = plan(width: bounds.width)
@@ -133,10 +210,14 @@ final class PaneStripView: NSView {
                 palette: ChipStyle.paneStrip(isActive: chip.isFocused)
                     .palette(for: chip.kind, appearance: appearance),
                 flipped: isFlipped)
+            drawStateDot(chip.state, on: rect, in: context, appearance: appearance)
             x += edge + spacing
         }
 
         guard plan.hidden > 0 else { return }
+        // The count is deliberately unmarked: it stands for panes the row could
+        // not show, and a dot on it would claim to summarize states it is not
+        // reporting. The `+N` itself is the signal to widen the sidebar.
         let label = overflowLabel(count: plan.hidden)
         let size = label.size()
         label.draw(at: NSPoint(x: x, y: (bounds.height - size.height) / 2))

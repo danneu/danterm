@@ -101,7 +101,7 @@ struct ChipKindTests {
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
 
-        #expect(tabPaneChips(tab).isEmpty)
+        #expect(tabPaneChips(tab, alerts: []).isEmpty)
     }
 
     @Test("a split tab's strip lists every pane in tree order, focus flagged")
@@ -115,7 +115,7 @@ struct ChipKindTests {
         let thirdPaneId = try #require(selectedTab(in: model)).focusedPaneId
 
         let tab = try #require(selectedTab(in: model))
-        let strip = tabPaneChips(tab)
+        let strip = tabPaneChips(tab, alerts: [])
 
         #expect(strip.map(\.paneId) == [firstPaneId, secondPaneId, thirdPaneId])
         #expect(strip.map(\.isFocused) == [false, false, true])
@@ -156,9 +156,92 @@ struct ChipKindTests {
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(claude)))
 
         let tab = try #require(selectedTab(in: model))
-        #expect(tabPaneChips(tab).map(\.kind) == [.claude, .terminal])
+        #expect(tabPaneChips(tab, alerts: []).map(\.kind) == [.claude, .terminal])
         // The row's own chip still speaks for the focused pane alone.
         #expect(chipKind(of: tab.id, in: desiredSidebar(in: model)) == .terminal)
+    }
+
+    // Why it exists: the five facts behind a chip collapse onto one dot, and the
+    //   collapse is the policy -- an unread alert and an agent blocked on a
+    //   prompt are the same message to the reader, and neither an idle agent nor
+    //   one that has reported nothing has anything to say.
+    @Test("a pane's alert and activity collapse onto one state")
+    func paneStateCollapsesAlertAndActivity() throws {
+        let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        func state(_ activity: AgentActivity?, alert: Bool = false) -> PaneChipState {
+            paneChipState(agent: .attached(session: claude, activity: activity), hasUnreadAlert: alert)
+        }
+
+        #expect(state(.waiting) == .attention)
+        #expect(state(.working) == .busy)
+        #expect(state(.idle) == .quiet)
+        #expect(state(nil) == .quiet)
+        #expect(paneChipState(agent: .none, hasUnreadAlert: false) == .quiet)
+    }
+
+    // Why it exists: a bell rings while an agent is mid-turn, so the two states
+    //   genuinely coincide and the chip has one dot to spend. Attention has to
+    //   win, or a busy pane could ring and show no change at all.
+    @Test("an unread alert outranks a working agent for the one dot")
+    func alertOutranksWorking() throws {
+        let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+
+        #expect(
+            paneChipState(agent: .attached(session: claude, activity: .working), hasUnreadAlert: true)
+                == .attention)
+        // Also for a pane with no agent at all: a shell can ring the bell.
+        #expect(paneChipState(agent: .none, hasUnreadAlert: true) == .attention)
+    }
+
+    // Why it exists: nothing else in the tab's projection moves when one pane's
+    //   agent starts or stops working, so if the state did not ride along in
+    //   `paneChips` the row would never reload and the dot would never appear.
+    @Test("a pane's activity change restates the strip through the projection")
+    func activityChangeReachesTheSidebarProjection() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let tab = try #require(selectedTab(in: model))
+        let sessionId = try #require(model.pane(firstPaneId)?.session?.id)
+        let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(claude)))
+
+        let before = try #require(paneChips(of: tab.id, in: desiredSidebar(in: model)))
+        #expect(before.first?.state == .quiet)
+
+        update(
+            &model,
+            .sessionReport(
+                sessionId: sessionId,
+                report: .agentActivityChanged(session: claude, activity: .working)))
+
+        let after = try #require(paneChips(of: tab.id, in: desiredSidebar(in: model)))
+        #expect(after.first?.state == .busy)
+        #expect(after != before)
+    }
+
+    // Why it exists: the tab row's own alert badge counts the whole tab, so the
+    //   strip is the only thing that says which pane rang. It reads the same
+    //   tally the badge does, and this pins the two to the same pane.
+    @Test("an unread alert marks the pane that raised it, not its neighbors")
+    func alertMarksOnlyItsOwnPane() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let tab = try #require(selectedTab(in: model))
+        model.alerts.append(
+            AlertModel(
+                id: AlertId(rawValue: UUID()), kind: .bell, paneId: firstPaneId,
+                title: "bell", body: "", createdAt: Date(timeIntervalSince1970: 0), isUnread: true))
+
+        let strip = tabPaneChips(tab, alerts: model.alerts)
+
+        #expect(strip.map(\.state) == [.attention, .quiet])
+        // Both overloads must agree, or the sidebar's hot path and the cell's
+        // cold path would draw different strips for the same model.
+        #expect(tabPaneChips(tab, unreadByPane: unreadAlertTally(for: model).byPane) == strip)
     }
 
     private func chipKind(of tabId: TabId, in projection: SidebarProjection) -> ChipKind? {

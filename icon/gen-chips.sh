@@ -471,10 +471,29 @@ w('    let background: CGColor')
 w('    let foreground: CGColor')
 w('}')
 w('')
-w('/// The two states of a chip in a tab row\'s pane strip.')
+w('/// The two states of a chip in a tab row\'s pane strip, plus the two colors')
+w('/// its state dot can take.')
 w('struct ChipPaneListPalette {')
 w('    let inactive: ChipPalette')
 w('    let active: ChipPalette')
+w('    /// A pane that wants you: an unread alert, or an agent blocked on a prompt.')
+w('    let attentionDot: CGColor')
+w('    /// A pane whose agent is mid-turn. Ambient, so it is drawn smaller and')
+w('    /// dimmer than `attentionDot` -- see the stateDot note in chips.json.')
+w('    let busyDot: CGColor')
+w('    /// Separates a dot from the mark, the chip, and the row it overhangs.')
+w('    /// Fixed per appearance, not taken from the row: sidebar selection never')
+w('    /// reaches the cell, so nothing drawn here may depend on it.')
+w('    let stateDotRing: CGColor')
+w('}')
+w('')
+w('/// How one state dot is drawn, in points at `ChipArtwork.paneRowSize`.')
+w('struct ChipStateDotSize {')
+w('    let diameter: CGFloat')
+w('    let alpha: CGFloat')
+w('    /// Width of the `stateDotRing` band outside the dot; 0 for no ring. Only')
+w('    /// the attention dot is ringed -- see the stateDot note in chips.json.')
+w('    let ringWidth: CGFloat')
 w('}')
 w('')
 w('/// One pane-kind chip: its glyph, its optical tuning, and its colors.')
@@ -548,18 +567,32 @@ w('    /// reads on a plain row and on the accent-colored selected row alike.')
 w('    /// Fixed per appearance for that reason -- sidebar selection is')
 w('    /// NSOutlineView-owned and does not reload the cell, so nothing in here')
 w('    /// may depend on whether the row is selected.')
-w('    static let paneListLight = ChipPaneListPalette(')
-w(f'        inactive: ChipPalette(background: {color(pl["light"]["fixed"]["bg"])}, '
-  f'foreground: {color(pl["light"]["fixed"]["fg"])}),')
-w(f'        active: ChipPalette(background: {color(pl["light"]["fixed"]["onBg"])}, '
-  f'foreground: {color(pl["light"]["fixed"]["onFg"])})')
-w('    )')
-w('    static let paneListDark = ChipPaneListPalette(')
-w(f'        inactive: ChipPalette(background: {color(pl["dark"]["fixed"]["bg"])}, '
-  f'foreground: {color(pl["dark"]["fixed"]["fg"])}),')
-w(f'        active: ChipPalette(background: {color(pl["dark"]["fixed"]["onBg"])}, '
-  f'foreground: {color(pl["dark"]["fixed"]["onFg"])})')
-w('    )')
+for mode in ('light', 'dark'):
+    m = pl[mode]
+    w(f'    static let paneList{mode.capitalize()} = ChipPaneListPalette(')
+    w(f'        inactive: ChipPalette(background: {color(m["fixed"]["bg"])}, '
+      f'foreground: {color(m["fixed"]["fg"])}),')
+    w(f'        active: ChipPalette(background: {color(m["fixed"]["onBg"])}, '
+      f'foreground: {color(m["fixed"]["onFg"])}),')
+    w(f'        attentionDot: {color(m["stateDot"]["attention"])},')
+    w(f'        busyDot: {color(m["stateDot"]["busy"])},')
+    w(f'        stateDotRing: {color(m["stateDot"]["ring"])}')
+    w('    )')
+
+sd = manifest['stateDot']
+w('')
+w('    /// State-dot geometry, in points at `paneRowSize` and scaled with it. The')
+w('    /// two sizes are deliberately unequal: busy is ambient and attention is an')
+w('    /// interrupt, so they must not read as equally loud on a strip where most')
+w('    /// panes are busy. See the stateDot note in chips.json.')
+for role in ('attention', 'busy'):
+    d = sd[role]
+    w(f'    static let {role}DotSize = ChipStateDotSize('
+      f'diameter: {fmt(d["diameter"])}, alpha: {fmt(d["alpha"])}, '
+      f'ringWidth: {fmt(d["ringWidth"])})')
+w('    /// How far the dot overhangs its chip\'s top-right corner. Lands in margins')
+w('    /// the strip already has, so it stays out of the strip\'s fitting math.')
+w(f'    static let stateDotBleed: CGFloat = {fmt(sd["bleed"])}')
 
 # Every chip, named. Emitted rather than hand-listed so a kind added to
 # chips.json cannot be missed by a caller that walks all of them -- which is how

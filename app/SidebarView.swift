@@ -34,7 +34,21 @@ extension TabColor {
 final class SidebarRowView: NSTableRowView {
     var forceEmphasizedSelection = false {
         didSet {
-            if forceEmphasizedSelection != oldValue { needsDisplay = true }
+            if forceEmphasizedSelection != oldValue {
+                needsDisplay = true
+                refreshHostedPaneStrips()
+            }
+        }
+    }
+
+    // NSTableRowView: selection is set by the outline view without reloading the
+    // row, so this is the only place a hosted pane strip can learn that the
+    // color behind it changed.
+    override var isSelected: Bool {
+        get { super.isSelected }
+        set {
+            super.isSelected = newValue
+            refreshHostedPaneStrips()
         }
     }
 
@@ -44,7 +58,31 @@ final class SidebarRowView: NSTableRowView {
     /// inline rename promoting the field editor) still works.
     override var isEmphasized: Bool {
         get { (isSelected && forceEmphasizedSelection) || super.isEmphasized }
-        set { super.isEmphasized = newValue }
+        set {
+            super.isEmphasized = newValue
+            refreshHostedPaneStrips()
+        }
+    }
+
+    /// The color AppKit fills this row with, or nil when it draws no selection.
+    /// Mirrors `.regular` highlight style: accent when emphasized, secondary
+    /// grey when not.
+    private var selectionBackground: NSColor? {
+        guard isSelected else { return nil }
+        return isEmphasized
+            ? .selectedContentBackgroundColor
+            : .unemphasizedSelectedContentBackgroundColor
+    }
+
+    /// Tells any hosted pane strip what is painted behind it, so its state-dot
+    /// rings match the row instead of a fixed neutral that reads as a halo.
+    private func refreshHostedPaneStrips() {
+        let background = selectionBackground
+        for cell in subviews.compactMap({ $0 as? NSTableCellView }) {
+            for strip in cell.subviews.compactMap({ $0 as? PaneStripView }) {
+                strip.rowBackground = background
+            }
+        }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -56,6 +94,9 @@ final class SidebarRowView: NSTableRowView {
     override func layout() {
         super.layout()
         resizeHostedCells()
+        // Covers a cell materialized or reused into an already-selected row,
+        // which never goes through the selection setters above.
+        refreshHostedPaneStrips()
     }
 
     private func resizeHostedCells() {
@@ -1452,7 +1493,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         // A multi-pane tab spends its second line enumerating its panes; only a
         // single-pane tab shows a cwd there.
-        let paneChips = tabPaneChips(tab)
+        let paneChips = tabPaneChips(tab, alerts: currentModel?.alerts ?? [])
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
             subtitleField.stringValue = chrome.1 ?? ""
             subtitleField.isHidden = chrome.1 == nil || !paneChips.isEmpty

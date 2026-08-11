@@ -617,25 +617,71 @@ func tabChipKind(_ tab: TabModel, in model: AppModel) -> ChipKind {
   ChipKind(agent: model.pane(tab.focusedPaneId)?.session?.agent ?? .none)
 }
 
+/// What a pane chip's single state dot says, if anything.
+///
+/// Three values rather than the five facts behind them, because a chip has one
+/// dot and the collapse is a policy decision that belongs where it can be
+/// tested. An unread alert and an agent blocked on a prompt are the same
+/// message to the reader -- go here -- so they share `attention`, and it wins
+/// over `busy` when a pane is both mid-turn and already ringing.
+///
+/// `quiet` covers an idle agent, an attached agent that has reported no
+/// activity, and a plain shell alike. A turn that finished worth knowing about
+/// has already rung a bell, and an unreported activity is a state the hooks
+/// have not claimed: neither earns a mark, and the glyph already separates a
+/// quiet agent pane from a shell.
+enum PaneChipState: Equatable {
+  case attention
+  case busy
+  case quiet
+}
+
 /// One entry of the chip row a multi-pane tab shows in place of its cwd
 /// subtitle. Carries the pane id so a later iteration can make a chip clickable.
 struct TabPaneChip: Equatable {
   let paneId: PaneId
   let kind: ChipKind
   let isFocused: Bool
+  let state: PaneChipState
 }
 
 /// The chips for a tab's panes, in the tree's left-to-right order, with the
 /// tab's focused pane flagged so the row can draw the others greyscale.
 /// Empty for a single-pane tab: that row keeps showing its cwd instead.
-func tabPaneChips(_ tab: TabModel) -> [TabPaneChip] {
+///
+/// `unreadByPane` is `UnreadAlertTally.byPane`, so the sidebar projection can
+/// pass the count it has already rolled up instead of rescanning the alerts.
+func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip] {
   let panes = panesInNode(tab.rootNode)
   guard panes.count > 1 else { return [] }
   return panes.map { pane in
-    TabPaneChip(
+    let agent = pane.session?.agent ?? .none
+    return TabPaneChip(
       paneId: pane.id,
-      kind: ChipKind(agent: pane.session?.agent ?? .none),
-      isFocused: pane.id == tab.focusedPaneId)
+      kind: ChipKind(agent: agent),
+      isFocused: pane.id == tab.focusedPaneId,
+      state: paneChipState(agent: agent, hasUnreadAlert: (unreadByPane[pane.id] ?? 0) > 0))
+  }
+}
+
+/// Cold-path overload for callers holding the raw alert list rather than a
+/// tally, mirroring `desiredSidebar(in:)` beside `desiredSidebar(in:tally:)`.
+func tabPaneChips(_ tab: TabModel, alerts: [AlertModel]) -> [TabPaneChip] {
+  var unreadByPane: [PaneId: Int] = [:]
+  for alert in alerts where alert.isUnread {
+    unreadByPane[alert.paneId, default: 0] += 1
+  }
+  return tabPaneChips(tab, unreadByPane: unreadByPane)
+}
+
+/// Collapses a pane's alert and agent facts into the one thing its dot can say.
+func paneChipState(agent: AgentLifecycle, hasUnreadAlert: Bool) -> PaneChipState {
+  if hasUnreadAlert { return .attention }
+  guard case .attached(_, let activity) = agent else { return .quiet }
+  switch activity {
+  case .waiting: return .attention
+  case .working: return .busy
+  case .idle, nil: return .quiet
   }
 }
 

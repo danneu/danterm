@@ -14,13 +14,14 @@ func paneStripViewTests() {
     print("PaneStripView")
 
     // A strip of `count` panes with the one at `focused` marked.
-    func makeStrip(count: Int, focused: Int) -> PaneStripView {
+    func makeStrip(count: Int, focused: Int, state: PaneChipState = .quiet) -> PaneStripView {
         let strip = PaneStripView()
         strip.chips = (0..<count).map { i in
             TabPaneChip(
                 paneId: PaneId(rawValue: UUID()),
                 kind: .terminal,
-                isFocused: i == focused)
+                isFocused: i == focused,
+                state: state)
         }
         return strip
     }
@@ -95,6 +96,38 @@ func paneStripViewTests() {
                 plan.visible.contains(focused),
                 "focus \(focused) fell outside \(plan.visible)")
         }
+    }
+
+    uiTest("a state dot stays inside the bleed the strip budgets for") {
+        // Intent: every dot sits on its chip's top-right corner and overhangs by
+        //   exactly the declared bleed, on both axes and in both flippednesses.
+        // Why it exists: the strip sets `clipsToBounds = false` so the dot on the
+        //   last chip is not cut off. That makes the overhang unbounded unless
+        //   something holds it, and the margins it lands in -- 2pt above the
+        //   strip, 4pt of trailing gap -- are only a few points wide.
+        let bleed = ChipArtwork.stateDotBleed
+        let chip = NSRect(x: 40, y: 0, width: ChipArtwork.paneRowSize, height: ChipArtwork.paneRowSize)
+
+        for state: PaneChipState in [.attention, .busy] {
+            let strip = makeStrip(count: 1, focused: 0, state: state)
+            try uiExpect(strip.stateDotRect(state, on: chip) != nil, "\(state) should draw a dot")
+            guard let dot = strip.stateDotRect(state, on: chip) else { continue }
+
+            try uiExpect(
+                abs(dot.maxX - (chip.maxX + bleed)) < 0.001,
+                "\(state) overhangs \(dot.maxX - chip.maxX) horizontally, budget \(bleed)")
+            // The strip is unflipped, so the chip's visual top is its maxY.
+            try uiExpect(
+                abs(dot.maxY - (chip.maxY + bleed)) < 0.001,
+                "\(state) overhangs \(dot.maxY - chip.maxY) vertically, budget \(bleed)")
+            try uiExpect(
+                dot.width <= ChipArtwork.paneRowSize,
+                "a dot wider than its chip would mark the neighbor too")
+        }
+
+        try uiExpect(
+            makeStrip(count: 1, focused: 0).stateDotRect(.quiet, on: chip) == nil,
+            "a quiet pane draws no dot at all")
     }
 
     uiTest("the run stays anchored at the start until the focus forces it") {

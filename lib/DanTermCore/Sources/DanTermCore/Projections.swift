@@ -493,8 +493,10 @@ struct SidebarTabProjection: Equatable {
   // The row speaks for the focused pane, like displayTitle and subtitle do.
   var chipKind: ChipKind = .terminal
   // The second line's pane enumeration, empty for a single-pane tab. Carried in
-  // the projection so a split, a close, or a focus move inside the tab reloads
-  // the row -- none of those changes any other field.
+  // the projection so a split, a close, a focus move, or a state change inside
+  // the tab reloads the row. Only `unreadAlertCount` overlaps at all, and it
+  // moves for a tab-wide total rather than for the pane that changed, so
+  // without this field an agent going idle would never repaint the strip.
   var paneChips: [TabPaneChip] = []
 }
 
@@ -548,7 +550,7 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,
           chipKind: tabChipKind(tab, in: model),
-          paneChips: tabPaneChips(tab)
+          paneChips: tabPaneChips(tab, unreadByPane: tally.byPane)
         )
       }
     )

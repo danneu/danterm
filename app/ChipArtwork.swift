@@ -32,10 +32,29 @@ struct ChipPalette {
     let foreground: CGColor
 }
 
-/// The two states of a chip in a tab row's pane strip.
+/// The two states of a chip in a tab row's pane strip, plus the two colors
+/// its state dot can take.
 struct ChipPaneListPalette {
     let inactive: ChipPalette
     let active: ChipPalette
+    /// A pane that wants you: an unread alert, or an agent blocked on a prompt.
+    let attentionDot: CGColor
+    /// A pane whose agent is mid-turn. Ambient, so it is drawn smaller and
+    /// dimmer than `attentionDot` -- see the stateDot note in chips.json.
+    let busyDot: CGColor
+    /// Separates a dot from the mark, the chip, and the row it overhangs.
+    /// Fixed per appearance, not taken from the row: sidebar selection never
+    /// reaches the cell, so nothing drawn here may depend on it.
+    let stateDotRing: CGColor
+}
+
+/// How one state dot is drawn, in points at `ChipArtwork.paneRowSize`.
+struct ChipStateDotSize {
+    let diameter: CGFloat
+    let alpha: CGFloat
+    /// Width of the `stateDotRing` band outside the dot; 0 for no ring. Only
+    /// the attention dot is ringed -- see the stateDot note in chips.json.
+    let ringWidth: CGFloat
 }
 
 /// One pane-kind chip: its glyph, its optical tuning, and its colors.
@@ -134,12 +153,28 @@ enum ChipArtwork {
     /// may depend on whether the row is selected.
     static let paneListLight = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.1216), foreground: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.451)),
-        active: ChipPalette(background: CGColor(srgbRed: 0.1137, green: 0.1137, blue: 0.1216, alpha: 1), foreground: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1))
+        active: ChipPalette(background: CGColor(srgbRed: 0.1137, green: 0.1137, blue: 0.1216, alpha: 1), foreground: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)),
+        attentionDot: CGColor(srgbRed: 1, green: 0.2314, blue: 0.1882, alpha: 1),
+        busyDot: CGColor(srgbRed: 0.7804, green: 0.4667, blue: 0, alpha: 1),
+        stateDotRing: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1)
     )
     static let paneListDark = ChipPaneListPalette(
         inactive: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.1412), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.549)),
-        active: ChipPalette(background: CGColor(srgbRed: 0.949, green: 0.949, blue: 0.9569, alpha: 1), foreground: CGColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1255, alpha: 1))
+        active: ChipPalette(background: CGColor(srgbRed: 0.949, green: 0.949, blue: 0.9569, alpha: 1), foreground: CGColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1255, alpha: 1)),
+        attentionDot: CGColor(srgbRed: 1, green: 0.2706, blue: 0.2275, alpha: 1),
+        busyDot: CGColor(srgbRed: 1, green: 0.6235, blue: 0.0392, alpha: 1),
+        stateDotRing: CGColor(srgbRed: 0.1373, green: 0.1373, blue: 0.149, alpha: 1)
     )
+
+    /// State-dot geometry, in points at `paneRowSize` and scaled with it. The
+    /// two sizes are deliberately unequal: busy is ambient and attention is an
+    /// interrupt, so they must not read as equally loud on a strip where most
+    /// panes are busy. See the stateDot note in chips.json.
+    static let attentionDotSize = ChipStateDotSize(diameter: 4.5, alpha: 1, ringWidth: 1)
+    static let busyDotSize = ChipStateDotSize(diameter: 3, alpha: 0.6, ringWidth: 0)
+    /// How far the dot overhangs its chip's top-right corner. Lands in margins
+    /// the strip already has, so it stays out of the strip's fitting math.
+    static let stateDotBleed: CGFloat = 1
 
     /// Every chip in the manifest, in declaration order.
     static let all: [(name: String, chip: ChipDefinition)] = [

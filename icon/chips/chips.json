@@ -30,6 +30,48 @@
   "cornerRadius": 0.23,
   "sizes": { "sidebar": 15, "toolbar": 13, "paneRow": 12 },
 
+  "_stateDotNote": [
+    "The one state mark a pane chip carries, at its top-right corner. Geometry",
+    "is stated once here because it does not vary by appearance; only the two",
+    "colors do, and those live under paneList.<mode>.stateDot.",
+    "",
+    "attention and busy are deliberately unequal. Busy is ambient -- most agent",
+    "panes are busy most of the time -- and attention is an interrupt, so a",
+    "strip where six panes are working must still let the one that wants you",
+    "pull the eye first. Equal weights failed exactly that case: on the",
+    "accent-colored selected row the warmer busy dot outshouted the red one.",
+    "The pair therefore differs in size and alpha as well as in hue, which",
+    "also keeps them apart without hue at all -- red darkens toward amber for",
+    "a protanope.",
+    "",
+    "diameter and ringWidth are in points at paneRow size and scale with it.",
+    "",
+    "Only attention is ringed. The ring separates it from everything it can land",
+    "on -- the mark, the lifted active chip, the dim inactive ones, and the row",
+    "where the dot overhangs -- because attention has to be unmissable. Busy is",
+    "the opposite: it is muted on purpose, so a ring fighting for its legibility",
+    "would undo the muting. At 3pt a 1pt ring is most of the dot, and on the",
+    "selected row it turned the amber into a white blob.",
+    "",
+    "The ring matches the row behind it, so it reads as a gap around the dot",
+    "rather than a halo of its own: over the chip it separates, over the row it",
+    "disappears. This value is the unselected row and covers every case the",
+    "manifest can speak for. A selected row is painted by AppKit in a color that",
+    "depends on selection and on emphasis, neither of which reaches the cell",
+    "through the sidebar projection, so SidebarRowView pushes that one down to",
+    "the strip at draw time.",
+    "",
+    "bleed is how far the dot overhangs the chip's top-right corner. It lands",
+    "in margins the strip already has -- 2pt above it, 4pt of trailing gap --",
+    "so it is excluded from the strip's fitting math on purpose."
+  ],
+
+  "stateDot": {
+    "attention": { "diameter": 4.5, "alpha": 1.0, "ringWidth": 1.0 },
+    "busy":      { "diameter": 3.0, "alpha": 0.6, "ringWidth": 0.0 },
+    "bleed": 1.0
+  },
+
   "kinds": {
     "terminal": {
       "svg": "terminal.svg",
@@ -76,8 +118,13 @@
     "selected row, where the neutrals turn translucent-white so they read",
     "against the accent instead of against the sidebar.",
     "",
-    "preview.html renders every candidate treatment from these. Nothing ships",
-    "reads them yet; the treatment is still being chosen by eye."
+    "The `fixed` pair is what ships: it lifts the active chip by luminance",
+    "rather than by hue, so it clears the accent from either direction and",
+    "needs no knowledge of whether its row is selected. `rest`, `sel`, and",
+    "`accent` feed preview.html's losing candidates only, kept so the choice",
+    "can be re-judged by eye rather than re-derived from memory.",
+    "",
+    "`stateDot` is the attention/busy pair from the top-level stateDot block."
   ],
 
   "paneList": {
@@ -87,7 +134,9 @@
       "accent": "#007AFFFF",
       "onAccent": "#FFFFFFFF",
       "fixed": { "bg": "#0000001F", "fg": "#00000073",
-                 "onBg": "#1D1D1FFF", "onFg": "#FAFAFAFF" }
+                 "onBg": "#1D1D1FFF", "onFg": "#FAFAFAFF" },
+      "stateDot": { "attention": "#FF3B30FF", "busy": "#C77700FF",
+                    "ring": "#FAFAFAFF" }
     },
     "dark": {
       "rest": { "bg": "#FFFFFF24", "fg": "#FFFFFFA6", "dim": "#FFFFFF66" },
@@ -95,7 +144,9 @@
       "accent": "#0A84FFFF",
       "onAccent": "#FFFFFFFF",
       "fixed": { "bg": "#FFFFFF24", "fg": "#FFFFFF8C",
-                 "onBg": "#F2F2F4FF", "onFg": "#1E1E20FF" }
+                 "onBg": "#F2F2F4FF", "onFg": "#1E1E20FF" },
+      "stateDot": { "attention": "#FF453AFF", "busy": "#FF9F0AFF",
+                    "ring": "#232326FF" }
     }
   }
 }
