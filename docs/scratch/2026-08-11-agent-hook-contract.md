@@ -18,16 +18,23 @@ the record it came from.
 
 | Gap | Where it bites | Status |
 |---|---|---|
-| Claude's pane transitions are unverified live | A Claude pane may still fail to report for a reason the unit tests cannot see, exactly as codex did | Wiring fixed and evaluated, no live run yet; needs a `world:rebuild` first |
 | Claude's test payloads are hand-written | Its field names are pinned only as far as we guessed them, so a renamed field passes | Needs a capture like the codex one; no trust gate, so it is cheap |
 | A declined codex approval leaves the pane reading `waiting` | Until the next `UserPromptSubmit`, the pane misreports | Not ours to fix; codex emits nothing on abort |
 | Codex subagent behavior is untested | The `agent_id` guard is a placeholder for a contract we have not measured | One subagent turn settles it |
 | `CLAUDE_CONFIG_DIR` isolation is unconfirmed | Decides whether test layer 2 can cover Claude at all | Untested |
 | A fresh codex pane carries no chip until the first prompt | Looks like a broken hook, and cost an hour of debugging once already | Codex's behavior; not fixable in the hook |
 
-Verified end to end on the real config, by contrast: a codex pane goes `none` ->
-`attached` + `working` -> `idle` on Stop -> `none` on `/quit`. Test layers 2 and
-3 are proposals, not decisions.
+Verified end to end on the real config, both agents: a pane goes `none` ->
+`attached` -> `working` on the prompt -> `idle` on Stop -> `none` on
+`/quit` or `/exit`. Test layers 2 and 3 are proposals, not decisions.
+
+Watching Claude do it turned up a defect on our side. Attachment claimed
+`.working`, a state no hook sends. Codex hid it by deferring `SessionStart` to
+the first prompt, so a turn always followed within milliseconds; Claude fires it
+at launch, so a pane at an untouched prompt reported work indefinitely. Attach
+now records no activity and the first real event fills it in. Sessions that
+started before a hook change keep the old wiring until they restart, so a
+lingering wrong state usually means an old session, not a broken hook.
 
 ## Why this exists
 
