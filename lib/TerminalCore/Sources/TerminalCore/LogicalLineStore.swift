@@ -1029,10 +1029,18 @@ extension Terminal {
             // survives is the *continuation* reading the trimmed head had under today's store,
             // which is `.continuation` for a marked line and nothing at all for an unmarked one.
             trimmed.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
-            let newOffset = offset + cut * LogicalLineRecord.cellBytes
+            // The trim moves the record's start and keeps its identity, so the index word is
+            // re-packed from both halves rather than added to. Adding the cut bytes to the packed
+            // word happens to leave the ordinal alone today, but only because the sum never
+            // carries out of the offset field; re-packing says what the write means and puts
+            // `packedRecordAddress`'s bounds check on the new offset.
+            let newOffset = recordOffset(in: offset) + cut * LogicalLineRecord.cellBytes
             writeHeader(trimmed, at: newOffset)
-            offsets[0] = newOffset
-            head = recordOffset(in: newOffset)
+            offsets[0] = packedRecordAddress(
+                offset: newOffset,
+                identity: recordIdentity(in: offset)
+            )
+            head = newOffset
             bytesInUse -= cut * LogicalLineRecord.cellBytes
             headTrimmedCells += cut
         }

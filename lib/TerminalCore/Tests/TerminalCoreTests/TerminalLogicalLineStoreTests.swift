@@ -1004,6 +1004,29 @@ struct TerminalLogicalLineStoreTests {
         assertSurvives("after a head trim", offsetBy: 6)
     }
 
+    @Test("a head trim keeps the head record's identity and the text its coordinate names")
+    func headTrimPreservesHeadRecordIdentity() throws {
+        // Intent: trimming cells off the front of the head record leaves that record's identity
+        //   alone, so a coordinate stored against it still names the same character.
+        // Why it exists: the identity and the arena offset share one packed index word, and the
+        //   trim rewrites that word. `position(of:)` binary-searches on the identity it reads
+        //   back, so an identity the trim disturbed would resolve a stored search match onto the
+        //   wrong text instead of failing outright.
+        // Scenario: a six-cell closed record loses its first four-cell display row while a
+        //   coordinate names the first cell of the retained suffix.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        store.admit(Self.filledRow(width: 4, seed: 0, softWrapped: true))
+        store.admit(Self.shortRow(width: 4, count: 2, seed: 4))
+        let identity = try #require(store.recordIdentity(at: 0))
+        let coordinate = try #require(store.recordTextPosition(recordIndex: 0, cellOffset: 4))
+        let named = try #require(Self.scalar(in: store, at: coordinate))
+
+        #expect(evictOne(&store))
+
+        #expect(store.recordIdentity(at: 0) == identity)
+        #expect(Self.scalar(in: store, at: coordinate) == named)
+    }
+
     @Test("a record coordinate survives a head trim without moving")
     func recordCoordinateSurvivesHeadTrim() throws {
         // Intent: a coordinate names its original cell after eviction trims earlier cells from
@@ -1532,6 +1555,19 @@ struct TerminalLogicalLineStoreTests {
     /// so cannot call a mutating member.
     private func evictOne(_ store: inout Terminal.LogicalLineStore) -> Bool {
         store.evictOneDisplayRow()
+    }
+
+    /// The scalar a record coordinate resolves to, read back through the display projection a
+    /// highlight would use.
+    private static func scalar(
+        in store: Terminal.LogicalLineStore,
+        at coordinate: Terminal.LogicalLineStore.RecordTextPosition
+    ) -> Unicode.Scalar? {
+        guard let resolved = store.position(of: coordinate),
+              let row = store.displayRow(at: resolved.displayRow),
+              row.cells.indices.contains(resolved.column)
+        else { return nil }
+        return row.cells[resolved.column].scalars.first
     }
 
     /// Whether `candidate` is a trailing subsequence of `whole`.
