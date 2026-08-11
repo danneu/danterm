@@ -20,22 +20,17 @@ import Cocoa
 /// build, not a stale diff.
 struct ReconcilerCaches {
     // focusBorders rides the persisted terminal session in `sessions`, which survives
-    // container rebuilds, so this cache needs no cross-pass invalidation.
+    // container edits, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
     // paneConfig also rides the persisted terminal session in `sessions`, so the
     // cache needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
-    // paneToolbar / searchOverlay are the *host-recreated* caches: their host is the
-    // PaneWrapperView, which a container rebuild destroys (toolbar + overlay are subviews
-    // of the wrapper). reconcileContainers keeps them coherent by clearing the affected
-    // keys (chromeInvalidation) for rebuilt/removed containers BEFORE reconcilePaneChrome
-    // runs, so its applyDiff re-pushes the (value-unchanged) chrome onto the fresh wrapper.
+    // Pane toolbar and search overlay state rides the runtime-owned PaneHost, so
+    // structural container edits do not invalidate either cache.
     var paneToolbar: [PaneId: PaneToolbarRender] = [:]
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
-    // The last container shape reconcileContainers built per tab. computeContainerOps
-    // diffs the new shapes against this; a tab rebuilds only when its shape drifts.
-    // This is the input that decides which paneToolbar/searchOverlay keys to invalidate
-    // (a rebuilt container destroys those wrappers) before reconcilePaneChrome runs.
+    // The last container shape reconciled per tab. computeContainerOps diffs new
+    // shapes against this into full builds for new tabs and keyed patches for survivors.
     var containerShape: [TabId: ContainerShape] = [:]
     // Single-optional ordered-pass cache (like the eventual switcher cache): the last
     // sidebar projection reconcileSidebar applied. computeSidebarRowOps diffs the new
@@ -44,7 +39,7 @@ struct ReconcilerCaches {
     // is excluded from the projection and reapplied separately (resolveReloadSelection).
     var sidebar: SidebarProjection? = nil
     // Single-struct-compare cache: the last window chrome reconcileWindowChrome applied.
-    // Its three hosts (window, chromeView, dock tile) persist across container rebuilds,
+    // Its three hosts (window, chromeView, dock tile) persist across container edits,
     // so this cache needs no cross-pass invalidation. nil == not yet applied.
     var windowChrome: WindowChromeProjection? = nil
     // Single-optional preferences projection cache. nil == no open preferences
@@ -62,7 +57,7 @@ struct ReconcilerCaches {
     var themeBrowser: ThemeBrowserProjection? = nil
     // Single-optional MRU switcher cache (the windowChrome template, plus a hide
     // transition): the last switcher projection reconcileSwitcher applied. nil == no MRU
-    // cycle == panel ordered out. The panel persists across container rebuilds, so this
+    // cycle == panel ordered out. The panel persists across container edits, so this
     // cache needs no cross-pass invalidation.
     var switcher: SwitcherProjection? = nil
     // Single-optional quit-confirmation cache. Unlike switcher, the panel is
@@ -74,21 +69,18 @@ struct ReconcilerCaches {
 extension AppRuntime {
     /// Reconcile derived AppKit/session state from the model. Runs after the
     /// pre-reconcile command phase in send() and at the end of a restore commit.
-    /// Ordered existence -> pane config -> containers -> content/chrome -> occlusion:
-    /// session teardown first (so a removed pane's session is gone before config
-    /// or container work), pane config once surviving sessions are known, containers
-    /// before chrome (they invalidate the chrome caches the chrome pass then reads),
-    /// and occlusion last (it reads `sessions`).
+    /// Ordered containers -> existence -> pane config -> content/chrome -> occlusion:
+    /// containers detach removed wrappers before session teardown releases their hosts;
+    /// chrome then renders into the stable surviving wrappers, and occlusion stays last.
     func reconcile() {
-        reconcileSessionExistence()         // destroy sessions for panes gone from model.allPaneIds
-        reconcilePaneConfig()
         let mountFocusTab = reconcileContainers()  // eager: selected visible, rest mounted+hidden
+        reconcileSessionExistence()         // release hosts only after containers detach dead wrappers
+        reconcilePaneConfig()
         let alertTally = unreadAlertTally(for: model)
         reconcileFocusBorders(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
-        // Mount-time focus runs AFTER reconcilePaneChrome so an active-search pane's
-        // (just-rebuilt) search field exists when applyMountTimeFocus targets it. No-op
-        // unless reconcileContainers built/rebuilt or newly showed the selected container.
+        // Mount-time focus runs after pane chrome so a newly built active-search pane
+        // has its search field before applyMountTimeFocus targets it.
         applyMountTimeFocus(mountFocusTab)
         reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
@@ -102,9 +94,7 @@ extension AppRuntime {
         syncPaneVisibility()  // existing occlusion pass; stays last
     }
 
-    /// FIRST pass: tear down sessions whose pane left the model. Runs before
-    /// reconcileContainers so a removed pane's session is gone before its container is
-    /// rebuilt/removed (matching the prior teardown-before-rebuild ordering).
+    /// Tear down sessions whose pane left the model after containers detach wrappers.
     /// Selection is the pure `sessionsToTearDown` (= live sessions - model.allPaneIds);
     /// the executor body is the former teardown command. Session *creation* stays
     /// a command, so the reconciler only ever destroys.
@@ -116,38 +106,31 @@ extension AppRuntime {
 
     /// Container pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
     /// mounted, the selected one visible, the rest hidden). Returns the tab whose
-    /// container was just built/rebuilt or newly shown -- the sole container that gets
-    /// mount-time focus, applied by reconcile() *after* reconcilePaneChrome rebuilds the
-    /// search overlay. Diffs desiredContainerShapes against caches.containerShape via
-    /// computeContainerOps; a container rebuilds only when its shape drifts (structure +
-    /// leaf ids + zoom -- not ratios or pane payload).
+    /// container was just built or newly shown -- the sole container that gets
+    /// mount-time focus. Existing containers receive keyed structural patches.
     func reconcileContainers() -> TabId? {
         guard contentArea != nil else { return nil }
         let new = desiredContainerShapes(in: model)
         let ops = computeContainerOps(old: caches.containerShape, new: new, selectedTabId: model.selectedTabId)
 
-        // Host-recreated cache invalidation: a rebuilt container destroys its panes'
-        // PaneWrapperViews (toolbar + search overlay are wrapper subviews), so clear those
-        // panes' chrome caches BEFORE reconcilePaneChrome (the next pass) runs -- its
-        // value-unchanged diff then re-pushes chrome onto the fresh wrapper. focusBorders
-        // is NOT invalidated: its terminal host persists in `sessions`.
-        for paneId in chromeInvalidation(ops: ops, newShapes: new) {
-            caches.paneToolbar.removeValue(forKey: paneId)
-            caches.searchOverlay.removeValue(forKey: paneId)
-        }
-
         // AppKit half of view-swap popover dismissal: when the visible container is
-        // removed, rebuilt, or hidden, the anchored popover(s) strand -- dismiss them.
+        // removed or hidden, the anchored popover(s) strand -- dismiss them.
         // The model half (clearing model.todoPopover) is the pure reconcileTodoPopover
         // in update(); the two halves read different inputs because they run in
         // different layers (see the model-driven view reconciliation ADR).
         let previouslyVisibleTabId = tabContainers.first(where: { !$0.value.isHidden })?.key
         if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId) {
             dismissStrandedPopovers()
+        } else if containerOpsEditVisibleTree(
+            ops: ops,
+            previouslyVisibleTabId: previouslyVisibleTabId
+        ) {
+            cancelPaneDrag()
+            dismissStrandedTabPopover()
         }
 
-        // Apply ops (remove -> rebuild -> setVisible). Track whether the selected
-        // container was activated (built/rebuilt or shown-from-hidden) so mount-time focus
+        // Apply ops (remove -> build/patch/zoom -> setVisible). Track whether the selected
+        // container was activated (built or shown-from-hidden) so mount-time focus
         // runs only then -- never per hidden tab, and never on a background-only reconcile
         // (so a pane click does not refight first responder).
         var activatedSelected = false
@@ -155,15 +138,17 @@ extension AppRuntime {
             switch op {
             case .remove(let tabId):
                 removeTabContainer(tabId)
-            case .rebuild(let tabId):
-                if let existing = tabContainers[tabId] {
-                    existing.removeFromSuperview()
-                    tabContainers.removeValue(forKey: tabId)
-                }
+            case .build(let tabId):
                 if let tab = tabById(tabId, in: model) {
                     _ = buildAndInsertContainer(for: tab)  // visibility set by the following setVisible op
                 }
                 if tabId == model.selectedTabId { activatedSelected = true }
+            case .patch(let tabId, let patch):
+                guard let tab = tabById(tabId, in: model),
+                      let container = tabContainers[tabId] else { break }
+                container.applyTreePatch(patch, rootNode: tab.rootNode)
+            case .setZoomedPane(let tabId, let paneId):
+                tabContainers[tabId]?.setZoomedPane(paneId)
             case .setVisible(let tabId, let visible):
                 guard let container = tabContainers[tabId] else { break }
                 let wasHidden = container.isHidden
@@ -232,7 +217,9 @@ extension AppRuntime {
                 chipKind: render.chipKind,
                 unreadAlertCount: render.unreadAlertCount,
                 totalTodoCount: render.totalTodoCount,
-                uncompletedTodoCount: render.uncompletedTodoCount
+                uncompletedTodoCount: render.uncompletedTodoCount,
+                isZoomed: render.isZoomed,
+                hasSplits: render.hasSplits
             )
         })
         applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in

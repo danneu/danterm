@@ -7,10 +7,10 @@
 // guardSidebarRenameOps (suppress reload of edited row; structural ops clear
 // the sidecar; nil target is a pass-through), advanceSidebarCache attribute
 // retention, the eager desiredContainerShapes projection, the
-// computeContainerOps model-apply suite (remove / rebuild / visibility-only
+// computeContainerOps model-apply suite (remove / build / patch / visibility-only
 // switch / no-op), containerOpsStrandVisible classification, ContainerShape
 // equality (ratio + leaf metadata carveouts; structural change /
-// zoom-toggle / direction / moved-leaf detected), chromeInvalidation, and
+// zoom-toggle / direction / moved-leaf detected), keyed tree patches, and
 // sessionsToTearDown. The model-apply helpers (sbTab / sbGroup / sbProj /
 // applySidebarRowOps / cShape / cSplitShape / splitNode / applyContainerOps
 // / checkRowOps / checkContainerOps) move to file-private scope alongside
@@ -546,17 +546,60 @@ import Testing
             "removing tab B reaches new (A visible, B gone)")
     }
 
-    @Test("computeContainerOps: rebuild on a drifted shape keeps visibility")
-    func computeContainerOpsRebuildOnDriftedShapeKeepsVisibility() {
-        // Intent: a drifted shape triggers rebuild and the tab stays
-        //   visible.
-        // Why it exists: pins the rebuild branch.
-        // Scenario: spec-first drift rebuild.
+    @Test("computeContainerOps: patch on a drifted shape keeps visibility")
+    func computeContainerOpsPatchOnDriftedShapeKeepsVisibility() {
+        // Intent: a drifted shape triggers an incremental patch and the tab
+        //   stays visible.
+        // Why it exists: rebuilding here made split and close latency grow with
+        //   every pane already mounted in the tab.
+        // Scenario: the incremental-container reconciliation performance fix.
         let a = TabId(), pa = PaneId(), pa2 = PaneId()
         checkContainerOps(
             old: [a: cShape(pa)], oldVisible: [a: true],
             new: [a: cSplitShape(pa, pa2)], newSelected: a,
-            "rebuilding A reaches new with A still visible")
+            "patching A reaches new with A still visible")
+    }
+
+    @Test("container tree patches reach every model-produced structural shape")
+    func containerTreePatchesReachEveryStructuralShape() throws {
+        // Intent: applying a keyed tree patch reaches the desired shape for
+        //   leaf replacement, collapse, root wrapping, swaps, and replacement.
+        // Why it exists: the AppKit executor trusts this pure patch to name
+        //   every relationship that must change without rebuilding the tab.
+        // Scenario: spec-first coverage of every model-produced tree mutation.
+        let a = PaneId(), b = PaneId(), c = PaneId(), d = PaneId()
+        let s1 = SplitId(), s2 = SplitId(), s3 = SplitId()
+        let leafA = ContainerShapeNode.leaf(a)
+        let splitAB = ContainerShapeNode.split(
+            id: s1, direction: .horizontal, first: .leaf(a), second: .leaf(b))
+        let nested = ContainerShapeNode.split(
+            id: s2, direction: .vertical, first: splitAB, second: .leaf(c))
+        let swapped = ContainerShapeNode.split(
+            id: s2, direction: .vertical,
+            first: .split(id: s1, direction: .horizontal, first: .leaf(c), second: .leaf(b)),
+            second: .leaf(a))
+        let replacement = ContainerShapeNode.split(
+            id: s3, direction: .horizontal, first: .leaf(d), second: .leaf(a))
+        let cases: [(String, ContainerShapeNode, ContainerShapeNode)] = [
+            ("replace leaf with split", leafA, splitAB),
+            ("collapse split", splitAB, leafA),
+            ("wrap root", splitAB, nested),
+            ("swap leaves", nested, swapped),
+            ("replace whole tree", nested, replacement),
+        ]
+
+        for (name, old, new) in cases {
+            let patch = try #require(computeContainerTreePatch(old: old, new: new), "missing patch for \(name)")
+            #expect(applyContainerTreePatch(patch, to: old) == new, "patch failed to \(name)")
+        }
+    }
+
+    @Test("container tree patch is absent when structure is unchanged")
+    func containerTreePatchIsAbsentWhenStructureIsUnchanged() {
+        let pane = PaneId()
+        let shape = ContainerShapeNode.leaf(pane)
+
+        #expect(computeContainerTreePatch(old: shape, new: shape) == nil)
     }
 
     @Test("computeContainerOps: visibility-only selected-tab switch hides old, shows new")
@@ -587,7 +630,7 @@ import Testing
 
     @Test("containerOpsStrandVisible flags only ops that strand the visible tab")
     func containerOpsStrandVisibleFlagsOnlyStrandingOps() {
-        // Intent: containerOpsStrandVisible flags rebuild/remove/hide of
+        // Intent: containerOpsStrandVisible flags build/remove/hide of
         //   the previously-visible tab, but not other ops or no-ops.
         // Why it exists: pins the stranding classifier the reconciler
         //   uses to decide whether to force-show a fallback.
@@ -595,8 +638,8 @@ import Testing
         let visible = TabId(), background = TabId()
 
         #expect(
-            containerOpsStrandVisible(ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible) == true,
-            "visible rebuild strands the visible container")
+            containerOpsStrandVisible(ops: [.build(tabId: visible)], previouslyVisibleTabId: visible) == true,
+            "visible full build strands the visible container")
         #expect(
             containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible) == true,
             "visible remove strands the visible container")
@@ -607,10 +650,10 @@ import Testing
             "hiding the visible container strands it")
         #expect(
             containerOpsStrandVisible(
-                ops: [.rebuild(tabId: background)],
+                ops: [.build(tabId: background)],
                 previouslyVisibleTabId: visible
             ) == false,
-            "background rebuild leaves the visible container mounted")
+            "background full build leaves the visible container mounted")
         #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: visible, visible: true)],
@@ -627,6 +670,48 @@ import Testing
         #expect(
             containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil) == false,
             "without a previously-visible tab there is no stranded container")
+    }
+
+    @Test("containerOpsEditVisibleTree flags patch and zoom only on the visible tab")
+    func containerOpsEditVisibleTreeFlagsPatchAndZoom() throws {
+        // Intent: a patch or zoom update to the visible tab is classified as a
+        //   live tree edit, while background and visibility ops are not.
+        // Why it exists: the AppKit executor uses this boundary to cancel pane
+        //   drags without dismissing pane-scoped popovers whose anchors survive.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let visible = TabId(), background = TabId(), pane = PaneId(), sibling = PaneId()
+        let patch = try #require(computeContainerTreePatch(
+            old: .leaf(pane),
+            new: .split(id: SplitId(), direction: .horizontal, first: .leaf(pane), second: .leaf(sibling))))
+
+        #expect(containerOpsEditVisibleTree(
+            ops: [.patch(tabId: visible, patch: patch)],
+            previouslyVisibleTabId: visible))
+        #expect(containerOpsEditVisibleTree(
+            ops: [.setZoomedPane(tabId: visible, paneId: pane)],
+            previouslyVisibleTabId: visible))
+        #expect(!containerOpsEditVisibleTree(
+            ops: [.patch(tabId: background, patch: patch), .setVisible(tabId: visible, visible: true)],
+            previouslyVisibleTabId: visible))
+    }
+
+    @Test("computeContainerOps uses a full build only when the cached tab is absent")
+    func computeContainerOpsUsesFullBuildOnlyForAbsentTab() {
+        // Intent: resetting the reconciliation cache causes a clean full build,
+        //   while a surviving tab's changed tree receives a patch.
+        // Why it exists: restore must never patch stale hosts, and ordinary edits
+        //   must never fall back to whole-tab reconstruction.
+        // Scenario: spec-first clean-restore and live-edit cache boundary.
+        let tabId = TabId(), pane = PaneId(), sibling = PaneId()
+        let old = cShape(pane)
+        let new = cSplitShape(pane, sibling)
+
+        let clean = computeContainerOps(old: [:], new: [tabId: new], selectedTabId: tabId)
+        #expect(clean.contains(.build(tabId: tabId)))
+
+        let live = computeContainerOps(old: [tabId: old], new: [tabId: new], selectedTabId: tabId)
+        #expect(!live.contains(.build(tabId: tabId)))
+        #expect(live.contains { if case .patch(let id, _) = $0 { return id == tabId }; return false })
     }
 
     // MARK: - ContainerShape (ratio carveout / payload excluded / structural change)
@@ -687,25 +772,6 @@ import Testing
         var zoomed = split; zoomed.isZoomed = true
         #expect(containerShape(of: split) != containerShape(of: zoomed),
             "toggling zoom changes the shape")
-    }
-
-    // MARK: - chromeInvalidation
-
-    @Test("chromeInvalidation: rebuild contributes its leaves, setVisible-only is empty")
-    func chromeInvalidationRebuildContributesLeavesSetVisibleEmpty() {
-        // Intent: a rebuild op invalidates every leaf in the rebuilt
-        //   container; setVisible-only ops invalidate nothing.
-        // Why it exists: pins the chrome-invalidation contract used to
-        //   redraw pane chrome only when the wrappers actually change.
-        // Scenario: spec-first chrome invalidation.
-        let a = TabId(), b = TabId(), pa = PaneId(), pa2 = PaneId(), pb = PaneId()
-        let newShapes: [TabId: ContainerShape] = [a: cSplitShape(pa, pa2), b: cShape(pb)]
-        let ops: [ContainerOp] = [.rebuild(tabId: a), .setVisible(tabId: a, visible: true), .setVisible(tabId: b, visible: false)]
-        #expect(chromeInvalidation(ops: ops, newShapes: newShapes) == Set([pa, pa2]),
-            "a rebuilt container invalidates every one of its leaf panes")
-        let visOnly: [ContainerOp] = [.setVisible(tabId: a, visible: false), .setVisible(tabId: b, visible: true)]
-        #expect(chromeInvalidation(ops: visOnly, newShapes: newShapes).isEmpty,
-            "a visibility-only switch invalidates no chrome (wrappers survive)")
     }
 
     // MARK: - sessionsToTearDown (migrated sessionCreationFailed net)
@@ -818,11 +884,76 @@ private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [
     for op in ops {
         switch op {
         case .remove(let t): state[t] = nil
-        case .rebuild(let t): if state[t] == nil { state[t] = false }
+        case .build(let t): if state[t] == nil { state[t] = false }
+        case .patch: break
+        case .setZoomedPane: break
         case .setVisible(let t, let v): state[t] = v
         }
     }
     return state
+}
+
+private func applyContainerTreePatch(
+    _ patch: ContainerTreePatch,
+    to old: ContainerShapeNode
+) -> ContainerShapeNode? {
+    var state = flattenContainerTree(old)
+    for splitId in patch.removedSplitIds {
+        state.splits.removeValue(forKey: splitId)
+    }
+    for splitId in patch.changedSplitIds {
+        guard let split = patch.desiredSplits[splitId] else { return nil }
+        state.splits[splitId] = split
+    }
+    if patch.rootChanged {
+        state.root = patch.desiredRoot
+    }
+
+    func materialize(_ node: ContainerNodeRef, visiting: inout Set<SplitId>) -> ContainerShapeNode? {
+        switch node {
+        case .pane(let paneId):
+            return .leaf(paneId)
+        case .split(let splitId):
+            guard visiting.insert(splitId).inserted,
+                  let split = state.splits[splitId],
+                  let first = materialize(split.first, visiting: &visiting),
+                  let second = materialize(split.second, visiting: &visiting) else { return nil }
+            visiting.remove(splitId)
+            return .split(
+                id: splitId,
+                direction: split.direction,
+                first: first,
+                second: second
+            )
+        }
+    }
+
+    var visiting: Set<SplitId> = []
+    return materialize(state.root, visiting: &visiting)
+}
+
+private func flattenContainerTree(
+    _ node: ContainerShapeNode
+) -> (root: ContainerNodeRef, splits: [SplitId: ContainerSplitSpec]) {
+    var splits: [SplitId: ContainerSplitSpec] = [:]
+
+    func walk(_ node: ContainerShapeNode) -> ContainerNodeRef {
+        switch node {
+        case .leaf(let paneId):
+            return .pane(paneId)
+        case .split(let splitId, let direction, let first, let second):
+            let firstRef = walk(first)
+            let secondRef = walk(second)
+            splits[splitId] = ContainerSplitSpec(
+                direction: direction,
+                first: firstRef,
+                second: secondRef
+            )
+            return .split(splitId)
+        }
+    }
+
+    return (walk(node), splits)
 }
 
 private func checkContainerOps(

@@ -102,20 +102,21 @@ func splitContainerViewTests() {
         try uiExpect(firstSubviewRatio(in: innerSplitView, expectedRatio: 0.7), "inner split should match stored ratio")
     }
 
-    uiTest("container rebuild reparents the same terminal host") {
-        // Intent: rebuilding pane containers replaces wrapper chrome but preserves
-        //   the terminal session and its stable host-view identity.
-        // Why it exists: pane moves and zoom rebuilds must not recreate the PTY owner.
-        // Scenario: spec-first container rebuild for one live pane.
+    uiTest("container rebuild reparents the same pane wrapper") {
+        // Intent: rebuilding pane containers preserves both the terminal session
+        //   and its runtime-owned wrapper host.
+        // Why it exists: pane moves, splits, and zoom toggles must preserve
+        //   toolbar and search-overlay identity with the terminal host.
+        // Scenario: the incremental-container reconciliation performance fix.
         let paneId = PaneId()
         let terminal = TerminalView()
+        let runtime = AppRuntime()
+        runtime.sessions[paneId] = terminal
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = SplitContainerView(
             rootNode: root,
-            sessionLookup: { id in id == paneId ? terminal : nil },
-            runtime: nil,
-            isZoomed: false,
-            hasSplits: false,
+            wrapperLookup: { id in id == paneId ? runtime.paneHost(for: id)?.wrapper : nil },
+            runtime: runtime,
             frame: NSRect(x: 0, y: 0, width: 800, height: 600)
         )
 
@@ -126,8 +127,184 @@ func splitContainerViewTests() {
 
         try uiExpect(terminal.hostView === terminal, "session host identity changed")
         try uiExpect(firstWrapper != nil && secondWrapper != nil, "rebuild should mount both wrappers")
-        try uiExpect(firstWrapper !== secondWrapper, "rebuild should replace wrapper chrome")
+        try uiExpect(firstWrapper === secondWrapper, "rebuild should preserve wrapper chrome")
     }
+
+    uiTest("tree patch preserves wrapper and search overlay without ratio feedback") {
+        // Intent: splitting a pane patches one live tree while preserving the
+        //   pane wrapper, its search overlay, and every stored split ratio.
+        // Why it exists: the old whole-tab rebuild discarded pane chrome and
+        //   could feed layout-produced divider positions back into the model.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
+        let terminalA = TerminalView(), terminalB = TerminalView()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = terminalA
+        runtime.sessions[paneB] = terminalB
+        let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
+        let newRoot = SplitNodeModel.split(
+            id: splitId,
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)),
+            second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.7
+        )
+        let container = persistentContainer(root: oldRoot, runtime: runtime)
+        container.rebuild()
+        container.ensureLaidOut()
+        let wrapper = try requireWrapper(runtime, paneA)
+        wrapper.showSearchOverlay(search: SearchModel(needle: "needle"), runtime: runtime)
+        let overlay = wrapper.searchOverlay
+        let todoAnchor = wrapper.todoButtonView
+        guard let patch = computeContainerTreePatch(
+            old: containerShapeNode(oldRoot),
+            new: containerShapeNode(newRoot)
+        ) else { throw UITestFailure(message: "missing split patch") }
+
+        container.applyTreePatch(patch, rootNode: newRoot)
+        container.ensureLaidOut()
+
+        try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "split replaced the original wrapper")
+        try uiExpect(wrapper.searchOverlay === overlay, "split replaced the active search overlay")
+        try uiExpect(wrapper.todoButtonView === todoAnchor, "split replaced the TODO popover anchor")
+        try uiExpect(paneSplitViews(in: container).count == 1, "split patch should create one split view")
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "patch layout emitted split-ratio feedback")
+
+        let swappedRoot = SplitNodeModel.split(
+            id: splitId,
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: paneB)),
+            second: .leaf(PaneModel(id: paneA)),
+            ratio: 0.7
+        )
+        guard let swapPatch = computeContainerTreePatch(
+            old: containerShapeNode(newRoot),
+            new: containerShapeNode(swappedRoot)
+        ) else { throw UITestFailure(message: "missing swap patch") }
+        container.applyTreePatch(swapPatch, rootNode: swappedRoot)
+        container.ensureLaidOut()
+
+        guard let closePatch = computeContainerTreePatch(
+            old: containerShapeNode(swappedRoot),
+            new: containerShapeNode(.leaf(PaneModel(id: paneA)))
+        ) else { throw UITestFailure(message: "missing close patch") }
+        container.applyTreePatch(closePatch, rootNode: .leaf(PaneModel(id: paneA)))
+        container.ensureLaidOut()
+
+        try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "swap or sibling close replaced the wrapper")
+        try uiExpect(wrapper.searchOverlay === overlay, "swap or sibling close replaced the search overlay")
+        try uiExpect(wrapper.todoButtonView === todoAnchor, "swap or sibling close replaced the TODO anchor")
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "swap or close layout emitted split-ratio feedback")
+    }
+
+    uiTest("zoom presents one pane without removing sibling wrappers") {
+        // Intent: zoom hides branches outside the focused pane and unzoom restores
+        //   them without removing either wrapper from the mounted hierarchy.
+        // Why it exists: zoom used to rebuild a collapsed one-leaf container.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let paneA = PaneId(), paneB = PaneId()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = TerminalView()
+        runtime.sessions[paneB] = TerminalView()
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)), ratio: 0.5)
+        let container = persistentContainer(root: root, runtime: runtime)
+        container.rebuild()
+        let wrapperA = try requireWrapper(runtime, paneA)
+        let wrapperB = try requireWrapper(runtime, paneB)
+
+        container.setZoomedPane(paneA)
+
+        try uiExpect(!wrapperA.isHidden && wrapperB.isHidden, "zoom should present only the focused pane")
+        try uiExpect(wrapperA.isDescendant(of: container), "focused wrapper left the container hierarchy")
+        try uiExpect(wrapperB.isDescendant(of: container), "hidden sibling wrapper left the container hierarchy")
+
+        container.setZoomedPane(nil)
+
+        try uiExpect(!wrapperA.isHidden && !wrapperB.isHidden, "unzoom should restore both wrappers")
+    }
+
+    uiTest("cross-tab patches preserve a moved wrapper in either patch order") {
+        // Intent: moving a pane between tabs reparents its one wrapper even when
+        //   the destination patch runs before the source patch.
+        // Why it exists: container op order follows dictionary iteration, so one
+        //   tab must not tear a wrapper back out of its new parent.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
+        let runtime = AppRuntime()
+        runtime.sessions[paneA] = TerminalView()
+        runtime.sessions[paneB] = TerminalView()
+        runtime.sessions[paneC] = TerminalView()
+        let sourceOld = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)), ratio: 0.5)
+        let sourceNew = SplitNodeModel.leaf(PaneModel(id: paneB))
+        let destinationOld = SplitNodeModel.leaf(PaneModel(id: paneC))
+        let destinationNew = SplitNodeModel.split(
+            id: SplitId(), direction: .vertical,
+            first: .leaf(PaneModel(id: paneC)), second: .leaf(PaneModel(id: paneA)), ratio: 0.5)
+        let source = persistentContainer(root: sourceOld, runtime: runtime)
+        let destination = persistentContainer(root: destinationOld, runtime: runtime)
+        source.rebuild()
+        destination.rebuild()
+        let movedWrapper = try requireWrapper(runtime, paneA)
+        guard let sourcePatch = computeContainerTreePatch(
+            old: containerShapeNode(sourceOld), new: containerShapeNode(sourceNew)),
+              let destinationPatch = computeContainerTreePatch(
+                old: containerShapeNode(destinationOld), new: containerShapeNode(destinationNew)) else {
+            throw UITestFailure(message: "missing cross-tab patches")
+        }
+
+        destination.applyTreePatch(destinationPatch, rootNode: destinationNew)
+        source.applyTreePatch(sourcePatch, rootNode: sourceNew)
+
+        try uiExpect(runtime.findPaneWrapper(for: paneA) === movedWrapper, "move replaced the pane wrapper")
+        try uiExpect(movedWrapper.isDescendant(of: destination), "source patch detached the moved wrapper from its destination")
+    }
+
+    uiTest("removing the runtime host releases pane chrome") {
+        // Intent: removing a pane's session-lifetime host releases its wrapper
+        //   once no container parents that wrapper.
+        // Why it exists: the ownership inversion must not trade rebuild churn for
+        //   a runtime-owned wrapper leak.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let paneId = PaneId()
+        let runtime = AppRuntime()
+        weak var hostObserver: PaneHost?
+        weak var wrapperObserver: PaneWrapperView?
+
+        autoreleasepool {
+            runtime.sessions[paneId] = TerminalView()
+            hostObserver = runtime.paneHost(for: paneId)
+            wrapperObserver = hostObserver?.wrapper
+            runtime.paneHosts.removeValue(forKey: paneId)
+            runtime.sessions.removeValue(forKey: paneId)
+        }
+
+        try uiExpect(hostObserver == nil, "runtime released its host but the host stayed alive")
+        try uiExpect(wrapperObserver == nil, "runtime released its host but the wrapper stayed alive")
+    }
+}
+
+/// Builds a container whose wrapper lookup goes through the runtime lifetime root.
+@MainActor
+private func persistentContainer(root: SplitNodeModel, runtime: AppRuntime) -> SplitContainerView {
+    SplitContainerView(
+        rootNode: root,
+        wrapperLookup: { [weak runtime] paneId in runtime?.paneHost(for: paneId)?.wrapper },
+        runtime: runtime,
+        frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+    )
+}
+
+/// Unwraps one runtime-owned pane wrapper for identity assertions.
+@MainActor
+private func requireWrapper(_ runtime: AppRuntime, _ paneId: PaneId) throws -> PaneWrapperView {
+    guard let wrapper = runtime.findPaneWrapper(for: paneId) else {
+        throw UITestFailure(message: "missing wrapper for \(paneId)")
+    }
+    return wrapper
 }
 
 private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRuntime? = nil) -> SplitContainerView {
@@ -140,10 +317,8 @@ private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRu
     )
     return SplitContainerView(
         rootNode: root,
-        sessionLookup: { _ in nil },
+        wrapperLookup: { _ in nil },
         runtime: runtime,
-        isZoomed: false,
-        hasSplits: true,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
     )
 }
@@ -164,10 +339,8 @@ private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: Split
     )
     return SplitContainerView(
         rootNode: root,
-        sessionLookup: { _ in nil },
+        wrapperLookup: { _ in nil },
         runtime: nil,
-        isZoomed: false,
-        hasSplits: true,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
     )
 }

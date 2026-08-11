@@ -927,15 +927,13 @@ indirect enum ContainerShapeNode: Equatable {
   case split(id: SplitId, direction: SplitNodeModel.Direction, first: ContainerShapeNode, second: ContainerShapeNode)
 }
 
-/// What a tab's container is built from, reduced to the inputs that require a
-/// rebuild: the tree's structural fingerprint plus the zoom state (a zoomed tab
-/// renders only its focused leaf, so the zoom flag and the zoomed leaf id are part
-/// of the shape). Ratios and pane payloads are excluded via `ContainerShapeNode`.
+/// Structural and zoom inputs that can require a container patch.
+/// Ratios and pane payloads are excluded via `ContainerShapeNode`.
 struct ContainerShape: Equatable {
   let tree: ContainerShapeNode
   let isZoomed: Bool
   // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
-  // tab does NOT drift the shape (which is why a pane click never rebuilds).
+  // tab does NOT drift the shape (which is why a pane click needs no tree patch).
   let zoomedLeaf: PaneId?
 }
 
@@ -1005,15 +1003,17 @@ func reconcileDecision(
 /// nil from todoPopoverStrandKey means no popover is open, so callers can skip
 /// the tree walk and avoid clearing a popover opened during the current message.
 struct TodoPopoverStrandKey: Equatable {
+  let scope: TodoPopoverScope
   let visibleTabId: TabId?
   let visibleShape: ContainerShape?
 }
 
 /// Capture the visible container identity before a message runs.
 func todoPopoverStrandKey(_ model: AppModel) -> TodoPopoverStrandKey? {
-  guard model.todoPopover != nil else { return nil }
+  guard let scope = model.todoPopover else { return nil }
   let sel = model.selectedTabId
   return TodoPopoverStrandKey(
+    scope: scope,
     visibleTabId: sel,
     visibleShape: sel.flatMap { tabById($0, in: model) }.map(containerShape(of:))
   )
@@ -1021,16 +1021,26 @@ func todoPopoverStrandKey(_ model: AppModel) -> TodoPopoverStrandKey? {
 
 /// Pure model half of view-swap popover dismissal. Clears model.todoPopover iff
 /// the message stranded the visible container the popover was anchored to: the
-/// selected tab changed, or the selected tab's ContainerShape drifted. A same-tab
-/// focus change strands nothing, so it is intentionally not a trigger.
+/// selected tab changed, its pane anchor left that tab, or a tab-scoped anchor's
+/// container shape drifted. A surviving pane anchor remains valid across tree edits.
 func reconcileTodoPopover(_ model: inout AppModel, previous: TodoPopoverStrandKey?) {
-  guard let previous, model.todoPopover != nil else { return }
+  guard let previous, model.todoPopover == previous.scope else { return }
   let sel = model.selectedTabId
-  let current = TodoPopoverStrandKey(
-    visibleTabId: sel,
-    visibleShape: sel.flatMap { tabById($0, in: model) }.map(containerShape(of:))
-  )
-  if current != previous { model.todoPopover = nil }
+  guard sel == previous.visibleTabId,
+        let tab = sel.flatMap({ tabById($0, in: model) }) else {
+    model.todoPopover = nil
+    return
+  }
+  switch previous.scope {
+  case .pane(let paneId):
+    if !allPaneIds(tab.rootNode).contains(paneId) {
+      model.todoPopover = nil
+    }
+  case .tab:
+    if containerShape(of: tab) != previous.visibleShape {
+      model.todoPopover = nil
+    }
+  }
 }
 
 /// Move `value` to index 0 of the array, removing all other occurrences.

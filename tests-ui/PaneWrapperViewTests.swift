@@ -179,6 +179,47 @@ func paneWrapperViewTests() {
         try uiExpect(unzoomItem.isEnabled, "Unzoom Pane should be enabled while zoomed")
     }
 
+    uiTest("persistent wrapper zoom affordances follow toolbar projection") {
+        // Intent: one wrapper changes its menu and unzoom affordance as the tab
+        //   moves through split, zoom, unzoom, and single-pane states.
+        // Why it exists: those values were immutable construction inputs before
+        //   wrapper lifetime moved up to the runtime.
+        // Scenario: the incremental-container reconciliation performance fix.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: false)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        guard let unzoomButton = paneWrapperDescendants(of: fx.wrapper)
+            .compactMap({ $0 as? PaneToolbarButton })
+            .first(where: { $0.toolTip == "Unzoom Pane" }) else {
+            throw UITestFailure(message: "missing persistent unzoom button")
+        }
+        unzoomButton.superview?.needsLayout = true
+        unzoomButton.superview?.layoutSubtreeIfNeeded()
+        try uiExpect(
+            unzoomButton.frame.width < 1,
+            "unzoomed toolbar should collapse the button below one point, got \(unzoomButton.frame.width)")
+
+        fx.wrapper.updateToolbar(
+            title: "Terminal", cwd: nil, isZoomed: true, hasSplits: true)
+        unzoomButton.superview?.needsLayout = true
+        unzoomButton.superview?.layoutSubtreeIfNeeded()
+        let unzoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Unzoom Pane")
+        try uiExpect(unzoom.isEnabled, "projected zoom should enable Unzoom Pane")
+        try uiExpect(
+            unzoomButton.frame.width >= 15,
+            "zoomed toolbar should restore the button to at least 15 points, got \(unzoomButton.frame.width)")
+
+        fx.wrapper.updateToolbar(
+            title: "Terminal", cwd: nil, isZoomed: false, hasSplits: false)
+        unzoomButton.superview?.needsLayout = true
+        unzoomButton.superview?.layoutSubtreeIfNeeded()
+        let zoom = try onlyItem(fx.wrapper.makePaneMenu(), titled: "Zoom Pane")
+        try uiExpect(!zoom.isEnabled, "projected single-pane state should disable Zoom Pane")
+        try uiExpect(
+            unzoomButton.frame.width < 1,
+            "unzoomed toolbar should collapse the button below one point again")
+    }
+
     uiTest("init points the terminal back at its wrapper") {
         // Intent: after PaneWrapperView.init, terminalView.paneWrapper === the
         //   wrapper.
@@ -224,6 +265,11 @@ func paneWrapperViewTests() {
         }
         try uiExpect(sawClose, "Close Pane should still dispatch after the wrapper's owner released it")
     }
+}
+
+/// Returns every descendant used to inspect private wrapper affordances behaviorally.
+private func paneWrapperDescendants(of root: NSView) -> [NSView] {
+    root.subviews.flatMap { [$0] + paneWrapperDescendants(of: $0) }
 }
 
 // MARK: - Fixtures

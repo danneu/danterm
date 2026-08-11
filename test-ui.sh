@@ -101,6 +101,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/SearchOverlayView.swift" \
         "$SCRIPT_DIR/app/LinkPreviewView.swift" \
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
+        "$SCRIPT_DIR/app/PaneHost.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
         "$SCRIPT_DIR/app/PaneStripView.swift" \

@@ -1,9 +1,11 @@
+// Split-view host that owns one model ratio and suppresses programmatic layout feedback.
 import Cocoa
 
 class PaneSplitView: NSSplitView, NSSplitViewDelegate {
     let splitId: SplitId
     var ratio: CGFloat
     var isApplyingRatio: Bool = false
+    var shouldSuppressRatioFeedback: (() -> Bool)?
     var onRatioChanged: ((SplitId, CGFloat) -> Void)?
 
     init(splitId: SplitId, ratio: CGFloat) {
@@ -58,7 +60,7 @@ class PaneSplitView: NSSplitView, NSSplitViewDelegate {
     }
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard !isApplyingRatio else { return }
+        guard !isApplyingRatio, shouldSuppressRatioFeedback?() != true else { return }
         guard arrangedSubviews.count == 2 else { return }
         let totalSize = isVertical ? bounds.width : bounds.height
         guard totalSize > 0 else { return }

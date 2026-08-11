@@ -94,11 +94,17 @@ Reconcile pass ordering is part of the contract. Passes that destroy or recreate
 hosts must run before passes that render into those hosts, and they must
 invalidate affected host-local caches.
 
-Session teardown runs before container reconciliation. Container reconciliation
-runs before pane chrome because container rebuilds recreate pane wrapper hosts.
-Mount-time focus runs after pane chrome when it may target a search field the
-chrome pass creates. Occlusion remains last because it reads the final
-visible/mounted session state.
+Container reconciliation runs before session teardown so a removed pane leaves
+the mounted tree before teardown releases its runtime-owned `PaneHost`. Pane
+chrome then renders into the surviving persistent wrappers. Mount-time focus
+runs after pane chrome when a new tab build may target a search field the chrome
+pass creates. Occlusion remains last because it reads the final visible/mounted
+session state.
+
+Container reconciliation reserves whole-tree construction for a tab that has no
+cached shape, including the clean cache after restore. A surviving tab is patched
+by stable pane and split ids. Tree edits reparent existing wrappers, and zoom
+hides branches outside the focused pane without replacing the mounted tree.
 
 Post-reconcile commands target views that reconcile creates.
 `Command.isPostReconcile` must stay an exhaustive switch with no `default`, so
@@ -158,8 +164,9 @@ projection layer does not accrete context bags for negligible cold-path work.
 
 ## Non-Goals
 
-This is not a virtual DOM or generic component reconciler. DanTerm does not build
-a full intermediate UI tree and recursively diff it.
+This is not a virtual DOM or generic component reconciler. The container pass
+diffs only its explicit split-tree projection, keyed by the pane and split ids
+the model already owns; other hosts keep their purpose-built pass shapes.
 
 This is not Solid-style fine-grained reactivity. DanTerm does not track signal
 dependencies from individual model fields to individual view sinks.
@@ -182,9 +189,12 @@ projection plus a reconcile pass instead.
 Some conditions are expressed twice in layer-appropriate forms. For TODO
 popovers, `update()` clears `model.todoPopover` by comparing model state before
 and after a message, while `reconcileContainers` dismisses AppKit popovers from
-the live `ContainerOp` diff and the previously visible container. That
-duplication is accepted because each half reads the inputs its layer owns. Tests
-keep the behavioral boundary aligned.
+the live `ContainerOp` diff and the previously visible container. Both scopes
+dismiss when their tab is removed or loses visibility. A structural change to
+the still-visible tab dismisses only a tab-scoped popover; a pane-scoped popover
+survives while its pane remains in that tab because its runtime-owned wrapper and
+anchor survive. That duplication is accepted because each half reads the inputs
+its layer owns. Tests keep the behavioral boundary aligned.
 
 The cost of this architecture is occasional extra model helpers, generation
 counters, host-lifetime invalidation, or `ViewLocalState` plumbing. The payoff is

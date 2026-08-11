@@ -3024,8 +3024,37 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                 chipKind: .terminal,
                 unreadAlertCount: 2,
                 totalTodoCount: 3,
-                uncompletedTodoCount: 2),
+                uncompletedTodoCount: 2,
+                isZoomed: false,
+                hasSplits: false),
             "all toolbar fields derive from the pane + model.alerts")
+    }
+
+    @Test("desiredPaneToolbar tracks split and zoom affordances on a persistent wrapper")
+    func desiredPaneToolbarTracksSplitAndZoomAffordances() {
+        // Intent: the same pane's toolbar projection follows first split, zoom,
+        //   unzoom, and closing the last sibling.
+        // Why it exists: those values were frozen in wrapper construction before
+        //   wrappers became session-lifetime hosts.
+        // Scenario: the incremental-container reconciliation performance fix.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == false)
+
+        update(&model, .splitPane(paneId: paneId, direction: .horizontal))
+        let siblingId = selectedTab(in: model)!.focusedPaneId
+        #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == true)
+        update(&model, .paneBecameFirstResponder(paneId: paneId))
+
+        update(&model, .toggleZoomPane(paneId: paneId))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isZoomed == true)
+
+        update(&model, .toggleZoomPane(paneId: paneId))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.isZoomed == false)
+
+        update(&model, .closePane(paneId: siblingId))
+        #expect(desiredPaneToolbar(in: model)[paneId]?.hasSplits == false)
     }
 
     @Test("desiredPaneToolbar reads running command state from immutable pane snapshots")

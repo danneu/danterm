@@ -278,6 +278,8 @@ struct PaneToolbarRender: Equatable {
   let unreadAlertCount: Int
   let totalTodoCount: Int
   let uncompletedTodoCount: Int
+  let isZoomed: Bool
+  let hasSplits: Bool
 }
 
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
@@ -302,39 +304,47 @@ func desiredPaneToolbar(
   tally: UnreadAlertTally
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
-  for pane in model.allPanes {
-    let session = pane.session
-    let remoteSession: RemoteSession?
-    if case .remote(let identity) = session?.connection ?? .local {
-      remoteSession = identity
-    } else {
-      remoteSession = nil
+  for group in model.groups {
+    for tab in group.tabs {
+      let hasSplits: Bool
+      if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
+      for pane in panesInNode(tab.rootNode) {
+        let session = pane.session
+        let remoteSession: RemoteSession?
+        if case .remote(let identity) = session?.connection ?? .local {
+          remoteSession = identity
+        } else {
+          remoteSession = nil
+        }
+        let agentSession: AgentSession?
+        if case .attached(let attachedSession, _) = session?.agent ?? .none {
+          agentSession = attachedSession
+        } else {
+          agentSession = nil
+        }
+        let command: String?
+        if case .running(let text) = session?.command ?? .idle {
+          command = text
+        } else {
+          command = nil
+        }
+        result[pane.id] = PaneToolbarRender(
+          title: session?.title ?? "Terminal",
+          cwd: session?.cwd,
+          command: command,
+          progress: session?.progress,
+          isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
+          remoteSession: remoteSession,
+          agentSession: agentSession,
+          chipKind: ChipKind(agent: session?.agent ?? .none),
+          unreadAlertCount: tally.byPane[pane.id] ?? 0,
+          totalTodoCount: pane.todos.count,
+          uncompletedTodoCount: pane.todos.count { !$0.isDone },
+          isZoomed: tab.isZoomed && tab.focusedPaneId == pane.id,
+          hasSplits: hasSplits
+        )
+      }
     }
-    let agentSession: AgentSession?
-    if case .attached(let attachedSession, _) = session?.agent ?? .none {
-      agentSession = attachedSession
-    } else {
-      agentSession = nil
-    }
-    let command: String?
-    if case .running(let text) = session?.command ?? .idle {
-      command = text
-    } else {
-      command = nil
-    }
-    result[pane.id] = PaneToolbarRender(
-      title: session?.title ?? "Terminal",
-      cwd: session?.cwd,
-      command: command,
-      progress: session?.progress,
-      isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
-      remoteSession: remoteSession,
-      agentSession: agentSession,
-      chipKind: ChipKind(agent: session?.agent ?? .none),
-      unreadAlertCount: tally.byPane[pane.id] ?? 0,
-      totalTodoCount: pane.todos.count,
-      uncompletedTodoCount: pane.todos.count { !$0.isDone }
-    )
   }
   return result
 }
@@ -792,11 +802,11 @@ func advanceSidebarCache(
 //
 // The content area renders one SplitContainerView per tab (eager: every tab's
 // container is mounted; the selected tab's is visible, the rest hidden). A
-// container is rebuilt only when its *shape* drifts -- structure + leaf ids +
-// zoom -- NOT on a split-ratio change or any leaf PaneModel payload edit
+// container structure is patched only when its *shape* drifts -- structure + leaf
+// ids + zoom -- NOT on a split-ratio change or any leaf PaneModel payload edit
 // (title/cwd/progress/theme/todo), which now live in the tree. Excluding the
-// payload is what keeps a metadata edit from rebuilding a container (and clearing
-// anchored UI); excluding ratios keeps a divider drag a content-diff no-op.
+// payload keeps metadata edits out of structural patches; excluding ratios keeps
+// a divider drag a content-diff no-op.
 
 /// Container-shape projection: one shape per tab in the model -- a *total* projection
 /// of every group's every tab (eager mounting has no "mounted set" side-input).
@@ -810,21 +820,92 @@ func desiredContainerShapes(in model: AppModel) -> [TabId: ContainerShape] {
   return result
 }
 
+/// Stable identity for one node in the mounted container tree.
+enum ContainerNodeRef: Hashable {
+  case pane(PaneId)
+  case split(SplitId)
+}
+
+/// The child relationships and orientation a mounted split must have.
+struct ContainerSplitSpec: Equatable {
+  let direction: SplitNodeModel.Direction
+  let first: ContainerNodeRef
+  let second: ContainerNodeRef
+}
+
+/// A keyed structural patch for one existing tab container.
+struct ContainerTreePatch: Equatable {
+  let desiredRoot: ContainerNodeRef
+  let desiredSplits: [SplitId: ContainerSplitSpec]
+  let rootChanged: Bool
+  let changedSplitIds: Set<SplitId>
+  let removedSplitIds: Set<SplitId>
+}
+
+/// Flatten a structural fingerprint into the keyed relationships a patch compares.
+private func flattenedContainerTree(
+  _ node: ContainerShapeNode
+) -> (root: ContainerNodeRef, splits: [SplitId: ContainerSplitSpec]) {
+  var splits: [SplitId: ContainerSplitSpec] = [:]
+
+  func walk(_ node: ContainerShapeNode) -> ContainerNodeRef {
+    switch node {
+    case .leaf(let paneId):
+      return .pane(paneId)
+    case .split(let splitId, let direction, let first, let second):
+      let firstRef = walk(first)
+      let secondRef = walk(second)
+      splits[splitId] = ContainerSplitSpec(
+        direction: direction,
+        first: firstRef,
+        second: secondRef
+      )
+      return .split(splitId)
+    }
+  }
+
+  return (walk(node), splits)
+}
+
+/// Diff two split trees by stable node id, returning nil when no host edge changes.
+func computeContainerTreePatch(
+  old: ContainerShapeNode,
+  new: ContainerShapeNode
+) -> ContainerTreePatch? {
+  let oldTree = flattenedContainerTree(old)
+  let newTree = flattenedContainerTree(new)
+  let changedSplitIds = Set(newTree.splits.compactMap { splitId, spec in
+    oldTree.splits[splitId] == spec ? nil : splitId
+  })
+  let removedSplitIds = Set(oldTree.splits.keys).subtracting(newTree.splits.keys)
+  let rootChanged = oldTree.root != newTree.root
+  guard rootChanged || !changedSplitIds.isEmpty || !removedSplitIds.isEmpty else {
+    return nil
+  }
+  return ContainerTreePatch(
+    desiredRoot: newTree.root,
+    desiredSplits: newTree.splits,
+    rootChanged: rootChanged,
+    changedSplitIds: changedSplitIds,
+    removedSplitIds: removedSplitIds
+  )
+}
+
 /// A single container mutation the thin `reconcileContainers` executor applies.
-/// `remove` detaches a gone tab's container; `rebuild` recreates a new/drifted tab's
-/// container; `setVisible` toggles isHidden. Emitted remove -> rebuild -> setVisible
-/// so a rebuilt container exists before its visibility op runs. Equatable for the
-/// model-apply test.
+/// New tabs receive one full build; surviving tabs receive keyed tree and zoom
+/// presentation patches; `setVisible` toggles `isHidden`.
 enum ContainerOp: Equatable {
   case remove(tabId: TabId)
-  case rebuild(tabId: TabId)
+  case build(tabId: TabId)
+  case patch(tabId: TabId, patch: ContainerTreePatch)
+  case setZoomedPane(tabId: TabId, paneId: PaneId?)
   case setVisible(tabId: TabId, visible: Bool)
 }
 
 /// Diff old vs new container shapes into ops: `.remove` for tabs gone from `new`,
-/// `.rebuild` for a tab absent in `old` (new tab) or whose shape drifted, and
-/// `.setVisible` for *every* tab in `new` (selected visible, rest hidden -- eager).
-/// Ordered remove -> rebuild -> setVisible. Pure; unit-tested via model-apply
+/// `.build` for a tab absent in `old`, keyed patches for surviving structural
+/// changes, zoom presentation updates, and `.setVisible` for every tab in `new`.
+/// Ordered remove -> build/patch/zoom -> setVisible. Pure; unit-tested via model-apply
 /// (apply the ops to a presence/visibility map -> equals new's keys + visibility),
 /// which catches a dropped-hide regression an exact-sequence assert would bless.
 func computeContainerOps(
@@ -836,8 +917,17 @@ func computeContainerOps(
   for tabId in old.keys where new[tabId] == nil {
     ops.append(.remove(tabId: tabId))
   }
-  for (tabId, shape) in new where old[tabId] != shape {
-    ops.append(.rebuild(tabId: tabId))
+  for (tabId, shape) in new {
+    guard let oldShape = old[tabId] else {
+      ops.append(.build(tabId: tabId))
+      continue
+    }
+    if let patch = computeContainerTreePatch(old: oldShape.tree, new: shape.tree) {
+      ops.append(.patch(tabId: tabId, patch: patch))
+    }
+    if oldShape.zoomedLeaf != shape.zoomedLeaf {
+      ops.append(.setZoomedPane(tabId: tabId, paneId: shape.zoomedLeaf))
+    }
   }
   for tabId in new.keys {
     ops.append(.setVisible(tabId: tabId, visible: tabId == selectedTabId))
@@ -846,49 +936,37 @@ func computeContainerOps(
 }
 
 /// Does this container-op script strand the previously-visible tab -- i.e. is the
-/// visible container removed, rebuilt, or hidden? This is the "view swap" condition.
+/// visible container removed or hidden? This is the "view swap" condition.
 /// A pane TODO popover anchored to that container's wrapper button is physically
 /// orphaned when it holds; a tab popover is closed on view swap by policy.
 func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId?) -> Bool {
   guard let visible = previouslyVisibleTabId else { return false }
   return ops.contains { op in
     switch op {
-    case .remove(let tabId), .rebuild(let tabId):
+    case .remove(let tabId), .build(let tabId):
       return tabId == visible
+    case .patch, .setZoomedPane:
+      return false
     case .setVisible(let tabId, let visibleFlag):
       return tabId == visible && !visibleFlag
     }
   }
 }
 
-/// Leaf pane ids of a container shape (backs `chromeInvalidation`).
-func leafPaneIds(of shape: ContainerShape) -> [PaneId] {
-  func walk(_ node: ContainerShapeNode) -> [PaneId] {
-    switch node {
-    case .leaf(let id): return [id]
-    case .split(_, _, let first, let second): return walk(first) + walk(second)
+/// Reports whether a surviving visible tab's tree or zoom presentation changed.
+func containerOpsEditVisibleTree(
+  ops: [ContainerOp],
+  previouslyVisibleTabId: TabId?
+) -> Bool {
+  guard let visible = previouslyVisibleTabId else { return false }
+  return ops.contains { op in
+    switch op {
+    case .patch(let tabId, _), .setZoomedPane(let tabId, _):
+      return tabId == visible
+    case .remove, .build, .setVisible:
+      return false
     }
   }
-  return walk(shape.tree)
-}
-
-/// Panes whose host PaneWrapperView a container op destroys, so `reconcileContainers`
-/// must clear their paneToolbar/searchOverlay cache entries *before*
-/// `reconcilePaneChrome` runs -- otherwise the value-unchanged chrome diff would skip
-/// the fresh wrapper and leave it blank. Only `.rebuild` contributes (its panes
-/// survive on a fresh wrapper): a `.remove`'s panes are gone from the model, so
-/// reconcilePaneChrome's keyed-over-all-panes diff prunes their cache entries itself;
-/// `.setVisible` keeps the same wrapper. (The signature takes only `newShapes`, which
-/// cannot resolve a removed tab's leaves anyway -- by design, since they need no
-/// invalidation.)
-func chromeInvalidation(ops: [ContainerOp], newShapes: [TabId: ContainerShape]) -> Set<PaneId> {
-  var result: Set<PaneId> = []
-  for op in ops {
-    if case .rebuild(let tabId) = op, let shape = newShapes[tabId] {
-      result.formUnion(leafPaneIds(of: shape))
-    }
-  }
-  return result
 }
 
 /// Sessions to tear down: live sessions whose pane no longer exists in the model.

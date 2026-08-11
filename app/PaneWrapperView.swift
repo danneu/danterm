@@ -9,10 +9,11 @@ class PaneWrapperView: NSView {
     private let toolbar: NSView
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
-    private let unzoomButton: PaneToolbarButton?
+    private let unzoomButton: PaneToolbarButton
+    private var unzoomWidthConstraint: NSLayoutConstraint?
     private let todoButton: TodoToolbarButton
-    private let isZoomed: Bool
-    private let hasSplits: Bool
+    private var isZoomed: Bool
+    private var hasSplits: Bool
     private weak var runtime: AppRuntime?
     /// Destination for the context menu's copy actions (cwd, pane id, agent session id).
     /// Defaults to the system pasteboard so a test can assign a scratch board and neither
@@ -69,23 +70,20 @@ class PaneWrapperView: NSView {
         mb.setContentHuggingPriority(.required, for: .horizontal)
         self.menuButton = mb
 
-        // Unzoom button (only when zoomed)
-        if isZoomed {
-            let ub = PaneToolbarButton()
-            ub.translatesAutoresizingMaskIntoConstraints = false
-            ub.bezelStyle = .inline
-            ub.isBordered = false
-            ub.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
-            ub.imageScaling = .scaleProportionallyDown
-            ub.contentTintColor = NSColor.secondaryLabelColor
-            ub.wantsLayer = true
-            ub.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-            ub.toolTip = "Unzoom Pane"
-            ub.setContentHuggingPriority(.required, for: .horizontal)
-            self.unzoomButton = ub
-        } else {
-            self.unzoomButton = nil
-        }
+        // The persistent button follows the toolbar projection instead of wrapper lifetime.
+        let ub = PaneToolbarButton()
+        ub.translatesAutoresizingMaskIntoConstraints = false
+        ub.bezelStyle = .inline
+        ub.isBordered = false
+        ub.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
+        ub.imageScaling = .scaleProportionallyDown
+        ub.contentTintColor = NSColor.secondaryLabelColor
+        ub.wantsLayer = true
+        ub.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        ub.toolTip = "Unzoom Pane"
+        ub.setContentHuggingPriority(.required, for: .horizontal)
+        ub.isHidden = !isZoomed
+        self.unzoomButton = ub
 
         // TODO button (always visible to provide a stable popover anchor)
         self.todoButton = TodoToolbarButton()
@@ -99,10 +97,8 @@ class PaneWrapperView: NSView {
         todoButton.target = self
         todoButton.action = #selector(toggleTodoPopover)
 
-        if let ub = unzoomButton {
-            ub.target = self
-            ub.action = #selector(zoomPaneAction)
-        }
+        unzoomButton.target = self
+        unzoomButton.action = #selector(zoomPaneAction)
 
         // Toolbar container
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -216,9 +212,7 @@ class PaneWrapperView: NSView {
         // Add buttons to toolbar (on top of drag handle)
         toolbar.addSubview(todoButton)
         toolbar.addSubview(menuButton)
-        if let ub = unzoomButton {
-            toolbar.addSubview(ub)
-        }
+        toolbar.addSubview(unzoomButton)
 
         // Terminal view wrapped in scroll view for native scrollbar support
         let scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
@@ -256,7 +250,7 @@ class PaneWrapperView: NSView {
 
             // TODO button (to the left of unzoom/menu buttons)
             todoButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            todoButton.trailingAnchor.constraint(equalTo: unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor, constant: -2),
+            todoButton.trailingAnchor.constraint(equalTo: unzoomButton.leadingAnchor, constant: -2),
 
             // Menu button
             menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -271,14 +265,16 @@ class PaneWrapperView: NSView {
             scrollWrapper.bottomAnchor.constraint(equalTo: bottomAnchor),
         ]
 
-        if let ub = unzoomButton {
-            constraints.append(contentsOf: [
-                ub.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-                ub.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor),
-                ub.widthAnchor.constraint(equalToConstant: 16),
-                ub.heightAnchor.constraint(equalToConstant: 16),
-            ])
-        }
+        let unzoomWidthConstraint = unzoomButton.widthAnchor.constraint(
+            equalToConstant: isZoomed ? 16 : 0
+        )
+        self.unzoomWidthConstraint = unzoomWidthConstraint
+        constraints.append(contentsOf: [
+            unzoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            unzoomButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor),
+            unzoomWidthConstraint,
+            unzoomButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
 
         NSLayoutConstraint.activate(constraints)
     }
@@ -287,7 +283,7 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
+    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {
         toolbarLabel.stringValue = paneCommandChromeText(
             title: title,
             cwd: cwd,
@@ -320,6 +316,14 @@ class PaneWrapperView: NSView {
         agentSessionLabel.stringValue = needsAgentLabel ? (agentSession?.toolbarLabel ?? "") : ""
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
+        if let isZoomed {
+            self.isZoomed = isZoomed
+            unzoomButton.isHidden = !isZoomed
+            unzoomWidthConstraint?.constant = isZoomed ? 16 : 0
+        }
+        if let hasSplits {
+            self.hasSplits = hasSplits
+        }
     }
 
     /// Anchor view for the TODO popover.
@@ -391,7 +395,7 @@ class PaneWrapperView: NSView {
         menu.autoenablesItems = false
 
         // NSMenuItem.target is weak; representedObject is strong. Anchor this
-        // ephemeral wrapper to each item so a reconcile mid-track can't nil the
+        // runtime-owned wrapper to each item so a teardown mid-track can't nil the
         // targets (lifetime-safety doc, "AppKit target that can outlive its referent").
         func wrapperItem(_ title: String, _ action: Selector) -> NSMenuItem {
             let mi = NSMenuItem(title: title, action: action, keyEquivalent: "")

@@ -10,6 +10,7 @@ final class AppRuntime {
     var model: AppModel
     var viewLocalState = ViewLocalState()
     var sessions: [PaneId: any TerminalSession] = [:]
+    var paneHosts: [PaneId: PaneHost] = [:]
     var paneVisibility: [PaneId: Bool] = [:]
     var renderingAvailable = true
     weak var window: NSWindow?
@@ -38,6 +39,22 @@ final class AppRuntime {
 
     func focusPaneSession(_ paneId: PaneId) {
         focusedPaneSessions.append(paneId)
+    }
+
+    /// Mirrors production's lazy host seam for UI tests that inject sessions.
+    @MainActor
+    func paneHost(for paneId: PaneId) -> PaneHost? {
+        if let host = paneHosts[paneId] { return host }
+        guard let session = sessions[paneId] else { return nil }
+        let host = PaneHost(paneId: paneId, session: session, runtime: self)
+        paneHosts[paneId] = host
+        return host
+    }
+
+    /// Resolves a persistent wrapper through the test host index.
+    @MainActor
+    func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
+        paneHost(for: paneId)?.wrapper
     }
 
     /// ThemeBrowserView close-button hook. Production toggles the panel in and

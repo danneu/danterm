@@ -131,6 +131,8 @@ class AppRuntime {
     var viewLocalState = ViewLocalState()
     let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
+    // Runtime lifetime roots for pane chrome. A container only reparents wrappers.
+    var paneHosts: [PaneId: PaneHost] = [:]
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
     // Cross-file presentation lifecycle forwarding diffs effective visibility here.
@@ -886,7 +888,7 @@ class AppRuntime {
                 send(.sessionCreationFailed(sessionId: sessionId))
                 break
             }
-            sessions[paneId] = session
+            installTerminalSession(session, paneId: paneId)
 
         case .sendText(let paneId, let text):
             sessions[paneId]?.sendText(text)
@@ -1287,6 +1289,7 @@ class AppRuntime {
         cleanupReplayFile(for: paneId)
         schedulingLifecycle.cancel(searchDebouncerTokens.removeValue(forKey: paneId))
         searchDebouncers.removeValue(forKey: paneId)
+        paneHosts.removeValue(forKey: paneId)
         if let session = sessions.removeValue(forKey: paneId) {
             cancelSessionSubscriptions(session)
             session.tearDown()
@@ -1819,6 +1822,7 @@ class AppRuntime {
         for paneId in Array(sessions.keys) {
             endPaneTapeFollowers(for: paneId)
             cleanupReplayFile(for: paneId)
+            paneHosts.removeValue(forKey: paneId)
             if let session = sessions.removeValue(forKey: paneId) {
                 cancelSessionSubscriptions(session)
                 session.tearDown()
@@ -1841,6 +1845,9 @@ class AppRuntime {
         tearDownCurrentSession()
         model = staged.model
         sessions = staged.sessions
+        paneHosts = Dictionary(uniqueKeysWithValues: staged.sessions.map { paneId, session in
+            (paneId, PaneHost(paneId: paneId, session: session, runtime: self))
+        })
         replayFiles = staged.replayFiles
         lightCheckpointBaseline = currentLightCheckpointProjection()
         cancelCoalescedReconcile()
@@ -1982,10 +1989,25 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    // Resolve via the existing PaneId -> TerminalSession index. `internal` (not `private`)
-    // so reconcilePaneChrome in Reconcile.swift can reach the live wrapper.
+    /// Installs one session and its runtime-owned wrapper host as a single lifetime unit.
+    private func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
+        sessions[paneId] = session
+        paneHosts[paneId] = PaneHost(paneId: paneId, session: session, runtime: self)
+    }
+
+    /// Returns the persistent pane host, lazily covering test-injected sessions.
+    func paneHost(for paneId: PaneId) -> PaneHost? {
+        if let host = paneHosts[paneId] { return host }
+        guard let session = sessions[paneId] else { return nil }
+        let host = PaneHost(paneId: paneId, session: session, runtime: self)
+        paneHosts[paneId] = host
+        return host
+    }
+
+    // Resolve through the runtime-owned host so wrapper identity does not depend on
+    // which container currently parents it.
     func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
-        sessions[paneId]?.paneWrapper
+        paneHost(for: paneId)?.wrapper
     }
 
     // MARK: - View Building
@@ -1994,24 +2016,10 @@ class AppRuntime {
     /// `internal` so the cross-file reconcileContainers executor can build a container.
     func buildAndInsertContainer(for tab: TabModel) -> SplitContainerView {
         guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
-        let displayNode: SplitNodeModel
-        if tab.isZoomed {
-            displayNode = .leaf(model.pane(tab.focusedPaneId) ?? PaneModel(id: tab.focusedPaneId))
-        } else {
-            displayNode = tab.rootNode
-        }
-
-        // Defocus all sessions before rebuilding
-        for paneId in allPaneIds(tab.rootNode) {
-            sessions[paneId]?.setFocused(false)
-        }
-
         let container = SplitContainerView(
-            rootNode: displayNode,
-            sessionLookup: { [weak self] paneId in self?.sessions[paneId] },
+            rootNode: tab.rootNode,
+            wrapperLookup: { [weak self] paneId in self?.paneHost(for: paneId)?.wrapper },
             runtime: self,
-            isZoomed: tab.isZoomed,
-            hasSplits: { if case .leaf = tab.rootNode { return false } else { return true } }(),
             frame: contentArea.bounds
         )
         container.autoresizingMask = [.width, .height]
@@ -2021,6 +2029,7 @@ class AppRuntime {
             contentArea.addSubview(container)
         }
         container.rebuild()
+        container.setZoomedPane(tab.isZoomed ? tab.focusedPaneId : nil)
         tabContainers[tab.id] = container
         return container
     }
@@ -2034,7 +2043,7 @@ class AppRuntime {
 
     /// Cancel an in-flight pane drag and dismiss any open TODO popovers.
     /// `reconcileContainers` calls this when containerOpsStrandVisible says the
-    /// visible container was hidden, rebuilt, or removed. The model record is
+    /// visible container was hidden or removed. The model record is
     /// cleared separately by reconcileTodoPopover in update().
     func dismissStrandedPopovers() {
         cancelPaneDrag()
@@ -2042,10 +2051,15 @@ class AppRuntime {
         dismissTabTodoPopoverPair()
     }
 
+    /// Dismisses only a tab-scoped popover when a live tree edit preserves pane anchors.
+    func dismissStrandedTabPopover() {
+        dismissTabTodoPopoverPair()
+    }
+
     /// Establish mount-time focus for a just-(re)built or newly-shown selected container.
     /// The folded `finalizeTabSelection` focus, minus the parts the reconciler now owns:
-    /// the focus-border loop (reconcileFocusBorders), the toolbar refresh (reconcilePaneChrome
-    /// + container cache invalidation), and the search-overlay rehydrate (reconcilePaneChrome).
+    /// the focus-border loop (reconcileFocusBorders), the toolbar refresh, and the
+    /// search-overlay rehydrate (both reconcilePaneChrome).
     /// reconcile() calls this *after* reconcilePaneChrome so the search field exists when an
     /// active-search pane needs it. Scoped to the single selected container (never per built
     /// container) so eager-mounted hidden tabs don't fight for first responder.
@@ -2061,7 +2075,7 @@ class AppRuntime {
            let focusedSession = sessions[focusedId] {
             window?.makeFirstResponder(focusedSession.hostView)
         }
-        // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
+        // Active search on the focused pane: focus its pane-chrome search field.
         if browserFocus == nil, model.searchState[focusedId] != nil,
            let field = findPaneWrapper(for: focusedId)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)

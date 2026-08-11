@@ -65,7 +65,7 @@ stored-callback code:
    async hops. Avoid `unowned`; the codebase currently has none.
 7. `NSMenuItem.target` is weak -- an AppKit target that can outlive its referent
    must not be the only object keeping menu actions alive. A menu
-   owned by a reconcile-ephemeral view (for example `PaneWrapperView`) must
+   owned by a view whose teardown can race menu tracking must
    anchor that owner for the menu's lifetime by setting `representedObject` to
    it on every owner-targeted item; otherwise a reconcile mid-track can
    deallocate the target and turn actions into silent no-ops. Menu actions
@@ -106,7 +106,7 @@ The current high-risk sites are safe for these specific reasons:
   existing fallback to the selected tab's group
   (`lib/DanTermCore/Sources/DanTermCore/Update.swift:51-60`,
   `lib/DanTermCore/Tests/DanTermCoreTests/UpdateTabTests.swift:274-304`).
-  `PaneWrapperView.makePaneMenu` targets the reconcile-ephemeral wrapper and
+  `PaneWrapperView.makePaneMenu` targets the runtime-owned wrapper and
   anchors it via `representedObject = self` on each wrapper-targeted item
   (`app/PaneWrapperView.swift:425-485`); its clipboard items target the
   reconcile-stable `TerminalView` and need no anchor. `ThemeBrowserView` uses a

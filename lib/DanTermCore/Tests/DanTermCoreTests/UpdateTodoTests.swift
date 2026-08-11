@@ -386,26 +386,31 @@ private struct SectionRow {
         check({ tabId, _ in .tab(tabId) }, "tab")
     }
 
-    @Test("reconcileTodoPopover clears pane and tab popovers on selected-tab shape change")
-    func reconcileTodoPopoverClearsOnSelectedTabShapeChange() {
-        // Intent: a selected-tab structural shape change clears the
-        //   popover.
-        // Why it exists: pins the shape-change clear rule.
-        // Scenario: spec-first shape-change clear.
-        func check(_ scopeFor: (TabId, PaneId) -> TodoPopoverScope, _ label: String) {
-            var model = makeModel()
-            createTab(&model)
-            let tab = selectedTab(in: model)!
-            let paneId = tab.focusedPaneId
-            model.todoPopover = scopeFor(tab.id, paneId)
+    @Test("reconcileTodoPopover preserves pane scope but clears tab scope on shape change")
+    func reconcileTodoPopoverNarrowsSelectedTabShapeChange() {
+        // Intent: a structural edit preserves a surviving pane anchor while
+        //   retaining the existing dismissal policy for tab-scoped popovers.
+        // Why it exists: persistent wrappers make pane anchors stable; clearing
+        //   them would discard chrome even though no host was stranded.
+        // Scenario: the incremental-container reconciliation performance fix.
+        var paneModel = makeModel()
+        createTab(&paneModel)
+        let paneTab = selectedTab(in: paneModel)!
+        let paneId = paneTab.focusedPaneId
+        paneModel.todoPopover = .pane(paneId)
 
-            update(&model, .splitPane(paneId: paneId, direction: .horizontal))
+        update(&paneModel, .splitPane(paneId: paneId, direction: .horizontal))
 
-            #expect(model.todoPopover == nil, "\(label) popover should clear when selected tab shape changes")
-        }
+        #expect(paneModel.todoPopover == .pane(paneId))
 
-        check({ _, paneId in .pane(paneId) }, "pane")
-        check({ tabId, _ in .tab(tabId) }, "tab")
+        var tabModel = makeModel()
+        createTab(&tabModel)
+        let tab = selectedTab(in: tabModel)!
+        tabModel.todoPopover = .tab(tab.id)
+
+        update(&tabModel, .splitPane(paneId: tab.focusedPaneId, direction: .horizontal))
+
+        #expect(tabModel.todoPopover == nil)
     }
 
     @Test("reconcileTodoPopover preserves pane popover on same-tab focus change")
