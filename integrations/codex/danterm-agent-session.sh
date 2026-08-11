@@ -22,6 +22,10 @@ if [ -z "$SESSION_ID" ]; then
 fi
 
 EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty')
+# Inert as of codex 0.147.0: no recorded payload carries agent_id. Codex signals
+# subagent work with SubagentStart / SubagentStop instead, and whether the events
+# between them reuse the root session_id is untested -- so this guard stays until
+# a subagent run says which filter is the right one.
 AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')
 if [ -n "$AGENT_ID" ]; then
   exit 0
@@ -36,13 +40,18 @@ case "$EVENT" in
     ;;
   PreToolUse)
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
-    if [ "$TOOL" = "AskUserQuestion" ] || [ "$TOOL" = "request_user_input" ]; then
+    if [ "$TOOL" = "request_user_input" ]; then
       danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
-  PermissionRequest|Elicitation)
+  PermissionRequest)
     danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     ;;
+  # Codex emits nothing when the user declines an approval, so a declined turn
+  # leaves the pane on its last report -- waiting, from the PermissionRequest --
+  # until the next UserPromptSubmit. The fix belongs in codex, as a turn-ended
+  # event on abort; a timeout here would trade a rare wrong state for a routine
+  # one, since a long tool call is not a finished turn.
   Stop)
     danterm agent activity --kind codex --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
     ;;

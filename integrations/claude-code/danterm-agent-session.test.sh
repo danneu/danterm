@@ -18,7 +18,10 @@ check_case() {
   out="$tmpdir/out"
   status=0
 
-  if [ -n "$expect_invocation" ]; then
+  # The stub goes on PATH for every case, including the ones expecting silence:
+  # without it a "no invocation" case would pass merely because no danterm exists
+  # to find. NO_STUB=1 is for the case that tests exactly that absence.
+  if [ "${NO_STUB:-0}" != "1" ]; then
     cat >"$tmpdir/danterm" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DANTERM_AGENT_STUB_LOG"
@@ -95,6 +98,10 @@ check_case "elicitation reports waiting" \
   'agent activity --kind claude --id 4f3a2b1c --state waiting'
 check_case "ordinary tool use is ignored" \
   '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"4f3a2b1c"}'
+# request_user_input is codex's ask-user tool. Claude never sends it, so matching
+# it here would be a check that can only ever fire on a payload we do not receive.
+check_case "codex ask-user tool name is not matched" \
+  '{"hook_event_name":"PreToolUse","tool_name":"request_user_input","session_id":"4f3a2b1c"}'
 check_case "root stop reports idle" \
   '{"hook_event_name":"Stop","session_id":"4f3a2b1c","background_tasks":[]}' \
   'agent activity --kind claude --id 4f3a2b1c --state idle'
@@ -123,8 +130,10 @@ check_case "empty session id is silent no-op" \
 
 PATH=/usr/bin:/bin
 export PATH
+NO_STUB=1
 check_case "missing cli is silent no-op" \
   '{"hook_event_name":"SessionStart","session_id":"4f3a2b1c"}'
+unset NO_STUB
 
 if [ "$failed" -eq 0 ]; then
   printf 'OK: %s/%s cases passed.\n' "$passed" "$TOTAL"

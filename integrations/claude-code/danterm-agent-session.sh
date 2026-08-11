@@ -36,7 +36,7 @@ case "$EVENT" in
     ;;
   PreToolUse)
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
-    if [ "$TOOL" = "AskUserQuestion" ] || [ "$TOOL" = "request_user_input" ]; then
+    if [ "$TOOL" = "AskUserQuestion" ]; then
       danterm agent activity --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
