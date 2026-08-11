@@ -41,6 +41,17 @@ h3{font-size:11px;opacity:.45;margin:15px 0 6px;font-weight:600}
 .tabtext{display:flex;flex-direction:column;gap:1px;min-width:0}
 .t1{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t2{font-size:10.5px;opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.panerow{display:flex;gap:3px;margin-top:2px}
+.note2{font-size:11px;opacity:.5;line-height:1.5;margin:0 0 12px;max-width:44em}
+.trow{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+.sub2{opacity:.7;font-size:10px}
+.striprow{height:40px;width:206px;flex:none;display:flex;align-items:center;gap:8px;
+          padding-right:10px;border-radius:6px;overflow:hidden}
+.light .striprow{background:#fafafa}
+.dark .striprow{background:#232326}
+.striprow.sel{color:#fff}
+.light .striprow.sel,.dark .striprow.sel{background:#007aff}
+.dark .striprow.sel{background:#0a84ff}
 
 .toolbar{height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:5px;font-size:11px;width:420px;margin-bottom:6px}
 .light .toolbar{background:rgba(0,0,0,.055);color:#333}
@@ -63,11 +74,16 @@ h3{font-size:11px;opacity:.45;margin:15px 0 6px;font-weight:600}
 // to chips.json is enough to preview it.
 let KINDS = [];
 
+// `panes` stands in for a multi-pane tab: that row spends its second line
+// enumerating its panes instead of showing a cwd, and every chip but the
+// focused one is grey.
 const TABS = [
   {kind: "terminal", stripe: "#5b8def", t1: "danterm",         t2: "~/Code/danterm"},
-  {kind: "claude",   stripe: "#e0a44b", t1: "engine refactor", t2: "claude · lib/TerminalCore"},
+  {kind: "claude",   stripe: "#e0a44b", t1: "engine refactor", t2: "claude · lib/TerminalCore",
+   panes: ["terminal", "claude", "codex"], focused: 1},
   {kind: "codex",    stripe: "#57b86b", t1: "review",          t2: "codex · ~/Code/danterm"},
-  {kind: "agent",    stripe: "#8b7ad6", t1: "prompt tuning",   t2: "aider · lib/TerminalPTY"},
+  {kind: "agent",    stripe: "#8b7ad6", t1: "prompt tuning",   t2: "aider · lib/TerminalPTY",
+   panes: ["agent", "terminal"], focused: 0},
   {kind: "terminal", stripe: "#c96ab8", t1: "btop",            t2: "~"}
 ];
 
@@ -110,6 +126,95 @@ function glyph(art, box, fill, color, dilate) {
                viewBox="${art.viewBox.join(" ")}">${body}</svg>`;
 }
 
+// Mirrors ChipRenderer.grey: CoreGraphics converts the sRGB color into the
+// generic gray gamma-2.2 space, which is linearize -> D65 luminance -> re-encode
+// at 2.2. CSS `filter: grayscale(1)` weights the *encoded* channels instead and
+// comes out visibly lighter, so the math is spelled out rather than borrowed.
+// Alpha is untouched, so a translucent wash stays translucent.
+function desaturate(hex) {
+  const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const lin = v => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const Y = 0.2126 * lin(((n >> 16) & 255) / 255)
+          + 0.7152 * lin(((n >> 8) & 255) / 255)
+          + 0.0722 * lin((n & 255) / 255);
+  const g = Math.round(Math.pow(Y, 1 / 2.2) * 255).toString(16).padStart(2, "0");
+  return `#${g}${g}${g}${m[2] || ""}`;
+}
+
+// --- pane list -----------------------------------------------------------
+//
+// The strip a multi-pane tab shows on its second line. Every chip drops its own
+// brand colors for one shared monochrome pair, so the strip reads as "which
+// pane", not "what is each pane"; the treatment decides how the active one is
+// lifted out. `surfaceBg` is the row the strip sits on, which a treatment needs
+// whenever it inverts (its mark has to be punched in the row's own color).
+const PANE_TREATMENTS = [
+  ["grey",        "brand, desaturated",  (P, S, bg, on) => on
+                                            ? {brand: true}
+                                            : {brand: true, grey: true}],
+  ["accent-fill", "accent fills the chip", (P, S, bg, on) => on
+                                            ? {bg: P.accent, fg: P.onAccent}
+                                            : {bg: S.bg, fg: S.dim}],
+  ["accent-mark", "accent marks it",      (P, S, bg, on) => on
+                                            ? {bg: S.bg, fg: P.accent}
+                                            : {bg: S.bg, fg: S.dim}],
+  ["accent-ring", "accent rings it",      (P, S, bg, on) => on
+                                            ? {bg: S.bg, fg: S.fg, ring: P.accent}
+                                            : {bg: S.bg, fg: S.dim}],
+  ["bare",        "no chip, ink only",    (P, S, bg, on) => on
+                                            ? {bg: "transparent", fg: P.accent}
+                                            : {bg: "transparent", fg: S.dim}],
+  ["contrast",    "contrast only, no hue", (P, S, bg, on) => on
+                                            ? {bg: opaque(S.fg), fg: bg}
+                                            : {bg: S.bg, fg: S.dim}],
+  // The same idea with the surface taken out of it. Sidebar selection is
+  // NSOutlineView-owned and changes without reloading the cell, so a chip whose
+  // colors depend on whether its row is selected would need a signal the cell
+  // does not get. These are fixed per appearance instead, and clear the accent
+  // by luminance rather than by hue -- the accent is mid-bright, so near-black
+  // reads on it in light and near-white reads on it in dark.
+  ["fixed",       "contrast, surface-independent", (P, S, bg, on) => on
+                                            ? {bg: P.fixed.onBg, fg: P.fixed.onFg}
+                                            : {bg: P.fixed.bg, fg: P.fixed.fg}]
+];
+
+// The treatment that ships, so the sidebar mock below predicts the real row
+// instead of showing a candidate that lost.
+const SHIPPED = PANE_TREATMENTS.find(t => t[0] === "fixed")[2];
+
+// An 8-digit color with its alpha taken to full. The strong neutral is declared
+// translucent so it sits on any surface; a treatment that fills with it needs
+// the solid version, or the mark punched out of it shows the row through.
+function opaque(hex) {
+  const m = /^#([0-9a-f]{6})/i.exec(hex.trim());
+  return m ? `#${m[1]}FF` : hex;
+}
+
+function paneChip(M, art, kind, size, mode, treat, surface, surfaceBg, active) {
+  const P = M.paneList[mode];
+  const S = P[surface];
+  const style = treat(P, S, surfaceBg, active);
+  const k = M.kinds[kind];
+
+  let bg, fg;
+  if (style.brand) {
+    bg = k[mode].bg;
+    fg = k[mode].fg;
+    if (style.grey) { bg = desaturate(bg); fg = desaturate(fg); }
+  } else {
+    bg = style.bg;
+    fg = style.fg;
+  }
+
+  const r = (size * M.cornerRadius).toFixed(2);
+  const ring = style.ring ? `box-shadow:0 0 0 1.5px ${style.ring};` : "";
+  return `<span class="chip" style="width:${size}px;height:${size}px;` +
+         `background:${bg};border-radius:${r}px;${ring}">` +
+         glyph(art[kind], size, k.fill, fg, k.dilate) + `</span>`;
+}
+
 function chip(M, art, kind, size, mode, opts) {
   opts = opts || {};
   const k = M.kinds[kind];
@@ -127,6 +232,8 @@ function chip(M, art, kind, size, mode, opts) {
     bg = treat === "tinted" ? fg + "26" : "transparent";
   }
 
+  if (opts.desaturated) { bg = desaturate(bg); fg = desaturate(fg); }
+
   const r = (size * M.cornerRadius).toFixed(2);
   return `<span class="chip" style="width:${size}px;height:${size}px;` +
          `background:${bg};border-radius:${r}px">` +
@@ -134,6 +241,22 @@ function chip(M, art, kind, size, mode, opts) {
 }
 
 // --- sections ------------------------------------------------------------
+
+// One mock sidebar row carrying a pane strip, so a treatment is judged where it
+// will live rather than on a swatch board.
+const STRIP = ["terminal", "claude", "codex", "agent"];
+const ACTIVE = 1;
+
+function paneStrip(M, art, mode, treat, surface, surfaceBg, selected) {
+  const chips = STRIP.map((k, i) =>
+    paneChip(M, art, k, M.sizes.paneRow, mode, treat, surface, surfaceBg, i === ACTIVE)
+  ).join("");
+  return `<div class="striprow${selected ? " sel" : ""}">` +
+         `<span class="stripe" style="background:#e0a44b"></span>` +
+         chip(M, art, STRIP[ACTIVE], M.sizes.sidebar, mode) +
+         `<span class="tabtext"><span class="t1">engine refactor</span>` +
+         `<span class="panerow">${chips}</span></span></div>`;
+}
 
 function build(M, art, mode) {
   let h = "";
@@ -145,13 +268,33 @@ function build(M, art, mode) {
          KINDS.map(k => C(k, size)).join("") + `</div>`;
   }
 
+  h += `<h2>pane list &mdash; picking a treatment</h2>`;
+  h += `<p class="note2">Four panes, the second one focused. Each treatment is
+        shown on a plain row and on the selected row, because the selected row
+        is the one whose panes you are actually looking at &mdash; and it has
+        already spent the accent color on itself.</p>`;
+  const rowBg = mode === "light" ? "#fafafa" : "#232326";
+  const selBg = M.paneList[mode].accent;
+  for (const [id, label, treat] of PANE_TREATMENTS) {
+    h += `<div class="trow"><span class="lbl">${id}<br>` +
+         `<span class="sub2">${label}</span></span>` +
+         paneStrip(M, art, mode, treat, "rest", rowBg, false) +
+         paneStrip(M, art, mode, treat, "sel", selBg, true) + `</div>`;
+  }
+
   h += `<h3>sidebar &mdash; ${M.sizes.sidebar}pt chip, 40pt row</h3><div class="sidebar">`;
   TABS.forEach((t, i) => {
     h += `<div class="tab${i === 1 ? " sel" : ""}">` +
          `<span class="stripe" style="background:${t.stripe}"></span>` +
          C(t.kind, M.sizes.sidebar) +
          `<span class="tabtext"><span class="t1">${t.t1}</span>` +
-         `<span class="t2">${t.t2}</span></span></div>`;
+         (t.panes
+           ? `<span class="panerow">` + t.panes.map((k, j) =>
+               paneChip(M, art, k, M.sizes.paneRow, mode, SHIPPED, "rest",
+                        mode === "light" ? "#fafafa" : "#232326",
+                        j === t.focused)).join("") + `</span>`
+           : `<span class="t2">${t.t2}</span>`) +
+         `</span></div>`;
   });
   h += `</div>`;
 

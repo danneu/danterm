@@ -41,6 +41,31 @@ extension ChipKind {
     }
 }
 
+/// Where a chip takes its colors from.
+///
+/// `.brand` is a chip standing for one pane: it wears the agent's own colors.
+/// `.paneStrip` is a chip standing for one pane *among the tab's others*, where
+/// telling the active one apart matters more than telling Claude from Codex, so
+/// the whole strip shares a palette and only the active chip is lifted out.
+enum ChipStyle: Equatable {
+    case brand
+    case paneStrip(isActive: Bool)
+
+    /// The colors to paint with, for a chip of `kind` at this appearance.
+    func palette(for kind: ChipKind, appearance: ChipAppearance) -> ChipPalette {
+        switch self {
+        case .brand:
+            let artwork = kind.artwork
+            return appearance == .light ? artwork.light : artwork.dark
+        case .paneStrip(let isActive):
+            let strip = appearance == .light
+                ? ChipArtwork.paneListLight
+                : ChipArtwork.paneListDark
+            return isActive ? strip.active : strip.inactive
+        }
+    }
+}
+
 /// A fixed-size square that draws one chip. Used by both the sidebar rows and
 /// the pane toolbar, so the two cannot drift apart.
 ///
@@ -51,6 +76,16 @@ final class ChipView: NSView {
     var kind: ChipKind {
         didSet {
             guard kind != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Which palette this chip paints from. Defaults to the kind's own colors;
+    /// a tab row's pane strip overrides it so the strip is monochrome apart
+    /// from the pane the tab is focused on.
+    var style: ChipStyle = .brand {
+        didSet {
+            guard style != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -85,11 +120,12 @@ final class ChipView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let appearance: ChipAppearance = isDark ? .dark : .light
         ChipRenderer.draw(
             kind.artwork,
             in: context,
             rect: NSRect(x: 0, y: 0, width: edge, height: edge),
-            appearance: isDark ? .dark : .light,
+            palette: style.palette(for: kind, appearance: appearance),
             flipped: isFlipped
         )
     }

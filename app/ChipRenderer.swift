@@ -29,6 +29,7 @@ enum ChipRenderer {
     /// Nothing is clipped. A dilation stroke can reach a fraction of a point
     /// outside the mark's box, which matches the preview page's `overflow:
     /// visible` and keeps the mark's own edges from being shaved.
+    ///
     static func draw(
         _ definition: ChipDefinition,
         in context: CGContext,
@@ -36,8 +37,22 @@ enum ChipRenderer {
         appearance: ChipAppearance,
         flipped: Bool
     ) {
-        let palette = appearance == .light ? definition.light : definition.dark
+        draw(
+            definition, in: context, rect: rect,
+            palette: appearance == .light ? definition.light : definition.dark,
+            flipped: flipped)
+    }
 
+    /// The same chip in colors that are not its own. A tab row's pane strip
+    /// paints every chip from one shared palette, so the strip reads as "which
+    /// pane" rather than as four brands competing for attention.
+    static func draw(
+        _ definition: ChipDefinition,
+        in context: CGContext,
+        rect: CGRect,
+        palette: ChipPalette,
+        flipped: Bool
+    ) {
         context.saveGState()
         context.setFillColor(palette.background)
         context.addPath(CGPath(

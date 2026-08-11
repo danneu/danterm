@@ -1340,6 +1340,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
         let chipId = NSUserInterfaceItemIdentifier("tabChip")
+        let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -1386,6 +1387,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)
 
+            // Occupies the subtitle's line, and only one of the two is ever shown.
+            let paneStrip = PaneStripView()
+            paneStrip.identifier = paneStripId
+            paneStrip.isHidden = true
+            cell.addSubview(paneStrip)
+
             let bellBadge = NSTextField.makeBadge()
             bellBadge.identifier = bellDotId
             let accessoryStack = NSStackView(views: [bellBadge])
@@ -1411,6 +1418,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
                 subtitleField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 1),
+                paneStrip.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
+                // Equal, not <=: the strip has no intrinsic width and fits itself
+                // to whatever it is given, so it needs a definite one.
+                paneStrip.trailingAnchor.constraint(
+                    equalTo: accessoryStack.leadingAnchor, constant: -4),
+                paneStrip.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 2),
             ])
         }
 
@@ -1430,15 +1443,23 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
         let chipId = NSUserInterfaceItemIdentifier("tabChip")
+        let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
 
         let chrome = tabChrome(tab)
         let displayTitle = tab.customTitle ?? chrome.0
         if !skipTitle {
             cell.textField?.stringValue = displayTitle
         }
+        // A multi-pane tab spends its second line enumerating its panes; only a
+        // single-pane tab shows a cwd there.
+        let paneChips = tabPaneChips(tab)
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
             subtitleField.stringValue = chrome.1 ?? ""
-            subtitleField.isHidden = chrome.1 == nil
+            subtitleField.isHidden = chrome.1 == nil || !paneChips.isEmpty
+        }
+        if let paneStrip = cell.subviews.first(where: { $0.identifier == paneStripId }) as? PaneStripView {
+            paneStrip.chips = paneChips
+            paneStrip.isHidden = paneChips.isEmpty
         }
         if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView {
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {

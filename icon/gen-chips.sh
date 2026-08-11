@@ -471,6 +471,12 @@ w('    let background: CGColor')
 w('    let foreground: CGColor')
 w('}')
 w('')
+w('/// The two states of a chip in a tab row\'s pane strip.')
+w('struct ChipPaneListPalette {')
+w('    let inactive: ChipPalette')
+w('    let active: ChipPalette')
+w('}')
+w('')
 w('/// One pane-kind chip: its glyph, its optical tuning, and its colors.')
 w('///')
 w('/// `fill` is the fraction of the chip box the mark occupies, per-kind because')
@@ -491,6 +497,9 @@ w(f'    /// Chip corner radius as a fraction of the chip\'s edge length.')
 w(f'    static let cornerRadius: CGFloat = {fmt(manifest["cornerRadius"])}')
 w(f'    static let sidebarSize: CGFloat = {fmt(manifest["sizes"]["sidebar"])}')
 w(f'    static let toolbarSize: CGFloat = {fmt(manifest["sizes"]["toolbar"])}')
+w('    /// The per-pane chips on a multi-pane tab\'s second line, smaller than the')
+w('    /// row\'s own chip so the enumeration reads as subordinate to the title.')
+w(f'    static let paneRowSize: CGFloat = {fmt(manifest["sizes"]["paneRow"])}')
 
 
 def color(c):
@@ -527,6 +536,30 @@ for name, spec in kinds.items():
     w(f'        dark: ChipPalette(background: {color(spec["dark"]["bg"])}, '
       f'foreground: {color(spec["dark"]["fg"])})')
     w('    )')
+
+# The pane strip's own palette. Not per kind: the strip answers "which pane am
+# I looking at", so every chip in it drops its brand colors for one shared pair
+# and only the mark tells them apart.
+pl = manifest["paneList"]
+w('')
+w('    /// The pane strip\'s palette, which is the same for every kind: only the')
+w('    /// active chip is lifted out, and by luminance rather than by hue, so it')
+w('    /// reads on a plain row and on the accent-colored selected row alike.')
+w('    /// Fixed per appearance for that reason -- sidebar selection is')
+w('    /// NSOutlineView-owned and does not reload the cell, so nothing in here')
+w('    /// may depend on whether the row is selected.')
+w('    static let paneListLight = ChipPaneListPalette(')
+w(f'        inactive: ChipPalette(background: {color(pl["light"]["fixed"]["bg"])}, '
+  f'foreground: {color(pl["light"]["fixed"]["fg"])}),')
+w(f'        active: ChipPalette(background: {color(pl["light"]["fixed"]["onBg"])}, '
+  f'foreground: {color(pl["light"]["fixed"]["onFg"])})')
+w('    )')
+w('    static let paneListDark = ChipPaneListPalette(')
+w(f'        inactive: ChipPalette(background: {color(pl["dark"]["fixed"]["bg"])}, '
+  f'foreground: {color(pl["dark"]["fixed"]["fg"])}),')
+w(f'        active: ChipPalette(background: {color(pl["dark"]["fixed"]["onBg"])}, '
+  f'foreground: {color(pl["dark"]["fixed"]["onFg"])})')
+w('    )')
 
 # Every chip, named. Emitted rather than hand-listed so a kind added to
 # chips.json cannot be missed by a caller that walks all of them -- which is how

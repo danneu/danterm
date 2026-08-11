@@ -93,7 +93,79 @@ struct ChipKindTests {
         #expect(desiredPaneToolbar(in: model)[paneId]?.chipKind == .codex)
     }
 
+    // Why it exists: the row's second line is a cwd until the tab splits, so an
+    //   empty strip is the signal that the cwd still owns that line.
+    @Test("a single-pane tab has no pane strip")
+    func singlePaneTabHasNoStrip() throws {
+        var model = makeModel()
+        createTab(&model)
+        let tab = try #require(selectedTab(in: model))
+
+        #expect(tabPaneChips(tab).isEmpty)
+    }
+
+    @Test("a split tab's strip lists every pane in tree order, focus flagged")
+    func splitTabStripListsPanesInOrder() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let secondPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: secondPaneId, direction: .vertical))
+        let thirdPaneId = try #require(selectedTab(in: model)).focusedPaneId
+
+        let tab = try #require(selectedTab(in: model))
+        let strip = tabPaneChips(tab)
+
+        #expect(strip.map(\.paneId) == [firstPaneId, secondPaneId, thirdPaneId])
+        #expect(strip.map(\.isFocused) == [false, false, true])
+    }
+
+    // Why it exists: a focus move inside a tab changes no other projected field,
+    //   so without the strip in the projection the row would never reload and
+    //   the highlight would sit on the pane you just left.
+    @Test("moving focus between panes restyles the strip through the projection")
+    func focusMoveReachesTheSidebarProjection() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let tab = try #require(selectedTab(in: model))
+
+        let before = try #require(paneChips(of: tab.id, in: desiredSidebar(in: model)))
+        #expect(before.first(where: \.isFocused)?.paneId != firstPaneId)
+
+        update(&model, .paneBecameFirstResponder(paneId: firstPaneId))
+
+        let after = try #require(paneChips(of: tab.id, in: desiredSidebar(in: model)))
+        #expect(after.first(where: \.isFocused)?.paneId == firstPaneId)
+        #expect(after != before)
+    }
+
+    // Why it exists: the strip drops brand color for a shared palette, so the
+    //   kind is the only thing left that tells one pane from another in it.
+    @Test("a pane strip reports each pane's own kind, not the tab's")
+    func stripReportsEachPanesOwnKind() throws {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = try #require(selectedTab(in: model)).focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let sessionId = try #require(model.pane(firstPaneId)?.session?.id)
+        let claude = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(claude)))
+
+        let tab = try #require(selectedTab(in: model))
+        #expect(tabPaneChips(tab).map(\.kind) == [.claude, .terminal])
+        // The row's own chip still speaks for the focused pane alone.
+        #expect(chipKind(of: tab.id, in: desiredSidebar(in: model)) == .terminal)
+    }
+
     private func chipKind(of tabId: TabId, in projection: SidebarProjection) -> ChipKind? {
         projection.groups.flatMap(\.tabs).first { $0.id == tabId }?.chipKind
+    }
+
+    private func paneChips(of tabId: TabId, in projection: SidebarProjection) -> [TabPaneChip]? {
+        projection.groups.flatMap(\.tabs).first { $0.id == tabId }?.paneChips
     }
 }

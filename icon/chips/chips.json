@@ -28,7 +28,7 @@
 
   "treatment": "filled",
   "cornerRadius": 0.23,
-  "sizes": { "sidebar": 15, "toolbar": 13 },
+  "sizes": { "sidebar": 15, "toolbar": 13, "paneRow": 12 },
 
   "kinds": {
     "terminal": {
@@ -62,6 +62,40 @@
       "light": { "bg": "#0F7F73FF", "fg": "#FFFFFFFF" },
       "dark":  { "bg": "#0F7F73FF", "fg": "#FFFFFFFF" },
       "exploreMark": { "light": "#0F7F73", "dark": "#3EAE9F" }
+    }
+  },
+
+  "_paneListNote": [
+    "Palette for the pane list -- the chip strip a multi-pane tab shows on its",
+    "second line. That strip is answering 'which pane am I looking at', not",
+    "'what is each pane', so every chip drops its own brand colors for one",
+    "shared monochrome pair and only the mark tells them apart.",
+    "",
+    "Colors are stated per surface, because the strip sits on a row that may be",
+    "selected. `rest` is the plain sidebar row. `sel` is the accent-colored",
+    "selected row, where the neutrals turn translucent-white so they read",
+    "against the accent instead of against the sidebar.",
+    "",
+    "preview.html renders every candidate treatment from these. Nothing ships",
+    "reads them yet; the treatment is still being chosen by eye."
+  ],
+
+  "paneList": {
+    "light": {
+      "rest": { "bg": "#0000001F", "fg": "#000000A6", "dim": "#00000066" },
+      "sel":  { "bg": "#FFFFFF33", "fg": "#FFFFFFCC", "dim": "#FFFFFF99" },
+      "accent": "#007AFFFF",
+      "onAccent": "#FFFFFFFF",
+      "fixed": { "bg": "#0000001F", "fg": "#00000073",
+                 "onBg": "#1D1D1FFF", "onFg": "#FAFAFAFF" }
+    },
+    "dark": {
+      "rest": { "bg": "#FFFFFF24", "fg": "#FFFFFFA6", "dim": "#FFFFFF66" },
+      "sel":  { "bg": "#FFFFFF33", "fg": "#FFFFFFCC", "dim": "#FFFFFF99" },
+      "accent": "#0A84FFFF",
+      "onAccent": "#FFFFFFFF",
+      "fixed": { "bg": "#FFFFFF24", "fg": "#FFFFFF8C",
+                 "onBg": "#F2F2F4FF", "onFg": "#1E1E20FF" }
     }
   }
 }

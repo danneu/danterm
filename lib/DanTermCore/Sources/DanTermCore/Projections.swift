@@ -492,6 +492,10 @@ struct SidebarTabProjection: Equatable {
   var color: TabColor?
   // The row speaks for the focused pane, like displayTitle and subtitle do.
   var chipKind: ChipKind = .terminal
+  // The second line's pane enumeration, empty for a single-pane tab. Carried in
+  // the projection so a split, a close, or a focus move inside the tab reloads
+  // the row -- none of those changes any other field.
+  var paneChips: [TabPaneChip] = []
 }
 
 /// One sidebar group row. `isCollapsed` drives the structural `setGroupCollapsed`
@@ -543,7 +547,8 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,
-          chipKind: tabChipKind(tab, in: model)
+          chipKind: tabChipKind(tab, in: model),
+          paneChips: tabPaneChips(tab)
         )
       }
     )

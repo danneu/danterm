@@ -617,6 +617,28 @@ func tabChipKind(_ tab: TabModel, in model: AppModel) -> ChipKind {
   ChipKind(agent: model.pane(tab.focusedPaneId)?.session?.agent ?? .none)
 }
 
+/// One entry of the chip row a multi-pane tab shows in place of its cwd
+/// subtitle. Carries the pane id so a later iteration can make a chip clickable.
+struct TabPaneChip: Equatable {
+  let paneId: PaneId
+  let kind: ChipKind
+  let isFocused: Bool
+}
+
+/// The chips for a tab's panes, in the tree's left-to-right order, with the
+/// tab's focused pane flagged so the row can draw the others greyscale.
+/// Empty for a single-pane tab: that row keeps showing its cwd instead.
+func tabPaneChips(_ tab: TabModel) -> [TabPaneChip] {
+  let panes = panesInNode(tab.rootNode)
+  guard panes.count > 1 else { return [] }
+  return panes.map { pane in
+    TabPaneChip(
+      paneId: pane.id,
+      kind: ChipKind(agent: pane.session?.agent ?? .none),
+      isFocused: pane.id == tab.focusedPaneId)
+  }
+}
+
 func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
   let allTabs = model.groups.flatMap(\.tabs)
   guard let idx = allTabs.firstIndex(where: { $0.id == model.selectedTabId }) else { return nil }

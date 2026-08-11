@@ -32,6 +32,12 @@ struct ChipPalette {
     let foreground: CGColor
 }
 
+/// The two states of a chip in a tab row's pane strip.
+struct ChipPaneListPalette {
+    let inactive: ChipPalette
+    let active: ChipPalette
+}
+
 /// One pane-kind chip: its glyph, its optical tuning, and its colors.
 ///
 /// `fill` is the fraction of the chip box the mark occupies, per-kind because
@@ -52,6 +58,9 @@ enum ChipArtwork {
     static let cornerRadius: CGFloat = 0.23
     static let sidebarSize: CGFloat = 15
     static let toolbarSize: CGFloat = 13
+    /// The per-pane chips on a multi-pane tab's second line, smaller than the
+    /// row's own chip so the enumeration reads as subordinate to the title.
+    static let paneRowSize: CGFloat = 12
 
     static let terminal = ChipDefinition(
         glyph: ChipGlyph(
@@ -115,6 +124,21 @@ enum ChipArtwork {
         dilate: 0,
         light: ChipPalette(background: CGColor(srgbRed: 0.0588, green: 0.498, blue: 0.451, alpha: 1), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)),
         dark: ChipPalette(background: CGColor(srgbRed: 0.0588, green: 0.498, blue: 0.451, alpha: 1), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+    )
+
+    /// The pane strip's palette, which is the same for every kind: only the
+    /// active chip is lifted out, and by luminance rather than by hue, so it
+    /// reads on a plain row and on the accent-colored selected row alike.
+    /// Fixed per appearance for that reason -- sidebar selection is
+    /// NSOutlineView-owned and does not reload the cell, so nothing in here
+    /// may depend on whether the row is selected.
+    static let paneListLight = ChipPaneListPalette(
+        inactive: ChipPalette(background: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.1216), foreground: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.451)),
+        active: ChipPalette(background: CGColor(srgbRed: 0.1137, green: 0.1137, blue: 0.1216, alpha: 1), foreground: CGColor(srgbRed: 0.9804, green: 0.9804, blue: 0.9804, alpha: 1))
+    )
+    static let paneListDark = ChipPaneListPalette(
+        inactive: ChipPalette(background: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.1412), foreground: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.549)),
+        active: ChipPalette(background: CGColor(srgbRed: 0.949, green: 0.949, blue: 0.9569, alpha: 1), foreground: CGColor(srgbRed: 0.1176, green: 0.1176, blue: 0.1255, alpha: 1))
     )
 
     /// Every chip in the manifest, in declaration order.

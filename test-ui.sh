@@ -103,6 +103,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
+        "$SCRIPT_DIR/app/PaneStripView.swift" \
         "$SCRIPT_DIR/app/ThemeCatalog.swift" \
         "$SCRIPT_DIR/app/ThemeRenderBridge.swift" \
         "$SCRIPT_DIR/app/ThemeSwatchViews.swift" \
@@ -111,6 +112,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PreferencesPanel.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
         "$SCRIPT_DIR/tests-ui/ChipViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/PaneStripViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
