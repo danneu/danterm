@@ -1566,6 +1566,24 @@ private func dispatchIpc(
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return commands + [.ipcReply(reqId: reqId, result: encoder.paneReference(newPaneId.flatMap(model.pane)))]
 
+    case Methods.paneClose:
+        let paneId = try resolvePane(
+            params: params,
+            context: context,
+            in: model,
+            requireExplicit: true
+        )
+        guard let tab = tabForPane(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
+        }
+        if allPaneIds(tab.rootNode).count == 1, wouldQuitFromClose(model) {
+            throw IpcParamsError("cannot close the last pane")
+        }
+        let commands = update(&model, .closePane(paneId: paneId), env: env)
+        return commands + [.ipcReply(reqId: reqId, result: .object([
+            "pane": .object(["id": .string(paneId.rawValue.uuidString)])
+        ]))]
+
     case Methods.tabNew:
         guard case .object(let object) = params else {
             throw IpcParamsError("invalid params")

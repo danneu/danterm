@@ -3,9 +3,11 @@
 // the protocol surface: ls (full snapshot), pane.info (explicit + implicit
 // pane context, missing/invalid target), tab.rename (set/clear, live-tab
 // derivation from pane context, explicit-vs-context precedence, malformed
-// inputs), pane.split (context-pane targeting, explicit-pane overrides,
-// malformed/unknown/non-string/orphan failures, background and launch
-// flows), pane.focus (selection + first responder + popover preservation +
+// inputs), pane.close (required explicit targeting, sibling promotion, tab
+// cascade, last-pane refusal, and confirmation bypass), pane.split
+// (context-pane targeting, explicit-pane overrides, malformed/unknown/non-
+// string/orphan failures, background and launch flows), pane.focus
+// (selection + first responder + popover preservation +
 // alert clear), tab.new (explicit group, group context, background, launch,
 // afterTab matching, malformed groups, cwd inheritance), theme.set
 // (explicit-vs-context precedence), the todo command family (list/add/edit/
@@ -787,6 +789,172 @@ import DanTermProtocol
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(tabById(tabId, in: model) != nil)
+    }
+
+    @Test("pane.close removes an explicit pane and reports its id")
+    func paneCloseRemovesExplicitPaneAndReportsId() throws {
+        // Intent: pane.close routes through the existing pane-close mutation,
+        //   promotes the sibling, and replies with the closed pane id.
+        // Why it exists: pins the IPC surface to the GUI's model operation
+        //   instead of growing a second pane-removal implementation.
+        // Scenario: spec-first close of the focused pane in a two-pane tab.
+        var model = makeModel()
+        createTab(&model)
+        let survivorPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
+        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        let tabId = selectedTab(in: model)!.id
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneClose,
+            params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
+        )
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["pane"]?["id"]?.asString == closedPaneId.rawValue.uuidString)
+        #expect(model.pane(closedPaneId) == nil)
+        let tab = try #require(tabById(tabId, in: model))
+        #expect(tab.focusedPaneId == survivorPaneId)
+        if case .leaf(let survivor) = tab.rootNode {
+            #expect(survivor.id == survivorPaneId)
+        } else {
+            Issue.record("pane.close should promote the surviving sibling")
+        }
+    }
+
+    @Test("pane.close closes the tab that held its sole pane")
+    func paneCloseClosesSolePaneTab() throws {
+        // Intent: closing a tab's sole pane cascades through closeTab.
+        // Why it exists: pins parity with the existing GUI close semantics.
+        // Scenario: spec-first close of a background single-pane tab while a
+        //   second tab keeps the app alive.
+        var model = makeModel()
+        createTab(&model)
+        let closedTabId = selectedTab(in: model)!.id
+        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        createTab(&model)
+        let countBefore = totalTabCount(model)
+
+        _ = try requireIpcReply(sendIpc(
+            &model,
+            method: Methods.paneClose,
+            params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
+        ))
+
+        #expect(model.pane(closedPaneId) == nil)
+        #expect(tabById(closedTabId, in: model) == nil)
+        #expect(totalTabCount(model) == countBefore - 1)
+    }
+
+    @Test("pane.close refuses the only pane of the only tab")
+    func paneCloseRefusesOnlyPaneOfOnlyTab() throws {
+        // Intent: pane.close fails before the last-pane close can enter the
+        //   app-termination confirmation path.
+        // Why it exists: an IPC success with a surviving pane and stranded
+        //   pending confirmation would lie to the caller and block later UI.
+        // Scenario: spec-first attempt to close the app's sole pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneClose,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        )
+
+        let error = try requireIpcError(commands)
+        #expect(error == .init(code: -32602, message: "cannot close the last pane"))
+        #expect(model.pane(paneId) != nil)
+        #expect(model.pendingConfirmation == nil)
+        #expect(hasEffect(commands) { if case .terminate = $0 { return true }; return false } == false)
+    }
+
+    @Test("pane.close bypasses pane and tab todo confirmations")
+    func paneCloseBypassesTodoConfirmations() throws {
+        // Intent: pane.close dispatches .closePane directly when an affected
+        //   pane or its tab carries uncompleted todos.
+        // Why it exists: CLI callers cannot drive AppKit confirmation sheets,
+        //   and tab.close already establishes the direct-mutation policy.
+        // Scenario: spec-first close of one pane in a split task tab, then the
+        //   sole pane of a task tab while another tab keeps the app alive.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let survivorPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
+        let closedPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .addTodo(paneId: closedPaneId, text: "pane task"))
+        _ = update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneClose,
+            params: .object(["pane": .string(closedPaneId.rawValue.uuidString)])
+        )
+
+        _ = try requireIpcReply(commands)
+        #expect(model.pane(closedPaneId) == nil)
+        #expect(hasEffect(commands) {
+            if case .showClosePaneConfirmation = $0 { return true }
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        } == false)
+
+        var tabModel = makeModel()
+        createTab(&tabModel)
+        let closedTabId = selectedTab(in: tabModel)!.id
+        let solePaneId = selectedTab(in: tabModel)!.focusedPaneId
+        _ = update(&tabModel, .addTodo(paneId: solePaneId, text: "pane task"))
+        _ = update(&tabModel, .addTabTodo(tabId: closedTabId, text: "tab task"))
+        createTab(&tabModel)
+
+        let tabCommands = sendIpc(
+            &tabModel,
+            method: Methods.paneClose,
+            params: .object(["pane": .string(solePaneId.rawValue.uuidString)])
+        )
+
+        _ = try requireIpcReply(tabCommands)
+        #expect(tabById(closedTabId, in: tabModel) == nil)
+        #expect(hasEffect(tabCommands) {
+            if case .showClosePaneConfirmation = $0 { return true }
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        } == false)
+    }
+
+    @Test("pane.close requires a valid explicit pane and never falls back to context")
+    func paneCloseRejectsMissingMalformedUnknownAndNonStringPane() throws {
+        // Intent: every absent or invalid explicit pane is rejected without
+        //   using the caller pane context or mutating the model.
+        // Why it exists: closing is destructive, so its target must always be
+        //   the pane id the caller named.
+        // Scenario: spec-first missing, malformed, unknown, and wrong-type ids.
+        var model = makeModel()
+        createTab(&model)
+        let contextPaneId = selectedTab(in: model)!.focusedPaneId
+        let context = IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+        let before = model
+        let cases: [JSONValue] = [
+            .object([:]),
+            .object(["pane": .string("not-a-uuid")]),
+            .object(["pane": .string(UUID().uuidString)]),
+            .object(["pane": .number(7)]),
+        ]
+
+        for params in cases {
+            let commands = sendIpc(
+                &model,
+                method: Methods.paneClose,
+                params: params,
+                context: context
+            )
+
+            #expect(try requireIpcError(commands).code == -32602)
+            #expect(model == before)
+        }
     }
 
     @Test("pane.split targets context pane even when another tab is selected")

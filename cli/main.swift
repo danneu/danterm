@@ -39,6 +39,7 @@ struct DanTermCLI {
                                       Print pane, tab, and group metadata as JSON
           pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
                                       Split a pane (horizontal/vertical)
+          pane close --pane <pane-id>  Close a pane
           pane input [--pane <pane-id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
                                       "ls" Enter, C-c, Up, Escape). Use --pane

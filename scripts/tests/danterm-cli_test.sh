@@ -83,6 +83,7 @@ grep -qF 'tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--
 grep -qF 'tab close [--tab <tab-id>]' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
+grep -qF 'pane close --pane <pane-id>' "$err"
 grep -qF 'agent attach --kind <kind> --id <session-id>' "$err"
 grep -qF 'agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>' "$err"
 grep -qF 'agent detach --kind <kind> --id <session-id>' "$err"
@@ -110,6 +111,7 @@ for help_arg in help --help -h; do
     grep -qF 'tab close [--tab <tab-id>]' "$out"
     grep -qF 'pane split [--pane <pane-id>] -h|-v' "$out"
     grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
+    grep -qF 'pane close --pane <pane-id>' "$out"
     grep -qF 'agent attach --kind <kind> --id <session-id>' "$out"
     grep -qF 'agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>' "$out"
     grep -qF 'agent detach --kind <kind> --id <session-id>' "$out"
@@ -271,6 +273,20 @@ slot_cli tab close --tab "$close_id"
 slot_cli ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
 split_pane_id="$(slot_cli pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
+
+run_cli --socket "$socket" pane close --pane "$split_pane_id"
+[[ $status -eq 0 ]]
+[[ ! -s "$out" ]]
+[[ ! -s "$err" ]]
+slot_cli ls | jq -e \
+    --arg pane "$split_pane_id" \
+    --arg tab "$tab_id" \
+    '([.. | objects | select(.id? == $pane)] | length == 0) and ([.groups[].tabs[] | select(.id == $tab)] | length == 1)' >/dev/null
+
+run_cli --socket "$socket" pane close
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: usage: danterm pane close --pane <pane-id>' "$err"
 
 slot_cli theme set --pane "$pane_id" SmokeTheme
 slot_cli theme set --pane "$pane_id" --clear

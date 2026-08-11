@@ -32,6 +32,7 @@ and skips those rows when the app is unavailable.
     danterm pane focus <pane-id>
     danterm pane info [--pane <pane-id>]
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
+    danterm pane close --pane <pane-id>
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm pane zoom [--pane <pane-id>] on|off|toggle
@@ -100,6 +101,7 @@ For agent commands:
 - `pane split`: always pass `--pane <pane-id>`. The default opens in the
   background. Pass `--foreground` only when the user asked to focus the new pane
   within its tab.
+- `pane close`: always pass `--pane <pane-id>`.
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
 - `agent attach`, `agent activity`, and `agent detach`: hooks may use the
   implicit `$DANTERM_PANE` context; ordinary agent recipes should not call them.
@@ -199,6 +201,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "close this tab" / "close tab X" | `tab close --tab <tab-id>` |
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
+| "close pane X" | `pane close --pane <pane-id>` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
 | "make this pane fill the tab" / "restore the split" | `pane zoom on` / `pane zoom off` |
 | "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
@@ -297,6 +300,15 @@ To navigate to a new pane that was split in another tab:
 
     NEW=$(danterm pane split --pane "$PANE_ID" -v --cmd 'just test' | jq -r '.pane.id')
     danterm pane focus "$NEW"
+
+### Close a pane
+
+    danterm pane close --pane "$PANE_ID"
+
+Closing a pane in a split promotes its sibling. Closing a tab's only pane also
+closes that tab. Closing the only pane of the only tab is refused, so the CLI
+does not quit DanTerm as a side effect. The command does not show the GUI's todo
+confirmation because the explicit pane id authorizes the close.
 
 ### Read another pane's output
 

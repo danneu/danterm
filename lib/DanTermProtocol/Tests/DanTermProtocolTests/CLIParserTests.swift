@@ -229,6 +229,37 @@ struct CLIParserTests {
         #expect(command.outputMode == .none)
     }
 
+    @Test("pane close parses an explicit pane as a silent mutation")
+    func paneCloseParsesExplicitPane() throws {
+        let command = try parseCLI(["pane", "close", "--pane", "P1"])
+
+        #expect(command.method == Methods.paneClose)
+        #expect(command.params == ["pane": .string("P1")])
+        #expect(command.outputMode == .none)
+    }
+
+    @Test("pane close requires a non-empty explicit pane", arguments: [
+        ["pane", "close"],
+        ["pane", "close", "--pane"],
+        ["pane", "close", "--pane", ""],
+    ])
+    func paneCloseRequiresNonEmptyExplicitPane(_ args: [String]) {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI(args)
+        }
+
+        #expect(error?.message == "usage: danterm pane close --pane <pane-id>")
+    }
+
+    @Test("pane command usage lists every supported subcommand")
+    func paneCommandUsageListsEverySubcommand() {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI(["pane"])
+        }
+
+        #expect(error?.message == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape>")
+    }
+
     @Test("implicit human mutation forms still parse without explicit targets")
     func implicitHumanMutationFormsStillParseWithoutExplicitTargets() throws {
         // Intent: implicit target commands still parse while tab/split defaults
@@ -506,6 +537,8 @@ struct CLIParserTests {
         (["tab", "close", "--tab"], "usage: danterm tab close [--tab <tab-id>]"),
         (["tab", "close", "bogus"], "unexpected argument: bogus"),
         (["tab", "close", "--nope"], "unknown flag: --nope"),
+        (["pane", "close", "--pane", "P1", "extra"], "unexpected argument: extra"),
+        (["pane", "close", "--nope"], "unknown flag: --nope"),
         (["pane", "split", "--pane"], paneSplitUsageWithFocusFlags),
         (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
         (["theme", "set", "--pane"], "usage: danterm theme set [--pane <pane-id>] <name>|--clear"),

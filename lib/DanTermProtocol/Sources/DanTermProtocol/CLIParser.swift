@@ -88,7 +88,9 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         }
 
     case "pane":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm pane <focus|info|split|input|read|tape>") }
+        guard args.count >= 2 else {
+            throw CLIParseError("usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape>")
+        }
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
@@ -97,6 +99,8 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
             return try parsePaneInfoCommand(Array(args.dropFirst(2)))
         case "split":
             return try parsePaneSplitCommand(Array(args.dropFirst(2)))
+        case "close":
+            return try parsePaneCloseCommand(Array(args.dropFirst(2)))
         case "input":
             return try parsePaneInputCommand(Array(args.dropFirst(2)))
         case "read":
@@ -277,6 +281,30 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     }
     params["background"] = .bool(parsed.foreground ? false : true)
     return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
+}
+
+/// Keeps destructive pane closure explicit at parse time, before request
+/// context can supply any implicit target.
+private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane close --pane <pane-id>"
+    guard args.count >= 2, args[0] == "--pane", args[1].isEmpty == false else {
+        if let argument = args.first, argument.hasPrefix("--"), argument != "--pane" {
+            throw CLIParseError("unknown flag: \(argument)")
+        }
+        throw CLIParseError(usage)
+    }
+    guard args.count == 2 else {
+        let argument = args[2]
+        if argument.hasPrefix("--") {
+            throw CLIParseError("unknown flag: \(argument)")
+        }
+        throw CLIParseError("unexpected argument: \(argument)")
+    }
+    return CLICommand(
+        method: Methods.paneClose,
+        params: ["pane": .string(args[1])],
+        outputMode: .none
+    )
 }
 
 private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
