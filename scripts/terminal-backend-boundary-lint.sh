@@ -13,9 +13,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${1:-$SCRIPT_DIR/../app}"
 
 # Files permitted to import the engine: the backend adapter, its view, the
-# theme bridge that translates DanTerm colors into engine colors, and the
-# benchmark harness that drives the engine directly on purpose.
-ADAPTER_ALLOWLIST='SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalBenchmark.swift'
+# theme bridge that translates DanTerm colors into engine colors, the link
+# converter that asks the engine's activation gate before building a URL, and
+# the benchmark harness that drives the engine directly on purpose.
+ADAPTER_ALLOWLIST='SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalLinkURL.swift|TerminalBenchmark.swift'
 ENGINE_MODULES='PaneProcessLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution'
 
 failed=0

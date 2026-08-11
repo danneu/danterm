@@ -2768,7 +2768,7 @@ public struct Terminal: Equatable, Sendable {
     /// Admits and anchors one resolved link for hover presentation within the shared metadata cap.
     @discardableResult
     public mutating func setHoveredLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableHTTPLink(link.hyperlink.uri),
+        guard isActivatableWebURI(link.hyperlink.uri),
               hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
         else { return false }
 
@@ -2796,7 +2796,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports whether the current table can atomically reserve one click target.
     func canAdmitArmedLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableHTTPLink(link.hyperlink.uri),
+        guard isActivatableWebURI(link.hyperlink.uri),
               hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
         else { return false }
         return admittedHyperlinkTargets(adding: link.hyperlink, replacing: .arm) != nil
@@ -2805,7 +2805,7 @@ public struct Terminal: Equatable, Sendable {
     /// Atomically reserves a validated originating run for click-time revalidation.
     @discardableResult
     public mutating func setArmedLink(_ link: TerminalResolvedLink) -> Bool {
-        guard isActivatableHTTPLink(link.hyperlink.uri),
+        guard isActivatableWebURI(link.hyperlink.uri),
               hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes,
               let candidateTargets = admittedHyperlinkTargets(
                   adding: link.hyperlink,
@@ -3111,7 +3111,7 @@ public struct Terminal: Equatable, Sendable {
     /// Resolves explicit OSC 8 metadata or a detected URL through the HTTP(S) activation gate.
     public func activatableLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
         if let explicit = explicitLink(at: position) {
-            guard isActivatableHTTPLink(explicit.hyperlink.uri) else { return nil }
+            guard isActivatableWebURI(explicit.hyperlink.uri) else { return nil }
             return explicit
         }
         return detectedLink(at: position)
@@ -3218,7 +3218,7 @@ public struct Terminal: Equatable, Sendable {
             // `scripts/terminal-scalar-append-lint.sh` allows this site by.
             uri.unicodeScalars.append(contentsOf: scalars[start..<end])  // scalar-append: bounded-single-append
             guard uri.utf8.count <= Self.maximumHyperlinkTargetBytes,
-                  isActivatableHTTPLink(uri)
+                  isActivatableWebURI(uri)
             else { continue }
             let firstUnit = units[scalarUnits[start]]
             let lastUnit = units[scalarUnits[end - 1]]
@@ -3294,173 +3294,6 @@ public struct Terminal: Equatable, Sendable {
     private func isTrailingURLPunctuation(_ scalar: Unicode.Scalar) -> Bool {
         [0x2C, 0x2E, 0x3B, 0x3A, 0x21, 0x3F, 0x29, 0x5C, 0x5D, 0x7D]
             .contains(scalar.value)
-    }
-
-    private func isActivatableHTTPLink(_ uri: String) -> Bool {
-        let scalars = Array(uri.unicodeScalars)
-        guard scalars.allSatisfy({ $0.value > 0x20 && $0.value != 0x7F }),
-              let colon = scalars.firstIndex(where: { $0.value == 0x3A })
-        else { return false }
-        let scheme = String(String.UnicodeScalarView(scalars[..<colon])).lowercased()
-        guard scheme == "http" || scheme == "https",
-              colon + 2 < scalars.count,
-              scalars[colon + 1].value == 0x2F,
-              scalars[colon + 2].value == 0x2F
-        else { return false }
-        let authorityStart = colon + 3
-        let authorityEnd = scalars[authorityStart...].firstIndex(where: {
-            $0.value == 0x2F || $0.value == 0x3F || $0.value == 0x23
-        }) ?? scalars.endIndex
-        guard authorityStart < authorityEnd else { return false }
-        let authority = Array(scalars[authorityStart..<authorityEnd])
-        let at = authority.lastIndex(where: { $0.value == 0x40 })
-        if let at, isValidURIComponent(authority[..<at], allowsColon: true) == false {
-            return false
-        }
-        let hostPortStart = at.map { $0 + 1 } ?? 0
-        guard hostPortStart < authority.count else { return false }
-        let hostPort = Array(authority[hostPortStart...])
-        let port: ArraySlice<Unicode.Scalar>?
-        let host: ArraySlice<Unicode.Scalar>
-        let isBracketedHost: Bool
-        if hostPort.first?.value == 0x5B {
-            guard let close = hostPort.firstIndex(where: { $0.value == 0x5D }), close > 1 else {
-                return false
-            }
-            host = hostPort[1..<close]
-            isBracketedHost = true
-            if close + 1 < hostPort.count {
-                guard hostPort[close + 1].value == 0x3A else { return false }
-                port = hostPort[(close + 2)...]
-            } else {
-                port = nil
-            }
-        } else if let separator = hostPort.lastIndex(where: { $0.value == 0x3A }) {
-            guard hostPort[..<separator].allSatisfy({ $0.value != 0x3A }) else { return false }
-            host = hostPort[..<separator]
-            port = hostPort[(separator + 1)...]
-            isBracketedHost = false
-        } else {
-            host = hostPort[...]
-            port = nil
-            isBracketedHost = false
-        }
-        guard host.isEmpty == false,
-              isBracketedHost ? isValidIPLiteral(host) : isValidRegName(host)
-        else { return false }
-        if let port {
-            guard port.isEmpty == false,
-                  port.allSatisfy({ (0x30...0x39).contains($0.value) }),
-                  let value = Int(String(String.UnicodeScalarView(port))),
-                  (1...65_535).contains(value)
-            else { return false }
-        }
-        return true
-    }
-
-    private func isValidRegName(_ host: ArraySlice<Unicode.Scalar>) -> Bool {
-        isValidURIComponent(host, allowsColon: false)
-    }
-
-    private func isValidURIComponent(
-        _ scalars: ArraySlice<Unicode.Scalar>,
-        allowsColon: Bool
-    ) -> Bool {
-        let values = scalars.map(\.value)
-        var index = 0
-        while index < values.count {
-            let value = values[index]
-            if value == 0x25 {
-                guard index + 2 < values.count,
-                      isHexDigit(values[index + 1]),
-                      isHexDigit(values[index + 2])
-                else { return false }
-                index += 3
-                continue
-            }
-            guard isUnreservedOrSubDelimiter(value) || (allowsColon && value == 0x3A) else {
-                return false
-            }
-            index += 1
-        }
-        return true
-    }
-
-    private func isValidIPLiteral(_ host: ArraySlice<Unicode.Scalar>) -> Bool {
-        let value = String(String.UnicodeScalarView(host))
-        if value.first == "v" || value.first == "V" {
-            guard let dot = value.firstIndex(of: "."), dot > value.startIndex else { return false }
-            let version = value[value.index(after: value.startIndex)..<dot]
-            let address = value[value.index(after: dot)...]
-            return version.isEmpty == false
-                && version.unicodeScalars.allSatisfy { isHexDigit($0.value) }
-                && address.isEmpty == false
-                && address.unicodeScalars.allSatisfy {
-                    isUnreservedOrSubDelimiter($0.value) || $0.value == 0x3A
-                }
-        }
-        return isValidIPv6(value)
-    }
-
-    private func isValidIPv6(_ address: String) -> Bool {
-        guard address.isEmpty == false else { return false }
-        let characters = Array(address)
-        var compressionCount = 0
-        if characters.count >= 2 {
-            for index in 0..<(characters.count - 1)
-            where characters[index] == ":" && characters[index + 1] == ":"
-            {
-                compressionCount += 1
-            }
-        }
-        guard compressionCount <= 1 else { return false }
-        let isCompressed = compressionCount == 1
-        if isCompressed == false,
-           (characters.first == ":" || characters.last == ":")
-        {
-            return false
-        }
-        let pieces = address.split(separator: ":", omittingEmptySubsequences: true)
-        var groupCount = 0
-        for (index, piece) in pieces.enumerated() {
-            if piece.contains(".") {
-                guard index == pieces.count - 1, isValidIPv4(String(piece)) else { return false }
-                groupCount += 2
-            } else {
-                guard (1...4).contains(piece.count),
-                      piece.unicodeScalars.allSatisfy({ isHexDigit($0.value) })
-                else { return false }
-                groupCount += 1
-            }
-        }
-        if isCompressed {
-            return groupCount < 8
-        }
-        return groupCount == 8
-    }
-
-    private func isValidIPv4(_ address: String) -> Bool {
-        let pieces = address.split(separator: ".", omittingEmptySubsequences: false)
-        return pieces.count == 4 && pieces.allSatisfy { piece in
-            piece.isEmpty == false
-                && piece.unicodeScalars.allSatisfy { (0x30...0x39).contains($0.value) }
-                && Int(piece).map { (0...255).contains($0) } == true
-        }
-    }
-
-    private func isHexDigit(_ value: UInt32) -> Bool {
-        (0x30...0x39).contains(value)
-            || (0x41...0x46).contains(value)
-            || (0x61...0x66).contains(value)
-    }
-
-    private func isUnreservedOrSubDelimiter(_ value: UInt32) -> Bool {
-        return (0x30...0x39).contains(value)
-            || (0x41...0x5A).contains(value)
-            || (0x61...0x7A).contains(value)
-            || value == 0x2D || value == 0x2E || value == 0x5F || value == 0x7E
-            || [0x21, 0x24, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x3B, 0x3D]
-                .contains(value)
     }
 
     /// Clears only the local selection, leaving an active search untouched.

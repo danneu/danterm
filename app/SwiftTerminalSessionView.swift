@@ -1303,7 +1303,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     private func openLink(_ link: TerminalHyperlink) {
         guard isTornDown == false,
-              let url = Self.safeWebURL(link.uri)
+              let url = openableWebURL(link.uri)
         else {
             return
         }
@@ -1340,23 +1340,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         addSubview(preview)
         linkPreview = preview
         return preview
-    }
-
-    private static func safeWebURL(_ raw: String) -> URL? {
-        guard raw.unicodeScalars.allSatisfy({ scalar in
-            CharacterSet.whitespacesAndNewlines.contains(scalar) == false
-                && CharacterSet.controlCharacters.contains(scalar) == false
-        }),
-            let components = URLComponents(string: raw),
-            let scheme = components.scheme?.lowercased(),
-            scheme == "http" || scheme == "https",
-            let host = components.host,
-            host.isEmpty == false,
-            components.port.map({ (1...65_535).contains($0) }) ?? true
-        else {
-            return nil
-        }
-        return components.url
     }
 
     private static func wheelPhase(for event: NSEvent) -> TerminalWheelPhase {

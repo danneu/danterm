@@ -412,6 +412,49 @@ struct TerminalHyperlinkTests {
         }
     }
 
+    // Intent: a URI carrying an invisible, bidi-affecting, or non-ASCII whitespace scalar
+    //   anywhere -- not just in the authority -- is never activatable, while a URI whose only
+    //   non-ASCII content is ordinary visible text stays activatable.
+    // Why it exists: the activation gate validated only the authority against RFC 3986 and let
+    //   the path, query, and fragment through on a bare "greater than 0x20" check. Those scalars
+    //   render as nothing (or reorder their neighbours) in the hover preview, and the app's
+    //   separate pre-open check rejected them, so the terminal drew a link, armed it on
+    //   Cmd-press, and then silently opened nothing.
+    // Scenario: a program emits OSC 8 whose path hides a zero-width space; hovering must not
+    //   offer the link at all rather than offer one that cannot be opened.
+    @Test("activation rejects invisible and whitespace scalars anywhere in the URI")
+    func activationRejectsHiddenScalars() {
+        let hidden: [Unicode.Scalar] = [
+            "\u{200B}", "\u{200E}", "\u{202E}", "\u{2066}", "\u{FEFF}", "\u{00AD}",
+            "\u{061C}", "\u{2060}", "\u{0085}", "\u{E0041}",
+            "\u{00A0}", "\u{2028}", "\u{2029}", "\u{3000}",
+        ]
+        for scalar in hidden {
+            for uri in [
+                "https://example.com/a\(scalar)b",
+                "https://example.com/?q=a\(scalar)b",
+                "https://example.com/#a\(scalar)b",
+            ] {
+                var terminal = Terminal(columns: 80, rows: 1)!
+                terminal.feed(osc8(uri: uri))
+                terminal.feed(Array("x".utf8))
+                #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == uri)
+                #expect(terminal.activatableLink(at: .init(row: 0, column: 0)) == nil)
+            }
+        }
+
+        for uri in [
+            "https://ja.wikipedia.org/wiki/日本語",
+            "https://example.com/a%20b?q=1#f",
+            "https://example.com/emoji/🐈",
+        ] {
+            var terminal = Terminal(columns: 80, rows: 1)!
+            terminal.feed(osc8(uri: uri))
+            terminal.feed(Array("x".utf8))
+            #expect(terminal.activatableLink(at: .init(row: 0, column: 0))?.hyperlink.uri == uri)
+        }
+    }
+
     private func osc8(params: String = "", uri: String) -> [UInt8] {
         Array("\u{1B}]8;\(params);\(uri)\u{7}".utf8)
     }
