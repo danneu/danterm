@@ -23,8 +23,9 @@ class PaneWrapperView: NSView {
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
 
-    // Leading accessories stack: [alertBadge?, remoteAccessory?, agentAccessory?, progressIndicator?, toolbarLabel]
+    // Leading accessories stack: [paneChip, alertBadge?, remoteAccessory?, agentAccessory?, progressIndicator?, toolbarLabel]
     private let leadingStack: NSStackView
+    private let paneChip: ChipView
     private let alertBadge: NSTextField
     private let remoteAccessory: NSView
     private let remoteIcon: NSImageView
@@ -32,15 +33,10 @@ class PaneWrapperView: NSView {
     private var compactRemoteConstraints: [NSLayoutConstraint] = []
     private var expandedRemoteConstraints: [NSLayoutConstraint] = []
     private let agentAccessory: NSView
-    private let agentIcon: NSImageView
     private let agentSessionLabel: NonHitTestingLabel
-    private var compactAgentConstraints: [NSLayoutConstraint] = []
-    private var expandedAgentConstraints: [NSLayoutConstraint] = []
-    private var expandedAgentWidthConstraint: NSLayoutConstraint?
     // Tracks which remote constraint set is active so toolbar text churn does not
     // re-toggle layout constraints unless the compact/expanded mode changes.
     private var remoteExpanded = false
-    private var agentExpanded = false
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
 
@@ -58,8 +54,8 @@ class PaneWrapperView: NSView {
         self.remoteIcon = NSImageView()
         self.remoteSessionLabel = NonHitTestingLabel(labelWithString: "")
         self.agentAccessory = NSView()
-        self.agentIcon = NSImageView()
         self.agentSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.paneChip = ChipView(kind: .terminal, edge: ChipArtwork.toolbarSize)
         self.leadingStack = NSStackView()
 
         // Menu button (always visible)
@@ -155,48 +151,30 @@ class PaneWrapperView: NSView {
         ]
         NSLayoutConstraint.activate(compactRemoteConstraints)
 
-        // Agent accessory: indigo background with sparkles icon, hidden by default
+        // Agent accessory: names an attached agent that the chip cannot. The chip
+        // already carries the kind for every agent DanTerm ships artwork for, so
+        // this pill is shown only for the ones it does not -- which is also why it
+        // has no icon and only one layout: it is always a label.
         agentAccessory.translatesAutoresizingMaskIntoConstraints = false
         agentAccessory.wantsLayer = true
         agentAccessory.layer?.backgroundColor = NSColor.systemIndigo.cgColor
         agentAccessory.isHidden = true
         agentAccessory.setContentHuggingPriority(.required, for: .horizontal)
 
-        agentIcon.translatesAutoresizingMaskIntoConstraints = false
-        agentIcon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
-        agentIcon.contentTintColor = .white
-        agentIcon.imageScaling = .scaleProportionallyDown
-        agentAccessory.addSubview(agentIcon)
-
         agentSessionLabel.translatesAutoresizingMaskIntoConstraints = false
         agentSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         agentSessionLabel.textColor = .white
         agentSessionLabel.lineBreakMode = .byTruncatingTail
         agentSessionLabel.usesSingleLineMode = true
-        agentSessionLabel.isHidden = true
         agentSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         agentAccessory.addSubview(agentSessionLabel)
 
         NSLayoutConstraint.activate([
-            agentIcon.centerYAnchor.constraint(equalTo: agentAccessory.centerYAnchor),
-            agentIcon.widthAnchor.constraint(equalToConstant: 14),
-            agentIcon.heightAnchor.constraint(equalToConstant: 14),
-        ])
-        compactAgentConstraints = [
-            agentIcon.centerXAnchor.constraint(equalTo: agentAccessory.centerXAnchor),
-            agentAccessory.widthAnchor.constraint(equalToConstant: 22),
-        ]
-        let expandedAgentWidthConstraint = agentAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22)
-        self.expandedAgentWidthConstraint = expandedAgentWidthConstraint
-        expandedAgentConstraints = [
-            agentIcon.leadingAnchor.constraint(equalTo: agentAccessory.leadingAnchor, constant: 4),
-            agentSessionLabel.leadingAnchor.constraint(equalTo: agentIcon.trailingAnchor, constant: 4),
+            agentSessionLabel.leadingAnchor.constraint(equalTo: agentAccessory.leadingAnchor, constant: 6),
             agentSessionLabel.trailingAnchor.constraint(equalTo: agentAccessory.trailingAnchor, constant: -6),
             agentSessionLabel.centerYAnchor.constraint(equalTo: agentAccessory.centerYAnchor),
             agentSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 240),
-            expandedAgentWidthConstraint,
-        ]
-        NSLayoutConstraint.activate(compactAgentConstraints)
+        ])
 
         // Progress indicator, hidden by default
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
@@ -218,6 +196,7 @@ class PaneWrapperView: NSView {
         leadingStack.orientation = .horizontal
         leadingStack.spacing = 4
         leadingStack.alignment = .centerY
+        leadingStack.addArrangedSubview(paneChip)
         leadingStack.addArrangedSubview(alertBadge)
         leadingStack.addArrangedSubview(remoteAccessory)
         leadingStack.addArrangedSubview(agentAccessory)
@@ -308,7 +287,7 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
+    func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
         toolbarLabel.stringValue = paneCommandChromeText(
             title: title,
             cwd: cwd,
@@ -329,35 +308,18 @@ class PaneWrapperView: NSView {
                 NSLayoutConstraint.activate(compactRemoteConstraints)
             }
         }
-        agentAccessory.isHidden = agentSession == nil
-        agentSessionLabel.stringValue = agentSession?.toolbarLabel ?? ""
-        agentSessionLabel.isHidden = agentSession == nil
-        agentAccessory.toolTip = agentSession.map { "\($0.kind) session \($0.sessionId)" }
-        updateExpandedAgentWidth()
-        let agentExpanded = agentSession != nil
-        if agentExpanded != self.agentExpanded {
-            self.agentExpanded = agentExpanded
-            if agentExpanded {
-                NSLayoutConstraint.deactivate(compactAgentConstraints)
-                NSLayoutConstraint.activate(expandedAgentConstraints)
-            } else {
-                NSLayoutConstraint.deactivate(expandedAgentConstraints)
-                NSLayoutConstraint.activate(compactAgentConstraints)
-            }
-        }
+        paneChip.kind = chipKind
+        // The chip's tooltip carries the session id, so it survives the pill
+        // being hidden for an agent the chip can name on its own.
+        paneChip.toolTip = agentSession.map { "\($0.kind) session \($0.sessionId)" }
+        // `.agent` is the mark for an agent DanTerm cannot name, so the pill has
+        // to supply the name the chip is missing. Every other kind either names
+        // the agent itself or means there is no agent.
+        let needsAgentLabel = chipKind == .agent
+        agentAccessory.isHidden = !needsAgentLabel
+        agentSessionLabel.stringValue = needsAgentLabel ? (agentSession?.toolbarLabel ?? "") : ""
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
-    }
-
-    private func updateExpandedAgentWidth() {
-        guard let expandedAgentWidthConstraint else { return }
-        guard !agentSessionLabel.isHidden else {
-            expandedAgentWidthConstraint.constant = 22
-            return
-        }
-
-        let labelWidth = min(ceil(agentSessionLabel.intrinsicContentSize.width), 240)
-        expandedAgentWidthConstraint.constant = 4 + 14 + 4 + labelWidth + 6
     }
 
     /// Anchor view for the TODO popover.
@@ -468,9 +430,13 @@ class PaneWrapperView: NSView {
 
         // Only shown when the pane reported an agent session. The toolbar chip renders
         // the compact kind label, so this menu item is the full-id copy affordance.
-        if case .attached = runtime?.model.pane(paneId)?.session?.agent {
+        if let agent = runtime?.model.pane(paneId)?.session?.agent, case .attached = agent {
             let copySessionId = wrapperItem("Copy Agent Session ID", #selector(copyAgentSessionIdAction))
-            copySessionId.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
+            // The same chip the toolbar and sidebar show, so the menu names the
+            // agent the way the rest of the window already does.
+            let image = ChipKind(agent: agent).image()
+            image.accessibilityDescription = "Agent session"
+            copySessionId.image = image
             menu.addItem(copySessionId)
         }
 

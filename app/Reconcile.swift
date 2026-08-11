@@ -229,6 +229,7 @@ extension AppRuntime {
                 isRemote: render.isRemote,
                 remoteSession: render.remoteSession,
                 agentSession: render.agentSession,
+                chipKind: render.chipKind,
                 unreadAlertCount: render.unreadAlertCount,
                 totalTodoCount: render.totalTodoCount,
                 uncompletedTodoCount: render.uncompletedTodoCount

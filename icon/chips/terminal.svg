@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20.6 13.6">
+  <!-- Hand-authored, not sourced from an upstream mark. Unlike the two agent
+       marks this one is stroked, not filled: the chevron and bar read better at
+       chip size as a stroke whose width can be tuned against the filled marks'
+       optical weight. stroke-width is in viewBox units.
+
+       The box hugs the stroke's outer edge, half a stroke width past the path
+       on every side, which is what makes `fill` in chips.json mean the share
+       of the chip this mark covers. gen-chips.sh rejects the file otherwise. -->
+  <path fill="none" stroke="#8a8a8e" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6" d="M1.3 1.3 7.8 6.8 1.3 12.3m10 0h8"/>
+</svg>

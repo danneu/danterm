@@ -611,6 +611,12 @@ func tabSubtitle(_ tab: TabModel, in model: AppModel) -> String? {
   tabChrome(tab, in: model).subtitle
 }
 
+/// Returns the chip for one tab's row, taken from the focused pane like the
+/// rest of the row's chrome. An agent in an unfocused split does not show here.
+func tabChipKind(_ tab: TabModel, in model: AppModel) -> ChipKind {
+  ChipKind(agent: model.pane(tab.focusedPaneId)?.session?.agent ?? .none)
+}
+
 func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
   let allTabs = model.groups.flatMap(\.tabs)
   guard let idx = allTabs.firstIndex(where: { $0.id == model.selectedTabId }) else { return nil }

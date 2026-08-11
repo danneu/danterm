@@ -3021,6 +3021,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                 isRemote: false,
                 remoteSession: nil,
                 agentSession: nil,
+                chipKind: .terminal,
                 unreadAlertCount: 2,
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2),

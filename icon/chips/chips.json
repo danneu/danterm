@@ -1,0 +1,67 @@
+{
+  "_note": [
+    "Tuning knobs for the pane-kind chips. preview.html and the (not yet written)",
+    "generator both read this file, so what you see in the preview is what ships.",
+    "Geometry lives in the .svg files; nothing here is baked into the paths.",
+    "",
+    "fill    fraction of the chip box the mark's ink occupies. Per-kind because",
+    "        equal measured size does not read as equal optical size: the knot's",
+    "        heavy perimeter looks larger than the starburst at the same value.",
+    "dilate  re-strokes a filled path in its own color to fatten thin features.",
+    "        The starburst's spokes taper to points and wash out at chip size.",
+    "        Units are a 24-unit box for every mark regardless of its own",
+    "        viewBox, so the number stays comparable across icons.",
+    "        Past ~0.9 the starburst's hub fills in solid.",
+    "        Ignored for stroked marks -- tune terminal.svg's stroke-width.",
+    "colors  8-digit #RRGGBBAA hex. bg is the chip, fg is the mark.",
+    "",
+    "exploreMark",
+    "        The mark color for preview.html's tinted and bare rows. Nothing",
+    "        ships reads it: the manifest declares one treatment, and these",
+    "        exist so a change to it can be judged by eye first. The value is",
+    "        the brand color where the chip is saturated, and a legible",
+    "        neutral where it is not. 6-digit hex, not 8: the tinted row",
+    "        builds its background by appending an alpha to this string.",
+    "        A dark appearance needs its own value whenever the brand color",
+    "        is too dark to read as a bare mark on the dark row."
+  ],
+
+  "treatment": "filled",
+  "cornerRadius": 0.23,
+  "sizes": { "sidebar": 15, "toolbar": 13 },
+
+  "kinds": {
+    "terminal": {
+      "svg": "terminal.svg",
+      "fill": 0.5322,
+      "dilate": 0.0,
+      "light": { "bg": "#00000047", "fg": "#FFFFFFFF" },
+      "dark":  { "bg": "#FFFFFF33", "fg": "#FFFFFFFF" },
+      "exploreMark": { "light": "#55555F", "dark": "#BBBBBB" }
+    },
+    "claude": {
+      "svg": "claude.svg",
+      "fill": 0.72,
+      "dilate": 0.5,
+      "light": { "bg": "#D97757FF", "fg": "#FFFFFFFF" },
+      "dark":  { "bg": "#D97757FF", "fg": "#FFFFFFFF" },
+      "exploreMark": { "light": "#D97757", "dark": "#D97757" }
+    },
+    "codex": {
+      "svg": "codex.svg",
+      "fill": 0.70,
+      "dilate": 0.0,
+      "light": { "bg": "#000000FF", "fg": "#FFFFFFFF" },
+      "dark":  { "bg": "#FFFFFFFF", "fg": "#000000FF" },
+      "exploreMark": { "light": "#1A1A1A", "dark": "#E6E6E6" }
+    },
+    "agent": {
+      "svg": "agent.svg",
+      "fill": 0.69,
+      "dilate": 0.0,
+      "light": { "bg": "#0F7F73FF", "fg": "#FFFFFFFF" },
+      "dark":  { "bg": "#0F7F73FF", "fg": "#FFFFFFFF" },
+      "exploreMark": { "light": "#0F7F73", "dark": "#3EAE9F" }
+    }
+  }
+}

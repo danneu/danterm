@@ -109,27 +109,50 @@ func recoveryReplayText(scrollback: String?, agentSession: AgentSessionSnapshot?
     }
 }
 
-/// Display and resume-command metadata for agent kinds DanTerm knows by name.
-enum AgentCatalog {
-    static func displayName(for kind: String) -> String {
-        switch kind {
-        case "claude":
-            return "Claude"
-        case "codex":
-            return "Codex"
-        default:
-            return kind.capitalized
+/// The agents DanTerm knows by name. One case per agent, so adding an agent
+/// cannot leave it known to one lookup and unknown to another -- every piece of
+/// per-agent metadata hangs off this enum.
+///
+/// The raw value is the reported `AgentSession.kind`, already lowercased by
+/// `AgentSession.init`.
+enum KnownAgent: String {
+    case claude
+    case codex
+
+    init?(kind: String) {
+        self.init(rawValue: kind)
+    }
+
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
         }
     }
 
-    static func resumeCommand(for session: AgentSession) -> String? {
-        switch session.kind {
-        case "claude":
-            return "claude --resume \(session.sessionId)"
-        case "codex":
-            return "codex resume \(session.sessionId)"
-        default:
-            return nil
+    var chipKind: ChipKind {
+        switch self {
+        case .claude: return .claude
+        case .codex: return .codex
         }
+    }
+
+    func resumeCommand(sessionId: String) -> String {
+        switch self {
+        case .claude: return "claude --resume \(sessionId)"
+        case .codex: return "codex resume \(sessionId)"
+        }
+    }
+}
+
+/// Metadata lookups for an agent kind reported as a raw string, each falling
+/// back to what DanTerm can still say about an agent it does not know.
+enum AgentCatalog {
+    static func displayName(for kind: String) -> String {
+        KnownAgent(kind: kind)?.displayName ?? kind.capitalized
+    }
+
+    static func resumeCommand(for session: AgentSession) -> String? {
+        KnownAgent(kind: session.kind)?.resumeCommand(sessionId: session.sessionId)
     }
 }

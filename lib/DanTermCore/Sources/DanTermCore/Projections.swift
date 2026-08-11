@@ -274,6 +274,7 @@ struct PaneToolbarRender: Equatable {
   let isRemote: Bool
   let remoteSession: RemoteSession?
   let agentSession: AgentSession?
+  let chipKind: ChipKind
   let unreadAlertCount: Int
   let totalTodoCount: Int
   let uncompletedTodoCount: Int
@@ -329,6 +330,7 @@ func desiredPaneToolbar(
       isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
       remoteSession: remoteSession,
       agentSession: agentSession,
+      chipKind: ChipKind(agent: session?.agent ?? .none),
       unreadAlertCount: tally.byPane[pane.id] ?? 0,
       totalTodoCount: pane.todos.count,
       uncompletedTodoCount: pane.todos.count { !$0.isDone }
@@ -488,6 +490,8 @@ struct SidebarTabProjection: Equatable {
   var unreadAlertCount: Int
   var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
   var color: TabColor?
+  // The row speaks for the focused pane, like displayTitle and subtitle do.
+  var chipKind: ChipKind = .terminal
 }
 
 /// One sidebar group row. `isCollapsed` drives the structural `setGroupCollapsed`
@@ -538,7 +542,8 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
           subtitle: tabSubtitle(tab, in: model),
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
-          color: tab.color
+          color: tab.color,
+          chipKind: tabChipKind(tab, in: model)
         )
       }
     )

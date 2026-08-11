@@ -1,0 +1,211 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DanTerm pane-kind chips</title>
+<!--
+  Live preview for the pane-kind chips. Reads chips.json and the .svg files in
+  this directory -- the same inputs the generator reads -- so tuning a value in
+  chips.json and reloading shows what will actually ship. Nothing here is
+  authoritative; it renders, it does not define.
+
+  Needs a local server, because fetch() of a sibling file is blocked on file://:
+      python3 -m http.server -d icon/chips 8000
+      open http://localhost:8000/preview.html
+-->
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:13px -apple-system,BlinkMacSystemFont,sans-serif;background:#e8e8ea;color:#111}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 28px 80px}
+h1{font-size:15px;margin:0 0 4px}
+.sub{font-size:12px;opacity:.55;margin:0 0 20px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.5;margin:26px 0 10px;font-weight:600}
+h3{font-size:11px;opacity:.45;margin:15px 0 6px;font-weight:600}
+.err{background:#ffe2e2;border:1px solid #e5a0a0;border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.5}
+.err code{background:rgba(0,0,0,.07);padding:1px 5px;border-radius:3px}
+.panes{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.pane{border-radius:10px;padding:14px 18px 20px;border:1px solid rgba(0,0,0,.12)}
+.pane.light{background:#f2f2f4;color:#111}
+.pane.dark{background:#1e1e20;color:#eee;border-color:rgba(255,255,255,.14)}
+.pane.dark h2,.pane.dark h3{opacity:.55}
+.row{display:flex;align-items:center;gap:10px;margin:9px 0}
+.lbl{font-size:11px;opacity:.5;width:104px;flex:none}
+.note{font-size:11px;opacity:.45;margin-left:8px}
+
+.sidebar{border-radius:8px;overflow:hidden;width:262px;border:1px solid rgba(0,0,0,.1)}
+.dark .sidebar{border-color:rgba(255,255,255,.1);background:#232326}
+.light .sidebar{background:#fafafa}
+.tab{height:40px;display:flex;align-items:center;gap:8px;padding-right:10px}
+.tab.sel{background:rgba(0,122,255,.16)}
+.stripe{width:5px;height:100%;flex:none}
+.tabtext{display:flex;flex-direction:column;gap:1px;min-width:0}
+.t1{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t2{font-size:10.5px;opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.toolbar{height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:5px;font-size:11px;width:420px;margin-bottom:6px}
+.light .toolbar{background:rgba(0,0,0,.055);color:#333}
+.dark .toolbar{background:rgba(255,255,255,.08);color:#ddd}
+.toolbar .cmd{opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.chip{flex:none;display:inline-flex;align-items:center;justify-content:center}
+.chip svg{display:block;overflow:visible}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pane-kind chips</h1>
+  <p class="sub">Rendered from <code>chips.json</code> + the sibling <code>.svg</code> files. Edit either and reload.</p>
+  <div id="out"></div>
+</div>
+
+<script>
+// Filled from the manifest at boot, in its declaration order, so adding a kind
+// to chips.json is enough to preview it.
+let KINDS = [];
+
+const TABS = [
+  {kind: "terminal", stripe: "#5b8def", t1: "danterm",         t2: "~/Code/danterm"},
+  {kind: "claude",   stripe: "#e0a44b", t1: "engine refactor", t2: "claude · lib/TerminalCore"},
+  {kind: "codex",    stripe: "#57b86b", t1: "review",          t2: "codex · ~/Code/danterm"},
+  {kind: "agent",    stripe: "#8b7ad6", t1: "prompt tuning",   t2: "aider · lib/TerminalPTY"},
+  {kind: "terminal", stripe: "#c96ab8", t1: "btop",            t2: "~"}
+];
+
+// --- loading -------------------------------------------------------------
+
+async function loadArt(file) {
+  const text = await (await fetch(file)).text();
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  const svg = doc.querySelector("svg");
+  const vb = svg.getAttribute("viewBox").trim().split(/[\s,]+/).map(Number);
+  const paths = [...doc.querySelectorAll("path")].map(p => ({
+    d: p.getAttribute("d"),
+    rule: p.getAttribute("fill-rule") || "nonzero",
+    stroked: (p.getAttribute("fill") || "") === "none",
+    sw: Number(p.getAttribute("stroke-width") || 0),
+    cap: p.getAttribute("stroke-linecap") || "butt",
+    join: p.getAttribute("stroke-linejoin") || "miter"
+  }));
+  return {viewBox: vb, w: vb[2], h: vb[3], ratio: vb[2] / vb[3], paths};
+}
+
+// --- drawing -------------------------------------------------------------
+
+// `dilate` is expressed on a 24-unit box for every mark, so scale it into this
+// mark's own viewBox units before using it as a stroke width.
+function glyph(art, box, fill, color, dilate) {
+  let w, h;
+  if (art.ratio >= 1) { w = box * fill; h = w / art.ratio; }
+  else                { h = box * fill; w = h * art.ratio; }
+  const d = (dilate || 0) * (art.w / 24);
+
+  const body = art.paths.map(p => p.stroked
+    ? `<path d="${p.d}" fill="none" stroke="${color}" stroke-width="${p.sw}"
+             stroke-linecap="${p.cap}" stroke-linejoin="${p.join}"/>`
+    : `<path d="${p.d}" fill="${color}" fill-rule="${p.rule}"` +
+      (d ? ` stroke="${color}" stroke-width="${d}" stroke-linejoin="round"` : "") + `/>`
+  ).join("");
+
+  return `<svg width="${w.toFixed(2)}" height="${h.toFixed(2)}"
+               viewBox="${art.viewBox.join(" ")}">${body}</svg>`;
+}
+
+function chip(M, art, kind, size, mode, opts) {
+  opts = opts || {};
+  const k = M.kinds[kind];
+  const treat = opts.treatment || M.treatment;
+  const dilate = opts.dilate === undefined ? k.dilate : opts.dilate;
+  const c = k[mode];
+
+  let bg, fg;
+  if (treat === "filled") { bg = c.bg; fg = c.fg; }
+  else {
+    // Exploratory only. The manifest declares one treatment; tinted and bare
+    // exist so a change to it can be judged by eye before it is written down.
+    // exploreMark is 6-digit so the tint can append its alpha.
+    fg = k.exploreMark[mode];
+    bg = treat === "tinted" ? fg + "26" : "transparent";
+  }
+
+  const r = (size * M.cornerRadius).toFixed(2);
+  return `<span class="chip" style="width:${size}px;height:${size}px;` +
+         `background:${bg};border-radius:${r}px">` +
+         glyph(art[kind], size, k.fill, fg, dilate) + `</span>`;
+}
+
+// --- sections ------------------------------------------------------------
+
+function build(M, art, mode) {
+  let h = "";
+  const C = (kind, size, opts) => chip(M, art, kind, size, mode, opts);
+
+  h += `<h2>current &mdash; treatment: ${M.treatment}</h2>`;
+  for (const size of [M.sizes.toolbar, M.sizes.sidebar, 17]) {
+    h += `<div class="row"><span class="lbl">${size}pt</span>` +
+         KINDS.map(k => C(k, size)).join("") + `</div>`;
+  }
+
+  h += `<h3>sidebar &mdash; ${M.sizes.sidebar}pt chip, 40pt row</h3><div class="sidebar">`;
+  TABS.forEach((t, i) => {
+    h += `<div class="tab${i === 1 ? " sel" : ""}">` +
+         `<span class="stripe" style="background:${t.stripe}"></span>` +
+         C(t.kind, M.sizes.sidebar) +
+         `<span class="tabtext"><span class="t1">${t.t1}</span>` +
+         `<span class="t2">${t.t2}</span></span></div>`;
+  });
+  h += `</div>`;
+
+  h += `<h3>pane toolbar &mdash; ${M.sizes.toolbar}pt chip, 22pt bar</h3>`;
+  const bars = [
+    ["claude",   "claude · ~/Code/danterm · editing Terminal.swift"],
+    ["codex",    "codex · ~/Code/danterm"],
+    ["terminal", "btop · ~"]
+  ];
+  for (const [k, text] of bars) {
+    h += `<div class="toolbar">` + C(k, M.sizes.toolbar) +
+         `<span class="cmd">${text}</span></div>`;
+  }
+
+  h += `<h2>treatments</h2>`;
+  for (const treatment of ["filled", "tinted", "bare"]) {
+    h += `<div class="row"><span class="lbl">${treatment}</span>` +
+         KINDS.map(k => C(k, M.sizes.sidebar, {treatment})).join("") + `</div>`;
+  }
+
+  h += `<h2>dilation &mdash; claude vs. the knot</h2>`;
+  for (const treatment of ["filled", "tinted", "bare"]) {
+    h += `<div class="row"><span class="lbl">${treatment}</span>` +
+         [0, .3, .5, .7, .9].map(d =>
+           C("claude", M.sizes.sidebar, {treatment, dilate: d})).join("") +
+         `<span style="width:12px"></span>` +
+         C("codex", M.sizes.sidebar, {treatment}) +
+         `<span class="note">0 / .3 / .5 / .7 / .9 &nbsp;|&nbsp; knot</span></div>`;
+  }
+  return h;
+}
+
+// --- boot ----------------------------------------------------------------
+
+(async () => {
+  const out = document.getElementById("out");
+  let M, art = {};
+  try {
+    M = await (await fetch("chips.json")).json();
+    KINDS = Object.keys(M.kinds);
+    for (const k of KINDS) art[k] = await loadArt(M.kinds[k].svg);
+  } catch (e) {
+    out.innerHTML = `<div class="err"><b>Could not read the source files.</b><br>` +
+      `Browsers block <code>fetch()</code> of sibling files over <code>file://</code>. ` +
+      `Serve the directory instead:<br><br>` +
+      `<code>python3 -m http.server -d icon/chips 8000</code><br>` +
+      `<code>open http://localhost:8000/preview.html</code><br><br>` +
+      `<i>${e}</i></div>`;
+    return;
+  }
+  out.innerHTML = `<div class="panes">` +
+    `<div class="pane light">${build(M, art, "light")}</div>` +
+    `<div class="pane dark">${build(M, art, "dark")}</div></div>`;
+})();
+</script>
+</body>
+</html>

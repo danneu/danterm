@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="#8a8a8e" viewBox="0 0 24 24">
+  <title>Agent</title>
+  <!-- Hand-authored, for an attached agent DanTerm has no chip for. A closed
+       silhouette with a flat top is the one shape family the other three marks
+       leave open: the starburst is radial, the knot is looped, the terminal
+       chevron is open strokes.
+
+       Filled, not stroked, so nothing in the mark is a hairline and dilate can
+       stay 0. The eyes and smile are knockouts, so they show the chip
+       background.
+
+       Wound for nonzero fill: head clockwise, the three knockouts
+       counter-clockwise. Even-odd would knock out any overlap between
+       subpaths, and shapes that merely touch to dodge that pinch apart at chip
+       size.
+
+       The head spans the viewBox exactly, 0 to 24 on both axes, as the knot
+       does. The aspect fit scales the viewBox, not the ink, so a mark that
+       sits small inside its own box draws smaller than its fill says and the
+       number stops being comparable across kinds. Keep the ink against the
+       edges and tune size in chips.json. gen-chips.sh prints ink coverage and
+       warns below 0.97.
+
+       The smile is not decoration. Two holes alone read as a cassette; the
+       third feature is what makes it a face. It is a crescent, built from two
+       arcs concentric on (12,10.67) with radii 8.53 and 5.33, closed by a
+       round cap at each tip. The tips have to stop well short of the eyes: a
+       wider smile curves up toward them, and at chip size the gap closes
+       before the eye does.
+
+       The head is square, so its corner radius is 0.30 of its edge against the
+       chip's 0.23. Two rounded squares at the same roundness read as one
+       shape, and the head is the inner one, so it is the one that gives.
+
+       No antenna, deliberately. It is the strongest robot signal, but an
+       antenna would have to come out of the height the head now uses, and the
+       face is what carries the mark at 13px.
+
+       Note for editors: XML forbids a double hyphen inside a comment, so the
+       usual prose dash is spelled out in this file. -->
+  <path d="M7.2 0 L16.8 0 A7.2 7.2 0 0 1 24 7.2 L24 16.8 A7.2 7.2 0 0 1 16.8 24 L7.2 24 A7.2 7.2 0 0 1 0 16.8 L0 7.2 A7.2 7.2 0 0 1 7.2 0 Z M3.87 7.2 A3.2 3.2 0 0 0 10.27 7.2 A3.2 3.2 0 0 0 3.87 7.2 Z M13.73 7.2 A3.2 3.2 0 0 0 20.13 7.2 A3.2 3.2 0 0 0 13.73 7.2 Z M5.06 15.64 A8.53 8.53 0 0 0 18.94 15.64 A1.6 1.6 0 0 0 16.33 13.78 A5.33 5.33 0 0 1 7.67 13.78 A1.6 1.6 0 0 0 5.06 15.64 Z"/>
+</svg>

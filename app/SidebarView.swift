@@ -1339,6 +1339,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
+        let chipId = NSUserInterfaceItemIdentifier("tabChip")
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -1365,7 +1366,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textField.delegate = self
             cell.textField = textField
 
-            let leadingStack = NSStackView(views: [textField])
+            let chip = ChipView(kind: .terminal, edge: ChipArtwork.sidebarSize)
+            chip.identifier = chipId
+
+            let leadingStack = NSStackView(views: [chip, textField])
             leadingStack.translatesAutoresizingMaskIntoConstraints = false
             leadingStack.orientation = .horizontal
             leadingStack.alignment = .centerY
@@ -1425,6 +1429,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
+        let chipId = NSUserInterfaceItemIdentifier("tabChip")
 
         let chrome = tabChrome(tab)
         let displayTitle = tab.customTitle ?? chrome.0
@@ -1440,6 +1445,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
                 bellBadge.updateBadge(count: count)
             }
+        }
+        if let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView,
+           let chip = leadingStack.arrangedSubviews.first(where: { $0.identifier == chipId }) as? ChipView,
+           let model = currentModel
+        {
+            // Outside the skipTitle guard: an inline rename owns the title field,
+            // not the chip, and the pane can attach an agent mid-rename.
+            chip.kind = tabChipKind(tab, in: model)
         }
         if !skipTitle,
            let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView

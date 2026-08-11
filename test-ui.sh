@@ -43,6 +43,7 @@ echo "Compiling UI tests..."
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/AgentSession.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ChipKind.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CoreEnvironment.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift" \
@@ -65,8 +66,13 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeCatalogDocument.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DragDropInput.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift" \
+        "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/ActivatableWebURI.swift" \
+        "$SCRIPT_DIR/app/TerminalLinkURL.swift" \
         "$SCRIPT_DIR/app/DragDropPasteboard.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
+        "$SCRIPT_DIR/app/ChipArtwork.swift" \
+        "$SCRIPT_DIR/app/ChipRenderer.swift" \
+        "$SCRIPT_DIR/app/ChipView.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/TerminalSession.swift" \
         "$SCRIPT_DIR/app/AppRuntimeSchedulingLifecycle.swift" \
@@ -104,6 +110,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
         "$SCRIPT_DIR/app/PreferencesPanel.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
+        "$SCRIPT_DIR/tests-ui/ChipViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \

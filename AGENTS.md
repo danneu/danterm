@@ -225,6 +225,10 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   logged-in GUI session, including an agent's.
 - Targeted: `swift test --package-path lib/DanTermCore [--filter CheckpointTests]`.
 
+Run a suite once, into a file, and grep the file: `just test-ui > /tmp/ui.log
+2>&1`. Re-running a minute-long suite to try a different grep wastes the minute,
+and a filter that hides the failing line invites you to blame the wrong test.
+
 **In a worktree:** run `just provision-worktree` before the first build, then
 use the same `just launch-slot` path. See
 [agent-docs/worktree-development.md](agent-docs/worktree-development.md).
