@@ -6,9 +6,28 @@ Status: open scratch document. It records what codex 0.147.0 actually sends to
 a hook, the edits that measurement implies, and a sketch of a test that would
 keep the record honest as the agent CLIs move.
 
-All eight edits are implemented, and the chain is verified end to end on the
-real config: a codex pane goes `none` -> `attached` + `working` -> `idle` on
-Stop -> `none` on `/quit`. Test layers 2 and 3 are proposals, not decisions.
+All eight edits are implemented, plus a ninth the list missed: Claude's wiring
+in `~/world/common/claude-code.nix` had the same defect item 7 fixed for codex,
+registering the agent hook on `SessionStart` alone. Item 7 called that file "the
+same shape" without noticing it needed the same edit.
+
+## What is still open
+
+Everything below is a known gap, not an oversight. The rest of this document is
+the record it came from.
+
+| Gap | Where it bites | Status |
+|---|---|---|
+| Claude's pane transitions are unverified live | A Claude pane may still fail to report for a reason the unit tests cannot see, exactly as codex did | Wiring fixed and evaluated, no live run yet; needs a `world:rebuild` first |
+| Claude's test payloads are hand-written | Its field names are pinned only as far as we guessed them, so a renamed field passes | Needs a capture like the codex one; no trust gate, so it is cheap |
+| A declined codex approval leaves the pane reading `waiting` | Until the next `UserPromptSubmit`, the pane misreports | Not ours to fix; codex emits nothing on abort |
+| Codex subagent behavior is untested | The `agent_id` guard is a placeholder for a contract we have not measured | One subagent turn settles it |
+| `CLAUDE_CONFIG_DIR` isolation is unconfirmed | Decides whether test layer 2 can cover Claude at all | Untested |
+| A fresh codex pane carries no chip until the first prompt | Looks like a broken hook, and cost an hour of debugging once already | Codex's behavior; not fixable in the hook |
+
+Verified end to end on the real config, by contrast: a codex pane goes `none` ->
+`attached` + `working` -> `idle` on Stop -> `none` on `/quit`. Test layers 2 and
+3 are proposals, not decisions.
 
 ## Why this exists
 
@@ -134,9 +153,13 @@ triggers its own review.
    every tool call. Note the file's own comment: `config.toml` stays
    hand-managed because codex writes to it, which is also where the hook trust
    state lands -- so each added entry needs an interactive approval once.
-   `~/world/common/claude-code.nix` is the same shape for Claude, where the
-   non-`SessionStart` events already route to `danterm-claude-notify-osc777`
-   instead.
+
+   `~/world/common/claude-code.nix` needs the same fix, and reading it as merely
+   "the same shape" is what hid that for a day. Its non-`SessionStart` events
+   ran `danterm-claude-notify-osc777` and nothing else, and `UserPromptSubmit`
+   and `SessionEnd` were absent, so a Claude pane attached and then went silent
+   exactly as codex did. The two hooks answer different questions -- pane state
+   versus get-the-user's-attention -- so the events that want both list both.
 8. The `danterm` on PATH is `danterm-0.1.1`, whose CLI parses only
    `agent attach`; `agent activity` and `agent detach` exit 1 and are swallowed
    by the script's `|| true`. Both subcommands landed in v0.1.2. The cause is a
