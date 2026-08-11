@@ -906,7 +906,8 @@ struct TerminalSearchTests {
         // Why it exists: stable record ranges must be retired at either end and extended at the
         //   closed seam without retargeting an old coordinate or losing a boundary match.
         // Scenario: searches spanning the closed/live boundary survive output, both resize directions,
-        //   a severed and restored wrap claim, ED 3, eviction, and a needle longer than history.
+        //   a severed and restored wrap claim, ED 3, eviction, a forced split, and a needle
+        //   longer than history.
         let spanningNeedle = "DAB"
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("ABCDAB".utf8))
@@ -954,6 +955,46 @@ struct TerminalSearchTests {
         assertSearchIndexMatchesOracle(evicting, needle: evictionNeedle)
         evicting.feed(Array("\r\nb\r\nc\r\nd".utf8))
         assertSearchIndexMatchesOracle(evicting, needle: evictionNeedle)
+
+        let splitBudget = 1 << 12
+        let splitColumns = 4
+        let splitCellCap = Terminal.LogicalLineStore.forcedSplitCellCount(
+            forCapacity: splitBudget
+        )
+        let splitBoundary = splitCellCap / splitColumns * splitColumns
+        let splitNeedle = "aXYb"
+        let splitContent = String(repeating: "a", count: splitBoundary - 1)
+            + "XY"
+            + String(repeating: "b", count: splitColumns * 3)
+        var splitting = try #require(Terminal(
+            columns: splitColumns,
+            rows: 2,
+            scrollbackBudgetBytes: splitBudget
+        ))
+        _ = splitting.beginSearch(splitNeedle)
+        splitting.feed(Array(splitContent.utf8))
+
+        func forcedRecordIndex() -> Int? {
+            (0..<splitting.scrollbackRowCount).first {
+                splitting.retainedRecordSummaryForTesting(at: $0)?.isForcedSplit == true
+            }
+        }
+
+        let splitRecordIndex = try #require(forcedRecordIndex())
+        #expect(splitting.retainedRecordSummaryForTesting(at: splitRecordIndex)?.cellCount == splitBoundary)
+        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
+
+        splitting.feed(Array("\r\nq\r\nr".utf8))
+        #expect(
+            splitting.retainedRecordSummaryForTesting(at: splitRecordIndex + 1)?.isOpen == false
+        )
+        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
+
+        for _ in 0..<512 where forcedRecordIndex() != nil {
+            splitting.feed(Array("z\r\n".utf8))
+        }
+        #expect(forcedRecordIndex() == nil)
+        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
     }
 
     @Test("blank rows contribute boundaries only when later content exists")
