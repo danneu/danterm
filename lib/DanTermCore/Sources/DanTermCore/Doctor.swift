@@ -83,18 +83,21 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
         evaluatePermission(
             id: .notifications,
             title: "Notifications enabled",
+            deniedTitle: "Notifications disabled",
             state: facts.permissions.notifications,
             deniedMessage: "Enable DanTerm in System Settings > Notifications."
         ),
         evaluatePermission(
             id: .fullDiskAccess,
             title: "Full Disk Access permission granted",
+            deniedTitle: "Full Disk Access permission not granted",
             state: facts.permissions.fullDiskAccess,
             deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm."
         ),
         evaluatePermission(
             id: .developerTools,
             title: "Developer Tools permission granted",
+            deniedTitle: "Developer Tools permission not granted",
             state: facts.permissions.developerTools,
             deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm."
         ),
@@ -105,6 +108,7 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
 private func evaluatePermission(
     id: DoctorCheckID,
     title: String,
+    deniedTitle: String,
     state: DoctorFacts.PermissionState,
     deniedMessage: String
 ) -> DoctorCheck {
@@ -112,7 +116,7 @@ private func evaluatePermission(
     case .granted:
         return DoctorCheck(id: id, title: title, status: .ok, message: nil)
     case .denied:
-        return DoctorCheck(id: id, title: title, status: .warn, message: deniedMessage)
+        return DoctorCheck(id: id, title: deniedTitle, status: .warn, message: deniedMessage)
     case .unknown:
         return DoctorCheck(
             id: id,

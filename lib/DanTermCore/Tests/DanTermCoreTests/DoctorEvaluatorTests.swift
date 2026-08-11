@@ -191,6 +191,9 @@ import DanTermProtocol
             fullDiskAccess: .denied,
             developerTools: .denied
         )))
+        #expect(check(.notifications, in: denied).title == "Notifications disabled")
+        #expect(check(.fullDiskAccess, in: denied).title == "Full Disk Access permission not granted")
+        #expect(check(.developerTools, in: denied).title == "Developer Tools permission not granted")
         #expect(check(.notifications, in: denied).message == "Enable DanTerm in System Settings > Notifications.")
         #expect(check(.fullDiskAccess, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm.")
         #expect(check(.developerTools, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm.")

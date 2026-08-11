@@ -446,9 +446,11 @@ agent should select this skill automatically.
 The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
 
-The `Notifications enabled`, `Full Disk Access permission granted`, and
-`Developer Tools permission granted` rows are app-owned checks. They report OK
-or WARN when the matching DanTerm instance is running and SKIP when it is not.
+The Notifications, Full Disk Access, and Developer Tools rows are app-owned
+checks. They name the observed state: `enabled` or `disabled` for notifications,
+and `permission granted` or `permission not granted` for the other two. They
+report OK or WARN when the matching DanTerm instance is running and SKIP when it
+is not.
 Full Disk Access is tested by reading a protected TCC file. Developer Tools is
 tested by having LLDB attach to a disposable child process because macOS exposes
 no public status API for either permission.
