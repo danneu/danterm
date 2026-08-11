@@ -145,24 +145,29 @@ struct TerminalSearchTests {
         // Scenario: a line longer than the small arena's forced-split cap ends under EL 0 with a
         //   background color, then the user copies and searches it before and after a reflow.
         let content = String(repeating: "A", count: 400)
-        let expected = content + "\nX\nY"
+        let expected = content + "\nX\nY\nZ\nW"
         var terminal = try #require(Terminal(
             columns: 32,
             rows: 2,
             scrollbackBudgetBytes: 1 << 16
         ))
-        terminal.feed(Array((content + "\u{1B}[41m\u{1B}[K\u{1B}[0m\r\nX\r\nY").utf8))
+        terminal.feed(Array(
+            (content + "\u{1B}[41m\u{1B}[K\u{1B}[0m\r\nX\r\nY\r\nZ\r\nW").utf8
+        ))
 
         #expect(terminal.retainedRecordSummaryForTesting(at: 0)?.isForcedSplit == true)
         #expect(terminal.fullHistoryText == expected)
         var found = terminal.beginSearch("A\nX")
         #expect(found)
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        let recordCoordinates = terminal.indexedSearchRecordRangesForTesting
+        #expect(recordCoordinates.count == 1)
 
         terminal.resize(columns: 17, rows: 2)
 
         #expect(terminal.fullHistoryText == expected)
         #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.indexedSearchRecordRangesForTesting == recordCoordinates)
         found = terminal.beginSearch("A \nX")
         #expect(found == false)
     }
@@ -515,45 +520,145 @@ struct TerminalSearchTests {
         }
     }
 
-    @Test("building the search index projects history once")
-    func buildingSearchIndexWalksHistoryOnce() throws {
-        // Intent: opening a search and rebuilding it after reflow each walk retained rows once.
-        // Why it exists: separately scanning all matches and immutable-prefix candidates doubled
-        //   the per-keystroke and resize cost at deep scrollback depths.
-        // Scenario: a deep pane opens a search, then changes width while that search remains open.
-        var terminal = try #require(Terminal(columns: 8, rows: 3))
-        for index in 0..<80 {
-            terminal.feed(Array("row\(index)\r\n".utf8))
-        }
-
-        func measuredBuild(_ body: () -> Void) -> (rows: Int, materializations: Int) {
-            var rows = 0
-            let materializations = WholeProjectionCounter.measure {
-                rows = ProjectionRowCounter.measure(body)
+    @Test("width changes do no retained search work at shallow and deep history")
+    func widthChangeSearchCostIsIndependentOfHistoryDepth() throws {
+        // Intent: changing width neither projects retained rows nor visits retained matches when
+        //   the closed-history seam stays put.
+        // Why it exists: display-row-keyed matches forced every width step to rebuild the whole
+        //   retained index, so resize cost grew with scrollback depth.
+        // Scenario: otherwise identical panes retain tens or hundreds of short hard-ended lines,
+        //   keep a dense search open, then widen without moving a record across the live seam.
+        for depth in [40, 400] {
+            var terminal = try #require(Terminal(columns: 8, rows: 3))
+            for _ in 0..<depth {
+                terminal.feed(Array("hit\r\n".utf8))
             }
-            return (rows, materializations)
-        }
+            _ = terminal.beginSearch("hit")
 
-        let begin = measuredBuild {
-            _ = terminal.beginSearch("row")
-        }
-        let beginRowCount = terminal.scrollProjection.totalRows
-        #expect(begin.materializations == 0)
-        #expect(begin.rows <= beginRowCount + 3)
+            var projectedRows = 0
+            let maintenance = SearchIndexMaintenanceCounter.measure {
+                projectedRows = ProjectionRowCounter.measure {
+                    terminal.resize(columns: 9, rows: 3)
+                }
+            }
 
-        let resize = measuredBuild {
-            terminal.resize(columns: 9, rows: 3)
+            #expect(projectedRows == 0)
+            #expect(maintenance == 0)
+            assertSearchIndexMatchesFullScan(terminal)
         }
-        let resizedRowCount = terminal.scrollProjection.totalRows
-        #expect(resize.materializations == 0)
-        #expect(resize.rows <= resizedRowCount + 3)
     }
 
-    @Test("prefix advance projects a fixed row count for short and long needles")
-    func prefixAdvanceProjectionCostIsIndependentOfNeedleLength() throws {
-        // Intent: advancing the immutable search prefix projects each newly closed row once.
-        // Why it exists: rebuilding left and right context for every closed row made feed cost
-        //   grow linearly with the needle length.
+    @Test("closed-history match endpoints survive width changes unchanged")
+    func closedHistoryMatchCoordinatesAreWidthInvariant() throws {
+        // Intent: a retained match keeps the same record identities and cell offsets while its
+        //   display rows refold around a narrower width.
+        // Why it exists: matching content is stable across reflow only if the index stores
+        //   content coordinates rather than recomputed row and column pairs.
+        // Scenario: one match crosses a hard boundary between two closed records, then the first
+        //   record grows from one display row to two.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("alpha\r\nbeta\r\ngamma\r\ndelta".utf8))
+        _ = terminal.beginSearch("pha\nbeta")
+        let before = terminal.indexedSearchRecordRangesForTesting
+
+        #expect(before.count == 1)
+        terminal.resize(columns: 4, rows: 2)
+
+        #expect(terminal.indexedSearchRecordRangesForTesting == before)
+        assertSearchIndexMatchesOracle(terminal, needle: "pha\nbeta")
+    }
+
+    @Test("a tail match never retargets after its record is pulled and readmitted")
+    func tailRecordReuseRetiresIndexedCoordinates() throws {
+        // Intent: removing the closed tail invalidates its indexed match, and admitting the same
+        //   text again gives the replacement match a distinct record coordinate.
+        // Why it exists: a position-derived record id lets a retired match silently name the next
+        //   record admitted at that sequence slot.
+        // Scenario: a height increase pulls one matching record into the live grid, then shrinking
+        //   returns that text to closed history.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("hit\r\n".utf8))
+        _ = terminal.beginSearch("hit")
+        let retired = try #require(terminal.indexedSearchRecordRangesForTesting.first)
+
+        terminal.resize(columns: 4, rows: 2)
+        #expect(terminal.indexedSearchRecordRangesForTesting.isEmpty)
+        terminal.resize(columns: 4, rows: 1)
+
+        let replacement = try #require(terminal.indexedSearchRecordRangesForTesting.first)
+        #expect(replacement != retired)
+        assertSearchIndexMatchesOracle(terminal, needle: "hit")
+    }
+
+    @Test("head trimming retires a match whose start leaves the record")
+    func headTrimRetiresMatchStartingInEvictedCells() throws {
+        // Intent: trimming only the first display row of a record removes a match that began in
+        //   that row even when its end remains retained under the same record identity.
+        // Why it exists: keeping the record id stable across a trim must not keep a coordinate
+        //   whose original cell offset has already left history.
+        // Scenario: a two-row logical line holds a cross-row match, then a later hard line makes
+        //   the budget trim the logical line's first row.
+        var terminal = try #require(Terminal(
+            columns: 4,
+            rows: 1,
+            scrollbackBudgetBytes: historyBudget(lineCells: [8, 1, 1, 1], paneColumns: 4)
+        ))
+        terminal.feed(Array("ABCDhitZ\r\nx".utf8))
+        _ = terminal.beginSearch("Dhit")
+        #expect(terminal.indexedSearchRecordRangesForTesting.count == 1)
+
+        terminal.feed(Array("\r\ny\r\nz\r\na\r\nb\r\nc".utf8))
+
+        #expect(terminal.indexedSearchRecordRangesForTesting.isEmpty)
+        assertSearchIndexMatchesOracle(terminal, needle: "Dhit")
+    }
+
+    @Test("a width change reports search work only when the closed seam moves")
+    func widthChangeSearchMaintenanceInstrumentDetectsSeamMovement() throws {
+        // Intent: the resize maintenance counter stays live for the bounded case where reflow
+        //   closes new history even though stable closed records require no work.
+        // Why it exists: an instrument that always reports zero cannot prove retained-depth
+        //   independence on ordinary width changes.
+        // Scenario: widening a pane pulls a matching closed record back across the live seam.
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        terminal.feed(Array("hit\r\nhit\r\nhit\r\nABCDEFGHIJK".utf8))
+        _ = terminal.beginSearch("hit")
+
+        var projectedRows = 0
+        let maintenance = SearchIndexMaintenanceCounter.measure {
+            projectedRows = ProjectionRowCounter.measure {
+                terminal.resize(columns: 12, rows: 3)
+            }
+        }
+
+        #expect(projectedRows == 0)
+        #expect(maintenance > 0)
+        assertSearchIndexMatchesOracle(terminal, needle: "hit")
+    }
+
+    @Test("a position between matches resolves to the same occurrence at every width")
+    func nearestOccurrenceIsWidthInvariant() throws {
+        // Intent: nearest-match resolution measures content rather than hard-line display padding.
+        // Why it exists: row times width gives each hard-ended line width-dependent phantom space,
+        //   which can switch the selected occurrence even though the text and anchor did not move.
+        // Scenario: an anchor three cells into the middle line is nearer the first of two matches;
+        //   widening or narrowing changes the rows but not that choice.
+        var terminal = try #require(Terminal(columns: 8, rows: 5))
+        terminal.feed(Array("hit\r\nabcdefghij\r\nhit".utf8))
+        _ = terminal.beginSearch("hit")
+        terminal.setSearchPositionForTesting(TerminalTextPosition(row: 1, column: 3))
+
+        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        terminal.resize(columns: 5, rows: 5)
+
+        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+    }
+
+    @Test("closed-record index advance performs no display-row projection")
+    func closedRecordIndexAdvanceAvoidsDisplayProjection() throws {
+        // Intent: advancing the closed-history search index reads record content directly.
+        // Why it exists: a display-row projection on index maintenance makes its stored
+        //   coordinates width-dependent and adds fold work to the feed path.
         // Scenario: identical tailing panes keep absent one- and 24-character needles open.
         func measuredRows(needle: String) throws -> Int {
             var terminal = try #require(Terminal(columns: 32, rows: 3))
@@ -570,12 +675,12 @@ struct TerminalSearchTests {
         let shortNeedleRows = try measuredRows(needle: "z")
         let longNeedleRows = try measuredRows(needle: String(repeating: "z", count: 24))
 
-        #expect(shortNeedleRows == 20)
-        #expect(longNeedleRows == shortNeedleRows)
+        #expect(shortNeedleRows == 0)
+        #expect(longNeedleRows == 0)
     }
 
-    @Test("prefix maintenance examines logarithmically many existing matches")
-    func prefixMaintenanceCostStaysBoundedWithManyExistingMatches() throws {
+    @Test("closed-history maintenance examines logarithmically many existing matches")
+    func closedHistoryMaintenanceCostStaysBoundedWithManyExistingMatches() throws {
         // Intent: closing one more history row never walks the retained match sequence.
         // Why it exists: eviction and truncation maintenance filtered every stored match on
         //   each scrolled row, making a dense open search progressively slow down the feed path.
@@ -593,12 +698,41 @@ struct TerminalSearchTests {
         #expect(comparisons <= 32)
     }
 
+    @Test("head eviction cost is unchanged by retained match density")
+    func headEvictionMaintenanceIsIndependentOfMatchDensity() throws {
+        // Intent: evicting one display row never inspects the surviving closed match sequence.
+        // Why it exists: filtering or binary-searching retained matches makes head maintenance
+        //   depend on how many occurrences history holds even though their coordinates do not move.
+        // Scenario: identical bounded panes evict one row while equal-length needles match every
+        //   retained line or none of them.
+        func measuredCost(needle: String) throws -> Int {
+            var terminal = try #require(Terminal(
+                columns: 8,
+                rows: 2,
+                scrollbackBudgetBytes: historyBudget(lines: 32, cells: 3, paneColumns: 8)
+            ))
+            for _ in 0..<34 {
+                terminal.feed(Array("hit\r\n".utf8))
+            }
+            _ = terminal.beginSearch(needle)
+            return SearchIndexMaintenanceCounter.measure {
+                terminal.feed(Array("new\r\n".utf8))
+            }
+        }
+
+        let dense = try measuredCost(needle: "hit")
+        let empty = try measuredCost(needle: "zzz")
+
+        #expect(dense == empty)
+        #expect(dense <= 2)
+    }
+
     @Test("the retained index agrees with the oracle across store boundary mutations")
     func retainedIndexMatchesOracleAcrossStoreMutations() throws {
         // Intent: every admitted history mutation preserves the exact ordered search result.
-        // Why it exists: the carried boundary window relies on detecting prefix advance,
-        //   regression, truncation, removal, and head eviction without inspecting retained text.
-        // Scenario: searches spanning the prefix boundary survive output, both resize directions,
+        // Why it exists: stable record ranges must be retired at either end and extended at the
+        //   closed seam without retargeting an old coordinate or losing a boundary match.
+        // Scenario: searches spanning the closed/live boundary survive output, both resize directions,
         //   a severed and restored wrap claim, ED 3, eviction, and a needle longer than history.
         let spanningNeedle = "DAB"
         var terminal = try #require(Terminal(columns: 4, rows: 2))

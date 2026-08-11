@@ -28,7 +28,7 @@
 
 import DequeModule
 
-/// Counts match comparisons during immutable-prefix maintenance so its cost remains bounded.
+/// Counts indexed-match visits during closed-history maintenance so its cost remains bounded.
 enum SearchIndexMaintenanceCounter {
     final class Tally: @unchecked Sendable {
         var count = 0
@@ -48,6 +48,12 @@ enum SearchIndexMaintenanceCounter {
             return tally.count
         }
     }
+}
+
+/// Exposes stable closed-history match endpoints to behavioral tests without display geometry.
+struct IndexedSearchRecordRange: Equatable, Sendable {
+    var start: Terminal.LogicalLineStore.RecordTextPosition
+    var end: Terminal.LogicalLineStore.RecordTextPosition
 }
 
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
@@ -541,37 +547,65 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Stores matches over immutable closed history and leaves only the bounded mutable suffix
-    /// for each read to rescan. Candidates ending in trailing blank history stay dormant until
-    /// later content makes their hard boundaries part of the text projection.
+    /// for each read to rescan.
     private struct SearchMatchIndex: Equatable, Sendable {
         var needleKeys: [SearchGraphemeKey]
-        var retainedStartRow: Int
-        var prefixEndRow: Int
-        var boundaryWindow: [SearchProjectionUnit]
-        var prefixMatches: Deque<TextAnchorRange>
-        var confirmedPrefixMatchCount: Int
+        var indexedThroughRecord: LogicalLineStore.RecordIdentity?
+        var retainedStart: LogicalLineStore.RecordTextPosition?
+        var boundaryWindow: [RecordSearchProjectionUnit]
+        var prefixMatches: Deque<RecordSearchRange>
     }
 
-    /// Carries the folded units immediately before the immutable-prefix boundary so advancing
-    /// that boundary never has to project rows it already scanned.
+    /// Keeps an indexed occurrence independent of the width used to display its records.
+    private struct RecordSearchRange: Equatable, Sendable {
+        var start: LogicalLineStore.RecordTextPosition
+        var end: LogicalLineStore.RecordTextPosition
+    }
+
+    /// Couples a folded search key to stable boundaries in closed history.
+    private struct RecordSearchProjectionUnit: Equatable, Sendable {
+        var key: SearchGraphemeKey
+        var start: LogicalLineStore.RecordTextPosition
+        var end: LogicalLineStore.RecordTextPosition
+    }
+
+    /// Carries the folded units at the end of closed history so a mutable-suffix match can join
+    /// them without projecting an earlier display row.
     private struct SearchProjectionUnit: Equatable, Sendable {
         var key: SearchGraphemeKey
         var start: TextAnchor
         var end: TextAnchor
     }
 
-    /// Presents the immutable prefix and freshly scanned suffix as one ordered collection
-    /// without copying the history-sized prefix on each navigation or status read.
+    /// Presents record-keyed closed matches and a freshly scanned suffix as one ordered
+    /// collection without copying or resolving the history-sized prefix on each read.
     private struct SearchMatchSnapshot {
-        var prefix: Deque<TextAnchorRange>
-        var prefixCount: Int
+        var history: LogicalLineStore
+        var absoluteHistoryStartRow: Int
+        var prefix: Deque<RecordSearchRange>
         var suffix: [TextAnchorRange]
 
-        var count: Int { prefixCount + suffix.count }
+        var count: Int { prefix.count + suffix.count }
         var isEmpty: Bool { count == 0 }
 
         subscript(index: Int) -> TextAnchorRange {
-            index < prefixCount ? prefix[index] : suffix[index - prefixCount]
+            if index >= prefix.count { return suffix[index - prefix.count] }
+            let match = prefix[index]
+            guard let start = history.position(of: match.start),
+                  let end = history.position(of: match.end)
+            else {
+                preconditionFailure("the search index retained a retired record coordinate")
+            }
+            return TextAnchorRange(
+                start: TextAnchor(
+                    row: absoluteHistoryStartRow + start.displayRow,
+                    column: start.column
+                ),
+                end: TextAnchor(
+                    row: absoluteHistoryStartRow + end.displayRow,
+                    column: end.column
+                )
+            )
         }
     }
 
@@ -3523,6 +3557,23 @@ public struct Terminal: Equatable, Sendable {
         recordPresentationFullDamage()
     }
 
+    /// Gives tests the coordinates the retained search index actually stores.
+    var indexedSearchRecordRangesForTesting: [IndexedSearchRecordRange] {
+        guard let search else { return [] }
+        return search.index.prefixMatches.map {
+            IndexedSearchRecordRange(start: $0.start, end: $0.end)
+        }
+    }
+
+    /// Places the durable search anchor at a projected boundary for resolution tests.
+    mutating func setSearchPositionForTesting(_ position: TerminalTextPosition) {
+        let absoluteRow = evictedRowCount + position.row
+        search?.position = TextAnchor(
+            row: absoluteRow,
+            column: position.column
+        )
+    }
+
     private func projectedHistoryText(from stream: [GridRow]) -> String {
         // The single funnel every history-text projection passes through, so counting the stream
         // here measures what a bounded read actually walks -- including the `rowBudget *= 2`
@@ -4151,195 +4202,316 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Resolves the index's immutable prefix together with its bounded mutable suffix.
+    /// Resolves record-keyed closed matches together with the bounded mutable suffix.
     private func currentSearchMatches(_ search: SearchState) -> SearchMatchSnapshot {
+        let prefixEndRow = evictedRowCount + history.closedPrefixDisplayRowCount
         let streamEndRow = evictedRowCount + projectionRowCount
-        guard search.index.prefixEndRow < streamEndRow else {
+        guard prefixEndRow < streamEndRow else {
             return SearchMatchSnapshot(
+                history: history,
+                absoluteHistoryStartRow: evictedRowCount,
                 prefix: search.index.prefixMatches,
-                prefixCount: search.index.confirmedPrefixMatchCount,
                 suffix: []
             )
         }
-        let suffixRows = search.index.prefixEndRow..<streamEndRow
+        let suffixRows = prefixEndRow..<streamEndRow
         let suffixLastContentRow = lastProjectedContentRow(in: suffixRows)
         guard let suffixLastContentRow else {
             return SearchMatchSnapshot(
+                history: history,
+                absoluteHistoryStartRow: evictedRowCount,
                 prefix: search.index.prefixMatches,
-                prefixCount: search.index.confirmedPrefixMatchCount,
                 suffix: []
             )
         }
+        var seed = search.index.boundaryWindow.compactMap { unit -> SearchProjectionUnit? in
+            guard let start = history.position(of: unit.start),
+                  let end = history.position(of: unit.end)
+            else { return nil }
+            return SearchProjectionUnit(
+                key: unit.key,
+                start: TextAnchor(
+                    row: evictedRowCount + start.displayRow,
+                    column: start.column
+                ),
+                end: TextAnchor(
+                    row: evictedRowCount + end.displayRow,
+                    column: end.column
+                )
+            )
+        }
+        var matchingSeedSuffixCount = 0
+        if history.closedRecordCount > 0 {
+            let last = history.closedRecordCount - 1
+            if history.recordSummary(at: last)?.isForcedSplit == false,
+               let summary = history.recordSummary(at: last),
+               let boundary = history.recordTextPosition(
+                   recordIndex: last,
+                   cellOffset: summary.cellCount
+               ),
+               let start = history.position(of: boundary)
+            {
+                seed.append(SearchProjectionUnit(
+                    key: .scalar(0x0A),
+                    start: TextAnchor(
+                        row: evictedRowCount + start.displayRow,
+                        column: start.column
+                    ),
+                    end: TextAnchor(row: prefixEndRow, column: 0)
+                ))
+                matchingSeedSuffixCount = 1
+            }
+        }
         let suffix = scanSearchUnits(
             needleKeys: search.index.needleKeys,
-            seededBy: search.index.boundaryWindow,
+            seededBy: seed,
             absoluteRows: suffixRows.lowerBound..<(suffixLastContentRow + 1),
             lastContentRow: suffixLastContentRow,
-            matching: suffixRows
+            matching: matchingSeedSuffixCount > 0
+                ? max(evictedRowCount, prefixEndRow - 1)..<suffixRows.upperBound
+                : suffixRows,
+            matchingSeedSuffixCount: matchingSeedSuffixCount
         ).matches
         return SearchMatchSnapshot(
+            history: history,
+            absoluteHistoryStartRow: evictedRowCount,
             prefix: search.index.prefixMatches,
-            prefixCount: search.index.prefixMatches.count,
             suffix: suffix
         )
     }
 
-    /// Advances or trims the immutable prefix after the store changes record ownership.
+    /// Advances or trims the closed-record index after the store changes record ownership.
     private mutating func synchronizeSearchIndexPrefix() {
         guard var search else { return }
-        let newEnd = evictedRowCount + history.closedPrefixDisplayRowCount
-        let oldEnd = search.index.prefixEndRow
-        let boundary = TextAnchor(row: newEnd, column: 0)
-        let firstRetainedRow = evictedRowCount
-        guard newEnd != oldEnd || firstRetainedRow != search.index.retainedStartRow else { return }
-        let droppedPrefixCount = prefixMatchStartIndex(
-            in: search.index.prefixMatches,
-            retainedFrom: firstRetainedRow
-        )
-        let retainedEndIndex = prefixMatchEndIndex(
-            in: search.index.prefixMatches,
-            through: boundary
-        )
-        search.index.confirmedPrefixMatchCount = max(
-            0,
-            min(search.index.confirmedPrefixMatchCount, retainedEndIndex) - droppedPrefixCount
-        )
-        search.index.prefixMatches.removeLast(search.index.prefixMatches.count - retainedEndIndex)
-        search.index.prefixMatches.removeFirst(
-            min(droppedPrefixCount, search.index.prefixMatches.count)
-        )
-        let scanStart = max(oldEnd, firstRetainedRow)
-        let droppedBoundaryUnit = search.index.boundaryWindow.contains {
-            $0.start.row < firstRetainedRow
+        let closedCount = history.closedRecordCount
+        let retainedStart = closedCount > 0
+            ? history.recordTextPosition(recordIndex: 0, cellOffset: 0)
+            : nil
+        let indexedThrough = closedCount > 0
+            ? history.recordIdentity(at: closedCount - 1)
+            : nil
+        guard retainedStart != search.index.retainedStart
+            || indexedThrough != search.index.indexedThroughRecord
+        else { return }
+        SearchIndexMaintenanceCounter.recordComparison()
+
+        if let retainedStart {
+            while let first = search.index.prefixMatches.first,
+                  first.start < retainedStart
+            {
+                search.index.prefixMatches.removeFirst()
+            }
+        } else {
+            search.index.prefixMatches.removeAll()
         }
-        search.index.boundaryWindow.removeAll { $0.start.row < firstRetainedRow }
-        if newEnd < scanStart {
-            search.index.boundaryWindow = searchBoundaryWindow(
+
+        let previousThrough = search.index.indexedThroughRecord
+        let tailRegressed = previousThrough.map { previous in
+            indexedThrough == nil || indexedThrough! < previous
+        } ?? false
+        if tailRegressed {
+            if let last = closedRecordEndPosition() {
+                var low = 0
+                var high = search.index.prefixMatches.count
+                while low < high {
+                    let middle = low + (high - low) / 2
+                    SearchIndexMaintenanceCounter.recordComparison()
+                    if search.index.prefixMatches[middle].end <= last {
+                        low = middle + 1
+                    } else {
+                        high = middle
+                    }
+                }
+                search.index.prefixMatches.removeLast(search.index.prefixMatches.count - low)
+            } else {
+                search.index.prefixMatches.removeAll()
+            }
+            search.index.boundaryWindow = recordSearchBoundaryWindow(
                 needleKeys: search.index.needleKeys,
-                endingAt: newEnd
+                endingAt: closedCount
             )
-        } else if newEnd > scanStart {
-            if scanStart != oldEnd || droppedBoundaryUnit {
-                search.index.boundaryWindow = searchBoundaryWindow(
+        } else {
+            let appendStart: Int
+            if let previousThrough,
+               let previousIndex = history.recordIndex(of: previousThrough),
+               previousIndex < closedCount
+            {
+                appendStart = previousIndex + 1
+            } else if previousThrough == nil {
+                appendStart = 0
+            } else {
+                appendStart = 0
+                search.index.prefixMatches.removeAll()
+                search.index.boundaryWindow.removeAll()
+            }
+            if appendStart < closedCount {
+                let advanced = scanClosedRecordSearchUnits(
                     needleKeys: search.index.needleKeys,
-                    endingAt: scanStart
+                    seededBy: search.index.boundaryWindow,
+                    records: appendStart..<closedCount,
+                    includesLeadingBoundary: appendStart > 0
+                )
+                search.index.prefixMatches.append(contentsOf: advanced.matches)
+                search.index.boundaryWindow = advanced.trailingUnits
+            } else if search.index.boundaryWindow.contains(where: {
+                history.position(of: $0.start) == nil || history.position(of: $0.end) == nil
+            }) {
+                search.index.boundaryWindow = recordSearchBoundaryWindow(
+                    needleKeys: search.index.needleKeys,
+                    endingAt: closedCount
                 )
             }
-            let advanced = scanSearchUnits(
-                needleKeys: search.index.needleKeys,
-                seededBy: search.index.boundaryWindow,
-                absoluteRows: scanStart..<newEnd,
-                lastContentRow: newEnd,
-                matching: scanStart..<newEnd
-            )
-            search.index.boundaryWindow = advanced.trailingUnits
-            search.index.prefixMatches.append(contentsOf: advanced.matches)
-            let mutableRows = scanStart..<(evictedRowCount + projectionRowCount)
-            if let lastContentRow = lastProjectedContentRow(in: mutableRows) {
-                search.index.confirmedPrefixMatchCount = prefixMatchCount(
-                    in: search.index.prefixMatches,
-                    throughContentRow: lastContentRow
-                )
-            }
-        } else if droppedBoundaryUnit {
-            search.index.boundaryWindow = searchBoundaryWindow(
-                needleKeys: search.index.needleKeys,
-                endingAt: newEnd
-            )
         }
-        search.index.retainedStartRow = firstRetainedRow
-        search.index.prefixEndRow = newEnd
-        self.search = search
-    }
-
-    private func prefixMatchCount(
-        in matches: Deque<TextAnchorRange>,
-        throughContentRow row: Int
-    ) -> Int {
-        var low = 0
-        var high = matches.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            SearchIndexMaintenanceCounter.recordComparison()
-            if matches[middle].end.row <= row {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
-        return low
-    }
-
-    private func prefixMatchStartIndex(
-        in matches: Deque<TextAnchorRange>,
-        retainedFrom row: Int
-    ) -> Int {
-        var low = 0
-        var high = matches.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            SearchIndexMaintenanceCounter.recordComparison()
-            if matches[middle].start.row < row {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
-        return low
-    }
-
-    private func prefixMatchEndIndex(
-        in matches: Deque<TextAnchorRange>,
-        through boundary: TextAnchor
-    ) -> Int {
-        var low = 0
-        var high = matches.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            SearchIndexMaintenanceCounter.recordComparison()
-            if matches[middle].end <= boundary {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
-        return low
-    }
-
-    /// Rebuilds the index after width reflow changes every display-row coordinate.
-    private mutating func rebuildSearchIndex() {
-        guard var search else { return }
-        search.index = builtSearchMatchIndex(needleKeys: search.index.needleKeys)
+        search.index.retainedStart = retainedStart
+        search.index.indexedThroughRecord = indexedThrough
         self.search = search
     }
 
     private func builtSearchMatchIndex(
         needleKeys: [SearchGraphemeKey]
     ) -> SearchMatchIndex {
-        let retainedStart = evictedRowCount
-        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
-        let prefixScan = scanSearchUnits(
+        let closedCount = history.closedRecordCount
+        let prefixScan = scanClosedRecordSearchUnits(
             needleKeys: needleKeys,
             seededBy: [],
-            absoluteRows: retainedStart..<prefixEnd,
-            lastContentRow: prefixEnd,
-            matching: retainedStart..<prefixEnd
+            records: 0..<closedCount,
+            includesLeadingBoundary: false
         )
-        let prefixMatches = Deque(prefixScan.matches)
-        let streamEnd = evictedRowCount + projectionRowCount
-        let confirmedPrefixMatchCount = lastProjectedContentRow(
-            in: retainedStart..<streamEnd
-        ).map {
-            prefixMatchCount(in: prefixMatches, throughContentRow: $0)
-        } ?? 0
         return SearchMatchIndex(
             needleKeys: needleKeys,
-            retainedStartRow: retainedStart,
-            prefixEndRow: prefixEnd,
+            indexedThroughRecord: closedCount > 0
+                ? history.recordIdentity(at: closedCount - 1)
+                : nil,
+            retainedStart: closedCount > 0
+                ? history.recordTextPosition(recordIndex: 0, cellOffset: 0)
+                : nil,
             boundaryWindow: prefixScan.trailingUnits,
-            prefixMatches: prefixMatches,
-            confirmedPrefixMatchCount: confirmedPrefixMatchCount
+            prefixMatches: Deque(prefixScan.matches)
         )
+    }
+
+    private func closedRecordEndPosition() -> LogicalLineStore.RecordTextPosition? {
+        let count = history.closedRecordCount
+        guard count > 0, let summary = history.recordSummary(at: count - 1) else { return nil }
+        return history.recordTextPosition(
+            recordIndex: count - 1,
+            cellOffset: summary.cellCount
+        )
+    }
+
+    private func scanClosedRecordSearchUnits(
+        needleKeys: [SearchGraphemeKey],
+        seededBy seed: [RecordSearchProjectionUnit],
+        records: Range<Int>,
+        includesLeadingBoundary: Bool
+    ) -> (matches: [RecordSearchRange], trailingUnits: [RecordSearchProjectionUnit]) {
+        guard needleKeys.isEmpty == false else { return ([], []) }
+        var matches: [RecordSearchRange] = []
+        var window = [RecordSearchProjectionUnit?](repeating: nil, count: needleKeys.count)
+        var unitCount = 0
+
+        func consume(_ unit: RecordSearchProjectionUnit, recordsMatch: Bool) {
+            let slot = unitCount % needleKeys.count
+            window[slot] = unit
+            unitCount += 1
+            guard recordsMatch, unitCount >= needleKeys.count else { return }
+            let startIndex = unitCount - needleKeys.count
+            for offset in needleKeys.indices {
+                guard window[(startIndex + offset) % needleKeys.count]?.key == needleKeys[offset]
+                else { return }
+            }
+            guard let start = window[startIndex % needleKeys.count]?.start else { return }
+            matches.append(RecordSearchRange(start: start, end: unit.end))
+        }
+
+        for unit in seed.suffix(max(0, needleKeys.count - 1)) {
+            consume(unit, recordsMatch: false)
+        }
+        for recordIndex in records {
+            if recordIndex > records.lowerBound || includesLeadingBoundary,
+               let previous = history.recordSummary(at: recordIndex - 1),
+               previous.isForcedSplit == false,
+               let start = history.recordTextPosition(
+                   recordIndex: recordIndex - 1,
+                   cellOffset: previous.cellCount
+               ),
+               let end = history.recordTextPosition(recordIndex: recordIndex, cellOffset: 0)
+            {
+                consume(
+                    RecordSearchProjectionUnit(key: .scalar(0x0A), start: start, end: end),
+                    recordsMatch: true
+                )
+            }
+            let cellCount = history.recordSummary(at: recordIndex)?.cellCount ?? 0
+            history.forEachRecordCell(at: recordIndex) { cellOffset, cell in
+                let key: SearchGraphemeKey?
+                switch cell.kind {
+                case .narrow, .wideHead:
+                    key = searchGraphemeKey(for: cell.scalars)
+                case .padding:
+                    key = .scalar(0x20)
+                case .wideTail, .spacerHead:
+                    key = nil
+                }
+                guard let key,
+                      let start = history.recordTextPosition(
+                          recordIndex: recordIndex,
+                          cellOffset: cellOffset
+                      ),
+                      let end = history.recordTextPosition(
+                          recordIndex: recordIndex,
+                          cellOffset: min(
+                              cellCount,
+                              cellOffset + (cell.kind == .wideHead ? 2 : 1)
+                          )
+                      )
+                else { return }
+                consume(
+                    RecordSearchProjectionUnit(key: key, start: start, end: end),
+                    recordsMatch: true
+                )
+            }
+        }
+
+        let trailingCount = min(max(0, needleKeys.count - 1), unitCount)
+        let trailingStart = unitCount - trailingCount
+        return (
+            matches,
+            (trailingStart..<unitCount).compactMap { window[$0 % needleKeys.count] }
+        )
+    }
+
+    /// Rebuilds only the record units that can join a future mutable-suffix match.
+    private func recordSearchBoundaryWindow(
+        needleKeys: [SearchGraphemeKey],
+        endingAt recordEnd: Int
+    ) -> [RecordSearchProjectionUnit] {
+        let targetCount = max(0, needleKeys.count - 1)
+        guard targetCount > 0, recordEnd > 0 else { return [] }
+        var start = recordEnd
+        var available = 0
+        while start > 0, available < targetCount {
+            start -= 1
+            history.forEachRecordCell(at: start) { _, cell in
+                switch cell.kind {
+                case .narrow, .wideHead, .padding:
+                    available += 1
+                case .wideTail, .spacerHead:
+                    break
+                }
+            }
+            if start + 1 < recordEnd,
+               history.recordSummary(at: start)?.isForcedSplit == false
+            {
+                available += 1
+            }
+        }
+        return scanClosedRecordSearchUnits(
+            needleKeys: needleKeys,
+            seededBy: [],
+            records: start..<recordEnd,
+            includesLeadingBoundary: false
+        ).trailingUnits
     }
 
     /// Scans only enough surrounding rows to decide which matches intersect `absoluteRows`.
@@ -4376,6 +4548,7 @@ public struct Terminal: Equatable, Sendable {
         absoluteRows: Range<Int>,
         lastContentRow: Int,
         matching matchRows: Range<Int>,
+        matchingSeedSuffixCount: Int = 0,
         stream suppliedStream: ProjectionRows? = nil
     ) -> (matches: [TextAnchorRange], trailingUnits: [SearchProjectionUnit]) {
         let stream = suppliedStream ?? activeProjection()
@@ -4399,8 +4572,12 @@ public struct Terminal: Equatable, Sendable {
             if range(match, intersects: matchRows) { matches.append(match) }
         }
 
-        for unit in seed.suffix(max(0, needleKeys.count - 1)) {
-            consume(unit, recordsMatch: false)
+        let retainedSeed = Array(seed.suffix(needleKeys.count - 1 + matchingSeedSuffixCount))
+        for (index, unit) in retainedSeed.enumerated() {
+            consume(
+                unit,
+                recordsMatch: index >= retainedSeed.count - matchingSeedSuffixCount
+            )
         }
         forEachSearchUnit(
             in: stream,
@@ -4419,32 +4596,6 @@ public struct Terminal: Equatable, Sendable {
             window[$0 % needleKeys.count]
         }
         return (matches, trailingUnits)
-    }
-
-    /// Rebuilds only the units that can participate in a future cross-boundary match.
-    private func searchBoundaryWindow(
-        needleKeys: [SearchGraphemeKey],
-        endingAt boundary: Int
-    ) -> [SearchProjectionUnit] {
-        let targetCount = max(0, needleKeys.count - 1)
-        guard targetCount > 0, boundary > evictedRowCount else { return [] }
-        let stream = activeProjection()
-        var row = boundary
-        var units: [SearchProjectionUnit] = []
-        while row > evictedRowCount, units.count < targetCount {
-            row -= 1
-            ProjectionRowCounter.record(rows: 1)
-            var rowUnits: [SearchProjectionUnit] = []
-            forEachSearchUnit(
-                in: stream,
-                absoluteRows: row..<(row + 1),
-                lastContentRow: boundary
-            ) { key, start, end in
-                rowUnits.append(SearchProjectionUnit(key: key, start: start, end: end))
-            }
-            units.insert(contentsOf: rowUnits, at: 0)
-        }
-        return Array(units.suffix(targetCount))
     }
 
     /// Streams the painted projection as match keys and anchors without constructing selection
@@ -4528,7 +4679,25 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func searchDistance(from lhs: TextAnchor, to rhs: TextAnchor) -> Int {
-        abs((lhs.row - rhs.row) * columnCount + lhs.column - rhs.column)
+        guard lhs != rhs else { return 0 }
+        let lower = min(lhs, rhs)
+        let upper = max(lhs, rhs)
+        let streamStart = evictedRowCount
+        let streamEnd = evictedRowCount + projectionRowCount
+        let rows = max(streamStart, lower.row)..<min(streamEnd, upper.row + 1)
+        guard rows.isEmpty == false,
+              let lastContentRow = lastProjectedContentRow(in: streamStart..<streamEnd)
+        else { return 0 }
+        var distance = 0
+        forEachSearchUnit(
+            in: activeProjection(),
+            absoluteRows: rows,
+            lastContentRow: lastContentRow
+        ) { _, start, end in
+            guard end > lower, start < upper else { return }
+            distance += start.row == end.row ? end.column - start.column : 1
+        }
+        return distance
     }
 
     private func searchGraphemeKeys(for query: String) -> [SearchGraphemeKey] {
@@ -5402,7 +5571,6 @@ public struct Terminal: Equatable, Sendable {
             appendToScrollback(Array(rebuiltRows[..<viewportStart]))
         }
         enforceScrollbackBudget()
-        rebuildSearchIndex()
         clampViewportAnchorToRetainedStream(previousTopBeforeReflow: viewportTopBeforeReflow)
     }
 

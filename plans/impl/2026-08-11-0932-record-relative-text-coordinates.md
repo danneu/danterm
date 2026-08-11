@@ -243,7 +243,7 @@ an omission.
 ## Commit progress
 
 - [x] 1. Establish width-invariant record projection and stable record coordinates
-- [ ] 2. Index closed-history search matches by record coordinates
+- [x] 2. Index closed-history search matches by record coordinates
 
 ## Implementation notes
 
@@ -256,3 +256,6 @@ an omission.
   If that ordinal space is ever exhausted, the store retires all history and
   advances an epoch before admitting another record, so an old coordinate can
   never resolve to new text.
+- The closed-history index keeps record endpoints unresolved. Ordered reads
+  resolve only the matches they inspect, while nearest-match ties count
+  projected content units instead of width-dependent hard-line padding.

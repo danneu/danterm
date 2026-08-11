@@ -502,6 +502,14 @@ extension Terminal {
 
         var recordCount: Int { offsets.count }
 
+        /// Number of leading records whose content can no longer change.
+        var closedRecordCount: Int {
+            guard offsets.count > 0 else { return 0 }
+            return record(at: offsets[offsets.count - 1]).isOpen
+                ? offsets.count - 1
+                : offsets.count
+        }
+
         /// Number of display rows held by records whose bytes can no longer change.
         var closedPrefixDisplayRowCount: Int {
             guard offsets.count > 0 else { return 0 }
@@ -1402,6 +1410,22 @@ extension Terminal {
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
+        /// Borrows one closed record's content cells for width-free indexing.
+        func forEachRecordCell(
+            at recordIndex: Int,
+            _ body: (_ cellOffset: Int, _ cell: Terminal.GridCell) -> Void
+        ) {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return }
+            let record = self.record(at: offsets[recordIndex])
+            guard record.isOpen == false else { return }
+            for cellOffset in 0..<record.cellCount {
+                body(
+                    cellOffset,
+                    cell(recordIndex: recordIndex, cellOffset: cellOffset)
+                )
+            }
+        }
+
         /// Whether the last logical line is still being printed, which is the store's spelling of
         /// "the last retained display row soft-wraps into the live grid".
         var hasOpenTailRecord: Bool { openTailRecord() != nil }
@@ -1805,6 +1829,30 @@ extension Terminal {
                 record: recordIdentity(in: address),
                 cellOffset: originalOffset
             )
+        }
+
+        /// Returns a retained record's stable identity for index maintenance.
+        func recordIdentity(at recordIndex: Int) -> RecordIdentity? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            return recordIdentity(in: offsets[recordIndex])
+        }
+
+        /// Resolves a stable identity to its current retained sequence position.
+        func recordIndex(of identity: RecordIdentity) -> Int? {
+            var low = 0
+            var high = offsets.count
+            while low < high {
+                let middle = low + (high - low) / 2
+                if recordIdentity(in: offsets[middle]) < identity {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            guard low < offsets.count, recordIdentity(in: offsets[low]) == identity else {
+                return nil
+            }
+            return low
         }
 
         /// Resolves a retained record coordinate under the current width, or nil once retired.
