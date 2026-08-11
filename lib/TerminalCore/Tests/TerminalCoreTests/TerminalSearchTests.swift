@@ -300,31 +300,27 @@ struct TerminalSearchTests {
         #expect(terminal.scrollProjection.topRow == viewportTop)
     }
 
-    @Test("the alternate screen suppresses both search reads")
+    @Test("the alternate screen refuses to begin a search")
     func alternateScreenReportsNoSearch() throws {
-        // Intent: while the alternate screen is active, both `searchStatus` and
-        //   `activeSearchMatchRange` report nothing even though the needle still
-        //   matches retained scrollback.
-        // Why it exists: match anchors are absolute stream rows spanning scrollback,
-        //   but the alternate screen's projection restarts at row 0 -- an unguarded
-        //   read would paint a scrollback match over unrelated alt-screen content at
-        //   the same numeric row. `revealSearchMatchIfNeeded` already carries this
-        //   guard; these reads must agree with it.
+        // Intent: alternate-screen content cannot create search state that outlives the screen.
+        // Why it exists: match anchors are absolute primary-stream rows, while the alternate
+        //   projection restarts at row zero and uses different soft-wrap semantics.
+        // Scenario: an alternate-screen application paints a match, starts search, exits, and
+        //   then ordinary primary output arrives.
         var terminal = try #require(Terminal(columns: 8, rows: 2))
         terminal.feed(Array("hit\r\nzzz\r\nyyy".utf8))
         terminal.feed(Array("\u{1B}[?1049h".utf8))
+        terminal.feed(Array("hit".utf8))
 
-        _ = terminal.beginSearch("hit")
+        let found = terminal.beginSearch("hit")
+        #expect(found == false)
         #expect(terminal.searchStatus == nil)
         #expect(terminal.activeSearchMatchRange == nil)
 
-        // Leaving the alternate screen drops inspection state, so re-run the search to
-        // prove the suppression is a read-time guard rather than a permanent loss.
         terminal.feed(Array("\u{1B}[?1049l".utf8))
-        let found = terminal.beginSearch("hit")
-        #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
-        #expect(terminal.activeSearchMatchRange != nil)
+        terminal.feed(Array("\r\nmore".utf8))
+        #expect(terminal.searchStatus == nil)
+        #expect(terminal.activeSearchMatchRange == nil)
     }
 
     @Test("every search mutation damages the whole viewport")
@@ -486,6 +482,40 @@ struct TerminalSearchTests {
 
             #expect(locates == 1)
         }
+    }
+
+    @Test("building the search index projects history once")
+    func buildingSearchIndexWalksHistoryOnce() throws {
+        // Intent: opening a search and rebuilding it after reflow each walk retained rows once.
+        // Why it exists: separately scanning all matches and immutable-prefix candidates doubled
+        //   the per-keystroke and resize cost at deep scrollback depths.
+        // Scenario: a deep pane opens a search, then changes width while that search remains open.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        for index in 0..<80 {
+            terminal.feed(Array("row\(index)\r\n".utf8))
+        }
+
+        func measuredBuild(_ body: () -> Void) -> (rows: Int, materializations: Int) {
+            var rows = 0
+            let materializations = WholeProjectionCounter.measure {
+                rows = ProjectionRowCounter.measure(body)
+            }
+            return (rows, materializations)
+        }
+
+        let begin = measuredBuild {
+            _ = terminal.beginSearch("row")
+        }
+        let beginRowCount = terminal.scrollProjection.totalRows
+        #expect(begin.materializations == 0)
+        #expect(begin.rows <= beginRowCount + 3)
+
+        let resize = measuredBuild {
+            terminal.resize(columns: 9, rows: 3)
+        }
+        let resizedRowCount = terminal.scrollProjection.totalRows
+        #expect(resize.materializations == 0)
+        #expect(resize.rows <= resizedRowCount + 3)
     }
 
     @Test("prefix advance projects a fixed row count for short and long needles")

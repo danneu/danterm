@@ -3466,6 +3466,7 @@ public struct Terminal: Equatable, Sendable {
     /// distinguish "found nothing" from "not searching".
     @discardableResult
     public mutating func beginSearch(_ query: String) -> Bool {
+        guard isAlternateScreenActive == false else { return false }
         guard query.isEmpty == false else {
             guard search != nil else { return false }
             search = nil
@@ -3474,29 +3475,17 @@ public struct Terminal: Equatable, Sendable {
         }
         let needleKeys = searchGraphemeKeys(for: query)
         let streamRows = evictedRowCount..<(evictedRowCount + projectionRowCount)
-        let matches = searchMatches(needleKeys: needleKeys, intersecting: streamRows)
-        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
-        let prefixBoundary = TextAnchor(row: prefixEnd, column: 0)
-        let prefixCandidates = searchMatches(
-            needleKeys: needleKeys,
-            intersecting: evictedRowCount..<prefixEnd,
-            lastContentRow: prefixEnd
-        ).filter { $0.end <= prefixBoundary }
-        let index = SearchMatchIndex(
-            needleKeys: needleKeys,
-            retainedStartRow: evictedRowCount,
-            prefixEndRow: prefixEnd,
-            boundaryWindow: searchBoundaryWindow(
-                needleKeys: needleKeys,
-                endingAt: prefixEnd
-            ),
-            prefixMatches: Deque(prefixCandidates),
-            confirmedPrefixMatchCount: matches.lazy.filter { $0.end <= prefixBoundary }.count
+        let index = builtSearchMatchIndex(needleKeys: needleKeys)
+        var newSearch = SearchState(
+            query: query,
+            position: TextAnchor(row: streamRows.upperBound, column: 0),
+            index: index
         )
-        let position = matches.last?.start
-            ?? TextAnchor(row: streamRows.upperBound, column: 0)
-        search = SearchState(query: query, position: position, index: index)
-        revealSearchMatchIfNeeded(matches.last)
+        let matches = currentSearchMatches(newSearch)
+        let newestMatch = matches.isEmpty ? nil : matches[matches.count - 1]
+        if let newestMatch { newSearch.position = newestMatch.start }
+        search = newSearch
+        revealSearchMatchIfNeeded(newestMatch)
         recordPresentationFullDamage()
         return matches.isEmpty == false
     }
@@ -4174,16 +4163,23 @@ public struct Terminal: Equatable, Sendable {
         }
         let suffixRows = search.index.prefixEndRow..<streamEndRow
         let suffixLastContentRow = lastProjectedContentRow(in: suffixRows)
-        let suffix = searchMatches(
+        guard let suffixLastContentRow else {
+            return SearchMatchSnapshot(
+                prefix: search.index.prefixMatches,
+                prefixCount: search.index.confirmedPrefixMatchCount,
+                suffix: []
+            )
+        }
+        let suffix = scanSearchUnits(
             needleKeys: search.index.needleKeys,
-            intersecting: suffixRows,
-            lastContentRow: suffixLastContentRow
-        ).filter { $0.end > TextAnchor(row: search.index.prefixEndRow, column: 0) }
+            seededBy: search.index.boundaryWindow,
+            absoluteRows: suffixRows.lowerBound..<(suffixLastContentRow + 1),
+            lastContentRow: suffixLastContentRow,
+            matching: suffixRows
+        ).matches
         return SearchMatchSnapshot(
             prefix: search.index.prefixMatches,
-            prefixCount: suffixLastContentRow == nil
-                ? search.index.confirmedPrefixMatchCount
-                : search.index.prefixMatches.count,
+            prefixCount: search.index.prefixMatches.count,
             suffix: suffix
         )
     }
@@ -4313,27 +4309,37 @@ public struct Terminal: Equatable, Sendable {
     /// Rebuilds the index after width reflow changes every display-row coordinate.
     private mutating func rebuildSearchIndex() {
         guard var search else { return }
-        let streamRows = evictedRowCount..<(evictedRowCount + projectionRowCount)
-        let matches = searchMatches(
-            needleKeys: search.index.needleKeys,
-            intersecting: streamRows
-        )
-        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
-        let boundary = TextAnchor(row: prefixEnd, column: 0)
-        let prefixCandidates = searchMatches(
-            needleKeys: search.index.needleKeys,
-            intersecting: evictedRowCount..<prefixEnd,
-            lastContentRow: prefixEnd
-        ).filter { $0.end <= boundary }
-        search.index.prefixEndRow = prefixEnd
-        search.index.retainedStartRow = evictedRowCount
-        search.index.boundaryWindow = searchBoundaryWindow(
-            needleKeys: search.index.needleKeys,
-            endingAt: prefixEnd
-        )
-        search.index.prefixMatches = Deque(prefixCandidates)
-        search.index.confirmedPrefixMatchCount = matches.lazy.filter { $0.end <= boundary }.count
+        search.index = builtSearchMatchIndex(needleKeys: search.index.needleKeys)
         self.search = search
+    }
+
+    private func builtSearchMatchIndex(
+        needleKeys: [SearchGraphemeKey]
+    ) -> SearchMatchIndex {
+        let retainedStart = evictedRowCount
+        let prefixEnd = evictedRowCount + history.closedPrefixDisplayRowCount
+        let prefixScan = scanSearchUnits(
+            needleKeys: needleKeys,
+            seededBy: [],
+            absoluteRows: retainedStart..<prefixEnd,
+            lastContentRow: prefixEnd,
+            matching: retainedStart..<prefixEnd
+        )
+        let prefixMatches = Deque(prefixScan.matches)
+        let streamEnd = evictedRowCount + projectionRowCount
+        let confirmedPrefixMatchCount = lastProjectedContentRow(
+            in: retainedStart..<streamEnd
+        ).map {
+            prefixMatchCount(in: prefixMatches, throughContentRow: $0)
+        } ?? 0
+        return SearchMatchIndex(
+            needleKeys: needleKeys,
+            retainedStartRow: retainedStart,
+            prefixEndRow: prefixEnd,
+            boundaryWindow: prefixScan.trailingUnits,
+            prefixMatches: prefixMatches,
+            confirmedPrefixMatchCount: confirmedPrefixMatchCount
+        )
     }
 
     /// Scans only enough surrounding rows to decide which matches intersect `absoluteRows`.

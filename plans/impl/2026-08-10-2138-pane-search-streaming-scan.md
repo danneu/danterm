@@ -340,7 +340,7 @@ folding and re-projecting.
 - [x] 2. Stream the row scan without materializing units or allocating per cell
 - [x] 3. Advance the prefix from a carried boundary window instead of re-reading context
 - [x] 4. Reduce eviction and truncation to arithmetic on the sorted match sequence
-- [ ] 5. Build the index from a single walk of history
+- [x] 5. Build the index from a single walk of history
 - [ ] 6. Measure the per-row damage widening; if it is not small, drop its
       per-call `Set` allocation and sort, keeping the I9 radius intact
 

@@ -515,7 +515,7 @@ struct TerminalSelectionTests {
             to: TerminalTextPosition(row: terminal.scrollbackRowCount, column: 0)
         )
         let found = terminal.beginSearch(query)
-        #expect(found)
+        #expect(found == (terminal.isAlternateScreenActive == false))
     }
 
     private func cellKind(
