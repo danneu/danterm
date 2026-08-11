@@ -13,7 +13,7 @@ struct PaneLifecycleReducerTests {
             .integrationReady,
             .commandStarted("claude"),
             .agentAttached(session),
-            .remoteDetected,
+            .connectionDeclared(.remote(identity: nil)),
             .agentActivityChanged(session: session, activity: .waiting),
             .commandEnded(exitStatus: 0),
         ] {
@@ -68,7 +68,7 @@ struct PaneLifecycleReducerTests {
         let state = reduce([
             .integrationReady,
             .commandStarted("make test"),
-            .remoteIdentityReported(remote),
+            .connectionDeclared(.remote(identity: remote)),
             .agentAttached(session),
             .agentActivityChanged(session: session, activity: .waiting),
             .commandEnded(exitStatus: 1),
@@ -80,59 +80,33 @@ struct PaneLifecycleReducerTests {
         #expect(state.agent == .attached(session: session, activity: .waiting))
     }
 
-    @Test("remote detection preserves a reported identity")
-    func remoteDetectionPreservesIdentity() {
+    @Test("connection declarations assign the whole state and identical reports are steady")
+    func connectionDeclarationsAreAssignments() {
         let remote = RemoteSession(user: "dan", host: "caja")
-        let state = reduce([
-            .remoteIdentityReported(remote),
-            .remoteDetected,
+        var state = reduce([
+            .connectionDeclared(.remote(identity: remote)),
+            .connectionDeclared(.remote(identity: nil)),
         ])
-
-        #expect(state.connection == .remote(identity: remote))
-    }
-
-    @Test("remote without identity is steady and upgrades in place")
-    func identitylessRemoteUpgradesInPlace() {
-        let remote = RemoteSession(user: "dan", host: "caja")
-        var state = reduce([.remoteDetected, .remoteDetected])
 
         #expect(state.connection == .remote(identity: nil))
+        let beforeRepeatedDeclaration = state
+        reduceSession(&state, report: .connectionDeclared(.remote(identity: nil)))
+        #expect(state == beforeRepeatedDeclaration)
 
-        reduceSession(&state, report: .remoteIdentityReported(remote))
-
-        #expect(state.connection == .remote(identity: remote))
-    }
-
-    @Test("nested remote reports restore the enclosing identity")
-    func nestedRemoteReportsRestoreEnclosingIdentity() {
-        let outer = RemoteSession(user: "dan", host: "outer")
-        let inner = RemoteSession(user: "root", host: "inner")
-        var state = reduce([
-            .remoteDetected,
-            .remoteIdentityReported(outer),
-            .remoteDetected,
-            .remoteIdentityReported(inner),
-            .connectionEnded,
-            .remoteIdentityReported(outer),
-        ])
-
-        #expect(state.connection == .remote(identity: outer))
-
-        reduceSession(&state, report: .connectionEnded)
-        reduceSession(&state, report: .connectionEnded)
+        reduceSession(&state, report: .connectionDeclared(.local))
 
         #expect(state.connection == .local)
     }
 
-    @Test("nested identityless remote returns through the enclosing report")
-    func nestedIdentitylessRemoteReturnsThroughEnclosingReport() {
+    @Test("nested connection return restores the enclosing declaration without a stack")
+    func nestedConnectionReturnRestoresEnclosingDeclaration() {
         let outer = RemoteSession(user: "dan", host: "outer")
+        let inner = RemoteSession(user: "root", host: "inner")
         let state = reduce([
-            .remoteDetected,
-            .remoteIdentityReported(outer),
-            .remoteDetected,
-            .connectionEnded,
-            .remoteIdentityReported(outer),
+            .connectionDeclared(.remote(identity: outer)),
+            .connectionDeclared(.remote(identity: nil)),
+            .connectionDeclared(.remote(identity: inner)),
+            .connectionDeclared(.remote(identity: outer)),
         ])
 
         #expect(state.connection == .remote(identity: outer))

@@ -39,7 +39,7 @@ command_text='printf "hola 世界; $HOME"'
 encoded_command="$(printf '%s' "$command_text" | base64 | tr -d '\n')"
 encoded_user="$(printf '%s' 'user name' | base64 | tr -d '\n')"
 encoded_host="$(printf '%s' 'host.example' | base64 | tr -d '\n')"
-prefix="$(printf '\033]1337;DanTermShell=2;')"
+prefix="$(printf '\033]1337;DanTermShell=3;')"
 terminator=$'\033\\'
 
 for asset in danterm.zsh danterm.bash danterm.fish vendor/bash-preexec.sh vendor/bash-preexec.LICENSE vendor/bash-preexec.PROVENANCE; do
@@ -117,7 +117,7 @@ for shell in zsh bash fish; do
     test "$local_output" = "$integration_dir" || fail "$shell hook changed or lost the advertised directory"
     test -z "$inert_output" || fail "$shell hook was not inert outside DanTerm"
     assert_contains "$broken_output" "DanTerm shell integration is unreadable: $missing_integration/danterm.$shell"
-    # Substring, not equality: a genuinely remote shell emits its `remote-host`
+    # Substring, not equality: a genuinely remote shell emits its `connection`
     # identity at source time, so that OSC legitimately precedes the marker. The
     # emission itself is asserted by the nested-ssh block at the end of the file;
     # here the only claim is that the packaged asset got sourced.
@@ -222,9 +222,9 @@ zsh_output="$(DANTERM=1 zsh -f -c '
     [[ ${DANTERM:-} == 1 ]] || exit 31
     danterm_emit_command_start "$2"
     danterm_emit_command_end 17
-    danterm_emit_remote_start
-    danterm_emit_remote_host "user name" host.example
-    danterm_emit_connection_end
+    danterm_emit_connection_local
+    danterm_emit_connection_remote
+    danterm_emit_connection_remote_identity "user name" host.example
 ' _ "$integration_dir" "$command_text")"
 
 bash_output="$(DANTERM=1 bash --noprofile --norc -c '
@@ -238,9 +238,9 @@ bash_output="$(DANTERM=1 bash --noprofile --norc -c '
     [[ $(trap -p DEBUG) == *":"* ]] || exit 33
     danterm_emit_command_start "$2"
     danterm_emit_command_end 17
-    danterm_emit_remote_start
-    danterm_emit_remote_host "user name" host.example
-    danterm_emit_connection_end
+    danterm_emit_connection_local
+    danterm_emit_connection_remote
+    danterm_emit_connection_remote_identity "user name" host.example
 ' _ "$integration_dir" "$command_text")"
 
 fish_output="$(env DANTERM=1 fish --no-config -c '
@@ -249,12 +249,12 @@ fish_output="$(env DANTERM=1 fish --no-config -c '
     test "$DANTERM" = 1; or exit 31
     danterm_emit_command_start $argv[2]
     danterm_emit_command_end 17
-    danterm_emit_remote_start
-    danterm_emit_remote_host "user name" host.example
-    danterm_emit_connection_end
+    danterm_emit_connection_local
+    danterm_emit_connection_remote
+    danterm_emit_connection_remote_identity "user name" host.example
 ' "$integration_dir" "$command_text")"
 
-expected="$prefix""integration-ready$terminator$prefix""command-start;$encoded_command$terminator$prefix""command-end;17$terminator$prefix""remote-start$terminator$prefix""remote-host;$encoded_user;$encoded_host$terminator$prefix""connection-end$terminator"
+expected="$prefix""integration-ready$terminator$prefix""command-start;$encoded_command$terminator$prefix""command-end;17$terminator$prefix""connection;local$terminator$prefix""connection;remote$terminator$prefix""connection;remote;$encoded_user;$encoded_host$terminator"
 test "$zsh_output" = "$expected" || fail "zsh protocol differs"
 test "$bash_output" = "$expected" || fail "bash protocol differs"
 test "$fish_output" = "$expected" || fail "fish protocol differs"
@@ -309,6 +309,7 @@ osc133_c="$(printf '\033]133;C\007')"
 for hook_output in "$zsh_hooks" "$bash_hooks" "$fish_hooks"; do
     assert_contains "$hook_output" "$prefix""command-start;$encoded_command$terminator"
     assert_contains "$hook_output" "$prefix""command-end;23$terminator"
+    assert_contains "$hook_output" "$prefix""connection;local$terminator"
     assert_contains "$hook_output" "$(printf '\033]7;file://')"
 done
 # zsh and Bash emit OSC 133 `C` themselves, immediately after the private
@@ -428,10 +429,13 @@ precedence_output="$(env DANTERM=1 LC_DANTERM=1 zsh -f -c '
 test "$precedence_output" = "$prefix""integration-ready$terminator$prefix""command-end;0$terminator" || fail "local marker did not take precedence"
 
 fake_bin="$(mktemp -d)"
-trap 'rm -rf "$fake_bin"' EXIT
+interrupt_bin="$(mktemp -d)"
+trap 'rm -rf "$fake_bin" "$interrupt_bin"' EXIT
 printf '#!/bin/sh\nprintf "SSH_ARGS=<%%s>\\n" "$*"\nexit 23\n' > "$fake_bin/ssh"
 printf '#!/bin/sh\nprintf "MOSH_ARGS=<%%s>\\n" "$*"\nexit 29\n' > "$fake_bin/mosh"
 chmod +x "$fake_bin/ssh" "$fake_bin/mosh"
+printf '#!/bin/sh\ntrap "exit 130" INT\nprintf "DANTERM_FAKE_SSH_READY\\n"\nwhile :; do read -r line; done\n' > "$interrupt_bin/ssh"
+chmod +x "$interrupt_bin/ssh"
 zsh_wrapper_output="$(PATH="$fake_bin:$PATH" DANTERM=1 zsh -f -c '
     source "$1/danterm.zsh"
     ssh -o SendEnv=EXISTING "host name"
@@ -454,12 +458,82 @@ fish_wrapper_output="$(PATH="$fake_bin:$PATH" env DANTERM=1 fish --no-config -c 
     printf "MOSH_STATUS=<%s>\n" $status
 ' "$integration_dir")"
 for wrapper_output in "$zsh_wrapper_output" "$bash_wrapper_output" "$fish_wrapper_output"; do
-    assert_contains "$wrapper_output" "$prefix""remote-start$terminator"
-    assert_contains "$wrapper_output" "$prefix""connection-end$terminator"
+    assert_contains "$wrapper_output" "$prefix""connection;remote$terminator"
+    assert_not_contains "$wrapper_output" "$prefix""connection;local$terminator"
     assert_contains "$wrapper_output" "SSH_ARGS=<-o SendEnv=LC_DANTERM -o SendEnv=EXISTING host name>"
     assert_contains "$wrapper_output" "MOSH_ARGS=<--server=mosh server example>"
     assert_contains "$wrapper_output" "SSH_STATUS=<23>"
     assert_contains "$wrapper_output" "MOSH_STATUS=<29>"
+    case "$wrapper_output" in
+        *"$prefix""connection;remote$terminator"*"SSH_ARGS=<"*) ;;
+        *) fail "wrapper did not declare remote before launching ssh" ;;
+    esac
+done
+
+zsh_subshell_output="$(PATH="$fake_bin:$PATH" DANTERM=1 zsh -f -c '
+    source "$1/danterm.zsh"
+    (ssh example)
+    _danterm_precmd
+' _ "$integration_dir")"
+bash_subshell_output="$(PATH="$fake_bin:$PATH" DANTERM=1 bash --noprofile --norc -c '
+    source "$1/danterm.bash"
+    (ssh example)
+    _danterm_precmd
+' _ "$integration_dir")"
+fish_pipeline_output="$(PATH="$fake_bin:$PATH" env DANTERM=1 fish --no-config -c '
+    source $argv[1]/danterm.fish
+    ssh example | string collect
+    emit fish_prompt
+' "$integration_dir")"
+for stranded_output in "$zsh_subshell_output" "$bash_subshell_output" "$fish_pipeline_output"; do
+    assert_contains "$stranded_output" "$prefix""connection;remote$terminator"
+    assert_contains "$stranded_output" "$prefix""connection;local$terminator"
+done
+
+for shell in zsh bash fish; do
+    SHELL_UNDER_TEST="$shell" INTEGRATION_DIR="$integration_dir" INTERRUPT_BIN="$interrupt_bin" expect <<'EXPECT' || fail "$shell interrupted ssh did not return to local at its prompt"
+set timeout 15
+set shell $env(SHELL_UNDER_TEST)
+set integration $env(INTEGRATION_DIR)
+set interrupt_bin $env(INTERRUPT_BIN)
+set local "\033]1337;DanTermShell=3;connection;local\033\\"
+set prompt "DANTERM_CONNECTION_PROMPT> "
+
+proc fail_expect {label reason} {
+    puts stderr "shell-integration test failed: $::shell $label: $reason"
+    exit 1
+}
+
+proc expect_exact {label pattern} {
+    expect {
+        -exact $pattern { return }
+        timeout { fail_expect $label "timed out waiting for declaration" }
+        eof { fail_expect $label "shell exited before declaration" }
+    }
+}
+
+if {$shell eq "zsh"} {
+    spawn env PATH=$interrupt_bin:$env(PATH) DANTERM=1 PROMPT=$prompt zsh -f
+    expect_exact "first prompt" $prompt
+    send -- "source $integration/danterm.zsh\r"
+} elseif {$shell eq "bash"} {
+    spawn env PATH=$interrupt_bin:$env(PATH) DANTERM=1 PS1=$prompt bash --noprofile --norc
+    expect_exact "first prompt" $prompt
+    send -- "source $integration/danterm.bash\r"
+} else {
+    spawn env PATH=$interrupt_bin:$env(PATH) DANTERM=1 fish_features=no-query-term fish_greeting= fish --no-config --init-command "function fish_prompt; printf '$prompt'; end"
+    expect_exact "first prompt" $prompt
+    send -- "source $integration/danterm.fish\r"
+}
+expect_exact "prompt after source" $prompt
+send -- "ssh example\r"
+expect_exact "fake ssh readiness" "DANTERM_FAKE_SSH_READY"
+send -- "\003"
+expect_exact "prompt declaration after interrupt" $local
+expect_exact "prompt after interrupt" $prompt
+send -- "exit\r"
+expect eof
+EXPECT
 done
 
 for shell in zsh bash; do
@@ -478,10 +552,10 @@ for shell in zsh bash; do
         ' _ "$integration_dir")" || errexit_status=$?
     fi
     test "$errexit_status" = 23 || fail "$shell ssh wrapper changed the command status under errexit"
-    assert_contains "$errexit_output" "$prefix""connection-end$terminator"
+    assert_contains "$errexit_output" "$prefix""connection;remote$terminator"
 done
 
-tmux_prefix="$(printf '\033Ptmux;\033\033]1337;DanTermShell=2;')"
+tmux_prefix="$(printf '\033Ptmux;\033\033]1337;DanTermShell=3;')"
 tmux_terminator="$(printf '\033\033\\\033\\')"
 for shell in zsh bash fish; do
     case "$shell" in
@@ -507,16 +581,17 @@ remote_output="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 USER='user n
     (exit 1)
     _danterm_precmd
     ssh nested
-    printf "STATUS=<%s>" "$?"
+    nested_status=$?
+    _danterm_precmd
+    printf "STATUS=<%s>" "$nested_status"
 ' _ "$integration_dir")"
 outer_user="$(printf '%s' 'user name' | base64 | tr -d '\n')"
 outer_host="$(printf '%s' "$remote_host" | base64 | tr -d '\n')"
-outer_event="$prefix""remote-host;$outer_user;$outer_host$terminator"
-outer_pop="$prefix""connection-end$terminator$outer_event"
-assert_contains "$remote_output" "$prefix""command-end;1$terminator$outer_event$prefix""remote-start$terminator"
+outer_event="$prefix""connection;remote;$outer_user;$outer_host$terminator"
+assert_contains "$remote_output" "$prefix""command-end;1$terminator$outer_event$prefix""connection;remote$terminator"
 assert_not_contains "$remote_output" "$(printf '\033]7;')"
 case "$remote_output" in
-    *"$outer_event"*"SSH_ARGS=<"*"$outer_pop"*"STATUS=<23>") ;;
+    *"$outer_event"*"SSH_ARGS=<"*"$outer_event"*"STATUS=<23>") ;;
     *) fail "nested ssh did not restore outer host" ;;
 esac
 
@@ -529,7 +604,9 @@ for remote_shell in bash fish; do
             (exit 1)
             _danterm_precmd
             ssh nested
-            printf "STATUS=<%s>" "$?"
+            nested_status=$?
+            _danterm_precmd
+            printf "STATUS=<%s>" "$nested_status"
         ' _ "$integration_dir")"
     else
         remote_case="$(PATH="$fake_bin:$PATH" env -u DANTERM LC_DANTERM=1 fish --no-config -c '
@@ -539,15 +616,17 @@ for remote_shell in bash fish; do
             emit fish_postexec 0
             emit fish_prompt
             ssh nested
-            printf "STATUS=<%s>" $status
+            set nested_status $status
+            emit fish_prompt
+            printf "STATUS=<%s>" $nested_status
         ' "$integration_dir")"
     fi
     case "$remote_case" in
-        *"remote-host;"*"remote-start"*"SSH_ARGS=<"*"connection-end"*"remote-host;"*"STATUS=<23>"*) ;;
+        *"connection;remote;"*"connection;remote"*"SSH_ARGS=<"*"connection;remote;"*"STATUS=<23>"*) ;;
         *) fail "$remote_shell nested ssh did not restore outer host" ;;
     esac
     case "$remote_case" in
-        *"command-end;"*"remote-host;"*) ;;
+        *"command-end;"*"connection;remote;"*) ;;
         *) fail "$remote_shell prompt did not restore its remote host" ;;
     esac
     assert_not_contains "$remote_case" "$(printf '\033]7;')"

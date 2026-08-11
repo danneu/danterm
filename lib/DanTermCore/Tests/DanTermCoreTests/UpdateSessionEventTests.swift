@@ -165,8 +165,8 @@ import Testing
     @Test("reconcileDecision coalesces only eligible high-frequency messages")
     func reconcileDecisionCoalescesOnlyEligibleMessages() throws {
         // Intent: high-frequency split-ratio, search-count, background alert,
-        //   and command-event messages classify as coalesce-eligible while
-        //   post-reconcile commands still force inline.
+        //   command-event, and connection-declaration messages classify as
+        //   coalesce-eligible while post-reconcile commands still force inline.
         // Why it exists: pins reconcile coalescing policy against regressions in
         //   message classification, pending-state handling, and post-reconcile
         //   command forcing.
@@ -194,6 +194,10 @@ import Testing
             .sessionReport(sessionId: sessionId, report: .commandEnded(exitStatus: 0)),
             .sessionReport(
                 sessionId: sessionId,
+                report: .connectionDeclared(.remote(identity: nil))
+            ),
+            .sessionReport(
+                sessionId: sessionId,
                 report: .agentActivityChanged(session: agent, activity: .waiting)
             ),
         ]
@@ -217,13 +221,27 @@ import Testing
             )
         }
 
+        let commandEnd = Msg.sessionReport(
+            sessionId: sessionId,
+            report: .commandEnded(exitStatus: 130)
+        )
+        let promptDeclaration = Msg.sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.local)
+        )
+        #expect(reconcileDecision(
+            for: commandEnd,
+            coalescedSweepPending: false,
+            emitsPostReconcile: false
+        ) == .scheduleCoalesced)
+        #expect(reconcileDecision(
+            for: promptDeclaration,
+            coalescedSweepPending: true,
+            emitsPostReconcile: false
+        ) == .coalesceIntoPending)
+
         let inlineMessages: [Msg] = [
             .sessionReport(sessionId: sessionId, report: .integrationReady),
-            .sessionReport(sessionId: sessionId, report: .remoteDetected),
-            .sessionReport(sessionId: sessionId, report: .remoteIdentityReported(
-                RemoteSession(user: "dan", host: "caja")
-            )),
-            .sessionReport(sessionId: sessionId, report: .connectionEnded),
             .sessionReport(sessionId: sessionId, report: .agentAttached(agent)),
             .sessionReport(sessionId: sessionId, report: .agentDetached(agent)),
             .preferencesOpened(),
@@ -280,6 +298,10 @@ import Testing
             (.sessionReport(
                 sessionId: unfocusedSessionId,
                 report: .commandEnded(exitStatus: 0)
+            ), unfocusedModel),
+            (.sessionReport(
+                sessionId: unfocusedSessionId,
+                report: .connectionDeclared(.remote(identity: nil))
             ), unfocusedModel)
         ]
 

@@ -5,6 +5,18 @@ import Testing
 
 @Suite("Terminal shell events")
 struct TerminalShellEventTests {
+    @Test("v3 connection declarations replace every v2 connection event")
+    func connectionDeclarationVersionBoundary() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=3;connection;local\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=2;remote-start\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=2;remote-host;ZGFu;Y2FqYQ==\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=2;connection-end\u{7}".utf8))
+
+        #expect(terminal.drainSemanticEvents().count == 1)
+    }
+
     @Test("all native shell events decode without changing the title")
     func typedEventsAndTitleIsolation() throws {
         var terminal = try #require(Terminal(columns: 20, rows: 2))
@@ -13,12 +25,12 @@ struct TerminalShellEventTests {
         let host = Data("caja".utf8).base64EncodedString()
         terminal.feed(Array((
             "\u{1B}]2;editor\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;integration-ready\u{1B}\\"
-                + "\u{1B}]1337;DanTermShell=2;command-start;\(command)\u{1B}\\"
-                + "\u{1B}]1337;DanTermShell=2;command-end;17\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;remote-start\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;remote-host;\(user);\(host)\u{1B}\\"
-                + "\u{1B}]1337;DanTermShell=2;connection-end\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=3;integration-ready\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=3;command-start;\(command)\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=3;command-end;17\u{7}"
+                + "\u{1B}]1337;DanTermShell=3;connection;remote\u{7}"
+                + "\u{1B}]1337;DanTermShell=3;connection;remote;\(user);\(host)\u{1B}\\"
+                + "\u{1B}]1337;DanTermShell=3;connection;local\u{1B}\\"
         ).utf8))
 
         #expect(terminal.drainSemanticEvents() == [
@@ -26,9 +38,9 @@ struct TerminalShellEventTests {
             .integrationReady,
             .commandStarted("printf 'hola'"),
             .commandEnded(exitStatus: 17),
-            .remoteStarted,
-            .remoteHost(user: "dan", host: "caja"),
-            .connectionEnded,
+            .connectionDeclared(.remote(identity: nil)),
+            .connectionDeclared(.remote(identity: TerminalRemoteIdentity(user: "dan", host: "caja"))),
+            .connectionDeclared(.local),
         ])
     }
 
@@ -37,7 +49,7 @@ struct TerminalShellEventTests {
         let command = Data("printf before\0after".utf8).base64EncodedString()
         var terminal = try #require(Terminal(columns: 20, rows: 2))
 
-        terminal.feed(Array("\u{1B}]1337;DanTermShell=2;command-start;\(command)\u{1B}\\".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=3;command-start;\(command)\u{1B}\\".utf8))
 
         #expect(terminal.drainSemanticEvents().isEmpty)
     }
@@ -49,8 +61,9 @@ struct TerminalShellEventTests {
         terminal.feed(Array((
             "\u{1B}]1337;Wrong=2;command-end;0\u{7}"
                 + "\u{1B}]1337;DanTermShell=1;command-end;0\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;command-start;abcd===\u{7}"
-                + "\u{1B}]1337;DanTermShell=2;command-start;\(valid)\u{7}"
+                + "\u{1B}]1337;DanTermShell=2;connection;local\u{7}"
+                + "\u{1B}]1337;DanTermShell=3;command-start;abcd===\u{7}"
+                + "\u{1B}]1337;DanTermShell=3;command-start;\(valid)\u{7}"
         ).utf8))
 
         #expect(terminal.drainSemanticEvents() == [.commandStarted("echo ok")])
@@ -60,7 +73,7 @@ struct TerminalShellEventTests {
     func everyByteSplit() throws {
         let encoded = Data("echo español".utf8).base64EncodedString()
         let bytes = Array(
-            "\u{1B}]1337;DanTermShell=2;command-start;\(encoded)\u{1B}\\".utf8
+            "\u{1B}]1337;DanTermShell=3;command-start;\(encoded)\u{1B}\\".utf8
         )
 
         for split in 0...bytes.count {
@@ -98,19 +111,22 @@ struct TerminalShellEventTests {
 
         terminal.feed(shellEvent("command-start", fields: [encode(exactCommand)]))
         terminal.feed(shellEvent("command-start", fields: [encode(oversizedCommand)]))
-        terminal.feed(shellEvent("remote-host", fields: [encode(exactUser), encode(exactHost)]))
-        terminal.feed(shellEvent("remote-host", fields: [encode(exactUser), encode(oversizedHost)]))
+        terminal.feed(shellEvent("connection", fields: ["remote", encode(exactUser), encode(exactHost)]))
+        terminal.feed(shellEvent("connection", fields: ["remote", encode(exactUser), encode(oversizedHost)]))
 
         #expect(terminal.drainSemanticEvents() == [
             .commandStarted(exactCommand),
-            .remoteHost(user: exactUser, host: exactHost),
+            .connectionDeclared(.remote(identity: TerminalRemoteIdentity(
+                user: exactUser,
+                host: exactHost
+            ))),
         ])
     }
 
     @Test("encoded OSC content accepts the 88 KiB boundary and recovers after overflow")
     func encodedLimitAndRecovery() throws {
         var terminal = try #require(Terminal(columns: 20, rows: 2))
-        let prefix = "1337;DanTermShell=2;unknown;"
+        let prefix = "1337;DanTermShell=3;unknown;"
         let exactPayload = prefix + String(
             repeating: "x",
             count: Terminal.maximumShellOSCBytes - prefix.utf8.count
@@ -129,23 +145,25 @@ struct TerminalShellEventTests {
         let invalidUTF8 = Data([0xFF]).base64EncodedString()
         let empty = Data().base64EncodedString()
         let malformedEvents = [
-            "\u{1B}]1337;DanTermShell=2\u{7}",
-            "\u{1B}]1337;DanTermShell=2;unknown\u{7}",
-            "\u{1B}]1337;DanTermShell=2;integration-ready;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start;\(empty);extra\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-end\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-end;00\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-end;256\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-end;-1\u{7}",
-            "\u{1B}]1337;DanTermShell=2;remote-start;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=2;remote-host;ZGFu\u{7}",
-            "\u{1B}]1337;DanTermShell=2;remote-host;ZGFu;Y2FqYQ==;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=2;connection-end;extra\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start;\(invalidUTF8)\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start;\(empty)\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start;ZGE\u{7}",
-            "\u{1B}]1337;DanTermShell=2;command-start; ZGFu\u{7}",
+            "\u{1B}]1337;DanTermShell=3\u{7}",
+            "\u{1B}]1337;DanTermShell=3;unknown\u{7}",
+            "\u{1B}]1337;DanTermShell=3;integration-ready;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start;\(empty);extra\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-end\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-end;00\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-end;256\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-end;-1\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection;unknown\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection;local;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection;remote;ZGFu\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection;remote;ZGFu;Y2FqYQ==;extra\u{7}",
+            "\u{1B}]1337;DanTermShell=3;connection;remote;ZGE;Y2FqYQ==\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start;\(invalidUTF8)\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start;\(empty)\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start;ZGE\u{7}",
+            "\u{1B}]1337;DanTermShell=3;command-start; ZGFu\u{7}",
         ]
         var terminal = try #require(Terminal(columns: 20, rows: 2))
 
@@ -177,7 +195,7 @@ struct TerminalShellEventTests {
 
 private func shellEvent(_ event: String, fields: [String] = []) -> [UInt8] {
     let suffix = fields.isEmpty ? "" : ";" + fields.joined(separator: ";")
-    return Array("\u{1B}]1337;DanTermShell=2;\(event)\(suffix)\u{1B}\\".utf8)
+    return Array("\u{1B}]1337;DanTermShell=3;\(event)\(suffix)\u{1B}\\".utf8)
 }
 
 private func encode(_ value: String) -> String {

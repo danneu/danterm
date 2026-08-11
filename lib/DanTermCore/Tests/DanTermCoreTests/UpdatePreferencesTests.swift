@@ -602,7 +602,10 @@ private func openPrefs(
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
-        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.remote(identity: nil))
+        ))
         let paneBefore = model.pane(paneId)
 
         _ = openPrefs(&model)

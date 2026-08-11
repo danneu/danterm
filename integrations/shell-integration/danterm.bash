@@ -38,18 +38,18 @@ danterm_base64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 danterm_emit() {
     [[ -n $_danterm_enabled ]] || return 0
     if [[ -n ${TMUX:-} ]]; then
-        printf '\033Ptmux;\033\033]1337;DanTermShell=2;%s\033\033\\\033\\' "$1"
+        printf '\033Ptmux;\033\033]1337;DanTermShell=3;%s\033\033\\\033\\' "$1"
     else
-        printf '\033]1337;DanTermShell=2;%s%s' "$1" "$_danterm_st"
+        printf '\033]1337;DanTermShell=3;%s%s' "$1" "$_danterm_st"
     fi
 }
 danterm_emit_integration_ready() { danterm_emit integration-ready; }
 danterm_emit_command_start() { danterm_emit "command-start;$(danterm_base64 "$1")"; }
 danterm_emit_command_end() { danterm_emit "command-end;$1"; }
-danterm_emit_remote_start() { danterm_emit remote-start; }
-danterm_emit_connection_end() { danterm_emit connection-end; }
-danterm_emit_remote_host() {
-    danterm_emit "remote-host;$(danterm_base64 "$1");$(danterm_base64 "$2")"
+danterm_emit_connection_local() { danterm_emit "connection;local"; }
+danterm_emit_connection_remote() { danterm_emit "connection;remote"; }
+danterm_emit_connection_remote_identity() {
+    danterm_emit "connection;remote;$(danterm_base64 "$1");$(danterm_base64 "$2")"
 }
 danterm_emit_cwd() {
     [[ -n $_danterm_enabled ]] || return 0
@@ -168,8 +168,9 @@ _danterm_precmd() {
         unset _danterm_command_active
     fi
     if [[ -n ${_danterm_remote_user:-} ]]; then
-        danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
+        danterm_emit_connection_remote_identity "$_danterm_remote_user" "$_danterm_remote_host"
     else
+        danterm_emit_connection_local
         danterm_emit_cwd
     fi
 }
@@ -181,24 +182,12 @@ precmd_functions+=( _danterm_precmd )
 _danterm_prompt_retail
 
 danterm_ssh() {
-    danterm_emit_remote_start
-    local _danterm_exit_status=0
-    LC_DANTERM=1 command ssh -o SendEnv=LC_DANTERM "$@" || _danterm_exit_status=$?
-    danterm_emit_connection_end
-    if [[ -n ${_danterm_remote_user:-} ]]; then
-        danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
-    fi
-    return "$_danterm_exit_status"
+    danterm_emit_connection_remote
+    LC_DANTERM=1 command ssh -o SendEnv=LC_DANTERM "$@"
 }
 danterm_mosh() {
-    danterm_emit_remote_start
-    local _danterm_exit_status=0
-    LC_DANTERM=1 command mosh "$@" || _danterm_exit_status=$?
-    danterm_emit_connection_end
-    if [[ -n ${_danterm_remote_user:-} ]]; then
-        danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
-    fi
-    return "$_danterm_exit_status"
+    danterm_emit_connection_remote
+    LC_DANTERM=1 command mosh "$@"
 }
 ssh() { danterm_ssh "$@"; }
 mosh() { danterm_mosh "$@"; }
@@ -207,5 +196,5 @@ danterm_emit_integration_ready
 if [[ -n $_danterm_enabled && -n $_danterm_is_remote ]]; then
     _danterm_remote_user=${USER:-unknown}
     _danterm_remote_host=${HOSTNAME:-unknown}
-    danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
+    danterm_emit_connection_remote_identity "$_danterm_remote_user" "$_danterm_remote_host"
 fi

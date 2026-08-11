@@ -227,9 +227,10 @@ private enum TerminalWorkflowRunner {
         case .integrationReady: "integration-ready"
         case .commandStarted(let value): "command-start=\(value)"
         case .commandEnded(let exitStatus): "command-end=\(exitStatus)"
-        case .remoteStarted: "remote-start"
-        case .remoteHost(let user, let host): "remote-host=\(user)@\(host)"
-        case .connectionEnded: "connection-end"
+        case .connectionDeclared(.local): "connection=local"
+        case .connectionDeclared(.remote(identity: nil)): "connection=remote"
+        case .connectionDeclared(.remote(identity: let identity?)):
+            "connection=remote:\(identity.user)@\(identity.host)"
         case let .desktopNotification(title, body): "notification=\(title):\(body)"
         case .progress(let state): "progress=\(String(describing: state))"
         }
@@ -247,9 +248,11 @@ private enum TerminalWorkflowRunner {
             else { throw RunnerError.missingSemantics(workflow) }
         }
         if workflow == "ssh" {
-            guard events.contains(.remoteStarted),
-                  events.contains(where: { if case .remoteHost = $0 { true } else { false } }),
-                  events.contains(.connectionEnded)
+            guard events.contains(.connectionDeclared(.remote(identity: nil))),
+                  events.contains(where: {
+                      if case .connectionDeclared(.remote(identity: .some)) = $0 { true } else { false }
+                  }),
+                  events.contains(.connectionDeclared(.local))
             else { throw RunnerError.missingSemantics(workflow) }
         }
     }
@@ -285,6 +288,8 @@ private enum TerminalWorkflowRunner {
         let integration = (ProcessInfo.processInfo.environment["DANTERM_REPO_ROOT"] ?? "") + "/integrations/shell-integration/danterm.zsh"
         let sshConfigArgument = shellQuote(sshConfig)
         let integrationArgument = shellQuote(integration)
+        let remoteSSHCommand = shellQuote("source \(integrationArgument); printf '\\033[35m__SSH_UNICODE__=λ\\033[0m\\n__REMOTE_READY__\\n'; while read line; do stty size; test \"$line\" = exit && break; done")
+        let remoteSSHInvocation = shellQuote("/bin/zsh -f -c \(remoteSSHCommand)")
         let fzfArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_FZF"] ?? "fzf")
         let asciinemaArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_ASCIINEMA"] ?? "asciinema")
         let cast = runDirectory.appending(path: "asciinema/session.cast").path
@@ -314,7 +319,7 @@ private enum TerminalWorkflowRunner {
             Workflow(name: "bash", shell: "/bin/bash", steps: shellSteps),
             Workflow(name: "fish", shell: ProcessInfo.processInfo.environment["DANTERM_FISH"] ?? "fish", steps: shellSteps),
             Workflow(name: "ssh", shell: "/bin/zsh", steps: [
-                .expect("DANTERM-WORKFLOW>"), .text(#"ssh -tt -F \#(sshConfigArgument) workflow-host "source \#(integrationArgument); printf '\\033[35m__SSH_UNICODE__=λ\\033[0m\\n__REMOTE_READY__\\n'; while read line; do stty size; test \"\$line\" = exit && break; done"; printf '__SSH_LOCAL__\\n'"# + "\n"),
+                .expect("DANTERM-WORKFLOW>"), .text("ssh -tt -F \(sshConfigArgument) workflow-host \(remoteSSHInvocation); printf '__SSH_LOCAL__\\n'\n"),
                 .expect("__SSH_UNICODE__=λ"), .expect("__REMOTE_READY__"),
                 .resize(43, 12), .text("narrow\n"), .expect("12 43"),
                 .resize(101, 37), .text("wide\n"), .expect("37 101"),

@@ -535,8 +535,7 @@ func update(
                 body: "Waiting for input",
                 env: env
             )
-        case .integrationReady, .remoteDetected, .remoteIdentityReported,
-             .connectionEnded, .agentActivityChanged:
+        case .integrationReady, .connectionDeclared, .agentActivityChanged:
             return []
         }
 

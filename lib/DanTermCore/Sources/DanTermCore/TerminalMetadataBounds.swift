@@ -25,10 +25,10 @@ extension SessionReport {
             value.fitsTerminalMetadataValueLimit
         case .cwd(let value):
             value?.fitsTerminalMetadataValueLimit != false
-        case .remoteIdentityReported(let identity):
-            identity.user.utf8.count + identity.host.utf8.count
+        case .connectionDeclared(.remote(identity: let identity)):
+            (identity?.user.utf8.count ?? 0) + (identity?.host.utf8.count ?? 0)
                 <= TerminalMetadataBounds.maximumValueBytes
-        case .progress, .integrationReady, .commandEnded, .remoteDetected, .connectionEnded,
+        case .progress, .integrationReady, .commandEnded, .connectionDeclared(.local),
              .agentAttached, .agentActivityChanged, .agentDetached:
             true
         }

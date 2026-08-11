@@ -202,7 +202,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
             + "\\033]7;file://localhost/tmp/pane\\007"
-            + "\\033]1337;DanTermShell=2;command-end;7\\007\\007'; exec sleep 30"
+            + "\\033]1337;DanTermShell=3;command-end;7\\007\\007'; exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command),

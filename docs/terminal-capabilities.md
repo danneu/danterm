@@ -137,23 +137,25 @@ version returned by XTVERSION.
 | `DANTERM_RESTORE_SCROLLBACK_FILE` (`<recovery-file-path>`) | pane-when-restoring | private |
 | `DANTERM_RESTORE_COMMAND` (`<editable-command>`) | pane-when-restoring | private |
 
-Private shell events use `OSC 1337;DanTermShell=2;<event>[;<arg>...] ST`.
-The exact field counts are two for `integration-ready`, `remote-start`, and
-`connection-end`; three for `command-start` and `command-end`; and four for
-`remote-host`. Command and host values use canonical padded base64 and strict
-UTF-8. Command-end's exit status is canonical decimal in the range 0 through
-255. Shell integrations emit when either `DANTERM` or `LC_DANTERM` is present;
-ssh and mosh wrappers forward `LC_DANTERM=1`, and a shell with `LC_DANTERM` but
-no `DANTERM` is remote. Each remote wrapper emits `remote-start` before launch,
-then `connection-end` after the command returns without changing its exit
-status. A remote wrapper immediately re-reports its enclosing identity after
-`connection-end`.
+Private shell events use `OSC 1337;DanTermShell=3;<event>[;<arg>...] ST`.
+The exact field counts are two for `integration-ready`; three for
+`command-start`, `command-end`, `connection;local`, and `connection;remote`;
+and five for `connection;remote;<user>;<host>`. Command and identity values use
+canonical padded base64 and strict UTF-8. Command-end's exit status is canonical
+decimal in the range 0 through 255. Shell integrations emit when either
+`DANTERM` or `LC_DANTERM` is present; ssh and mosh wrappers forward
+`LC_DANTERM=1`, and a shell with `LC_DANTERM` but no `DANTERM` is remote. Every
+prompt declares the shell's complete connection state. A wrapper declares an
+identity-less remote before launch and emits nothing afterward, so the next
+prompt restores local state or an enclosing remote identity without a paired
+close or wrapper-owned state.
 
 Direct and nested PTYs and SSH preserve the complete private envelope. Inside
 tmux, the integration uses DCS passthrough; delivery requires the user's tmux
 server to have `allow-passthrough` enabled already. The integration does not
 change that policy. Mosh filters far-side private OSC, so only the near-side
-`remote-start` and `connection-end` reports are available for a mosh session.
+identity-less remote declaration and the owning shell's later prompt declaration
+are available for a mosh session.
 `DANTERM_SHELL_INTEGRATION_DIR` is persistent discovery state: shell hooks read
 it but the integration does not consume or rewrite it, so nested and re-exec'd
 shells continue to find the running bundle's assets. Remote shells have no

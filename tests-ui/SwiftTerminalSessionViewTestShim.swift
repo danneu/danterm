@@ -36,11 +36,19 @@ enum TerminalSemanticEvent {
     case integrationReady
     case commandStarted(String)
     case commandEnded(exitStatus: UInt8)
-    case remoteStarted
-    case remoteHost(user: String, host: String)
-    case connectionEnded
+    case connectionDeclared(TerminalConnectionState)
     case desktopNotification(title: String, body: String)
     case progress(TerminalProgress?)
+}
+
+enum TerminalConnectionState {
+    case local
+    case remote(identity: TerminalRemoteIdentity?)
+}
+
+struct TerminalRemoteIdentity {
+    let user: String
+    let host: String
 }
 
 enum TerminalProgress {

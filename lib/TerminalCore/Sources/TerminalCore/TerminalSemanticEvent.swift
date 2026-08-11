@@ -8,11 +8,26 @@ public enum TerminalSemanticEvent: Equatable, Sendable {
     case integrationReady
     case commandStarted(String)
     case commandEnded(exitStatus: UInt8)
-    case remoteStarted
-    case remoteHost(user: String, host: String)
-    case connectionEnded
+    case connectionDeclared(TerminalConnectionState)
     case desktopNotification(title: String, body: String)
     case progress(TerminalProgress?)
+}
+
+/// Carries one complete connection declaration from the shell that owns the prompt.
+public enum TerminalConnectionState: Equatable, Sendable {
+    case local
+    case remote(identity: TerminalRemoteIdentity?)
+}
+
+/// Couples the two fields that identify a remote shell so partial identities are impossible.
+public struct TerminalRemoteIdentity: Equatable, Sendable {
+    public let user: String
+    public let host: String
+
+    public init(user: String, host: String) {
+        self.user = user
+        self.host = host
+    }
 }
 
 /// Represents the progress states DanTerm exposes in pane chrome.
@@ -34,11 +49,11 @@ struct PendingTerminalSemanticEvent: Equatable, Sendable {
             value.utf8.count
         case let .desktopNotification(title, body):
             title.utf8.count + body.utf8.count
-        case let .remoteHost(user, host):
-            user.utf8.count + host.utf8.count
+        case let .connectionDeclared(.remote(identity: identity)):
+            identity.map { $0.user.utf8.count + $0.host.utf8.count } ?? 0
         case let .workingDirectory(value):
             value?.utf8.count ?? 0
-        case .bell, .integrationReady, .commandEnded, .remoteStarted, .connectionEnded, .progress:
+        case .bell, .integrationReady, .commandEnded, .connectionDeclared(.local), .progress:
             0
         }
     }

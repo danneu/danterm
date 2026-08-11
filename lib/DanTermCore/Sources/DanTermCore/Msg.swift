@@ -210,7 +210,7 @@ extension Msg {
     /// side-effecting commands these emit (such as .sendNotification) are not
     /// post-reconcile, so they still run inline. The runtime evaluates this
     /// on the pane-scoped message, so command and activity transitions opt in
-    /// here while remote and attach/detach transitions stay inline. Eligibility is
+    /// here while attach/detach transitions stay inline. Eligibility is
     /// necessary but not sufficient: reconcileDecision still forces an inline
     /// reconcile when update() emitted a post-reconcile command, so opting a message
     /// in here is always safe.
@@ -237,10 +237,9 @@ extension Msg {
         case .sessionReport(_, let report):
             switch report {
             case .title, .cwd, .progress, .commandStarted, .commandEnded,
-                 .agentActivityChanged:
+                 .connectionDeclared, .agentActivityChanged:
                 return true
-            case .integrationReady, .remoteDetected, .remoteIdentityReported,
-                 .connectionEnded, .agentAttached, .agentDetached:
+            case .integrationReady, .agentAttached, .agentDetached:
                 return false
             }
         default:

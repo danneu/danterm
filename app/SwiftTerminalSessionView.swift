@@ -42,12 +42,18 @@ func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
         return .commandStarted(command)
     case .commandEnded(let exitStatus):
         return .commandEnded(exitStatus: exitStatus)
-    case .remoteStarted:
-        return .remoteDetected
-    case let .remoteHost(user, host):
-        return .remoteIdentityReported(RemoteSession(user: user, host: host))
-    case .connectionEnded:
-        return .connectionEnded
+    case .connectionDeclared(let connection):
+        switch connection {
+        case .local:
+            return .connectionDeclared(.local)
+        case .remote(identity: nil):
+            return .connectionDeclared(.remote(identity: nil))
+        case .remote(identity: let identity?):
+            return .connectionDeclared(.remote(identity: RemoteSession(
+                user: identity.user,
+                host: identity.host
+            )))
+        }
     case .bell, .desktopNotification:
         return nil
     }
@@ -1063,7 +1069,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             }
             switch event {
             case .title, .workingDirectory, .progress, .integrationReady, .commandStarted,
-                 .commandEnded, .remoteStarted, .remoteHost, .connectionEnded:
+                 .commandEnded, .connectionDeclared:
                 continue
             case .bell:
                 callbackGate.emit(.bell)

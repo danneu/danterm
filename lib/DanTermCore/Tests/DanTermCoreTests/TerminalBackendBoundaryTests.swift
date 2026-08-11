@@ -50,16 +50,24 @@ struct TerminalBackendBoundaryTests {
             }
             return false
         }
-        assertSessionMessage(.report(.remoteDetected), sessionId: sessionId, paneId: paneId) {
+        assertSessionMessage(
+            .report(.connectionDeclared(.remote(identity: nil))),
+            sessionId: sessionId,
+            paneId: paneId
+        ) {
             if case .sessionReport(let id, let report) = $0 {
-                return id == sessionId && report == .remoteDetected
+                return id == sessionId && report == .connectionDeclared(.remote(identity: nil))
             }
             return false
         }
-        assertSessionMessage(.report(.remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))), sessionId: sessionId, paneId: paneId) {
+        assertSessionMessage(.report(.connectionDeclared(.remote(identity:
+            RemoteSession(user: "dan", host: "caja")
+        ))), sessionId: sessionId, paneId: paneId) {
             if case .sessionReport(let id, let report) = $0 {
                 return id == sessionId
-                    && report == .remoteIdentityReported(RemoteSession(user: "dan", host: "caja"))
+                    && report == .connectionDeclared(.remote(identity:
+                        RemoteSession(user: "dan", host: "caja")
+                    ))
             }
             return false
         }
@@ -119,9 +127,9 @@ struct TerminalBackendBoundaryTests {
             }
             return false
         }
-        assertSessionMessage(.report(.connectionEnded), sessionId: sessionId, paneId: paneId) {
+        assertSessionMessage(.report(.connectionDeclared(.local)), sessionId: sessionId, paneId: paneId) {
             if case .sessionReport(let id, let report) = $0 {
-                return id == sessionId && report == .connectionEnded
+                return id == sessionId && report == .connectionDeclared(.local)
             }
             return false
         }

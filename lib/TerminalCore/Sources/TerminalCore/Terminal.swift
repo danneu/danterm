@@ -1599,7 +1599,7 @@ public struct Terminal: Equatable, Sendable {
             omittingEmptySubsequences: false
         )
         guard fields.count >= 2,
-              fields[0].elementsEqual("DanTermShell=2".utf8),
+              fields[0].elementsEqual("DanTermShell=3".utf8),
               let eventName = String(validating: fields[1], as: UTF8.self)
         else { return }
 
@@ -1619,19 +1619,30 @@ public struct Terminal: Equatable, Sendable {
                   let exitStatus = canonicalExitStatus(fields[2])
             else { return }
             admitDiscreteSemanticEvent(.commandEnded(exitStatus: exitStatus))
-        case "remote-start":
-            guard fields.count == 2 else { return }
-            admitDiscreteSemanticEvent(.remoteStarted)
-        case "remote-host":
-            guard fields.count == 4,
-                  let user = decodedCanonicalBase64(fields[2]),
-                  let host = decodedCanonicalBase64(fields[3]),
-                  user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
+        case "connection":
+            guard fields.count >= 3,
+                  let state = String(validating: fields[2], as: UTF8.self)
             else { return }
-            admitDiscreteSemanticEvent(.remoteHost(user: user, host: host))
-        case "connection-end":
-            guard fields.count == 2 else { return }
-            admitDiscreteSemanticEvent(.connectionEnded)
+            switch state {
+            case "local":
+                guard fields.count == 3 else { return }
+                admitDiscreteSemanticEvent(.connectionDeclared(.local))
+            case "remote":
+                if fields.count == 3 {
+                    admitDiscreteSemanticEvent(.connectionDeclared(.remote(identity: nil)))
+                    return
+                }
+                guard fields.count == 5,
+                      let user = decodedCanonicalBase64(fields[3]),
+                      let host = decodedCanonicalBase64(fields[4]),
+                      user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
+                else { return }
+                admitDiscreteSemanticEvent(.connectionDeclared(.remote(
+                    identity: TerminalRemoteIdentity(user: user, host: host)
+                )))
+            default:
+                return
+            }
         default:
             return
         }

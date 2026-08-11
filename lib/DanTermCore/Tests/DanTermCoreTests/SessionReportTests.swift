@@ -148,12 +148,12 @@ struct SessionReportTests {
         #expect(SessionReport.title(overLimit).isAdmitted == false)
         #expect(SessionReport.cwd(atLimit).isAdmitted)
         #expect(SessionReport.cwd(overLimit).isAdmitted == false)
-        #expect(SessionReport.remoteIdentityReported(
+        #expect(SessionReport.connectionDeclared(.remote(identity:
             RemoteSession(user: half, host: otherHalf)
-        ).isAdmitted)
-        #expect(SessionReport.remoteIdentityReported(
+        )).isAdmitted)
+        #expect(SessionReport.connectionDeclared(.remote(identity:
             RemoteSession(user: half + "x", host: otherHalf)
-        ).isAdmitted == false)
+        )).isAdmitted == false)
     }
 
     @Test("repeated waiting activity emits one background alert")

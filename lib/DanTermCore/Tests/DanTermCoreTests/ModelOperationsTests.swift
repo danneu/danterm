@@ -3050,7 +3050,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
-        update(&model, .sessionReport(sessionId: sessionId, report: .remoteIdentityReported(remote)))
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.remote(identity: remote))
+        ))
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
 
         let populated = desiredPaneToolbar(in: model)[paneId]
@@ -3145,7 +3148,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.updatePane(paneId) { $0.theme = "Dracula" }
         let sessionId = model.pane(paneId)!.session!.id
-        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.remote(identity: nil))
+        ))
 
         #expect(
             desiredPaneConfig(in: model)[paneId] ==

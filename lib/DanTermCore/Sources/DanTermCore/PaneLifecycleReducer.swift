@@ -45,9 +45,7 @@ enum SessionReport: Equatable {
     case integrationReady
     case commandStarted(String)
     case commandEnded(exitStatus: UInt8)
-    case remoteDetected
-    case remoteIdentityReported(RemoteSession)
-    case connectionEnded
+    case connectionDeclared(ConnectionLifecycle)
     case agentAttached(AgentSession)
     case agentActivityChanged(session: AgentSession, activity: AgentActivity)
     case agentDetached(AgentSession)
@@ -77,15 +75,8 @@ func reduceSession(_ session: inout SessionModel, report: SessionReport) {
         guard case .running = session.command else { return }
         session.command = .idle
 
-    case .remoteDetected:
-        guard case .local = session.connection else { return }
-        session.connection = .remote(identity: nil)
-
-    case .remoteIdentityReported(let identity):
-        session.connection = .remote(identity: identity)
-
-    case .connectionEnded:
-        session.connection = .local
+    case .connectionDeclared(let connection):
+        session.connection = connection
 
     case .agentAttached(let agentSession):
         session.agent = .attached(session: agentSession, activity: .working)

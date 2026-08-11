@@ -30,7 +30,10 @@ struct UpdateRemoteTests {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
-        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.remote(identity: nil))
+        ))
         let paneBefore = model.pane(paneId)
 
         var reloaded = model.config
@@ -52,12 +55,15 @@ struct UpdateRemoteTests {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let sessionId = model.pane(paneId)!.session!.id
-        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .connectionDeclared(.remote(identity: nil))
+        ))
 
         _ = update(&model, .setPaneTheme(paneId: paneId, themeName: "Solarized"))
 
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == model.config.remoteTheme)
-        update(&model, .sessionReport(sessionId: sessionId, report: .connectionEnded))
+        update(&model, .sessionReport(sessionId: sessionId, report: .connectionDeclared(.local)))
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Solarized")
     }
 
@@ -78,10 +84,10 @@ struct UpdateRemoteTests {
 
         #expect(changesProjection(.commandStarted("make")))
         #expect(changesProjection(.commandEnded(exitStatus: 0)) == false)
-        #expect(changesProjection(.remoteDetected) == false)
-        #expect(changesProjection(.remoteIdentityReported(
+        #expect(changesProjection(.connectionDeclared(.remote(identity: nil))) == false)
+        #expect(changesProjection(.connectionDeclared(.remote(identity:
             RemoteSession(user: "dan", host: "caja")
-        )) == false)
+        ))) == false)
         #expect(changesProjection(.agentAttached(agent)))
         #expect(changesProjection(.agentActivityChanged(
             session: agent,
@@ -90,6 +96,6 @@ struct UpdateRemoteTests {
         #expect(changesProjection(.commandStarted("test")))
         #expect(changesProjection(.commandEnded(exitStatus: 0)) == false)
         #expect(changesProjection(.agentDetached(agent)))
-        #expect(changesProjection(.connectionEnded) == false)
+        #expect(changesProjection(.connectionDeclared(.local)) == false)
     }
 }

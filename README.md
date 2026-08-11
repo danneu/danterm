@@ -150,6 +150,10 @@ scp -r /Applications/DanTerm.app/Contents/Resources/shell-integration \
 source ~/.danterm-shell-integration/danterm.zsh
 ```
 
+Refresh the copied directory after upgrading DanTerm. Older remote copies use a
+different private protocol version, so DanTerm ignores their identity reports;
+the local wrapper still shows the connection as remote until it returns.
+
 ```sshconfig
 # /etc/ssh/sshd_config
 AcceptEnv LC_*
