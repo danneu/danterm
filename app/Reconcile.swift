@@ -191,10 +191,7 @@ extension AppRuntime {
     /// Push each themed pane's config through its terminal session, diffed against
     /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
-        applyDiff(desiredPaneConfig(
-            in: model,
-            livePaneState: livePaneStateView
-        ), &caches.paneConfig, apply: { paneId, key in
+        applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
             sessions[paneId]?.applyTheme(key.theme)
             sessions[paneId]?.setFontSize(key.fontSize)
             sessions[paneId]?.setFontFamily(key.fontFamily)
@@ -220,8 +217,7 @@ extension AppRuntime {
         applyDiff(
             desiredPaneToolbar(
                 in: model,
-                tally: tally,
-                livePaneState: livePaneStateView
+                tally: tally
             ),
             &caches.paneToolbar,
             apply: { paneId, render in

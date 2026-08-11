@@ -284,13 +284,11 @@ struct PaneToolbarRender: Equatable {
 /// Convenience wrapper for callers that do not already hold the alert tally
 /// computed by reconcile.
 func desiredPaneToolbar(
-  in model: AppModel,
-  livePaneState: PaneLifecyclesView
+  in model: AppModel
 ) -> [PaneId: PaneToolbarRender] {
   desiredPaneToolbar(
     in: model,
-    tally: unreadAlertTally(for: model),
-    livePaneState: livePaneState
+    tally: unreadAlertTally(for: model)
   )
 }
 
@@ -300,26 +298,25 @@ func desiredPaneToolbar(
 /// diffs this with the default no-op `remove`.
 func desiredPaneToolbar(
   in model: AppModel,
-  tally: UnreadAlertTally,
-  livePaneState: PaneLifecyclesView
+  tally: UnreadAlertTally
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
-    let lifecycles = livePaneState.lifecycles(for: pane.id)
+    let session = pane.session
     let remoteSession: RemoteSession?
-    if case .remote(let identity) = lifecycles.connection {
+    if case .remote(let identity) = session?.connection ?? .local {
       remoteSession = identity
     } else {
       remoteSession = nil
     }
     let agentSession: AgentSession?
-    if case .attached(let session, _) = lifecycles.agent {
-      agentSession = session
+    if case .attached(let attachedSession, _) = session?.agent ?? .none {
+      agentSession = attachedSession
     } else {
       agentSession = nil
     }
     let command: String?
-    if case .running(let text) = lifecycles.command {
+    if case .running(let text) = session?.command ?? .idle {
       command = text
     } else {
       command = nil
@@ -329,7 +326,7 @@ func desiredPaneToolbar(
       cwd: pane.cwd,
       command: command,
       progress: pane.progress,
-      isRemote: remoteSession != nil || lifecycles.connection != .local,
+      isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
       remoteSession: remoteSession,
       agentSession: agentSession,
       unreadAlertCount: tally.byPane[pane.id] ?? 0,
@@ -388,17 +385,13 @@ struct PaneConfigKey: Equatable {
 
 /// Projects the resolved theme, per-pane effective font size, resolved font
 /// family, and copy-on-select onto every live pane.
-func desiredPaneConfig(
-  in model: AppModel,
-  livePaneState: PaneLifecyclesView
-) -> [PaneId: PaneConfigKey] {
+func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneConfigKey(
       theme: effectiveTheme(
         for: pane,
-        config: model.config,
-        lifecycles: livePaneState.lifecycles(for: pane.id)
+        config: model.config
       ),
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,

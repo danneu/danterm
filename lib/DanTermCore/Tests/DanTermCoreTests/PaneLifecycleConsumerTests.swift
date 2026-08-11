@@ -1,4 +1,4 @@
-// Behavioral coverage for read-only consumers of the pane-owned live lifecycle snapshot.
+// Behavioral coverage for read-only consumers of session-owned lifecycle state.
 import Foundation
 import Testing
 import DanTermProtocol
@@ -9,7 +9,8 @@ struct PaneLifecycleConsumerTests {
     @Test("pane inspection exposes every lifecycle as typed latest-value data")
     func paneInspectionExposesTypedLifecycles() throws {
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let state = PaneLifecycles(
+        let state = SessionModel(
+            id: SessionId(),
             integration: .ready,
             command: .running("swift test"),
             connection: .remote(identity: RemoteSession(user: "dan", host: "caja")),
@@ -32,7 +33,7 @@ struct PaneLifecycleConsumerTests {
 
     @Test("neutral pane inspection distinguishes absent, idle, local, and unattached lifecycles")
     func neutralPaneInspectionUsesExplicitStates() {
-        let value = paneLifecycleInspectionFields(PaneLifecycles())
+        let value = paneLifecycleInspectionFields(nil)
 
         #expect(value["integration"]?["state"]?.asString == "neverReported")
         #expect(value["command"]?["state"]?.asString == "idle")
@@ -43,7 +44,8 @@ struct PaneLifecycleConsumerTests {
     @Test("inspection preserves remote without identity and attached without activity")
     func paneInspectionPreservesOptionalLifecyclePayloads() throws {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let state = PaneLifecycles(
+        let state = SessionModel(
+            id: SessionId(),
             connection: .remote(identity: nil),
             agent: .attached(session: agent, activity: nil)
         )
@@ -59,10 +61,10 @@ struct PaneLifecycleConsumerTests {
     @Test("an applied attachment is visible to the next synchronous inspection")
     func attachmentPrecedesInspection() throws {
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneLifecycleStream()
+        var session = SessionModel(id: SessionId())
 
-        _ = stream.apply(.agentAttached(agent))
-        let inspected = paneLifecycleInspectionFields(stream.snapshot)
+        reduceSession(&session, report: .agentAttached(agent))
+        let inspected = paneLifecycleInspectionFields(session)
 
         #expect(inspected["agent"]?["state"]?.asString == "attached")
         #expect(inspected["agent"]?["session"]?["sessionId"]?.asString == "session-1")
@@ -70,10 +72,7 @@ struct PaneLifecycleConsumerTests {
 
     @Test("command chrome shows only a currently running command lifecycle")
     func commandChromeDistinguishesRunningFromIdle() {
-        var running = PaneLifecycles()
-        running.command = .running("swift test")
-
-        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", lifecycles: running) == "swift test")
-        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", lifecycles: PaneLifecycles()) == "zsh \u{2013} /work")
+        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", command: "swift test") == "swift test")
+        #expect(paneCommandChromeText(title: "zsh", cwd: "/work", command: nil) == "zsh \u{2013} /work")
     }
 }

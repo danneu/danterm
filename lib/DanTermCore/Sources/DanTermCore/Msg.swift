@@ -93,11 +93,11 @@ enum Msg {
     case sessionTitle(paneId: PaneId, title: String)
     case sessionCwd(paneId: PaneId, cwd: String?)
     case sessionBell(paneId: PaneId)
-    case paneLifecycleChanged(paneId: PaneId, event: PaneLifecycleEvent)
+    case sessionReport(sessionId: SessionId, report: SessionReport)
     case desktopNotification(paneId: PaneId, title: String, body: String)
     case sessionProgress(paneId: PaneId, state: ProgressState?)
-    case sessionClosed(paneId: PaneId)
-    case sessionCreationFailed(paneId: PaneId)
+    case sessionEnded(sessionId: SessionId)
+    case sessionCreationFailed(sessionId: SessionId)
 
     // Alerts
     case markAlertRead(alertId: AlertId)
@@ -238,8 +238,8 @@ extension Msg {
         // reconcilePaneChrome unread-alert counts) defers.
         case .sessionBell, .desktopNotification:
             return true
-        case .paneLifecycleChanged(_, let event):
-            switch event {
+        case .sessionReport(_, let report):
+            switch report {
             case .commandStarted, .commandEnded, .agentActivityChanged:
                 return true
             case .integrationReady, .remoteDetected, .remoteIdentityReported,

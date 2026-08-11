@@ -21,21 +21,17 @@ func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> J
 
 /// Lowers only declared lifecycle reports from the engine vocabulary into the
 /// pane-owned reducer vocabulary; view-only events remain outside that stream.
-func paneLifecycleEvent(for event: TerminalSemanticEvent) -> PaneLifecycleEvent? {
+func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
     switch event {
     case .integrationReady:
         return .integrationReady
     case .commandStarted(let command):
-        guard command.fitsTerminalMetadataValueLimit else { return nil }
         return .commandStarted(command)
     case .commandEnded(let exitStatus):
         return .commandEnded(exitStatus: exitStatus)
     case .remoteStarted:
         return .remoteDetected
     case let .remoteHost(user, host):
-        guard user.utf8.count + host.utf8.count <= TerminalMetadataBounds.maximumValueBytes else {
-            return nil
-        }
         return .remoteIdentityReported(RemoteSession(user: user, host: host))
     case .connectionEnded:
         return .connectionEnded
@@ -79,8 +75,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
-    private var lifecycleStream = PaneLifecycleStream()
-    private var lifecycleRecovery = PaneLifecycleRecoveryState()
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
@@ -128,8 +122,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
     }
     var hasSelection: Bool { controller.hasSelection }
-    var lifecycleSnapshot: PaneLifecycles { lifecycleStream.snapshot }
-    var lifecycleRecoverySnapshot: PaneLifecycleRecoverySnapshot { lifecycleRecovery.snapshot }
     #if DANTERM_UI_TEST
     var publishedBackgroundForTesting: RenderColor? {
         publishedFrame?.plan.defaultBackground
@@ -1047,8 +1039,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     private func publish(_ events: [TerminalSemanticEvent]) {
         for event in events {
-            if let paneEvent = paneLifecycleEvent(for: event) {
-                publishLifecycle(paneEvent)
+            if let report = sessionReport(for: event) {
+                callbackGate.emit(.report(report))
                 continue
             }
             switch event {
@@ -1077,18 +1069,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 }))
             }
         }
-    }
-
-    @discardableResult
-    func applyLifecycleEvent(_ event: PaneLifecycleEvent) -> PaneLifecycleTransition {
-        let transition = lifecycleStream.apply(event)
-        lifecycleRecovery.apply(transition)
-        callbackGate.emit(.paneLifecycleChanged(transition))
-        return transition
-    }
-
-    private func publishLifecycle(_ event: PaneLifecycleEvent) {
-        applyLifecycleEvent(event)
     }
 
     /// Maps the engine's total search status onto the overlay's two independently

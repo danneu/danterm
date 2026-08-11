@@ -140,7 +140,7 @@ import Testing
             "makeFirstResponder is post-reconcile (Stage 8)")
         #expect(!Command.focusSession(paneId: pane, focused: true).isPostReconcile,
             "focusSession is pre-reconcile")
-        #expect(!Command.createSession(paneId: pane, cwd: nil, command: nil).isPostReconcile,
+        #expect(!Command.createSession(sessionId: SessionId(), paneId: pane, cwd: nil, command: nil).isPostReconcile,
             "createSession is pre-reconcile")
         #expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")

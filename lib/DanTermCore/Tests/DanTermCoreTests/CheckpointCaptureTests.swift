@@ -41,14 +41,8 @@ private func decodeLightCapture(_ capture: CheckpointCapture) throws -> Validate
 
 /// Build a stable-home light projection so persisted-facet tests compare only the mutation
 /// under test, never the machine running the suite.
-private func lightProjection(
-    _ model: AppModel,
-    recovery: [PaneId: PaneLifecycleRecoverySnapshot] = [:]
-) -> LightCheckpointProjection {
-    LightCheckpointProjection(
-        snapshot: toSnapshot(model, home: "/Users/testhome"),
-        lifecycleRecoveryByPaneId: recovery
-    )
+private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
+    LightCheckpointProjection(snapshot: toSnapshot(model, home: "/Users/testhome"))
 }
 
 @Suite struct LightCheckpointProjectionTests {
@@ -174,37 +168,18 @@ private func lightProjection(
 
     @Test("lifecycle recovery values alone change the projection")
     func lifecycleRecoveryValuesChangeProjection() throws {
-        let (model, paneIds) = makeModelWithPanes(1)
+        var (model, paneIds) = makeModelWithPanes(1)
         let paneId = paneIds[0]
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
         let baseline = lightProjection(model)
-        let withCommand = lightProjection(
-            model,
-            recovery: [paneId: PaneLifecycleRecoverySnapshot(command: "swift test")]
-        )
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
+        let withCommand = lightProjection(model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let withAgent = lightProjection(
-            model,
-            recovery: [paneId: PaneLifecycleRecoverySnapshot(
-                command: "swift test",
-                agentSession: agent
-            )]
-        )
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
+        let withAgent = lightProjection(model)
 
         #expect(withCommand != baseline, "command memo")
         #expect(withAgent != withCommand, "agent session")
-    }
-
-    @Test("lifecycle recovery for a missing pane leaves the projection unchanged")
-    func missingPaneRecoveryLeavesProjectionUnchanged() {
-        let (model, _) = makeModelWithPanes(1)
-        let baseline = lightProjection(model)
-        let missingPane = PaneId(rawValue: UUID())
-        let withStaleSession = lightProjection(
-            model,
-            recovery: [missingPane: PaneLifecycleRecoverySnapshot(command: "ignored")]
-        )
-
-        #expect(withStaleSession == baseline)
     }
 
     @Test("the write decision follows projection equality")
@@ -216,16 +191,10 @@ private func lightProjection(
         // Scenario: a tab title changes after baseline A, then repeats unchanged at baseline B.
         var model = makeModel()
         createTab(&model)
-        let baseline = LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: [:]
-        )
+        let baseline = LightCheckpointProjection(snapshot: toSnapshot(model))
         let tabId = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: tabId, name: "persisted title"))
-        let changed = LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: [:]
-        )
+        let changed = LightCheckpointProjection(snapshot: toSnapshot(model))
 
         #expect(lightCheckpointCapture(current: baseline, baseline: baseline) == nil)
         let capture = try #require(
@@ -245,16 +214,10 @@ private func lightProjection(
         // Scenario: A is on disk, B is captured, then state returns to A before B completes.
         var model = makeModel()
         createTab(&model)
-        let projectionA = LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: [:]
-        )
+        let projectionA = LightCheckpointProjection(snapshot: toSnapshot(model))
         let tabId = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: tabId, name: "temporary"))
-        let projectionB = LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: [:]
-        )
+        let projectionB = LightCheckpointProjection(snapshot: toSnapshot(model))
 
         _ = try #require(lightCheckpointCapture(current: projectionB, baseline: projectionA))
         let reverted = try #require(
@@ -396,19 +359,16 @@ private func lightProjection(
         #expect(try capture.encoder()() == expected)
     }
 
-    @Test("a light capture grafts command and agent recovery state")
-    func lightCaptureGraftsLifecycleRecoveryState() throws {
-        let (model, paneIds) = makeModelWithPanes(1)
+    @Test("a light capture preserves command and agent recovery state")
+    func lightCapturePreservesLifecycleRecoveryState() throws {
+        var (model, paneIds) = makeModelWithPanes(1)
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
+        let sessionId = try #require(model.pane(paneIds[0])?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
         let capture = CheckpointCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: [:],
-            lifecycleRecoveryByPaneId: [
-                paneIds[0]: PaneLifecycleRecoverySnapshot(
-                    command: "swift test",
-                    agentSession: agent
-                ),
-            ]
+            scrollbackReads: [:]
         )
 
         let restore = try loadValidatedInitFile(from: capture.encoder()())

@@ -16,7 +16,13 @@ AppModel(
               PaneModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
                 session: SessionModel(
-                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002))
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+                  integration: .neverReported,
+                  command: .idle,
+                  connection: .local,
+                  agent: .none,
+                  lastCommand: nil,
+                  lastAgentSession: nil
                 ),
                 title: "Terminal",
                 cwd: nil,
@@ -30,7 +36,13 @@ AppModel(
               PaneModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
                 session: SessionModel(
-                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005))
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005)),
+                  integration: .neverReported,
+                  command: .idle,
+                  connection: .local,
+                  agent: .none,
+                  lastCommand: nil,
+                  lastAgentSession: nil
                 ),
                 title: "Terminal",
                 cwd: nil,
@@ -64,7 +76,13 @@ AppModel(
               PaneModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
                 session: SessionModel(
-                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009))
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009)),
+                  integration: .neverReported,
+                  command: .idle,
+                  connection: .local,
+                  agent: .none,
+                  lastCommand: nil,
+                  lastAgentSession: nil
                 ),
                 title: "Terminal",
                 cwd: nil,
@@ -78,7 +96,13 @@ AppModel(
               PaneModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000B)),
                 session: SessionModel(
-                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C))
+                  id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C)),
+                  integration: .neverReported,
+                  command: .idle,
+                  connection: .local,
+                  agent: .none,
+                  lastCommand: nil,
+                  lastAgentSession: nil
                 ),
                 title: "Terminal",
                 cwd: nil,

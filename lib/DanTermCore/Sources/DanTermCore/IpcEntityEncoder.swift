@@ -5,7 +5,6 @@ import DanTermProtocol
 /// Builds wire documents from live model entities so IPC reply shape cannot
 /// drift with the recovery format or require runtime JSON patching.
 struct IpcEntityEncoder {
-    let livePaneState: PaneLifecyclesView
     let home: String
 
     func list(_ model: AppModel) -> JSONValue {
@@ -153,9 +152,7 @@ struct IpcEntityEncoder {
             "title": .string(pane.title),
         ]
         if includeLifecycles {
-            let lifecycleFields = paneLifecycleInspectionFields(
-                livePaneState.lifecycles(for: pane.id)
-            )
+            let lifecycleFields = paneLifecycleInspectionFields(pane.session)
             object.merge(lifecycleFields) { _, lifecycle in lifecycle }
         }
         if let cwd {

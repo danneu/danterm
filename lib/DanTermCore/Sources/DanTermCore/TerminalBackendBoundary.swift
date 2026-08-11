@@ -7,7 +7,7 @@ enum TerminalSessionEvent: Equatable {
     case titleChanged(String)
     case cwdChanged(String?)
     case bell
-    case paneLifecycleChanged(PaneLifecycleTransition)
+    case report(SessionReport)
     case desktopNotification(title: String, body: String)
     case progress(ProgressState?)
     case searchStarted(String)
@@ -20,6 +20,7 @@ enum TerminalSessionEvent: Equatable {
 /// Translates the closed session-event vocabulary into the existing pane messages.
 func terminalMessages(
     for event: TerminalSessionEvent,
+    sessionId: SessionId,
     paneId: PaneId
 ) -> [Msg] {
     switch event {
@@ -29,9 +30,8 @@ func terminalMessages(
         return [.sessionCwd(paneId: paneId, cwd: cwd)]
     case .bell:
         return [.sessionBell(paneId: paneId)]
-    case .paneLifecycleChanged(let transition):
-        guard transition.didChange else { return [] }
-        return [.paneLifecycleChanged(paneId: paneId, event: transition.event)]
+    case .report(let report):
+        return [.sessionReport(sessionId: sessionId, report: report)]
     case .desktopNotification(let title, let body):
         return [.desktopNotification(paneId: paneId, title: title, body: body)]
     case .progress(let state):
@@ -45,6 +45,6 @@ func terminalMessages(
     case .becameFirstResponder:
         return [.paneBecameFirstResponder(paneId: paneId)]
     case .closeRequested:
-        return [.sessionClosed(paneId: paneId)]
+        return [.sessionEnded(sessionId: sessionId)]
     }
 }

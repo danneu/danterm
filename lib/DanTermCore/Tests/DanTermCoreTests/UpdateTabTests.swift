@@ -57,7 +57,7 @@ import Testing
         #expect(model.selectedTabId == selectedTabId, "background tab should not steal selection")
         #expect(newPaneIds.count == 1, "background tab should create one pane")
         #expect(hasEffect(commands) {
-            if case .createSession(let paneId, _, _, _, _) = $0 {
+            if case .createSession(_, let paneId, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
@@ -86,7 +86,7 @@ import Testing
             return false
         })
         #expect(createEffect != nil, "should have createSession command")
-        if case .createSession(_, let cwd, _, _, _) = createEffect! {
+        if case .createSession(_, _, let cwd, _, _) = createEffect! {
             #expect(cwd == "/tmp/test", "cwd should inherit")
         }
     }

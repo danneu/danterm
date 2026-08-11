@@ -3032,13 +3032,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        var lifecycles = PaneLifecycles()
-        lifecycles.command = .running("swift test")
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
 
-        let render = desiredPaneToolbar(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
-        )[paneId]
+        let render = desiredPaneToolbar(in: model)[paneId]
 
         #expect(render?.command == "swift test")
     }
@@ -3050,17 +3047,14 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let paneId = selectedTab(in: model)!.focusedPaneId
         let remote = RemoteSession(user: "dan", host: "caja")
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let lifecycles = PaneLifecycles(
-            command: .running("swift test"),
-            connection: .remote(identity: remote),
-            agent: .attached(session: agent, activity: .working)
-        )
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
+        update(&model, .sessionReport(sessionId: sessionId, report: .remoteIdentityReported(remote)))
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
 
-        let populated = desiredPaneToolbar(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
-        )[paneId]
-        let absent = desiredPaneToolbar(in: model, livePaneState: PaneLifecyclesView())[paneId]
+        let populated = desiredPaneToolbar(in: model)[paneId]
+        model.updatePane(paneId) { $0.session = nil }
+        let absent = desiredPaneToolbar(in: model)[paneId]
 
         #expect(populated?.command == "swift test")
         #expect(populated?.isRemote == true)
@@ -3071,12 +3065,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(absent?.remoteSession == nil)
         #expect(absent?.agentSession == nil)
 
-        let unidentifiedRemote = desiredPaneToolbar(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [
-                paneId: PaneLifecycles(connection: .remote(identity: nil)),
-            ])
-        )[paneId]
+        model.updatePane(paneId) {
+            $0.session = SessionModel(id: SessionId(), connection: .remote(identity: nil))
+        }
+        let unidentifiedRemote = desiredPaneToolbar(in: model)[paneId]
         #expect(unidentifiedRemote?.isRemote == true)
         #expect(unidentifiedRemote?.remoteSession == nil)
     }
@@ -3151,13 +3143,11 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.updatePane(paneId) { $0.theme = "Dracula" }
-        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
 
         #expect(
-            desiredPaneConfig(
-                in: model,
-                livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
-            )[paneId] ==
+            desiredPaneConfig(in: model)[paneId] ==
             PaneConfigKey(theme: "Purplepeter"),
             "remote connection uses the configured remote theme")
     }

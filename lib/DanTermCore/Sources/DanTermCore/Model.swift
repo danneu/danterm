@@ -93,10 +93,16 @@ struct TodoItem: Equatable, Codable {
 
 // MARK: - Model
 
-/// Gives terminal-reported state the identity of the terminal session whose
-/// lifetime bounds it; later migration slices move that state into this value.
+/// Owns the terminal-reported lifecycles and recovery memo whose lifetime is
+/// bounded by this identified terminal session.
 struct SessionModel: Equatable {
     let id: SessionId
+    var integration: IntegrationLatch = .neverReported
+    var command: CommandLifecycle = .idle
+    var connection: ConnectionLifecycle = .local
+    var agent: AgentLifecycle = .none
+    var lastCommand: String?
+    var lastAgentSession: AgentSession?
 }
 
 struct PaneModel: Equatable {
@@ -615,10 +621,15 @@ private func parseSplitNode(
 ) -> SplitNodeModel? {
     switch snapshot {
     case .leaf(let ps):
-        if let persistedAgent = ps.agentSession,
-           AgentSession(kind: persistedAgent.kind, sessionId: persistedAgent.sessionId) == nil {
-            print("[init] Invalid agent session")
-            return nil
+        let persistedAgent: AgentSession?
+        if let snapshot = ps.agentSession {
+            guard let agent = AgentSession(kind: snapshot.kind, sessionId: snapshot.sessionId) else {
+                print("[init] Invalid agent session")
+                return nil
+            }
+            persistedAgent = agent
+        } else {
+            persistedAgent = nil
         }
         // Resolve the pane id: explicit (validated UUID) or freshly minted for an
         // id-less leaf. The mint is the hand-authoring affordance that the old
@@ -652,7 +663,11 @@ private func parseSplitNode(
         let expandedCwd = resolveLaunch(ps, home: env.homeDirectory()).cwd
         var paneModel = PaneModel(
             id: paneId,
-            session: SessionModel(id: sessionId),
+            session: SessionModel(
+                id: sessionId,
+                lastCommand: ps.command,
+                lastAgentSession: persistedAgent
+            ),
             title: ps.title ?? "Terminal",
             cwd: expandedCwd,
             theme: ps.theme

@@ -64,10 +64,6 @@ class TerminalView: NSView, TerminalSession {
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
-    private var lifecycleStream = PaneLifecycleStream()
-    private var lifecycleRecovery = PaneLifecycleRecoveryState()
-    var lifecycleSnapshot: PaneLifecycles { lifecycleStream.snapshot }
-    var lifecycleRecoverySnapshot: PaneLifecycleRecoverySnapshot { lifecycleRecovery.snapshot }
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
     var revealCount = 0
@@ -112,11 +108,6 @@ class TerminalView: NSView, TerminalSession {
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
-    func applyLifecycleEvent(_ event: PaneLifecycleEvent) -> PaneLifecycleTransition {
-        let transition = lifecycleStream.apply(event)
-        lifecycleRecovery.apply(transition)
-        return transition
-    }
     func fenceForApplicationExit() {}
     func tearDown() {}
 }

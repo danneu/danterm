@@ -792,18 +792,16 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.focusedPaneId
         let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
 
-        let snapshot = graftLifecycleRecovery(
-            onto: toSnapshot(model),
-            recoveryByPaneId: [
-                paneId: PaneLifecycleRecoverySnapshot(agentSession: session),
-            ]
-        )
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(session)))
+        let snapshot = toSnapshot(model)
         let pane = try #require(paneSnapshot(paneId.rawValue.uuidString, in: snapshot))
         #expect(pane.agentSession?.kind == "claude")
         #expect(pane.agentSession?.sessionId == "4f3a2b1c")
 
         let rebuilt = try #require(validateAndBuild(snapshot), "snapshot should rebuild")
-        #expect(rebuilt.pane(paneId) != nil)
+        #expect(rebuilt.pane(paneId)?.session?.agent == AgentLifecycle.none)
+        #expect(rebuilt.pane(paneId)?.session?.lastAgentSession == session)
     }
 
     @Test("recovery replay defensively validates a directly constructed agent snapshot")

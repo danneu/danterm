@@ -1,16 +1,16 @@
-// Pure read-only projections from one pane's live lifecycle snapshot.
+// Pure read-only projections from one terminal session's lifecycle state.
 import Foundation
 import DanTermProtocol
 
 /// Encodes every lifecycle with an explicit discriminator so pane inspection
 /// never relies on missing keys to distinguish current states.
-func paneLifecycleInspectionFields(_ state: PaneLifecycles) -> [String: JSONValue] {
+func paneLifecycleInspectionFields(_ session: SessionModel?) -> [String: JSONValue] {
     let integration: JSONValue = .object([
-        "state": .string(state.integration == .ready ? "ready" : "neverReported"),
+        "state": .string(session?.integration == .ready ? "ready" : "neverReported"),
     ])
 
     let command: JSONValue
-    switch state.command {
+    switch session?.command ?? .idle {
     case .idle:
         command = .object(["state": .string("idle")])
     case .running(let text):
@@ -18,7 +18,7 @@ func paneLifecycleInspectionFields(_ state: PaneLifecycles) -> [String: JSONValu
     }
 
     let connection: JSONValue
-    switch state.connection {
+    switch session?.connection ?? .local {
     case .local:
         connection = .object(["state": .string("local")])
     case .remote(let identity):
@@ -31,7 +31,7 @@ func paneLifecycleInspectionFields(_ state: PaneLifecycles) -> [String: JSONValu
     }
 
     let agent: JSONValue
-    switch state.agent {
+    switch session?.agent ?? .none {
     case .none:
         agent = .object(["state": .string("none")])
     case .attached(let session, let activity):
@@ -58,9 +58,9 @@ func paneLifecycleInspectionFields(_ state: PaneLifecycles) -> [String: JSONValu
 func paneCommandChromeText(
     title: String,
     cwd: String?,
-    lifecycles: PaneLifecycles
+    command: String?
 ) -> String {
-    if case .running(let command) = lifecycles.command {
+    if let command {
         return command
     }
     return formatToolbarLabel(title: title, cwd: cwd)

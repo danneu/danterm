@@ -694,12 +694,12 @@ import Testing
         #expect(fx.model.groups[0].tabs[0] == selectedBefore, "selected tab must be untouched")
     }
 
-    @Test("sessionClosed for a background-tab pane removes it and preserves the selected tab's zoom")
-    func sessionClosedBackgroundTabPaneIsRemoved() {
-        // Intent: .sessionClosed for a pane in a non-selected tab removes the
+    @Test("sessionEnded for a background-tab pane removes it and preserves the selected tab's zoom")
+    func sessionEndedBackgroundTabPaneIsRemoved() {
+        // Intent: .sessionEnded for a pane in a non-selected tab removes the
         //   pane from its own tab's tree and does not clear the selected
         //   tab's isZoomed.
-        // Why it exists: regression test for the ghost-pane bug. .sessionClosed
+        // Why it exists: regression test for the ghost-pane bug. .sessionEnded
         //   routes into .closePane, which resolved selectedTab(in:); for a
         //   background-tab pane removeLeaf missed, so the dead pane stayed in
         //   its real tab as a ghost and the selected tab's isZoomed was
@@ -710,7 +710,8 @@ import Testing
         //   zoom state.
         var fx = makeTwoTabFixture()
 
-        update(&fx.model, .sessionClosed(paneId: fx.a1))
+        let sessionId = fx.model.pane(fx.a1)!.session!.id
+        update(&fx.model, .sessionEnded(sessionId: sessionId))
 
         #expect(fx.model.pane(fx.a1) == nil, "the dead pane must leave its tab's tree, not linger as a ghost")
         let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
@@ -990,7 +991,7 @@ import Testing
         #expect(tab.focusedPaneId == existingFocusedPaneId, "background split should preserve focused pane")
         #expect(model.selectedTabId == tabId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
-            if case .createSession(let paneId, _, _, _, _) = $0 {
+            if case .createSession(_, let paneId, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
@@ -1031,7 +1032,7 @@ import Testing
         #expect(tabB.focusedPaneId == tabBFocusedPaneId, "background split should preserve target tab focus")
         #expect(model.selectedTabId == tabAId, "background split should not change selected tab")
         #expect(hasEffect(commands) {
-            if case .createSession(let paneId, _, _, _, _) = $0 {
+            if case .createSession(_, let paneId, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
@@ -1749,6 +1750,9 @@ private struct TwoTabFixture {
 /// mutates B's tree or zoom where the assertions will catch it.
 private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
     var model = makeModel()
+    func pane(_ id: PaneId) -> PaneModel {
+        PaneModel(id: id, session: SessionModel(id: SessionId()))
+    }
     let a1 = PaneId()
     let b1 = PaneId()
     let tabAId = TabId()
@@ -1761,9 +1765,9 @@ private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
         a2 = sibling
         rootA = .split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(PaneModel(id: a1)), second: .leaf(PaneModel(id: sibling)), ratio: 0.5)
+            first: .leaf(pane(a1)), second: .leaf(pane(sibling)), ratio: 0.5)
     } else {
-        rootA = .leaf(PaneModel(id: a1))
+        rootA = .leaf(pane(a1))
     }
     let tabA = TabModel(id: tabAId, focusedPaneId: a1, rootNode: rootA)
 
@@ -1771,7 +1775,7 @@ private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
         id: tabBId, focusedPaneId: b1,
         rootNode: .split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(PaneModel(id: b1)), second: .leaf(PaneModel(id: PaneId())), ratio: 0.5))
+            first: .leaf(pane(b1)), second: .leaf(pane(PaneId())), ratio: 0.5))
     tabB.isZoomed = true
 
     model.groups[0].tabs = [tabA, tabB]

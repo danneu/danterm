@@ -1,8 +1,8 @@
-// Pure ordered lifecycle state for one pane. Transport admission, pane
-// ownership, product projections, and history do not belong in this file.
+// Pure ordered lifecycle reports for one terminal session. Transport and
+// product projections do not belong in this file.
 
 /// Records whether a shell integration has ever announced readiness during the
-/// current pane lifetime.
+/// current terminal-session lifetime.
 enum IntegrationLatch: Equatable {
     case neverReported
     case ready
@@ -37,19 +37,8 @@ enum AgentLifecycle: Equatable {
     case attached(session: AgentSession, activity: AgentActivity?)
 }
 
-/// Owns the pane-reported lifecycles selected by D1's per-fact test, admitted
-/// under D2, and kept exclusive under D3 in
-/// docs/design/2026-08-10-terminal-reported-pane-facts.md.
-struct PaneLifecycles: Equatable {
-    var integration: IntegrationLatch = .neverReported
-    var command: CommandLifecycle = .idle
-    var connection: ConnectionLifecycle = .local
-    var agent: AgentLifecycle = .none
-}
-
-/// Defines the typed, pane-ordered events admitted by terminal and agent
-/// boundaries before they reach the pure live reducer.
-enum PaneLifecycleEvent: Equatable {
+/// Defines the lifecycle facts a terminal session can report to the pure model.
+enum SessionReport: Equatable {
     case integrationReady
     case commandStarted(String)
     case commandEnded(exitStatus: UInt8)
@@ -61,74 +50,50 @@ enum PaneLifecycleEvent: Equatable {
     case agentDetached(AgentSession)
 }
 
-/// Describes one serialized lifecycle input together with the complete snapshots
-/// immediately before and after it was reduced.
-struct PaneLifecycleTransition: Equatable {
-    let event: PaneLifecycleEvent
-    let previous: PaneLifecycles
-    let current: PaneLifecycles
-
-    /// Lets product projections suppress idempotent and stale inputs without
-    /// reimplementing lifecycle transition rules.
-    var didChange: Bool { previous != current }
-}
-
-/// Owns the ordered reducer state that a pane session stores beside its terminal
-/// and lifecycle state.
-struct PaneLifecycleStream {
-    private(set) var snapshot = PaneLifecycles()
-
-    /// Applies one already-admitted pane event and returns immutable transition
-    /// data for product projections and read-only consumers.
-    mutating func apply(_ event: PaneLifecycleEvent) -> PaneLifecycleTransition {
-        let previous = snapshot
-        reducePaneLifecycles(&snapshot, event: event)
-        return PaneLifecycleTransition(event: event, previous: previous, current: snapshot)
-    }
-}
-
-/// Applies one admitted pane event without IO, ambient state, or retained
-/// history; callers serialize events before invoking it.
-func reducePaneLifecycles(_ state: inout PaneLifecycles, event: PaneLifecycleEvent) {
-    switch event {
+/// Applies one admitted report and keeps recovery memo updates atomic with the
+/// lifecycle transition that accepted them.
+func reduceSession(_ session: inout SessionModel, report: SessionReport) {
+    switch report {
     case .integrationReady:
-        state.integration = .ready
+        session.integration = .ready
 
     case .commandStarted(let command):
-        state.command = .running(command)
+        session.command = .running(command)
+        session.lastCommand = command
 
     case .commandEnded:
-        guard case .running = state.command else { return }
-        state.command = .idle
+        guard case .running = session.command else { return }
+        session.command = .idle
 
     case .remoteDetected:
-        guard case .local = state.connection else { return }
-        state.connection = .remote(identity: nil)
+        guard case .local = session.connection else { return }
+        session.connection = .remote(identity: nil)
 
     case .remoteIdentityReported(let identity):
-        state.connection = .remote(identity: identity)
+        session.connection = .remote(identity: identity)
 
     case .connectionEnded:
-        state.connection = .local
+        session.connection = .local
 
-    case .agentAttached(let session):
-        state.agent = .attached(session: session, activity: .working)
+    case .agentAttached(let agentSession):
+        session.agent = .attached(session: agentSession, activity: .working)
+        session.lastAgentSession = agentSession
 
     case let .agentActivityChanged(reportingSession, activity):
-        guard case .attached(let currentSession, _) = state.agent,
+        guard case .attached(let currentSession, _) = session.agent,
               currentSession == reportingSession
         else {
             return
         }
-        state.agent = .attached(session: currentSession, activity: activity)
+        session.agent = .attached(session: currentSession, activity: activity)
 
     case .agentDetached(let reportingSession):
-        guard case .attached(let currentSession, _) = state.agent,
+        guard case .attached(let currentSession, _) = session.agent,
               currentSession == reportingSession
         else {
             return
         }
-        state.agent = .none
-
+        session.agent = .none
+        session.lastAgentSession = nil
     }
 }

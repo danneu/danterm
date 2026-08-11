@@ -92,7 +92,8 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let liveSessionIds = Set(model.allPaneIds)
 
-        let commands = update(&model, .sessionCreationFailed(paneId: paneId))
+        let sessionId = model.pane(paneId)!.session!.id
+        let commands = update(&model, .sessionCreationFailed(sessionId: sessionId))
         #expect(model.pane(paneId) == nil, "pane should be removed")
         #expect(model.groups[0].tabs.count == 0, "tab should be removed")
         #expect(hasEffect(commands) {
@@ -123,7 +124,8 @@ import Testing
         update(&model, .selectTab(id: tabId))
         let liveSessionIds = Set(model.allPaneIds)
 
-        let commands = update(&model, .sessionCreationFailed(paneId: paneA))
+        let sessionId = model.pane(paneA)!.session!.id
+        let commands = update(&model, .sessionCreationFailed(sessionId: sessionId))
 
         #expect(model.selectedTabId == fallbackTabId, "selection should move to fallback tab")
         #expect(model.pane(paneA) == nil, "failed pane should be removed")
@@ -173,6 +175,7 @@ import Testing
         //   or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
         //   incident to cite, and none should be invented.
         let paneId = PaneId()
+        let sessionId = SessionId()
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let coalescedMessages: [Msg] = [
             .sessionTitle(paneId: paneId, title: "vim"),
@@ -187,16 +190,11 @@ import Testing
                 title: "build",
                 body: "done"
             ),
-            lifecycleMessage(paneId: paneId, event: .commandStarted("make test")),
-            lifecycleMessage(
-                paneId: paneId,
-                event: .commandEnded(exitStatus: 0),
-                after: [.commandStarted("make test")]
-            ),
-            lifecycleMessage(
-                paneId: paneId,
-                event: .agentActivityChanged(session: agent, activity: .waiting),
-                after: [.agentAttached(agent)]
+            .sessionReport(sessionId: sessionId, report: .commandStarted("make test")),
+            .sessionReport(sessionId: sessionId, report: .commandEnded(exitStatus: 0)),
+            .sessionReport(
+                sessionId: sessionId,
+                report: .agentActivityChanged(session: agent, activity: .waiting)
             ),
         ]
 
@@ -220,22 +218,14 @@ import Testing
         }
 
         let inlineMessages: [Msg] = [
-            lifecycleMessage(paneId: paneId, event: .integrationReady),
-            lifecycleMessage(paneId: paneId, event: .remoteDetected),
-            lifecycleMessage(paneId: paneId, event: .remoteIdentityReported(
+            .sessionReport(sessionId: sessionId, report: .integrationReady),
+            .sessionReport(sessionId: sessionId, report: .remoteDetected),
+            .sessionReport(sessionId: sessionId, report: .remoteIdentityReported(
                 RemoteSession(user: "dan", host: "caja")
             )),
-            lifecycleMessage(
-                paneId: paneId,
-                event: .connectionEnded,
-                after: [.remoteDetected]
-            ),
-            lifecycleMessage(paneId: paneId, event: .agentAttached(agent)),
-            lifecycleMessage(
-                paneId: paneId,
-                event: .agentDetached(agent),
-                after: [.agentAttached(agent)]
-            ),
+            .sessionReport(sessionId: sessionId, report: .connectionEnded),
+            .sessionReport(sessionId: sessionId, report: .agentAttached(agent)),
+            .sessionReport(sessionId: sessionId, report: .agentDetached(agent)),
             .preferencesOpened(),
             .preferencesClosed
         ]
@@ -268,6 +258,7 @@ import Testing
         createTab(&unfocusedModel)
         let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
         update(&unfocusedModel, .splitPane(direction: .horizontal))
+        let unfocusedSessionId = unfocusedModel.pane(unfocusedPane)!.session!.id
 
         let scenarios: [(Msg, AppModel)] = [
             (.sessionTitle(paneId: focusedPane, title: "vim"), focusedModel),
@@ -282,11 +273,13 @@ import Testing
                 title: "build",
                 body: "done"
             ), unfocusedModel),
-            (lifecycleMessage(paneId: unfocusedPane, event: .commandStarted("make")), unfocusedModel),
-            (lifecycleMessage(
-                paneId: unfocusedPane,
-                event: .commandEnded(exitStatus: 0),
-                after: [.commandStarted("make")]
+            (.sessionReport(
+                sessionId: unfocusedSessionId,
+                report: .commandStarted("make")
+            ), unfocusedModel),
+            (.sessionReport(
+                sessionId: unfocusedSessionId,
+                report: .commandEnded(exitStatus: 0)
             ), unfocusedModel)
         ]
 
@@ -484,30 +477,29 @@ import Testing
         createTab(&model)
         let focusedPaneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        let lifecycles = PaneLifecycles(
-            agent: .attached(session: agent, activity: .waiting)
-        )
-        let livePaneState = PaneLifecyclesView(lifecyclesByPaneId: [
-            backgroundPaneId: lifecycles,
-            focusedPaneId: lifecycles,
-        ])
+        let backgroundSessionId = try #require(model.pane(backgroundPaneId)?.session?.id)
+        let focusedSessionId = try #require(model.pane(focusedPaneId)?.session?.id)
+        update(&model, .sessionReport(
+            sessionId: backgroundSessionId,
+            report: .agentAttached(agent)
+        ))
+        update(&model, .sessionReport(
+            sessionId: focusedSessionId,
+            report: .agentAttached(agent)
+        ))
         let backgroundCommands = update(
             &model,
-            lifecycleMessage(
-                paneId: backgroundPaneId,
-                event: .agentActivityChanged(session: agent, activity: .waiting),
-                after: [.agentAttached(agent)]
-            ),
-            livePaneState: livePaneState
+            .sessionReport(
+                sessionId: backgroundSessionId,
+                report: .agentActivityChanged(session: agent, activity: .waiting)
+            )
         )
         let focusedCommands = update(
             &model,
-            lifecycleMessage(
-                paneId: focusedPaneId,
-                event: .agentActivityChanged(session: agent, activity: .waiting),
-                after: [.agentAttached(agent)]
-            ),
-            livePaneState: livePaneState
+            .sessionReport(
+                sessionId: focusedSessionId,
+                report: .agentActivityChanged(session: agent, activity: .waiting)
+            )
         )
 
         #expect(model.alerts.count == 1)
@@ -538,22 +530,13 @@ import Testing
         createTab(&model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
 
-        for transition in [
-            lifecycleTransition(event: .integrationReady),
-            lifecycleTransition(
-                event: .agentActivityChanged(session: agent, activity: .working),
-                after: [.agentAttached(agent)]
-            ),
-            lifecycleTransition(
-                event: .agentActivityChanged(session: agent, activity: .idle),
-                after: [.agentAttached(agent)]
-            ),
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        for report: SessionReport in [
+            .integrationReady,
+            .agentActivityChanged(session: agent, activity: .working),
+            .agentActivityChanged(session: agent, activity: .idle),
         ] {
-            #expect(update(
-                &model,
-                .paneLifecycleChanged(paneId: paneId, event: transition.event),
-                livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: transition.current])
-            ).isEmpty)
+            #expect(update(&model, .sessionReport(sessionId: sessionId, report: report)).isEmpty)
         }
         #expect(model.alerts.isEmpty)
     }
@@ -565,17 +548,14 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        let lifecycles = PaneLifecycles(
-            agent: .attached(session: agent, activity: .waiting)
-        )
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
         #expect(update(
             &model,
-            lifecycleMessage(
-                paneId: paneId,
-                event: .agentActivityChanged(session: agent, activity: .waiting),
-                after: [.agentAttached(agent)]
-            ),
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
+            .sessionReport(
+                sessionId: sessionId,
+                report: .agentActivityChanged(session: agent, activity: .waiting)
+            )
         ).isEmpty)
         #expect(model.alerts.isEmpty)
     }
@@ -757,7 +737,7 @@ import Testing
 
     @Test("testSessionClosed")
     func testSessionClosed() {
-        // Intent: sessionClosed on the last pane flips pendingConfirmation
+        // Intent: sessionEnded on the last pane flips pendingConfirmation
         //   to .terminate and leaves the model intact.
         // Why it exists: pins the session-closed -> quit-confirm path.
         // Scenario: spec-first session-closed terminate.
@@ -765,31 +745,10 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .sessionClosed(paneId: paneId))
+        let sessionId = model.pane(paneId)!.session!.id
+        let commands = update(&model, .sessionEnded(sessionId: sessionId))
         #expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
-}
-
-private func lifecycleMessage(
-    paneId: PaneId,
-    event: PaneLifecycleEvent,
-    after preceding: [PaneLifecycleEvent] = []
-) -> Msg {
-    .paneLifecycleChanged(
-        paneId: paneId,
-        event: lifecycleTransition(event: event, after: preceding).event
-    )
-}
-
-private func lifecycleTransition(
-    event: PaneLifecycleEvent,
-    after preceding: [PaneLifecycleEvent] = []
-) -> PaneLifecycleTransition {
-    var stream = PaneLifecycleStream()
-    for event in preceding {
-        _ = stream.apply(event)
-    }
-    return stream.apply(event)
 }

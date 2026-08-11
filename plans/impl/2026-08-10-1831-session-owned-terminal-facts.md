@@ -319,7 +319,7 @@ their file.
   facts ADR
 - [x] 2. core: add SessionId and the pane-nested SessionModel (mint on
   create/restore; no facts move yet; SessionStoreTests + GoldenMaster regen)
-- [ ] 3. core!: reduce session lifecycles inside update(); runtime stops
+- [x] 3. core!: reduce session lifecycles inside update(); runtime stops
   owning terminal-reported state (SessionReport lifecycle cases, unified
   admission with its byte-limit test, agent IPC in-pass reply, delete
   PaneLifecyclesView/applyPaneLifecycleIpc/graft apparatus and

@@ -284,7 +284,8 @@ import Testing
         let liveSessionIds = Set(model.allPaneIds)
         #expect(liveSessionIds.isSuperset(of: [paneA, paneB]), "both split panes were live")
 
-        update(&model, .sessionCreationFailed(paneId: paneA))
+        let sessionId = model.pane(paneA)!.session!.id
+        update(&model, .sessionCreationFailed(sessionId: sessionId))
 
         // Whole tab removed: both panes gone.
         #expect(model.pane(paneA) == nil, "failed pane should be gone")
@@ -320,37 +321,10 @@ import Testing
         createTab(&model)
         let before = model
 
-        let commands = update(&model, .sessionCreationFailed(paneId: PaneId()))
+        let commands = update(&model, .sessionCreationFailed(sessionId: SessionId()))
 
-        #expect(commands.isEmpty, "unknown pane should emit no commands")
+        #expect(commands.isEmpty, "unknown session should emit no commands")
         expectNoDifference(model, before)
-    }
-
-    @Test("sessionCreationFailed for a pane in no tree cleans side tables")
-    func sessionCreationFailedForPaneInNoTreeCleansSideTables() {
-        // Intent: the defensive no-tree branch still prunes per-pane side
-        //   tables for the failed pane id.
-        // Why it exists: pins the cleanup behavior that a structure-only
-        //   no-op assertion cannot observe.
-        // Scenario: spec-first stale-callback cleanup -- a failure arrives
-        //   for a pane no longer in any tab, but stale per-pane state still
-        //   exists and must be discarded.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = PaneId()
-        model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneId,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        model.searchState[paneId] = SearchModel(needle: "test")
-        model.lastNotificationTime[paneId] = [.bell: Date()]
-
-        let commands = update(&model, .sessionCreationFailed(paneId: paneId))
-
-        #expect(commands.isEmpty, "no-tree cleanup should emit no commands")
-        #expect(!model.alerts.contains { $0.paneId == paneId }, "stale alerts should be removed")
-        #expect(model.searchState[paneId] == nil, "stale search state should be removed")
-        #expect(model.lastNotificationTime[paneId] == nil, "stale throttle data should be removed")
     }
 
     // MARK: - Leaf-embedded v3 wire format

@@ -63,7 +63,7 @@ import DanTermProtocol
         let groupBId = GroupId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
         let paneTodoId = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
         let tabTodoId = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
-        let paneA = PaneModel(
+        var paneA = PaneModel(
             id: paneAId,
             title: "shell",
             cwd: "/Users/testhome/work",
@@ -71,6 +71,7 @@ import DanTermProtocol
             fontSizeSteps: 2,
             todos: [TodoItem(id: paneTodoId, text: "ship", isDone: false)]
         )
+        paneA.session = SessionModel(id: SessionId(), command: .running("swift test"), lastCommand: "swift test")
         let paneB = PaneModel(id: paneBId, title: "tests", cwd: "/tmp")
         let paneC = PaneModel(id: paneCId, title: "logs")
         let paneD = PaneModel(id: paneDId, title: "archive")
@@ -103,11 +104,9 @@ import DanTermProtocol
             ],
             selectedTabId: tabAId
         )
-        let lifecycles = PaneLifecycles(command: .running("swift test"))
         let commands = sendIpc(
             &model,
             method: Methods.ls,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneAId: lifecycles]),
             env: makeTestEnv(homeDirectory: "/Users/testhome")
         )
 
@@ -215,18 +214,16 @@ import DanTermProtocol
         let paneId = PaneId(rawValue: rawId)
         let tabId = TabId(rawValue: rawId)
         let groupId = GroupId(rawValue: rawId)
-        let pane = PaneModel(id: paneId)
+        let state = SessionModel(id: SessionId(), command: .running("make test"), lastCommand: "make test")
+        let pane = PaneModel(id: paneId, session: state)
         let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
         var model = AppModel(
             groups: [GroupModel(id: groupId, name: "collision", tabs: [tab])],
             selectedTabId: tabId
         )
-        let state = PaneLifecycles(command: .running("make test"))
-
         let result = try requireIpcReply(sendIpc(
             &model,
-            method: Methods.ls,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: state])
+            method: Methods.ls
         ))
         let group = try #require(result["groups"]?.asArray?.first)
         let encodedTab = try #require(group["tabs"]?.asArray?.first)
@@ -243,10 +240,8 @@ import DanTermProtocol
 
     @Test("agent.attach routes through the pane owner before its reply")
     func agentAttachRoutesThroughPaneOwnerBeforeReply() throws {
-        // Intent: agent.attach validates the session and returns one owner-routed
-        //   command instead of mutating AppModel or replying from pure update.
-        // Why it exists: success must be written only after the live session has
-        //   applied and projected the attachment.
+        // Intent: agent.attach reduces the model before returning its reply.
+        // Why it exists: reply ordering is guaranteed by one pure update pass.
         // Scenario: a Claude SessionStart hook reports its session id from
         //   inside a DanTerm pane.
         var model = makeModel()
@@ -264,16 +259,12 @@ import DanTermProtocol
         )
 
         #expect(commands.count == 1)
-        guard case .applyPaneLifecycleIpc(_, let commandPaneId, let event) = commands[0] else {
-            Issue.record("expected pane-owner lifecycle IPC command")
-            return
-        }
-        #expect(commandPaneId == paneId)
         let session = try #require(AgentSession(
             kind: "claude",
             sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"
         ))
-        #expect(event == .agentAttached(session))
+        #expect(model.pane(paneId)?.session?.agent == .attached(session: session, activity: .working))
+        _ = try requireIpcReply(commands)
     }
 
     @Test("pane.info replies directly with complete default lifecycles")
@@ -321,6 +312,9 @@ import DanTermProtocol
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(session)))
 
         let activity = sendIpc(
             &model,
@@ -339,19 +333,11 @@ import DanTermProtocol
             context: context
         )
 
-        guard case .applyPaneLifecycleIpc(_, let activityPane, let activityEvent) = activity.first,
-              case .applyPaneLifecycleIpc(_, let detachPane, let detachEvent) = detach.first
-        else {
-            Issue.record("expected pane-owner lifecycle IPC commands")
-            return
-        }
-        let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         #expect(activity.count == 1)
-        #expect(activityPane == paneId)
-        #expect(activityEvent == .agentActivityChanged(session: session, activity: .waiting))
+        _ = try requireIpcReply(activity)
         #expect(detach.count == 1)
-        #expect(detachPane == paneId)
-        #expect(detachEvent == .agentDetached(session))
+        _ = try requireIpcReply(detach)
+        #expect(model.pane(paneId)?.session?.agent == AgentLifecycle.none)
     }
 
     @Test("agent activity rejects unsupported states before pane mutation")
@@ -1515,7 +1501,7 @@ import DanTermProtocol
             let reply = try requireIpcReply(commands)
             let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
             #expect(hasEffect(commands) {
-                if case .createSession(let effectPaneId, let cwd, _, _, _) = $0 {
+                if case .createSession(_, let effectPaneId, let cwd, _, _) = $0 {
                     return effectPaneId == paneId && cwd == "/caller"
                 }
                 return false
@@ -1556,12 +1542,11 @@ import DanTermProtocol
         #expect(tabById(tabId, in: model)?.displayTitle == "clock")
         #expect(model.pane(paneId)?.title == "clock")
         #expect(hasEffect(commands) {
-            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
+            if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {
                 return effectPaneId == paneId
                     && cwd == "/tmp"
                     && command == "date"
                     && launchCommand == nil
-                    && waitAfterCommand
             }
             return false
         }, "expected createSession with shell input command")
@@ -1591,7 +1576,7 @@ import DanTermProtocol
         let paneId = group?.tabs.last?.focusedPaneId
         #expect(paneId != nil, "target group should have a new tab")
         #expect(hasEffect(commands) {
-            if case .createSession(let effectPaneId, _, let command, let launchCommand, _) = $0 {
+            if case .createSession(_, let effectPaneId, _, let command, let launchCommand) = $0 {
                 return effectPaneId == paneId && command == "make test" && launchCommand == nil
             }
             return false
@@ -1776,7 +1761,7 @@ import DanTermProtocol
         #expect(model.pane(newPaneId)?.title == "cargo")
         #expect(tabById(tabId, in: model)?.customTitle == nil)
         #expect(hasEffect(commands) {
-            if case .createSession(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
+            if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {
                 return effectPaneId == newPaneId
                     && cwd == "/tmp"
                     && command == "cargo --version"
@@ -2956,13 +2941,11 @@ private func sendIpc(
     method: String,
     params: JSONValue = .object([:]),
     context: IpcRequestContext = IpcRequestContext(),
-    livePaneState: PaneLifecyclesView = PaneLifecyclesView(),
     env: CoreEnv = .live
 ) -> [Command] {
     update(
         &model,
         .ipcRequest(reqId: UUID(), method: method, params: params, context: context),
-        livePaneState: livePaneState,
         env: env
     )
 }

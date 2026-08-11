@@ -123,7 +123,7 @@ func paneWrapperViewTests() {
                      "agent session item should be absent when the pane has no agent session")
     }
 
-    uiTest("agent menu visibility and copied id follow the terminal snapshot") {
+    uiTest("agent menu visibility and copied id follow the session model") {
         let agent = AgentSession(kind: "claude", sessionId: "snapshot-session")!
         let fx = makePaneMenuFixture(agentSession: agent)
         fx.wrapper.menuPasteboard = NSPasteboard(
@@ -135,10 +135,13 @@ func paneWrapperViewTests() {
         _ = copy.target?.perform(copy.action, with: copy)
         try uiExpect(
             fx.wrapper.menuPasteboard.string(forType: .string) == "snapshot-session",
-            "copied id should come from the terminal lifecycle snapshot"
+            "copied id should come from the session model"
         )
 
-        _ = fx.terminal.applyLifecycleEvent(.agentDetached(agent))
+        let sessionId = fx.runtime.model.pane(fx.paneId)!.session!.id
+        fx.runtime.model.updateSession(sessionId) {
+            reduceSession(&$0, report: .agentDetached(agent))
+        }
         let detachedMenu = fx.wrapper.makePaneMenu(includeClipboard: true)
         try uiExpect(
             detachedMenu.items.allSatisfy { $0.title != "Copy Agent Session ID" },
@@ -239,12 +242,14 @@ private func makeSinglePaneModel(
     hasSplits: Bool = true
 ) -> (model: AppModel, paneId: PaneId) {
     let paneId = PaneId()
-    var pane = PaneModel(id: paneId)
+    var pane = PaneModel(id: paneId, session: SessionModel(id: SessionId()))
     pane.cwd = cwd
 
     let rootNode: SplitNodeModel = hasSplits
         ? .split(id: SplitId(), direction: .horizontal,
-                 first: .leaf(pane), second: .leaf(PaneModel(id: PaneId())), ratio: 0.5)
+                 first: .leaf(pane),
+                 second: .leaf(PaneModel(id: PaneId(), session: SessionModel(id: SessionId()))),
+                 ratio: 0.5)
         : .leaf(pane)
     let tab = TabModel(id: TabId(), customTitle: nil, focusedPaneId: paneId, rootNode: rootNode)
     let group = GroupModel(id: GroupId(), name: "g", tabs: [tab])
@@ -263,8 +268,10 @@ private func makePaneMenuFixture(
     let (model, paneId) = makeSinglePaneModel(cwd: cwd, hasSplits: hasSplits)
     let runtime = AppRuntime(model: model)
     let terminal = TerminalView()
-    if let agentSession {
-        _ = terminal.applyLifecycleEvent(.agentAttached(agentSession))
+    if let agentSession, let sessionId = runtime.model.pane(paneId)?.session?.id {
+        runtime.model.updateSession(sessionId) {
+            reduceSession(&$0, report: .agentAttached(agentSession))
+        }
     }
     let wrapper = PaneWrapperView(
         paneId: paneId, terminalView: terminal,

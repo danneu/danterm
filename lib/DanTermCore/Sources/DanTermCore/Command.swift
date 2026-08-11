@@ -12,7 +12,7 @@ import DanTermProtocol
 
 enum Command {
     // Session
-    case createSession(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
+    case createSession(sessionId: SessionId, paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil)
     // Session *destruction* is a projection (reconcileSessionExistence tears down sessions
     // for panes gone from model.allPaneIds), so there is no destroy-session command.
     // The paste path, taken by IPC's top-level `text` field. Delivered through the
@@ -49,10 +49,6 @@ enum Command {
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)
     case followPaneTape(reqId: UUID, paneId: PaneId, fromNow: Bool)
-    /// Routes one hook mutation through the live session owner and writes the
-    /// IPC reply only after that owner has reduced and projected the event.
-    case applyPaneLifecycleIpc(reqId: UUID, paneId: PaneId, event: PaneLifecycleEvent)
-
     // System
     // `paneId` is carried for grouping alone: it becomes the banner's thread
     // identifier so a chatty pane stacks into one Notification Center entry
@@ -105,7 +101,6 @@ extension Command {
         case .createSession, .sendText, .sendInputText, .sendInputKey,
              .focusSession, .exportState, .ipcReply, .ipcError,
              .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
-             .applyPaneLifecycleIpc,
              .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .dismissAlertsPopover,

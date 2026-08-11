@@ -18,18 +18,6 @@ typealias CheckpointScrollbackRead = @Sendable (ScrollbackRetention) -> String?
 /// represented in the final grafted snapshot is deliberately unable to trigger a light write.
 struct LightCheckpointProjection: Equatable {
     let snapshot: AppModelSnapshot
-
-    /// Graft pane-owned recovery while constructing the value so comparison and encoding cannot
-    /// disagree about stale sessions or any other recovery input that has no persisted leaf.
-    init(
-        snapshot: AppModelSnapshot,
-        lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
-    ) {
-        self.snapshot = graftLifecycleRecovery(
-            onto: snapshot,
-            recoveryByPaneId: lifecycleRecoveryByPaneId
-        )
-    }
 }
 
 /// Everything a checkpoint needs, taken from live state in a single main-actor pass. Bundling
@@ -40,18 +28,15 @@ struct LightCheckpointProjection: Equatable {
 struct CheckpointCapture {
     let snapshot: AppModelSnapshot
     let scrollbackReads: [PaneId: CheckpointScrollbackRead]
-    let lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
     let retention: ScrollbackRetention
 
     init(
         snapshot: AppModelSnapshot,
         scrollbackReads: [PaneId: CheckpointScrollbackRead],
-        lifecycleRecoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot] = [:],
         retention: ScrollbackRetention = .checkpoint
     ) {
         self.snapshot = snapshot
         self.scrollbackReads = scrollbackReads
-        self.lifecycleRecoveryByPaneId = lifecycleRecoveryByPaneId
         self.retention = retention
     }
 
@@ -59,8 +44,7 @@ struct CheckpointCapture {
     init(lightProjection: LightCheckpointProjection) {
         self.init(
             snapshot: lightProjection.snapshot,
-            scrollbackReads: [:],
-            lifecycleRecoveryByPaneId: [:]
+            scrollbackReads: [:]
         )
     }
 
@@ -71,15 +55,10 @@ struct CheckpointCapture {
         // Bind values out so the closure does not capture the container itself.
         let snapshot = snapshot
         let reads = scrollbackReads
-        let lifecycleRecovery = lifecycleRecoveryByPaneId
         let retention = retention
         return {
-            let recovered = graftLifecycleRecovery(
-                onto: snapshot,
-                recoveryByPaneId: lifecycleRecovery
-            )
             let enriched = graftScrollback(
-                onto: recovered,
+                onto: snapshot,
                 scrollbackByPaneId: resolveScrollback(reads, keeping: retention)
             )
             let encoder = JSONEncoder()

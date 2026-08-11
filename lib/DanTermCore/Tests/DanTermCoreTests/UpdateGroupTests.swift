@@ -445,7 +445,8 @@ import Testing
         let generalPaneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .selectTab(id: generalTabId))
 
-        let commands = update(&model, .sessionCreationFailed(paneId: generalPaneId))
+        let sessionId = model.pane(generalPaneId)!.session!.id
+        let commands = update(&model, .sessionCreationFailed(sessionId: sessionId))
 
         #expect(model.groups.count == 1, "empty General should be pruned")
         #expect(model.groups[0].id == workGroupId, "Work should remain")

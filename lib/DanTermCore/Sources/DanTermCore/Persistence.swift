@@ -100,8 +100,8 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
   )
 }
 
-/// Build the structural PaneSnapshot embedded in a leaf. Pane-owned scrollback
-/// and lifecycle recovery values are grafted separately from live-session reads.
+/// Build the structural PaneSnapshot embedded in a leaf. Scrollback remains a
+/// separate live-engine graft; recovery memo is already model-owned.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
@@ -111,11 +111,14 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     id: pane.id.rawValue.uuidString,
     title: pane.title,
     cwd: abbrevCwd,
-    command: nil,
+    command: pane.session?.lastCommand,
     scrollback: nil,
     theme: pane.theme
   )
   snapshot.todos = todoSnapshots
+  snapshot.agentSession = pane.session?.lastAgentSession.map {
+    AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
+  }
   snapshot.fontSizeSteps = pane.fontSizeSteps == 0 ? nil : pane.fontSizeSteps
   return snapshot
 }
@@ -164,60 +167,6 @@ func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneI
     },
     selectedTabId: snapshot.selectedTabId
   )
-}
-
-/// Embed pane-owned recovery projections into matching snapshot leaves.
-func graftLifecycleRecovery(
-  onto snapshot: AppModelSnapshot,
-  recoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
-) -> AppModelSnapshot {
-  AppModelSnapshot(
-    groups: snapshot.groups.map { group in
-      GroupSnapshot(
-        id: group.id,
-        name: group.name,
-        isCollapsed: group.isCollapsed,
-        tabs: group.tabs.map { tab in
-          TabSnapshot(
-            id: tab.id,
-            customTitle: tab.customTitle,
-            focusedPaneId: tab.focusedPaneId,
-            rootNode: graftLifecycleRecoveryIntoNode(tab.rootNode, recoveryByPaneId),
-            color: tab.color,
-            todos: tab.todos
-          )
-        }
-      )
-    },
-    selectedTabId: snapshot.selectedTabId
-  )
-}
-
-private func graftLifecycleRecoveryIntoNode(
-  _ node: SplitNodeSnapshot,
-  _ recoveryByPaneId: [PaneId: PaneLifecycleRecoverySnapshot]
-) -> SplitNodeSnapshot {
-  switch node {
-  case .leaf(var pane):
-    guard let id = pane.id.flatMap(UUID.init(uuidString:)),
-          let recovery = recoveryByPaneId[PaneId(rawValue: id)]
-    else {
-      return .leaf(pane)
-    }
-    pane.command = recovery.command
-    pane.agentSession = recovery.agentSession.map {
-      AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
-    }
-    return .leaf(pane)
-  case .split(let id, let direction, let first, let second, let ratio):
-    return .split(
-      id: id,
-      direction: direction,
-      first: graftLifecycleRecoveryIntoNode(first, recoveryByPaneId),
-      second: graftLifecycleRecoveryIntoNode(second, recoveryByPaneId),
-      ratio: ratio
-    )
-  }
 }
 
 private func graftScrollbackIntoNode(_ node: SplitNodeSnapshot, _ scrollbackByPaneId: [PaneId: String]) -> SplitNodeSnapshot {

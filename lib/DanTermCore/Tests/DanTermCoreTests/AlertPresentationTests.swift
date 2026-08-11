@@ -17,13 +17,12 @@ struct AlertPresentationTests {
         paneId: PaneId,
         title: String,
         body: String,
-        lifecycles: PaneLifecycles = PaneLifecycles()
+        command: String? = nil
     ) -> (title: String, subtitle: String?, body: String)? {
-        let commands = update(
-            &model,
-            .desktopNotification(paneId: paneId, title: title, body: body),
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: lifecycles])
-        )
+        if let command, let sessionId = model.pane(paneId)?.session?.id {
+            update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted(command)))
+        }
+        let commands = update(&model, .desktopNotification(paneId: paneId, title: title, body: body))
         for command in commands {
             if case .sendNotification(_, _, let title, let subtitle, let body) = command {
                 return (title, subtitle, body)
@@ -52,19 +51,18 @@ struct AlertPresentationTests {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionTitle(paneId: paneId, title: "pane-title"))
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        var commandState = PaneLifecycles(command: .running("swift test"))
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
 
         let command = alertPresentation(
             senderTitle: "sender",
             paneId: paneId,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: commandState]),
             in: model
         )
-        commandState.agent = .attached(session: agent, activity: .waiting)
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
         let attached = alertPresentation(
             senderTitle: "sender",
             paneId: paneId,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: [paneId: commandState]),
             in: model
         )
 
@@ -78,14 +76,12 @@ struct AlertPresentationTests {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         createTab(&model)
-        let lifecycles = PaneLifecycles(command: .running("swift test"))
-
         let sent = notification(
             &model,
             paneId: paneId,
             title: "sender",
             body: "Done",
-            lifecycles: lifecycles
+            command: "swift test"
         )
 
         #expect(sent?.title == "swift test")

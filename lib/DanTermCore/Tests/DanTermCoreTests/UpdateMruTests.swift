@@ -140,7 +140,8 @@ import Testing
         let failedTabId = ids[1]
         let failedPaneId = model.groups[0].tabs.first { $0.id == failedTabId }!.focusedPaneId
 
-        _ = update(&model, .sessionCreationFailed(paneId: failedPaneId))
+        let sessionId = model.pane(failedPaneId)!.session!.id
+        _ = update(&model, .sessionCreationFailed(sessionId: sessionId))
         #expect(!model.mruOrder.contains(failedTabId), "failed-tab id pruned")
     }
 

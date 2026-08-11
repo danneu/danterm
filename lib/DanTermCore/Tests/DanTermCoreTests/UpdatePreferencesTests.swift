@@ -601,17 +601,15 @@ private func openPrefs(
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
         let paneBefore = model.pane(paneId)
 
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
         #expect(model.pane(paneId) == paneBefore)
-        #expect(desiredPaneConfig(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
-        )[paneId]?.theme == "Grape")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
             if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false

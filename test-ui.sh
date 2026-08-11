@@ -56,9 +56,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleReducer.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleRecovery.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleConsumers.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecyclesView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/PaneLifecycleIpcAdapter.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalMetadataBounds.swift" \

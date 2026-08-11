@@ -281,7 +281,8 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.searchState[paneId] = SearchModel(needle: "test")
-        update(&model, .sessionCreationFailed(paneId: paneId))
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionCreationFailed(sessionId: sessionId))
         #expect(model.searchState[paneId] == nil, "search state should be cleaned up on session failure")
     }
 

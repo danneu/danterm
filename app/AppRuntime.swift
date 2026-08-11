@@ -137,10 +137,6 @@ class AppRuntime {
     var viewLocalState = ViewLocalState()
     let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
-    /// Samples pane-owned state once for each pure update or projection pass.
-    var livePaneStateView: PaneLifecyclesView {
-        PaneLifecyclesView(lifecyclesByPaneId: sessions.mapValues(\.lifecycleSnapshot))
-    }
     // Last occlusion value pushed for each live session.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh sessions.
     // Cross-file presentation lifecycle forwarding diffs effective visibility here.
@@ -175,7 +171,7 @@ class AppRuntime {
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     // Session persistence uses two tiers of checkpoints:
-    //   Light  -- model plus lifecycle recovery (no scrollback), written in a fixed
+    //   Light  -- model-owned recovery state (no scrollback), written in a fixed
     //            2s coalescing window after the persisted projection changes.
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
@@ -236,10 +232,7 @@ class AppRuntime {
         }
         self.model.config = launchConfig
         self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
-        self.lightCheckpointBaseline = LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: [:]
-        )
+        self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -399,7 +392,7 @@ class AppRuntime {
 
     func send(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
-        let commands = update(&model, msg, livePaneState: livePaneStateView)
+        let commands = update(&model, msg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
         // whose search field reconcilePaneChrome builds) run after. See
@@ -875,17 +868,18 @@ class AppRuntime {
 
     private func perform(_ command: Command) {
         switch command {
-        case .createSession(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
+        case .createSession(let sessionId, let paneId, let cwd, let command, let launchCommand):
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
             )
             guard let session = makeTerminalSession(
+                sessionId: sessionId,
                 paneId: paneId,
                 workingDirectory: cwd,
                 command: command,
                 launchCommand: launchCommand,
-                waitAfterCommand: waitAfterCommand,
+                waitAfterCommand: true,
                 envVars: envVars,
                 themeName: model.pane(paneId).map {
                     effectiveTheme(for: $0, config: model.config)
@@ -895,7 +889,7 @@ class AppRuntime {
                 } ?? model.config.resolvedFontSize,
                 fontFamily: model.resolvedFontFamily
             ) else {
-                send(.sessionCreationFailed(paneId: paneId))
+                send(.sessionCreationFailed(sessionId: sessionId))
                 break
             }
             sessions[paneId] = session
@@ -939,8 +933,7 @@ class AppRuntime {
             // user action that blocks on a save panel anyway, and its bytes are human-readable.
             let capture = CheckpointCapture(
                 snapshot: snapshot,
-                scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
-                lifecycleRecoveryByPaneId: captureLifecycleRecovery()
+                scrollbackReads: captureScrollbackReads(keeping: .checkpoint)
             )
             let encode = capture.encoder(prettyPrinted: true)
             let data: Data
@@ -979,19 +972,6 @@ class AppRuntime {
         case .ipcError(let reqId, let code, let message):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
-
-        case .applyPaneLifecycleIpc(let reqId, let paneId, let event):
-            guard let connection = takeIpcConnection(for: reqId) else { break }
-            guard let session = sessions[paneId] else {
-                connection.writeError(
-                    reqId: reqId,
-                    code: -32603,
-                    message: "pane session no longer available"
-                )
-                break
-            }
-            session.applyLifecycleEvent(event)
-            connection.writeSuccess(reqId: reqId, result: .object(["ok": .bool(true)]))
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = takeIpcConnection(for: reqId) else { break }
@@ -1505,17 +1485,9 @@ class AppRuntime {
         return reads
     }
 
-    /// Capture the pane-owned values needed only for the next process launch.
-    private func captureLifecycleRecovery() -> [PaneId: PaneLifecycleRecoverySnapshot] {
-        sessions.mapValues(\.lifecycleRecoverySnapshot)
-    }
-
     /// Capture the exact value shared by light scheduling and light encoding.
     private func currentLightCheckpointProjection() -> LightCheckpointProjection {
-        LightCheckpointProjection(
-            snapshot: toSnapshot(model),
-            lifecycleRecoveryByPaneId: captureLifecycleRecovery()
-        )
+        LightCheckpointProjection(snapshot: toSnapshot(model))
     }
 
     /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
@@ -1526,7 +1498,6 @@ class AppRuntime {
         return CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: captureScrollbackReads(keeping: retention),
-            lifecycleRecoveryByPaneId: captureLifecycleRecovery(),
             retention: retention
         )
     }
@@ -1788,6 +1759,7 @@ class AppRuntime {
                             command: resolved?.command
                         )
                         guard let session = makeTerminalSession(
+                            sessionId: restoredModel.pane(paneId)!.session!.id,
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
                             command: nil,
@@ -1896,6 +1868,7 @@ class AppRuntime {
 
     /// Construct one backend session and install its pane-scoped event translation.
     private func makeTerminalSession(
+        sessionId: SessionId,
         paneId: PaneId,
         workingDirectory: String?,
         command: String?,
@@ -1925,6 +1898,7 @@ class AppRuntime {
             withExtendedLifetime(session) {
                 for message in terminalMessages(
                     for: event,
+                    sessionId: sessionId,
                     paneId: paneId
                 ) {
                     self.send(message)

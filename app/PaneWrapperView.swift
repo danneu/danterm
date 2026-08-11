@@ -309,12 +309,10 @@ class PaneWrapperView: NSView {
     }
 
     func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
-        var lifecycles = PaneLifecycles()
-        if let command { lifecycles.command = .running(command) }
         toolbarLabel.stringValue = paneCommandChromeText(
             title: title,
             cwd: cwd,
-            lifecycles: lifecycles
+            command: command
         )
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
@@ -470,7 +468,7 @@ class PaneWrapperView: NSView {
 
         // Only shown when the pane reported an agent session. The toolbar chip renders
         // the compact kind label, so this menu item is the full-id copy affordance.
-        if case .attached = terminalSession.lifecycleSnapshot.agent {
+        if case .attached = runtime?.model.pane(paneId)?.session?.agent {
             let copySessionId = wrapperItem("Copy Agent Session ID", #selector(copyAgentSessionIdAction))
             copySessionId.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
             menu.addItem(copySessionId)
@@ -529,7 +527,7 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func copyAgentSessionIdAction() {
-        guard case .attached(let session, _) = terminalSession.lifecycleSnapshot.agent else { return }
+        guard case .attached(let session, _) = runtime?.model.pane(paneId)?.session?.agent else { return }
         menuPasteboard.clearContents()
         menuPasteboard.setString(session.sessionId, forType: .string)
     }

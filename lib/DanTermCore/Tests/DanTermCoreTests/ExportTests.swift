@@ -431,17 +431,16 @@ import Testing
         #expect(allPaneSnapshots(snapshot)[0].cwd == "~/work")
     }
 
-    @Test("lifecycle recovery graft combines command with structural cwd")
-    func lifecycleRecoveryGraftCombinesCommandAndCwd() {
+    @Test("session recovery memo combines command with structural cwd")
+    func sessionRecoveryMemoCombinesCommandAndCwd() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.cwd = home + "/code" }
-        let snapshot = graftLifecycleRecovery(
-            onto: toSnapshot(model),
-            recoveryByPaneId: [paneId: PaneLifecycleRecoverySnapshot(command: "claude")]
-        )
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("claude")))
+        let snapshot = toSnapshot(model)
         let pane = allPaneSnapshots(snapshot)[0]
         #expect(pane.command == "claude")
         #expect(pane.cwd == "~/code")
@@ -465,10 +464,9 @@ import Testing
         update(&model, .splitPane(direction: .horizontal))
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
-        let snapshot = graftLifecycleRecovery(
-            onto: toSnapshot(model),
-            recoveryByPaneId: [paneId: PaneLifecycleRecoverySnapshot(command: "claude")]
-        )
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
+        update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("claude")))
+        let snapshot = toSnapshot(model)
         let initFile = toInitFile(snapshot: snapshot)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

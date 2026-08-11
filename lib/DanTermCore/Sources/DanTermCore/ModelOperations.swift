@@ -42,10 +42,9 @@ func configFontSizeText(_ size: Double) -> String {
 /// Resolves the live connection theme ahead of the pane's local theme choice.
 func effectiveTheme(
   for pane: PaneModel,
-  config: DanTermConfig = .default,
-  lifecycles: PaneLifecycles = PaneLifecycles()
+  config: DanTermConfig = .default
 ) -> String {
-  if case .remote = lifecycles.connection {
+  if case .remote = pane.session?.connection ?? .local {
     return config.remoteTheme
   }
   return pane.theme ?? config.resolvedDefaultTheme

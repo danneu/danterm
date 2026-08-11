@@ -16,3 +16,19 @@ extension String {
         utf8.count <= TerminalMetadataBounds.maximumValueBytes
     }
 }
+
+extension SessionReport {
+    /// Centralizes admission of bounded lifecycle metadata before model mutation.
+    var isAdmitted: Bool {
+        switch self {
+        case .commandStarted(let command):
+            command.fitsTerminalMetadataValueLimit
+        case .remoteIdentityReported(let identity):
+            identity.user.utf8.count + identity.host.utf8.count
+                <= TerminalMetadataBounds.maximumValueBytes
+        case .integrationReady, .commandEnded, .remoteDetected, .connectionEnded,
+             .agentAttached, .agentActivityChanged, .agentDetached:
+            true
+        }
+    }
+}

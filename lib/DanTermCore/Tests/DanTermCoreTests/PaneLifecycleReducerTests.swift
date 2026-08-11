@@ -7,29 +7,32 @@ struct PaneLifecycleReducerTests {
     @Test("pane stream preserves ordered interleaving")
     func paneStreamPreservesOrdering() throws {
         let session = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneLifecycleStream()
+        var state = SessionModel(id: SessionId())
 
-        _ = stream.apply(.integrationReady)
-        _ = stream.apply(.commandStarted("claude"))
-        _ = stream.apply(.agentAttached(session))
-        _ = stream.apply(.remoteDetected)
-        _ = stream.apply(.agentActivityChanged(session: session, activity: .waiting))
-        _ = stream.apply(.commandEnded(exitStatus: 0))
+        for report: SessionReport in [
+            .integrationReady,
+            .commandStarted("claude"),
+            .agentAttached(session),
+            .remoteDetected,
+            .agentActivityChanged(session: session, activity: .waiting),
+            .commandEnded(exitStatus: 0),
+        ] {
+            reduceSession(&state, report: report)
+        }
 
-        #expect(stream.snapshot.integration == .ready)
-        #expect(stream.snapshot.command == .idle)
-        #expect(stream.snapshot.connection == .remote(identity: nil))
-        #expect(stream.snapshot.agent == .attached(session: session, activity: .waiting))
+        #expect(state.integration == .ready)
+        #expect(state.command == .idle)
+        #expect(state.connection == .remote(identity: nil))
+        #expect(state.agent == .attached(session: session, activity: .waiting))
     }
 
     @Test("initial state has no reported live lifecycles")
     func initialStateIsEmpty() {
-        #expect(PaneLifecycles() == PaneLifecycles(
-            integration: .neverReported,
-            command: .idle,
-            connection: .local,
-            agent: .none
-        ))
+        let state = SessionModel(id: SessionId())
+        #expect(state.integration == .neverReported)
+        #expect(state.command == .idle)
+        #expect(state.connection == .local)
+        #expect(state.agent == .none)
     }
 
     @Test("integration readiness is idempotent")
@@ -52,8 +55,8 @@ struct PaneLifecycleReducerTests {
 
         #expect(state.command == .running("replacement command"))
 
-        reducePaneLifecycles(&state, event: .commandEnded(exitStatus: 23))
-        reducePaneLifecycles(&state, event: .commandEnded(exitStatus: 0))
+        reduceSession(&state, report: .commandEnded(exitStatus: 23))
+        reduceSession(&state, report: .commandEnded(exitStatus: 0))
 
         #expect(state.command == .idle)
     }
@@ -95,7 +98,7 @@ struct PaneLifecycleReducerTests {
 
         #expect(state.connection == .remote(identity: nil))
 
-        reducePaneLifecycles(&state, event: .remoteIdentityReported(remote))
+        reduceSession(&state, report: .remoteIdentityReported(remote))
 
         #expect(state.connection == .remote(identity: remote))
     }
@@ -115,8 +118,8 @@ struct PaneLifecycleReducerTests {
 
         #expect(state.connection == .remote(identity: outer))
 
-        reducePaneLifecycles(&state, event: .connectionEnded)
-        reducePaneLifecycles(&state, event: .connectionEnded)
+        reduceSession(&state, report: .connectionEnded)
+        reduceSession(&state, report: .connectionEnded)
 
         #expect(state.connection == .local)
     }
@@ -148,12 +151,12 @@ struct PaneLifecycleReducerTests {
 
         #expect(state.agent == .attached(session: session, activity: .idle))
 
-        reducePaneLifecycles(&state, event: .agentDetached(session))
-        reducePaneLifecycles(
+        reduceSession(&state, report: .agentDetached(session))
+        reduceSession(
             &state,
-            event: .agentActivityChanged(session: session, activity: .working)
+            report: .agentActivityChanged(session: session, activity: .working)
         )
-        reducePaneLifecycles(&state, event: .agentDetached(session))
+        reduceSession(&state, report: .agentDetached(session))
 
         #expect(state.agent == .none)
     }
@@ -167,7 +170,7 @@ struct PaneLifecycleReducerTests {
             .agentActivityChanged(session: first, activity: .waiting),
         ])
 
-        reducePaneLifecycles(&state, event: .agentAttached(replacement))
+        reduceSession(&state, report: .agentAttached(replacement))
 
         #expect(state.agent == .attached(session: replacement, activity: .working))
     }
@@ -186,10 +189,10 @@ struct PaneLifecycleReducerTests {
         #expect(state.agent == .attached(session: current, activity: .working))
     }
 
-    private func reduce(_ events: [PaneLifecycleEvent]) -> PaneLifecycles {
-        var state = PaneLifecycles()
-        for event in events {
-            reducePaneLifecycles(&state, event: event)
+    private func reduce(_ reports: [SessionReport]) -> SessionModel {
+        var state = SessionModel(id: SessionId())
+        for report in reports {
+            reduceSession(&state, report: report)
         }
         return state
     }

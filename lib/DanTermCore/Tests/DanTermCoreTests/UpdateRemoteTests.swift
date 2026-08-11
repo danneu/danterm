@@ -12,15 +12,16 @@ struct UpdateRemoteTests {
         var config = DanTermConfig.default
         config.defaultTheme = "Default"
         config.remoteTheme = "Remote"
-        let local = PaneLifecycles()
-        let remote = PaneLifecycles(connection: .remote(identity: nil))
-
-        #expect(effectiveTheme(for: pane, config: config, lifecycles: local) == "Default")
-        #expect(effectiveTheme(for: pane, config: config, lifecycles: remote) == "Remote")
+        pane.session = SessionModel(id: SessionId())
+        #expect(effectiveTheme(for: pane, config: config) == "Default")
+        pane.session?.connection = .remote(identity: nil)
+        #expect(effectiveTheme(for: pane, config: config) == "Remote")
 
         pane.theme = "Pane"
-        #expect(effectiveTheme(for: pane, config: config, lifecycles: local) == "Pane")
-        #expect(effectiveTheme(for: pane, config: config, lifecycles: remote) == "Remote")
+        pane.session?.connection = .local
+        #expect(effectiveTheme(for: pane, config: config) == "Pane")
+        pane.session?.connection = .remote(identity: nil)
+        #expect(effectiveTheme(for: pane, config: config) == "Remote")
     }
 
     @Test("remote theme changes project immediately without pane mutation")
@@ -28,25 +29,20 @@ struct UpdateRemoteTests {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let lifecycles = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
         let paneBefore = model.pane(paneId)
 
         var reloaded = model.config
         reloaded.remoteTheme = "Grape"
         _ = update(&model, .configLoaded(reloaded, resolvedFontFamily: nil))
-        #expect(desiredPaneConfig(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
-        )[paneId]?.theme == "Grape")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
         #expect(model.pane(paneId) == paneBefore)
 
         _ = update(&model, .preferencesOpened())
         _ = update(&model, .prefSetRemoteTheme("Ocean"))
         _ = update(&model, .prefSave)
-        #expect(desiredPaneConfig(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: lifecycles)
-        )[paneId]?.theme == "Ocean")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Ocean")
         #expect(model.pane(paneId) == paneBefore)
     }
 
@@ -55,15 +51,14 @@ struct UpdateRemoteTests {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let remote = [paneId: PaneLifecycles(connection: .remote(identity: nil))]
+        let sessionId = model.pane(paneId)!.session!.id
+        update(&model, .sessionReport(sessionId: sessionId, report: .remoteDetected))
 
         _ = update(&model, .setPaneTheme(paneId: paneId, themeName: "Solarized"))
 
-        #expect(desiredPaneConfig(
-            in: model,
-            livePaneState: PaneLifecyclesView(lifecyclesByPaneId: remote)
-        )[paneId]?.theme == model.config.remoteTheme)
-        #expect(desiredPaneConfig(in: model, livePaneState: PaneLifecyclesView())[paneId]?.theme == "Solarized")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == model.config.remoteTheme)
+        update(&model, .sessionReport(sessionId: sessionId, report: .connectionEnded))
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Solarized")
     }
 
     @Test("lifecycle recovery projection changes only for persisted transitions")
@@ -72,36 +67,29 @@ struct UpdateRemoteTests {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
-        var stream = PaneLifecycleStream()
-        var recovery = PaneLifecycleRecoveryState()
+        let sessionId = try #require(model.pane(paneId)?.session?.id)
 
-        func changesProjection(_ transition: PaneLifecycleTransition) -> Bool {
-            let before = LightCheckpointProjection(
-                snapshot: toSnapshot(model),
-                lifecycleRecoveryByPaneId: [paneId: recovery.snapshot]
-            )
-            recovery.apply(transition)
-            let after = LightCheckpointProjection(
-                snapshot: toSnapshot(model),
-                lifecycleRecoveryByPaneId: [paneId: recovery.snapshot]
-            )
+        func changesProjection(_ report: SessionReport) -> Bool {
+            let before = LightCheckpointProjection(snapshot: toSnapshot(model))
+            update(&model, .sessionReport(sessionId: sessionId, report: report))
+            let after = LightCheckpointProjection(snapshot: toSnapshot(model))
             return before != after
         }
 
-        #expect(changesProjection(stream.apply(.commandStarted("make"))))
-        #expect(changesProjection(stream.apply(.commandEnded(exitStatus: 0))) == false)
-        #expect(changesProjection(stream.apply(.remoteDetected)) == false)
-        #expect(changesProjection(stream.apply(.remoteIdentityReported(
+        #expect(changesProjection(.commandStarted("make")))
+        #expect(changesProjection(.commandEnded(exitStatus: 0)) == false)
+        #expect(changesProjection(.remoteDetected) == false)
+        #expect(changesProjection(.remoteIdentityReported(
             RemoteSession(user: "dan", host: "caja")
-        ))) == false)
-        #expect(changesProjection(stream.apply(.agentAttached(agent))))
-        #expect(changesProjection(stream.apply(.agentActivityChanged(
+        )) == false)
+        #expect(changesProjection(.agentAttached(agent)))
+        #expect(changesProjection(.agentActivityChanged(
             session: agent,
             activity: .idle
-        ))) == false)
-        #expect(changesProjection(stream.apply(.commandStarted("test"))))
-        #expect(changesProjection(stream.apply(.commandEnded(exitStatus: 0))) == false)
-        #expect(changesProjection(stream.apply(.agentDetached(agent))))
-        #expect(changesProjection(stream.apply(.connectionEnded)) == false)
+        )) == false)
+        #expect(changesProjection(.commandStarted("test")))
+        #expect(changesProjection(.commandEnded(exitStatus: 0)) == false)
+        #expect(changesProjection(.agentDetached(agent)))
+        #expect(changesProjection(.connectionEnded) == false)
     }
 }

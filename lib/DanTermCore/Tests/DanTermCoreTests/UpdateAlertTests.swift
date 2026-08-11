@@ -411,7 +411,8 @@ import Testing
         model.searchState[paneA] = SearchModel(needle: "test")
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
-        update(&model, .sessionCreationFailed(paneId: paneA))
+        let sessionId = model.pane(paneA)!.session!.id
+        update(&model, .sessionCreationFailed(sessionId: sessionId))
         #expect(model.alerts.isEmpty, "sessionCreationFailed should remove pane's alerts")
         #expect(model.searchState[paneA] == nil, "sessionCreationFailed should clean up search state")
         #expect(model.lastNotificationTime[paneA] == nil, "sessionCreationFailed should clean up throttle data")

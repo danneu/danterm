@@ -48,28 +48,6 @@ func makeTestEnv(
     )
 }
 
-/// Keeps lifecycles-independent tests terse while production callers must
-/// always supply the pane-owner view explicitly.
-@discardableResult
-func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Command] {
-    update(&model, msg, livePaneState: PaneLifecyclesView(), env: env)
-}
-
-func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
-    desiredPaneToolbar(in: model, livePaneState: PaneLifecyclesView())
-}
-
-func desiredPaneToolbar(
-    in model: AppModel,
-    tally: UnreadAlertTally
-) -> [PaneId: PaneToolbarRender] {
-    desiredPaneToolbar(in: model, tally: tally, livePaneState: PaneLifecyclesView())
-}
-
-func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
-    desiredPaneConfig(in: model, livePaneState: PaneLifecyclesView())
-}
-
 /// Create a tab and return the commands (for inspection or ignoring).
 @discardableResult
 func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Command] {
