@@ -237,6 +237,28 @@ extension Terminal {
             var rowWithinRecord: Int
         }
 
+        /// Names one retained record without depending on its sequence position or arena offset.
+        struct RecordIdentity: Equatable, Comparable, Sendable {
+            fileprivate var epoch: UInt64
+            fileprivate var rawValue: UInt64
+
+            static func < (lhs: Self, rhs: Self) -> Bool {
+                lhs.epoch < rhs.epoch
+                    || (lhs.epoch == rhs.epoch && lhs.rawValue < rhs.rawValue)
+            }
+        }
+
+        /// Names a cell boundary by stable record identity and its original offset in that record.
+        struct RecordTextPosition: Equatable, Comparable, Sendable {
+            var record: RecordIdentity
+            var cellOffset: Int
+
+            static func < (lhs: Self, rhs: Self) -> Bool {
+                lhs.record < rhs.record
+                    || (lhs.record == rhs.record && lhs.cellOffset < rhs.cellOffset)
+            }
+        }
+
         // MARK: - Stored state
 
         /// The arena, stored as 64-bit words over copy-on-write chunks materialized on first use.
@@ -278,9 +300,22 @@ extension Terminal {
 
         private var bytesInUse = 0
 
-        /// One byte offset per live record, oldest first. Charged at capacity, which is the
-        /// term that bounds the degenerate blank-line regime (`research/31/D2` Decision 1).
+        /// One packed arena offset and stable identity per live record, oldest first. The pair
+        /// stays one word, so the capacity charge that bounds the degenerate blank-line regime
+        /// remains eight bytes per record (`research/31/D2` Decision 1).
         private var offsets: RingBuffer<Int>
+
+        /// Bits in each existing 8-byte index entry that hold its physical arena offset.
+        private let recordOffsetBits: Int
+
+        /// Selects the physical arena offset from a packed index entry.
+        private let recordOffsetMask: Int
+
+        /// The next identity packed beside an offset without widening the per-record index.
+        private var nextRecordIdentity: UInt64 = 1
+
+        /// Advances only when the packed identity space is exhausted and history is retired.
+        private var recordIdentityEpoch: UInt64 = 0
 
         /// Cached display-row totals, one per `blockSize` records.
         private var blocks: RingBuffer<Block>
@@ -372,6 +407,8 @@ extension Terminal {
             precondition(width >= 1)
             budget = budgetBytes
             arenaCapacity = budgetBytes - Self.metadataReserveBytes(forBudget: budgetBytes)
+            recordOffsetBits = max(1, Int.bitWidth - (arenaCapacity - 1).leadingZeroBitCount)
+            recordOffsetMask = (1 << recordOffsetBits) - 1
             let shift = Self.chunkByteShift(forCapacity: arenaCapacity)
             chunkByteShift = shift
             chunkByteMask = (1 << shift) - 1
@@ -762,7 +799,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse += record.byteLength
                 - LogicalLineRecord.headerAndCells(record.cellCount)
-            writeCursor = offset + record.byteLength
+            writeCursor = recordOffset(in: offset) + record.byteLength
             clearOpenScratch()
         }
 
@@ -799,6 +836,8 @@ extension Terminal {
         }
 
         private mutating func reopenClosedTail(_ closed: LogicalLineRecord, at offset: Int) {
+            guard ensureRecordIdentityCapacity() else { return }
+            renewTailRecordIdentity()
             var record = closed
             loadOpenScratch(from: record, at: offset)
             if record.hasTrailingFill {
@@ -816,7 +855,7 @@ extension Terminal {
             record.identityPerCell = false
             writeHeader(record, at: offset)
             bytesInUse -= closedLength - record.byteLength
-            writeCursor = offset + record.byteLength
+            writeCursor = recordOffset(in: offset) + record.byteLength
             refreshMetadataCharge()
         }
 
@@ -850,7 +889,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             bytesInUse += record.byteLength
                 - LogicalLineRecord.headerAndCells(record.cellCount)
-            writeCursor = offset + record.byteLength
+            writeCursor = recordOffset(in: offset) + record.byteLength
             clearOpenScratch()
         }
 
@@ -919,7 +958,7 @@ extension Terminal {
             let newOffset = offset + cut * LogicalLineRecord.cellBytes
             writeHeader(trimmed, at: newOffset)
             offsets[0] = newOffset
-            head = newOffset
+            head = recordOffset(in: newOffset)
             bytesInUse -= cut * LogicalLineRecord.cellBytes
             headTrimmedCells += cut
         }
@@ -970,8 +1009,12 @@ extension Terminal {
             // the span off the index rather than re-deriving the record's length and then walking
             // the pads (`research/31/DD14`) charges the same bytes with one subtraction and no decode.
             let next = offsets[0]
-            bytesInUse -= next > offset ? next - offset : (arenaCapacity - offset) + next
-            head = next
+            let nextOffset = recordOffset(in: next)
+            let oldOffset = recordOffset(in: offset)
+            bytesInUse -= nextOffset > oldOffset
+                ? nextOffset - oldOffset
+                : (arenaCapacity - oldOffset) + nextOffset
+            head = nextOffset
             retireEmptyHeadBlocks()
         }
 
@@ -1091,7 +1134,7 @@ extension Terminal {
             clearOpenScratch()
             offsets.removeLast()
             bytesInUse -= record.byteLength
-            writeCursor = offset
+            writeCursor = recordOffset(in: offset)
             if offsets.count == 0 {
                 resetToEmptyArena()
                 return
@@ -1132,7 +1175,7 @@ extension Terminal {
             record.cellCount = newCellCount
             writeHeader(record, at: offset)
             bytesInUse -= (oldCellCount - newCellCount) * LogicalLineRecord.cellBytes
-            writeCursor = offset + record.byteLength
+            writeCursor = recordOffset(in: offset) + record.byteLength
             refreshMetadataCharge()
         }
 
@@ -1746,6 +1789,45 @@ extension Terminal {
             return (cursor.recordIndex, min(start + max(0, column), end))
         }
 
+        /// Captures a cell boundary in a closed record without storing its display geometry.
+        func recordTextPosition(
+            recordIndex: Int,
+            cellOffset: Int
+        ) -> RecordTextPosition? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            let address = offsets[recordIndex]
+            let record = self.record(at: address)
+            guard record.isOpen == false, cellOffset >= 0, cellOffset <= record.cellCount else {
+                return nil
+            }
+            let originalOffset = cellOffset + (recordIndex == 0 ? headTrimmedCells : 0)
+            return RecordTextPosition(
+                record: recordIdentity(in: address),
+                cellOffset: originalOffset
+            )
+        }
+
+        /// Resolves a retained record coordinate under the current width, or nil once retired.
+        func position(of coordinate: RecordTextPosition) -> (displayRow: Int, column: Int)? {
+            var low = 0
+            var high = offsets.count
+            while low < high {
+                let middle = low + (high - low) / 2
+                if recordIdentity(in: offsets[middle]) < coordinate.record {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            guard low < offsets.count, recordIdentity(in: offsets[low]) == coordinate.record else {
+                return nil
+            }
+            let retainedStart = low == 0 ? headTrimmedCells : 0
+            let relativeOffset = coordinate.cellOffset - retainedStart
+            guard relativeOffset >= 0 else { return nil }
+            return position(ofRecord: low, cellOffset: relativeOffset)
+        }
+
         /// Where a record's cell offset folds to, under the fold in force now.
         ///
         /// Nil when the offset is no longer in the record, which a width change can produce for
@@ -2117,6 +2199,7 @@ extension Terminal {
 
         private mutating func openRecordIfNeeded(mark: Terminal.SemanticPromptRow) {
             if openTailRecord() != nil { return }
+            _ = ensureRecordIdentityCapacity()
             materializeChunk(at: writeCursor)
             let inherited = pendingStartsMidLine
             pendingStartsMidLine = false
@@ -2500,7 +2583,7 @@ extension Terminal {
                     if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
                     offsets.removeLast()
                     bytesInUse -= LogicalLineRecord.Header.byteCount
-                    writeCursor = offset
+                    writeCursor = recordOffset(in: offset)
                     clearOpenScratch()
                     // Every other mutator keeps `head == offsets[0]`; discarding the store's only
                     // record here would leave `head` naming an offset no record occupies, and an
@@ -2546,7 +2629,8 @@ extension Terminal {
 
         private mutating func appendRecordOffset(_ offset: Int) {
             let sequence = firstRecordSequence + offsets.count
-            offsets.append(offset)
+            let identity = allocateRecordIdentity()
+            offsets.append(packedRecordAddress(offset: offset, identity: identity))
             if offsets.count == 1 {
                 firstBlockNumber = sequence / Self.blockSize
                 blocks.removeAll()
@@ -2560,6 +2644,59 @@ extension Terminal {
                 blocks.append(Block(rowStart: previous.rowStart + previous.rowCount, rowCount: 0))
             }
             refreshMetadataCharge()
+        }
+
+        /// Test support: stable identity shares the existing index word with the arena offset.
+        var recordIndexEntryBytesForTesting: Int { MemoryLayout<Int>.stride }
+
+        /// Drives the packed ordinal past its range so the retirement seam is reachable in tests.
+        mutating func exhaustRecordIdentitySpaceForTesting() {
+            nextRecordIdentity = maximumRecordIdentity + 1
+        }
+
+        private var maximumRecordIdentity: UInt64 {
+            UInt64.max >> UInt64(recordOffsetBits)
+        }
+
+        private mutating func allocateRecordIdentity() -> RecordIdentity {
+            precondition(nextRecordIdentity <= maximumRecordIdentity)
+            defer { nextRecordIdentity += 1 }
+            return RecordIdentity(epoch: recordIdentityEpoch, rawValue: nextRecordIdentity)
+        }
+
+        /// Retires all coordinates before the packed ordinal could repeat.
+        @discardableResult
+        private mutating func ensureRecordIdentityCapacity() -> Bool {
+            guard nextRecordIdentity > maximumRecordIdentity else { return true }
+            removeAll()
+            recordIdentityEpoch &+= 1
+            nextRecordIdentity = 1
+            return false
+        }
+
+        private func packedRecordAddress(offset: Int, identity: RecordIdentity) -> Int {
+            precondition(offset >= 0 && offset <= recordOffsetMask)
+            let raw = identity.rawValue << UInt64(recordOffsetBits) | UInt64(offset)
+            return Int(bitPattern: UInt(raw))
+        }
+
+        @inline(__always) private func recordOffset(in address: Int) -> Int {
+            address & recordOffsetMask
+        }
+
+        @inline(__always) private func recordIdentity(in address: Int) -> RecordIdentity {
+            RecordIdentity(
+                epoch: recordIdentityEpoch,
+                rawValue: UInt64(UInt(bitPattern: address)) >> UInt64(recordOffsetBits)
+            )
+        }
+
+        private mutating func renewTailRecordIdentity() {
+            let index = offsets.count - 1
+            offsets[index] = packedRecordAddress(
+                offset: recordOffset(in: offsets[index]),
+                identity: allocateRecordIdentity()
+            )
         }
 
         private mutating func addDisplayRowsToTail(_ rows: Int) {
@@ -2615,36 +2752,43 @@ extension Terminal {
         /// A record never straddles a chunk, so every walk over one record's bytes can call
         /// these once and index the chunk directly afterwards.
         @inline(__always) private func chunkIndex(of offset: Int) -> Int {
-            offset >> chunkByteShift
+            let offset = recordOffset(in: offset)
+            return offset >> chunkByteShift
         }
 
         @inline(__always) private func chunkWordIndex(of offset: Int) -> Int {
-            (offset & chunkByteMask) >> 3
+            let offset = recordOffset(in: offset)
+            return (offset & chunkByteMask) >> 3
         }
 
         private func word(at offset: Int) -> UInt64 {
+            let offset = recordOffset(in: offset)
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
             return chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
         }
 
         private mutating func setWord(_ value: UInt64, at offset: Int) {
+            let offset = recordOffset(in: offset)
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
             chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3] = value
         }
 
         private func u16(_ offset: Int) -> Int {
+            let offset = recordOffset(in: offset)
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
             let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
             return Int((word >> UInt64((offset & 7) << 3)) & 0xFFFF)
         }
 
         private func u32(_ offset: Int) -> UInt32 {
+            let offset = recordOffset(in: offset)
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
             let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
             return UInt32(truncatingIfNeeded: word >> UInt64((offset & 7) << 3))
         }
 
         private mutating func setU16(_ value: Int, at offset: Int) {
+            let offset = recordOffset(in: offset)
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
             let shift = UInt64((offset & 7) << 3)
             let chunk = offset >> chunkByteShift
@@ -2654,6 +2798,7 @@ extension Terminal {
         }
 
         private mutating func setU32(_ value: UInt32, at offset: Int) {
+            let offset = recordOffset(in: offset)
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
             let shift = UInt64((offset & 7) << 3)
             let chunk = offset >> chunkByteShift

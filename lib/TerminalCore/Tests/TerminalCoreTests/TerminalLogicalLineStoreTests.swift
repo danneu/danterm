@@ -1004,6 +1004,74 @@ struct TerminalLogicalLineStoreTests {
         assertSurvives("after a head trim", offsetBy: 6)
     }
 
+    @Test("a record coordinate survives a head trim without moving")
+    func recordCoordinateSurvivesHeadTrim() throws {
+        // Intent: a coordinate names its original cell after eviction trims earlier cells from
+        //   the same record.
+        // Why it exists: rewriting surviving coordinates on every head trim would make eviction
+        //   cost grow with the number of indexed search matches.
+        // Scenario: a six-cell closed record loses its first four-cell display row while a
+        //   coordinate continues to name the first cell of the retained suffix.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        store.admit(Self.filledRow(width: 4, seed: 0, softWrapped: true))
+        store.admit(Self.shortRow(width: 4, count: 2, seed: 4))
+        let coordinate = try #require(
+            store.recordTextPosition(recordIndex: 0, cellOffset: 4)
+        )
+
+        _ = store.setWidth(3)
+        var resolved = try #require(store.position(of: coordinate))
+        #expect(resolved.displayRow == 1)
+        #expect(resolved.column == 1)
+        _ = store.setWidth(4)
+
+        #expect(evictOne(&store))
+
+        resolved = try #require(store.position(of: coordinate))
+        #expect(resolved.displayRow == 0)
+        #expect(resolved.column == 0)
+    }
+
+    @Test("a retired record coordinate never resolves to newly admitted text")
+    func recordCoordinateIsNotReusedAfterTailDrop() throws {
+        // Intent: once tail truncation removes a record, its coordinate stays invalid even when
+        //   the next admission occupies the same sequence position and arena bytes.
+        // Why it exists: position-derived identity reused both today, which would let a stored
+        //   search match silently retarget from removed text onto unrelated new text.
+        // Scenario: one closed record is handed back, then a different closed record replaces it.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 0))
+        let retired = try #require(
+            store.recordTextPosition(recordIndex: 0, cellOffset: 0)
+        )
+
+        _ = store.truncateTail(displayRows: 1)
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 10))
+
+        #expect(store.position(of: retired) == nil)
+        #expect(store.recordIndexEntryBytesForTesting == MemoryLayout<Int>.stride)
+    }
+
+    @Test("record identity exhaustion retires history before restarting its ordinal")
+    func recordIdentityExhaustionRetiresHistory() throws {
+        // Intent: exhausting the bits packed beside an arena offset invalidates every old
+        //   coordinate before any ordinal can repeat.
+        // Why it exists: an untrusted output stream may run indefinitely, so the bounded
+        //   identity representation needs a non-crashing retirement rule at its limit.
+        // Scenario: a test primes the otherwise unreachable limit, then admits a replacement.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 0))
+        let retired = try #require(
+            store.recordTextPosition(recordIndex: 0, cellOffset: 0)
+        )
+        store.exhaustRecordIdentitySpaceForTesting()
+
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 10))
+
+        #expect(store.recordCount == 1)
+        #expect(store.position(of: retired) == nil)
+    }
+
     @Test("Equality separates histories that differ only in a side-table value")
     func equalitySeesEverySideTableValue() {
         // Intent: two stores fed the same rows compare equal, and stop comparing equal as soon

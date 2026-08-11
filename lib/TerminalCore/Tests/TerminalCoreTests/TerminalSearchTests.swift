@@ -136,6 +136,37 @@ struct TerminalSearchTests {
         ))
     }
 
+    @Test("forced-split erase fill never enters copied or searched text")
+    func forcedSplitEraseFillIsNotTextAtAnyWidth() throws {
+        // Intent: a forced-split logical line projects only stored cells and its hard boundary,
+        //   independent of the width used to paint its trailing background erase.
+        // Why it exists: treating the erase fill as padding text made copy and the match set
+        //   change on resize even though the retained record's content did not change.
+        // Scenario: a line longer than the small arena's forced-split cap ends under EL 0 with a
+        //   background color, then the user copies and searches it before and after a reflow.
+        let content = String(repeating: "A", count: 400)
+        let expected = content + "\nX\nY"
+        var terminal = try #require(Terminal(
+            columns: 32,
+            rows: 2,
+            scrollbackBudgetBytes: 1 << 16
+        ))
+        terminal.feed(Array((content + "\u{1B}[41m\u{1B}[K\u{1B}[0m\r\nX\r\nY").utf8))
+
+        #expect(terminal.retainedRecordSummaryForTesting(at: 0)?.isForcedSplit == true)
+        #expect(terminal.fullHistoryText == expected)
+        var found = terminal.beginSearch("A\nX")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+
+        terminal.resize(columns: 17, rows: 2)
+
+        #expect(terminal.fullHistoryText == expected)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        found = terminal.beginSearch("A \nX")
+        #expect(found == false)
+    }
+
     @Test("navigation rescans changed nonintersecting rows")
     func navigationUsesLiveContent() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
