@@ -252,7 +252,18 @@ private enum TerminalWorkflowRunner {
                   events.contains(where: {
                       if case .connectionDeclared(.remote(identity: .some)) = $0 { true } else { false }
                   }),
-                  events.contains(.connectionDeclared(.local))
+                  events.contains(.connectionDeclared(.local)),
+                  let interruptedCommand = events.firstIndex(where: {
+                      if case .commandStarted(let command) = $0 {
+                          command.contains("__SSH_%s_READY__")
+                      } else {
+                          false
+                      }
+                  }),
+                  let interruptedRemote = events[events.index(after: interruptedCommand)...]
+                      .firstIndex(of: .connectionDeclared(.remote(identity: nil))),
+                  events[events.index(after: interruptedRemote)...]
+                      .contains(.connectionDeclared(.local))
             else { throw RunnerError.missingSemantics(workflow) }
         }
     }
@@ -290,6 +301,8 @@ private enum TerminalWorkflowRunner {
         let integrationArgument = shellQuote(integration)
         let remoteSSHCommand = shellQuote("source \(integrationArgument); printf '\\033[35m__SSH_UNICODE__=λ\\033[0m\\n__REMOTE_READY__\\n'; while read line; do stty size; test \"$line\" = exit && break; done")
         let remoteSSHInvocation = shellQuote("/bin/zsh -f -c \(remoteSSHCommand)")
+        let interruptedSSHCommand = shellQuote("trap 'exit 130' INT; printf '__SSH_%s_READY__\\n' INTERRUPT; while :; do read -r line; done")
+        let interruptedSSHInvocation = shellQuote("/bin/zsh -f -c \(interruptedSSHCommand)")
         let fzfArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_FZF"] ?? "fzf")
         let asciinemaArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_ASCIINEMA"] ?? "asciinema")
         let cast = runDirectory.appending(path: "asciinema/session.cast").path
@@ -325,6 +338,10 @@ private enum TerminalWorkflowRunner {
                 .resize(101, 37), .text("wide\n"), .expect("37 101"),
                 .text("exit\n"), .expect("__SSH_LOCAL__"),
                 .expectFollowing("DANTERM-WORKFLOW>", after: "__SSH_LOCAL__"),
+                .text("ssh -tt -F \(sshConfigArgument) workflow-host \(interruptedSSHInvocation)\n"),
+                .expect("__SSH_INTERRUPT_READY__"),
+                .key(.character("c"), .control),
+                .expectFollowing("DANTERM-WORKFLOW>", after: "__SSH_INTERRUPT_READY__"),
             ]),
             Workflow(name: "fzf", shell: "/bin/zsh", steps: [
                 .expect("DANTERM-WORKFLOW>"), .text("printf 'alpha\\nβeta\\nβravo\\ngamma\\n' | \(fzfArgument) --layout=reverse --no-sort > /tmp/danterm-workflow-fzf-$PPID; printf '__FZF__='; cat /tmp/danterm-workflow-fzf-$PPID; rm /tmp/danterm-workflow-fzf-$PPID\n"),

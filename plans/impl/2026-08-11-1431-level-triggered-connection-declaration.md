@@ -167,4 +167,4 @@ remote until the copy is refreshed; the remote-install instructions should say s
 - [x] Level-triggered `connection` declaration end to end: shells, envelope
       version, parser, core, app, IPC shape, updated and new tests including the
       interactive PTY regression, and the contract docs.
-- [ ] Interrupted-connection coverage in the opt-in real-sshd workflow runner.
+- [x] Interrupted-connection coverage in the opt-in real-sshd workflow runner.
