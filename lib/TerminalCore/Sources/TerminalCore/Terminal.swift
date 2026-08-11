@@ -4569,34 +4569,42 @@ public struct Terminal: Equatable, Sendable {
 
     /// How much text lies between two stream anchors, counted in projected content units.
     ///
-    /// Units rather than rows times columns, because a hard-ended line's padding out to the right
-    /// margin is width-dependent phantom space and would let a width change move which occurrence
-    /// the durable position resolves to (`31/I6`). The count is exact and the walk is bounded by
-    /// the gap between the two occurrences that bracket the position -- not by retained depth,
-    /// but not by the viewport either. Closing that gap needs a cumulative content coordinate
-    /// over the stream, which is the follow-up this plan names rather than a search-local fix;
-    /// until then `resolvedSearchMatch` settles the case a frame actually holds -- a position
-    /// sitting on an occurrence -- before it measures anything.
+    /// Closed history resolves through width-free block ranks, so the work is bounded by the
+    /// endpoints' fixed-size blocks rather than by the gap between them. A live endpoint adds
+    /// only the mutable suffix after the closed prefix.
     private func searchDistance(from lhs: TextAnchor, to rhs: TextAnchor) -> Int {
         guard lhs != rhs else { return 0 }
-        let lower = min(lhs, rhs)
-        let upper = max(lhs, rhs)
-        let streamStart = evictedRowCount
-        let streamEnd = evictedRowCount + projectionRowCount
-        let rows = max(streamStart, lower.row)..<min(streamEnd, upper.row + 1)
-        guard rows.isEmpty == false,
-              let lastContentRow = lastProjectedContentRow(in: streamStart..<streamEnd)
+        guard let lhsRank = searchContentRank(of: lhs),
+              let rhsRank = searchContentRank(of: rhs)
         else { return 0 }
-        var distance = 0
+        return abs(rhsRank - lhsRank)
+    }
+
+    /// Resolves one stream anchor to the width-free content coordinate search distance uses.
+    private func searchContentRank(of anchor: TextAnchor) -> Int? {
+        if let coordinate = recordPosition(of: anchor) {
+            return history.contentRank(of: coordinate)
+        }
+
+        let prefixEndRow = evictedRowCount + history.closedPrefixDisplayRowCount
+        let streamEndRow = evictedRowCount + projectionRowCount
+        guard anchor.row >= prefixEndRow, anchor.row < streamEndRow else { return nil }
+        let suffixRows = prefixEndRow..<streamEndRow
+        let lastContentRow = lastProjectedContentRow(in: suffixRows)
+        var rank = history.closedContentUnitTotal(
+            includingTrailingBoundary: lastContentRow != nil
+        )
+        guard let lastContentRow else { return rank }
+        let rows = prefixEndRow..<min(streamEndRow, anchor.row + 1)
         forEachSearchUnit(
             in: activeProjection(),
             absoluteRows: rows,
             lastContentRow: lastContentRow
         ) { _, start, end in
-            guard end > lower, start < upper else { return }
-            distance += start.row == end.row ? end.column - start.column : 1
+            SearchDistanceWorkCounter.record()
+            if end <= anchor { rank += 1 }
         }
-        return distance
+        return rank
     }
 
     private func searchGraphemeKeys(for query: String) -> [SearchGraphemeKey] {

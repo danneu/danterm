@@ -338,5 +338,5 @@ plan: after it, no width-dependent position is stored anywhere in the engine.
   deleted; collapsed-selection and eviction rules restated in content terms;
   the G9 tier amendment lands in the engine design doc with the behavior;
   seeded sweep extended; recovery corpus replayed. (PO1, PO4, PO5, PO10.)
-- [ ] 5. Distance prefix sums: block-granularity content-unit sums; the
+- [x] 5. Distance prefix sums: block-granularity content-unit sums; the
   closed-history gap walk deleted. (PO9.)

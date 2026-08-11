@@ -121,18 +121,38 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
-    @Test("The grand total agrees with an independent recount after each of the six triggers")
-    func grandTotalAgreesWithRecountAfterEveryTrigger() {
-        // Intent: the derived index's grand display-row total matches a recount from the
-        //   arena alone after a width change, an admission, a head eviction, a tail
-        //   truncation, a forced split and a clear-all.
-        // Why it exists: `31/AR4` names a stale index as the one new failure mode with no
-        //   analogue today -- six invalidation points against an eagerly maintained truth --
-        //   and this recount is the only thing that catches a missed one.
+    @Test("Display and content totals agree with independent recounts after every mutation")
+    func maintainedTotalsAndContentRanksAgreeWithRecountsAfterEveryMutation() {
+        // Intent: the row index and width-free content ranks match independent arena recounts
+        //   after every mutation that can change record cells, boundaries, or ownership.
+        // Why it exists: content ranks are incrementally maintained across more paths than the
+        //   width-derived row index, so one missed delta can silently reorder nearest matches.
+        // Scenario: a store admits, closes, reopens, splits, trims and drops at both ends,
+        //   changes width, and clears while every cached total and retained coordinate is checked.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
 
         func check(_ label: Comment) {
             #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount(), label)
+            #expect(store.grandContentUnitTotal == store.independentContentUnitRecount(), label)
+            #expect(
+                store.contentBlockTotalsForTesting
+                    == store.independentContentBlockTotalsForTesting,
+                label
+            )
+            for recordIndex in 0..<store.closedRecordCount {
+                guard let summary = store.recordSummary(at: recordIndex) else { continue }
+                for offset in Set([0, summary.cellCount / 2, summary.cellCount]) {
+                    guard let coordinate = store.recordTextPosition(
+                        recordIndex: recordIndex,
+                        cellOffset: offset
+                    ) else { continue }
+                    #expect(
+                        store.contentRank(of: coordinate)
+                            == store.independentContentRank(of: coordinate),
+                        "\(label): record \(recordIndex), offset \(offset)"
+                    )
+                }
+            }
         }
 
         for line in 0..<12 {
@@ -142,26 +162,89 @@ struct TerminalLogicalLineStoreTests {
         }
         check("admission")
 
+        store.admit(Self.filledRow(width: 16, seed: 100, softWrapped: true))
+        check("open admission")
+        store.closeOpenRecord()
+        check("close")
+        store.reopenTailRecord()
+        check("reopen")
+        store.forceSplitOpenRecord()
+        check("forced split")
+        store.admit(Self.shortRow(width: 16, count: 7, seed: 101))
+        check("forced-split successor")
+
+        let contentBeforeWidths = store.grandContentUnitTotal
+        let blockContentBeforeWidths = store.contentBlockTotalsForTesting
         for width in [16, 9, 40, 2] {
             _ = store.setWidth(width)
             check("width change to \(width)")
+            #expect(store.grandContentUnitTotal == contentBeforeWidths)
+            #expect(store.contentBlockTotalsForTesting == blockContentBeforeWidths)
         }
         _ = store.setWidth(16)
 
         store.evictOneDisplayRow()
-        check("head eviction")
+        check("head trim")
 
-        _ = store.truncateTail(displayRows: 2)
-        check("tail truncation")
+        let recordsBeforeWholeEviction = store.recordCount
+        while store.recordCount == recordsBeforeWholeEviction {
+            guard store.evictOneDisplayRow() else { break }
+        }
+        check("whole-record eviction")
+
+        _ = store.truncateTail(displayRows: 1)
+        check("tail record removal")
+
+        _ = store.truncateTail(displayRows: 1)
+        check("tail cut and reopen")
 
         store.admit(Self.filledRow(width: 16, seed: 3, softWrapped: true))
         store.forceSplitOpenRecord()
-        check("forced split")
+        check("second forced split")
 
         store.removeAll()
         check("clear all")
         #expect(store.grandDisplayRowTotal == 0)
         #expect(store.recordCount == 0)
+    }
+
+    @Test("Content ranks count projected cells and hard boundaries exactly")
+    func contentRanksMatchSearchProjectionUnits() throws {
+        // Intent: a narrow cell, wide pair and padding each advance rank once, while a forced
+        //   split contributes no boundary and a hard-ended predecessor contributes one.
+        // Why it exists: rank subtraction is sound only if its unit is exactly the unit the
+        //   search scanner consumes; display columns would count the wide pair twice.
+        // Scenario: mixed-width content crosses a forced split, then a hard record boundary.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        var mixed = Terminal.GridRow(cells: [
+            Self.narrow("a"),
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Terminal.GridCell(kind: .padding),
+        ])
+        mixed.isSoftWrapped = true
+        store.admit(mixed)
+        store.forceSplitOpenRecord()
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 20))
+        store.admit(Self.shortRow(width: 4, count: 1, seed: 21))
+
+        let expectedMixedRanks = [0, 1, 2, 2, 3]
+        for (offset, expected) in expectedMixedRanks.enumerated() {
+            let coordinate = try #require(
+                store.recordTextPosition(recordIndex: 0, cellOffset: offset)
+            )
+            #expect(store.contentRank(of: coordinate) == expected)
+        }
+
+        let forcedSplitSuccessor = try #require(
+            store.recordTextPosition(recordIndex: 1, cellOffset: 0)
+        )
+        let hardBoundarySuccessor = try #require(
+            store.recordTextPosition(recordIndex: 2, cellOffset: 0)
+        )
+        #expect(store.contentRank(of: forcedSplitSuccessor) == 3)
+        #expect(store.contentRank(of: hardBoundarySuccessor) == 5)
+        #expect(store.grandContentUnitTotal == 6)
     }
 
     /// A blank-line history fed until the store visibly stopped getting deeper, plus how many
@@ -920,6 +1003,10 @@ struct TerminalLogicalLineStoreTests {
         let splitCount = (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit }
         #expect(splitCount == 0)
         #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
+        #expect(store.grandContentUnitTotal == store.independentContentUnitRecount())
+        #expect(
+            store.contentBlockTotalsForTesting == store.independentContentBlockTotalsForTesting
+        )
     }
 
     // MARK: - I5: the middle is immutable
@@ -1105,6 +1192,21 @@ struct TerminalLogicalLineStoreTests {
         //   why it is composed into the identity instead.
         #expect(MemoryLayout<Terminal.LogicalLineStore.RecordIdentity>.stride == 8)
         #expect(MemoryLayout<Terminal.LogicalLineStore.RecordTextPosition>.stride == 16)
+    }
+
+    @Test("content ranks widen block metadata without widening record storage")
+    func contentRanksUseOnlyBlockMetadata() {
+        // Intent: content ranks add two words per 64-record block while every record keeps its
+        //   existing one-word index entry.
+        // Why it exists: a dense per-record prefix would reduce the blank-history depth that the
+        //   store's budget contract prices explicitly.
+        // Scenario: the storage-pricing seam reports both fixed strides directly.
+        let store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        #expect(store.recordIndexEntryBytesForTesting == MemoryLayout<Int>.stride)
+        #expect(
+            Terminal.LogicalLineStore.blockMetadataBytesForTesting
+                == 4 * MemoryLayout<Int>.stride
+        )
     }
 
     @Test("Equality separates histories that differ only in a side-table value")

@@ -12,7 +12,7 @@
 //
 // What belongs here: the arena and its ring discipline, the five mutating operations `research/31/D2`
 // Decision 2 enumerates (admit, close/reopen the tail, evict at the head, truncate the tail,
-// clear), the derived index (per-block display-row totals plus one grand total), the side tables
+// clear), the derived index (per-block display-row and content-unit totals), the side tables
 // keyed by record -- spills and the trailing background-erase fill style -- and the two reads the
 // fold serves: the content walk a copy takes and the painted walk a renderer takes. What does
 // not: the record's byte layout and the fold's arithmetic, which are `LogicalLineRecord`; and
@@ -157,6 +157,34 @@ enum RecordPositionResolutionCounter {
     }
 }
 
+/// Counts content units inspected while resolving nearest-search distances.
+///
+/// The dynamic scope lets tests distinguish endpoint-local rank work from a walk through the
+/// gap between matches without adding mutable instrumentation to `Terminal` or its history.
+enum SearchDistanceWorkCounter {
+    /// The tally one `measure` is collecting.
+    final class Tally: @unchecked Sendable {
+        var units = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records actual content-unit work against whatever `measure` is in scope.
+    @inline(__always)
+    static func record(units: Int = 1) {
+        active?.units += units
+    }
+
+    /// Runs `body` and reports the content-unit work it spent.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.units
+        }
+    }
+}
+
 /// Counts cells decoded through a whole-record materialization, so an index build over closed
 /// history can assert it streams the arena instead of rebuilding cells it does not keep.
 ///
@@ -219,20 +247,24 @@ enum RetainedRowMaterializationCounter {
 extension Terminal {
     /// Retained history as logical-line records in one fixed-capacity arena.
     ///
-    /// Owns its own width, because the derived index's totals are only meaningful at one
-    /// (`research/31/D3` Decision 1). Callers change it through `setWidth(_:)`, which is the only entry
-    /// point that recomputes the whole index; every other operation maintains it in O(1).
+    /// Owns its own width, because the derived row totals are only meaningful at one
+    /// (`research/31/D3` Decision 1). Callers change it through `setWidth(_:)`, which recomputes
+    /// only those totals; content totals remain width-free and are maintained at mutation sites.
     struct LogicalLineStore: Sendable, Equatable {
         // MARK: - Nested types
 
-        /// One index block's cached display-row total (`research/31/D3` Decision 1).
+        /// One index block's cached display-row and width-free content-unit totals.
         ///
         /// `rowStart` is an **absolute** stream position measured from the same monotone origin
         /// `evictedRowCount` counts against, which is what lets a head eviction touch only the
         /// head block: every later block's start is unchanged by definition.
+        /// `contentStart` follows the same rule against `evictedContentUnitCount`, while both
+        /// counts cover only this block's records.
         private struct Block: Sendable, Equatable {
             var rowStart: Int
             var rowCount: Int
+            var contentStart: Int = 0
+            var contentCount: Int = 0
         }
 
         /// A hyperlink id stamped at one cell offset within the record.
@@ -383,11 +415,15 @@ extension Terminal {
         /// Advances only when the packed identity space is exhausted and history is retired.
         private var recordIdentityEpoch: UInt64 = 0
 
-        /// Cached display-row totals, one per `blockSize` records.
+        /// Cached display-row and content-unit totals, one per `blockSize` records.
         private var blocks: RingBuffer<Block>
 
         private var firstBlockNumber = 0
         private var firstRecordSequence = 0
+
+        /// Content units removed from the head, on the same monotone-origin rule as
+        /// `evictedRowCount`.
+        private var evictedContentUnitCount = 0
 
         /// Cells trimmed off the head record's front, which rebases its side-table keys.
         ///
@@ -402,6 +438,9 @@ extension Terminal {
         private var pendingStartsMidLine = false
 
         private(set) var grandDisplayRowTotal = 0
+
+        /// Width-free projected content units retained by all records.
+        private(set) var grandContentUnitTotal = 0
 
         /// Display rows dropped at the head, at the width in force when they were dropped, and
         /// only ever increasing (`research/31/D2` Decision 2's invariant, which replaces
@@ -460,7 +499,7 @@ extension Terminal {
         /// `research/31/F1` Observation 4 measured sequential browse at 677 ns (32), 697 ns (64), 801 ns
         /// (128) and 870 ns (256) per display row: small blocks read faster because the in-block
         /// scan shortens faster than the binary search lengthens. 64 keeps that while charging
-        /// 0.25 B per record for the block totals, against the 8 B the offsets cost.
+        /// 0.5 B per record for both block totals, against the 8 B the offsets cost.
         static let blockSize = 64
 
         // MARK: - Construction
@@ -1022,6 +1061,8 @@ extension Terminal {
             at offset: Int,
             by cut: Int
         ) {
+            let removedContent = contentCellCount(recordIndex: 0, range: 0..<cut)
+            removeContentUnitsFromHead(removedContent)
             var trimmed = record
             trimmed.cellCount -= cut
             trimmed.startsMidLine = true
@@ -1046,6 +1087,7 @@ extension Terminal {
         }
 
         private mutating func dropHeadRecord(_ record: LogicalLineRecord, at offset: Int) {
+            removeContentUnitsFromHead(contentContribution(recordIndex: 0))
             // `research/31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
             // must stamp what follows it, or the follower reads as a fresh logical line -- the
             // divergence from `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` that inherited
@@ -1207,6 +1249,8 @@ extension Terminal {
         }
 
         private mutating func dropTailRecord(_ record: LogicalLineRecord, at offset: Int) {
+            addContentUnitsToTail(-contentContribution(recordIndex: offsets.count - 1))
+            removeBoundaryBeforeTailIfNeeded()
             let sequence = firstRecordSequence + offsets.count - 1
             if spillsBySequence.isEmpty == false {
                 spillBytes -= spillCost(of: spillsBySequence.removeValue(forKey: sequence))
@@ -1227,6 +1271,12 @@ extension Terminal {
         /// Rewinds the open tail record to `newCellCount`, dropping the side-table entries and
         /// spills the removed cells owned.
         private mutating func cutTail(to newCellCount: Int, from oldCellCount: Int, at offset: Int) {
+            let index = offsets.count - 1
+            let removedContent = contentCellCount(
+                recordIndex: index,
+                range: newCellCount..<oldCellCount
+            )
+            addContentUnitsToTail(-removedContent)
             var removedSpills = 0
             for index in newCellCount..<oldCellCount where cellWord(recordAt: offset, cell: index)
                 & PackedRetainedRow.Header.cellSpillBit != 0
@@ -1266,6 +1316,8 @@ extension Terminal {
         mutating func removeAll() {
             evictedRowCount += grandDisplayRowTotal
             grandDisplayRowTotal = 0
+            evictedContentUnitCount += grandContentUnitTotal
+            grandContentUnitTotal = 0
             firstRecordSequence += offsets.count
             offsets.removeAll()
             resetToEmptyArena()
@@ -1308,34 +1360,33 @@ extension Terminal {
             return suffix
         }
 
-        /// Rebuilds every block total and sets the grand total to their sum.
+        /// Rebuilds the width-dependent row totals without touching width-free content totals.
         ///
         /// Eager rather than lazy by measurement: `research/31/F2` read 0.016 ms at trial depth, `research/31/F7`
         /// 0.76 ms at the record count the budget admits, and `research/31/F9` 5.6 ms on the deepest wide
         /// history at the two-column minimum -- all inside one 60 Hz frame, so neither of
         /// `research/31/D3` Decision 7's mitigations ships.
         private mutating func recomputeIndex() {
-            blocks.removeAll()
-            firstBlockNumber = firstRecordSequence / Self.blockSize
             grandDisplayRowTotal = 0
             var rowStart = evictedRowCount
-            var blockNumber = firstBlockNumber
-            var current = Block(rowStart: rowStart, rowCount: 0)
-            for index in 0..<offsets.count {
-                let sequence = firstRecordSequence + index
-                let number = sequence / Self.blockSize
-                if number != blockNumber {
-                    blocks.append(current)
-                    rowStart += current.rowCount
-                    blockNumber = number
-                    current = Block(rowStart: rowStart, rowCount: 0)
+            for blockIndex in 0..<blocks.count {
+                let blockNumber = firstBlockNumber + blockIndex
+                let first = max(firstRecordSequence, blockNumber * Self.blockSize)
+                    - firstRecordSequence
+                let end = min(
+                    offsets.count,
+                    (blockNumber + 1) * Self.blockSize - firstRecordSequence
+                )
+                var rows = 0
+                for recordIndex in first..<end {
+                    rows += displayRowCount(recordIndex: recordIndex)
                 }
-                let rows = displayRowCount(recordIndex: index)
-                current.rowCount += rows
+                blocks.modifyElement(at: blockIndex) { block in
+                    block.rowStart = rowStart
+                    block.rowCount = rows
+                }
+                rowStart += rows
                 grandDisplayRowTotal += rows
-            }
-            if offsets.count > 0 {
-                blocks.append(current)
             }
             refreshMetadataCharge()
         }
@@ -1350,6 +1401,169 @@ extension Terminal {
                 total += displayRowCount(recordIndex: index)
             }
             return total
+        }
+
+        /// Counts retained search-projection units straight from record cells and boundaries.
+        func independentContentUnitRecount() -> Int {
+            var total = 0
+            for index in 0..<offsets.count {
+                total += independentlyRecountedContentContribution(recordIndex: index)
+            }
+            return total
+        }
+
+        /// Test oracle for each block's maintained content-unit total.
+        var contentBlockTotalsForTesting: [Int] {
+            (0..<blocks.count).map { blocks[$0].contentCount }
+        }
+
+        /// Recounts each current block independently of its cached content total.
+        var independentContentBlockTotalsForTesting: [Int] {
+            (0..<blocks.count).map { blockIndex in
+                let blockNumber = firstBlockNumber + blockIndex
+                let first = max(firstRecordSequence, blockNumber * Self.blockSize)
+                    - firstRecordSequence
+                let end = min(
+                    offsets.count,
+                    (blockNumber + 1) * Self.blockSize - firstRecordSequence
+                )
+                return (first..<end).reduce(into: 0) {
+                    $0 += independentlyRecountedContentContribution(recordIndex: $1)
+                }
+            }
+        }
+
+        /// Resolves a retained coordinate to its maintained width-free content rank.
+        func contentRank(of coordinate: RecordTextPosition) -> Int? {
+            guard let index = recordIndex(of: coordinate.record) else { return nil }
+            let retainedStart = index == 0 ? headTrimmedCells : 0
+            let relativeOffset = coordinate.cellOffset - retainedStart
+            let record = self.record(at: offsets[index])
+            guard relativeOffset >= 0, relativeOffset <= record.cellCount else { return nil }
+            let sequence = firstRecordSequence + index
+            let blockIndex = sequence / Self.blockSize - firstBlockNumber
+            guard blockIndex >= 0, blockIndex < blocks.count else { return nil }
+            var rank = blocks[blockIndex].contentStart - evictedContentUnitCount
+            let blockFirst = max(
+                firstRecordSequence,
+                (firstBlockNumber + blockIndex) * Self.blockSize
+            ) - firstRecordSequence
+            for earlier in blockFirst..<index {
+                SearchDistanceWorkCounter.record()
+                rank += contentContribution(recordIndex: earlier, recordingWork: true)
+            }
+            rank += contentCellCount(
+                recordIndex: index,
+                range: 0..<relativeOffset,
+                recordingWork: true
+            )
+            return rank
+        }
+
+        /// Width-free content units through the closed prefix, including its trailing hard
+        /// boundary when one exists.
+        func closedContentUnitTotal(includingTrailingBoundary: Bool) -> Int {
+            let count = closedRecordCount
+            guard count > 0 else { return 0 }
+            let index = count - 1
+            let address = offsets[index]
+            let record = self.record(at: address)
+            let coordinate = RecordTextPosition(
+                record: recordIdentity(in: address),
+                cellOffset: record.cellCount + (index == 0 ? headTrimmedCells : 0)
+            )
+            guard let rank = contentRank(of: coordinate) else { return 0 }
+            let boundary = includingTrailingBoundary && record.isForcedSplit == false ? 1 : 0
+            return rank + boundary
+        }
+
+        /// Full-walk oracle for `contentRank(of:)`.
+        func independentContentRank(of coordinate: RecordTextPosition) -> Int? {
+            guard let index = recordIndex(of: coordinate.record) else { return nil }
+            let retainedStart = index == 0 ? headTrimmedCells : 0
+            let relativeOffset = coordinate.cellOffset - retainedStart
+            let record = self.record(at: offsets[index])
+            guard relativeOffset >= 0, relativeOffset <= record.cellCount else { return nil }
+            var rank = 0
+            for earlier in 0..<index {
+                rank += independentlyRecountedContentContribution(recordIndex: earlier)
+            }
+            rank += independentlyRecountedContentCells(
+                recordIndex: index,
+                range: 0..<relativeOffset
+            )
+            return rank
+        }
+
+        private func contentContribution(
+            recordIndex: Int,
+            recordingWork: Bool = false
+        ) -> Int {
+            let record = self.record(at: offsets[recordIndex])
+            let hasFollowingRecord = recordIndex + 1 < offsets.count
+            return contentCellCount(
+                recordIndex: recordIndex,
+                range: 0..<record.cellCount,
+                recordingWork: recordingWork
+            ) + (
+                hasFollowingRecord && record.isOpen == false && record.isForcedSplit == false
+                    ? 1 : 0
+            )
+        }
+
+        private func contentCellCount(
+            recordIndex: Int,
+            range: Range<Int>,
+            recordingWork: Bool = false
+        ) -> Int {
+            let offset = offsets[recordIndex]
+            var total = 0
+            for cellOffset in range {
+                if recordingWork { SearchDistanceWorkCounter.record() }
+                switch cellKind(recordAt: offset, cell: cellOffset) {
+                case .narrow, .wideHead, .padding:
+                    total += 1
+                case .wideTail, .spacerHead:
+                    break
+                }
+            }
+            return total
+        }
+
+        /// Full-materialization oracle kept separate from the packed-word counter ranks use.
+        private func independentlyRecountedContentContribution(recordIndex: Int) -> Int {
+            guard let cells = recordCells(at: recordIndex),
+                  let summary = recordSummary(at: recordIndex)
+            else { return 0 }
+            let content = cells.reduce(into: 0) { total, cell in
+                switch cell.kind {
+                case .narrow, .wideHead, .padding:
+                    total += 1
+                case .wideTail, .spacerHead:
+                    break
+                }
+            }
+            let hasFollowingRecord = recordIndex + 1 < offsets.count
+            return content + (
+                hasFollowingRecord && summary.isOpen == false && summary.isForcedSplit == false
+                    ? 1 : 0
+            )
+        }
+
+        /// Full-materialization coordinate oracle for the endpoint record.
+        private func independentlyRecountedContentCells(
+            recordIndex: Int,
+            range: Range<Int>
+        ) -> Int {
+            guard let cells = recordCells(at: recordIndex) else { return 0 }
+            return cells[range].reduce(into: 0) { total, cell in
+                switch cell.kind {
+                case .narrow, .wideHead, .padding:
+                    total += 1
+                case .wideTail, .spacerHead:
+                    break
+                }
+            }
         }
 
         // MARK: - Reads
@@ -2396,6 +2610,10 @@ extension Terminal {
             if openTailRecord() != nil { return }
             _ = ensureRecordIdentityCapacity()
             materializeChunk(at: writeCursor)
+            if offsets.count > 0 {
+                let predecessor = record(at: offsets[offsets.count - 1])
+                if predecessor.isForcedSplit == false { addContentUnitsToTail(1) }
+            }
             let inherited = pendingStartsMidLine
             pendingStartsMidLine = false
             // A record opened after a forced split continues the previous line, so the mark
@@ -2460,6 +2678,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             writeCursor += count * LogicalLineRecord.cellBytes
             bytesInUse += count * LogicalLineRecord.cellBytes
+            addContentUnitsToTail(count)
         }
 
         /// Takes the cells through a buffer pointer so admission can hand it a slice of the
@@ -2477,6 +2696,7 @@ extension Terminal {
             var spills = spillsBySequence[sequence] ?? []
             let spillsBefore = spills.count
             var sideTablesGrew = false
+            var contentUnits = 0
             spillBytes -= spillCost(of: spillsBySequence[sequence])
 
             // The record's cells are one run inside one backing chunk (`research/31/D5`), and moving that
@@ -2494,6 +2714,12 @@ extension Terminal {
             for index in 0..<cells.count {
                 let cellOffset = record.cellCount + index
                 let kind = cells[index].kind
+                switch kind {
+                case .narrow, .wideHead, .padding:
+                    contentUnits += 1
+                case .wideTail, .spacerHead:
+                    break
+                }
                 var word = UInt64(kind.packedCode) << PackedRetainedRow.Header.cellKindShift
                 word |= UInt64(cells[index].styleId) << PackedRetainedRow.Header.cellStyleShift
                 let scalarCount = cells[index].scalars.count
@@ -2538,6 +2764,7 @@ extension Terminal {
             writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
             bytesInUse += cells.count * LogicalLineRecord.cellBytes
+            addContentUnitsToTail(contentUnits)
             // The overwhelmingly common row moves no side table at all, and the charge only has
             // to be refreshed when one of its terms moved.
             if sideTablesGrew || spills.count != spillsBefore { refreshMetadataCharge() }
@@ -2776,6 +3003,7 @@ extension Terminal {
                     let offset = offsets[offsets.count - 1]
                     grandDisplayRowTotal -= 1
                     if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
+                    removeBoundaryBeforeTailIfNeeded()
                     offsets.removeLast()
                     bytesInUse -= LogicalLineRecord.Header.byteCount
                     writeCursor = recordOffset(in: offset)
@@ -2829,20 +3057,33 @@ extension Terminal {
             if offsets.count == 1 {
                 firstBlockNumber = sequence / Self.blockSize
                 blocks.removeAll()
-                blocks.append(Block(rowStart: evictedRowCount, rowCount: 0))
+                blocks.append(Block(
+                    rowStart: evictedRowCount,
+                    rowCount: 0,
+                    contentStart: evictedContentUnitCount,
+                    contentCount: 0
+                ))
                 refreshMetadataCharge()
                 return
             }
             let number = sequence / Self.blockSize
             if number >= firstBlockNumber + blocks.count {
                 let previous = blocks[blocks.count - 1]
-                blocks.append(Block(rowStart: previous.rowStart + previous.rowCount, rowCount: 0))
+                blocks.append(Block(
+                    rowStart: previous.rowStart + previous.rowCount,
+                    rowCount: 0,
+                    contentStart: previous.contentStart + previous.contentCount,
+                    contentCount: 0
+                ))
             }
             refreshMetadataCharge()
         }
 
         /// Test support: stable identity shares the existing index word with the arena offset.
         var recordIndexEntryBytesForTesting: Int { MemoryLayout<Int>.stride }
+
+        /// Test support: each block charges both row and content cumulative totals.
+        static var blockMetadataBytesForTesting: Int { MemoryLayout<Block>.stride }
 
         /// Drives the packed ordinal past its range so the retirement seam is reachable in tests.
         mutating func exhaustRecordIdentitySpaceForTesting() {
@@ -2911,6 +3152,44 @@ extension Terminal {
             }
         }
 
+        /// Applies a content delta to the only mutable record and its block.
+        private mutating func addContentUnitsToTail(_ units: Int) {
+            grandContentUnitTotal += units
+            if blocks.count > 0 {
+                blocks.modifyElement(at: blocks.count - 1) { $0.contentCount += units }
+            }
+        }
+
+        /// Applies a tail-side delta to the block that owns a specific retained record.
+        private mutating func addContentUnits(_ units: Int, toBlockContaining recordIndex: Int) {
+            let sequence = firstRecordSequence + recordIndex
+            let blockIndex = sequence / Self.blockSize - firstBlockNumber
+            precondition(blockIndex >= 0 && blockIndex < blocks.count)
+            grandContentUnitTotal += units
+            blocks.modifyElement(at: blockIndex) { $0.contentCount += units }
+        }
+
+        /// Removes the hard boundary whose successor is the tail record about to disappear.
+        private mutating func removeBoundaryBeforeTailIfNeeded() {
+            guard offsets.count > 1 else { return }
+            let predecessorIndex = offsets.count - 2
+            let predecessor = record(at: offsets[predecessorIndex])
+            guard predecessor.isOpen == false, predecessor.isForcedSplit == false else { return }
+            addContentUnits(-1, toBlockContaining: predecessorIndex)
+        }
+
+        /// Removes content from the head while leaving every later block's absolute start fixed.
+        private mutating func removeContentUnitsFromHead(_ units: Int) {
+            evictedContentUnitCount += units
+            grandContentUnitTotal -= units
+            if blocks.count > 0 {
+                blocks.modifyElement(at: 0) { block in
+                    block.contentStart += units
+                    block.contentCount -= units
+                }
+            }
+        }
+
         // MARK: - Header and byte access
 
         private func record(at offset: Int) -> LogicalLineRecord {
@@ -2932,10 +3211,14 @@ extension Terminal {
         }
 
         private func isWideHead(recordAt offset: Int, cell index: Int) -> Bool {
+            cellKind(recordAt: offset, cell: index) == .wideHead
+        }
+
+        private func cellKind(recordAt offset: Int, cell index: Int) -> TerminalCellKind {
             let word = cellWord(recordAt: offset, cell: index)
             let kind = (word >> PackedRetainedRow.Header.cellKindShift)
                 & PackedRetainedRow.Header.cellKindMask
-            return kind == UInt64(TerminalCellKind.wideHead.packedCode)
+            return TerminalCellKind(packedCode: UInt8(kind))
         }
 
         private func cellWord(recordAt offset: Int, cell index: Int) -> UInt64 {

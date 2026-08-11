@@ -665,6 +665,68 @@ struct TerminalSearchTests {
         }
     }
 
+    @Test("nearest distance crosses from closed history into the live suffix")
+    func nearestOccurrenceAcrossClosedLiveSeamUsesOneContentCoordinate() throws {
+        // Intent: a durable position in the live suffix compares a retained match and a live
+        //   match in the same content-unit coordinate, including the hard seam boundary.
+        // Why it exists: closed ranks stop at `LogicalLineStore`, while live ranks scan from the
+        //   seam; either dropping or double-counting that boundary can switch the nearest match.
+        // Scenario: the first occurrence has scrolled into a closed record, the position is in
+        //   the middle live line, and the second occurrence remains live.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("hit\r\nabcdefghij\r\nhit".utf8))
+        _ = terminal.beginSearch("hit")
+        terminal.setSearchPositionForTesting(TerminalTextPosition(row: 1, column: 3))
+
+        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+    }
+
+    @Test("closed-history nearest distance does endpoint-local work")
+    func closedHistoryNearestDistanceWorkIsIndependentOfDepthAndGap() throws {
+        // Intent: resolving between two retained matches spends the same bounded work at shallow
+        //   and deep retained depths, whether the matches have a short or long gap between them.
+        // Why it exists: the former distance walk visited every projected unit in that gap, so a
+        //   find-bar read could grow with retained depth even though both endpoints were indexed.
+        // Scenario: equally aligned records bracket the durable position at two history depths
+        //   and across gaps spanning one or three complete record blocks.
+        func work(depth: Int, gap: Int) throws -> Int {
+            var terminal = try #require(Terminal(columns: 8, rows: 3))
+            for _ in 0..<depth { terminal.feed(Array("x\r\n".utf8)) }
+            terminal.feed(Array("hit\r\n".utf8))
+            for _ in 0..<gap { terminal.feed(Array("x\r\n".utf8)) }
+            terminal.feed(Array("hit\r\ntail\r\ntail\r\ntail".utf8))
+            _ = terminal.beginSearch("hit")
+            terminal.setSearchPositionForTesting(
+                TerminalTextPosition(row: depth + 1 + gap / 2, column: 0)
+            )
+
+            var selected: TerminalTextRange?
+            let spent = SearchDistanceWorkCounter.measure {
+                selected = terminal.activeSearchMatchRange
+            }
+            #expect(selected != nil)
+            return spent
+        }
+
+        let shallowShort = try work(depth: 64, gap: 64)
+        let shallowLong = try work(depth: 64, gap: 192)
+        let deepShort = try work(depth: 640, gap: 64)
+        let deepLong = try work(depth: 640, gap: 192)
+
+        let costs = [shallowShort, shallowLong, deepShort, deepLong]
+        let least = costs.min() ?? 0
+        let most = costs.max() ?? 0
+        #expect(least > 0, "the instrument must observe distance resolution")
+        #expect(deepShort == shallowShort)
+        #expect(deepLong == shallowLong)
+        #expect(
+            most - least <= 8,
+            "fixed-block endpoint alignment may differ by one short record, not by the gap"
+        )
+        #expect(most <= Terminal.LogicalLineStore.blockSize * 4)
+    }
+
     @Test("closed-record index advance performs no display-row projection")
     func closedRecordIndexAdvanceAvoidsDisplayProjection() throws {
         // Intent: advancing the closed-history search index reads record content directly.

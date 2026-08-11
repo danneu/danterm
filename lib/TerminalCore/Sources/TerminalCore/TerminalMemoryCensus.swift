@@ -86,7 +86,7 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// charge. Materialized chunks are never reclaimed, while the address space stays bounded.
     public var retainedArenaCapacityBytes: Int
 
-    /// The derived index's charge: per-record offsets plus per-block display-row totals.
+    /// The derived index's charge: per-record offsets plus per-block row and content totals.
     public var retainedIndexBytes: Int
 
     /// Side tables held outside the arena -- multi-scalar spills and trailing fill styles --
