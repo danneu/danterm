@@ -79,7 +79,10 @@ func reduceSession(_ session: inout SessionModel, report: SessionReport) {
         session.connection = connection
 
     case .agentAttached(let agentSession):
-        session.agent = .attached(session: agentSession, activity: .working)
+        // No activity: attaching is not a report that the agent is doing
+        // anything. Claude fires SessionStart at launch, so claiming `.working`
+        // here left a pane at an untouched prompt reporting work indefinitely.
+        session.agent = .attached(session: agentSession, activity: nil)
         session.lastAgentSession = agentSession
 
     case let .agentActivityChanged(reportingSession, activity):

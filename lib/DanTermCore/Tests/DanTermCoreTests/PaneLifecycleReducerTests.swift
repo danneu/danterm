@@ -135,18 +135,26 @@ struct PaneLifecycleReducerTests {
         #expect(state.agent == .none)
     }
 
-    @Test("agent attachment starts working and replaces stale activity")
-    func agentAttachmentStartsWorking() throws {
+    // Intent: attaching reports no activity, and clears whatever the previous
+    // session reported.
+    // Why it exists: attachment used to claim `.working`, which is a state no
+    // hook ever sent. A Claude pane sitting at an empty prompt reported working
+    // indefinitely, because Claude fires SessionStart at launch and the next
+    // event is the Stop of a turn the user had not started yet.
+    // Scenario: a pane attaches, reports waiting, then a second agent replaces
+    // the first.
+    @Test("agent attachment reports no activity and replaces stale activity")
+    func agentAttachmentReportsNoActivity() throws {
         let first = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let replacement = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
-        var state = reduce([
-            .agentAttached(first),
-            .agentActivityChanged(session: first, activity: .waiting),
-        ])
+        var state = reduce([.agentAttached(first)])
 
+        #expect(state.agent == .attached(session: first, activity: nil))
+
+        reduceSession(&state, report: .agentActivityChanged(session: first, activity: .waiting))
         reduceSession(&state, report: .agentAttached(replacement))
 
-        #expect(state.agent == .attached(session: replacement, activity: .working))
+        #expect(state.agent == .attached(session: replacement, activity: nil))
     }
 
     @Test("stale agent events cannot mutate a replacement session")
@@ -160,7 +168,7 @@ struct PaneLifecycleReducerTests {
             .agentDetached(stale),
         ])
 
-        #expect(state.agent == .attached(session: current, activity: .working))
+        #expect(state.agent == .attached(session: current, activity: nil))
     }
 
     private func reduce(_ reports: [SessionReport]) -> SessionModel {

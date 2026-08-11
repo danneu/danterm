@@ -282,7 +282,7 @@ import DanTermProtocol
             kind: "claude",
             sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"
         ))
-        #expect(model.pane(paneId)?.session?.agent == .attached(session: session, activity: .working))
+        #expect(model.pane(paneId)?.session?.agent == .attached(session: session, activity: nil))
         _ = try requireIpcReply(commands)
     }
 
