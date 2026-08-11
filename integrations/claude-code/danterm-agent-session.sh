@@ -29,28 +29,28 @@ fi
 
 case "$EVENT" in
   SessionStart)
-    danterm agent attach --kind claude --id "$SESSION_ID" >/dev/null 2>&1 || true
+    danterm agent attach --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" >/dev/null 2>&1 || true
     ;;
   UserPromptSubmit)
-    danterm agent activity --kind claude --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
+    danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
     ;;
   PreToolUse)
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
     if [ "$TOOL" = "AskUserQuestion" ]; then
-      danterm agent activity --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+      danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
   PermissionRequest|Elicitation)
-    danterm agent activity --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+    danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     ;;
   Stop)
     HAS_RUNNING_BACKGROUND=$(printf '%s' "$INPUT" | jq -r '[.background_tasks[]? | select(.status == "running")] | length > 0')
     if [ "$HAS_RUNNING_BACKGROUND" != "true" ]; then
-      danterm agent activity --kind claude --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
+      danterm agent activity --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
     fi
     ;;
   SessionEnd)
-    danterm agent detach --kind claude --id "$SESSION_ID" >/dev/null 2>&1 || true
+    danterm agent detach --pane "$DANTERM_PANE" --kind claude --id "$SESSION_ID" >/dev/null 2>&1 || true
     ;;
 esac
 exit 0

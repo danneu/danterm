@@ -33,19 +33,19 @@ fi
 
 case "$EVENT" in
   SessionStart)
-    danterm agent attach --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
+    danterm agent attach --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
     ;;
   UserPromptSubmit)
-    danterm agent activity --kind codex --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
+    danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state working >/dev/null 2>&1 || true
     ;;
   PreToolUse)
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
     if [ "$TOOL" = "request_user_input" ]; then
-      danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+      danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
   PermissionRequest)
-    danterm agent activity --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
+    danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     ;;
   # Codex emits nothing when the user declines an approval, so a declined turn
   # leaves the pane on its last report -- waiting, from the PermissionRequest --
@@ -53,10 +53,10 @@ case "$EVENT" in
   # event on abort; a timeout here would trade a rare wrong state for a routine
   # one, since a long tool call is not a finished turn.
   Stop)
-    danterm agent activity --kind codex --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
+    danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
     ;;
   SessionEnd)
-    danterm agent detach --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
+    danterm agent detach --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" >/dev/null 2>&1 || true
     ;;
 esac
 exit 0

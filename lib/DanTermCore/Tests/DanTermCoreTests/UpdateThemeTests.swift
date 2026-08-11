@@ -89,7 +89,7 @@ import Testing
     func splitPaneWithoutThemeProjectsDefaults() {
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
         #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
             theme: "Monokai Remastered",

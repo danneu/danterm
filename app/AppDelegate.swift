@@ -175,11 +175,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             if response == .alertFirstButtonReturn {
                 runtime.bootstrapFromValidatedRestore(lastSession)
             } else {
-                runtime.send(.createTab(inGroupId: nil))
+                runtime.send(.createTabInSelectedGroup())
             }
             lastSessionSnapshot = nil
         } else {
-            runtime.send(.createTab(inGroupId: nil))
+            runtime.send(.createTabInSelectedGroup())
         }
 
         #if DANTERM_TERMINAL_BENCHMARK
@@ -478,11 +478,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // MARK: - Menu Actions
 
     @objc func newTab(_ sender: Any?) {
-        runtime.send(.createTab(inGroupId: nil))
+        runtime.send(.createTabInSelectedGroup())
     }
 
     @objc func newTabAtGroupEnd(_ sender: Any?) {
-        runtime.send(.createTab(inGroupId: nil, position: .atGroupEnd))
+        runtime.send(.createTabInSelectedGroup(position: .atGroupEnd))
     }
 
     @objc func newGroup(_ sender: Any?) {
@@ -497,11 +497,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func splitRight(_ sender: Any?) {
-        runtime.send(.splitPane(direction: .horizontal))
+        runtime.send(.splitFocusedPane(direction: .horizontal))
     }
 
     @objc func splitDown(_ sender: Any?) {
-        runtime.send(.splitPane(direction: .vertical))
+        runtime.send(.splitFocusedPane(direction: .vertical))
     }
 
     @objc func nextTab(_ sender: Any?) {

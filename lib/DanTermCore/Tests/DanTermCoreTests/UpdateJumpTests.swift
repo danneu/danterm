@@ -14,7 +14,7 @@ import Testing
         var model = makeModel()
         var ids: [TabId] = []
         for _ in 0..<count {
-            _ = update(&model, .createTab(inGroupId: nil))
+            _ = update(&model, .createTabInSelectedGroup())
             ids.append(model.selectedTabId!)
         }
         return (model, ids)

@@ -51,7 +51,10 @@ func makeTestEnv(
 /// Create a tab and return the commands (for inspection or ignoring).
 @discardableResult
 func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Command] {
-    return update(&model, .createTab(inGroupId: inGroupId, background: background))
+    if let inGroupId {
+        return update(&model, .createTab(inGroupId: inGroupId, background: background))
+    }
+    return update(&model, .createTabInSelectedGroup(background: background))
 }
 
 func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {

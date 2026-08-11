@@ -24,7 +24,7 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         // Scenario: spec-first restore unzoom.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
         let tab = selectedTab(in: model)!
         #expect(tab.isZoomed, "tab should be zoomed before snapshot")

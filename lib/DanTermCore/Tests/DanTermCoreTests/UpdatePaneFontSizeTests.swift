@@ -18,7 +18,7 @@ import Testing
     private func splitPaneIds(_ model: inout AppModel) -> (first: PaneId, second: PaneId) {
         createTab(&model)
         let first = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let second = selectedTab(in: model)!.focusedPaneId
         return (first, second)
     }
@@ -285,7 +285,7 @@ import Testing
         let source = selectedTab(in: model)!.focusedPaneId
         update(&model, .adjustPaneFontSize(paneId: source, steps: 2))
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let child = selectedTab(in: model)!.focusedPaneId
         #expect(size(model, child) == size(model, source), "the split inherits the source pane's zoom")
 

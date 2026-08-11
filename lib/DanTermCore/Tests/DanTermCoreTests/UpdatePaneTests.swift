@@ -28,7 +28,7 @@ import Testing
         createTab(&model)
         let originalPaneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let tab = model.groups[0].tabs[0]
 
         guard case .split(_, let direction, let first, let second, _) = tab.rootNode else {
@@ -63,7 +63,7 @@ import Testing
         createTab(&model)
         let firstPaneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let newPaneId = model.groups[0].tabs[0].focusedPaneId
         #expect(newPaneId != firstPaneId, "split should create new pane")
 
@@ -92,7 +92,7 @@ import Testing
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let rightPaneId = model.groups[0].tabs[0].focusedPaneId
         #expect(rightPaneId != leftPaneId)
 
@@ -121,7 +121,7 @@ import Testing
         // Scenario: spec-first ratio drag.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         guard case .split(let splitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
             Issue.record("should be a split")
@@ -150,7 +150,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         guard case .split(let tabASplitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
             Issue.record("tab A should have a split")
@@ -193,7 +193,7 @@ import Testing
         //   callback carries an id that is not present in that tree.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let snapshot = model
 
         let commands = update(&model, .splitRatioChanged(splitId: SplitId(), ratio: 0.25))
@@ -213,10 +213,10 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .vertical))
+        update(&model, .splitFocusedPane(direction: .vertical))
         let paneC = model.groups[0].tabs[0].focusedPaneId
 
         #expect(model.allPaneIds.count == 3)
@@ -273,12 +273,12 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tl = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let tr = model.groups[0].tabs[0].focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tl))
-        update(&model, .splitPane(direction: .vertical))  // TL -> TL/BL, focus BL
+        update(&model, .splitFocusedPane(direction: .vertical))  // TL -> TL/BL, focus BL
         update(&model, .paneBecameFirstResponder(paneId: tr))
-        update(&model, .splitPane(direction: .vertical))  // TR -> TR/BR, focus BR
+        update(&model, .splitFocusedPane(direction: .vertical))  // TR -> TR/BR, focus BR
         let br = model.groups[0].tabs[0].focusedPaneId
         // BR is now the most-recently focused pane in the right column.
 
@@ -311,13 +311,13 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tl = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let tr = model.groups[0].tabs[0].focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tl))
-        update(&model, .splitPane(direction: .vertical))  // TL -> TL/BL, focus BL
+        update(&model, .splitFocusedPane(direction: .vertical))  // TL -> TL/BL, focus BL
         let bl = model.groups[0].tabs[0].focusedPaneId
         update(&model, .paneBecameFirstResponder(paneId: tr))
-        update(&model, .splitPane(direction: .vertical))  // TR -> TR/BR, focus BR
+        update(&model, .splitFocusedPane(direction: .vertical))  // TR -> TR/BR, focus BR
         let br = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: tr))  // TR last-focused in right column
@@ -349,7 +349,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         model.updatePane(paneA) { $0.session?.title = "my-title" }
@@ -435,7 +435,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -461,7 +461,7 @@ import Testing
 
         model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
         model.updatePane(paneA) { $0.session?.cwd = "/tmp/pane-a" }
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .closePane(paneId: paneB))
@@ -485,7 +485,7 @@ import Testing
         model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
         model.groups[0].isCollapsed = true
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .closePane(paneId: paneB))
@@ -502,7 +502,7 @@ import Testing
         // Scenario: spec-first sibling-survives.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneToClose = model.groups[0].tabs[0].focusedPaneId
         let sibling = allPaneIds(model.groups[0].tabs[0].rootNode).first { $0 != paneToClose }!
 
@@ -544,7 +544,7 @@ import Testing
         // Scenario: spec-first zoom on.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
@@ -557,7 +557,7 @@ import Testing
         // Scenario: spec-first zoom off.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
 
         update(&model, .toggleZoomPane(paneId: nil))
@@ -588,7 +588,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
@@ -607,9 +607,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .vertical))
+        update(&model, .splitFocusedPane(direction: .vertical))
         let paneC = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .toggleZoomPane(paneId: nil))
@@ -627,11 +627,11 @@ import Testing
         // Scenario: spec-first split-while-zoomed.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
-        update(&model, .splitPane(direction: .vertical))
+        update(&model, .splitFocusedPane(direction: .vertical))
         #expect(model.groups[0].tabs[0].isZoomed == false, "split should clear zoom")
     }
 
@@ -643,7 +643,7 @@ import Testing
         // Scenario: spec-first focus-while-zoomed.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
@@ -811,7 +811,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .splitBottom))
@@ -834,7 +834,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
@@ -850,7 +850,7 @@ import Testing
         // Scenario: spec-first identity guard.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let pane = model.groups[0].tabs[0].focusedPaneId
 
         let commands = update(&model, .movePane(source: pane, target: pane, intent: .swap))
@@ -876,7 +876,7 @@ import Testing
         // Scenario: spec-first zoomed-no-op.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
@@ -927,7 +927,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         #expect(paneB != paneA)
 
@@ -1092,7 +1092,7 @@ import Testing
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let rightPaneId = model.groups[0].tabs[0].focusedPaneId
         #expect(rightPaneId != leftPaneId)
 
@@ -1121,7 +1121,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
 
@@ -1188,7 +1188,7 @@ import Testing
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         createTab(&model)
@@ -1228,7 +1228,7 @@ import Testing
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
@@ -1361,7 +1361,7 @@ import Testing
 
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[1].isZoomed == true)
 
@@ -1386,7 +1386,7 @@ import Testing
         createTab(&model)
         let srcTabId = model.groups[0].tabs[0].id
         let survivor = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let zoomedPane = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
@@ -1417,7 +1417,7 @@ import Testing
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         let groupId = model.groups[0].id
 
@@ -1467,7 +1467,7 @@ import Testing
         createTab(&model)
         let srcTabId = model.groups[0].tabs[0].id
         let survivor = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let zoomedPane = model.groups[0].tabs[0].focusedPaneId
         let groupId = model.groups[0].id
         update(&model, .toggleZoomPane(paneId: nil))
@@ -1546,7 +1546,7 @@ import Testing
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         update(&model, .createGroup(name: "Work"))
         let group1Id = model.groups[1].id
@@ -1591,7 +1591,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         let groupId = model.groups[0].id
@@ -1613,7 +1613,7 @@ import Testing
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
@@ -1637,7 +1637,7 @@ import Testing
         let paneA = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneA) { $0.session?.title = "/Users/dan/projects" }
         model.updatePane(paneA) { $0.session?.cwd = "/Users/dan/projects" }
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
@@ -1657,7 +1657,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
         let alert = AlertModel(
@@ -1680,7 +1680,7 @@ import Testing
         // Scenario: spec-first before-source extract.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
         let groupId = model.groups[0].id
 

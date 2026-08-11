@@ -43,11 +43,13 @@ enum TodoDestination: Equatable {
 
 enum Msg {
     // User actions
-    case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
+    case createTab(inGroupId: GroupId, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
+    case createTabInSelectedGroup(position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
     case selectTab(id: TabId)
     case requestCloseTab(id: TabId)
     case requestCloseTabs(ids: [TabId])
-    case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
+    case splitPane(paneId: PaneId, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
+    case splitFocusedPane(direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
     case createGroup(name: String, launch: LaunchSpec? = nil)
@@ -77,7 +79,7 @@ enum Msg {
     case sidebarRenameEnded
 
     // IPC
-    case ipcRequest(reqId: UUID, method: String, params: JSONValue, context: IpcRequestContext)
+    case ipcRequest(reqId: UUID, method: String, params: JSONValue)
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)

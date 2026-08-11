@@ -152,7 +152,7 @@ import Testing
         let tabId = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: tabId, name: "My App"))
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
         model.updatePane(paneA) { $0.session?.title = "zsh" }
         update(&model, .paneBecameFirstResponder(paneId: paneA))
@@ -196,7 +196,7 @@ import Testing
         createTab(&model)
 
         update(&model, .selectTab(id: tabAId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .requestCloseTab(id: tabAId))
         let confirmEffect = commands.first(where: {
@@ -379,7 +379,7 @@ import Testing
 
         model.updatePane(paneId) { $0.session?.title = "\(home)/world" }
         model.updatePane(paneId) { $0.session?.cwd = "\(home)/projects" }
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
 
         let tab = model.groups[0].tabs[0]

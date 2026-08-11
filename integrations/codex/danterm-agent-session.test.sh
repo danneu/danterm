@@ -92,18 +92,18 @@ export DANTERM_SOCK=/tmp/danterm.sock
 export DANTERM_PANE=11111111-1111-4111-8111-111111111111
 check_case "session start attaches silently" \
   '{'"$COMMON"',"hook_event_name":"SessionStart","source":"startup"}' \
-  "agent attach --kind codex --id $SESSION"
+  "agent attach --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION"
 
 check_case "prompt submit reports working" \
   '{'"$TURN_COMMON"',"hook_event_name":"UserPromptSubmit","prompt":"say hi"}' \
-  "agent activity --kind codex --id $SESSION --state working"
+  "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state working"
 check_case "request user input reports waiting" \
   '{'"$TURN_COMMON"',"hook_event_name":"PreToolUse","tool_name":"request_user_input","tool_input":{"questions":[]},"tool_use_id":"call_1"}' \
-  "agent activity --kind codex --id $SESSION --state waiting"
+  "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state waiting"
 # PermissionRequest carries no tool_use_id, unlike the tool events around it.
 check_case "permission request reports waiting" \
   '{'"$TURN_COMMON"',"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls","description":"list files"}}' \
-  "agent activity --kind codex --id $SESSION --state waiting"
+  "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state waiting"
 check_case "ordinary tool use is ignored" \
   '{'"$TURN_COMMON"',"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_use_id":"call_1"}'
 # AskUserQuestion is Claude's ask-user tool. Codex never sends it, so matching it
@@ -114,10 +114,10 @@ check_case "tool completion is ignored" \
   '{'"$TURN_COMMON"',"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_use_id":"call_1","tool_response":{"output":"hi"}}'
 check_case "root stop reports idle" \
   '{'"$TURN_COMMON"',"hook_event_name":"Stop","last_assistant_message":"hi","stop_hook_active":false}' \
-  "agent activity --kind codex --id $SESSION --state idle"
+  "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state idle"
 check_case "session end detaches" \
   '{'"$COMMON"',"hook_event_name":"SessionEnd","reason":"other"}' \
-  "agent detach --kind codex --id $SESSION"
+  "agent detach --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION"
 # No recorded codex payload carries agent_id; this pins the guard's behavior for
 # the day one does.
 check_case "subagent event is ignored" \

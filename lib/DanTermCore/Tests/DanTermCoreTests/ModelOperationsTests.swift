@@ -618,7 +618,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         createTab(&model)
         let firstPaneId = selectedTab(in: model)!.focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let focusedSplitPaneId = selectedTab(in: model)!.focusedPaneId
 
         #expect(isFocusedAndVisible(focusedSplitPaneId, in: model), "focused pane in selected split tab should be visible")
@@ -1550,7 +1550,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   close one non-last pane; the projection reports 1.
         var model = makeModel()
         createTab(&model)
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         #expect(model.allPaneIds.count == 2, "precondition: split created two panes")
         model.pendingConfirmation = .terminate
         #expect(desiredQuitConfirmation(in: model)?.paneCount == 2,

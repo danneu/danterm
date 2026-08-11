@@ -785,7 +785,7 @@ import Testing
         // Scenario: spec-first teardown net.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let live = Set(model.allPaneIds)
         let dead1 = PaneId(), dead2 = PaneId()
         let teardown = sessionsToTearDown(liveSessionIds: live.union([dead1, dead2]), model: model)

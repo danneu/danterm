@@ -1711,7 +1711,7 @@ class AppRuntime {
     func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
         guard let built = validateAndBuildDetailed(snapshot) else {
             print("[init] Snapshot validation failed, falling back to default startup")
-            send(.createTab(inGroupId: nil))
+            send(.createTabInSelectedGroup())
             return
         }
         bootstrapFromValidatedRestore(
@@ -1728,7 +1728,7 @@ class AppRuntime {
             commitRestoreSession(staged)
         } catch {
             print("[init] Snapshot session creation failed, falling back to default startup")
-            send(.createTab(inGroupId: nil))
+            send(.createTabInSelectedGroup())
         }
     }
 

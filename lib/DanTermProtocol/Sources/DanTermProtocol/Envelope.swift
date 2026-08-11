@@ -51,6 +51,15 @@ public struct JsonRpcError: Codable, Equatable {
     }
 }
 
+/// Builds the exact request envelope for a parsed CLI command without adding process context.
+public func makeCLIRequest(_ command: CLICommand, id: JSONValue) -> JsonRpcRequest {
+    JsonRpcRequest(
+        id: id,
+        method: command.method,
+        params: .object(command.params)
+    )
+}
+
 /// Encodes one transport line without doubling base64 slash bytes inside large replies.
 public func encodeIpcLine<T: Encodable>(_ value: T) throws -> Data {
     let encoder = JSONEncoder()

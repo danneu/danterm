@@ -31,7 +31,7 @@ import DanTermProtocol
 
         var model = makeModel(env: env)
 
-        _ = update(&model, .createTab(inGroupId: nil), env: env)
+        _ = update(&model, .createTabInSelectedGroup(), env: env)
         let firstPane = model.groups[0].tabs[0].focusedPaneId
         _ = update(&model, .splitPane(paneId: firstPane, direction: .horizontal), env: env)
 
@@ -41,15 +41,16 @@ import DanTermProtocol
         _ = update(&model, .ipcRequest(
             reqId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
             method: Methods.paneSplit,
-            params: .object(["direction": .string("vertical")]),
-            context: IpcRequestContext(paneId: secondGroupPane.rawValue.uuidString)
+            params: .object([
+                "pane": .string(secondGroupPane.rawValue.uuidString),
+                "direction": .string("vertical"),
+            ])
         ), env: env)
 
         _ = update(&model, .ipcRequest(
             reqId: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
             method: Methods.paneFocus,
-            params: .object(["paneId": .string(firstPane.rawValue.uuidString)]),
-            context: IpcRequestContext(paneId: nil)
+            params: .object(["pane": .string(firstPane.rawValue.uuidString)])
         ), env: env)
 
         _ = update(&model, .appResignedActive, env: env)

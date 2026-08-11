@@ -27,28 +27,26 @@ struct DanTermCLI {
 
         Commands:
           ls                          Print the full app snapshot as JSON
-          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
-                  [--after-selected | --at-group-end | --after-tab <tab-id>]
+          tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>]
+                  [--background] [--foreground] [--after-selected | --at-group-end]
                                       Open a new tab, optionally launching a command
-          tab rename [--tab <tab-id>] <name>|--clear
+          tab rename --tab <tab-id> <name>|--clear
                                       Rename a tab or clear its custom title
-          tab close [--tab <tab-id>]
+          tab close --tab <tab-id>
                                       Close a tab
           pane focus <pane-id>        Focus a pane by id
-          pane info [--pane <pane-id>]
+          pane info --pane <pane-id>
                                       Print pane, tab, and group metadata as JSON
-          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
+          pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
                                       Split a pane (horizontal/vertical)
           pane close --pane <pane-id>  Close a pane
-          pane input [--pane <pane-id>] [--literal] -- <token>...
+          pane input --pane <pane-id> [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
-                                      "ls" Enter, C-c, Up, Escape). Use --pane
-                                      to target a specific pane (default:
-                                      caller's via $DANTERM_PANE).
+                                      "ls" Enter, C-c, Up, Escape).
           pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
-          pane zoom [--pane <pane-id>] on|off|toggle
+          pane zoom --pane <pane-id> on|off|toggle
                                       Zoom a pane to fill its tab, or restore the
                                       split. Prints the tab's resulting zoom state.
           pane rows --pane <pane-id>
@@ -57,29 +55,29 @@ struct DanTermCLI {
           pane tape --pane <pane-id> [--follow] [--from-now]
                                       Print a replayable snapshot, or follow the
                                       bounded backlog and live events as JSON Lines
-          theme set [--pane <pane-id>] <name>|--clear
+          theme set --pane <pane-id> <name>|--clear
                                       Set or clear a pane theme
-          agent attach --kind <kind> --id <session-id>
+          agent attach --pane <pane-id> --kind <kind> --id <session-id>
                                       Attach the caller's root agent session
-          agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>
+          agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
                                       Report explicit root-agent activity
-          agent detach --kind <kind> --id <session-id>
+          agent detach --pane <pane-id> --kind <kind> --id <session-id>
                                       Detach the matching root agent session
           skill                       Print DanTerm's agent skill instructions
           doctor                      Check DanTerm integration health
-          todo list [--pane <pane-id>]
+          todo list --pane <pane-id>
                                       List todos as JSON
-          todo add [--pane <pane-id>] <text>
+          todo add --pane <pane-id> <text>
                                       Add a todo
-          todo edit [--pane <pane-id>] <id> <text>
+          todo edit --pane <pane-id> <id> <text>
                                       Edit a todo's text
-          todo done [--pane <pane-id>] <id>
+          todo done --pane <pane-id> <id>
                                       Mark a todo done
-          todo open [--pane <pane-id>] <id>
+          todo open --pane <pane-id> <id>
                                       Reopen a completed todo
-          todo delete [--pane <pane-id>] <id>
+          todo delete --pane <pane-id> <id>
                                       Delete a todo
-          todo clear-completed [--pane <pane-id>]
+          todo clear-completed --pane <pane-id>
                                       Remove all completed todos
           help, --help, -h            Print this message
 
@@ -95,7 +93,7 @@ struct DanTermCLI {
           DANTERM        Marks a process launched inside DanTerm. Without a
                          non-empty DANTERM_SOCK, socket lookup fails closed.
           DANTERM_SOCK   Path to the DanTerm control socket
-          DANTERM_PANE   Pane id for context-aware commands (set by shell integration)
+          DANTERM_PANE   Pane id exported for callers to pass explicitly
 
         """
 
@@ -168,7 +166,7 @@ struct DanTermCLI {
         }
         try validateHello(helloLine)
 
-        let (requestId, request) = makeRequest(command, environment: environment)
+        let (requestId, request) = makeRequest(command)
         try writeJSON(request, to: fd)
 
         while let line = try readLine(from: fd) {
@@ -194,7 +192,7 @@ struct DanTermCLI {
         }
         try validateHello(helloLine)
 
-        let (requestId, request) = makeRequest(command, environment: environment)
+        let (requestId, request) = makeRequest(command)
         try writeJSON(request, to: fd)
         _ = try renderPaneTapeFollowStream(
             socket: fd,
@@ -203,21 +201,11 @@ struct DanTermCLI {
         )
     }
 
-    private static func makeRequest(
-        _ command: CLICommand,
-        environment: [String: String]
-    ) -> (id: String, request: JsonRpcRequest) {
+    private static func makeRequest(_ command: CLICommand) -> (id: String, request: JsonRpcRequest) {
         let requestId = UUID().uuidString
-        var params = command.params
-        let context = IpcRequestContext(paneId: nonEmpty(environment[EnvVars.pane]))
-        params[IpcRequestContext.paramsKey] = context.jsonValue
         return (
             requestId,
-            JsonRpcRequest(
-                id: .string(requestId),
-                method: command.method,
-                params: .object(params)
-            )
+            makeCLIRequest(command, id: .string(requestId))
         )
     }
 
@@ -433,10 +421,6 @@ struct DanTermCLI {
         return String(data: data, encoding: .utf8) ?? "null"
     }
 
-    private static func nonEmpty(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }
 
 /// Selects an explicit owner or the external-process fallback without crossing instances.

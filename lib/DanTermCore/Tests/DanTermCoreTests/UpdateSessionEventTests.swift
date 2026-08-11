@@ -117,7 +117,7 @@ import Testing
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         createTab(&model)
         let fallbackTabId = model.groups[0].tabs[1].id
@@ -275,7 +275,7 @@ import Testing
         var unfocusedModel = makeModel()
         createTab(&unfocusedModel)
         let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
-        update(&unfocusedModel, .splitPane(direction: .horizontal))
+        update(&unfocusedModel, .splitFocusedPane(direction: .horizontal))
         let unfocusedSessionId = unfocusedModel.pane(unfocusedPane)!.session!.id
 
         let scenarios: [(Msg, AppModel)] = [
@@ -338,7 +338,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("htop")))
         #expect(model.pane(paneA)?.session?.title == "htop", "pane title should update")
@@ -373,7 +373,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .cwd("/tmp")))
         #expect(model.pane(paneA)?.session?.cwd == "/tmp", "pane cwd should update")

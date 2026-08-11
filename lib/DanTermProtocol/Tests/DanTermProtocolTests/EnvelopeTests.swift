@@ -46,21 +46,21 @@ struct EnvelopeTests {
         #expect(decoded == response)
     }
 
-    @Test("request context decodes from params")
-    func requestContextDecodesFromParams() throws {
-        let request = JsonRpcRequest(
-            id: .string("1"),
-            method: Methods.todoList,
-            params: .object([
-                IpcRequestContext.paramsKey: .object([
-                    "paneId": .string("pane-1"),
-                ]),
-            ])
+    @Test("request round trip carries only explicit method params")
+    func requestRoundTripCarriesOnlyExplicitMethodParams() throws {
+        let request = makeCLIRequest(
+            CLICommand(
+                method: Methods.todoList,
+                params: ["pane": .string("11111111-1111-4111-8111-111111111111")],
+                outputMode: .json
+            ),
+            id: .string("1")
         )
 
         let encoded = try sortedEncoder().encode(request)
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
-        #expect(IpcRequestContext.from(params: decoded.params) == IpcRequestContext(paneId: "pane-1"))
+        #expect(decoded == request)
+        #expect(String(decoding: encoded, as: UTF8.self).contains("_ctx") == false)
     }
 
     @Test("JSON value does not encode object as base64 data")

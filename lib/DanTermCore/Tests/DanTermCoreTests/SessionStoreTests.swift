@@ -14,7 +14,7 @@ struct SessionStoreTests {
         let env = makeTestEnv(idSequence: ids)
         var model = makeModel(env: env)
 
-        _ = update(&model, .createTab(inGroupId: nil), env: env)
+        _ = update(&model, .createTabInSelectedGroup(), env: env)
         let firstPane = try #require(model.allPanes.first)
         let firstSession = try #require(firstPane.session)
 
@@ -42,7 +42,7 @@ struct SessionStoreTests {
         let env = makeTestEnv(idSequence: ids)
         var model = makeModel(env: env)
 
-        _ = update(&model, .createTab(inGroupId: nil), env: env)
+        _ = update(&model, .createTabInSelectedGroup(), env: env)
         let pane = try #require(model.allPanes.first)
         let sessionId = try #require(pane.session?.id)
         let replacementId = SessionId(rawValue: UUID(uuidString: "20000000-0000-4000-8000-000000000000")!)
@@ -66,7 +66,7 @@ struct SessionStoreTests {
         let env = makeTestEnv(idSequence: ids)
         var model = makeModel(env: env)
 
-        _ = update(&model, .createTab(inGroupId: nil), env: env)
+        _ = update(&model, .createTabInSelectedGroup(), env: env)
         let firstPaneId = try #require(model.allPanes.first?.id)
         _ = update(
             &model,

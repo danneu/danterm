@@ -73,7 +73,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         #expect(current != previous, "selected tab")
         previous = current
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = allPaneIds(model.groups[0].tabs[0].rootNode)
         current = lightProjection(model)
         #expect(current != previous, "split structure and focused pane")
@@ -152,7 +152,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         let backgroundPane = model.groups[0].tabs[0].focusedPaneId
         createTab(&model)
         let selectedPane = model.groups[0].tabs[1].focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let baseline = lightProjection(model)
 
         update(&model, .toggleZoomPane(paneId: selectedPane))

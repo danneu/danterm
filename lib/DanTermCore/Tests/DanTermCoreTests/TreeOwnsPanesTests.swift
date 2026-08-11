@@ -131,7 +131,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let original = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let added = selectedTab(in: model)!.focusedPaneId
         #expect(added != original, "split should add a pane")
 
@@ -159,7 +159,7 @@ import Testing
         createTab(&model)
         let sourceTabId = selectedTab(in: model)!.id
         let movable = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))  // keep source tab alive after the move
+        update(&model, .splitFocusedPane(direction: .horizontal))  // keep source tab alive after the move
 
         model.updatePane(movable) {
             $0.session?.title = "Movable"
@@ -233,7 +233,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let target = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .vertical))
+        update(&model, .splitFocusedPane(direction: .vertical))
         let source = selectedTab(in: model)!.focusedPaneId
         #expect(source != target, "split should create a distinct source pane")
 
@@ -278,7 +278,7 @@ import Testing
         createTab(&model)
         let failingTabId = selectedTab(in: model)!.id
         let paneA = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = selectedTab(in: model)!.focusedPaneId
         createTab(&model)  // a second tab so removing the failing one doesn't terminate
 
@@ -470,7 +470,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let p1 = selectedTab(in: model)!.focusedPaneId
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let p2 = selectedTab(in: model)!.focusedPaneId
         #expect(p1 != p2, "split should add a second pane")
 

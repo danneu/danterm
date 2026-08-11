@@ -1,17 +1,16 @@
 // Swift Testing migration of the legacy `tests/UpdateIpcTests.swift` harness
 // suite. Pins the pure `update()` handling of DanTerm IPC requests across
 // the protocol surface: ls (full snapshot), pane.info (explicit + implicit
-// pane context, missing/invalid target), tab.rename (set/clear, live-tab
-// derivation from pane context, explicit-vs-context precedence, malformed
+// pane targeting and missing/invalid targets), tab.rename (set/clear,
+// explicit targeting, malformed
 // inputs), pane.close (required explicit targeting, sibling promotion, tab
 // cascade, last-pane refusal, and confirmation bypass), pane.split
-// (context-pane targeting, explicit-pane overrides, malformed/unknown/non-
+// (explicit-pane targeting, malformed/unknown/non-
 // string/orphan failures, background and launch flows), pane.focus
 // (selection + first responder + popover preservation +
 // alert clear), tab.new (explicit group, group context, background, launch,
-// afterTab matching, malformed groups, cwd inheritance), theme.set
-// (explicit-vs-context precedence), the todo command family (list/add/edit/
-// done/open/delete/clear-completed across context + explicit-pane), and
+// afterTab matching, malformed groups, cwd sourcing), theme.set,
+// the todo command family (list/add/edit/done/open/delete/clear-completed), and
 // pane.input (text/input array/empty mods/non-array mods/ctrl mod/both-or-
 // neither/unknown key/non-string key/unknown mod/shift mod/missing pane/
 // non-string pane), plus pane.read (viewport + scrollback line limit).
@@ -25,6 +24,54 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct UpdateIpcTests {
+    @Test("every targeting IPC method rejects an absent target without mutation")
+    func everyTargetingMethodRejectsAbsentTarget() throws {
+        let todoId = UUID().uuidString
+        let cases: [(method: String, params: [String: JSONValue], entity: String)] = [
+            (Methods.tabNew, [:], "group"),
+            (Methods.tabRename, ["title": .string("work")], "tab"),
+            (Methods.tabClose, [:], "tab"),
+            (Methods.paneFocus, [:], "pane"),
+            (Methods.paneInfo, [:], "pane"),
+            (Methods.paneSplit, ["direction": .string("horizontal")], "pane"),
+            (Methods.paneClose, [:], "pane"),
+            (Methods.paneInput, ["input": .array([.object(["text": .string("x")])])], "pane"),
+            (Methods.paneRead, [:], "pane"),
+            (Methods.paneRows, [:], "pane"),
+            (Methods.paneZoom, ["state": .string("on")], "pane"),
+            (Methods.paneTape, [:], "pane"),
+            (Methods.themeSet, ["themeName": .null], "pane"),
+            (Methods.agentAttach, ["kind": .string("codex"), "id": .string("thread")], "pane"),
+            (Methods.agentActivity, [
+                "kind": .string("codex"),
+                "id": .string("thread"),
+                "state": .string("working"),
+            ], "pane"),
+            (Methods.agentDetach, ["kind": .string("codex"), "id": .string("thread")], "pane"),
+            (Methods.todoList, [:], "pane"),
+            (Methods.todoAdd, ["text": .string("work")], "pane"),
+            (Methods.todoEdit, ["todoId": .string(todoId), "text": .string("work")], "pane"),
+            (Methods.todoDone, ["todoId": .string(todoId)], "pane"),
+            (Methods.todoOpen, ["todoId": .string(todoId)], "pane"),
+            (Methods.todoDelete, ["todoId": .string(todoId)], "pane"),
+            (Methods.todoClearCompleted, [:], "pane"),
+        ]
+
+        for testCase in cases {
+            var model = makeModel()
+            createTab(&model)
+            let before = model
+            let commands = sendIpc(
+                &model,
+                method: testCase.method,
+                params: .object(testCase.params)
+            )
+
+            #expect(try requireIpcError(commands).message == "\(testCase.entity) required")
+            #expect(model == before)
+        }
+    }
+
     @Test("doctor permissions delegates probing to the runtime")
     func doctorPermissionsDelegatesProbingToRuntime() throws {
         var model = makeModel()
@@ -50,15 +97,15 @@ import DanTermProtocol
         #expect(error.code == -32601)
     }
 
-    @Test("malformed context returns invalid params")
-    func malformedContextReturnsInvalidParams() throws {
-        // Intent: an IPC context with a malformed pane id returns
-        //   invalid-params (-32602) before any mutation.
-        // Why it exists: pins the context-validation guard.
-        // Scenario: spec-first malformed context.
+    @Test("malformed explicit target returns invalid params")
+    func malformedExplicitTargetReturnsInvalidParams() throws {
         var model = makeModel()
         createTab(&model)
-        let commands = sendIpc(&model, method: Methods.tabRename, context: IpcRequestContext(paneId: "not-a-uuid"))
+        let commands = sendIpc(
+            &model,
+            method: Methods.tabRename,
+            params: .object(["tab": .string("not-a-uuid"), "title": .string("work")])
+        )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
     }
@@ -276,7 +323,7 @@ import DanTermProtocol
                 "kind": .string("Claude"),
                 "id": .string("4f3a2b1c-0000-4000-9000-abcdef123456"),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         #expect(commands.count == 1)
@@ -297,7 +344,7 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: Methods.paneInfo,
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         let result = try requireIpcReply(commands)
@@ -332,7 +379,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        let context = paneId
         let session = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(session)))
@@ -345,13 +392,13 @@ import DanTermProtocol
                 "id": .string("thread-1"),
                 "state": .string("waiting"),
             ]),
-            context: context
+            pane: context
         )
         let detach = sendIpc(
             &model,
             method: Methods.agentDetach,
             params: .object(["kind": .string("codex"), "id": .string("thread-1")]),
-            context: context
+            pane: context
         )
 
         #expect(activity.count == 1)
@@ -375,7 +422,7 @@ import DanTermProtocol
                 "id": .string("thread-1"),
                 "state": .string("busy"),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         let error = try requireIpcError(commands)
@@ -400,7 +447,7 @@ import DanTermProtocol
                 "kind": .string("claude"),
                 "id": .string("--dangerously-skip-permissions"),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         let error = try requireIpcError(commands)
@@ -427,7 +474,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneInfo,
             params: .object(["pane": .string(backgroundPaneId.rawValue.uuidString)]),
-            context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            pane: contextPaneId
         )
 
         let reply = try requireIpcReply(commands)
@@ -438,12 +485,8 @@ import DanTermProtocol
         #expect(reply["group"]?["name"]?.asString == "General")
     }
 
-    @Test("pane.info implicit pane uses pane context")
-    func paneInfoImplicitPaneUsesContext() throws {
-        // Intent: pane.info without an explicit pane uses the IPC
-        //   context pane.
-        // Why it exists: pins the implicit-context branch.
-        // Scenario: spec-first implicit pane.
+    @Test("pane.info uses the explicitly named pane")
+    func paneInfoUsesExplicitPane() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -452,7 +495,7 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: Methods.paneInfo,
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
         let reply = try requireIpcReply(commands)
@@ -470,14 +513,14 @@ import DanTermProtocol
         createTab(&model)
         let contextPaneId = selectedTab(in: model)!.focusedPaneId
 
-        let missing = sendIpc(&model, method: Methods.paneInfo, context: IpcRequestContext())
+        let missing = sendIpc(&model, method: Methods.paneInfo, pane: nil)
         #expect(try requireIpcError(missing).code == -32602)
 
         let invalid = sendIpc(
             &model,
             method: Methods.paneInfo,
             params: .object(["pane": .string("not-a-uuid")]),
-            context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            pane: contextPaneId
         )
         #expect(try requireIpcError(invalid).code == -32602)
 
@@ -485,7 +528,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneInfo,
             params: .object(["pane": .string(UUID().uuidString)]),
-            context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            pane: contextPaneId
         )
         #expect(try requireIpcError(unknown).code == -32602)
     }
@@ -498,22 +541,28 @@ import DanTermProtocol
         // Scenario: spec-first set + clear.
         var model = makeModel()
         createTab(&model)
-        let ctx = contextForSelectedPane(in: model)
+        let ctx = selectedPaneId(in: model)
         let tabId = selectedTab(in: model)!.id
 
-        let setEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .string("hello")]), context: ctx)
+        let setEffects = sendIpc(&model, method: Methods.tabRename, params: .object([
+            "tab": .string(tabId.rawValue.uuidString),
+            "title": .string("hello"),
+        ]), pane: ctx)
         let setReply = try requireIpcReply(setEffects)
         #expect(setReply["tab"]?["id"]?.asString == tabId.rawValue.uuidString)
         #expect(setReply["tab"]?["customTitle"]?.asString == "hello")
         #expect(tabById(tabId, in: model)?.customTitle == "hello")
 
-        let clearEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .null]), context: ctx)
+        let clearEffects = sendIpc(&model, method: Methods.tabRename, params: .object([
+            "tab": .string(tabId.rawValue.uuidString),
+            "title": .null,
+        ]), pane: ctx)
         let clearReply = try requireIpcReply(clearEffects)
         #expect(clearReply["tab"]?["customTitle"] == .null)
         #expect(tabById(tabId, in: model)?.customTitle == nil)
     }
 
-    @Test("tab.rename derives live tab from pane context when pane moved")
+    @Test("tab.rename targets the named live tab when a pane moved")
     func tabRenameDerivesLiveTabFromPaneContext() {
         // Intent: tab.rename uses the live tab of the pane in context;
         //   after movePaneToTab, the new live tab is targeted.
@@ -522,7 +571,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
         _ = update(&model, .movePaneToTab(paneId: paneId, targetTabId: targetTabId))
@@ -530,8 +579,11 @@ import DanTermProtocol
         _ = sendIpc(
             &model,
             method: Methods.tabRename,
-            params: .object(["title": .string("current")]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            params: .object([
+                "tab": .string(targetTabId.rawValue.uuidString),
+                "title": .string("current"),
+            ]),
+            pane: paneId
         )
 
         let currentTab = tabForPane(paneId, in: model)
@@ -560,7 +612,7 @@ import DanTermProtocol
                 "tab": .string(backgroundTabId.rawValue.uuidString),
                 "title": .string("build"),
             ]),
-            context: IpcRequestContext(paneId: foregroundPaneId.rawValue.uuidString)
+            pane: foregroundPaneId
         )
 
         let reply = try requireIpcReply(commands)
@@ -589,7 +641,7 @@ import DanTermProtocol
                     "tab": tabValue,
                     "title": .string("should-not-apply"),
                 ]),
-                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                pane: contextPaneId
             )
 
             let error = try requireIpcError(commands)
@@ -611,7 +663,7 @@ import DanTermProtocol
             &model,
             method: Methods.tabRename,
             params: .object(["title": .string("missing-context")]),
-            context: IpcRequestContext()
+            pane: nil
         )
 
         let error = try requireIpcError(commands)
@@ -644,7 +696,7 @@ import DanTermProtocol
         #expect(totalTabCount(model) == countBefore - 1)
     }
 
-    @Test("tab.close derives tab from pane context")
+    @Test("tab.close closes the named tab after a pane moved")
     func tabCloseDerivesTabFromPaneContext() {
         // Intent: tab.close without an explicit tab closes the tab that
         //   currently owns the IPC context pane.
@@ -654,7 +706,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
         _ = update(&model, .movePaneToTab(paneId: paneId, targetTabId: targetTabId))
@@ -662,7 +714,8 @@ import DanTermProtocol
         _ = sendIpc(
             &model,
             method: Methods.tabClose,
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            params: .object(["tab": .string(targetTabId.rawValue.uuidString)]),
+            pane: paneId
         )
 
         #expect(tabForPane(paneId, in: model) == nil)
@@ -764,7 +817,7 @@ import DanTermProtocol
                 &model,
                 method: Methods.tabClose,
                 params: .object(["tab": tabValue]),
-                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                pane: contextPaneId
             )
 
             let error = try requireIpcError(commands)
@@ -784,7 +837,7 @@ import DanTermProtocol
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
 
-        let commands = sendIpc(&model, method: Methods.tabClose, context: IpcRequestContext())
+        let commands = sendIpc(&model, method: Methods.tabClose, pane: nil)
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -935,7 +988,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let contextPaneId = selectedTab(in: model)!.focusedPaneId
-        let context = IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+        let context = contextPaneId
         let before = model
         let cases: [JSONValue] = [
             .object([:]),
@@ -949,7 +1002,7 @@ import DanTermProtocol
                 &model,
                 method: Methods.paneClose,
                 params: params,
-                context: context
+                pane: context
             )
 
             #expect(try requireIpcError(commands).code == -32602)
@@ -957,12 +1010,8 @@ import DanTermProtocol
         }
     }
 
-    @Test("pane.split targets context pane even when another tab is selected")
-    func paneSplitTargetsContextPaneEvenWhenAnotherTabSelected() throws {
-        // Intent: pane.split using the pane context targets that pane
-        //   even when a different tab is selected.
-        // Why it exists: pins the context-pane override.
-        // Scenario: spec-first context-pane split.
+    @Test("pane.split targets the named pane even when another tab is selected")
+    func paneSplitTargetsNamedPaneEvenWhenAnotherTabSelected() throws {
         var model = makeModel()
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
@@ -974,8 +1023,10 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: Methods.paneSplit,
-            params: .object(["direction": .string("horizontal")]),
-            context: IpcRequestContext(paneId: backgroundPaneId.rawValue.uuidString)
+            params: .object([
+                "pane": .string(backgroundPaneId.rawValue.uuidString),
+                "direction": .string("horizontal"),
+            ])
         )
 
         #expect(model.selectedTabId == foregroundTabId)
@@ -1006,7 +1057,7 @@ import DanTermProtocol
                 "pane": .string(siblingPaneId.rawValue.uuidString),
                 "direction": .string("vertical"),
             ]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
         let reply = try requireIpcReply(commands)
@@ -1042,7 +1093,7 @@ import DanTermProtocol
                 "pane": .string("not-a-uuid"),
                 "direction": .string("horizontal"),
             ]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
         let error = try requireIpcError(commands)
@@ -1068,7 +1119,7 @@ import DanTermProtocol
                 "pane": .number(42),
                 "direction": .string("horizontal"),
             ]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
         let error = try requireIpcError(commands)
@@ -1096,7 +1147,7 @@ import DanTermProtocol
                 "pane": .string(UUID().uuidString),
                 "direction": .string("horizontal"),
             ]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
         let error = try requireIpcError(commands)
@@ -1118,7 +1169,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneSplit,
             params: .object(["direction": .string("horizontal")]),
-            context: IpcRequestContext()
+            pane: nil
         )
 
         let error = try requireIpcError(commands)
@@ -1142,7 +1193,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneSplit,
             params: .object(["direction": .string("horizontal")]),
-            context: IpcRequestContext(paneId: unknownPaneId.rawValue.uuidString)
+            pane: unknownPaneId
         )
 
         let error = try requireIpcError(commands)
@@ -1223,7 +1274,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneFocus,
             params: .object(["pane": .string(secondPaneId.rawValue.uuidString)]),
-            context: contextForSelectedPane(in: model)
+            pane: selectedPaneId(in: model)
         )
 
         #expect(model.todoPopover == .pane(firstPaneId))
@@ -1271,9 +1322,7 @@ import DanTermProtocol
         // Scenario: spec-first no explicit focus target.
         var model = makeModel()
         createTab(&model)
-        let context = contextForSelectedPane(in: model)
-
-        let commands = sendIpc(&model, method: Methods.paneFocus, context: context)
+        let commands = sendIpc(&model, method: Methods.paneFocus)
 
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -1324,58 +1373,6 @@ import DanTermProtocol
             #expect(error.code == -32602)
             #expect(error.message == "pane not found")
         }
-    }
-
-    @Test("pane.focus accepts legacy paneId alias")
-    func paneFocusAcceptsLegacyPaneIdAlias() throws {
-        // Intent: raw IPC clients that still send paneId can focus a
-        //   pane when the forward pane field is absent.
-        // Why it exists: paneId is a deprecated wire alias, not a CLI-
-        //   emitted field; direct IPC clients may still rely on it.
-        // Scenario: back-compat direct IPC request with paneId only.
-        var model = makeModel()
-        createTab(&model)
-        let targetTabId = selectedTab(in: model)!.id
-        let targetPaneId = selectedTab(in: model)!.focusedPaneId
-        createTab(&model)
-
-        let commands = sendIpc(
-            &model,
-            method: Methods.paneFocus,
-            params: .object(["paneId": .string(targetPaneId.rawValue.uuidString)])
-        )
-
-        let reply = try requireIpcReply(commands)
-        #expect(model.selectedTabId == targetTabId)
-        #expect(reply["tab"]?["focusedPaneId"]?.asString == targetPaneId.rawValue.uuidString)
-    }
-
-    @Test("pane.focus pane field wins over legacy paneId alias")
-    func paneFocusPaneFieldWinsOverLegacyPaneIdAlias() throws {
-        // Intent: the forward pane field is authoritative when both it
-        //   and the deprecated paneId alias are present.
-        // Why it exists: prevents legacy-alias normalization from
-        //   overwriting the explicit forward target.
-        // Scenario: direct IPC request sends both pane and paneId.
-        var model = makeModel()
-        createTab(&model)
-        let firstTabId = selectedTab(in: model)!.id
-        let firstPaneId = selectedTab(in: model)!.focusedPaneId
-        createTab(&model)
-        let secondPaneId = selectedTab(in: model)!.focusedPaneId
-
-        let commands = sendIpc(
-            &model,
-            method: Methods.paneFocus,
-            params: .object([
-                "pane": .string(firstPaneId.rawValue.uuidString),
-                "paneId": .string(secondPaneId.rawValue.uuidString),
-            ])
-        )
-
-        let reply = try requireIpcReply(commands)
-        #expect(model.selectedTabId == firstTabId)
-        #expect(reply["tab"]?["focusedPaneId"]?.asString == firstPaneId.rawValue.uuidString)
     }
 
     @Test("tab.new explicit group id creates tab in that group")
@@ -1446,12 +1443,8 @@ import DanTermProtocol
         #expect(result == expected)
     }
 
-    @Test("tab.new explicit group id wins over pane context group")
-    func tabNewExplicitGroupWinsOverPaneContextGroup() throws {
-        // Intent: an explicit group id wins over the implicit pane-
-        //   context group.
-        // Why it exists: pins explicit-wins.
-        // Scenario: spec-first explicit vs context group.
+    @Test("tab.new uses its named group despite an unrelated pane param")
+    func tabNewUsesNamedGroupDespiteUnrelatedPaneParam() throws {
         var model = makeModel()
         createTab(&model)
         let callerGroupId = model.groups[0].id
@@ -1465,7 +1458,7 @@ import DanTermProtocol
             &model,
             method: Methods.tabNew,
             params: .object(["group": .string(explicitGroupId.rawValue.uuidString)]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
         #expect(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count == callerCountBefore)
@@ -1490,7 +1483,7 @@ import DanTermProtocol
                 &model,
                 method: Methods.tabNew,
                 params: .object(["group": groupValue]),
-                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                pane: contextPaneId
             )
 
             let error = try requireIpcError(commands)
@@ -1500,27 +1493,23 @@ import DanTermProtocol
         }
     }
 
-    @Test("tab.new without explicit group uses pane context group")
-    func tabNewWithoutExplicitGroupUsesContextGroup() throws {
-        // Intent: without an explicit group, tab.new uses the pane
-        //   context's group.
-        // Why it exists: pins the implicit-group derivation.
-        // Scenario: spec-first implicit group.
+    @Test("tab.new does not infer a group from a supplied pane")
+    func tabNewDoesNotInferGroupFromPane() throws {
         var model = makeModel()
         createTab(&model)
-        let callerGroupId = model.groups[0].id
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
         _ = update(&model, .createGroup(name: "Other"))
+        let tabsBefore = model.groups.flatMap(\.tabs).count
 
         let commands = sendIpc(
             &model,
             method: Methods.tabNew,
             params: .object([:]),
-            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            pane: callerPaneId
         )
 
-        #expect(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count == 2)
-        #expect(try requireIpcReply(commands)["group"]?["id"]?.asString == callerGroupId.rawValue.uuidString)
+        #expect(try requireIpcError(commands).message == "group required")
+        #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
     }
 
     @Test("tab.new without explicit group and without pane context fails before mutation")
@@ -1532,7 +1521,7 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabsBefore = model.groups.flatMap(\.tabs).count
-        let commands = sendIpc(&model, method: Methods.tabNew, params: .object([:]), context: IpcRequestContext())
+        let commands = sendIpc(&model, method: Methods.tabNew, params: .object([:]), pane: nil)
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
@@ -1575,7 +1564,7 @@ import DanTermProtocol
                 &nonStringModel,
                 method: targetCase.method,
                 params: targetCase.explicitParams(.number(7)),
-                context: contextForSelectedPane(in: nonStringModel)
+                pane: selectedPaneId(in: nonStringModel)
             )
             let nonStringError = try requireIpcError(nonStringCommands)
             #expect(nonStringError.code == -32602)
@@ -1587,7 +1576,7 @@ import DanTermProtocol
                 &unknownModel,
                 method: targetCase.method,
                 params: targetCase.explicitParams(.string(UUID().uuidString)),
-                context: contextForSelectedPane(in: unknownModel)
+                pane: selectedPaneId(in: unknownModel)
             )
             let unknownError = try requireIpcError(unknownCommands)
             #expect(unknownError.code == -32602)
@@ -1599,11 +1588,11 @@ import DanTermProtocol
                 &absentModel,
                 method: targetCase.method,
                 params: targetCase.absentParams,
-                context: IpcRequestContext()
+                pane: nil
             )
             let absentError = try requireIpcError(absentCommands)
             #expect(absentError.code == -32602)
-            #expect(absentError.message == "no \(targetCase.entity) in context")
+            #expect(absentError.message == "\(targetCase.entity) required")
         }
     }
 
@@ -1660,13 +1649,8 @@ import DanTermProtocol
         #expect(model.groups.flatMap(\.tabs).map(\.id) == tabsBefore)
     }
 
-    @Test("tab.new inherits cwd from caller pane, not selected tab")
-    func tabNewInheritsCwdFromCallerPane() throws {
-        // Intent: tab.new inherits cwd from the caller pane (per
-        //   IPC context), not from the selected tab's pane.
-        // Why it exists: pins the caller-pane scope of cwd.
-        // Scenario: spec-first cwd inherit (both foreground +
-        //   background).
+    @Test("tab.new without cwd uses home rather than any pane cwd")
+    func tabNewWithoutCwdUsesHome() throws {
         for background in [true, false] {
             var model = makeModel()
             createTab(&model)
@@ -1677,22 +1661,32 @@ import DanTermProtocol
             let callerPaneId = selectedTab(in: model)!.focusedPaneId
             model.updatePane(callerPaneId) { $0.session?.cwd = "/caller" }
             _ = update(&model, .selectTab(id: selectedTabId))
+            let groupId = model.groups[0].id
+            let env = CoreEnv(
+                newId: { UUID() },
+                now: { Date(timeIntervalSince1970: 1_700_000_000) },
+                homeDirectory: { "/home" }
+            )
 
             let commands = sendIpc(
                 &model,
                 method: Methods.tabNew,
-                params: .object(["background": .bool(background)]),
-                context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+                params: .object([
+                    "group": .string(groupId.rawValue.uuidString),
+                    "background": .bool(background),
+                ]),
+                pane: callerPaneId,
+                env: env
             )
 
             let reply = try requireIpcReply(commands)
             let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
             #expect(hasEffect(commands) {
                 if case .createSession(_, let effectPaneId, let cwd, _, _) = $0 {
-                    return effectPaneId == paneId && cwd == "/caller"
+                    return effectPaneId == paneId && cwd == "/home"
                 }
                 return false
-            }, "tab.new should inherit cwd from caller pane")
+            }, "tab.new should use home without an explicit cwd")
         }
     }
 
@@ -1706,17 +1700,19 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneIdInContext = selectedTab(in: model)!.focusedPaneId
+        let groupId = model.groups[0].id
         let commands = sendIpc(
             &model,
             method: Methods.tabNew,
             params: .object([
+                "group": .string(groupId.rawValue.uuidString),
                 "launch": .object([
                     "cmd": .string("date"),
                     "cwd": .string("/tmp"),
                     "title": .string("clock"),
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneIdInContext.rawValue.uuidString)
+            pane: paneIdInContext
         )
 
         let reply = try requireIpcReply(commands)
@@ -1805,19 +1801,14 @@ import DanTermProtocol
         )
     }
 
-    @Test("tab.new afterTab with matching group succeeds")
-    func tabNewAfterTabWithMatchingGroupSucceeds() throws {
-        // Intent: afterTab with a group id that matches the reference
-        //   tab's group succeeds.
-        // Why it exists: pins the matching-group OK branch.
-        // Scenario: spec-first afterTab matching group.
+    @Test("tab.new rejects both group and afterTab anchors")
+    func tabNewRejectsBothGroupAndAfterTabAnchors() throws {
         var model = makeModel()
         createTab(&model)
         createTab(&model)
         let refTabId = model.groups[0].tabs[0].id
         let targetGroupId = model.groups[0].id
-        let beforeGroupTabs = groupTabIds(in: model)
-        let panesBefore = Set(model.allPaneIds)
+        let tabsBefore = groupTabIds(in: model)
 
         let commands = sendIpc(
             &model,
@@ -1829,15 +1820,8 @@ import DanTermProtocol
             ])
         )
 
-        let reply = try requireIpcReply(commands)
-        try expectAfterTabInserted(
-            reply: reply,
-            in: model,
-            targetGroupId: targetGroupId,
-            refTabId: refTabId,
-            beforeGroupTabs: beforeGroupTabs,
-            panesBefore: panesBefore
-        )
+        #expect(try requireIpcError(commands).message == "tab.new requires exactly one of group or afterTabId")
+        #expect(groupTabIds(in: model) == tabsBefore)
     }
 
     @Test("tab.new afterTab with different explicit group fails before mutation")
@@ -1941,7 +1925,7 @@ import DanTermProtocol
                     "title": .string("cargo"),
                 ]),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         let newPaneId = try requirePaneId(try requireIpcReply(commands)["pane"]?["id"], "pane.split should return pane id")
@@ -1977,7 +1961,7 @@ import DanTermProtocol
                 "direction": .string("horizontal"),
                 "background": .bool(true),
             ]),
-            context: IpcRequestContext(paneId: focusedPaneId.rawValue.uuidString)
+            pane: focusedPaneId
         )
 
         let reply = try requireIpcReply(commands)
@@ -2009,7 +1993,7 @@ import DanTermProtocol
                 "direction": .string("horizontal"),
                 "background": .bool(true),
             ]),
-            context: IpcRequestContext(paneId: backgroundPaneId.rawValue.uuidString)
+            pane: backgroundPaneId
         )
 
         let reply = try requireIpcReply(commands)
@@ -2038,7 +2022,7 @@ import DanTermProtocol
                 "direction": .string("horizontal"),
                 "background": .string("true"),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
 
         let error = try requireIpcError(commands)
@@ -2081,7 +2065,7 @@ import DanTermProtocol
                     "direction": .string("horizontal"),
                     "launch": launchValue,
                 ]),
-                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                pane: contextPaneId
             )
             #expect(try requireIpcError(splitEffects).code == -32602)
             #expect(Set(model.allPaneIds) == paneIdsBefore)
@@ -2100,13 +2084,13 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let ctx = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        let ctx = paneId
 
-        let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), context: ctx)
+        let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), pane: ctx)
         #expect(model.pane(paneId)?.theme == "Tokyo Night")
         #expect(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString == "Tokyo Night")
 
-        let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), context: ctx)
+        let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), pane: ctx)
         #expect(model.pane(paneId)?.theme == nil)
         #expect(try requireIpcReply(clearEffects)["pane"]?["theme"] == .null)
     }
@@ -2129,7 +2113,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "themeName": .string("Tokyo Night"),
             ]),
-            context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            pane: contextPaneId
         )
 
         #expect(model.pane(targetPaneId)?.theme == "Tokyo Night")
@@ -2155,7 +2139,7 @@ import DanTermProtocol
                     "pane": paneValue,
                     "themeName": .string("Tokyo Night"),
                 ]),
-                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                pane: contextPaneId
             )
 
             let error = try requireIpcError(commands)
@@ -2177,7 +2161,7 @@ import DanTermProtocol
             &model,
             method: Methods.themeSet,
             params: .object(["themeName": .string("Tokyo Night")]),
-            context: IpcRequestContext()
+            pane: nil
         )
 
         let error = try requireIpcError(commands)
@@ -2196,46 +2180,46 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let ctx = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        let ctx = paneId
 
         let addEffects = sendIpc(
             &model,
             method: Methods.todoAdd,
             params: .object(["text": .string(" ship cli ")]),
-            context: ctx
+            pane: ctx
         )
         let added = try requireIpcReply(addEffects)
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
         #expect(model.pane(paneId)?.todos.first?.text == "ship cli")
 
-        let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx))
+        let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.text == "ship cli v2")
         #expect(editReply["todo"]?["text"]?.asString == "ship cli v2")
 
-        let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx))
+        let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.isDone == true)
         #expect(doneReply["todo"]?["isDone"]?.asBool == true)
 
-        let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), context: ctx))
+        let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), pane: ctx))
         #expect(model.pane(paneId)?.todos.first?.isDone == false)
         #expect(openReply["todo"]?["isDone"]?.asBool == false)
 
-        let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, context: ctx))
+        let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, pane: ctx))
         #expect(list["todos"]?.asArray?.count == 1)
 
-        _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), context: ctx)
+        _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), pane: ctx)
         #expect(model.pane(paneId)?.todos.count == 0)
 
         let secondAdd = try requireIpcReply(sendIpc(
             &model,
             method: Methods.todoAdd,
             params: .object(["text": .string("done later")]),
-            context: ctx
+            pane: ctx
         ))
         let secondTodoId = try requireString(secondAdd["todo"]?["id"], "todo add should return second id")
-        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), context: ctx)
-        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx)
-        _ = sendIpc(&model, method: Methods.todoClearCompleted, context: ctx)
+        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), pane: ctx)
+        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), pane: ctx)
+        _ = sendIpc(&model, method: Methods.todoClearCompleted, pane: ctx)
         #expect(model.pane(paneId)?.todos.count == 0)
     }
 
@@ -2250,7 +2234,7 @@ import DanTermProtocol
         let targetPaneId = selectedTab(in: model)!.focusedPaneId
         createTab(&model)
         let contextPaneId = selectedTab(in: model)!.focusedPaneId
-        let ctx = IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+        let ctx = contextPaneId
 
         let addReply = try requireIpcReply(sendIpc(
             &model,
@@ -2259,7 +2243,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "text": .string("ship cli"),
             ]),
-            context: ctx
+            pane: ctx
         ))
         let todoId = try requireString(addReply["todo"]?["id"], "todo add should return id")
         #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli")
@@ -2269,7 +2253,7 @@ import DanTermProtocol
             &model,
             method: Methods.todoList,
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
-            context: ctx
+            pane: ctx
         ))
         #expect(listReply["todos"]?.asArray?.count == 1)
 
@@ -2281,7 +2265,7 @@ import DanTermProtocol
                 "todoId": .string(todoId),
                 "text": .string("ship cli v2"),
             ]),
-            context: ctx
+            pane: ctx
         )
         #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli v2")
 
@@ -2292,7 +2276,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
             ]),
-            context: ctx
+            pane: ctx
         )
         #expect(model.pane(targetPaneId)?.todos.first?.isDone == true)
 
@@ -2303,7 +2287,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
             ]),
-            context: ctx
+            pane: ctx
         )
         #expect(model.pane(targetPaneId)?.todos.first?.isDone == false)
 
@@ -2314,13 +2298,13 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(todoId),
             ]),
-            context: ctx
+            pane: ctx
         )
         _ = sendIpc(
             &model,
             method: Methods.todoClearCompleted,
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
-            context: ctx
+            pane: ctx
         )
         #expect(model.pane(targetPaneId)?.todos.count == 0)
 
@@ -2331,7 +2315,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "text": .string("delete me"),
             ]),
-            context: ctx
+            pane: ctx
         ))
         let deleteId = try requireString(deleteReply["todo"]?["id"], "todo add should return delete id")
         _ = sendIpc(
@@ -2341,7 +2325,7 @@ import DanTermProtocol
                 "pane": .string(targetPaneId.rawValue.uuidString),
                 "todoId": .string(deleteId),
             ]),
-            context: ctx
+            pane: ctx
         )
         #expect(model.pane(targetPaneId)?.todos.count == 0)
     }
@@ -2383,7 +2367,7 @@ import DanTermProtocol
                     &model,
                     method: method,
                     params: .object(params),
-                    context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+                    pane: contextPaneId
                 )
 
                 let error = try requireIpcError(sent)
@@ -2421,7 +2405,7 @@ import DanTermProtocol
                 &model,
                 method: method,
                 params: .object(params),
-                context: IpcRequestContext()
+                pane: nil
             )
 
             let error = try requireIpcError(sent)
@@ -2442,7 +2426,7 @@ import DanTermProtocol
             &model,
             method: Methods.todoDelete,
             params: .object(["todoId": .string(UUID().uuidString)]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2461,7 +2445,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneInput,
             params: .object(["text": .string("echo hi")]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         #expect(hasEffect(commands) {
             if case .sendText(let pid, let text) = $0 { return pid == paneId && text == "echo hi" }
@@ -2488,7 +2472,7 @@ import DanTermProtocol
                     .object(["key": .string("Enter")]),
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         #expect(commands.count == 3)
         guard case .sendInputText(let p0, let t0) = commands[0] else {
@@ -2533,7 +2517,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         #expect(hasEffect(commands) {
             if case .sendInputKey(let p, let k, let m) = $0 {
@@ -2563,7 +2547,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2590,7 +2574,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         #expect(hasEffect(commands) {
             if case .sendInputKey(let p, let k, let m) = $0 {
@@ -2616,7 +2600,7 @@ import DanTermProtocol
                 "text": .string("hi"),
                 "input": .array([.object(["text": .string("hi")])]),
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2634,7 +2618,7 @@ import DanTermProtocol
             &model,
             method: Methods.paneInput,
             params: .object([:]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2654,7 +2638,7 @@ import DanTermProtocol
             params: .object([
                 "input": .array([.object([:])])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2679,7 +2663,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2703,7 +2687,7 @@ import DanTermProtocol
                     .object(["key": .string("Bogus")])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2731,7 +2715,7 @@ import DanTermProtocol
                     .object(["key": .number(5)])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2757,7 +2741,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2781,7 +2765,7 @@ import DanTermProtocol
                     ])
                 ])
             ]),
-            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+            pane: paneId
         )
         #expect(commands.contains { command in
             if case .sendInputKey(let target, .named(.tab), let modifiers) = command {
@@ -2808,7 +2792,7 @@ import DanTermProtocol
                 "pane": .string(backgroundPaneId.rawValue.uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
             ]),
-            context: IpcRequestContext(paneId: foregroundPaneId.rawValue.uuidString)
+            pane: foregroundPaneId
         )
         #expect(hasEffect(commands) {
             if case .sendInputText(let p, let t) = $0 {
@@ -2834,7 +2818,7 @@ import DanTermProtocol
                 "pane": .string(UUID().uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
             ]),
-            context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
+            pane: realPaneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2862,7 +2846,7 @@ import DanTermProtocol
                 "pane": .number(5),
                 "input": .array([.object(["text": .string("hi")])]),
             ]),
-            context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
+            pane: realPaneId
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
@@ -2870,11 +2854,11 @@ import DanTermProtocol
             "expected 'pane must be a string', got: \(error.message)")
     }
 
-    @Test("pane.input with no pane in context and no explicit pane errors")
+    @Test("pane.input without an explicit pane errors")
     func paneInputNoPaneInContextOrExplicitErrors() throws {
-        // Intent: no pane context and no explicit pane returns -32602
-        //   with a "no pane in context" message.
-        // Why it exists: pins the no-pane error message.
+        // Intent: an absent explicit pane returns -32602 with the shared
+        //   required-target message.
+        // Why it exists: pins the missing-pane error message.
         // Scenario: spec-first no pane.
         var model = makeModel()
         createTab(&model)
@@ -2882,12 +2866,11 @@ import DanTermProtocol
             &model,
             method: Methods.paneInput,
             params: .object(["input": .array([.object(["text": .string("hi")])])]),
-            context: IpcRequestContext()
+            pane: nil
         )
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
-        #expect(error.message.contains("no pane in context"),
-            "expected 'no pane in context', got: \(error.message)")
+        #expect(error.message == "pane required")
     }
 
     @Test("pane.read emits viewport read command without immediate reply")
@@ -3085,7 +3068,7 @@ import DanTermProtocol
             &missingModel,
             method: Methods.paneTape,
             params: .object([:]),
-            context: IpcRequestContext()
+            pane: nil
         )
         #expect(try requireIpcError(missing) == .init(code: -32602, message: "pane required"))
 
@@ -3127,19 +3110,23 @@ private func sendIpc(
     _ model: inout AppModel,
     method: String,
     params: JSONValue = .object([:]),
-    context: IpcRequestContext = IpcRequestContext(),
+    pane: PaneId? = nil,
     env: CoreEnv = .live
 ) -> [Command] {
-    update(
+    var effectiveParams = params
+    if let pane, case .object(var object) = effectiveParams, object["pane"] == nil {
+        object["pane"] = .string(pane.rawValue.uuidString)
+        effectiveParams = .object(object)
+    }
+    return update(
         &model,
-        .ipcRequest(reqId: UUID(), method: method, params: params, context: context),
+        .ipcRequest(reqId: UUID(), method: method, params: effectiveParams),
         env: env
     )
 }
 
-private func contextForSelectedPane(in model: AppModel) -> IpcRequestContext {
-    let tab = selectedTab(in: model)!
-    return IpcRequestContext(paneId: tab.focusedPaneId.rawValue.uuidString)
+private func selectedPaneId(in model: AppModel) -> PaneId {
+    selectedTab(in: model)!.focusedPaneId
 }
 
 private func groupTabIds(in model: AppModel) -> [[TabId]] {
@@ -3250,7 +3237,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         // Scenario: spec-first; an agent zooms a split tab twice, then unzooms twice.
         var model = makeModel()
         createTab(&model)
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
         let params = JSONValue.object([
             "pane": .string(paneId.rawValue.uuidString),
@@ -3278,7 +3265,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
     func paneZoomToggleFlips() throws {
         var model = makeModel()
         createTab(&model)
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
         let params = JSONValue.object([
             "pane": .string(paneId.rawValue.uuidString),
@@ -3314,7 +3301,7 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
     func paneZoomRejectsBadInput() throws {
         var model = makeModel()
         createTab(&model)
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
 
         let badState = sendIpc(&model, method: Methods.paneZoom, params: .object([
@@ -3340,16 +3327,16 @@ private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: 
         // Scenario: spec-first; an agent zooms a tab and reads it back.
         var model = makeModel()
         createTab(&model)
-        _ = update(&model, .splitPane(direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let context = IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        let context = paneId
 
-        let before = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        let before = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, pane: context))
         #expect(before["tab"]?["isZoomed"]?.asBool == false)
 
         _ = update(&model, .toggleZoomPane(paneId: paneId))
 
-        let after = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, context: context))
+        let after = try requireIpcReply(sendIpc(&model, method: Methods.paneInfo, pane: context))
         #expect(after["tab"]?["isZoomed"]?.asBool == true)
     }
 }

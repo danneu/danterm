@@ -75,16 +75,13 @@ actor IpcServer {
         }
         let reqId = UUID()
         connection.rememberRequest(reqId: reqId, rpcId: rpcId)
-        let context = IpcRequestContext.from(params: request.params)
-        let params = IpcRequestContext.strippingContext(from: request.params)
         let runtime = self.runtime
         await MainActor.run {
             runtime?.registerIpcConnection(connection, for: reqId)
             runtime?.send(.ipcRequest(
                 reqId: reqId,
                 method: request.method,
-                params: params,
-                context: context
+                params: request.params ?? .object([:])
             ))
         }
     }

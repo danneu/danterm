@@ -336,7 +336,7 @@ import Testing
         //   is .split with the same direction/ratio.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)!
         let tab = rebuilt.groups[0].tabs[0]
@@ -461,7 +461,7 @@ import Testing
         //   the expected pane count.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.session?.cwd = NSHomeDirectory() + "/work" }
         let sessionId = try #require(model.pane(paneId)?.session?.id)

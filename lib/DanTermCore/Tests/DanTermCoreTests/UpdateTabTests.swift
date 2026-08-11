@@ -271,15 +271,8 @@ import Testing
         #expect(model.groups[1].tabs.count == 2, "Work should have auto-created tab + explicit tab")
     }
 
-    @Test("testCreateTabUnknownGroupFallsBackToSelectedTabsGroup")
-    func testCreateTabUnknownGroupFallsBackToSelectedTabsGroup() {
-        // Intent: createTab with an unknown explicit group id routes through
-        //   the selected tab's group instead of the first group.
-        // Why it exists: the AppKit lifetime ADR documents this fallback as
-        //   intentional for menu actions, while IPC tab.new explicitly rejects
-        //   unknown explicit groups; this keeps the two contracts distinct.
-        // Scenario: spec-first stale group id -- a menu action fires after
-        //   its group id has gone stale while a tab in another group is selected.
+    @Test("testCreateTabUnknownGroupIsNoOp")
+    func testCreateTabUnknownGroupIsNoOp() {
         var model = makeModel()
         update(&model, .createGroup(name: "Work"))
         let generalCountBefore = model.groups[0].tabs.count
@@ -294,13 +287,10 @@ import Testing
         #expect(model.groups[0].tabs.count == generalCountBefore,
             "unknown explicit group should not fall back to group 0")
         #expect(model.groups[1].id == workGroupId, "pre-existing Work group should remain the target")
-        #expect(model.groups[1].tabs.count == workTabIdsBefore.count + 1,
-            "unknown explicit group should use selected tab's group")
-        #expect(model.groups[1].tabs.dropLast().map(\.id) == workTabIdsBefore,
-            "existing Work tabs should remain in order")
+        #expect(model.groups[1].tabs.map(\.id) == workTabIdsBefore,
+            "unknown explicit group should not create a tab")
         #expect(!model.groups.contains { $0.id == unknownGroupId }, "unknown id should not create a group")
-        #expect(model.selectedTabId == model.groups[1].tabs.last?.id,
-            "new fallback tab should be selected")
+        #expect(model.selectedTabId == selectedWorkTabId)
     }
 
     @Test("testCreateTabBackgroundIntoSpecificGroup")
@@ -366,7 +356,7 @@ import Testing
         let tabCId = model.groups[0].tabs[2].id
 
         update(&model, .selectTab(id: tabBId))
-        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+        update(&model, .createTabInSelectedGroup(position: .atGroupEnd))
         let tabDId = model.groups[0].tabs[3].id
 
         #expect(model.groups[0].tabs.count == 4)
@@ -393,7 +383,7 @@ import Testing
         let workTab2 = model.groups[1].tabs[1].id
 
         update(&model, .selectTab(id: workTab2))
-        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+        update(&model, .createTabInSelectedGroup(position: .atGroupEnd))
 
         #expect(model.groups[0].tabs.count == 0, "default group untouched")
         #expect(model.groups[1].tabs.count == 4, "work group grows by one")
@@ -418,7 +408,7 @@ import Testing
         let tabBId = model.groups[0].tabs[1].id
         let tabCId = model.groups[0].tabs[2].id
 
-        update(&model, .createTab(inGroupId: nil, position: .afterTab(tabAId)))
+        update(&model, .createTabInSelectedGroup(position: .afterTab(tabAId)))
         let tabDId = model.groups[0].tabs[1].id
 
         #expect(model.groups[0].tabs.map(\.id) == [tabAId, tabDId, tabBId, tabCId])
@@ -460,7 +450,7 @@ import Testing
         createTab(&model)
         let before = model.groups[0].tabs.map(\.id)
 
-        update(&model, .createTab(inGroupId: nil, position: .afterTab(TabId())))
+        update(&model, .createTabInSelectedGroup(position: .afterTab(TabId())))
         let newTabId = model.groups[0].tabs.last!.id
 
         #expect(model.groups[0].tabs.map(\.id) == before + [newTabId])
@@ -730,7 +720,7 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
         #expect(model.groups[0].tabs.count == 2, "tab should NOT be removed yet")
@@ -755,7 +745,7 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
 
@@ -781,7 +771,7 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         model.pendingConfirmation = .closeTab
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
@@ -800,7 +790,7 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         model.pendingConfirmation = .terminate
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
@@ -826,7 +816,7 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = paneIdsForTab(firstTabId, in: model)
         model.pendingConfirmation = .closeTab
         let liveBefore = Set(model.allPaneIds)
@@ -849,7 +839,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = paneIdsForTab(tabId, in: model)
         model.pendingConfirmation = .closeTab
         let liveBefore = Set(model.allPaneIds)
@@ -915,7 +905,7 @@ import Testing
         let secondTabId = model.groups[0].tabs[1].id
         let thirdTabId = model.groups[0].tabs[2].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .addTabTodo(tabId: secondTabId, text: "finish this"))
         let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
         let liveBefore = Set(model.allPaneIds)
@@ -950,7 +940,7 @@ import Testing
         let secondTabId = model.groups[0].tabs[1].id
         let thirdTab = model.groups[0].tabs[2]
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .addTabTodo(tabId: secondTabId, text: "tab task"))
         update(&model, .addTodo(paneId: thirdTab.focusedPaneId, text: "pane task"))
 
@@ -1061,7 +1051,7 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         let secondTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, firstTabId, secondTabId]))
 
@@ -1109,7 +1099,7 @@ import Testing
         let secondTabId = model.groups[0].tabs[1].id
         let thirdTabId = model.groups[0].tabs[2].id
         update(&model, .selectTab(id: firstTabId))
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let expectedDestroyed = Set(paneIdsForTab(firstTabId, in: model) + paneIdsForTab(secondTabId, in: model))
         model.pendingConfirmation = .closeTab
         let liveBefore = Set(model.allPaneIds)

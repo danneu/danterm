@@ -198,7 +198,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
@@ -228,7 +228,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
 
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane(paneId: nil))
 
@@ -280,7 +280,7 @@ import Testing
         // Scenario: spec-first multi-pane quit.
         var model = makeModel()
         createTab(&model)
-        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .splitFocusedPane(direction: .horizontal))
         createTab(&model)
         let commands = update(&model, .requestQuit)
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")

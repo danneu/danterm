@@ -22,7 +22,7 @@ import Testing
         var model = makeModel()
         var ids: [TabId] = []
         for _ in 0..<count {
-            _ = update(&model, .createTab(inGroupId: nil))
+            _ = update(&model, .createTabInSelectedGroup())
             ids.append(model.selectedTabId!)
         }
         return (model, ids)
@@ -37,12 +37,12 @@ import Testing
         // Why it exists: pins the MRU insertion contract.
         // Scenario: spec-first createTab MRU.
         var model = makeModel()
-        _ = update(&model, .createTab(inGroupId: nil))
+        _ = update(&model, .createTabInSelectedGroup())
         let firstId = model.selectedTabId!
         #expect(model.mruOrder.count == 1)
         #expect(model.mruOrder.first == firstId)
 
-        _ = update(&model, .createTab(inGroupId: nil))
+        _ = update(&model, .createTabInSelectedGroup())
         let secondId = model.selectedTabId!
         #expect(model.mruOrder.count == 2)
         #expect(model.mruOrder.first == secondId, "newly selected tab is hoisted to front")
@@ -117,7 +117,7 @@ import Testing
         var model = m0
         let firstTab = model.groups[0].tabs[0]
         _ = update(&model, .selectTab(id: firstTab.id))
-        _ = update(&model, .splitPane(paneId: nil, direction: .horizontal))
+        _ = update(&model, .splitFocusedPane(direction: .horizontal))
         let panes = allPaneIds(model.groups[0].tabs[0].rootNode)
         #expect(panes.count == 2, "split should produce 2 panes in source tab")
         let groupId = model.groups[0].id

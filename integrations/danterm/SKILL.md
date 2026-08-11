@@ -26,31 +26,31 @@ targeting. `doctor` queries the matching running app for macOS permission state
 and skips those rows when the app is unavailable.
 
     danterm ls
-    danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
-    danterm tab rename [--tab <tab-id>] <name>|--clear
-    danterm tab close [--tab <tab-id>]
+    danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]
+    danterm tab rename --tab <tab-id> <name>|--clear
+    danterm tab close --tab <tab-id>
     danterm pane focus <pane-id>
-    danterm pane info [--pane <pane-id>]
-    danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
+    danterm pane info --pane <pane-id>
+    danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane close --pane <pane-id>
-    danterm pane input [--pane <pane-id>] [--literal] -- <token>...
+    danterm pane input --pane <pane-id> [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
-    danterm pane zoom [--pane <pane-id>] on|off|toggle
+    danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane rows --pane <pane-id>
     danterm pane tape --pane <pane-id> [--follow] [--from-now]
-    danterm theme set [--pane <pane-id>] <name>|--clear
-    danterm agent attach --kind <kind> --id <session-id>
-    danterm agent activity --kind <kind> --id <session-id> --state <working|waiting|idle>
-    danterm agent detach --kind <kind> --id <session-id>
+    danterm theme set --pane <pane-id> <name>|--clear
+    danterm agent attach --pane <pane-id> --kind <kind> --id <session-id>
+    danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
+    danterm agent detach --pane <pane-id> --kind <kind> --id <session-id>
     danterm skill
     danterm doctor
-    danterm todo list [--pane <pane-id>]
-    danterm todo add [--pane <pane-id>] <text>
-    danterm todo edit [--pane <pane-id>] <todo-id> <text>
-    danterm todo done [--pane <pane-id>] <todo-id>
-    danterm todo open [--pane <pane-id>] <todo-id>
-    danterm todo delete [--pane <pane-id>] <todo-id>
-    danterm todo clear-completed [--pane <pane-id>]
+    danterm todo list --pane <pane-id>
+    danterm todo add --pane <pane-id> <text>
+    danterm todo edit --pane <pane-id> <todo-id> <text>
+    danterm todo done --pane <pane-id> <todo-id>
+    danterm todo open --pane <pane-id> <todo-id>
+    danterm todo delete --pane <pane-id> <todo-id>
+    danterm todo clear-completed --pane <pane-id>
 
 CLI defaults are agent-safe: `tab new` opens in the background at the target
 group end, and `pane split` opens in the background. The interactive app UI
@@ -64,10 +64,8 @@ within its tab without selecting that tab.
 - `--after-selected`: insert after the currently selected tab in the target
   group, falling back to the end of that group.
 - `--at-group-end`: explicit form of the default append behavior.
-- `--after-tab <tab-id>`: insert immediately after the referenced tab. If
-  `--group` is also supplied, it must name the referenced tab's group. If
-  `--group` is omitted, the referenced tab's group is the target and
-  `$DANTERM_PANE` is not required.
+- `--after-tab <tab-id>`: insert immediately after the referenced tab. It is
+  the target anchor and cannot be combined with `--group`.
 
 ## Targeting rule
 
@@ -103,18 +101,18 @@ For agent commands:
   within its tab.
 - `pane close`: always pass `--pane <pane-id>`.
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
-- `agent attach`, `agent activity`, and `agent detach`: hooks may use the
-  implicit `$DANTERM_PANE` context; ordinary agent recipes should not call them.
-- `pane focus`, `pane read`, and `pane tape` already require explicit pane ids; keep them
-  explicit.
+- `agent attach`, `agent activity`, and `agent detach`: always pass
+  `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
+- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`, and
+  `pane tape`: always name the pane explicitly.
 
 ## Context env vars
 
 DanTerm sets these per pane:
 
 - `DANTERM` -- set to `1` when the process originated inside DanTerm.
-- `DANTERM_PANE` -- caller's pane id. Humans may omit explicit targets inside
-  DanTerm; agents should use it only to derive live ids.
+- `DANTERM_PANE` -- caller's pane id. Pass it explicitly when the caller pane is
+  the intended target, or use it to derive other live ids.
 - `DANTERM_SOCK` -- control socket path. Rarely needed; the CLI resolves it.
   Inside DanTerm, an absent or empty value means that process does not own a
   control socket, so the CLI reports that DanTerm is not running instead of
@@ -186,7 +184,7 @@ These are current lifecycles, not command history. They appear in `pane info` an
 under every pane returned by `ls`, beside fields such as `title` and `cwd`;
 they are not persisted in init files.
 
-Outside DanTerm, do not use implicit app state:
+Every command names its target. Outside DanTerm, begin by discovering live ids:
 
     danterm ls
 
@@ -203,7 +201,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "close pane X" | `pane close --pane <pane-id>` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
-| "make this pane fill the tab" / "restore the split" | `pane zoom on` / `pane zoom off` |
+| "make this pane fill the tab" / "restore the split" | `pane zoom --pane <pane-id> on` / `pane zoom --pane <pane-id> off` |
 | "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
 | "dump the pane's flight recording" | `pane tape --pane <pane-id>` |
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
@@ -247,8 +245,8 @@ the user asked to switch to the new tab.
 
 Use `--after-tab <tab-id>` when the user names an exact tab to place the new tab
 after; this is an explicit target and can work without `$DANTERM_PANE`. Use
-`--after-selected` only when the user explicitly wants selected-tab-relative
-placement.
+`--after-selected` with `--group <group-id>` only when the user explicitly
+wants selected-tab-relative placement in that named group.
 
 ### Launch Claude with an initial prompt
 
@@ -529,7 +527,7 @@ else prints nothing on success and exits 0.
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
-| `pane zoom [--pane <pane-id>] on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
+| `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `tab.isZoomed` and current session-reported fields |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
 | `pane tape --pane <pane-id>` | JSON: replayable raw live-capture recording |
 | `pane tape --pane <pane-id> --follow [--from-now]` | JSON Lines: `start`, `event`, optional `gap`, and `end` records |
