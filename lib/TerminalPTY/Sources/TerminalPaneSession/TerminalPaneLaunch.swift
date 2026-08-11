@@ -41,6 +41,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
     public let accessibleDirectories: [String]
     /// Deterministically ordered snapshot of the app process environment.
     public let inheritedEnvironment: [EnvironmentEntry]
+    /// Machine-supported LANG fallback, or nil when the app should advertise none.
+    public let localeFallback: String?
     /// Bundle version advertised to child processes as DanTerm's version.
     public let terminalProgramVersion: String
     /// Running bundle's asset directory advertised for nested-shell discovery.
@@ -53,6 +55,7 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         homeDirectory: String?,
         accessibleDirectories: [String],
         inheritedEnvironment: [EnvironmentEntry],
+        localeFallback: String?,
         terminalProgramVersion: String,
         shellIntegrationDirectory: String
     ) {
@@ -61,6 +64,7 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         self.homeDirectory = homeDirectory
         self.accessibleDirectories = accessibleDirectories
         self.inheritedEnvironment = inheritedEnvironment
+        self.localeFallback = localeFallback
         self.terminalProgramVersion = terminalProgramVersion
         self.shellIntegrationDirectory = shellIntegrationDirectory
     }
@@ -94,6 +98,26 @@ public func assembleTerminalPaneLaunch(
     facts: TerminalPaneLaunchFacts
 ) -> TerminalPaneLaunchConfiguration {
     let dimensions = terminalPaneInitialDimensions
+    var advertisedEnvironment = [
+        EnvironmentEntry(name: "TERM", value: "xterm-256color"),
+        EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
+        EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
+        EnvironmentEntry(
+            name: "TERM_PROGRAM_VERSION",
+            value: facts.terminalProgramVersion
+        ),
+    ]
+    let inheritedLocaleNames = Set(["LC_ALL", "LC_CTYPE", "LANG"])
+    let hasInheritedLocale = facts.inheritedEnvironment.contains {
+        inheritedLocaleNames.contains($0.name) && $0.value.isEmpty == false
+    }
+    if let localeFallback = facts.localeFallback, hasInheritedLocale == false {
+        advertisedEnvironment.append(EnvironmentEntry(name: "LANG", value: localeFallback))
+    }
+    advertisedEnvironment.append(EnvironmentEntry(
+        name: "DANTERM_SHELL_INTEGRATION_DIR",
+        value: facts.shellIntegrationDirectory
+    ))
     return TerminalPaneLaunchConfiguration(
         launchInput: LaunchPolicyInput(
             accountShell: facts.accountShell,
@@ -102,19 +126,7 @@ public func assembleTerminalPaneLaunch(
             homeDirectory: facts.homeDirectory,
             accessibleDirectories: facts.accessibleDirectories,
             inheritedEnvironment: facts.inheritedEnvironment,
-            advertisedEnvironment: [
-                EnvironmentEntry(name: "TERM", value: "xterm-256color"),
-                EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
-                EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
-                EnvironmentEntry(
-                    name: "TERM_PROGRAM_VERSION",
-                    value: facts.terminalProgramVersion
-                ),
-                EnvironmentEntry(
-                    name: "DANTERM_SHELL_INTEGRATION_DIR",
-                    value: facts.shellIntegrationDirectory
-                ),
-            ],
+            advertisedEnvironment: advertisedEnvironment,
             paneEnvironment: request.environment,
             command: request.command,
             launchCommand: request.launchCommand,

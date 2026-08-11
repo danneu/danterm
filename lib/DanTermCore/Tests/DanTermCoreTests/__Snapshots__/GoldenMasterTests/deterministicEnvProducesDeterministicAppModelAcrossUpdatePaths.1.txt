@@ -147,7 +147,8 @@ AppModel(
     fontFamily: nil,
     fontSize: nil,
     alertClearMode: .focus,
-    copyOnSelect: true
+    copyOnSelect: true,
+    localeFallback: true
   ),
   resolvedFontFamily: nil,
   preferencesDraft: nil,

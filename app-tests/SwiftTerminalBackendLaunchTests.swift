@@ -3,6 +3,7 @@
 import Foundation
 import PaneProcessLifecycle
 import Testing
+import xlocale
 @testable import DanTerm
 import TerminalPaneSession
 
@@ -28,8 +29,10 @@ struct SwiftTerminalBackendLaunchTests {
 
         let facts = SwiftTerminalBackend.launchFacts(
             bundle: bundle,
-            requestedWorkingDirectory: "/"
+            requestedWorkingDirectory: "/",
+            localeFallbackEnabled: true
         )
+        #expect(facts.localeFallback != nil)
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let launch = try resolveLaunchPlan(configuration.launchInput).get()
         let environment = Dictionary(uniqueKeysWithValues: launch.attempts[0].environment.map {
@@ -48,6 +51,65 @@ struct SwiftTerminalBackendLaunchTests {
                 atPath: fixture.integrationURL.appendingPathComponent(relativePath).path
             ))
         }
+    }
+
+    @Test("locale selection prefers the regional candidate and falls back only when needed", arguments: [
+        (accepted: ["fr_CA.UTF-8"], expected: "fr_CA.UTF-8"),
+        (accepted: ["en_US.UTF-8"], expected: "en_US.UTF-8"),
+        (accepted: [], expected: nil),
+    ])
+    @MainActor
+    func localeSelectionUsesFirstAcceptedCandidate(
+        accepted: [String],
+        expected: String?
+    ) {
+        let selected = SwiftTerminalBackend.localeFallback(
+            languageCode: "fr",
+            regionCode: "CA",
+            accepts: accepted.contains
+        )
+
+        #expect(selected == expected)
+    }
+
+    @Test("disabled locale fallback does not reach the child environment")
+    @MainActor
+    func disabledLocaleFallbackDoesNotReachChildEnvironment() throws {
+        let fixture = try SyntheticDanTermBundle()
+        defer { fixture.remove() }
+        let bundle = try #require(Bundle(url: fixture.bundleURL))
+        let request = TerminalPaneLaunchRequest(
+            workingDirectory: "/",
+            command: nil,
+            launchCommand: nil,
+            environment: []
+        )
+
+        let facts = SwiftTerminalBackend.launchFacts(
+            bundle: bundle,
+            requestedWorkingDirectory: "/",
+            localeFallbackEnabled: false,
+            processEnvironment: [:]
+        )
+        #expect(facts.localeFallback == nil)
+        let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
+        let launch = try resolveLaunchPlan(configuration.launchInput).get()
+        let environment = Dictionary(uniqueKeysWithValues: launch.attempts[0].environment.map {
+            ($0.name, $0.value)
+        })
+
+        #expect(environment["LANG"] == nil)
+    }
+
+    @Test("real locale acceptance does not mutate the process locale")
+    @MainActor
+    func realLocaleAcceptanceDoesNotMutateProcessLocale() throws {
+        let before = String(cString: try #require(setlocale(LC_CTYPE, nil)))
+
+        #expect(SwiftTerminalBackend.acceptsLocale("en_US.UTF-8"))
+
+        let after = String(cString: try #require(setlocale(LC_CTYPE, nil)))
+        #expect(after == before)
     }
 }
 

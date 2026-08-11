@@ -1888,6 +1888,7 @@ class AppRuntime {
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
             environment: envVars,
+            localeFallbackEnabled: model.config.localeFallback,
             themeName: themeName,
             fontSize: fontSize,
             fontFamily: fontFamily

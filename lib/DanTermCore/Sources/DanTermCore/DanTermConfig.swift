@@ -20,6 +20,8 @@ struct DanTermConfig: Equatable {
     /// Whether finishing a mouse selection copies it to the clipboard. Defaults on,
     /// matching the behavior DanTerm had while it ran on libghostty.
     var copyOnSelect: Bool = true
+    /// Whether locally spawned panes receive a supported LANG when no locale is inherited.
+    var localeFallback: Bool = true
 
     static let `default` = DanTermConfig()
 

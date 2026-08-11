@@ -92,6 +92,8 @@ struct TerminalSessionRequest {
     let launchCommand: String?
     let waitAfterCommand: Bool
     let environment: [(String, String)]
+    /// App-wide policy captured at the runtime's sole session-construction funnel.
+    let localeFallbackEnabled: Bool
     let themeName: String?
     let fontSize: Double
     /// The verified-installed family, or nil for the system monospace font; the raw

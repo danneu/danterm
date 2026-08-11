@@ -8,6 +8,7 @@ import PaneProcessLifecycle
 import TerminalCoreRecording
 #endif
 import TerminalPaneSession
+import xlocale
 
 /// Owns process-level Swift terminal launch and teardown policy outside the Elm runtime.
 @MainActor
@@ -56,7 +57,8 @@ final class SwiftTerminalBackend {
             request: launchRequest,
             facts: Self.launchFacts(
                 bundle: bundle,
-                requestedWorkingDirectory: request.workingDirectory
+                requestedWorkingDirectory: request.workingDirectory,
+                localeFallbackEnabled: request.localeFallbackEnabled
             )
         )
         let controller: TerminalPaneSessionController
@@ -135,9 +137,11 @@ final class SwiftTerminalBackend {
     /// Resolves app-owned bundle facts and ambient account state at the child-launch seam.
     static func launchFacts(
         bundle: Bundle,
-        requestedWorkingDirectory: String?
+        requestedWorkingDirectory: String?,
+        localeFallbackEnabled: Bool,
+        processEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) -> TerminalPaneLaunchFacts {
-        let environment = scrubbedTerminalProcessEnvironment(ProcessInfo.processInfo.environment)
+        let environment = scrubbedTerminalProcessEnvironment(processEnvironment)
         let accountShell = accountShell(environment: environment)
         let executablePaths = [accountShell, "/bin/zsh", "/bin/sh"]
             .compactMap { $0 }
@@ -163,15 +167,46 @@ final class SwiftTerminalBackend {
         let shellIntegrationDirectory = bundle.bundleURL
             .appendingPathComponent("Contents/Resources/shell-integration", isDirectory: true)
             .path
+        let locale = Locale.current
+        let localeFallback = localeFallbackEnabled ? Self.localeFallback(
+            languageCode: locale.language.languageCode?.identifier,
+            regionCode: locale.region?.identifier,
+            accepts: Self.acceptsLocale
+        ) : nil
         return TerminalPaneLaunchFacts(
             accountShell: accountShell,
             executablePaths: executablePaths,
             homeDirectory: homeDirectory,
             accessibleDirectories: accessibleDirectories,
             inheritedEnvironment: inheritedEnvironment,
+            localeFallback: localeFallback,
             terminalProgramVersion: version,
             shellIntegrationDirectory: shellIntegrationDirectory
         )
+    }
+
+    /// Selects the first machine-supported UTF-8 locale without depending on ICU suffixes.
+    static func localeFallback(
+        languageCode: String?,
+        regionCode: String?,
+        accepts: (String) -> Bool
+    ) -> String? {
+        var candidates: [String] = []
+        if let languageCode, languageCode.isEmpty == false,
+           let regionCode, regionCode.isEmpty == false {
+            candidates.append("\(languageCode)_\(regionCode).UTF-8")
+        }
+        if candidates.contains("en_US.UTF-8") == false {
+            candidates.append("en_US.UTF-8")
+        }
+        return candidates.first(where: accepts)
+    }
+
+    /// Probes LC_CTYPE support through an isolated locale object owned by this call.
+    static func acceptsLocale(_ identifier: String) -> Bool {
+        guard let locale = newlocale(LC_CTYPE_MASK, identifier, nil) else { return false }
+        freelocale(locale)
+        return true
     }
 
     private static func accountShell(environment: [String: String]) -> String? {

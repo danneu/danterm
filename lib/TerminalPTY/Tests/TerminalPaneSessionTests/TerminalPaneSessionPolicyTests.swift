@@ -70,6 +70,7 @@ struct TerminalPaneSessionPolicyTests {
             homeDirectory: "/home",
             accessibleDirectories: ["/requested", "/home", "/"],
             inheritedEnvironment: [.init(name: "BASE", value: "base")],
+            localeFallback: "en_US.UTF-8",
             terminalProgramVersion: "1.2.3",
             shellIntegrationDirectory: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
         )
@@ -86,6 +87,7 @@ struct TerminalPaneSessionPolicyTests {
             .init(name: "COLORTERM", value: "truecolor"),
             .init(name: "TERM_PROGRAM", value: "DanTerm"),
             .init(name: "TERM_PROGRAM_VERSION", value: "1.2.3"),
+            .init(name: "LANG", value: "en_US.UTF-8"),
             .init(
                 name: "DANTERM_SHELL_INTEGRATION_DIR",
                 value: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
@@ -94,6 +96,54 @@ struct TerminalPaneSessionPolicyTests {
         #expect(input.paneEnvironment == [.init(name: "PANE", value: "pane")])
         #expect(input.command == "restored")
         #expect(input.launchCommand == "launch")
+    }
+
+    @Test("locale fallback yields to every non-empty inherited locale opinion", arguments: [
+        "LANG",
+        "LC_CTYPE",
+        "LC_ALL",
+    ])
+    func localeFallbackYieldsToInheritedLocale(_ name: String) {
+        let advertised = advertisedEnvironment(
+            inheritedEnvironment: [.init(name: name, value: "C")],
+            localeFallback: "en_US.UTF-8"
+        )
+
+        #expect(advertised.contains { $0.name == "LANG" } == false)
+        #expect(advertised.contains { $0.name == "LC_CTYPE" } == false)
+        #expect(advertised.contains { $0.name == "LC_ALL" } == false)
+    }
+
+    @Test("empty inherited locale values leave room for the LANG fallback", arguments: [
+        "LANG",
+        "LC_CTYPE",
+        "LC_ALL",
+    ])
+    func emptyInheritedLocaleUsesFallback(_ name: String) {
+        let advertised = advertisedEnvironment(
+            inheritedEnvironment: [.init(name: name, value: "")],
+            localeFallback: "en_US.UTF-8"
+        )
+
+        #expect(advertised.filter { $0.name == "LANG" } == [
+            .init(name: "LANG", value: "en_US.UTF-8"),
+        ])
+        #expect(advertised.contains { $0.name == "LC_CTYPE" } == false)
+        #expect(advertised.contains { $0.name == "LC_ALL" } == false)
+    }
+
+    @Test("missing inherited locale uses only the LANG fallback")
+    func missingInheritedLocaleUsesFallback() {
+        let advertised = advertisedEnvironment(
+            inheritedEnvironment: [],
+            localeFallback: "en_US.UTF-8"
+        )
+
+        #expect(advertised.filter { $0.name == "LANG" } == [
+            .init(name: "LANG", value: "en_US.UTF-8"),
+        ])
+        #expect(advertised.contains { $0.name == "LC_CTYPE" } == false)
+        #expect(advertised.contains { $0.name == "LC_ALL" } == false)
     }
 
     @Test("DanTerm launch values override hostile inherited identity and pane collisions")
@@ -123,6 +173,7 @@ struct TerminalPaneSessionPolicyTests {
                 .init(name: "DANTERM_SOCK", value: "hostile"),
                 .init(name: "DANTERM_PANE", value: "hostile"),
             ],
+            localeFallback: nil,
             terminalProgramVersion: "9.8.7",
             shellIntegrationDirectory: "/owned/shell-integration"
         )
@@ -141,5 +192,29 @@ struct TerminalPaneSessionPolicyTests {
         #expect(environment["DANTERM"] == "1")
         #expect(environment["DANTERM_SOCK"] == "/owned/socket")
         #expect(environment["DANTERM_PANE"] == "owned-pane")
+    }
+
+    private func advertisedEnvironment(
+        inheritedEnvironment: [EnvironmentEntry],
+        localeFallback: String?
+    ) -> [EnvironmentEntry] {
+        let request = TerminalPaneLaunchRequest(
+            workingDirectory: nil,
+            command: nil,
+            launchCommand: nil,
+            environment: []
+        )
+        let facts = TerminalPaneLaunchFacts(
+            accountShell: "/bin/zsh",
+            executablePaths: ["/bin/zsh"],
+            homeDirectory: "/home",
+            accessibleDirectories: ["/home"],
+            inheritedEnvironment: inheritedEnvironment,
+            localeFallback: localeFallback,
+            terminalProgramVersion: "1.2.3",
+            shellIntegrationDirectory: "/shell-integration"
+        )
+        return assembleTerminalPaneLaunch(request: request, facts: facts)
+            .launchInput.advertisedEnvironment
     }
 }

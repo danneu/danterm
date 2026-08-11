@@ -74,6 +74,11 @@ struct DanTermConfigDocument: Equatable {
         setNestedValue(.bool(enabled), parent: "ui", key: "copyOnSelect")
     }
 
+    /// Sets the local-shell locale fallback while preserving unmodeled shell siblings.
+    mutating func setLocaleFallback(_ enabled: Bool) {
+        setNestedValue(.bool(enabled), parent: "shell", key: "localeFallback")
+    }
+
     /// Applies the complete modeled settings set as one document transaction.
     mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)
@@ -82,6 +87,7 @@ struct DanTermConfigDocument: Equatable {
         setFontSize(config.fontSize)
         setAlertClearMode(config.alertClearMode)
         setCopyOnSelect(config.copyOnSelect)
+        setLocaleFallback(config.localeFallback)
     }
 
     /// Returns original bytes until a semantic edit occurs, then stable sorted JSON.
@@ -147,6 +153,11 @@ struct DanTermConfigDocument: Equatable {
             if case .bool(let copyOnSelect)? = ui["copyOnSelect"] {
                 config.copyOnSelect = copyOnSelect
             }
+        }
+        if case .object(let shell)? = rootObject["shell"],
+           case .bool(let localeFallback)? = shell["localeFallback"]
+        {
+            config.localeFallback = localeFallback
         }
         return config
     }

@@ -92,11 +92,16 @@ Press Cmd+, to edit settings. DanTerm stores them in
   "schemaVersion": 1,
   "font": { "size": 14 },
   "theme": { "default": "Dracula", "remote": "Purplepeter" },
+  "shell": { "localeFallback": true },
   "ui": { "alertClearMode": "focus", "copyOnSelect": true }
 }
 ```
 
 Press Cmd+Shift+, to reload the file.
+
+`shell.localeFallback` defaults to `true`. For locally spawned panes, DanTerm
+sets `LANG` to a supported UTF-8 locale only when it inherits no non-empty
+`LANG`, `LC_CTYPE`, or `LC_ALL`. Set it to `false` to disable this fallback.
 
 Keep alerts until you dismiss them:
 

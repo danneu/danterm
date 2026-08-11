@@ -12,7 +12,8 @@ struct DanTermConfigDocumentTests {
           "schemaVersion": 1,
           "font": { "family": "Menlo", "size": 15.5 },
           "theme": { "default": "Solarized Light", "remote": "Grape" },
-          "ui": { "alertClearMode": "manual", "copyOnSelect": false }
+          "ui": { "alertClearMode": "manual", "copyOnSelect": false },
+          "shell": { "localeFallback": false }
         }
         """)))
 
@@ -22,6 +23,14 @@ struct DanTermConfigDocumentTests {
         #expect(document.config.fontSize == 15.5)
         #expect(document.config.alertClearMode == .manual)
         #expect(document.config.copyOnSelect == false)
+        #expect(document.config.localeFallback == false)
+    }
+
+    @Test("locale fallback defaults to on when the key is absent")
+    func localeFallbackDefaultsToOnWhenAbsent() throws {
+        let document = try #require(DanTermConfigDocument.decode(DanTermConfigDocument.seedData))
+
+        #expect(document.config.localeFallback)
     }
 
     @Test("copy-on-select defaults to on when the key is absent")
