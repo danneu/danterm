@@ -19,13 +19,14 @@
 #            Process, DispatchSource, ProcessInfo), so the pure-tier IO bans do
 #            NOT apply here. The profiles are deliberately kept separate.
 #   --forbid-imports
-#            Rejects every real Swift import, including Foundation. TerminalCore
-#            uses this alongside the pure profile so its dependency-free package
-#            cannot silently acquire a toolchain- or OS-versioned framework.
+#            Rejects every real Swift import, including Foundation. Import-free
+#            modules use this alongside the pure profile so they cannot silently
+#            acquire a toolchain- or OS-versioned framework.
 #   --allow-imports <module[,module...]>
 #            Rejects every real Swift import except the exact named modules.
-#            TerminalRenderPlanning uses this alongside the pure profile so it
-#            can depend on TerminalCore without acquiring framework imports.
+#            TerminalCore and TerminalRenderPlanning use this alongside the pure
+#            profile for their exact package dependencies without acquiring
+#            framework imports.
 #
 # The regex denylist is a heuristic regression guard, not the proof of purity:
 # the real proof is structural (the nested test packages compile core/support

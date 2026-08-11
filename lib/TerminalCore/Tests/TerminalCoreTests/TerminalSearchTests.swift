@@ -513,6 +513,25 @@ struct TerminalSearchTests {
         #expect(longNeedleRows == shortNeedleRows)
     }
 
+    @Test("prefix maintenance examines logarithmically many existing matches")
+    func prefixMaintenanceCostStaysBoundedWithManyExistingMatches() throws {
+        // Intent: closing one more history row never walks the retained match sequence.
+        // Why it exists: eviction and truncation maintenance filtered every stored match on
+        //   each scrolled row, making a dense open search progressively slow down the feed path.
+        // Scenario: a pane retains hundreds of matching log lines before one non-match scrolls.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        for _ in 0..<512 {
+            terminal.feed(Array("hit\r\n".utf8))
+        }
+        _ = terminal.beginSearch("hit")
+
+        let comparisons = SearchIndexMaintenanceCounter.measure {
+            terminal.feed(Array("miss\r\n".utf8))
+        }
+
+        #expect(comparisons <= 32)
+    }
+
     @Test("the retained index equals a full rescan across output tail changes and resize")
     func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))

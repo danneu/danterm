@@ -51,7 +51,7 @@ STEPS=(
     'python3 ./scripts/terminal-recording-schema-audit.py'
     './scripts/tests/terminal-viability-harness_test.sh'
     './scripts/tests/terminal-benchmark-harness_test.sh'
-    './scripts/core-purity-lint.sh --forbid-imports lib/TerminalCore/Sources/TerminalCore'
+    './scripts/core-purity-lint.sh --allow-imports DequeModule lib/TerminalCore/Sources/TerminalCore'
     './scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore'
     './scripts/tests/bundle-theme-resources_test.sh'
     './scripts/tests/terminal-fence-accounting-lint_test.sh'

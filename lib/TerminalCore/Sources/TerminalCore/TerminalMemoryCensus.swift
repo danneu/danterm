@@ -18,8 +18,7 @@
 // is the question this type answers, and conflating them has already produced two wrong numbers in
 // doc 15 (`research/15/F1` and `research/15/F4` inference 2).
 //
-// No imports: `TerminalCore` is enforced import-free by `scripts/core-purity-lint.sh`, and
-// everything here (`Codable`, `MemoryLayout`) is standard library.
+// This file needs no imports: everything here (`Codable`, `MemoryLayout`) is standard library.
 
 /// A point-in-time accounting of the cell storage one `Terminal` owns, in exact bytes.
 ///

@@ -26,6 +26,30 @@
 // Keep it pure. `Terminal` is value-semantic and fully testable by feeding bytes and reading
 // back state, which is the property the whole engine's test suite rests on.
 
+import DequeModule
+
+/// Counts match comparisons during immutable-prefix maintenance so its cost remains bounded.
+enum SearchIndexMaintenanceCounter {
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    @inline(__always)
+    static func recordComparison() {
+        active?.count += 1
+    }
+
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
 public struct TerminalTextPosition: Equatable, Sendable {
     /// Counts from the oldest retained scrollback row through the viewport.
@@ -524,7 +548,7 @@ public struct Terminal: Equatable, Sendable {
         var retainedStartRow: Int
         var prefixEndRow: Int
         var boundaryWindow: [SearchProjectionUnit]
-        var prefixMatches: [TextAnchorRange]
+        var prefixMatches: Deque<TextAnchorRange>
         var confirmedPrefixMatchCount: Int
     }
 
@@ -539,7 +563,7 @@ public struct Terminal: Equatable, Sendable {
     /// Presents the immutable prefix and freshly scanned suffix as one ordered collection
     /// without copying the history-sized prefix on each navigation or status read.
     private struct SearchMatchSnapshot {
-        var prefix: [TextAnchorRange]
+        var prefix: Deque<TextAnchorRange>
         var prefixCount: Int
         var suffix: [TextAnchorRange]
 
@@ -3466,7 +3490,7 @@ public struct Terminal: Equatable, Sendable {
                 needleKeys: needleKeys,
                 endingAt: prefixEnd
             ),
-            prefixMatches: prefixCandidates,
+            prefixMatches: Deque(prefixCandidates),
             confirmedPrefixMatchCount: matches.lazy.filter { $0.end <= prefixBoundary }.count
         )
         let position = matches.last?.start
@@ -4172,14 +4196,22 @@ public struct Terminal: Equatable, Sendable {
         let boundary = TextAnchor(row: newEnd, column: 0)
         let firstRetainedRow = evictedRowCount
         guard newEnd != oldEnd || firstRetainedRow != search.index.retainedStartRow else { return }
-        let confirmed = search.index.prefixMatches.prefix(search.index.confirmedPrefixMatchCount)
-        let retainedConfirmedCount = confirmed.lazy.filter {
-            $0.start.row >= firstRetainedRow && $0.end <= boundary
-        }.count
-        search.index.prefixMatches.removeAll {
-            $0.start.row < firstRetainedRow || $0.end > boundary
-        }
-        search.index.confirmedPrefixMatchCount = retainedConfirmedCount
+        let droppedPrefixCount = prefixMatchStartIndex(
+            in: search.index.prefixMatches,
+            retainedFrom: firstRetainedRow
+        )
+        let retainedEndIndex = prefixMatchEndIndex(
+            in: search.index.prefixMatches,
+            through: boundary
+        )
+        search.index.confirmedPrefixMatchCount = max(
+            0,
+            min(search.index.confirmedPrefixMatchCount, retainedEndIndex) - droppedPrefixCount
+        )
+        search.index.prefixMatches.removeLast(search.index.prefixMatches.count - retainedEndIndex)
+        search.index.prefixMatches.removeFirst(
+            min(droppedPrefixCount, search.index.prefixMatches.count)
+        )
         let scanStart = max(oldEnd, firstRetainedRow)
         let droppedBoundaryUnit = search.index.boundaryWindow.contains {
             $0.start.row < firstRetainedRow
@@ -4225,14 +4257,51 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func prefixMatchCount(
-        in matches: [TextAnchorRange],
+        in matches: Deque<TextAnchorRange>,
         throughContentRow row: Int
     ) -> Int {
         var low = 0
         var high = matches.count
         while low < high {
             let middle = low + (high - low) / 2
+            SearchIndexMaintenanceCounter.recordComparison()
             if matches[middle].end.row <= row {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
+    private func prefixMatchStartIndex(
+        in matches: Deque<TextAnchorRange>,
+        retainedFrom row: Int
+    ) -> Int {
+        var low = 0
+        var high = matches.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            SearchIndexMaintenanceCounter.recordComparison()
+            if matches[middle].start.row < row {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
+    private func prefixMatchEndIndex(
+        in matches: Deque<TextAnchorRange>,
+        through boundary: TextAnchor
+    ) -> Int {
+        var low = 0
+        var high = matches.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            SearchIndexMaintenanceCounter.recordComparison()
+            if matches[middle].end <= boundary {
                 low = middle + 1
             } else {
                 high = middle
@@ -4262,7 +4331,7 @@ public struct Terminal: Equatable, Sendable {
             needleKeys: search.index.needleKeys,
             endingAt: prefixEnd
         )
-        search.index.prefixMatches = prefixCandidates
+        search.index.prefixMatches = Deque(prefixCandidates)
         search.index.confirmedPrefixMatchCount = matches.lazy.filter { $0.end <= boundary }.count
         self.search = search
     }

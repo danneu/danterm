@@ -22,9 +22,15 @@ let package = Package(
         .executable(name: "TerminalResizeProbe", targets: ["TerminalResizeProbe"]),
         .executable(name: "TerminalRetainedRowProbe", targets: ["TerminalRetainedRowProbe"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
+    ],
     targets: [
         .target(
             name: "TerminalCore",
+            dependencies: [
+                .product(name: "DequeModule", package: "swift-collections"),
+            ],
             path: "Sources/TerminalCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
