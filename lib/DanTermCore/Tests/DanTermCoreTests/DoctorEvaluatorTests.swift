@@ -175,6 +175,45 @@ import DanTermProtocol
         }
     }
 
+    @Test("app permission status ladders stay advisory")
+    func appPermissionStatusLaddersStayAdvisory() {
+        let granted = evaluateDoctor(makeFacts(permissions: DoctorFacts.Permissions(
+            notifications: .granted,
+            fullDiskAccess: .granted,
+            developerTools: .granted
+        )))
+        #expect(check(.notifications, in: granted).status == .ok)
+        #expect(check(.fullDiskAccess, in: granted).status == .ok)
+        #expect(check(.developerTools, in: granted).status == .ok)
+
+        let denied = evaluateDoctor(makeFacts(permissions: DoctorFacts.Permissions(
+            notifications: .denied,
+            fullDiskAccess: .denied,
+            developerTools: .denied
+        )))
+        #expect(check(.notifications, in: denied).message == "Enable DanTerm in System Settings > Notifications.")
+        #expect(check(.fullDiskAccess, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm.")
+        #expect(check(.developerTools, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm.")
+
+        let unavailable = evaluateDoctor(makeFacts(permissions: .unavailable))
+        #expect(check(.notifications, in: unavailable).status == .skip)
+        #expect(check(.fullDiskAccess, in: unavailable).status == .skip)
+        #expect(check(.developerTools, in: unavailable).status == .skip)
+        #expect(check(.notifications, in: unavailable).message == "DanTerm is not running, so its permissions cannot be checked.")
+
+        let unknown = check(.developerTools, in: evaluateDoctor(makeFacts(
+            permissions: DoctorFacts.Permissions(
+                notifications: .granted,
+                fullDiskAccess: .granted,
+                developerTools: .unknown
+            )
+        )))
+        #expect(unknown.status == .skip)
+        #expect(unknown.message == "The permission state could not be checked on this Mac.")
+
+        #expect(doctorExitCode(for: denied) == 0)
+    }
+
     @Test("PATH CLI status ladder")
     func pathCLIStatusLadder() {
         let missing = check(.pathCLI, in: evaluateDoctor(makeFacts(pathDanterm: nil)))
@@ -304,7 +343,8 @@ private func makeFacts(
     symlinkEntry: SymlinkEntry = .symlink(target: "/bundle/Contents/Helpers/danterm", targetExists: true),
     translocated: Bool = false,
     jqOnPath: Bool = true,
-    configFont: DoctorFacts.ConfigFont = .unset
+    configFont: DoctorFacts.ConfigFont = .unset,
+    permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     DoctorFacts(
         claude: claude,
@@ -316,7 +356,8 @@ private func makeFacts(
         symlinkEntry: symlinkEntry,
         translocated: translocated,
         jqOnPath: jqOnPath,
-        configFont: configFont
+        configFont: configFont,
+        permissions: permissions
     )
 }
 

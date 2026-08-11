@@ -33,7 +33,8 @@ struct DoctorProbeEnv {
 /// CLI composes that one fact and hands it over.
 func gatherDoctorFacts(
     env: DoctorProbeEnv = .live,
-    configFont: DoctorFacts.ConfigFont = .unset
+    configFont: DoctorFacts.ConfigFont = .unset,
+    permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     let installerDiagnostics = CLIPathInstaller(env.installerDeps).installDiagnostics()
     let runningBinary = resolvedExecutablePath(env.argv0, env: env)
@@ -53,7 +54,8 @@ func gatherDoctorFacts(
         symlinkEntry: installerDiagnostics.entry,
         translocated: installerDiagnostics.translocated,
         jqOnPath: executableOnPath("jq", env: env) != nil,
-        configFont: configFont
+        configFont: configFont,
+        permissions: permissions
     )
 }
 

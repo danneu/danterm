@@ -23,6 +23,18 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct UpdateIpcTests {
+    @Test("doctor permissions delegates probing to the runtime")
+    func doctorPermissionsDelegatesProbingToRuntime() throws {
+        var model = makeModel()
+        let commands = sendIpc(&model, method: Methods.doctorPermissions)
+        let command = try #require(commands.first)
+        guard case .readDoctorPermissions = command else {
+            Issue.record("expected readDoctorPermissions")
+            return
+        }
+        #expect(commands.count == 1)
+    }
+
     @Test("unknown method returns method-not-found error")
     func unknownMethodReturnsMethodNotFoundError() throws {
         // Intent: an unknown method returns the standard JSON-RPC

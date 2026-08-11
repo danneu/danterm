@@ -173,8 +173,8 @@ grep -qx 'danterm: bundled skill is missing or unreadable' "$err"
 ! grep -qF 'DanTerm is not running' "$out" "$err"
 rm -rf "$skill_bin"
 
-# `doctor` is local-only like help: it must work before the app launches and
-# must not surface the socket error text.
+# `doctor` keeps its local checks available before the app launches; app-owned
+# permission rows skip without surfacing a socket error.
 doctor_home=$(mktemp -d)
 run_doctor_with_temp_home() {
     : >"$out"
@@ -190,7 +190,10 @@ run_doctor_with_temp_home doctor
 [[ -s "$out" ]]
 [[ ! -s "$err" ]]
 grep -qF 'OK ' "$out"
-! grep -qF 'DanTerm is not running' "$out" "$err"
+grep -qF 'SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.' "$out"
+grep -qF 'SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
+grep -qF 'SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
+! grep -qF 'DanTerm is not running' "$err"
 run_doctor_with_temp_home doctor --all
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]

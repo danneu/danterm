@@ -15,6 +15,9 @@ enum DoctorCheckID: Equatable {
     case translocation
     case jq
     case configFont
+    case notifications
+    case fullDiskAccess
+    case developerTools
 }
 
 /// Severity-like result for one doctor check. Only `.error` maps to a failing
@@ -77,7 +80,54 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
         evaluateTranslocation(facts),
         evaluateJQ(facts),
         evaluateConfigFont(facts),
+        evaluatePermission(
+            id: .notifications,
+            title: "Notifications enabled",
+            state: facts.permissions.notifications,
+            deniedMessage: "Enable DanTerm in System Settings > Notifications."
+        ),
+        evaluatePermission(
+            id: .fullDiskAccess,
+            title: "Full Disk Access permission granted",
+            state: facts.permissions.fullDiskAccess,
+            deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm."
+        ),
+        evaluatePermission(
+            id: .developerTools,
+            title: "Developer Tools permission granted",
+            state: facts.permissions.developerTools,
+            deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm."
+        ),
     ]
+}
+
+/// Maps an app-owned permission probe into the common advisory doctor ladder.
+private func evaluatePermission(
+    id: DoctorCheckID,
+    title: String,
+    state: DoctorFacts.PermissionState,
+    deniedMessage: String
+) -> DoctorCheck {
+    switch state {
+    case .granted:
+        return DoctorCheck(id: id, title: title, status: .ok, message: nil)
+    case .denied:
+        return DoctorCheck(id: id, title: title, status: .warn, message: deniedMessage)
+    case .unknown:
+        return DoctorCheck(
+            id: id,
+            title: title,
+            status: .skip,
+            message: "The permission state could not be checked on this Mac."
+        )
+    case .unavailable:
+        return DoctorCheck(
+            id: id,
+            title: title,
+            status: .skip,
+            message: "DanTerm is not running, so its permissions cannot be checked."
+        )
+    }
 }
 
 /// Renders doctor checks in the CLI's plain text format: one line per check

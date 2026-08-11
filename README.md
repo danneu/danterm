@@ -160,7 +160,7 @@ AcceptEnv LC_*
 Run these commands after installing DanTerm:
 
 ```sh
-danterm doctor  # Check CLI, hook, skill, and jq setup.
+danterm doctor  # Check permissions, CLI, hooks, skills, jq, and configured font.
 danterm skill   # Print the bundled agent instructions.
 ```
 

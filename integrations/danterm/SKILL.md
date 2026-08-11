@@ -21,8 +21,9 @@ Every IPC command accepts `--socket <path>` before the command name. This
 explicit instance target overrides `DANTERM_SOCK` and identity-derived socket
 lookup.
 
-The local `skill` and `doctor` commands do not accept `--socket`, inspect pane
-targeting, or contact the app.
+The local `skill` and `doctor` commands do not accept `--socket` or inspect pane
+targeting. `doctor` queries the matching running app for macOS permission state
+and skips those rows when the app is unavailable.
 
     danterm ls
     danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
@@ -432,7 +433,7 @@ Treat `selectedTabId` as display state, not as a targeting source.
 
 ### Check integration health
 
-`doctor` is local-only and does not require the app to be running. Use it when
+`doctor` does not require the app to be running. Use it when
 the user asks whether DanTerm's shell command, agent hooks, agent skill, `jq`, or
 configured font setup is healthy:
 
@@ -444,6 +445,13 @@ agent should select this skill automatically.
 
 The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
+
+The `Notifications enabled`, `Full Disk Access permission granted`, and
+`Developer Tools permission granted` rows are app-owned checks. They report OK
+or WARN when the matching DanTerm instance is running and SKIP when it is not.
+Full Disk Access is tested by reading a protected TCC file. Developer Tools is
+tested by having LLDB attach to a disposable child process because macOS exposes
+no public status API for either permission.
 
 The `Configured font installed` row checks `font.family` in
 `~/.config/danterm/config.json`: SKIP when no family is set, OK when it names an

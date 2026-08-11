@@ -45,6 +45,7 @@ enum Command {
     // IPC
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
+    case readDoctorPermissions(reqId: UUID)
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case dumpPaneTape(reqId: UUID, paneId: PaneId)
@@ -99,7 +100,7 @@ extension Command {
         case .makeFirstResponder, .focusSearchField:
             return true
         case .createSession, .sendText, .sendInputText, .sendInputKey,
-             .focusSession, .exportState, .ipcReply, .ipcError,
+             .focusSession, .exportState, .ipcReply, .ipcError, .readDoctorPermissions,
              .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
              .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,

@@ -3,6 +3,7 @@ import Foundation
 
 public enum Methods {
     public static let hello = "hello"
+    public static let doctorPermissions = "doctor.permissions"
     public static let ls = "ls"
     public static let tabNew = "tab.new"
     public static let tabRename = "tab.rename"

@@ -1445,6 +1445,9 @@ private func dispatchIpc(
     env: CoreEnv
 ) throws -> [Command] {
     switch method {
+    case Methods.doctorPermissions:
+        return [.readDoctorPermissions(reqId: reqId)]
+
     case Methods.ls:
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(reqId: reqId, result: encoder.list(model))]

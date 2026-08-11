@@ -228,9 +228,29 @@ struct DanTermCLI {
             throw CLIParseError("unexpected argument: \(arg)")
         }
 
-        let checks = evaluateDoctor(gatherDoctorFacts(configFont: gatherConfigFontFacts()))
+        let checks = evaluateDoctor(gatherDoctorFacts(
+            configFont: gatherConfigFontFacts(),
+            permissions: gatherDoctorPermissions()
+        ))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
+    }
+
+    /// Best-effort app query: local doctor checks remain useful when no instance is running.
+    private static func gatherDoctorPermissions() -> DoctorFacts.Permissions {
+        let environment = ProcessInfo.processInfo.environment
+        guard let socketPath = try? selectControlSocketPath(
+            explicit: nil,
+            environment: environment,
+            fallback: controlSocketPath().path
+        ) else { return .unavailable }
+        let command = CLICommand(method: Methods.doctorPermissions, params: [:], outputMode: .none)
+        guard let response = try? request(command, socketPath: socketPath, environment: environment),
+              response.error == nil,
+              let result = response.result,
+              let permissions = DoctorFacts.Permissions(jsonValue: result)
+        else { return .unavailable }
+        return permissions
     }
 
     private static func runSkill(_ args: [String]) throws {

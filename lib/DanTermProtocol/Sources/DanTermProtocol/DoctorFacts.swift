@@ -26,6 +26,37 @@ public struct PathCommand: Equatable {
 /// It lives in DanTermProtocol because support and core can both depend on this
 /// leaf module while staying independent of each other.
 public struct DoctorFacts: Equatable {
+    /// Whether the running app can use one macOS privacy-controlled capability.
+    public enum PermissionState: String, Codable, Equatable, Sendable {
+        case granted
+        case denied
+        case unknown
+        case unavailable
+    }
+
+    /// App-owned permission results returned to the local doctor process over IPC.
+    public struct Permissions: Codable, Equatable, Sendable {
+        public var notifications: PermissionState
+        public var fullDiskAccess: PermissionState
+        public var developerTools: PermissionState
+
+        public init(
+            notifications: PermissionState,
+            fullDiskAccess: PermissionState,
+            developerTools: PermissionState
+        ) {
+            self.notifications = notifications
+            self.fullDiskAccess = fullDiskAccess
+            self.developerTools = developerTools
+        }
+
+        public static let unavailable = Permissions(
+            notifications: .unavailable,
+            fullDiskAccess: .unavailable,
+            developerTools: .unavailable
+        )
+    }
+
     /// Facts for one coding-agent integration root: presence, hooks, and skill
     /// discovery paths.
     public struct Agent: Equatable {
@@ -90,6 +121,7 @@ public struct DoctorFacts: Equatable {
     public var translocated: Bool
     public var jqOnPath: Bool
     public var configFont: ConfigFont
+    public var permissions: Permissions
 
     public init(
         claude: Agent,
@@ -101,7 +133,8 @@ public struct DoctorFacts: Equatable {
         symlinkEntry: SymlinkEntry,
         translocated: Bool,
         jqOnPath: Bool,
-        configFont: ConfigFont
+        configFont: ConfigFont,
+        permissions: Permissions = .unavailable
     ) {
         self.claude = claude
         self.codex = codex
@@ -113,5 +146,6 @@ public struct DoctorFacts: Equatable {
         self.translocated = translocated
         self.jqOnPath = jqOnPath
         self.configFont = configFont
+        self.permissions = permissions
     }
 }
