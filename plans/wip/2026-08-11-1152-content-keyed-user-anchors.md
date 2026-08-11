@@ -192,7 +192,10 @@ plan: after it, no width-dependent position is stored anywhere in the engine.
 - **I9 (storage and publish cost).** Per-record charge stays 8 arena bytes
   plus 8 index bytes. The per-row stamp lives inside the already-copied rows
   array; no new state holds a second store reference; nothing new is touched
-  per pointer event; whole-value equality stays cheap.
+  per pointer event; whole-value equality stays cheap. New anchor-derived
+  state (the resolve caches and the browsing shadow) adds no
+  reference-counted storage to `Terminal`: it is plain value data, so a
+  per-frame publish copy pays no retain/release for it.
 - **I10 (feed cost).** Per admitted row, the write path gains O(1) work when
   no anchors are outstanding; renumber, split, and merge anchor repair is
   gated behind an O(1) anchors-outstanding check.
@@ -241,9 +244,10 @@ plan: after it, no width-dependent position is stored anywhere in the engine.
   test, resolving a stored coordinate in a trimmed head record, shipped with
   `123a0ce4` and stays green.
 - **PO8 (I9, I10).** The record-coordinate stride and blank-depth pricing
-  tests stay green; a layout assertion covers any new per-anchor state. The
-  feed benchmarks and the admission probe are re-run and not slower under
-  the frozen decision rules.
+  tests stay green; a layout assertion covers any new per-anchor state,
+  including that it holds no references (`_isPOD` on the anchor-state
+  type). The feed benchmarks and the admission probe are re-run and not
+  slower under the frozen decision rules.
 - **PO9 (I11).** A distance work counter is measured at two depths and two
   occurrence gaps and is independent of both; the block sums agree with an
   independent full recount after every store mutation; the
