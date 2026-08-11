@@ -472,9 +472,9 @@ exports nothing, so `benchmark-trace` checks the trace's schemas and fails with
 the list rather than leaving an empty report behind. For memory, use the mode
 below.
 
-Use `just benchmark-loop scrollback-stream backend=swift` when attaching another
+Use `just benchmark-loop scrollback-stream` when attaching another
 command-line diagnostic tool. It prints the identity JSON -- pid, workload,
-backend, executable SHA-256, Mach-O UUID, source identity -- and continues until
+fixed backend provenance, executable SHA-256, Mach-O UUID, source identity -- and continues until
 interrupted. Stop it with Ctrl-C; the harness then terminates only its own app.
 
 If attachment is refused, grant Developer Tools access to the invoking terminal

@@ -64,7 +64,6 @@ def run_batch(update_count):
         (
             str(ROOT / "scripts" / "terminal-benchmark.sh"),
             "localized-draw-acceptance",
-            "swift",
         ),
         cwd=ROOT,
         env=environment,

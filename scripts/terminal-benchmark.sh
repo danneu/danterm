@@ -28,12 +28,11 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
 
+(( $# <= 1 )) || {
+    echo "Usage: terminal-benchmark.sh [workload]" >&2
+    exit 2
+}
 WORKLOAD="${1:-scrollback-stream}"
-# The Swift engine is the only terminal backend. The positional survives its
-# retired sibling so a caller naming any other backend is refused outright,
-# rather than silently relabelled `swift` in the artifact consumers key on.
-BACKEND="${2:-swift}"
-BACKEND="${BACKEND#backend=}"
 MODE="${DANTERM_BENCHMARK_MODE:-measure}"
 PROFILE_IDENTITY_PATH="${DANTERM_BENCHMARK_IDENTITY_PATH:-}"
 PHASE_LOG="${DANTERM_BENCHMARK_PHASE_LOG:-}"
@@ -47,10 +46,6 @@ REDRAW_UPDATES="${DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES:-0}"
 # own PATH would find.
 BTOP_EXECUTABLE="${DANTERM_TERMINAL_BENCHMARK_BTOP:-}"
 CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
-case "$BACKEND" in
-    swift) ;;
-    *) echo "Unknown backend: $BACKEND (swift is the only backend)" >&2; exit 2 ;;
-esac
 case "$MODE" in
     measure|loop|persistent) ;;
     *) echo "Unknown benchmark mode: $MODE" >&2; exit 2 ;;
@@ -296,10 +291,10 @@ if [[ "$MODE" == "loop" || "$MODE" == "persistent" ]]; then
     [[ "${DANTERM_BENCHMARK_PROFILING:-0}" == "1" ]] && profiling_active=true
     geometry="$(jq -c --argjson columns "$TARGET_COLUMNS" --argjson rows "$TARGET_ROWS" \
         '{columns: $columns, rows: $rows}' <<<"{}")"
-    jq -n --argjson pid "$APP_PID" --arg workload "$WORKLOAD" --arg backend "$BACKEND" \
+    jq -n --argjson pid "$APP_PID" --arg workload "$WORKLOAD" \
         --arg binary "$APP_PATH/Contents/MacOS/DanTerm Benchmark" --arg artifacts "$ARTIFACTS" \
         --argjson geometry "$geometry" --argjson profilingActive "$profiling_active" \
-        '{schemaVersion: 1, pid: $pid, workload: $workload, backend: $backend,
+        '{schemaVersion: 1, pid: $pid, workload: $workload, backend: "swift",
           binary: $binary, artifacts: $artifacts, geometry: $geometry,
           profilingActive: $profilingActive}' >"$identity_tmp"
     mv "$identity_tmp" "$PROFILE_IDENTITY_PATH"
@@ -323,11 +318,11 @@ done
 if [[ -f "$STATE_RESULT" ]]; then
     block_state="$(python3 "$SCRIPT_DIR/terminal-benchmark-state.py" "$STATE_RESULT")"
     if ! jq -e '.valid' <<<"$block_state" >/dev/null; then
-        jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" \
+        jq -n --arg workload "$WORKLOAD" \
             --argjson blockState "$block_state" --slurpfile state "$STATE_RESULT" \
             '{
                 schemaVersion: 1,
-                backend: $backend,
+                backend: "swift",
                 workload: $workload,
                 blockState: $blockState,
                 producerWrite: {available: false},
@@ -361,13 +356,13 @@ draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
     exit 1
 }
 block_state="$(python3 "$SCRIPT_DIR/terminal-benchmark-state.py" "$DRAW_RESULT")"
-jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
+jq -n --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
     --arg fixtureIdentity "$FIXTURE_IDENTITY" \
     --argjson processId "$APP_PID" --arg sessionId "$PANE_ID" \
     --argjson displayScale "$display_scale" \
     --argjson blockState "$block_state" \
     --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
-    '{schemaVersion: 1, backend: $backend, workload: $workload,
+    '{schemaVersion: 1, backend: "swift", workload: $workload,
       fixtureIdentity: $fixtureIdentity, processId: $processId,
       sessionId: $sessionId, geometry: $geometry, displayScale: $displayScale,
       blockState: $blockState, producerWrite: $producer[0],

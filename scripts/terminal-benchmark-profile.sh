@@ -79,18 +79,25 @@ report_frame_accounting() {
 
 MODE="${1:-loop}"
 WORKLOAD="${2:-scrollback-stream}"
-BACKEND="${3:-swift}"
-DURATION="${4:-15}"
-TEMPLATE="${5:-Time Profiler}"
-# Fifth positional is the Instruments template for `trace` and the warmup cutoff
+DURATION="${3:-15}"
+TEMPLATE="${4:-Time Profiler}"
+# Fourth positional is the Instruments template for `trace` and the warmup cutoff
 # for `memory`; each mode reads only its own.
-WARMUP="${5:-15}"
+WARMUP="${4:-15}"
+case "$MODE" in
+    loop) max_arguments=2 ;;
+    sample) max_arguments=3 ;;
+    trace|memory) max_arguments=4 ;;
+    *) echo "Unknown profiling mode: $MODE" >&2; exit 2 ;;
+esac
+(( $# <= max_arguments )) || {
+    echo "Too many arguments for $MODE profiling mode" >&2
+    exit 2
+}
 WORKLOAD="${WORKLOAD#workload=}"
-BACKEND="${BACKEND#backend=}"
 DURATION="${DURATION#seconds=}"
 TEMPLATE="${TEMPLATE#template=}"
 WARMUP="${WARMUP#warmup=}"
-case "$MODE" in loop|sample|trace|memory) ;; *) echo "Unknown profiling mode: $MODE" >&2; exit 2 ;; esac
 for command in jq nm python3; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
@@ -222,7 +229,7 @@ DANTERM_BENCHMARK_MODE=loop DANTERM_BENCHMARK_PROFILING=1 \
     DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$redraw_updates" \
     DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES="$localized_updates" \
     DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="$ACTIVITY_PATH" \
-    "$SCRIPT_DIR/terminal-benchmark.sh" "$WORKLOAD" "$BACKEND" >"$HARNESS_LOG" 2>&1 &
+    "$SCRIPT_DIR/terminal-benchmark.sh" "$WORKLOAD" >"$HARNESS_LOG" 2>&1 &
 HARNESS_PID=$!
 deadline=$((SECONDS + 120))
 while [[ ! -f "$HARNESS_IDENTITY_PATH" ]]; do

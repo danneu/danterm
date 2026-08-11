@@ -200,8 +200,8 @@ benchmark-draw-app batches="15" target_ms="400":
     python3 ./scripts/terminal-draw-acceptance.py {{batches}} {{target_ms}}
 
 # Run one isolated workload continuously and publish its exact app pid.
-benchmark-loop workload="scrollback-stream" backend="swift":
-    ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"
+benchmark-loop workload="scrollback-stream":
+    ./scripts/terminal-benchmark-profile.sh loop "{{workload}}"
 
 # Capture a textual sample profile of Terminal.feed alone, headless and without a
 # display. Isolates parse/grid cost from planning and drawing, which share the app's
@@ -214,18 +214,18 @@ benchmark-feed-sample workload="styled-screen-redraw" seconds="20":
 
 # Capture a textual sample profile from one isolated sustained Swift workload.
 benchmark-sample workload="scrollback-stream" seconds="15":
-    ./scripts/terminal-benchmark-profile.sh sample "{{workload}}" swift "{{seconds}}"
+    ./scripts/terminal-benchmark-profile.sh sample "{{workload}}" "{{seconds}}"
 
 # Capture and export an xctrace profile from one isolated sustained Swift workload.
 benchmark-trace workload="scrollback-stream" template="Time Profiler" seconds="30":
-    ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" swift "{{seconds}}" "{{template}}"
+    ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" "{{seconds}}" "{{template}}"
 
 # Measure sustained memory growth of one isolated Swift workload. Polls footprint
 # and brackets the measured window with memory graphs so heap can name what grew.
 # Growth is measured after the warmup, so seconds must exceed it.
 #   just benchmark-memory scrollback-stream 90 15
 benchmark-memory workload="scrollback-stream" seconds="90" warmup="15":
-    ./scripts/terminal-benchmark-profile.sh memory "{{workload}}" swift "{{seconds}}" "{{warmup}}"
+    ./scripts/terminal-benchmark-profile.sh memory "{{workload}}" "{{seconds}}" "{{warmup}}"
 
 # Re-report an existing profile artifact as folded stacks plus JSON. Accepts a
 # profile directory, a .trace bundle, an exported time-profile XML, or a sample.txt;

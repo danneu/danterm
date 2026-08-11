@@ -89,7 +89,6 @@ def bystander_app(output):
         [
             str(ROOT / "scripts" / "terminal-benchmark.sh"),
             "full-screen-content-churn",
-            "swift",
         ],
         cwd=ROOT,
         env=environment,
@@ -129,7 +128,7 @@ def persistent_arm(output, workload, name, suffix):
     })
     log = (output / f"{name}-harness.log").open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [str(ROOT / "scripts" / "terminal-benchmark.sh"), workload, "swift"],
+        [str(ROOT / "scripts" / "terminal-benchmark.sh"), workload],
         cwd=ROOT,
         env=environment,
         stdout=log,

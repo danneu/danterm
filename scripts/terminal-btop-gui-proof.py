@@ -345,7 +345,7 @@ def bystander_btop(executable):
 def _run_profile(mode, *, seconds, template, output, label, on_started=None):
     """Run one profiling invocation end to end and return its root, identity, and status."""
     before = _existing_profile_roots()
-    argv = [str(PROFILE_SCRIPT), mode, "btop-scroll", "swift", str(seconds)]
+    argv = [str(PROFILE_SCRIPT), mode, "btop-scroll", str(seconds)]
     if mode == "trace":
         argv.append(template)
     log_path = output / f"{label}.log"
@@ -439,7 +439,7 @@ def prove_loop(output):
     publications = []
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
-            [str(PROFILE_SCRIPT), "loop", "btop-scroll", "swift"],
+            [str(PROFILE_SCRIPT), "loop", "btop-scroll"],
             cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, text=True, start_new_session=True,
         )
         deadline = time.monotonic() + LOOP_TIMEOUT_SECONDS

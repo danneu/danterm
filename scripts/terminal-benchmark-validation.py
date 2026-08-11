@@ -1112,7 +1112,6 @@ def make_scrollback_stream_runner(
             [
                 str(roots[arm] / "scripts" / "terminal-benchmark.sh"),
                 workload,
-                "swift",
             ],
             cwd=roots[arm],
             env=environment,
@@ -1289,7 +1288,6 @@ class PersistentDrawArms:
                             / "terminal-benchmark.sh"
                         ),
                         self.workload,
-                        "swift",
                     ],
                     cwd=self.roots[arm],
                     env=environment,

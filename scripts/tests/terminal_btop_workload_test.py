@@ -123,7 +123,7 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
         #   operator actually types, not only in the admission table. Memory
         #   profiling produces a footprint number, which is a claim this workload
         #   may not support.
-        result = self.run_profile("memory", "btop-scroll", "swift", "90", "15")
+        result = self.run_profile("memory", "btop-scroll", "90", "15")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("btop-scroll", result.stderr)
 
@@ -137,7 +137,7 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
         #   app and launch btop before failing -- or worse, not fail at all.
         for seconds in ("0", "21", "45"):
             with self.subTest(seconds=seconds):
-                result = self.run_profile("sample", "btop-scroll", "swift", seconds)
+                result = self.run_profile("sample", "btop-scroll", seconds)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("btop-scroll", result.stderr)
 
@@ -149,7 +149,7 @@ class ProfilingCommandAdmissionTests(unittest.TestCase):
         #   workload there for the profiling modes must not admit it for the
         #   decision-bearing one.
         result = subprocess.run(
-            [str(HARNESS_SCRIPT), "btop-scroll", "swift"],
+            [str(HARNESS_SCRIPT), "btop-scroll"],
             capture_output=True,
             text=True,
             cwd=ROOT,

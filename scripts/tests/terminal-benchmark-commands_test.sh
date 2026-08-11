@@ -62,12 +62,16 @@ grep -qE '^test-terminal-btop-gui( |:)' "$JUSTFILE"
 # front-end of its own (RI3), so the exact positional invocations an operator is
 # told to type are checked here rather than described anywhere else.
 btop_sample="$(dry_run benchmark-sample btop-scroll 20)"
-expect_contains "$btop_sample" 'terminal-benchmark-profile.sh sample "btop-scroll" swift "20"'
+expect_contains "$btop_sample" 'terminal-benchmark-profile.sh sample "btop-scroll" "20"'
 btop_trace="$(dry_run benchmark-trace btop-scroll "Time Profiler" 20)"
 expect_contains "$btop_trace" \
-    'terminal-benchmark-profile.sh trace "btop-scroll" swift "20" "Time Profiler"'
+    'terminal-benchmark-profile.sh trace "btop-scroll" "20" "Time Profiler"'
 btop_loop="$(dry_run benchmark-loop btop-scroll)"
 expect_contains "$btop_loop" 'terminal-benchmark-profile.sh loop "btop-scroll"'
+if [[ "$btop_sample$btop_trace$btop_loop" == *" swift "* ]]; then
+    echo "benchmark profiling recipes must not pass a terminal backend" >&2
+    exit 1
+fi
 
 # The operator instructions have to carry those same three lines: the workload is
 # admitted to nothing else, so a reader who guesses at a fourth mode gets refused.

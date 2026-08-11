@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract tests for benchmark ownership, backend scope, and marker protocol.
+# Contract tests for benchmark ownership and marker protocol.
 # Every assertion greps for literal shell source text, so single quotes are
 # deliberate throughout and SC2016 does not apply.
 # shellcheck disable=SC2016
@@ -11,11 +11,13 @@ PRODUCER="$ROOT/scripts/terminal-benchmark-producer.py"
 PROFILE="$ROOT/scripts/terminal-benchmark-profile.sh"
 
 grep -q 'terminate_owned_pid "$APP_PID"' "$HARNESS"
-# Swift is the only backend. The harness must still refuse a named one rather
-# than relabel it, and must never reintroduce a backend selector for the app.
-grep -q 'BACKEND="${BACKEND#backend=}"' "$HARNESS"
-if grep -qE 'ghostty|DANTERM_TERMINAL_BACKEND' "$HARNESS" "$PRODUCER"; then
-    echo "the benchmark harness must not carry a second terminal backend" >&2
+# The benchmark harness has one engine and therefore no backend argument or
+# selector to parse or forward.
+grep -q '(( $# <= 1 ))' "$HARNESS"
+grep -q '(( $# <= max_arguments ))' "$PROFILE"
+if grep -qE 'BACKEND|backend=|ghostty|DANTERM_TERMINAL_BACKEND' \
+    "$HARNESS" "$PROFILE" "$PRODUCER"; then
+    echo "the benchmark harness must not carry a terminal backend selector" >&2
     exit 1
 fi
 grep -q 'monotonic_ns=time.monotonic_ns' "$PRODUCER"
