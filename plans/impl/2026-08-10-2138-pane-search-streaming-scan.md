@@ -341,10 +341,19 @@ folding and re-projecting.
 - [x] 3. Advance the prefix from a carried boundary window instead of re-reading context
 - [x] 4. Reduce eviction and truncation to arithmetic on the sorted match sequence
 - [x] 5. Build the index from a single walk of history
-- [ ] 6. Measure the per-row damage widening; if it is not small, drop its
+- [x] 6. Measure the per-row damage widening; if it is not small, drop its
       per-call `Set` allocation and sort, keeping the I9 radius intact
 
 ## Implementation notes
 
 - The TerminalCore purity gate now allowlists the plan's `DequeModule` dependency while retaining
   the pure-profile IO and nondeterminism bans.
+- A same-session release probe of 500,000 single-row widening calls measured the old `Set` and
+  sort path at 0.131/0.311/0.756 seconds for 1/6/24-unit needles. Contiguous range arithmetic
+  stayed below 0.001 seconds in each arm, so slice 6 took the conditional cleanup.
+
+## Follow Up
+
+- Define a width-invariant record text projection shared by copy and search, then key search
+  matches by record sequence and unit offsets so width reflow does not rebuild deep history in
+  `lib/TerminalCore/Sources/TerminalCore/Terminal.swift`.

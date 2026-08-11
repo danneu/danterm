@@ -562,19 +562,60 @@ struct TerminalSearchTests {
         #expect(comparisons <= 32)
     }
 
-    @Test("the retained index equals a full rescan across output tail changes and resize")
-    func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
+    @Test("the retained index agrees with the oracle across store boundary mutations")
+    func retainedIndexMatchesOracleAcrossStoreMutations() throws {
+        // Intent: every admitted history mutation preserves the exact ordered search result.
+        // Why it exists: the carried boundary window relies on detecting prefix advance,
+        //   regression, truncation, removal, and head eviction without inspecting retained text.
+        // Scenario: searches spanning the prefix boundary survive output, both resize directions,
+        //   a severed and restored wrap claim, ED 3, eviction, and a needle longer than history.
+        let spanningNeedle = "DAB"
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("ABCDAB".utf8))
-        _ = terminal.beginSearch("DAB")
+        _ = terminal.beginSearch(spanningNeedle)
 
-        assertSearchIndexMatchesFullScan(terminal)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
         terminal.feed(Array("CD\r\nDAB".utf8))
-        assertSearchIndexMatchesFullScan(terminal)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
         terminal.resize(columns: 3, rows: 3)
-        assertSearchIndexMatchesFullScan(terminal)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
         terminal.resize(columns: 6, rows: 2)
-        assertSearchIndexMatchesFullScan(terminal)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
+        terminal.resize(columns: 6, rows: 4)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
+        terminal.resize(columns: 6, rows: 2)
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
+
+        var restoredWrap = try #require(Terminal(columns: 4, rows: 1))
+        restoredWrap.feed(Array("ABCD\r\n".utf8))
+        _ = restoredWrap.beginSearch("BCDE")
+        restoredWrap.restoreWrapClaimBeforeCursorForTesting()
+        assertSearchIndexMatchesOracle(restoredWrap, needle: "BCDE")
+        restoredWrap.feed(Array("E".utf8))
+        assertSearchIndexMatchesOracle(restoredWrap, needle: "BCDE")
+
+        terminal.feed(Array("\u{1B}[3J".utf8))
+        assertSearchIndexMatchesOracle(terminal, needle: spanningNeedle)
+
+        let longNeedle = "ABCDEFGHIJK"
+        var shortHistory = try #require(Terminal(columns: 4, rows: 2))
+        shortHistory.feed(Array("AB".utf8))
+        _ = shortHistory.beginSearch(longNeedle)
+        assertSearchIndexMatchesOracle(shortHistory, needle: longNeedle)
+        shortHistory.feed(Array("CDE\r\n".utf8))
+        assertSearchIndexMatchesOracle(shortHistory, needle: longNeedle)
+
+        let evictionNeedle = "it\nh"
+        var evicting = try #require(Terminal(
+            columns: 8,
+            rows: 2,
+            scrollbackBudgetBytes: historyBudget(lineCells: [3, 3, 1])
+        ))
+        evicting.feed(Array("hit\r\nhit\r\na".utf8))
+        _ = evicting.beginSearch(evictionNeedle)
+        assertSearchIndexMatchesOracle(evicting, needle: evictionNeedle)
+        evicting.feed(Array("\r\nb\r\nc\r\nd".utf8))
+        assertSearchIndexMatchesOracle(evicting, needle: evictionNeedle)
     }
 
     @Test("blank rows contribute boundaries only when later content exists")
@@ -719,6 +760,19 @@ private func assertSearchIndexMatchesFullScan(
     let rows = 0..<terminal.scrollProjection.totalRows
     #expect(
         terminal.searchMatchRanges(in: rows) == terminal.scannedSearchMatchRanges(in: rows),
+        sourceLocation: sourceLocation
+    )
+}
+
+private func assertSearchIndexMatchesOracle(
+    _ terminal: Terminal,
+    needle: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let rows = 0..<terminal.scrollProjection.totalRows
+    #expect(
+        terminal.searchMatchRanges(in: rows)
+            == independentSearchMatchRanges(in: terminal, needle: needle),
         sourceLocation: sourceLocation
     )
 }

@@ -1126,25 +1126,21 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func recordDamage(row: Int) {
-        recordPresentationDamage(rows: widenedSearchDamageRows(for: [row]))
+        recordPresentationDamage(rows: widenedSearchDamageRows(for: row..<(row + 1)))
         notePrimaryHistoryDamage()
     }
 
-    private mutating func recordDamage(rows: some Sequence<Int>) {
-        recordPresentationDamage(rows: widenedSearchDamageRows(for: Array(rows)))
+    private mutating func recordDamage(rows: Range<Int>) {
+        recordPresentationDamage(rows: widenedSearchDamageRows(for: rows))
         notePrimaryHistoryDamage()
     }
 
-    private func widenedSearchDamageRows(for source: [Int]) -> [Int] {
-        guard let search else { return source }
+    private func widenedSearchDamageRows(for source: Range<Int>) -> Range<Int> {
+        guard source.isEmpty == false, let search else { return source }
         let radius = max(1, search.index.needleKeys.count - 1)
-        var widened = Set<Int>()
-        for row in source {
-            let lower = max(0, row - radius)
-            let upper = min(rowCount - 1, row + radius)
-            widened.formUnion(lower...upper)
-        }
-        return widened.sorted()
+        let lower = max(0, source.lowerBound - radius)
+        let upper = min(rowCount, source.upperBound + radius)
+        return lower..<upper
     }
 
     // The non-bumping variants below are the exception, not the rule: bumping stays the default
@@ -2492,6 +2488,10 @@ public struct Terminal: Equatable, Sendable {
     /// store's contracts are assertable through the terminal that drives it.
     func retainedRecordSummaryForTesting(at index: Int) -> LogicalLineStore.RecordSummary? {
         history.recordSummary(at: index)
+    }
+
+    mutating func restoreWrapClaimBeforeCursorForTesting() {
+        restoreWrapClaimBeforeCursor()
     }
 
     /// Runs both metadata reclamation passes so their retained-row cost can be measured directly.
