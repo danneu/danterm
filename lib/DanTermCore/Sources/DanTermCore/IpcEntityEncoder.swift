@@ -9,7 +9,7 @@ struct IpcEntityEncoder {
 
     func list(_ model: AppModel) -> JSONValue {
         var object: [String: JSONValue] = [
-            "groups": .array(model.groups.map(group)),
+            "groups": .array(model.groups.map { group($0, in: model) }),
         ]
         if let selectedTabId = model.selectedTabId {
             object["selectedTabId"] = .string(selectedTabId.rawValue.uuidString)
@@ -17,20 +17,20 @@ struct IpcEntityEncoder {
         return .object(object)
     }
 
-    func group(_ group: GroupModel) -> JSONValue {
+    func group(_ group: GroupModel, in model: AppModel) -> JSONValue {
         .object([
             "id": .string(group.id.rawValue.uuidString),
             "name": .string(group.name),
             "isCollapsed": .bool(group.isCollapsed),
-            "tabs": .array(group.tabs.map(tab)),
+            "tabs": .array(group.tabs.map { tab($0, in: model) }),
         ])
     }
 
-    func tab(_ tab: TabModel) -> JSONValue {
-        self.tab(tab, includeLifecycles: true)
+    func tab(_ tab: TabModel, in model: AppModel) -> JSONValue {
+        self.tab(tab, in: model, includeLifecycles: true)
     }
 
-    private func tab(_ tab: TabModel, includeLifecycles: Bool) -> JSONValue {
+    private func tab(_ tab: TabModel, in model: AppModel, includeLifecycles: Bool) -> JSONValue {
         var object: [String: JSONValue] = [
             "id": .string(tab.id.rawValue.uuidString),
             "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
@@ -51,7 +51,7 @@ struct IpcEntityEncoder {
     private func pane(_ pane: PaneModel, includeLifecycles: Bool) -> JSONValue {
         var object = paneFields(
             pane,
-            cwd: pane.cwd.map { abbreviateHome($0, home: home) },
+            cwd: pane.session?.cwd.map { abbreviateHome($0, home: home) },
             includeNullCwd: false,
             includeLifecycles: includeLifecycles
         )
@@ -67,17 +67,22 @@ struct IpcEntityEncoder {
         return .object(object)
     }
 
-    func paneInfo(pane: PaneModel, tab: TabModel, group: GroupModel) -> JSONValue {
+    func paneInfo(
+        pane: PaneModel,
+        tab: TabModel,
+        group: GroupModel,
+        in model: AppModel
+    ) -> JSONValue {
         .object([
             "pane": .object(paneFields(
                 pane,
-                cwd: pane.cwd,
+                cwd: pane.session?.cwd,
                 includeNullCwd: true,
                 includeLifecycles: true
             )),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
-                "title": .string(tab.displayTitle),
+                "title": .string(tabDisplayTitle(tab, in: model)),
                 "groupId": .string(group.id.rawValue.uuidString),
                 "isZoomed": .bool(tab.isZoomed),
             ]),
@@ -88,9 +93,9 @@ struct IpcEntityEncoder {
         ])
     }
 
-    func tabNew(tab: TabModel?, group: GroupModel?) -> JSONValue {
+    func tabNew(tab: TabModel?, group: GroupModel?, in model: AppModel) -> JSONValue {
         var object: [String: JSONValue] = [
-            "tab": tab.map { self.tab($0, includeLifecycles: false) } ?? .null,
+            "tab": tab.map { self.tab($0, in: model, includeLifecycles: false) } ?? .null,
             "panes": .array(tab.map { tab in
                 allPaneIds(tab.rootNode)
                     .map { .object(["id": .string($0.rawValue.uuidString)]) }
@@ -149,7 +154,7 @@ struct IpcEntityEncoder {
     ) -> [String: JSONValue] {
         var object: [String: JSONValue] = [
             "id": .string(pane.id.rawValue.uuidString),
-            "title": .string(pane.title),
+            "title": .string(pane.session?.title ?? "Terminal"),
         ]
         if includeLifecycles {
             let lifecycleFields = paneLifecycleInspectionFields(pane.session)

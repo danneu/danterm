@@ -145,7 +145,10 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
   }
   for paneId in allPaneIds(tab.rootNode) {
     guard let pane = model.pane(paneId) else { continue }
-    rows.append(.paneSectionHeader(paneId: paneId, title: pane.title))
+    rows.append(.paneSectionHeader(
+      paneId: paneId,
+      title: pane.session?.title ?? "Terminal"
+    ))
     if pane.todos.isEmpty {
       rows.append(.paneEmptyPlaceholder(paneId: paneId))
     } else {

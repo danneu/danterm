@@ -541,7 +541,7 @@ private func renameRecycleModel(
                 tabs: tabs.map { tabId, title in
                     let paneId = PaneId()
                     var pane = PaneModel(id: paneId)
-                    pane.title = title
+                    pane.session = SessionModel(id: SessionId(), title: title)
                     return TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
                 }
             )

@@ -16,20 +16,26 @@ struct TerminalBackendBoundaryTests {
         let paneId = PaneId(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
         let sessionId = SessionId(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!)
 
-        assertSessionMessage(.titleChanged("vim"), paneId: paneId) {
-            if case .sessionTitle(let id, let title) = $0 { return id == paneId && title == "vim" }
+        assertSessionMessage(.report(.title("vim")), sessionId: sessionId, paneId: paneId) {
+            if case .sessionReport(let id, .title(let title)) = $0 {
+                return id == sessionId && title == "vim"
+            }
             return false
         }
-        assertSessionMessage(.cwdChanged("/tmp"), paneId: paneId) {
-            if case .sessionCwd(let id, let cwd) = $0 { return id == paneId && cwd == "/tmp" }
+        assertSessionMessage(.report(.cwd("/tmp")), sessionId: sessionId, paneId: paneId) {
+            if case .sessionReport(let id, .cwd(let cwd)) = $0 {
+                return id == sessionId && cwd == "/tmp"
+            }
             return false
         }
-        assertSessionMessage(.cwdChanged(nil), paneId: paneId) {
-            if case .sessionCwd(let id, let cwd) = $0 { return id == paneId && cwd == nil }
+        assertSessionMessage(.report(.cwd(nil)), sessionId: sessionId, paneId: paneId) {
+            if case .sessionReport(let id, .cwd(let cwd)) = $0 {
+                return id == sessionId && cwd == nil
+            }
             return false
         }
-        assertSessionMessage(.bell, paneId: paneId) {
-            if case .sessionBell(let id) = $0 { return id == paneId }
+        assertSessionMessage(.bell, sessionId: sessionId, paneId: paneId) {
+            if case .sessionBell(let id) = $0 { return id == sessionId }
             return false
         }
         assertSessionMessage(.report(.commandStarted("echo ok")), sessionId: sessionId, paneId: paneId) {
@@ -57,15 +63,15 @@ struct TerminalBackendBoundaryTests {
             }
             return false
         }
-        assertSessionMessage(.desktopNotification(title: "Build", body: "Done"), paneId: paneId) {
-            if case .desktopNotification(let id, let title, let body) = $0 {
-                return id == paneId && title == "Build" && body == "Done"
+        assertSessionMessage(.desktopNotification(title: "Build", body: "Done"), sessionId: sessionId, paneId: paneId) {
+            if case .sessionNotification(let id, let title, let body) = $0 {
+                return id == sessionId && title == "Build" && body == "Done"
             }
             return false
         }
-        assertSessionMessage(.progress(.pause(percent: 42)), paneId: paneId) {
-            if case .sessionProgress(let id, let state) = $0 {
-                return id == paneId && state == .pause(percent: 42)
+        assertSessionMessage(.report(.progress(.pause(percent: 42))), sessionId: sessionId, paneId: paneId) {
+            if case .sessionReport(let id, .progress(let state)) = $0 {
+                return id == sessionId && state == .pause(percent: 42)
             }
             return false
         }

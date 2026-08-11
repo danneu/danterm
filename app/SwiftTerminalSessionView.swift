@@ -19,10 +19,23 @@ func paneTapeFollowEventJSON(_ event: NeutralTerminalRecordingEvent) throws -> J
 }
 #endif
 
-/// Lowers only declared lifecycle reports from the engine vocabulary into the
-/// pane-owned reducer vocabulary; view-only events remain outside that stream.
+/// Lowers stored terminal facts from the engine vocabulary into the
+/// session-owned reducer vocabulary; occurrence and view-only events stay outside it.
 func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
     switch event {
+    case .title(let title):
+        return .title(title)
+    case .workingDirectory(let cwd):
+        return .cwd(cwd)
+    case .progress(let progress):
+        return .progress(progress.map { state in
+            switch state {
+            case .set(let percent): .set(percent: percent)
+            case .indeterminate: .indeterminate
+            case .error(let percent): .error(percent: percent)
+            case .pause(let percent): .pause(percent: percent)
+            }
+        })
     case .integrationReady:
         return .integrationReady
     case .commandStarted(let command):
@@ -35,7 +48,7 @@ func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
         return .remoteIdentityReported(RemoteSession(user: user, host: host))
     case .connectionEnded:
         return .connectionEnded
-    case .title, .workingDirectory, .bell, .desktopNotification, .progress:
+    case .bell, .desktopNotification:
         return nil
     }
 }
@@ -1039,34 +1052,23 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     private func publish(_ events: [TerminalSemanticEvent]) {
         for event in events {
+            #if DANTERM_TERMINAL_BENCHMARK
+            if case .title(let title) = event {
+                TerminalBenchmarkObserver.shared?.observeTitle(title)
+            }
+            #endif
             if let report = sessionReport(for: event) {
                 callbackGate.emit(.report(report))
                 continue
             }
             switch event {
-            case .title(let title):
-                #if DANTERM_TERMINAL_BENCHMARK
-                TerminalBenchmarkObserver.shared?.observeTitle(title)
-                #endif
-                callbackGate.emit(.titleChanged(title))
-            case .workingDirectory(let cwd):
-                callbackGate.emit(.cwdChanged(cwd))
+            case .title, .workingDirectory, .progress, .integrationReady, .commandStarted,
+                 .commandEnded, .remoteStarted, .remoteHost, .connectionEnded:
+                continue
             case .bell:
                 callbackGate.emit(.bell)
-            case .integrationReady, .commandStarted, .commandEnded,
-                 .remoteStarted, .remoteHost, .connectionEnded:
-                continue
             case let .desktopNotification(title, body):
                 callbackGate.emit(.desktopNotification(title: title, body: body))
-            case .progress(let progress):
-                callbackGate.emit(.progress(progress.map { state in
-                    switch state {
-                    case .set(let percent): .set(percent: percent)
-                    case .indeterminate: .indeterminate
-                    case .error(let percent): .error(percent: percent)
-                    case .pause(let percent): .pause(percent: percent)
-                    }
-                }))
             }
         }
     }

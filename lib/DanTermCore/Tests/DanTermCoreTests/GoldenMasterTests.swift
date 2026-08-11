@@ -53,7 +53,7 @@ import DanTermProtocol
         ), env: env)
 
         _ = update(&model, .appResignedActive, env: env)
-        _ = update(&model, .sessionBell(paneId: firstPane), env: env)
+        _ = update(&model, .sessionBell(sessionId: sessionId(for: firstPane, in: model)), env: env)
 
         assertSnapshot(of: model, as: .customDump)
     }

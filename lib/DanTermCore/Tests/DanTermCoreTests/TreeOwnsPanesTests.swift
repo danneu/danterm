@@ -54,12 +54,12 @@ import Testing
         let b = PaneId(rawValue: UUID(uuidString: paneBId)!)
 
         // Each pane reachable via model.pane(id) with the decoded content.
-        #expect(model.pane(a)?.title == "Editor")
-        #expect(model.pane(a)?.cwd == "/work")
+        #expect(model.pane(a)?.session?.title == "Editor")
+        #expect(model.pane(a)?.session?.cwd == "/work")
         #expect(model.pane(a)?.theme == "Dracula")
         #expect(model.pane(a)?.todos.count == 1)
         #expect(model.pane(a)?.todos.first?.text == "ship it")
-        #expect(model.pane(b)?.title == "Shell")
+        #expect(model.pane(b)?.session?.title == "Shell")
 
         // allPaneIds == the tab tree's leaves (no separate dict).
         #expect(Set(model.allPaneIds) == Set([a, b]))
@@ -84,9 +84,9 @@ import Testing
         //   B in a 3-pane (A | (B,C)) layout; A, C, and the splits stay frozen.
         let a = PaneId(), b = PaneId(), c = PaneId()
         let s1 = SplitId(), s2 = SplitId()
-        let paneA = PaneModel(id: a, title: "A")
-        let paneB = PaneModel(id: b, title: "B")
-        let paneC = PaneModel(id: c, title: "C")
+        let paneA = PaneModel(id: a, session: SessionModel(id: SessionId(), title: "A"))
+        let paneB = PaneModel(id: b, session: SessionModel(id: SessionId(), title: "B"))
+        let paneC = PaneModel(id: c, session: SessionModel(id: SessionId(), title: "C"))
         let root = SplitNodeModel.split(
             id: s1, direction: .horizontal,
             first: .leaf(paneA),
@@ -96,10 +96,10 @@ import Testing
         var model = makeModel()
         model.groups[0].tabs.append(TabModel(id: TabId(), focusedPaneId: a, rootNode: root))
 
-        model.updatePane(b) { $0.title = "B-changed" }
+        model.updatePane(b) { $0.session?.title = "B-changed" }
 
         // B changed; A and C untouched (full payload equality).
-        #expect(model.pane(b)?.title == "B-changed")
+        #expect(model.pane(b)?.session?.title == "B-changed")
         expectNoDifference(model.pane(a), paneA)
         expectNoDifference(model.pane(c), paneC)
         #expect(model.allPaneIds == [a, b, c])
@@ -162,7 +162,7 @@ import Testing
         update(&model, .splitPane(direction: .horizontal))  // keep source tab alive after the move
 
         model.updatePane(movable) {
-            $0.title = "Movable"
+            $0.session?.title = "Movable"
             $0.todos = [TodoItem(id: UUID(), text: "carry me", isDone: false)]
         }
 
@@ -172,7 +172,7 @@ import Testing
         update(&model, .movePaneToTab(paneId: movable, targetTabId: targetTabId))
 
         // Payload preserved on the moved pane.
-        #expect(model.pane(movable)?.title == "Movable")
+        #expect(model.pane(movable)?.session?.title == "Movable")
         #expect(model.pane(movable)?.todos.count == 1)
         #expect(model.pane(movable)?.todos.first?.text == "carry me")
         // Lands in the target tree, leaves the source tree, appears exactly once.
@@ -192,8 +192,16 @@ import Testing
         //   Dracula, B with /b + Nord) swap and each ends up with the other's
         //   full payload at the other's tree slot.
         let a = PaneId(), b = PaneId()
-        let paneA = PaneModel(id: a, title: "A", cwd: "/a", theme: "Dracula")
-        let paneB = PaneModel(id: b, title: "B", cwd: "/b", theme: "Nord")
+        let paneA = PaneModel(
+            id: a,
+            session: SessionModel(id: SessionId(), title: "A", cwd: "/a"),
+            theme: "Dracula"
+        )
+        let paneB = PaneModel(
+            id: b,
+            session: SessionModel(id: SessionId(), title: "B", cwd: "/b"),
+            theme: "Nord"
+        )
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(paneA), second: .leaf(paneB), ratio: 0.5
@@ -230,7 +238,7 @@ import Testing
         #expect(source != target, "split should create a distinct source pane")
 
         model.updatePane(source) {
-            $0.cwd = "/src"
+            $0.session?.cwd = "/src"
             $0.theme = "Dracula"
             $0.todos = [TodoItem(id: UUID(), text: "stay attached", isDone: false)]
         }
@@ -238,7 +246,7 @@ import Testing
         update(&model, .movePane(source: source, target: target, intent: .splitRight))
 
         // Payload preserved on the moved pane.
-        #expect(model.pane(source)?.cwd == "/src")
+        #expect(model.pane(source)?.session?.cwd == "/src")
         #expect(model.pane(source)?.theme == "Dracula")
         #expect(model.pane(source)?.todos.count == 1)
         #expect(model.pane(source)?.todos.first?.text == "stay attached")
@@ -396,8 +404,8 @@ import Testing
         let model = try #require(validateAndBuild(initFile.model), "id-less leaf should validate")
         #expect(model.allPaneIds.count == 1, "should mint exactly one pane")
         let minted = model.allPaneIds[0]
-        #expect(model.pane(minted)?.title == "Minty", "title survives the mint")
-        #expect(model.pane(minted)?.cwd == "/x")
+        #expect(model.pane(minted)?.session?.title == "Minty", "title survives the mint")
+        #expect(model.pane(minted)?.session?.cwd == "/x")
         #expect(model.pane(minted)?.theme == "Nord")
         #expect(model.groups[0].tabs[0].focusedPaneId == minted, "focus defaults to the minted leaf")
     }
@@ -442,10 +450,10 @@ import Testing
         let tab = model.groups[0].tabs[0]
 
         // The focused pane cwd supplies the subtitle.
-        #expect(tab.title == "Editor")
-        #expect(tab.subtitle == "~/focused-pane")
+        #expect(tabTitle(tab, in: model) == "Editor")
+        #expect(tabSubtitle(tab, in: model) == "~/focused-pane")
         // The sibling's cwd never bleeds into the tab chrome.
-        #expect(tab.subtitle != "~/sibling", "sibling cwd must not leak into the tab subtitle")
+        #expect(tabSubtitle(tab, in: model) != "~/sibling", "sibling cwd must not leak into the tab subtitle")
     }
 
     @Test("graftScrollback embeds scrollback into the matching tree leaves only")

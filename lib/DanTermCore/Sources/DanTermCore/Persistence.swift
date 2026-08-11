@@ -103,13 +103,14 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 /// Build the structural PaneSnapshot embedded in a leaf. Scrollback remains a
 /// separate live-engine graft; recovery memo is already model-owned.
 private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
-  let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
+  let session = pane.session
+  let abbrevCwd = session?.cwd.map { abbreviateHome($0, home: home) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
     TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
   }
   var snapshot = PaneSnapshot(
     id: pane.id.rawValue.uuidString,
-    title: pane.title,
+    title: session?.title ?? "Terminal",
     cwd: abbrevCwd,
     command: pane.session?.lastCommand,
     scrollback: nil,

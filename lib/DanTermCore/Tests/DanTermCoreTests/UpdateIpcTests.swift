@@ -63,18 +63,25 @@ import DanTermProtocol
         let groupBId = GroupId(rawValue: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!)
         let paneTodoId = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
         let tabTodoId = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
-        var paneA = PaneModel(
+        let paneA = PaneModel(
             id: paneAId,
-            title: "shell",
-            cwd: "/Users/testhome/work",
+            session: SessionModel(
+                id: SessionId(),
+                title: "shell",
+                cwd: "/Users/testhome/work",
+                command: .running("swift test"),
+                lastCommand: "swift test"
+            ),
             theme: "Tokyo Night",
             fontSizeSteps: 2,
             todos: [TodoItem(id: paneTodoId, text: "ship", isDone: false)]
         )
-        paneA.session = SessionModel(id: SessionId(), command: .running("swift test"), lastCommand: "swift test")
-        let paneB = PaneModel(id: paneBId, title: "tests", cwd: "/tmp")
-        let paneC = PaneModel(id: paneCId, title: "logs")
-        let paneD = PaneModel(id: paneDId, title: "archive")
+        let paneB = PaneModel(
+            id: paneBId,
+            session: SessionModel(id: SessionId(), title: "tests", cwd: "/tmp")
+        )
+        let paneC = PaneModel(id: paneCId, session: SessionModel(id: SessionId(), title: "logs"))
+        let paneD = PaneModel(id: paneDId, session: SessionModel(id: SessionId(), title: "archive"))
         let nestedRoot: SplitNodeModel = .split(
             id: splitAId,
             direction: .horizontal,
@@ -1485,10 +1492,10 @@ import DanTermProtocol
             createTab(&model)
             let selectedTabId = selectedTab(in: model)!.id
             let selectedPaneId = selectedTab(in: model)!.focusedPaneId
-            model.updatePane(selectedPaneId) { $0.cwd = "/selected" }
+            model.updatePane(selectedPaneId) { $0.session?.cwd = "/selected" }
             createTab(&model)
             let callerPaneId = selectedTab(in: model)!.focusedPaneId
-            model.updatePane(callerPaneId) { $0.cwd = "/caller" }
+            model.updatePane(callerPaneId) { $0.session?.cwd = "/caller" }
             _ = update(&model, .selectTab(id: selectedTabId))
 
             let commands = sendIpc(
@@ -1539,8 +1546,8 @@ import DanTermProtocol
         #expect(reply["tab"]?["rootNode"]?["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
         #expect(reply["panes"]?.asArray?.first?.asObject?.keys.count == 1)
         #expect(tabById(tabId, in: model)?.customTitle == "clock")
-        #expect(tabById(tabId, in: model)?.displayTitle == "clock")
-        #expect(model.pane(paneId)?.title == "clock")
+        #expect(tabById(tabId, in: model).map { tabDisplayTitle($0, in: model) } == "clock")
+        #expect(model.pane(paneId)?.session?.title == "clock")
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {
                 return effectPaneId == paneId
@@ -1758,7 +1765,7 @@ import DanTermProtocol
         )
 
         let newPaneId = try requirePaneId(try requireIpcReply(commands)["pane"]?["id"], "pane.split should return pane id")
-        #expect(model.pane(newPaneId)?.title == "cargo")
+        #expect(model.pane(newPaneId)?.session?.title == "cargo")
         #expect(tabById(tabId, in: model)?.customTitle == nil)
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {

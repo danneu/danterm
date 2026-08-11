@@ -37,8 +37,11 @@ enum AgentLifecycle: Equatable {
     case attached(session: AgentSession, activity: AgentActivity?)
 }
 
-/// Defines the lifecycle facts a terminal session can report to the pure model.
+/// Defines the stored facts a terminal session can report to the pure model.
 enum SessionReport: Equatable {
+    case title(String)
+    case cwd(String?)
+    case progress(ProgressState?)
     case integrationReady
     case commandStarted(String)
     case commandEnded(exitStatus: UInt8)
@@ -51,9 +54,18 @@ enum SessionReport: Equatable {
 }
 
 /// Applies one admitted report and keeps recovery memo updates atomic with the
-/// lifecycle transition that accepted them.
+/// session transition that accepted them.
 func reduceSession(_ session: inout SessionModel, report: SessionReport) {
     switch report {
+    case .title(let title):
+        session.title = title
+
+    case .cwd(let cwd):
+        session.cwd = cwd
+
+    case .progress(let progress):
+        session.progress = progress
+
     case .integrationReady:
         session.integration = .ready
 

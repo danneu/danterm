@@ -380,7 +380,10 @@ private func sidebarStoreModel(
 private func sidebarStoreTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
     var pane = PaneModel(id: paneId)
-    pane.title = String(id.rawValue.uuidString.prefix(8))
+    pane.session = SessionModel(
+        id: SessionId(),
+        title: String(id.rawValue.uuidString.prefix(8))
+    )
     return TabModel(
         id: id,
         focusedPaneId: paneId,

@@ -252,9 +252,9 @@ import Testing
 
         model.lastNotificationTime[paneId] = [.bell: Date.distantPast]
 
-        update(&model, .sessionBell(paneId: paneId))
+        update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 100, "alerts should be capped at 100")
-        #expect(model.alerts[0].body == (model.pane(paneId)?.title ?? ""), "newest alert should be first")
+        #expect(model.alerts[0].body == (model.pane(paneId)?.session?.title ?? ""), "newest alert should be first")
     }
 
     @Test("testSelectTabMarksAlertsReadForFocusedPane")
@@ -430,14 +430,14 @@ import Testing
 
         createTab(&model)
 
-        let effects1 = update(&model, .sessionBell(paneId: paneId))
+        let effects1 = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(hasEffect(effects1) {
             if case .sendNotification = $0 { return true }
             return false
         }, "first bell should send notification")
 
-        let effects2 = update(&model, .desktopNotification(
-            paneId: paneId,
+        let effects2 = update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
             title: "Done",
             body: "ok"
         ))
@@ -446,7 +446,7 @@ import Testing
             return false
         }, "desktop notification should not be throttled by bell")
 
-        let effects3 = update(&model, .sessionBell(paneId: paneId))
+        let effects3 = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(!hasEffect(effects3) {
             if case .sendNotification = $0 { return true }
             return false

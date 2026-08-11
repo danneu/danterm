@@ -17,10 +17,10 @@ func terminalBackendBoundaryTests() {
             scrollPosition: .init(total: 100, offset: 20, length: 30)
         )
 
-        gate.emit(.titleChanged("vim"))
+        gate.emit(.report(.title("vim")))
         gate.emit(state)
 
-        try uiExpect(events == [.titleChanged("vim")], "active event was not delivered")
+        try uiExpect(events == [.report(.title("vim"))], "active event was not delivered")
         try uiExpect(observer.states == [state], "active session state was not delivered")
     }
 

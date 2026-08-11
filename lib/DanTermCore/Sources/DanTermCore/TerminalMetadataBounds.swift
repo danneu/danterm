@@ -18,15 +18,17 @@ extension String {
 }
 
 extension SessionReport {
-    /// Centralizes admission of bounded lifecycle metadata before model mutation.
+    /// Centralizes admission of bounded terminal metadata before model mutation.
     var isAdmitted: Bool {
         switch self {
-        case .commandStarted(let command):
-            command.fitsTerminalMetadataValueLimit
+        case .title(let value), .commandStarted(let value):
+            value.fitsTerminalMetadataValueLimit
+        case .cwd(let value):
+            value?.fitsTerminalMetadataValueLimit != false
         case .remoteIdentityReported(let identity):
             identity.user.utf8.count + identity.host.utf8.count
                 <= TerminalMetadataBounds.maximumValueBytes
-        case .integrationReady, .commandEnded, .remoteDetected, .connectionEnded,
+        case .progress, .integrationReady, .commandEnded, .remoteDetected, .connectionEnded,
              .agentAttached, .agentActivityChanged, .agentDetached:
             true
         }

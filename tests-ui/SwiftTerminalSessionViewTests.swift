@@ -609,8 +609,8 @@ func swiftTerminalSessionViewTests() {
 
         try uiExpect(events == [
             .desktopNotification(title: "Build", body: "Done"),
-            .progress(.set(percent: 42)),
-            .progress(nil),
+            .report(.progress(.set(percent: 42))),
+            .report(.progress(nil)),
         ], "semantic adapter diverged: \(events)")
     }
 

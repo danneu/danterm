@@ -90,12 +90,9 @@ enum Msg {
     case exportState
 
     // Terminal session callbacks
-    case sessionTitle(paneId: PaneId, title: String)
-    case sessionCwd(paneId: PaneId, cwd: String?)
-    case sessionBell(paneId: PaneId)
     case sessionReport(sessionId: SessionId, report: SessionReport)
-    case desktopNotification(paneId: PaneId, title: String, body: String)
-    case sessionProgress(paneId: PaneId, state: ProgressState?)
+    case sessionBell(sessionId: SessionId)
+    case sessionNotification(sessionId: SessionId, title: String, body: String)
     case sessionEnded(sessionId: SessionId)
     case sessionCreationFailed(sessionId: SessionId)
 
@@ -222,8 +219,7 @@ extension Msg {
         // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
         // real but throttleable diff (tab title/subtitle, progress, the search
         // overlay's live "N/M" match count).
-        case .sessionTitle, .sessionCwd, .sessionProgress,
-             .searchTotalReported, .searchSelectionReported:
+        case .searchTotalReported, .searchSelectionReported:
             return true
         // Window/divider live-resize fires this every tick, but ContainerShape
         // drops split ratios (see ReconcileTests "split ratio is excluded"), so
@@ -236,11 +232,12 @@ extension Msg {
         // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
-        case .sessionBell, .desktopNotification:
+        case .sessionBell, .sessionNotification:
             return true
         case .sessionReport(_, let report):
             switch report {
-            case .commandStarted, .commandEnded, .agentActivityChanged:
+            case .title, .cwd, .progress, .commandStarted, .commandEnded,
+                 .agentActivityChanged:
                 return true
             case .integrationReady, .remoteDetected, .remoteIdentityReported,
                  .connectionEnded, .agentAttached, .agentDetached:

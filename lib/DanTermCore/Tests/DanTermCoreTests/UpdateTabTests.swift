@@ -79,7 +79,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let firstPaneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(firstPaneId) { $0.cwd = "/tmp/test" }
+        model.updatePane(firstPaneId) { $0.session?.cwd = "/tmp/test" }
         let commands = createTab(&model)
         let createEffect = commands.first(where: {
             if case .createSession = $0 { return true }
@@ -148,7 +148,7 @@ import Testing
 
         update(&model, .selectTab(id: tabAId))
 
-        update(&model, .sessionBell(paneId: tabBPaneId))
+        update(&model, .sessionBell(sessionId: sessionId(for: tabBPaneId, in: model)))
         #expect(model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "should have unread alert on background pane")
 
         update(&model, .selectTab(id: tabBId))

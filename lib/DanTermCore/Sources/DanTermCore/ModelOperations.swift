@@ -544,11 +544,11 @@ func focusedPane(in model: AppModel) -> PaneModel? {
 }
 
 func currentCwd(in model: AppModel) -> String? {
-  if let pane = focusedPane(in: model), let cwd = pane.cwd { return cwd }
+  if let cwd = focusedPane(in: model)?.session?.cwd { return cwd }
   // Fall back to most recent tab with a known cwd
   let allTabs = model.groups.flatMap(\.tabs)
   for tab in allTabs.reversed() {
-    if let cwd = model.pane(tab.focusedPaneId)?.cwd { return cwd }
+    if let cwd = model.pane(tab.focusedPaneId)?.session?.cwd { return cwd }
   }
   return nil
 }
@@ -573,11 +573,42 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
   return "~" + path.dropFirst(home.count)
 }
 
-/// Derive tab chrome (title/subtitle) from the focused pane.
-func deriveTabChrome(from pane: PaneModel) -> (title: String, subtitle: String?) {
-  let title = abbreviateHome(pane.title)
-  let subtitle = pane.cwd.map { abbreviateHome($0) }
+/// Derives tab chrome from the focused pane's current terminal session.
+func tabChrome(_ tab: TabModel, in model: AppModel) -> (title: String, subtitle: String?) {
+  guard let session = model.pane(tab.focusedPaneId)?.session else {
+    return ("Terminal", nil)
+  }
+  return sessionChrome(session)
+}
+
+/// Derives tab chrome directly from its leaf-owned pane tree.
+func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
+  guard let session = paneInNode(tab.rootNode, id: tab.focusedPaneId)?.session else {
+    return ("Terminal", nil)
+  }
+  return sessionChrome(session)
+}
+
+/// Formats terminal facts into the title and subtitle shared by tab chrome consumers.
+private func sessionChrome(_ session: SessionModel) -> (title: String, subtitle: String?) {
+  let title = abbreviateHome(session.title)
+  let subtitle = session.cwd.map { abbreviateHome($0) }
   return (title, subtitle)
+}
+
+/// Returns the terminal-derived title for one tab.
+func tabTitle(_ tab: TabModel, in model: AppModel) -> String {
+  tabChrome(tab, in: model).title
+}
+
+/// Applies a custom title over the terminal-derived title for one tab.
+func tabDisplayTitle(_ tab: TabModel, in model: AppModel) -> String {
+  tab.customTitle ?? tabTitle(tab, in: model)
+}
+
+/// Returns the focused session's working-directory subtitle for one tab.
+func tabSubtitle(_ tab: TabModel, in model: AppModel) -> String? {
+  tabChrome(tab, in: model).subtitle
 }
 
 func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {

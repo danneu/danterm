@@ -243,7 +243,7 @@ private func makeSinglePaneModel(
 ) -> (model: AppModel, paneId: PaneId) {
     let paneId = PaneId()
     var pane = PaneModel(id: paneId, session: SessionModel(id: SessionId()))
-    pane.cwd = cwd
+    pane.session?.cwd = cwd
 
     let rootNode: SplitNodeModel = hasSplits
         ? .split(id: SplitId(), direction: .horizontal,

@@ -31,18 +31,12 @@ func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
 func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
     let description: String
     switch event {
-    case .titleChanged(let title):
-        description = "session.titleChanged:\(title)"
-    case .cwdChanged(let cwd):
-        description = "session.cwdChanged:\(cwd)"
     case .bell:
         description = "session.bell"
-    case .paneLifecycleChanged(let transition):
-        description = "session.paneLifecycleChanged:\(String(describing: transition.event))"
+    case .report(let report):
+        description = "session.report:\(String(describing: report))"
     case .desktopNotification(let title, let body):
         description = "session.desktopNotification:\(title):\(body)"
-    case .progress(let progress):
-        description = "session.progress:\(String(describing: progress))"
     case .searchStarted(let needle):
         description = "session.searchStarted:\(needle)"
     case .searchTotal(let total):

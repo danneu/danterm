@@ -93,10 +93,13 @@ struct TodoItem: Equatable, Codable {
 
 // MARK: - Model
 
-/// Owns the terminal-reported lifecycles and recovery memo whose lifetime is
+/// Owns every terminal-reported fact and recovery memo whose lifetime is
 /// bounded by this identified terminal session.
 struct SessionModel: Equatable {
     let id: SessionId
+    var title: String = "Terminal"
+    var cwd: String?
+    var progress: ProgressState?
     var integration: IntegrationLatch = .neverReported
     var command: CommandLifecycle = .idle
     var connection: ConnectionLifecycle = .local
@@ -108,9 +111,6 @@ struct SessionModel: Equatable {
 struct PaneModel: Equatable {
     let id: PaneId
     var session: SessionModel? = nil
-    var title: String = "Terminal"
-    var cwd: String?
-    var progress: ProgressState? = nil
     var theme: String? = nil  // catalog theme name; nil = app default
     /// Font-size zoom relative to the configured size, in `paneFontSizeStepPoints`
     /// steps; 0 = follow the configuration. Relative rather than absolute so a
@@ -152,15 +152,6 @@ struct TabModel: Equatable {
     var color: TabColor? = nil
     var todos: [TodoItem] = []
 
-    // The focused leaf owns the pane chrome; derive tab chrome on read so focus
-    // changes cannot leave a stale tab-level cache behind.
-    var focusedPane: PaneModel? { paneInNode(rootNode, id: focusedPaneId) }
-    private var derivedChrome: (title: String, subtitle: String?) {
-        focusedPane.map { deriveTabChrome(from: $0) } ?? ("Terminal", nil)
-    }
-    var title: String { derivedChrome.title }
-    var displayTitle: String { customTitle ?? title }
-    var subtitle: String? { derivedChrome.subtitle }
 }
 
 /// Which TODO popover (if any) is currently open. Replaces the old
@@ -665,11 +656,11 @@ private func parseSplitNode(
             id: paneId,
             session: SessionModel(
                 id: sessionId,
+                title: ps.title ?? "Terminal",
+                cwd: expandedCwd,
                 lastCommand: ps.command,
                 lastAgentSession: persistedAgent
             ),
-            title: ps.title ?? "Terminal",
-            cwd: expandedCwd,
             theme: ps.theme
         )
         // A hand-edited or corrupt step count is bounded here rather than at

@@ -58,6 +58,13 @@ func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
     commands.contains(where: check)
 }
 
+func sessionId(for paneId: PaneId, in model: AppModel) -> SessionId {
+    guard let sessionId = model.pane(paneId)?.session?.id else {
+        preconditionFailure("test pane has no terminal session")
+    }
+    return sessionId
+}
+
 // MARK: - Snapshot (v3 leaf-embedded) test helpers
 
 /// Collect every leaf's embedded PaneSnapshot from a snapshot split tree.

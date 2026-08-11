@@ -31,7 +31,7 @@ func alertPresentation(
     in model: AppModel
 ) -> AlertPresentation {
     let pane = model.pane(paneId)
-    let paneTitle = pane?.title ?? "Terminal"
+    let paneTitle = pane?.session?.title ?? "Terminal"
     let title: String
     switch pane?.session?.agent ?? .none {
     case .attached(let session, _):
@@ -48,7 +48,7 @@ func alertPresentation(
         return AlertPresentation(title: title, subtitle: nil)
     }
 
-    var location = tab.displayTitle
+    var location = tabDisplayTitle(tab, in: model)
     let paneIds = allPaneIds(tab.rootNode)
     if paneIds.count > 1, let index = paneIds.firstIndex(of: paneId) {
         location += " - pane \(index + 1)"

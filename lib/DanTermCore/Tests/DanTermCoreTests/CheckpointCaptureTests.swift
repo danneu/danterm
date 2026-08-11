@@ -104,12 +104,18 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         #expect(current != previous, "tab color")
         previous = current
 
-        update(&model, .sessionTitle(paneId: paneIds[0], title: "swift"))
+        update(&model, .sessionReport(
+            sessionId: sessionId(for: paneIds[0], in: model),
+            report: .title("swift")
+        ))
         current = lightProjection(model)
         #expect(current != previous, "pane title")
         previous = current
 
-        update(&model, .sessionCwd(paneId: paneIds[0], cwd: "/tmp/project"))
+        update(&model, .sessionReport(
+            sessionId: sessionId(for: paneIds[0], in: model),
+            report: .cwd("/tmp/project")
+        ))
         current = lightProjection(model)
         #expect(current != previous, "pane cwd")
         previous = current
@@ -152,10 +158,10 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         update(&model, .toggleZoomPane(paneId: selectedPane))
         #expect(lightProjection(model) == baseline, "zoom")
 
-        update(&model, .sessionProgress(paneId: selectedPane, state: .set(percent: 50)))
+        update(&model, .sessionReport(sessionId: sessionId(for: selectedPane, in: model), report: .progress(.set(percent: 50))))
         #expect(lightProjection(model) == baseline, "progress")
 
-        update(&model, .sessionBell(paneId: backgroundPane))
+        update(&model, .sessionBell(sessionId: sessionId(for: backgroundPane, in: model)))
         #expect(model.alerts.isEmpty == false)
         #expect(lightProjection(model) == baseline, "alerts")
 
@@ -341,8 +347,8 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         model.groups[0].tabs[0].color = .purple
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "tab todo", isDone: true)]
         if case .leaf(var pane) = model.groups[0].tabs[0].rootNode {
-            pane.title = "vim"
-            pane.cwd = "/tmp/work"
+            pane.session?.title = "vim"
+            pane.session?.cwd = "/tmp/work"
             pane.theme = "Dracula"
             pane.todos = [TodoItem(id: UUID(), text: "pane todo", isDone: false)]
             model.groups[0].tabs[0].rootNode = .leaf(pane)

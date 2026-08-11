@@ -461,7 +461,7 @@ class PaneWrapperView: NSView {
         menu.addItem(.separator())
 
         let copyCwd = wrapperItem("Copy cwd", #selector(copyCwdAction))
-        copyCwd.isEnabled = runtime?.model.pane(paneId)?.cwd != nil
+        copyCwd.isEnabled = runtime?.model.pane(paneId)?.session?.cwd != nil
         menu.addItem(copyCwd)
 
         menu.addItem(wrapperItem("Copy Pane ID", #selector(copyPaneIdAction)))
@@ -516,7 +516,7 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func copyCwdAction() {
-        guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
+        guard let cwd = runtime?.model.pane(paneId)?.session?.cwd else { return }
         menuPasteboard.clearContents()
         menuPasteboard.setString(cwd, forType: .string)
     }

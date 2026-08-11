@@ -322,10 +322,10 @@ func desiredPaneToolbar(
       command = nil
     }
     result[pane.id] = PaneToolbarRender(
-      title: pane.title,
-      cwd: pane.cwd,
+      title: session?.title ?? "Terminal",
+      cwd: session?.cwd,
       command: command,
-      progress: pane.progress,
+      progress: session?.progress,
       isRemote: remoteSession != nil || (session?.connection ?? .local) != .local,
       remoteSession: remoteSession,
       agentSession: agentSession,
@@ -426,11 +426,12 @@ func applyDiff<K: Hashable, V: Equatable>(
 /// window-chrome projection can derive it and so it is test-visible; the
 /// reconcile executor only assigns the result. Moved here from Update.swift
 /// when the title stopped being a `.setWindowTitle` command (Stage 6).
-func windowTitle(for tab: TabModel) -> String {
-  if let subtitle = tab.subtitle, subtitle != tab.displayTitle {
-    return "\(tab.displayTitle) — \(subtitle)"
+func windowTitle(for tab: TabModel, in model: AppModel) -> String {
+  let displayTitle = tabDisplayTitle(tab, in: model)
+  if let subtitle = tabSubtitle(tab, in: model), subtitle != displayTitle {
+    return "\(displayTitle) — \(subtitle)"
   }
-  return tab.displayTitle
+  return displayTitle
 }
 
 /// Everything the window chrome shows, in one Equatable value the reconciler
@@ -459,8 +460,8 @@ func desiredWindowChrome(in model: AppModel, tally: UnreadAlertTally) -> WindowC
   let tab = selectedTab(in: model)
   let rollup = tab.map { tabTodoRollup($0.id, in: model) } ?? (total: 0, uncompleted: 0)
   return WindowChromeProjection(
-    windowTitle: tab.map { windowTitle(for: $0) } ?? "",
-    contentTitle: tab?.displayTitle ?? "",
+    windowTitle: tab.map { windowTitle(for: $0, in: model) } ?? "",
+    contentTitle: tab.map { tabDisplayTitle($0, in: model) } ?? "",
     unreadCount: tally.total,
     tabTodoTotal: rollup.total,
     tabTodoUncompleted: rollup.uncompleted
@@ -533,8 +534,8 @@ func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProje
       tabs: group.tabs.map { tab in
         SidebarTabProjection(
           id: tab.id,
-          displayTitle: tab.displayTitle,
-          subtitle: tab.subtitle,
+          displayTitle: tabDisplayTitle(tab, in: model),
+          subtitle: tabSubtitle(tab, in: model),
           unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color
@@ -931,7 +932,7 @@ func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherPro
     guard let tab = tabById(tabId, in: model) else { return nil }
     return SwitcherRow(
       tabId: tabId,
-      name: tab.displayTitle,
+      name: tabDisplayTitle(tab, in: model),
       color: tab.color,
       alertCount: tally.byTab[tabId] ?? 0
     )

@@ -17,6 +17,9 @@ AppModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
                 session: SessionModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+                  title: "Terminal",
+                  cwd: nil,
+                  progress: nil,
                   integration: .neverReported,
                   command: .idle,
                   connection: .local,
@@ -24,9 +27,6 @@ AppModel(
                   lastCommand: nil,
                   lastAgentSession: nil
                 ),
-                title: "Terminal",
-                cwd: nil,
-                progress: nil,
                 theme: nil,
                 fontSizeSteps: 0,
                 todos: []
@@ -37,6 +37,9 @@ AppModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
                 session: SessionModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005)),
+                  title: "Terminal",
+                  cwd: nil,
+                  progress: nil,
                   integration: .neverReported,
                   command: .idle,
                   connection: .local,
@@ -44,9 +47,6 @@ AppModel(
                   lastCommand: nil,
                   lastAgentSession: nil
                 ),
-                title: "Terminal",
-                cwd: nil,
-                progress: nil,
                 theme: nil,
                 fontSizeSteps: 0,
                 todos: []
@@ -77,6 +77,9 @@ AppModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
                 session: SessionModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009)),
+                  title: "Terminal",
+                  cwd: nil,
+                  progress: nil,
                   integration: .neverReported,
                   command: .idle,
                   connection: .local,
@@ -84,9 +87,6 @@ AppModel(
                   lastCommand: nil,
                   lastAgentSession: nil
                 ),
-                title: "Terminal",
-                cwd: nil,
-                progress: nil,
                 theme: nil,
                 fontSizeSteps: 0,
                 todos: []
@@ -97,6 +97,9 @@ AppModel(
                 id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000B)),
                 session: SessionModel(
                   id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000C)),
+                  title: "Terminal",
+                  cwd: nil,
+                  progress: nil,
                   integration: .neverReported,
                   command: .idle,
                   connection: .local,
@@ -104,9 +107,6 @@ AppModel(
                   lastCommand: nil,
                   lastAgentSession: nil
                 ),
-                title: "Terminal",
-                cwd: nil,
-                progress: nil,
                 theme: nil,
                 fontSizeSteps: 0,
                 todos: []

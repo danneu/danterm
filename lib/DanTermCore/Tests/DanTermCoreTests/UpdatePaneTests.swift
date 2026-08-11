@@ -352,8 +352,8 @@ import Testing
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        model.updatePane(paneA) { $0.title = "my-title" }
-        model.updatePane(paneA) { $0.cwd = "/tmp/foo" }
+        model.updatePane(paneA) { $0.session?.title = "my-title" }
+        model.updatePane(paneA) { $0.session?.cwd = "/tmp/foo" }
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -459,8 +459,8 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        model.updatePane(paneA) { $0.title = "pane-a-title" }
-        model.updatePane(paneA) { $0.cwd = "/tmp/pane-a" }
+        model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
+        model.updatePane(paneA) { $0.session?.cwd = "/tmp/pane-a" }
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
@@ -468,8 +468,8 @@ import Testing
 
         let tab = model.groups[0].tabs[0]
         #expect(tab.focusedPaneId == paneA)
-        #expect(tab.title == "pane-a-title")
-        #expect(tab.subtitle == "/tmp/pane-a")
+        #expect(tabTitle(tab, in: model) == "pane-a-title")
+        #expect(tabSubtitle(tab, in: model) == "/tmp/pane-a")
     }
 
     @Test("testClosePaneInCollapsedGroupCloses")
@@ -482,7 +482,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        model.updatePane(paneA) { $0.title = "pane-a-title" }
+        model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
         model.groups[0].isCollapsed = true
 
         update(&model, .splitPane(direction: .horizontal))
@@ -1120,16 +1120,16 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
 
         update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
 
         let tab = model.groups[0].tabs[0]
         #expect(tab.focusedPaneId == paneA)
-        #expect(tab.displayTitle == "alpha", "swapping focus to pane A should show pane A chrome")
+        #expect(tabDisplayTitle(tab, in: model) == "alpha", "swapping focus to pane A should show pane A chrome")
     }
 
     // MARK: - movePaneToTab Tests
@@ -1227,10 +1227,10 @@ import Testing
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
 
         createTab(&model)
@@ -1240,7 +1240,7 @@ import Testing
 
         let sourceTab = tabById(sourceTabId, in: model)!
         #expect(sourceTab.focusedPaneId == paneB)
-        #expect(sourceTab.displayTitle == "beta", "source tab should show the surviving focused pane")
+        #expect(tabDisplayTitle(sourceTab, in: model) == "beta", "source tab should show the surviving focused pane")
     }
 
     @Test("testMovePaneToTabSameTabIsNoOp")
@@ -1612,10 +1612,10 @@ import Testing
         createTab(&model)
         let sourceTabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneA, title: "alpha"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("alpha")))
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneB, title: "beta"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneB, in: model), report: .title("beta")))
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         let groupId = model.groups[0].id
 
@@ -1623,7 +1623,7 @@ import Testing
 
         let sourceTab = tabById(sourceTabId, in: model)!
         #expect(sourceTab.focusedPaneId == paneB)
-        #expect(sourceTab.displayTitle == "beta", "source tab should show the surviving focused pane")
+        #expect(tabDisplayTitle(sourceTab, in: model) == "beta", "source tab should show the surviving focused pane")
     }
 
     @Test("testMovePaneToNewTabPathB_ChromeDerived")
@@ -1635,16 +1635,16 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneA) { $0.title = "/Users/dan/projects" }
-        model.updatePane(paneA) { $0.cwd = "/Users/dan/projects" }
+        model.updatePane(paneA) { $0.session?.title = "/Users/dan/projects" }
+        model.updatePane(paneA) { $0.session?.cwd = "/Users/dan/projects" }
         update(&model, .splitPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         let newTab = model.groups[0].tabs[1]
-        #expect(newTab.title == abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
-        #expect(newTab.subtitle == abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
+        #expect(tabTitle(newTab, in: model) == abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
+        #expect(tabSubtitle(newTab, in: model) == abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
     }
 
     @Test("testMovePaneToNewTabAlertsClearedOnMove")

@@ -652,9 +652,9 @@ import Testing
         //   edits don't rebuild the container.
         // Scenario: spec-first leaf metadata carveout.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
-        var leftA = PaneModel(id: p1); leftA.title = "alpha"; leftA.cwd = "/a"
-        var leftB = PaneModel(id: p1); leftB.title = "beta"; leftB.cwd = "/b"
-        leftB.progress = .set(percent: 50)
+        let leftA = PaneModel(id: p1, session: SessionModel(id: SessionId(), title: "alpha", cwd: "/a"))
+        var leftB = PaneModel(id: p1, session: SessionModel(id: SessionId(), title: "beta", cwd: "/b"))
+        leftB.session?.progress = .set(percent: 50)
         leftB.todos = [TodoItem(id: UUID(), text: "do", isDone: false)]
         leftB.theme = "Dracula"
         let nodeA = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftA), second: .leaf(PaneModel(id: p2)), ratio: 0.5)

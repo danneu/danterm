@@ -324,7 +324,7 @@ their file.
   admission with its byte-limit test, agent IPC in-pass reply, delete
   PaneLifecyclesView/applyPaneLifecycleIpc/graft apparatus and
   PaneLifecycleRoutingTests, tests-ui shims)
-- [ ] 4. core!: move title, cwd, and progress into SessionModel; chrome and
+- [x] 4. core!: move title, cwd, and progress into SessionModel; chrome and
   persistence read the pane's session (value report cases, launch.title
   seeding, bell/notification re-key, TabModel chrome lookups, restore seeding,
   exact-shape IPC tests

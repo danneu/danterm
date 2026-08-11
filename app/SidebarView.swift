@@ -1426,12 +1426,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
 
+        let chrome = tabChrome(tab)
+        let displayTitle = tab.customTitle ?? chrome.0
         if !skipTitle {
-            cell.textField?.stringValue = tab.displayTitle
+            cell.textField?.stringValue = displayTitle
         }
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
-            subtitleField.stringValue = tab.subtitle ?? ""
-            subtitleField.isHidden = tab.subtitle == nil
+            subtitleField.stringValue = chrome.1 ?? ""
+            subtitleField.isHidden = chrome.1 == nil
         }
         if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView {
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {

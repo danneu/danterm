@@ -421,13 +421,13 @@ private func makeTabTodoFixture(
     let paneSecondId = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
 
     var firstPane = PaneModel(id: firstPaneId)
-    firstPane.title = "Left pane"
+    firstPane.session = SessionModel(id: SessionId(), title: "Left pane")
     firstPane.todos = firstPaneTodos ?? [
         TodoItem(id: paneOpenId, text: "Pane alpha", isDone: false),
     ]
 
     var secondPane = PaneModel(id: secondPaneId)
-    secondPane.title = "Right pane"
+    secondPane.session = SessionModel(id: SessionId(), title: "Right pane")
     secondPane.todos = secondPaneTodos ?? [
         TodoItem(id: paneSecondId, text: "Pane beta", isDone: false),
     ]

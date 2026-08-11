@@ -28,8 +28,8 @@ import Testing
         createTab(&model)
         model.groups[0].tabs[0].customTitle = "My App"
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.title = "vim" }
-        #expect(model.groups[0].tabs[0].displayTitle == "My App")
+        model.updatePane(paneId) { $0.session?.title = "vim" }
+        #expect(tabDisplayTitle(model.groups[0].tabs[0], in: model) == "My App")
     }
 
     @Test("testDisplayTitleFallback")
@@ -41,9 +41,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.title = "vim" }
+        model.updatePane(paneId) { $0.session?.title = "vim" }
         #expect(model.groups[0].tabs[0].customTitle == nil)
-        #expect(model.groups[0].tabs[0].displayTitle == "vim")
+        #expect(tabDisplayTitle(model.groups[0].tabs[0], in: model) == "vim")
     }
 
     // MARK: - renameTab
@@ -117,7 +117,7 @@ import Testing
 
         update(&model, .renameTab(id: tabAId, name: "Custom"))
         #expect(model.groups[0].tabs[0].customTitle == "Custom")
-        #expect(model.groups[0].tabs[1].displayTitle == "Terminal",
+        #expect(tabDisplayTitle(model.groups[0].tabs[1], in: model) == "Terminal",
             "selected tab B's display title is unchanged by renaming background tab A")
     }
 
@@ -135,9 +135,9 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .renameTab(id: tabId, name: "My App"))
 
-        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
         #expect(model.groups[0].tabs[0].customTitle == "My App", "customTitle should persist")
-        #expect(model.groups[0].tabs[0].displayTitle == "My App", "displayTitle should use customTitle")
+        #expect(tabDisplayTitle(model.groups[0].tabs[0], in: model) == "My App", "displayTitle should use customTitle")
     }
 
     @Test("testPaneFocusDoesNotOverrideCustom")
@@ -154,10 +154,10 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
         let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
-        model.updatePane(paneA) { $0.title = "zsh" }
+        model.updatePane(paneA) { $0.session?.title = "zsh" }
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         #expect(model.groups[0].tabs[0].customTitle == "My App")
-        #expect(model.groups[0].tabs[0].displayTitle == "My App")
+        #expect(tabDisplayTitle(model.groups[0].tabs[0], in: model) == "My App")
     }
 
     // MARK: - windowTitle uses displayTitle
@@ -174,7 +174,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .renameTab(id: tabId, name: "Custom"))
 
-        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
         let chrome = desiredWindowChrome(in: model)
         #expect(chrome.contentTitle == "Custom", "content title uses the custom display title")
         #expect(chrome.windowTitle.contains("Custom"),
@@ -245,7 +245,7 @@ import Testing
 
         #expect(rebuilt != nil, "round-trip should produce valid model")
         #expect(rebuilt!.groups[0].tabs[0].customTitle == "My Server")
-        #expect(rebuilt!.groups[0].tabs[0].displayTitle == "My Server")
+        #expect(tabDisplayTitle(rebuilt!.groups[0].tabs[0], in: rebuilt!) == "My Server")
     }
 
     // MARK: - Tab chrome derivation from snapshot
@@ -276,7 +276,7 @@ import Testing
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should build model")
-        #expect(model!.groups[0].tabs[0].title == "~/world")
+        #expect(tabTitle(model!.groups[0].tabs[0], in: model!) == "~/world")
     }
 
     @Test("testImportDerivesSubtitleFromLaunchCwd")
@@ -303,7 +303,7 @@ import Testing
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should build model")
-        #expect(model!.groups[0].tabs[0].subtitle == "~/projects")
+        #expect(tabSubtitle(model!.groups[0].tabs[0], in: model!) == "~/projects")
     }
 
     @Test("testImportNilCwdDerivesNilSubtitle")
@@ -330,7 +330,7 @@ import Testing
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should build model")
-        #expect(model!.groups[0].tabs[0].subtitle == nil, "subtitle should be nil when pane has no cwd")
+        #expect(tabSubtitle(model!.groups[0].tabs[0], in: model!) == nil, "subtitle should be nil when pane has no cwd")
     }
 
     @Test("testLegacySnapshotWithTitleSubtitleDecodesSuccessfully")
@@ -361,8 +361,8 @@ import Testing
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "legacy snapshot with title/subtitle should still decode")
-        #expect(model!.groups[0].tabs[0].title == "Terminal")
-        #expect(model!.groups[0].tabs[0].subtitle == "~/world")
+        #expect(tabTitle(model!.groups[0].tabs[0], in: model!) == "Terminal")
+        #expect(tabSubtitle(model!.groups[0].tabs[0], in: model!) == "~/world")
     }
 
     @Test("testDeriveTabChromeMatchesRuntimeBehavior")
@@ -377,19 +377,18 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
 
-        model.updatePane(paneId) { $0.title = "\(home)/world" }
-        model.updatePane(paneId) { $0.cwd = "\(home)/projects" }
+        model.updatePane(paneId) { $0.session?.title = "\(home)/world" }
+        model.updatePane(paneId) { $0.session?.cwd = "\(home)/projects" }
         update(&model, .splitPane(direction: .horizontal))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
 
         let tab = model.groups[0].tabs[0]
-        let pane = model.pane(paneId)!
-        let chrome = deriveTabChrome(from: pane)
+        let chrome = tabChrome(tab, in: model)
 
-        #expect(tab.title == chrome.title)
-        #expect(tab.subtitle == chrome.subtitle)
-        #expect(tab.title == "~/world")
-        #expect(tab.subtitle == "~/projects")
+        #expect(tabTitle(tab, in: model) == chrome.title)
+        #expect(tabSubtitle(tab, in: model) == chrome.subtitle)
+        #expect(tabTitle(tab, in: model) == "~/world")
+        #expect(tabSubtitle(tab, in: model) == "~/projects")
     }
 
     // MARK: - renameCompletionMessages
@@ -596,7 +595,7 @@ import Testing
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should decode without customTitle")
         #expect(model!.groups[0].tabs[0].customTitle == nil, "customTitle should be nil when omitted")
-        #expect(model!.groups[0].tabs[0].displayTitle == "Terminal")
+        #expect(tabDisplayTitle(model!.groups[0].tabs[0], in: model!) == "Terminal")
     }
 
     // MARK: - clearCustomTitles (batch from multi-select context menu)
@@ -677,7 +676,7 @@ import Testing
         update(&model, .clearCustomTitles(tabIds: [id]))
 
         #expect(model.groups[0].tabs[0].customTitle == nil)
-        #expect(model.groups[0].tabs[0].displayTitle == model.groups[0].tabs[0].title,
+        #expect(tabDisplayTitle(model.groups[0].tabs[0], in: model) == tabTitle(model.groups[0].tabs[0], in: model),
             "cleared custom title -> display title reverts to the underlying tab title")
     }
 }

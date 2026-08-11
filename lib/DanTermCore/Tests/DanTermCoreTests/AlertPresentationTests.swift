@@ -22,7 +22,7 @@ struct AlertPresentationTests {
         if let command, let sessionId = model.pane(paneId)?.session?.id {
             update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted(command)))
         }
-        let commands = update(&model, .desktopNotification(paneId: paneId, title: title, body: body))
+        let commands = update(&model, .sessionNotification(sessionId: sessionId(for: paneId, in: model), title: title, body: body))
         for command in commands {
             if case .sendNotification(_, _, let title, let subtitle, let body) = command {
                 return (title, subtitle, body)
@@ -49,7 +49,7 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneId, title: "pane-title"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("pane-title")))
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
@@ -96,7 +96,7 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneId, title: "codex"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
         let sent = notification(&model, paneId: paneId, title: "", body: "Ready for review")
@@ -110,7 +110,7 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneId, title: "codex"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
         let sent = notification(&model, paneId: paneId, title: "", body: "Ready for review")
@@ -140,7 +140,7 @@ struct AlertPresentationTests {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionTitle(paneId: paneId, title: "codex"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("codex")))
         createTab(&model)
 
         let sent = notification(&model, paneId: paneId, title: "", body: "Ready for review")

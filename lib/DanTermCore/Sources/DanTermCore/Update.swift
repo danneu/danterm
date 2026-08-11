@@ -42,10 +42,10 @@ func update(
         let tabId = TabId(rawValue: env.newId())
         let cwd = launch?.cwd ?? currentCwd(in: model)
 
-        var pane = PaneModel(id: paneId, session: SessionModel(id: sessionId))
-        if let title = launch?.title {
-            pane.title = title
-        }
+        let pane = PaneModel(
+            id: paneId,
+            session: SessionModel(id: sessionId, title: launch?.title ?? "Terminal")
+        )
 
         // The leaf owns the pane content directly -- no separate dict write.
         var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
@@ -120,7 +120,7 @@ func update(
         if paneCount > 1 || uncompletedTodos > 0 {
             let isLastTab = totalTabCount(model) == 1
             return emitCloseTabConfirmation(
-                &model, tabId: id, tabTitle: tab.displayTitle,
+                &model, tabId: id, tabTitle: tabDisplayTitle(tab, in: model),
                 paneCount: paneCount, isLastTab: isLastTab,
                 uncompletedTodoCount: uncompletedTodos
             )
@@ -166,14 +166,14 @@ func update(
         let newPaneId = PaneId(rawValue: env.newId())
         let newSessionId = SessionId(rawValue: env.newId())
         let newSplitId = SplitId(rawValue: env.newId())
-        let cwd = launch?.cwd ?? model.pane(targetPaneId)?.cwd
+        let cwd = launch?.cwd ?? model.pane(targetPaneId)?.session?.cwd
         let theme = model.pane(targetPaneId)?.theme
         let fontSizeSteps = model.pane(targetPaneId)?.fontSizeSteps ?? 0
 
-        var newPane = PaneModel(id: newPaneId, session: SessionModel(id: newSessionId))
-        if let title = launch?.title {
-            newPane.title = title
-        }
+        var newPane = PaneModel(
+            id: newPaneId,
+            session: SessionModel(id: newSessionId, title: launch?.title ?? "Terminal")
+        )
         newPane.theme = theme
         newPane.fontSizeSteps = fontSizeSteps
 
@@ -521,7 +521,7 @@ func update(
         model.updateSession(sessionId) { reduceSession(&$0, report: report) }
         let didChange = model.pane(paneId)?.session != previous
         switch report {
-        case .commandStarted, .agentAttached, .agentDetached:
+        case .title, .cwd, .progress, .commandStarted, .agentAttached, .agentDetached:
             return []
         case .commandEnded:
             return []
@@ -689,23 +689,8 @@ func update(
 
     // MARK: - Terminal Session Callbacks
 
-    case .sessionTitle(let paneId, let title):
-        guard title.fitsTerminalMetadataValueLimit else { return [] }
-        model.updatePane(paneId) { $0.title = title }
-        // Tab/window chrome derives from the focused pane title just set above.
-        return []
-
-    case .sessionCwd(let paneId, let cwd):
-        guard cwd?.fitsTerminalMetadataValueLimit != false else { return [] }
-        model.updatePane(paneId) { $0.cwd = cwd }
-        // Tab/window chrome derives from the focused pane cwd just set above.
-        return []
-
-    case .sessionProgress(let paneId, let state):
-        model.updatePane(paneId) { $0.progress = state }
-        return []
-
-    case .sessionBell(let paneId):
+    case .sessionBell(let sessionId):
+        guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
         // No alert for the focused pane while the app is active; when inactive,
         // the focused pane is unseen and should follow the normal alert path.
         if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
@@ -713,7 +698,7 @@ func update(
         }
 
         guard tabForPane(paneId, in: model) != nil else { return [] }
-        let paneTitle = model.pane(paneId)?.title ?? "Terminal"
+        let paneTitle = model.pane(paneId)?.session?.title ?? "Terminal"
 
         // Hack: ack previous alerts so each pane has at most 1 unread alert.
         // This keeps pane badges boolean and tab badges count panes-with-alerts
@@ -738,7 +723,8 @@ func update(
         ))
         return commands
 
-    case .desktopNotification(let paneId, let title, let body):
+    case .sessionNotification(let sessionId, let title, let body):
+        guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
         return desktopAlertCommands(
             model: &model,
             paneId: paneId,
@@ -1363,7 +1349,7 @@ func update(
             if rollup.uncompleted > 0 {
                 let isLastTab = totalTabCount(model) == 1
                 return emitCloseTabConfirmation(
-                    &model, tabId: tab.id, tabTitle: tab.displayTitle,
+                    &model, tabId: tab.id, tabTitle: tabDisplayTitle(tab, in: model),
                     paneCount: 1, isLastTab: isLastTab,
                     uncompletedTodoCount: rollup.uncompleted
                 )
@@ -1472,7 +1458,10 @@ private func dispatchIpc(
             throw IpcParamsError("pane not found")
         }
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return [.ipcReply(reqId: reqId, result: encoder.paneInfo(pane: pane, tab: tab, group: group))]
+        return [.ipcReply(
+            reqId: reqId,
+            result: encoder.paneInfo(pane: pane, tab: tab, group: group, in: model)
+        )]
 
     case Methods.agentAttach:
         let session = try agentSession(from: params)
@@ -1586,7 +1575,7 @@ private func dispatchIpc(
         var effectiveLaunch = launch
         if effectiveLaunch?.cwd == nil,
            let callerPaneId = resolveIpcPaneId(context, in: model),
-           let cwd = model.pane(callerPaneId)?.cwd {
+           let cwd = model.pane(callerPaneId)?.session?.cwd {
             effectiveLaunch = LaunchSpec(
                 cmd: effectiveLaunch?.cmd,
                 cwd: cwd,
@@ -1605,7 +1594,10 @@ private func dispatchIpc(
         let tab = tabId.flatMap { tabById($0, in: model) }
         let group = model.groups.first(where: { $0.id == groupId })
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
-        return commands + [.ipcReply(reqId: reqId, result: encoder.tabNew(tab: tab, group: group))]
+        return commands + [.ipcReply(
+            reqId: reqId,
+            result: encoder.tabNew(tab: tab, group: group, in: model)
+        )]
 
     case Methods.paneFocus:
         var focusParams = params
@@ -1732,7 +1724,7 @@ private func dispatchIpc(
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(
             reqId: reqId,
-            result: encoder.paneInfo(pane: pane, tab: currentTab, group: group)
+            result: encoder.paneInfo(pane: pane, tab: currentTab, group: group, in: model)
         )]
 
     case Methods.paneRows:

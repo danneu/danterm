@@ -240,7 +240,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/projects" }
+        model.updatePane(paneId) { $0.session?.cwd = NSHomeDirectory() + "/projects" }
         let expected = toSnapshot(model)
         let commands = update(&model, .exportState)
         #expect(commands.count == 1)
@@ -397,7 +397,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.cwd = nil }
+        model.updatePane(paneId) { $0.session?.cwd = nil }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].command == nil)
         #expect(allPaneSnapshots(snapshot)[0].cwd == nil)
@@ -415,7 +415,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.updatePane(paneId) { $0.cwd = home + "/projects" }
+        model.updatePane(paneId) { $0.session?.cwd = home + "/projects" }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].cwd == "~/projects")
     }
@@ -426,7 +426,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.updatePane(paneId) { $0.cwd = home + "/work" }
+        model.updatePane(paneId) { $0.session?.cwd = home + "/work" }
         let snapshot = toSnapshot(model)
         #expect(allPaneSnapshots(snapshot)[0].cwd == "~/work")
     }
@@ -437,7 +437,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.updatePane(paneId) { $0.cwd = home + "/code" }
+        model.updatePane(paneId) { $0.session?.cwd = home + "/code" }
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("claude")))
         let snapshot = toSnapshot(model)
@@ -463,7 +463,7 @@ import Testing
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
+        model.updatePane(paneId) { $0.session?.cwd = NSHomeDirectory() + "/work" }
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("claude")))
         let snapshot = toSnapshot(model)

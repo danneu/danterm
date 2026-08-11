@@ -4,12 +4,9 @@
 
 /// Product-level events one pane session may emit to DanTerm's model loop.
 enum TerminalSessionEvent: Equatable {
-    case titleChanged(String)
-    case cwdChanged(String?)
     case bell
     case report(SessionReport)
     case desktopNotification(title: String, body: String)
-    case progress(ProgressState?)
     case searchStarted(String)
     case searchTotal(Int?)
     case searchSelected(Int?)
@@ -17,25 +14,19 @@ enum TerminalSessionEvent: Equatable {
     case closeRequested
 }
 
-/// Translates the closed session-event vocabulary into the existing pane messages.
+/// Translates the closed session-event vocabulary into model messages.
 func terminalMessages(
     for event: TerminalSessionEvent,
     sessionId: SessionId,
     paneId: PaneId
 ) -> [Msg] {
     switch event {
-    case .titleChanged(let title):
-        return [.sessionTitle(paneId: paneId, title: title)]
-    case .cwdChanged(let cwd):
-        return [.sessionCwd(paneId: paneId, cwd: cwd)]
     case .bell:
-        return [.sessionBell(paneId: paneId)]
+        return [.sessionBell(sessionId: sessionId)]
     case .report(let report):
         return [.sessionReport(sessionId: sessionId, report: report)]
     case .desktopNotification(let title, let body):
-        return [.desktopNotification(paneId: paneId, title: title, body: body)]
-    case .progress(let state):
-        return [.sessionProgress(paneId: paneId, state: state)]
+        return [.sessionNotification(sessionId: sessionId, title: title, body: body)]
     case .searchStarted(let needle):
         return [.searchStarted(paneId: paneId, needle: needle)]
     case .searchTotal(let total):

@@ -2028,9 +2028,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(rows == [
             .tabSectionHeader,
             .tabEmptyPlaceholder,
-            .paneSectionHeader(paneId: paneA, title: model.pane(paneA)!.title),
+            .paneSectionHeader(paneId: paneA, title: model.pane(paneA)!.session?.title ?? "Terminal"),
             .paneEmptyPlaceholder(paneId: paneA),
-            .paneSectionHeader(paneId: paneB, title: model.pane(paneB)!.title),
+            .paneSectionHeader(paneId: paneB, title: model.pane(paneB)!.session?.title ?? "Terminal"),
             .paneEmptyPlaceholder(paneId: paneB),
         ])
     }
@@ -2192,7 +2192,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(previous != next, "tab todo changes should update the projection")
 
         previous = next
-        model.updatePane(paneA) { $0.title = "renamed pane" }
+        model.updatePane(paneA) { $0.session?.title = "renamed pane" }
         next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "pane title changes should update the projection")
     }
@@ -2997,9 +2997,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.updatePane(paneId) {
-            $0.title = "vim"
-            $0.cwd = "/work/proj"
-            $0.progress = .set(percent: 42)
+            $0.session?.title = "vim"
+            $0.session?.cwd = "/work/proj"
+            $0.session?.progress = .set(percent: 42)
             $0.todos = [
                 TodoItem(id: UUID(), text: "a", isDone: false),
                 TodoItem(id: UUID(), text: "b", isDone: true),
@@ -3169,8 +3169,11 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let tA = TabId(); let tB = TabId(); let tC = TabId()
         let pA = PaneId(); let pB = PaneId(); let pC = PaneId()
         var paneA = PaneModel(id: pA)
-        paneA.title = "shell"
-        paneA.cwd = "\(NSHomeDirectory())/src"
+        paneA.session = SessionModel(
+            id: SessionId(),
+            title: "shell",
+            cwd: "\(NSHomeDirectory())/src"
+        )
         var tabA = TabModel(id: tA, focusedPaneId: pA, rootNode: .leaf(paneA))
         tabA.customTitle = "Edited"; tabA.color = .blue
         let tabB = TabModel(id: tB, focusedPaneId: pB, rootNode: .leaf(PaneModel(id: pB)))
@@ -3245,7 +3248,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         model.groups[0].tabs[0].customTitle = "Custom"
-        model.updatePane(paneId) { $0.cwd = "\(NSHomeDirectory())/src" }
+        model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/src" }
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "t1", isDone: false)]
         model.updatePane(paneId) {
             $0.todos = [
@@ -3296,12 +3299,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.updatePane(paneId) { $0.title = "vim" }
+        model.updatePane(paneId) { $0.session?.title = "vim" }
         var proj = desiredWindowChrome(in: model)
         #expect(proj.windowTitle == "vim", "no subtitle -> window title is the bare display title")
         #expect(proj.contentTitle == "vim")
         model.groups[0].tabs[0].customTitle = "~/src"
-        model.updatePane(paneId) { $0.cwd = "\(NSHomeDirectory())/src" }
+        model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/src" }
         proj = desiredWindowChrome(in: model)
         #expect(proj.windowTitle == "~/src", "subtitle == display title is suppressed")
     }

@@ -23,7 +23,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .sessionBell(paneId: paneId))
+        let commands = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 0, "no alert for bell on focused pane")
         #expect(commands.count == 0, "no commands for bell on focused pane")
     }
@@ -42,7 +42,7 @@ import Testing
 
         createTab(&model)
 
-        let commands = update(&model, .sessionBell(paneId: firstTabPaneId))
+        let commands = update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .bell)
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
@@ -68,7 +68,7 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .sessionBell(paneId: paneId))
+        let commands = update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 1, "should create one alert")
         #expect(model.alerts[0].kind == .bell)
         #expect(model.alerts[0].isUnread == true, "alert should be unread")
@@ -152,10 +152,10 @@ import Testing
 
         createTab(&model)
 
-        update(&model, .sessionBell(paneId: firstTabPaneId))
+        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
         #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "should set lastNotificationTime for bell")
 
-        let effects2 = update(&model, .sessionBell(paneId: firstTabPaneId))
+        let effects2 = update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
         #expect(!hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false
@@ -178,15 +178,15 @@ import Testing
         let sessionId = SessionId()
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let coalescedMessages: [Msg] = [
-            .sessionTitle(paneId: paneId, title: "vim"),
-            .sessionCwd(paneId: paneId, cwd: "/tmp"),
-            .sessionProgress(paneId: paneId, state: .set(percent: 50)),
+            .sessionReport(sessionId: sessionId, report: .title("vim")),
+            .sessionReport(sessionId: sessionId, report: .cwd("/tmp")),
+            .sessionReport(sessionId: sessionId, report: .progress(.set(percent: 50))),
             .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
             .searchTotalReported(paneId: paneId, total: 42),
             .searchSelectionReported(paneId: paneId, selected: 3),
-            .sessionBell(paneId: paneId),
-            .desktopNotification(
-                paneId: paneId,
+            .sessionBell(sessionId: sessionId),
+            .sessionNotification(
+                sessionId: sessionId,
                 title: "build",
                 body: "done"
             ),
@@ -261,15 +261,15 @@ import Testing
         let unfocusedSessionId = unfocusedModel.pane(unfocusedPane)!.session!.id
 
         let scenarios: [(Msg, AppModel)] = [
-            (.sessionTitle(paneId: focusedPane, title: "vim"), focusedModel),
-            (.sessionCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
-            (.sessionProgress(paneId: focusedPane, state: .set(percent: 50)), focusedModel),
-            (.sessionTitle(paneId: unfocusedPane, title: "htop"), unfocusedModel),
-            (.sessionCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
-            (.sessionProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel),
-            (.sessionBell(paneId: unfocusedPane), unfocusedModel),
-            (.desktopNotification(
-                paneId: unfocusedPane,
+            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .title("vim")), focusedModel),
+            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .cwd("/tmp")), focusedModel),
+            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .progress(.set(percent: 50))), focusedModel),
+            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .title("htop")), unfocusedModel),
+            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .cwd("/var/tmp")), unfocusedModel),
+            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .progress(.indeterminate)), unfocusedModel),
+            (.sessionBell(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel)), unfocusedModel),
+            (.sessionNotification(
+                sessionId: sessionId(for: unfocusedPane, in: unfocusedModel),
                 title: "build",
                 body: "done"
             ), unfocusedModel),
@@ -301,9 +301,9 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
-        #expect(model.pane(paneId)?.title == "vim")
-        #expect(model.groups[0].tabs[0].title == "vim")
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
+        #expect(model.pane(paneId)?.session?.title == "vim")
+        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "vim")
     }
 
     @Test("testSessionTitleUnfocusedPane")
@@ -318,9 +318,9 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
 
-        let commands = update(&model, .sessionTitle(paneId: paneA, title: "htop"))
-        #expect(model.pane(paneA)?.title == "htop", "pane title should update")
-        #expect(model.groups[0].tabs[0].title == "Terminal", "tab title should not change")
+        let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("htop")))
+        #expect(model.pane(paneA)?.session?.title == "htop", "pane title should update")
+        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "Terminal", "tab title should not change")
         #expect(commands.isEmpty)
     }
 
@@ -335,9 +335,9 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .sessionCwd(paneId: paneId, cwd: "/home/dan/projects"))
-        #expect(model.pane(paneId)?.cwd == "/home/dan/projects")
-        #expect(model.groups[0].tabs[0].subtitle == abbreviateHome("/home/dan/projects"),
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/home/dan/projects")))
+        #expect(model.pane(paneId)?.session?.cwd == "/home/dan/projects")
+        #expect(tabSubtitle(model.groups[0].tabs[0], in: model) == abbreviateHome("/home/dan/projects"),
             "focused-pane cwd syncs the selected tab's subtitle (the window-chrome input)")
     }
 
@@ -353,8 +353,8 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
 
-        let commands = update(&model, .sessionCwd(paneId: paneA, cwd: "/tmp"))
-        #expect(model.pane(paneA)?.cwd == "/tmp", "pane cwd should update")
+        let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .cwd("/tmp")))
+        #expect(model.pane(paneA)?.session?.cwd == "/tmp", "pane cwd should update")
         #expect(commands.isEmpty)
     }
 
@@ -373,9 +373,9 @@ import Testing
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        update(&model, .sessionTitle(paneId: paneA, title: "vim"))
-        #expect(model.pane(paneA)?.title == "vim", "pane title should update")
-        #expect(model.groups[0].tabs[0].title == "vim", "background tab title should update")
+        update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("vim")))
+        #expect(model.pane(paneA)?.session?.title == "vim", "pane title should update")
+        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "vim", "background tab title should update")
     }
 
     @Test("testSessionPwdBackgroundTab")
@@ -392,9 +392,9 @@ import Testing
         createTab(&model)
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        update(&model, .sessionCwd(paneId: paneA, cwd: "/tmp"))
-        #expect(model.pane(paneA)?.cwd == "/tmp", "pane cwd should update")
-        #expect(model.groups[0].tabs[0].subtitle == ("~" == abbreviateHome("/tmp") ? "~" : "/tmp"), "background tab subtitle should update")
+        update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .cwd("/tmp")))
+        #expect(model.pane(paneA)?.session?.cwd == "/tmp", "pane cwd should update")
+        #expect(tabSubtitle(model.groups[0].tabs[0], in: model) == ("~" == abbreviateHome("/tmp") ? "~" : "/tmp"), "background tab subtitle should update")
     }
 
     @Test("terminal metadata accepts 64 KiB values and rejects larger values")
@@ -416,33 +416,33 @@ import Testing
         let accepted = String(repeating: "a", count: 64 * 1024)
         let rejected = accepted + "b"
 
-        #expect(update(&model, .sessionTitle(paneId: paneId, title: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.title != rejected)
-        #expect(update(&model, .sessionTitle(paneId: paneId, title: accepted)).isEmpty)
-        #expect(model.pane(paneId)?.title == accepted)
+        #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(rejected))).isEmpty)
+        #expect(model.pane(paneId)?.session?.title != rejected)
+        #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(accepted))).isEmpty)
+        #expect(model.pane(paneId)?.session?.title == accepted)
 
-        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.cwd != rejected)
-        #expect(update(&model, .sessionCwd(paneId: paneId, cwd: accepted)).isEmpty)
-        #expect(model.pane(paneId)?.cwd == accepted)
+        #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(rejected))).isEmpty)
+        #expect(model.pane(paneId)?.session?.cwd != rejected)
+        #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(accepted))).isEmpty)
+        #expect(model.pane(paneId)?.session?.cwd == accepted)
 
         model.isAppActive = false
-        #expect(update(&model, .desktopNotification(
-            paneId: paneId,
+        #expect(update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
             title: rejected,
             body: "body"
         )).isEmpty)
         #expect(model.alerts.isEmpty)
-        #expect(update(&model, .desktopNotification(
-            paneId: paneId,
+        #expect(update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
             title: "title",
             body: rejected
         )).isEmpty)
         #expect(model.alerts.isEmpty)
-        #expect(update(&model, .desktopNotification(
-            paneId: paneId,
-            title: "title",
-            body: "body"
+        #expect(update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
+            title: accepted,
+            body: accepted
         )).count == 1)
         #expect(model.alerts.count == 1)
     }
@@ -460,8 +460,8 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .desktopNotification(
-            paneId: paneId,
+        let commands = update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
             title: "Build complete",
             body: "make finished"
         ))
@@ -577,8 +577,8 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .desktopNotification(
-            paneId: paneId,
+        let commands = update(&model, .sessionNotification(
+            sessionId: sessionId(for: paneId, in: model),
             title: "Hello",
             body: "World"
         ))
@@ -605,8 +605,8 @@ import Testing
 
         createTab(&model)
 
-        let commands = update(&model, .desktopNotification(
-            paneId: firstTabPaneId,
+        let commands = update(&model, .sessionNotification(
+            sessionId: sessionId(for: firstTabPaneId, in: model),
             title: "Hello",
             body: "World"
         ))
@@ -632,11 +632,11 @@ import Testing
 
         createTab(&model)
 
-        update(&model, .sessionBell(paneId: firstTabPaneId))
+        update(&model, .sessionBell(sessionId: sessionId(for: firstTabPaneId, in: model)))
         #expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "bell should set lastNotificationTime")
 
-        let commands = update(&model, .desktopNotification(
-            paneId: firstTabPaneId,
+        let commands = update(&model, .sessionNotification(
+            sessionId: sessionId(for: firstTabPaneId, in: model),
             title: "Done",
             body: "Task finished"
         ))
@@ -646,8 +646,8 @@ import Testing
         }, "desktop notification should not be throttled by bell")
         #expect(model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] != nil, "should set lastNotificationTime for desktopNotification")
 
-        let effects2 = update(&model, .desktopNotification(
-            paneId: firstTabPaneId,
+        let effects2 = update(&model, .sessionNotification(
+            sessionId: sessionId(for: firstTabPaneId, in: model),
             title: "Done2",
             body: "Again"
         ))
@@ -669,8 +669,8 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let commands = update(&model, .sessionProgress(paneId: paneId, state: .set(percent: 50)))
-        #expect(model.pane(paneId)?.progress == .set(percent: 50))
+        let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.set(percent: 50))))
+        #expect(model.pane(paneId)?.session?.progress == .set(percent: 50))
         #expect(commands.count == 0, "no commands from progress update")
     }
 
@@ -683,11 +683,11 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .sessionProgress(paneId: paneId, state: .set(percent: 75)))
-        #expect(model.pane(paneId)?.progress == .set(percent: 75))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.set(percent: 75))))
+        #expect(model.pane(paneId)?.session?.progress == .set(percent: 75))
 
-        update(&model, .sessionProgress(paneId: paneId, state: nil))
-        #expect(model.pane(paneId)?.progress == nil, "progress should be cleared")
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(nil)))
+        #expect(model.pane(paneId)?.session?.progress == nil, "progress should be cleared")
     }
 
     @Test("testSessionProgressUnknownPaneIsNoop")
@@ -697,9 +697,10 @@ import Testing
         // Scenario: spec-first stale-pane progress.
         var model = makeModel()
         createTab(&model)
-        let unknownPaneId = PaneId()
-
-        let commands = update(&model, .sessionProgress(paneId: unknownPaneId, state: .set(percent: 50)))
+        let commands = update(
+            &model,
+            .sessionReport(sessionId: SessionId(), report: .progress(.set(percent: 50)))
+        )
         #expect(commands.count == 0, "no commands for unknown pane")
     }
 
@@ -712,11 +713,11 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .sessionProgress(paneId: paneId, state: .indeterminate))
-        update(&model, .sessionTitle(paneId: paneId, title: "vim"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.indeterminate)))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
 
-        #expect(model.pane(paneId)?.progress == .indeterminate, "progress should survive title update")
-        #expect(model.pane(paneId)?.title == "vim")
+        #expect(model.pane(paneId)?.session?.progress == .indeterminate, "progress should survive title update")
+        #expect(model.pane(paneId)?.session?.title == "vim")
     }
 
     @Test("testProgressStateSurvivesCwdUpdate")
@@ -728,11 +729,11 @@ import Testing
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .sessionProgress(paneId: paneId, state: .error(percent: 80)))
-        update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .progress(.error(percent: 80))))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/tmp")))
 
-        #expect(model.pane(paneId)?.progress == .error(percent: 80), "progress should survive cwd update")
-        #expect(model.pane(paneId)?.cwd == "/tmp")
+        #expect(model.pane(paneId)?.session?.progress == .error(percent: 80), "progress should survive cwd update")
+        #expect(model.pane(paneId)?.session?.cwd == "/tmp")
     }
 
     @Test("testSessionClosed")

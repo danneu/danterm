@@ -902,16 +902,16 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .sessionCwd(paneId: paneId, cwd: "/tmp/project"))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/tmp/project")))
 
-        update(&model, .sessionCwd(paneId: paneId, cwd: nil))
+        update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(nil)))
         let snapshot = toSnapshot(model, home: "/Users/testhome")
         let restored = try #require(validateAndBuild(snapshot))
         let paneSnapshot = try #require(allPaneSnapshots(snapshot).first)
 
-        #expect(model.pane(paneId)?.cwd == nil)
+        #expect(model.pane(paneId)?.session?.cwd == nil)
         #expect(paneSnapshot.cwd == nil)
-        #expect(restored.pane(paneId)?.cwd == nil)
+        #expect(restored.pane(paneId)?.session?.cwd == nil)
     }
 
     @Test("snapshot round-trip preserves tab todos")

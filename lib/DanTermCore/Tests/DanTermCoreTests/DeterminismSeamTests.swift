@@ -57,7 +57,7 @@ import Testing
         let env = makeTestEnv(idSequence: Self.idSequence, homeDirectory: Self.fakeHome)
         let loaded = try loadValidatedInitFile(from: data, env: env)
         let paneId = loaded.model.allPaneIds[0]
-        #expect(loaded.model.pane(paneId)?.cwd == Self.fakeHome + "/foo")
+        #expect(loaded.model.pane(paneId)?.session?.cwd == Self.fakeHome + "/foo")
     }
 
     // MARK: - snapshot-abbreviate (the SAVED axis: injected home -> ~/)
@@ -75,7 +75,11 @@ import Testing
         var model = makeModel()
         model.groups[0].tabs.append(
             TabModel(id: tabId, focusedPaneId: paneId,
-                rootNode: .leaf(PaneModel(id: paneId, title: "T", cwd: Self.fakeHome + "/foo", theme: nil))))
+                rootNode: .leaf(PaneModel(
+                    id: paneId,
+                    session: SessionModel(id: SessionId(), title: "T", cwd: Self.fakeHome + "/foo"),
+                    theme: nil
+                ))))
         model.selectedTabId = tabId
 
         let snapshot = toSnapshot(model, home: Self.fakeHome)
@@ -144,14 +148,18 @@ import Testing
         let tabId = TabId()
         var model = makeModel()
         model.groups[0].tabs.append(
-            TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId))))
+            TabModel(
+                id: tabId,
+                focusedPaneId: paneId,
+                rootNode: .leaf(PaneModel(id: paneId, session: SessionModel(id: SessionId())))
+            ))
         model.selectedTabId = tabId
 
-        _ = update(&model, .sessionCwd(paneId: paneId, cwd: h + "/sentinel"), env: env)
-        _ = update(&model, .sessionTitle(paneId: paneId, title: h + "/sentinel"), env: env)
+        _ = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(h + "/sentinel")), env: env)
+        _ = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(h + "/sentinel")), env: env)
 
-        #expect(model.pane(paneId)?.cwd == h + "/sentinel", "cwd stored raw, not abbreviated into the model")
-        #expect(model.pane(paneId)?.title == h + "/sentinel", "title stored raw, not abbreviated into the model")
+        #expect(model.pane(paneId)?.session?.cwd == h + "/sentinel", "cwd stored raw, not abbreviated into the model")
+        #expect(model.pane(paneId)?.session?.title == h + "/sentinel", "title stored raw, not abbreviated into the model")
     }
 
     // MARK: - path-helper boundary (travels with the boundary-aware abbreviateHome / expandTilde fixes)
