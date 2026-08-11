@@ -242,8 +242,11 @@ an omission.
 
 ## Commit progress
 
-- [x] 1. Establish width-invariant record projection and stable record coordinates
-- [x] 2. Index closed-history search matches by record coordinates
+- [x] 1. Establish width-invariant record projection and stable record
+  coordinates -- `caeb7d3a`
+- [x] 2. Index closed-history search matches by record coordinates --
+  `2bf55fe6`
+- [x] 3. Post-implementation hardening from the perf review -- `8425340e`
 
 ## Implementation notes
 
@@ -256,6 +259,42 @@ an omission.
   If that ordinal space is ever exhausted, the store retires all history and
   advances an epoch before admitting another record, so an old coordinate can
   never resolve to new text.
-- The closed-history index keeps record endpoints unresolved. Ordered reads
-  resolve only the matches they inspect, while nearest-match ties count
-  projected content units instead of width-dependent hard-line padding.
+- The closed-history index keeps record endpoints unresolved, and nearest-match
+  ties count projected content units instead of width-dependent hard-line
+  padding. As of `2bf55fe6` the ordered reads still resolved coordinates inside
+  their binary searches; the discipline of resolving only returned matches
+  landed in `8425340e` below.
+
+### Post-implementation hardening (`8425340e`)
+
+A perf review of `2bf55fe6` found the read and build paths spending the cost
+the plan's invariants bound, unobserved because no counter fired on coordinate
+resolution:
+
+- Ordered reads compared stored matches by resolving them into display
+  geometry -- a record fold per binary search probe, so I7's depth independence
+  failed while PO7's locate assertion stayed green. Reads now convert the query
+  point once, compare record coordinates directly, and resolve only the matches
+  they return. A new `RecordPositionResolutionCounter` fires on every
+  resolution, and a frame-cost test pins resolutions and locates as equal at
+  two retained depths.
+- The index build materialized every record's cells and asked the store to
+  derive each cell's coordinate twice, though identity and trim base are
+  per-record constants. The build now streams kinds and scalars from the packed
+  arena words (`ClosedRecordScan` / `forEachClosedRecordCell`, the width-free
+  counterpart of `withPaintedCells`) and states coordinates arithmetically. A
+  new `RecordCellMaterializationCounter` and a two-depth test pin the build at
+  zero materializations.
+- The match snapshot held a second live reference to the store on every read --
+  the arena copy hazard `research/31/F13` measured. It now holds only the two
+  match halves.
+- `RecordIdentity` packed its retirement generation beside the ordinal into one
+  word, returning a coordinate to 16 bytes and a stored match to 32, with the
+  store's own no-reissue property intact and no staleness check at call sites.
+  A layout test pins the strides.
+
+Residual, carried rather than hidden: when the durable position does not sit on
+an occurrence, the nearest-occurrence distance walk is bounded by the gap
+between the two bracketing occurrences -- not by the viewport. Closing it needs
+the cumulative content coordinate named in "The ideal beyond this plan"; the
+ideal is also recorded on `searchDistance`'s doc comment.
