@@ -424,6 +424,47 @@ struct TerminalSearchTests {
         }
     }
 
+    @Test("the search scan agrees with an independently segmented projection oracle")
+    func searchScanMatchesIndependentOracle() throws {
+        // Intent: search returns exactly the overlapping grapheme-aligned matches in the
+        //   painted logical-text projection under per-grapheme canonical caseless folding.
+        // Why it exists: index-versus-scan tests share one matcher, so a streaming rewrite
+        //   could change the match set while both sides stayed green.
+        // Scenario: a pane combines normalization forms, expanding folds, padding, soft wraps,
+        //   hard boundaries, and the retained/live seam while a user searches each distinction.
+        let cases = [
+            (columns: 5, rows: 2, text: "AaA ñ n\u{0303}", needles: ["aa", "Ñ", "n\u{0303}"]),
+            (columns: 5, rows: 2, text: "ß ﬁ ① Ａ", needles: ["ß", "ss", "ﬁ", "fi", "1", "A"]),
+            (columns: 5, rows: 2, text: "🙂A🙂a", needles: ["🙂a"]),
+            (columns: 4, rows: 2, text: "ABCDABCDABCD", needles: ["DAB", "BCDAB"]),
+            (columns: 4, rows: 2, text: "A\r\n\r\nB", needles: ["\n", "A\n", "\nB"]),
+        ]
+
+        for testCase in cases {
+            var terminal = try #require(Terminal(columns: testCase.columns, rows: testCase.rows))
+            terminal.feed(Array(testCase.text.utf8))
+
+            for needle in testCase.needles {
+                _ = terminal.beginSearch(needle)
+                let rows = 0..<terminal.scrollProjection.totalRows
+                #expect(
+                    terminal.searchMatchRanges(in: rows)
+                        == independentSearchMatchRanges(in: terminal, needle: needle)
+                )
+            }
+        }
+
+        var padding = try #require(Terminal(columns: 4, rows: 2))
+        padding.moveCursor(row: 0, column: 3)
+        padding.feed(Array("XY".utf8))
+        _ = padding.beginSearch("  XY")
+        let paddingRows = 0..<padding.scrollProjection.totalRows
+        #expect(
+            padding.searchMatchRanges(in: paddingRows)
+                == independentSearchMatchRanges(in: padding, needle: "  XY")
+        )
+    }
+
     @Test("the retained index equals a full rescan across output tail changes and resize")
     func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
@@ -583,4 +624,123 @@ private func assertSearchIndexMatchesFullScan(
         terminal.searchMatchRanges(in: rows) == terminal.scannedSearchMatchRanges(in: rows),
         sourceLocation: sourceLocation
     )
+}
+
+private struct SearchOracleScalar {
+    var scalar: Unicode.Scalar
+    var start: TerminalTextPosition
+    var end: TerminalTextPosition
+}
+
+private struct SearchOracleGrapheme {
+    var key: [Unicode.Scalar]
+    var start: TerminalTextPosition
+    var end: TerminalTextPosition
+}
+
+private func independentSearchMatchRanges(
+    in terminal: Terminal,
+    needle: String
+) -> [TerminalTextRange] {
+    let projection = independentSearchProjection(terminal)
+    let projectionScalars = projection.map(\.scalar)
+    let projectedGraphemes = graphemeRanges(in: projectionScalars).map { range in
+        SearchOracleGrapheme(
+            key: canonicalCaselessKey(for: Array(projectionScalars[range])),
+            start: projection[range.lowerBound].start,
+            end: projection[range.upperBound - 1].end
+        )
+    }
+    let needleScalars = Array(needle.unicodeScalars)
+    let needleKeys = graphemeRanges(in: needleScalars).map {
+        canonicalCaselessKey(for: Array(needleScalars[$0]))
+    }
+    guard needleKeys.isEmpty == false, needleKeys.count <= projectedGraphemes.count else {
+        return []
+    }
+
+    return projectedGraphemes.indices.dropLast(needleKeys.count - 1).compactMap { start in
+        let end = start + needleKeys.count
+        guard projectedGraphemes[start..<end].map(\.key) == needleKeys else { return nil }
+        return TerminalTextRange(
+            start: projectedGraphemes[start].start,
+            end: projectedGraphemes[end - 1].end
+        )
+    }
+}
+
+private func independentSearchProjection(_ terminal: Terminal) -> [SearchOracleScalar] {
+    let structures = terminal.rowStructure
+    let retainedCount = terminal.scrollbackRowCount
+    let rows = structures.compactMap { structure -> Terminal.GridRow? in
+        structure.isRetained
+            ? terminal.retainedRowForTesting(at: structure.index)
+            : terminal.liveRowForTesting(at: structure.index - retainedCount)
+    }
+    guard let lastContentRow = structures.lastIndex(where: { $0.contentEnd > 0 }) else {
+        return []
+    }
+
+    var result: [SearchOracleScalar] = []
+    for rowIndex in 0...lastContentRow {
+        let row = rows[rowIndex]
+        let structure = structures[rowIndex]
+        let projectedEnd = structure.isSoftWrapped
+            ? min(
+                terminal.viewportColumnCount,
+                structure.marginCellKind == .spacerHead
+                    ? row.cells.count + 1
+                    : row.cells.count
+            )
+            : structure.contentEnd
+        var column = 0
+        while column < projectedEnd {
+            let cell = row.cell(at: column)
+            let width = cell.kind == .wideHead ? 2 : 1
+            let scalars: [Unicode.Scalar]
+            switch cell.kind {
+            case .narrow, .wideHead:
+                scalars = Array(cell.scalars)
+            case .padding:
+                scalars = [" "]
+            case .wideTail, .spacerHead:
+                scalars = []
+            }
+            for scalar in scalars {
+                result.append(SearchOracleScalar(
+                    scalar: scalar,
+                    start: TerminalTextPosition(row: rowIndex, column: column),
+                    end: TerminalTextPosition(row: rowIndex, column: column + width)
+                ))
+            }
+            column += width
+        }
+        if rowIndex < lastContentRow, structure.isSoftWrapped == false {
+            result.append(SearchOracleScalar(
+                scalar: "\n",
+                start: TerminalTextPosition(row: rowIndex, column: projectedEnd),
+                end: TerminalTextPosition(row: rowIndex + 1, column: 0)
+            ))
+        }
+    }
+    return result
+}
+
+private func graphemeRanges(in scalars: [Unicode.Scalar]) -> [Range<Int>] {
+    guard scalars.isEmpty == false else { return [] }
+    var result: [Range<Int>] = []
+    var start = 0
+    var previous = scalars[0]
+    var state = GraphemeBreakState()
+    for index in scalars.indices.dropFirst() {
+        let current = scalars[index]
+        if graphemeBreak(between: previous, and: current, state: &state) {
+            result.append(start..<index)
+            start = index
+            state = GraphemeBreakState()
+        }
+        previous = current
+    }
+    result.append(start..<scalars.endIndex)
+    return result
 }
