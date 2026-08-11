@@ -338,7 +338,7 @@ folding and re-projecting.
 
 - [x] 1. Pin the scan's match set with an oracle independent of the scan
 - [x] 2. Stream the row scan without materializing units or allocating per cell
-- [ ] 3. Advance the prefix from a carried boundary window instead of re-reading context
+- [x] 3. Advance the prefix from a carried boundary window instead of re-reading context
 - [ ] 4. Reduce eviction and truncation to arithmetic on the sorted match sequence
 - [ ] 5. Build the index from a single walk of history
 - [ ] 6. Measure the per-row damage widening; if it is not small, drop its

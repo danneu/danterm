@@ -488,6 +488,31 @@ struct TerminalSearchTests {
         }
     }
 
+    @Test("prefix advance projects a fixed row count for short and long needles")
+    func prefixAdvanceProjectionCostIsIndependentOfNeedleLength() throws {
+        // Intent: advancing the immutable search prefix projects each newly closed row once.
+        // Why it exists: rebuilding left and right context for every closed row made feed cost
+        //   grow linearly with the needle length.
+        // Scenario: identical tailing panes keep absent one- and 24-character needles open.
+        func measuredRows(needle: String) throws -> Int {
+            var terminal = try #require(Terminal(columns: 32, rows: 3))
+            terminal.feed(Array("seed\r\nseed\r\nseed".utf8))
+            _ = terminal.beginSearch(needle)
+
+            return ProjectionRowCounter.measure {
+                for index in 0..<20 {
+                    terminal.feed(Array("row \(index)\r\n".utf8))
+                }
+            }
+        }
+
+        let shortNeedleRows = try measuredRows(needle: "z")
+        let longNeedleRows = try measuredRows(needle: String(repeating: "z", count: 24))
+
+        #expect(shortNeedleRows == 20)
+        #expect(longNeedleRows == shortNeedleRows)
+    }
+
     @Test("the retained index equals a full rescan across output tail changes and resize")
     func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))

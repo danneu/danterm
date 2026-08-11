@@ -521,9 +521,19 @@ public struct Terminal: Equatable, Sendable {
     /// later content makes their hard boundaries part of the text projection.
     private struct SearchMatchIndex: Equatable, Sendable {
         var needleKeys: [SearchGraphemeKey]
+        var retainedStartRow: Int
         var prefixEndRow: Int
+        var boundaryWindow: [SearchProjectionUnit]
         var prefixMatches: [TextAnchorRange]
         var confirmedPrefixMatchCount: Int
+    }
+
+    /// Carries the folded units immediately before the immutable-prefix boundary so advancing
+    /// that boundary never has to project rows it already scanned.
+    private struct SearchProjectionUnit: Equatable, Sendable {
+        var key: SearchGraphemeKey
+        var start: TextAnchor
+        var end: TextAnchor
     }
 
     /// Presents the immutable prefix and freshly scanned suffix as one ordered collection
@@ -3450,7 +3460,12 @@ public struct Terminal: Equatable, Sendable {
         ).filter { $0.end <= prefixBoundary }
         let index = SearchMatchIndex(
             needleKeys: needleKeys,
+            retainedStartRow: evictedRowCount,
             prefixEndRow: prefixEnd,
+            boundaryWindow: searchBoundaryWindow(
+                needleKeys: needleKeys,
+                endingAt: prefixEnd
+            ),
             prefixMatches: prefixCandidates,
             confirmedPrefixMatchCount: matches.lazy.filter { $0.end <= prefixBoundary }.count
         )
@@ -4156,6 +4171,7 @@ public struct Terminal: Equatable, Sendable {
         let oldEnd = search.index.prefixEndRow
         let boundary = TextAnchor(row: newEnd, column: 0)
         let firstRetainedRow = evictedRowCount
+        guard newEnd != oldEnd || firstRetainedRow != search.index.retainedStartRow else { return }
         let confirmed = search.index.prefixMatches.prefix(search.index.confirmedPrefixMatchCount)
         let retainedConfirmedCount = confirmed.lazy.filter {
             $0.start.row >= firstRetainedRow && $0.end <= boundary
@@ -4164,23 +4180,46 @@ public struct Terminal: Equatable, Sendable {
             $0.start.row < firstRetainedRow || $0.end > boundary
         }
         search.index.confirmedPrefixMatchCount = retainedConfirmedCount
-        if newEnd > oldEnd {
-            let mutableRows = oldEnd..<(evictedRowCount + projectionRowCount)
-            let additions = searchMatches(
+        let scanStart = max(oldEnd, firstRetainedRow)
+        let droppedBoundaryUnit = search.index.boundaryWindow.contains {
+            $0.start.row < firstRetainedRow
+        }
+        search.index.boundaryWindow.removeAll { $0.start.row < firstRetainedRow }
+        if newEnd < scanStart {
+            search.index.boundaryWindow = searchBoundaryWindow(
                 needleKeys: search.index.needleKeys,
-                intersecting: oldEnd..<newEnd,
-                lastContentRow: newEnd
-            ).filter {
-                $0.end > TextAnchor(row: oldEnd, column: 0) && $0.end <= boundary
+                endingAt: newEnd
+            )
+        } else if newEnd > scanStart {
+            if scanStart != oldEnd || droppedBoundaryUnit {
+                search.index.boundaryWindow = searchBoundaryWindow(
+                    needleKeys: search.index.needleKeys,
+                    endingAt: scanStart
+                )
             }
-            search.index.prefixMatches.append(contentsOf: additions)
+            let advanced = scanSearchUnits(
+                needleKeys: search.index.needleKeys,
+                seededBy: search.index.boundaryWindow,
+                absoluteRows: scanStart..<newEnd,
+                lastContentRow: newEnd,
+                matching: scanStart..<newEnd
+            )
+            search.index.boundaryWindow = advanced.trailingUnits
+            search.index.prefixMatches.append(contentsOf: advanced.matches)
+            let mutableRows = scanStart..<(evictedRowCount + projectionRowCount)
             if let lastContentRow = lastProjectedContentRow(in: mutableRows) {
                 search.index.confirmedPrefixMatchCount = prefixMatchCount(
                     in: search.index.prefixMatches,
                     throughContentRow: lastContentRow
                 )
             }
+        } else if droppedBoundaryUnit {
+            search.index.boundaryWindow = searchBoundaryWindow(
+                needleKeys: search.index.needleKeys,
+                endingAt: newEnd
+            )
         }
+        search.index.retainedStartRow = firstRetainedRow
         search.index.prefixEndRow = newEnd
         self.search = search
     }
@@ -4218,6 +4257,11 @@ public struct Terminal: Equatable, Sendable {
             lastContentRow: prefixEnd
         ).filter { $0.end <= boundary }
         search.index.prefixEndRow = prefixEnd
+        search.index.retainedStartRow = evictedRowCount
+        search.index.boundaryWindow = searchBoundaryWindow(
+            needleKeys: search.index.needleKeys,
+            endingAt: prefixEnd
+        )
         search.index.prefixMatches = prefixCandidates
         search.index.confirmedPrefixMatchCount = matches.lazy.filter { $0.end <= boundary }.count
         self.search = search
@@ -4240,46 +4284,92 @@ public struct Terminal: Equatable, Sendable {
         let scanStart = max(streamStart, absoluteRows.lowerBound - contextRows)
         let scanEnd = min(lastContentRow + 1, absoluteRows.upperBound + contextRows)
         guard scanStart < scanEnd else { return [] }
-        ProjectionRowCounter.record(rows: scanEnd - scanStart)
 
-        var matches: [TextAnchorRange] = []
-        var window = [SearchGraphemeKey?](repeating: nil, count: needleKeys.count)
-        var starts = [TextAnchor](
-            repeating: TextAnchor(row: 0, column: 0),
-            count: needleKeys.count
-        )
-        var unitCount = 0
-
-        func consume(_ key: SearchGraphemeKey, start: TextAnchor, end: TextAnchor) {
-            let endIndex = unitCount
-            let slot = endIndex % needleKeys.count
-            window[slot] = key
-            starts[slot] = start
-            unitCount += 1
-            guard unitCount >= needleKeys.count else { return }
-            let startIndex = unitCount - needleKeys.count
-            var matchesNeedle = true
-            for offset in needleKeys.indices {
-                guard window[(startIndex + offset) % needleKeys.count] == needleKeys[offset] else {
-                    matchesNeedle = false
-                    break
-                }
-            }
-            guard matchesNeedle else { return }
-            let match = TextAnchorRange(
-                start: starts[startIndex % needleKeys.count],
-                end: end
-            )
-            if range(match, intersects: absoluteRows) { matches.append(match) }
-        }
-
-        forEachSearchUnit(
-            in: stream,
+        return scanSearchUnits(
+            needleKeys: needleKeys,
+            seededBy: [],
             absoluteRows: scanStart..<scanEnd,
             lastContentRow: lastContentRow,
-            consume
-        )
-        return matches
+            matching: absoluteRows,
+            stream: stream
+        ).matches
+    }
+
+    private func scanSearchUnits(
+        needleKeys: [SearchGraphemeKey],
+        seededBy seed: [SearchProjectionUnit],
+        absoluteRows: Range<Int>,
+        lastContentRow: Int,
+        matching matchRows: Range<Int>,
+        stream suppliedStream: ProjectionRows? = nil
+    ) -> (matches: [TextAnchorRange], trailingUnits: [SearchProjectionUnit]) {
+        let stream = suppliedStream ?? activeProjection()
+        ProjectionRowCounter.record(rows: absoluteRows.count)
+        var matches: [TextAnchorRange] = []
+        var window = [SearchProjectionUnit?](repeating: nil, count: needleKeys.count)
+        var unitCount = 0
+
+        func consume(_ unit: SearchProjectionUnit, recordsMatch: Bool) {
+            let slot = unitCount % needleKeys.count
+            window[slot] = unit
+            unitCount += 1
+            guard recordsMatch, unitCount >= needleKeys.count else { return }
+            let startIndex = unitCount - needleKeys.count
+            for offset in needleKeys.indices {
+                guard window[(startIndex + offset) % needleKeys.count]?.key == needleKeys[offset]
+                else { return }
+            }
+            guard let start = window[startIndex % needleKeys.count]?.start else { return }
+            let match = TextAnchorRange(start: start, end: unit.end)
+            if range(match, intersects: matchRows) { matches.append(match) }
+        }
+
+        for unit in seed.suffix(max(0, needleKeys.count - 1)) {
+            consume(unit, recordsMatch: false)
+        }
+        forEachSearchUnit(
+            in: stream,
+            absoluteRows: absoluteRows,
+            lastContentRow: lastContentRow
+        ) { key, start, end in
+            consume(
+                SearchProjectionUnit(key: key, start: start, end: end),
+                recordsMatch: true
+            )
+        }
+
+        let trailingCount = min(max(0, needleKeys.count - 1), unitCount)
+        let trailingStart = unitCount - trailingCount
+        let trailingUnits = (trailingStart..<unitCount).compactMap {
+            window[$0 % needleKeys.count]
+        }
+        return (matches, trailingUnits)
+    }
+
+    /// Rebuilds only the units that can participate in a future cross-boundary match.
+    private func searchBoundaryWindow(
+        needleKeys: [SearchGraphemeKey],
+        endingAt boundary: Int
+    ) -> [SearchProjectionUnit] {
+        let targetCount = max(0, needleKeys.count - 1)
+        guard targetCount > 0, boundary > evictedRowCount else { return [] }
+        let stream = activeProjection()
+        var row = boundary
+        var units: [SearchProjectionUnit] = []
+        while row > evictedRowCount, units.count < targetCount {
+            row -= 1
+            ProjectionRowCounter.record(rows: 1)
+            var rowUnits: [SearchProjectionUnit] = []
+            forEachSearchUnit(
+                in: stream,
+                absoluteRows: row..<(row + 1),
+                lastContentRow: boundary
+            ) { key, start, end in
+                rowUnits.append(SearchProjectionUnit(key: key, start: start, end: end))
+            }
+            units.insert(contentsOf: rowUnits, at: 0)
+        }
+        return Array(units.suffix(targetCount))
     }
 
     /// Streams the painted projection as match keys and anchors without constructing selection
