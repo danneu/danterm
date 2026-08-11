@@ -649,9 +649,20 @@ struct TerminalSearchTests {
         terminal.setSearchPositionForTesting(TerminalTextPosition(row: 1, column: 3))
 
         #expect(terminal.activeSearchMatchRange?.start.row == 0)
-        terminal.resize(columns: 5, rows: 5)
+        // The older occurrence, counted the way the find bar counts.
+        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
 
-        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        // Narrower splits the middle line in two, wider joins it back into one; neither moves a
+        // cell of text, so neither may move the choice.
+        for columns in [5, 16] {
+            terminal.resize(columns: columns, rows: 5)
+
+            #expect(terminal.activeSearchMatchRange?.start.row == 0, "at \(columns) columns")
+            #expect(
+                terminal.searchStatus == .matched(selected: 1, total: 2),
+                "at \(columns) columns"
+            )
+        }
     }
 
     @Test("closed-record index advance performs no display-row projection")
@@ -677,6 +688,106 @@ struct TerminalSearchTests {
 
         #expect(shortNeedleRows == 0)
         #expect(longNeedleRows == 0)
+    }
+
+    @Test("a highlighted frame resolves the matches it draws, not the matches history holds")
+    func frameSearchResolutionCostIsIndependentOfHistoryDepth() throws {
+        // Intent: the reads one highlighted frame makes -- the counter, the visible ranges and
+        //   the selected occurrence -- resolve a viewport-sized number of record coordinates and
+        //   spend a fixed number of display-row locates, at any retained depth.
+        // Why it exists: `31/I7` and `31/AR3`. Record coordinates only order matches if the
+        //   comparison stays in record space; comparing them by resolving turns each ordered read
+        //   into a logarithmic walk of folds over retained history, which every behavioral
+        //   assertion in this suite passes straight through.
+        // Scenario: a user holds a dense search open over shallow and deep scrollback while the
+        //   renderer plans frames.
+        func frameCost(depth: Int) throws -> (resolutions: Int, locates: Int) {
+            var terminal = try #require(Terminal(columns: 16, rows: 8))
+            for _ in 0..<depth {
+                terminal.feed(Array("hit line\r\n".utf8))
+            }
+            _ = terminal.beginSearch("hit")
+            // Warm the read paths once, so the counts measure a steady frame rather than
+            // whatever the first one happens to fault in.
+            _ = terminal.searchStatus
+
+            var locates = 0
+            let resolutions = RecordPositionResolutionCounter.measure {
+                locates = LocateCounter.measure {
+                    _ = terminal.searchStatus
+                    _ = terminal.searchMatchRanges(in: 0..<8)
+                    _ = terminal.activeSearchMatchRange
+                }
+            }
+            return (resolutions, locates)
+        }
+
+        let shallow = try frameCost(depth: 40)
+        let deep = try frameCost(depth: 400)
+
+        // Calibration first: the frame highlights retained matches, so a working read path must
+        // resolve the ones it draws. Without this the whole test passes at zero -- a disconnected
+        // counter, or a read path that stopped consulting the index -- which is the instrument
+        // that cannot say "not measured" `agent-docs/measurement-discipline.md` rules out.
+        #expect(shallow.resolutions >= 8)
+        #expect(deep.resolutions == shallow.resolutions)
+        #expect(deep.locates == shallow.locates)
+        // Two endpoints for each of the eight visible matches and the selected one, plus the
+        // needle-length seam seed each of the three reads resolves.
+        #expect(shallow.resolutions <= 48)
+    }
+
+    @Test("entering a needle builds the retained index without materializing record cells")
+    func needleEntryBuildStreamsClosedRecordCells() throws {
+        // Intent: building the closed-history index for a new needle streams the arena, so no
+        //   depth of retained history turns a keystroke into decoded cells.
+        // Why it exists: a build that materializes each record's cells pays a style read, a
+        //   hyperlink probe and a content-identity probe per cell for a scan that keeps a folded
+        //   key, so the per-keystroke cost is retained depth times work the scan discards.
+        // Scenario: a user types a needle into the find bar over shallow and deep scrollback.
+        func buildCost(depth: Int) throws -> Int {
+            var terminal = try #require(Terminal(columns: 16, rows: 4))
+            for index in 0..<depth {
+                terminal.feed(Array("line \(index) hit\r\n".utf8))
+            }
+            return RecordCellMaterializationCounter.measure {
+                _ = terminal.beginSearch("hit")
+            }
+        }
+
+        #expect(try buildCost(depth: 50) == 0)
+        #expect(try buildCost(depth: 500) == 0)
+
+        // Calibration: the counter reports a materializing read, so the zeroes above are the
+        // build's behavior rather than an instrument nothing reaches.
+        var probe = try #require(Terminal(columns: 16, rows: 4))
+        for _ in 0..<8 {
+            probe.feed(Array("abcd\r\n".utf8))
+        }
+        let materialized = RecordCellMaterializationCounter.measure {
+            _ = probe.scrollbackRecordContentIdentityShape(at: 0)
+        }
+        #expect(materialized == 4)
+    }
+
+    @Test("the retained index keys wide and spilled cells the way a full scan does")
+    func retainedIndexKeysWideAndSpilledCellsLikeAFullScan() throws {
+        // Intent: occurrences indexed out of closed records agree with an independent scan when
+        //   those records hold two-column clusters and multi-scalar graphemes.
+        // Why it exists: the index reads closed records through a streaming decoder of its own,
+        //   so a cell whose scalars live in the spill table, or whose width is two, is exactly
+        //   where that decoder can disagree with the painted one while every other search test
+        //   stays green.
+        // Scenario: a pane scrolls emoji and combining-mark text into scrollback and the user
+        //   searches for it.
+        var terminal = try #require(Terminal(columns: 6, rows: 2))
+        terminal.feed(Array("🙂ab\r\nn\u{0303}xy\r\nz🙂q\r\ntail".utf8))
+        #expect(terminal.scrollbackRowCount >= 2)
+
+        for needle in ["🙂", "🙂a", "ñ", "n\u{0303}x", "🙂q", "b\nñ"] {
+            _ = terminal.beginSearch(needle)
+            assertSearchIndexMatchesOracle(terminal, needle: needle)
+        }
     }
 
     @Test("closed-history maintenance examines logarithmically many existing matches")

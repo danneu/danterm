@@ -578,35 +578,19 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Presents record-keyed closed matches and a freshly scanned suffix as one ordered
-    /// collection without copying or resolving the history-sized prefix on each read.
+    /// collection, in the two coordinate systems the two halves are keyed in.
+    ///
+    /// Holds no store and offers no subscript on purpose. Resolving a record coordinate folds
+    /// its record, so the reads that only *order* matches -- which is every ordered read but the
+    /// few endpoints they end up returning -- must be able to leave that cost unspent
+    /// (`31/I7`); and carrying a second live reference to the store would make the arena
+    /// non-uniquely referenced on every read, which is the copy `research/31/F13` measured.
     private struct SearchMatchSnapshot {
-        var history: LogicalLineStore
-        var absoluteHistoryStartRow: Int
         var prefix: Deque<RecordSearchRange>
         var suffix: [TextAnchorRange]
 
         var count: Int { prefix.count + suffix.count }
         var isEmpty: Bool { count == 0 }
-
-        subscript(index: Int) -> TextAnchorRange {
-            if index >= prefix.count { return suffix[index - prefix.count] }
-            let match = prefix[index]
-            guard let start = history.position(of: match.start),
-                  let end = history.position(of: match.end)
-            else {
-                preconditionFailure("the search index retained a retired record coordinate")
-            }
-            return TextAnchorRange(
-                start: TextAnchor(
-                    row: absoluteHistoryStartRow + start.displayRow,
-                    column: start.column
-                ),
-                end: TextAnchor(
-                    row: absoluteHistoryStartRow + end.displayRow,
-                    column: end.column
-                )
-            )
-        }
     }
 
     /// Retains hover presentation against reflowable text anchors without storing platform state.
@@ -2893,22 +2877,15 @@ public struct Terminal: Equatable, Sendable {
         let matches = currentSearchMatches(search)
         let contextRows = max(1, search.index.needleKeys.count - 1)
         let firstPossibleStart = absoluteRows.lowerBound - contextRows
-        var low = 0
-        var high = matches.count
-        while low < high {
-            let middle = (low + high) / 2
-            if matches[middle].start.row < firstPossibleStart {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
+        var index = searchMatchLowerBound(
+            in: matches,
+            notBefore: TextAnchor(row: firstPossibleStart, column: 0)
+        )
         var result: [TerminalTextRange] = []
-        var index = low
-        while index < matches.count, matches[index].start.row < absoluteRows.upperBound {
-            if range(matches[index], intersects: absoluteRows),
-               let publicMatch = publicRange(matches[index])
-            {
+        while index < matches.count {
+            let match = resolvedSearchMatchRange(index, in: matches)
+            guard match.start.row < absoluteRows.upperBound else { break }
+            if range(match, intersects: absoluteRows), let publicMatch = publicRange(match) {
                 result.append(publicMatch)
             }
             index += 1
@@ -3516,7 +3493,9 @@ public struct Terminal: Equatable, Sendable {
             index: index
         )
         let matches = currentSearchMatches(newSearch)
-        let newestMatch = matches.isEmpty ? nil : matches[matches.count - 1]
+        let newestMatch = matches.isEmpty
+            ? nil
+            : resolvedSearchMatchRange(matches.count - 1, in: matches)
         if let newestMatch { newSearch.position = newestMatch.start }
         search = newSearch
         revealSearchMatchIfNeeded(newestMatch)
@@ -3530,7 +3509,10 @@ public struct Terminal: Equatable, Sendable {
         guard let search else { return false }
         let matches = currentSearchMatches(search)
         guard let current = resolvedSearchMatch(in: matches)?.index else { return false }
-        let target = current > 0 ? matches[current - 1] : matches[matches.count - 1]
+        let target = resolvedSearchMatchRange(
+            current > 0 ? current - 1 : matches.count - 1,
+            in: matches
+        )
         self.search?.position = target.start
         revealSearchMatchIfNeeded(target)
         recordPresentationFullDamage()
@@ -3543,7 +3525,10 @@ public struct Terminal: Equatable, Sendable {
         guard let search else { return false }
         let matches = currentSearchMatches(search)
         guard let current = resolvedSearchMatch(in: matches)?.index else { return false }
-        let target = current + 1 < matches.count ? matches[current + 1] : matches[0]
+        let target = resolvedSearchMatchRange(
+            current + 1 < matches.count ? current + 1 : 0,
+            in: matches
+        )
         self.search?.position = target.start
         revealSearchMatchIfNeeded(target)
         recordPresentationFullDamage()
@@ -4207,23 +4192,16 @@ public struct Terminal: Equatable, Sendable {
         let prefixEndRow = evictedRowCount + history.closedPrefixDisplayRowCount
         let streamEndRow = evictedRowCount + projectionRowCount
         guard prefixEndRow < streamEndRow else {
-            return SearchMatchSnapshot(
-                history: history,
-                absoluteHistoryStartRow: evictedRowCount,
-                prefix: search.index.prefixMatches,
-                suffix: []
-            )
+            return SearchMatchSnapshot(prefix: search.index.prefixMatches, suffix: [])
         }
         let suffixRows = prefixEndRow..<streamEndRow
         let suffixLastContentRow = lastProjectedContentRow(in: suffixRows)
         guard let suffixLastContentRow else {
-            return SearchMatchSnapshot(
-                history: history,
-                absoluteHistoryStartRow: evictedRowCount,
-                prefix: search.index.prefixMatches,
-                suffix: []
-            )
+            return SearchMatchSnapshot(prefix: search.index.prefixMatches, suffix: [])
         }
+        // The seed's own endpoints are resolved eagerly rather than on demand: there are at most
+        // needle-length-minus-one of them, which is the bound the mutable suffix's rescan already
+        // carries (`31/AR4`), and a match that starts inside the seed needs them.
         var seed = search.index.boundaryWindow.compactMap { unit -> SearchProjectionUnit? in
             guard let start = history.position(of: unit.start),
                   let end = history.position(of: unit.end)
@@ -4242,14 +4220,9 @@ public struct Terminal: Equatable, Sendable {
         }
         var matchingSeedSuffixCount = 0
         if history.closedRecordCount > 0 {
-            let last = history.closedRecordCount - 1
-            if history.recordSummary(at: last)?.isForcedSplit == false,
-               let summary = history.recordSummary(at: last),
-               let boundary = history.recordTextPosition(
-                   recordIndex: last,
-                   cellOffset: summary.cellCount
-               ),
-               let start = history.position(of: boundary)
+            if let scan = history.closedRecordScan(at: history.closedRecordCount - 1),
+               scan.isForcedSplit == false,
+               let start = history.position(of: recordPosition(endingRecord: scan))
             {
                 seed.append(SearchProjectionUnit(
                     key: .scalar(0x0A),
@@ -4272,12 +4245,78 @@ public struct Terminal: Equatable, Sendable {
                 : suffixRows,
             matchingSeedSuffixCount: matchingSeedSuffixCount
         ).matches
-        return SearchMatchSnapshot(
-            history: history,
-            absoluteHistoryStartRow: evictedRowCount,
-            prefix: search.index.prefixMatches,
-            suffix: suffix
+        return SearchMatchSnapshot(prefix: search.index.prefixMatches, suffix: suffix)
+    }
+
+    /// Resolves one ordered match into the geometry the current width gives it.
+    ///
+    /// The only place a stored record coordinate becomes display rows, so the count of these a
+    /// read makes is the count `31/AR3` bounds by the viewport.
+    private func resolvedSearchMatchRange(
+        _ index: Int,
+        in matches: SearchMatchSnapshot
+    ) -> TextAnchorRange {
+        if index >= matches.prefix.count { return matches.suffix[index - matches.prefix.count] }
+        let match = matches.prefix[index]
+        guard let start = history.position(of: match.start),
+              let end = history.position(of: match.end)
+        else {
+            preconditionFailure("the search index retained a retired record coordinate")
+        }
+        return TextAnchorRange(
+            start: TextAnchor(row: evictedRowCount + start.displayRow, column: start.column),
+            end: TextAnchor(row: evictedRowCount + end.displayRow, column: end.column)
         )
+    }
+
+    /// The record coordinate a stream anchor names, or nil when the anchor is not in a closed
+    /// record -- the open tail, the live grid, or past the stream.
+    private func recordPosition(
+        of anchor: TextAnchor
+    ) -> LogicalLineStore.RecordTextPosition? {
+        guard let address = history.address(
+            ofDisplayRow: anchor.row - evictedRowCount,
+            column: anchor.column
+        ) else { return nil }
+        return history.recordTextPosition(
+            recordIndex: address.recordIndex,
+            cellOffset: address.cellOffset
+        )
+    }
+
+    /// The first ordered match starting at or after `anchor`.
+    ///
+    /// Closed matches are ordered by their record coordinates, so the query point is addressed
+    /// once and every probe after that compares two record coordinates. Ordering the
+    /// history-sized half therefore folds nothing, which is what keeps an ordered read's cost on
+    /// the matches it returns rather than on the matches history holds (`31/I7`).
+    private func searchMatchLowerBound(
+        in matches: SearchMatchSnapshot,
+        notBefore anchor: TextAnchor
+    ) -> Int {
+        guard anchor.row >= evictedRowCount else { return 0 }
+        if let position = recordPosition(of: anchor) {
+            var low = 0
+            var high = matches.prefix.count
+            while low < high {
+                let middle = low + (high - low) / 2
+                if matches.prefix[middle].start < position {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            if low < matches.prefix.count { return low }
+        }
+        // Either the anchor lies past every closed record, or no closed match starts at or after
+        // it; the mutable suffix is keyed in display anchors, so it answers in its own terms.
+        var low = 0
+        var high = matches.suffix.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if matches.suffix[middle].start < anchor { low = middle + 1 } else { high = middle }
+        }
+        return matches.prefix.count + low
     }
 
     /// Advances or trims the closed-record index after the store changes record ownership.
@@ -4392,10 +4431,17 @@ public struct Terminal: Equatable, Sendable {
 
     private func closedRecordEndPosition() -> LogicalLineStore.RecordTextPosition? {
         let count = history.closedRecordCount
-        guard count > 0, let summary = history.recordSummary(at: count - 1) else { return nil }
-        return history.recordTextPosition(
-            recordIndex: count - 1,
-            cellOffset: summary.cellCount
+        guard count > 0, let scan = history.closedRecordScan(at: count - 1) else { return nil }
+        return recordPosition(endingRecord: scan)
+    }
+
+    /// Where one closed record's text ends, in the coordinates the index stores.
+    private func recordPosition(
+        endingRecord scan: LogicalLineStore.ClosedRecordScan
+    ) -> LogicalLineStore.RecordTextPosition {
+        LogicalLineStore.RecordTextPosition(
+            record: scan.identity,
+            cellOffset: scan.cellOffsetBase + scan.cellCount
         )
     }
 
@@ -4427,50 +4473,61 @@ public struct Terminal: Equatable, Sendable {
         for unit in seed.suffix(max(0, needleKeys.count - 1)) {
             consume(unit, recordsMatch: false)
         }
+        // The record before the one being scanned, which the hard boundary between two records
+        // needs and the previous turn of the loop already read.
+        var previous = includesLeadingBoundary
+            ? history.closedRecordScan(at: records.lowerBound - 1)
+            : nil
         for recordIndex in records {
-            if recordIndex > records.lowerBound || includesLeadingBoundary,
-               let previous = history.recordSummary(at: recordIndex - 1),
-               previous.isForcedSplit == false,
-               let start = history.recordTextPosition(
-                   recordIndex: recordIndex - 1,
-                   cellOffset: previous.cellCount
-               ),
-               let end = history.recordTextPosition(recordIndex: recordIndex, cellOffset: 0)
-            {
+            guard let scan = history.closedRecordScan(at: recordIndex) else {
+                previous = nil
+                continue
+            }
+            if let previous, previous.isForcedSplit == false {
                 consume(
-                    RecordSearchProjectionUnit(key: .scalar(0x0A), start: start, end: end),
+                    RecordSearchProjectionUnit(
+                        key: .scalar(0x0A),
+                        start: recordPosition(endingRecord: previous),
+                        end: LogicalLineStore.RecordTextPosition(
+                            record: scan.identity,
+                            cellOffset: scan.cellOffsetBase
+                        )
+                    ),
                     recordsMatch: true
                 )
             }
-            let cellCount = history.recordSummary(at: recordIndex)?.cellCount ?? 0
-            history.forEachRecordCell(at: recordIndex) { cellOffset, cell in
+            // The record's identity and trim base are constant across its cells and its offsets
+            // are the loop's own arithmetic, so the scan states each unit's coordinates instead
+            // of asking the store to derive them twice per cell.
+            history.forEachClosedRecordCell(at: recordIndex) { cellOffset, kind, scalars in
                 let key: SearchGraphemeKey?
-                switch cell.kind {
+                switch kind {
                 case .narrow, .wideHead:
-                    key = searchGraphemeKey(for: cell.scalars)
+                    key = searchGraphemeKey(for: scalars)
                 case .padding:
                     key = .scalar(0x20)
                 case .wideTail, .spacerHead:
                     key = nil
                 }
-                guard let key,
-                      let start = history.recordTextPosition(
-                          recordIndex: recordIndex,
-                          cellOffset: cellOffset
-                      ),
-                      let end = history.recordTextPosition(
-                          recordIndex: recordIndex,
-                          cellOffset: min(
-                              cellCount,
-                              cellOffset + (cell.kind == .wideHead ? 2 : 1)
-                          )
-                      )
-                else { return }
+                guard let key else { return }
+                let base = scan.cellOffsetBase
+                let width = kind == .wideHead ? 2 : 1
                 consume(
-                    RecordSearchProjectionUnit(key: key, start: start, end: end),
+                    RecordSearchProjectionUnit(
+                        key: key,
+                        start: LogicalLineStore.RecordTextPosition(
+                            record: scan.identity,
+                            cellOffset: base + cellOffset
+                        ),
+                        end: LogicalLineStore.RecordTextPosition(
+                            record: scan.identity,
+                            cellOffset: base + min(scan.cellCount, cellOffset + width)
+                        )
+                    ),
                     recordsMatch: true
                 )
             }
+            previous = scan
         }
 
         let trailingCount = min(max(0, needleKeys.count - 1), unitCount)
@@ -4492,17 +4549,16 @@ public struct Terminal: Equatable, Sendable {
         var available = 0
         while start > 0, available < targetCount {
             start -= 1
-            history.forEachRecordCell(at: start) { _, cell in
-                switch cell.kind {
+            let scan = history.forEachClosedRecordCell(at: start) { _, kind, _ in
+                switch kind {
                 case .narrow, .wideHead, .padding:
                     available += 1
                 case .wideTail, .spacerHead:
                     break
                 }
             }
-            if start + 1 < recordEnd,
-               history.recordSummary(at: start)?.isForcedSplit == false
-            {
+            guard let scan else { break }
+            if start + 1 < recordEnd, scan.isForcedSplit == false {
                 available += 1
             }
         }
@@ -4663,21 +4719,31 @@ public struct Terminal: Equatable, Sendable {
         in matches: SearchMatchSnapshot
     ) -> (index: Int, match: TextAnchorRange)? {
         guard let position = search?.position, matches.isEmpty == false else { return nil }
-        var low = 0
-        var high = matches.count
-        while low < high {
-            let middle = (low + high) / 2
-            if matches[middle].start < position { low = middle + 1 } else { high = middle }
+        let low = searchMatchLowerBound(in: matches, notBefore: position)
+        if low == 0 { return (0, resolvedSearchMatchRange(0, in: matches)) }
+        if low == matches.count {
+            return (matches.count - 1, resolvedSearchMatchRange(matches.count - 1, in: matches))
         }
-        if low == 0 { return (0, matches[0]) }
-        if low == matches.count { return (matches.count - 1, matches[matches.count - 1]) }
-        let earlier = low - 1
-        let earlierDistance = searchDistance(from: position, to: matches[earlier].start)
-        let laterDistance = searchDistance(from: position, to: matches[low].start)
-        let bestIndex = laterDistance <= earlierDistance ? low : earlier
-        return (bestIndex, matches[bestIndex])
+        let later = resolvedSearchMatchRange(low, in: matches)
+        // Every navigation leaves the position on an occurrence, so the tie that resolves toward
+        // the later one is settled before anything measures a distance.
+        if later.start == position { return (low, later) }
+        let earlier = resolvedSearchMatchRange(low - 1, in: matches)
+        let earlierDistance = searchDistance(from: position, to: earlier.start)
+        let laterDistance = searchDistance(from: position, to: later.start)
+        return laterDistance <= earlierDistance ? (low, later) : (low - 1, earlier)
     }
 
+    /// How much text lies between two stream anchors, counted in projected content units.
+    ///
+    /// Units rather than rows times columns, because a hard-ended line's padding out to the right
+    /// margin is width-dependent phantom space and would let a width change move which occurrence
+    /// the durable position resolves to (`31/I6`). The count is exact and the walk is bounded by
+    /// the gap between the two occurrences that bracket the position -- not by retained depth,
+    /// but not by the viewport either. Closing that gap needs a cumulative content coordinate
+    /// over the stream, which is the follow-up this plan names rather than a search-local fix;
+    /// until then `resolvedSearchMatch` settles the case a frame actually holds -- a position
+    /// sitting on an occurrence -- before it measures anything.
     private func searchDistance(from lhs: TextAnchor, to rhs: TextAnchor) -> Int {
         guard lhs != rhs else { return 0 }
         let lower = min(lhs, rhs)

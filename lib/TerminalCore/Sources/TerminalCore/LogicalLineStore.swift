@@ -126,6 +126,68 @@ enum WholeProjectionCounter {
     }
 }
 
+/// Counts record coordinates resolved into current display geometry, so `31/PO7` can assert that
+/// a highlighted frame resolves the matches it draws rather than the matches history holds.
+///
+/// The instrument `31/AR3` names: translating a record coordinate is the new per-visible-match
+/// work on the frame path, and nothing in the type system keeps a reader from resolving a
+/// coordinate inside a binary search over every stored match instead. Same free-global, task-local
+/// shape as `LocateCounter`, and for the same reasons.
+enum RecordPositionResolutionCounter {
+    /// The tally one `measure` is collecting. A class for the same reason as `LocateCounter.Tally`.
+    final class Tally: @unchecked Sendable {
+        var count = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records one record-coordinate resolution against whatever `measure` is in scope.
+    @inline(__always)
+    static func record() {
+        active?.count += 1
+    }
+
+    /// Runs `body` and reports the record coordinates it resolved.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.count
+        }
+    }
+}
+
+/// Counts cells decoded through a whole-record materialization, so an index build over closed
+/// history can assert it streams the arena instead of rebuilding cells it does not keep.
+///
+/// A materialized cell carries a style id, a hyperlink probe and a content-identity probe that a
+/// content key never reads, so the count is the difference between the streaming reader and the
+/// materializing one rather than a proxy for it. Recorded once per whole-record read with that
+/// record's cell count, so no per-cell task-local lookup lands on any path.
+enum RecordCellMaterializationCounter {
+    /// The tally one `measure` is collecting.
+    final class Tally: @unchecked Sendable {
+        var cells = 0
+    }
+
+    @TaskLocal static var active: Tally?
+
+    /// Records the cells one whole-record read is about to decode.
+    @inline(__always)
+    static func record(cells: Int) {
+        active?.cells += cells
+    }
+
+    /// Runs `body` and reports the record cells materialized inside it.
+    static func measure(_ body: () -> Void) -> Int {
+        let tally = Tally()
+        return $active.withValue(tally) {
+            body()
+            return tally.cells
+        }
+    }
+}
+
 /// Counts retained display rows constructed by whole-history materializations.
 ///
 /// Reclamation only needs packed metadata ids, so this counter makes its zero-row structural
@@ -238,14 +300,18 @@ extension Terminal {
         }
 
         /// Names one retained record without depending on its sequence position or arena offset.
+        ///
+        /// One word, because a holder stores two of these per match and the index that stores
+        /// them is sized by the occurrences history holds. The word is a strictly increasing
+        /// number over the whole life of the store: the low bits are the ordinal packed beside
+        /// the record's arena offset, and the high bits are the retirement generation that
+        /// ordinal was issued in, so an identity is never reissued and a retired coordinate
+        /// resolves to nothing rather than to the text that took its place. Repeating one needs
+        /// 2^64 admitted records, which no output stream reaches.
         struct RecordIdentity: Equatable, Comparable, Sendable {
-            fileprivate var epoch: UInt64
             fileprivate var rawValue: UInt64
 
-            static func < (lhs: Self, rhs: Self) -> Bool {
-                lhs.epoch < rhs.epoch
-                    || (lhs.epoch == rhs.epoch && lhs.rawValue < rhs.rawValue)
-            }
+            static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
         }
 
         /// Names a cell boundary by stable record identity and its original offset in that record.
@@ -1407,23 +1473,80 @@ extension Terminal {
         func recordCells(at recordIndex: Int) -> [Terminal.GridCell]? {
             guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
             let record = self.record(at: offsets[recordIndex])
+            RecordCellMaterializationCounter.record(cells: record.cellCount)
             return (0..<record.cellCount).map { cell(recordIndex: recordIndex, cellOffset: $0) }
         }
 
-        /// Borrows one closed record's content cells for width-free indexing.
-        func forEachRecordCell(
+        /// Everything a width-free scan of one closed record needs before it reads a cell: the
+        /// record's stable identity, the original cell offset its first retained cell carries,
+        /// how many cells it holds, and whether its end is a hard line boundary.
+        ///
+        /// Read once per record so a scan states coordinates arithmetically instead of deriving
+        /// identity and trim base again for every cell it keys.
+        struct ClosedRecordScan: Equatable, Sendable {
+            var identity: RecordIdentity
+            var cellOffsetBase: Int
+            var cellCount: Int
+            var isForcedSplit: Bool
+        }
+
+        /// One closed record's scan facts, without touching a cell.
+        func closedRecordScan(at recordIndex: Int) -> ClosedRecordScan? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            let address = offsets[recordIndex]
+            let record = self.record(at: address)
+            guard record.isOpen == false else { return nil }
+            return ClosedRecordScan(
+                identity: recordIdentity(in: address),
+                cellOffsetBase: recordIndex == 0 ? headTrimmedCells : 0,
+                cellCount: record.cellCount,
+                isForcedSplit: record.isForcedSplit
+            )
+        }
+
+        /// Streams one closed record's stored cells as the kind and scalars a content key reads.
+        ///
+        /// The width-free counterpart of `withPaintedCells`, and it borrows the arena the same
+        /// way and for the same reason: the header, the identity and the backing chunk are
+        /// resolved once per record and every cell is one word load through a pointer into the
+        /// **local** chunk. Nothing here reads a style, a hyperlink or a content identity, which
+        /// is the whole difference from `recordCells(at:)` -- that read decodes a `GridCell` and
+        /// binary searches both side tables for every cell, and an index build over closed
+        /// history keeps none of it.
+        @discardableResult
+        func forEachClosedRecordCell(
             at recordIndex: Int,
-            _ body: (_ cellOffset: Int, _ cell: Terminal.GridCell) -> Void
-        ) {
-            guard recordIndex >= 0, recordIndex < offsets.count else { return }
-            let record = self.record(at: offsets[recordIndex])
-            guard record.isOpen == false else { return }
-            for cellOffset in 0..<record.cellCount {
-                body(
-                    cellOffset,
-                    cell(recordIndex: recordIndex, cellOffset: cellOffset)
-                )
+            _ body: (
+                _ cellOffset: Int,
+                _ kind: TerminalCellKind,
+                _ scalars: TerminalScalars
+            ) -> Void
+        ) -> ClosedRecordScan? {
+            guard let scan = closedRecordScan(at: recordIndex) else { return nil }
+            let address = offsets[recordIndex]
+            let chunk = chunks[chunkIndex(of: address)]
+            let cellsBase = chunkWordIndex(of: address) + 1
+            let spills = spillsBySequence[firstRecordSequence + recordIndex]
+            chunk.withUnsafeBufferPointer { words in
+                for cellOffset in 0..<scan.cellCount {
+                    let word = words[cellsBase + cellOffset]
+                    let kind = TerminalCellKind(
+                        packedCode: UInt8(
+                            (word >> PackedRetainedRow.Header.cellKindShift)
+                                & PackedRetainedRow.Header.cellKindMask
+                        )
+                    )
+                    let field = UInt32(word & PackedRetainedRow.Header.cellScalarMask)
+                    if word & PackedRetainedRow.Header.cellSpillBit != 0 {
+                        body(cellOffset, kind, TerminalScalars(spills?[Int(field)] ?? []))
+                    } else if field != 0, let scalar = Unicode.Scalar(field) {
+                        body(cellOffset, kind, TerminalScalars(scalar))
+                    } else {
+                        body(cellOffset, kind, .empty)
+                    }
+                }
             }
+            return scan
         }
 
         /// Whether the last logical line is still being printed, which is the store's spelling of
@@ -1889,6 +2012,22 @@ extension Terminal {
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
             guard cellOffset >= 0, cellOffset <= record.cellCount else { return nil }
+            RecordPositionResolutionCounter.record()
+            // The fold collapses to arithmetic whenever no wide cell can meet a row boundary --
+            // the same fast path, and the same `hasWideCells` reasoning, as `rowCount`'s. It is
+            // worth taking here because resolving a coordinate is per-visible-match frame work
+            // (`31/AR3`) and the walk below has no early exit.
+            if record.hasWideCells == false || width < 2 {
+                // The record's end boundary belongs to its last row rather than opening a new
+                // one, which is the only case the division gets wrong.
+                if cellOffset == record.cellCount, cellOffset > 0, cellOffset % width == 0 {
+                    return (firstDisplayRow(ofRecord: recordIndex) + cellOffset / width - 1, width)
+                }
+                return (
+                    firstDisplayRow(ofRecord: recordIndex) + cellOffset / width,
+                    cellOffset % width
+                )
+            }
             var localRow = 0
             var column = 0
             var resolved = false
@@ -2702,6 +2841,7 @@ extension Terminal {
             nextRecordIdentity = maximumRecordIdentity + 1
         }
 
+        /// The largest ordinal the bits left over beside an arena offset can hold.
         private var maximumRecordIdentity: UInt64 {
             UInt64.max >> UInt64(recordOffsetBits)
         }
@@ -2709,7 +2849,16 @@ extension Terminal {
         private mutating func allocateRecordIdentity() -> RecordIdentity {
             precondition(nextRecordIdentity <= maximumRecordIdentity)
             defer { nextRecordIdentity += 1 }
-            return RecordIdentity(epoch: recordIdentityEpoch, rawValue: nextRecordIdentity)
+            return composedRecordIdentity(ordinal: nextRecordIdentity)
+        }
+
+        /// Lifts a packed ordinal into the whole-life identity by stamping the current generation
+        /// above it, which is what keeps a reissued ordinal from reissuing an identity.
+        @inline(__always)
+        private func composedRecordIdentity(ordinal: UInt64) -> RecordIdentity {
+            RecordIdentity(
+                rawValue: recordIdentityEpoch << UInt64(64 - recordOffsetBits) | ordinal
+            )
         }
 
         /// Retires all coordinates before the packed ordinal could repeat.
@@ -2724,7 +2873,8 @@ extension Terminal {
 
         private func packedRecordAddress(offset: Int, identity: RecordIdentity) -> Int {
             precondition(offset >= 0 && offset <= recordOffsetMask)
-            let raw = identity.rawValue << UInt64(recordOffsetBits) | UInt64(offset)
+            let ordinal = identity.rawValue & maximumRecordIdentity
+            let raw = ordinal << UInt64(recordOffsetBits) | UInt64(offset)
             return Int(bitPattern: UInt(raw))
         }
 
@@ -2733,9 +2883,8 @@ extension Terminal {
         }
 
         @inline(__always) private func recordIdentity(in address: Int) -> RecordIdentity {
-            RecordIdentity(
-                epoch: recordIdentityEpoch,
-                rawValue: UInt64(UInt(bitPattern: address)) >> UInt64(recordOffsetBits)
+            composedRecordIdentity(
+                ordinal: UInt64(UInt(bitPattern: address)) >> UInt64(recordOffsetBits)
             )
         }
 

@@ -1072,6 +1072,18 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.position(of: retired) == nil)
     }
 
+    @Test("a record coordinate costs one identity word and one offset")
+    func recordCoordinateStaysTwoWords() {
+        // Intent: naming a cell boundary in retained history costs two words, and the identity
+        //   inside it costs one.
+        // Why it exists: a search index stores two coordinates per occurrence, so a third word
+        //   in this type is a 50% tax on every match a dense needle finds across all of history.
+        //   A retirement generation kept beside each ordinal is exactly that third word, which is
+        //   why it is composed into the identity instead.
+        #expect(MemoryLayout<Terminal.LogicalLineStore.RecordIdentity>.stride == 8)
+        #expect(MemoryLayout<Terminal.LogicalLineStore.RecordTextPosition>.stride == 16)
+    }
+
     @Test("Equality separates histories that differ only in a side-table value")
     func equalitySeesEverySideTableValue() {
         // Intent: two stores fed the same rows compare equal, and stop comparing equal as soon
