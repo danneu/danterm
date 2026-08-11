@@ -2174,7 +2174,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
     @Test("desiredTabTodoPopover changes for pane todo, tab todo, and pane title changes")
     func desiredTabTodoPopoverChangesOnTodoOrTitleChange() {
         // Intent: the projection identity changes when pane todos, tab
-        //   todos, or pane titles change.
+        //   todos, or focused session titles change.
         // Why it exists: pins the input-equality contract the reconcile
         //   loop reads.
         // Scenario: spec-first change-detection -- three mutations in

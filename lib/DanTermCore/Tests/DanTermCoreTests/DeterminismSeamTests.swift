@@ -126,7 +126,7 @@ import Testing
 
     @Test("update() stores the raw cwd/title in the model, never abbreviating into it")
     func modelStaysHomeCleanUnderAmbientHome() {
-        // Intent: sessionCwd/sessionTitle write the shell-reported path verbatim
+        // Intent: cwd and title reports write the shell-reported path verbatim
         //   into the model; HOME never enters AppModel, only its saved/sent output.
         // Why it exists: this is the load-bearing premise of the WHOLE narrow home
         //   seam -- because the model is home-clean, only save/send/restore needed

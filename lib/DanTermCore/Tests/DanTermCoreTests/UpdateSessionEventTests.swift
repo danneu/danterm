@@ -293,7 +293,7 @@ import Testing
 
     @Test("testSessionTitleFocusedPane")
     func testSessionTitleFocusedPane() {
-        // Intent: sessionTitle on the focused pane updates both the pane's
+        // Intent: a title report from the focused session updates both the session's
         //   title and the tab's title (chrome sync).
         // Why it exists: pins the focused-pane chrome sync.
         // Scenario: spec-first focused title.
@@ -308,9 +308,9 @@ import Testing
 
     @Test("testSessionTitleUnfocusedPane")
     func testSessionTitleUnfocusedPane() {
-        // Intent: sessionTitle on an unfocused pane updates the pane's title only, with
+        // Intent: a title report from an unfocused session updates its title only, with
         //   no tab chrome change or side-effect command.
-        // Why it exists: pins the per-pane scope of the title update.
+        // Why it exists: pins the per-session scope of the title update.
         // Scenario: spec-first unfocused title.
         var model = makeModel()
         createTab(&model)
@@ -326,7 +326,7 @@ import Testing
 
     @Test("testSessionPwdFocusedPane")
     func testSessionPwdFocusedPane() {
-        // Intent: sessionCwd on the focused pane updates the pane's cwd
+        // Intent: a cwd report from the focused session updates the session's cwd
         //   and the tab's subtitle (abbreviated from $HOME).
         // Why it exists: pins the chrome-sync for cwd on the selected
         //   tab.
@@ -343,9 +343,9 @@ import Testing
 
     @Test("testSessionPwdUnfocusedPane")
     func testSessionPwdUnfocusedPane() {
-        // Intent: sessionCwd on an unfocused pane only updates the pane's cwd, with no
+        // Intent: a cwd report from an unfocused session only updates its cwd, with no
         //   side-effect command.
-        // Why it exists: pins the per-pane scope for cwd updates.
+        // Why it exists: pins the per-session scope for cwd updates.
         // Scenario: spec-first unfocused cwd.
         var model = makeModel()
         createTab(&model)
@@ -360,7 +360,7 @@ import Testing
 
     @Test("testSessionTitleBackgroundTab")
     func testSessionTitleBackgroundTab() {
-        // Intent: a background tab's pane title still updates that tab's
+        // Intent: a background tab's focused session title still updates that tab's
         //   title; the selected tab is unaffected.
         // Why it exists: pins the "every tab tracks its pane chrome" rule
         //   independent of selection.
@@ -380,7 +380,7 @@ import Testing
 
     @Test("testSessionPwdBackgroundTab")
     func testSessionPwdBackgroundTab() {
-        // Intent: a background tab's pane cwd still updates that tab's
+        // Intent: a background tab's focused session cwd still updates that tab's
         //   subtitle.
         // Why it exists: pins the same per-tab rule for cwd.
         // Scenario: spec-first background cwd.
@@ -661,7 +661,7 @@ import Testing
 
     @Test("testSessionProgressSetStoresState")
     func testSessionProgressSetStoresState() {
-        // Intent: sessionProgress(.set) stores the percent on the pane;
+        // Intent: a progress report stores the percent on the session;
         //   emits no commands.
         // Why it exists: pins the no-side-effect progress write.
         // Scenario: spec-first progress set.
@@ -676,7 +676,7 @@ import Testing
 
     @Test("testSessionProgressNilClearsState")
     func testSessionProgressNilClearsState() {
-        // Intent: sessionProgress(.nil) clears the pane's progress.
+        // Intent: a nil progress report clears the session's progress.
         // Why it exists: pins the explicit-clear branch.
         // Scenario: spec-first progress clear.
         var model = makeModel()
@@ -692,9 +692,9 @@ import Testing
 
     @Test("testSessionProgressUnknownPaneIsNoop")
     func testSessionProgressUnknownPaneIsNoop() {
-        // Intent: progress for an unknown pane id emits no commands.
-        // Why it exists: pins fail-closed on stale pane ids.
-        // Scenario: spec-first stale-pane progress.
+        // Intent: progress for an unknown session id emits no commands.
+        // Why it exists: pins fail-closed on stale session ids.
+        // Scenario: spec-first stale-session progress.
         var model = makeModel()
         createTab(&model)
         let commands = update(

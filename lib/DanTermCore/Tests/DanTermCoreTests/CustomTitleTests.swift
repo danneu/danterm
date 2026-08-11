@@ -1,10 +1,10 @@
 // Swift Testing migration of the legacy `tests/CustomTitleTests.swift`
 // harness suite. Pins the tab custom title behavior end to end:
-// displayTitle precedence (custom > pane), renameTab (set / clear /
-// trim / empty-clear / non-selected scope), sessionTitle + pane-focus
+// displayTitle precedence (custom > session), renameTab (set / clear /
+// trim / empty-clear / non-selected scope), session title reports + pane-focus
 // non-override, windowChrome + close-confirm using displayTitle,
 // snapshot round-trip (preserve customTitle, derive title/subtitle
-// from pane on import including legacy fields), the
+// from the focused session on import including legacy fields), the
 // renameCompletionMessages dispatcher (Enter vs Esc, group skip),
 // sidebarRenameEnded restoring focus, and the clearCustomTitles batch
 // (dedup, stale-filter, no-op on all-stale, reverts displayTitle).
@@ -21,7 +21,7 @@ import Testing
 
     @Test("testDisplayTitlePrefersCustom")
     func testDisplayTitlePrefersCustom() {
-        // Intent: displayTitle prefers customTitle over the pane title.
+        // Intent: displayTitle prefers customTitle over the focused session title.
         // Why it exists: pins the precedence rule.
         // Scenario: spec-first custom-wins.
         var model = makeModel()
@@ -34,7 +34,7 @@ import Testing
 
     @Test("testDisplayTitleFallback")
     func testDisplayTitleFallback() {
-        // Intent: displayTitle falls back to the pane title when there's
+        // Intent: displayTitle falls back to the focused session title when there's
         //   no customTitle.
         // Why it exists: pins the fallback rule.
         // Scenario: spec-first fallback.
@@ -121,11 +121,11 @@ import Testing
             "selected tab B's display title is unchanged by renaming background tab A")
     }
 
-    // MARK: - sessionTitle does not override custom title
+    // MARK: - Session title reports do not override custom title
 
     @Test("testSessionTitleDoesNotOverrideCustom")
     func testSessionTitleDoesNotOverrideCustom() {
-        // Intent: sessionTitle updates the underlying pane title but
+        // Intent: a title report updates the underlying session title but
         //   customTitle (and displayTitle) survives.
         // Why it exists: pins the survive-on-session-title rule.
         // Scenario: spec-first survive.
@@ -165,7 +165,7 @@ import Testing
     @Test("testWindowChromeUsesDisplayTitle")
     func testWindowChromeUsesDisplayTitle() {
         // Intent: window chrome contentTitle/windowTitle use the
-        //   custom-title displayTitle, not the pane title.
+        //   custom-title displayTitle, not the session title.
         // Why it exists: pins the chrome-from-displayTitle rule.
         // Scenario: spec-first chrome display.
         var model = makeModel()
@@ -281,9 +281,9 @@ import Testing
 
     @Test("testImportDerivesSubtitleFromLaunchCwd")
     func testImportDerivesSubtitleFromLaunchCwd() throws {
-        // Intent: on import, the tab subtitle derives from the pane cwd.
-        // Why it exists: pins the pane cwd source for subtitle.
-        // Scenario: spec-first pane cwd subtitle.
+        // Intent: on import, the tab subtitle derives from the focused session cwd.
+        // Why it exists: pins the session cwd source for subtitle.
+        // Scenario: spec-first session cwd subtitle.
         let json = """
         {
           "version": 3,
@@ -664,7 +664,7 @@ import Testing
     @Test("testClearCustomTitlesRevertsSelectedTabDisplayTitle")
     func testClearCustomTitlesRevertsSelectedTabDisplayTitle() {
         // Intent: clearing the selected tab's customTitle reverts
-        //   displayTitle to the underlying pane title.
+        //   displayTitle to the underlying session title.
         // Why it exists: pins the displayTitle revert side effect.
         // Scenario: spec-first revert display.
         var model = makeModel()

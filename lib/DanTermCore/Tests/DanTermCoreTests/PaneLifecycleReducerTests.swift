@@ -1,4 +1,4 @@
-// Behavioral tests for the pure latest-value pane lifecycle reducer.
+// Behavioral tests for lifecycle transitions in the session report reducer.
 import Testing
 
 @testable import DanTermCore

@@ -329,5 +329,5 @@ their file.
   seeding, bell/notification re-key, TabModel chrome lookups, restore seeding,
   exact-shape IPC tests
   unchanged)
-- [ ] 5. docs: re-point residual references and comments (fold into 4 if
+- [x] 5. docs: re-point residual references and comments (fold into 4 if
   trivially small)

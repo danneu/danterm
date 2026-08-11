@@ -527,7 +527,7 @@ import DanTermProtocol
 
     @Test("pane without command uses expanded cwd")
     func paneWithoutCommandUsesExpandedCwd() {
-        // Intent: resolveLaunch returns the tilde-expanded pane cwd and a nil command.
+        // Intent: resolveLaunch returns the tilde-expanded session cwd and a nil command.
         let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", command: nil, scrollback: nil, theme: nil)
         let (cwd, command) = resolveLaunch(ps)
         let home = NSHomeDirectory()

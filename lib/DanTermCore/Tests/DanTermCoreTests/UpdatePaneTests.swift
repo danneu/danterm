@@ -449,7 +449,7 @@ import Testing
 
     @Test("testClosePaneSyncsTabChromeFromSurvivingPane")
     func testClosePaneSyncsTabChromeFromSurvivingPane() {
-        // Intent: after a pane close, the surviving pane's title/cwd flow
+        // Intent: after a pane close, the surviving session's title/cwd flow
         //   onto the tab (chrome resync).
         // Why it exists: pins the title/subtitle sync the window chrome
         //   reads.
@@ -1219,7 +1219,7 @@ import Testing
     @Test("testMovePaneToTabUpdatesSourceTabChrome")
     func testMovePaneToTabUpdatesSourceTabChrome() {
         // Intent: after movePaneToTab the source tab's chrome reflects the
-        //   surviving focused pane's title.
+        //   surviving focused session's title.
         // Why it exists: pins the chrome-follows-survivor rule on the
         //   source side.
         // Scenario: spec-first source-chrome.
@@ -1629,7 +1629,7 @@ import Testing
     @Test("testMovePaneToNewTabPathB_ChromeDerived")
     func testMovePaneToNewTabPathBChromeDerived() {
         // Intent: the new tab in path B derives its title/subtitle from
-        //   the moved pane's title/cwd (with abbreviateHome applied).
+        //   the moved pane's session title/cwd (with abbreviateHome applied).
         // Why it exists: pins the chrome-derivation rule on the new tab.
         // Scenario: spec-first new-tab-chrome.
         var model = makeModel()

@@ -20,8 +20,8 @@ struct AlertPresentation: Equatable {
 /// Resolve the title and subtitle for an alert raised by `paneId`.
 ///
 /// The title answers "who": the sender's own title when it supplies one (OSC 777
-/// does, OSC 9 does not), otherwise the pane title. An attached agent session
-/// and the running command report are earlier tiers in that order.
+/// does, OSC 9 does not), otherwise the terminal session title. An attached
+/// agent session and the running command report are earlier tiers in that order.
 ///
 /// The subtitle answers "where", and is dropped when it would only restate the
 /// title: an unnamed single-pane tab derives its own title from that same pane.

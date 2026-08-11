@@ -1,5 +1,5 @@
-// Tests the pane-lifecycle product policy that remains in update and the pure
-// theme projection derived from pane-owned connection snapshots.
+// Tests the session-lifecycle product policy that remains in update and the pure
+// theme projection derived from session-owned connection state.
 import Foundation
 import Testing
 

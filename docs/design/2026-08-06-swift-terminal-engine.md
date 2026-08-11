@@ -177,7 +177,7 @@ Status values:
 | F6 | `--cmd`, restore prefill, restore execute, and recovery replay send initial **input to the login shell** exactly once, with their specified execute-versus-prefill newline behavior. They never become a different process-launch mode. | live |
 | F7 | Closing a pane never deliberately detaches the session: DanTerm hangs up the PTY and terminates every process remaining in the owned session -- foreground, background, stopped, and hangup-resistant -- escalating from ordinary hangup to forced termination after bounded grace periods. Orderly application termination applies the same bounded teardown to every live pane, and closing one pane never touches a sibling session. | live |
 | F8 | A process that deliberately daemonizes out of the owned session is outside this contract. | live |
-| F9 | When the shell exits on its own, the PTY layer reports its status once and the existing `sessionClosed` pane lifecycle decides the resulting pane, tab, and last-window behavior. There is no new process-exited holding state. | live |
+| F9 | When the shell exits on its own, the PTY layer reports its status once and the session-keyed `sessionEnded` update decides the resulting pane, tab, and last-window behavior. There is no new process-exited holding state. | live |
 | F10 | DanTerm does not preserve or reconnect to child processes across a restart; a restart creates new processes and may replay saved scrollback. | live |
 | F11 | Background and occluded panes continue consuming PTY output even when they do not render it. | live |
 | F12 | Accepted risk: after an abrupt crash, macOS closes the PTY master and ordinary hangup applies, but no in-process escalation can run, so a hangup-resistant background process may be reparented and survive. Accepted to keep session supervision outside the product. | live |
@@ -233,12 +233,12 @@ Status values:
 | I4 | Incompatible contract changes require a new versioned document section, or a new versioned artifact (v2+) if a machine-readable form is ever needed again -- never a revival of the retired v1 JSON manifest. | live |
 | I5 | XTVERSION accepts `CSI > q` and `CSI > 0 q` and replies `DCS >|DanTerm <version> ST`, using the same injected bundle version exported as `TERM_PROGRAM_VERSION`. **DA2, DECRQSS, XTGETTCAP, and 8-bit replies remain unsupported.** | live |
 | I6 | The notification and progress grammar is deliberately narrow: `OSC 9;<body>` with canonical selectors 1 through 12; `OSC 777;notify;<title>;<body>` retaining later semicolons in the body; and `OSC 9;4;{0,1,2,3,4}` progress forms. Reserved and malformed selector-4 forms are ignored, numeric bodies outside exact selectors 1-12 remain notification text, and **Kitty OSC 99 is ignored**. | live |
-| I7 | DanTerm shell integrations use a private, versioned envelope `OSC 1337;DanTermShell=2;<event>[;<arg>...] ST` carrying typed integration-ready, command-start, command-end, remote-start, remote-host, and connection-end events. Command and host text uses canonical padded base64; command-end carries a canonical decimal exit status from 0 through 255. The engine validates exact field counts and bounds the envelope before admitting a lifecycle report; the session adapter binds accepted reports to the owning pane. Amended 2026-08-10: the reported-fact vocabulary now distinguishes lifecycles from values. | live |
+| I7 | DanTerm shell integrations use a private, versioned envelope `OSC 1337;DanTermShell=2;<event>[;<arg>...] ST` carrying typed integration-ready, command-start, command-end, remote-start, remote-host, and connection-end events. Command and host text uses canonical padded base64; command-end carries a canonical decimal exit status from 0 through 255. The engine validates exact field counts and envelope size before emitting a report tagged with the terminal session's `SessionId`; the model admits bounded metadata and resolves the owning pane from that identity. | live |
 | I8 | Shell events never pass through title handling. | live |
 | I9 | Canonical opt-in zsh, Bash, and fish integrations ship in the app bundle. They emit when `DANTERM` or `LC_DANTERM` is present, preserve existing prompt hooks, report local cwd with OSC 7, and have ssh/mosh wrappers forward `LC_DANTERM=1` through `SendEnv`. A shell with `LC_DANTERM` present and `DANTERM` absent reports its remote identity and suppresses OSC 7 cwd events. Each wrapper brackets its command with remote-start and connection-end, preserves the command's exit status, and re-reports an enclosing remote identity after the end. tmux delivery uses DCS passthrough and depends on the user's existing `allow-passthrough` policy; mosh exposes only the near-side bracket because it filters far-side private OSC. | live |
 | I10 | Each integration declares an OSC 133 `redraw` mode derived from how that shell actually repaints after SIGWINCH -- `redraw=1` for zsh and fish, `redraw=last` for Bash -- restated on every prompt, because the mode is per-pane terminal state that outlives the shell that set it. The parser default is `full`, so a stamped prompt row with no declaration is an implicit promise to repaint everything. | elsewhere -- [2026-08-01-osc-133-prompt-anchoring.md](2026-08-01-osc-133-prompt-anchoring.md) |
-| I11 | The OSC 133 dialect is engine-internal; lifecycle reports travel only on the OSC 1337 envelope, which is what lets the dialect be revised for row classification and reflow without touching the pane lifecycle reducer. Amended 2026-08-10: terminal-reported values and lifecycles now have distinct owners and vocabulary. | live |
-| I12 | BEL emits DanTerm's existing pane-scoped bell event. **The engine never plays an audible bell.** A transient visual bell is permitted for the focused pane because that pane's normal alert is suppressed while the app is active. | live |
+| I11 | The OSC 133 dialect is engine-internal; lifecycle reports travel only on the OSC 1337 envelope, which lets the dialect change for row classification and reflow without changing the model's session-report reducer. Values and lifecycles share one session-owned report vocabulary but keep their distinct reduction rules. | live |
+| I12 | BEL emits a session-keyed bell event so a late bell from a dead or replaced session is dropped. **The engine never plays an audible bell.** A transient visual bell is permitted for the focused pane because that pane's normal alert is suppressed while the app is active. | live |
 | I13 | Inside tmux, the inner terminal identity remains tmux's responsibility; DanTerm implements the outer capabilities tmux consumes. | live |
 | I14 | Rejected: an initial `TERM=danterm` -- remote hosts would need a custom terminfo entry before ordinary applications could rely on it. | rejected |
 | I15 | Rejected: Ghostty terminal identity or protocol compatibility as a goal. | rejected |
@@ -408,9 +408,9 @@ historical and these outlive any plan.
   owns closing them.
 - Undecided *questions* are in **Open questions** above. Undecided *features*
   with a candidate design live in `plans/wip/`; the deferred command journal
-  moved there. The shipped ownership rule for terminal-reported pane facts is
+  moved there. The shipped ownership rule for terminal-reported facts is
   recorded in
-  [2026-08-10-terminal-reported-pane-facts.md](2026-08-10-terminal-reported-pane-facts.md).
+  [2026-08-10-session-owned-terminal-reported-facts.md](2026-08-10-session-owned-terminal-reported-facts.md).
   This document records decisions and the questions that would change one; it
   does not record candidate designs.
 
@@ -419,7 +419,7 @@ historical and these outlive any plan.
 - [docs/terminal-capabilities.md](../terminal-capabilities.md) -- the normative capability contract (I2, I3, I4)
 - [docs/terminal-sprites.md](../terminal-sprites.md) -- procedural glyph contract (H5)
 - [2026-08-01-osc-133-prompt-anchoring.md](2026-08-01-osc-133-prompt-anchoring.md) -- prompt row ownership and reflow (I10)
-- [2026-08-10-terminal-reported-pane-facts.md](2026-08-10-terminal-reported-pane-facts.md) -- ownership and naming for terminal-reported values and lifecycles (I7, I11)
+- [2026-08-10-session-owned-terminal-reported-facts.md](2026-08-10-session-owned-terminal-reported-facts.md) -- session ownership, identity, and reduction for terminal-reported facts (I7, I11, I12)
 - [2026-07-29-cross-module-value-dispatch.md](2026-07-29-cross-module-value-dispatch.md) -- hot value types across target boundaries
 - [2026-06-09-appkit-lifetime-safety.md](2026-06-09-appkit-lifetime-safety.md) -- owner-bound timer and callback teardown (L7)
 - [2026-07-20-terminal-engine-experiment-decision.md](2026-07-20-terminal-engine-experiment-decision.md) -- the Milestone 5 record this note supersedes (M6)

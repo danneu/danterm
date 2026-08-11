@@ -229,14 +229,14 @@ import Testing
         // Intent: dispatching .exportState produces exactly one
         //   .exportState Command whose snapshot agrees with what
         //   toSnapshot(model) would have produced (groups, panes,
-        //   selectedTabId, IDs, and pane cwd) AND whose
+        //   selectedTabId, IDs, and session cwd) AND whose
         //   focused pane's leaf embeds the pane.
         // Why it exists: pins the export wire payload, including the
         //   leaf-embedded pane shape and the pure-snapshot scrollback
         //   contract (nil here -- enrichment happens at runtime).
         // Scenario: spec-first export -- a tab with a vim-running pane at
         //   ~/projects exports a structural snapshot whose launch surfaces
-        //   the abbreviated cwd; runtime grafts the pane-owned command later.
+        //   the abbreviated cwd without a runtime lifecycle graft.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId

@@ -449,7 +449,7 @@ import Testing
         let model = try #require(validateAndBuild(initFile.model), "split snapshot should validate")
         let tab = model.groups[0].tabs[0]
 
-        // The focused pane cwd supplies the subtitle.
+        // The focused pane's session cwd supplies the subtitle.
         #expect(tabTitle(tab, in: model) == "Editor")
         #expect(tabSubtitle(tab, in: model) == "~/focused-pane")
         // The sibling's cwd never bleeds into the tab chrome.

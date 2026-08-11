@@ -1743,7 +1743,7 @@ import DanTermProtocol
     func paneSplitWithLaunchTitleSetsPaneTitleNoTabCustom() throws {
         // Intent: pane.split with a launch.title sets the new pane's
         //   title; tab.customTitle stays nil.
-        // Why it exists: pins the per-pane title scope of launch.title.
+        // Why it exists: pins launch.title as the new session's initial title.
         // Scenario: spec-first split launch title.
         var model = makeModel()
         createTab(&model)
@@ -2064,7 +2064,7 @@ import DanTermProtocol
         // Intent: explicit pane param wins over the context pane on
         //   every todo command.
         // Why it exists: pins the explicit-wins rule for todos.
-        // Scenario: spec-first explicit pane lifecycle.
+        // Scenario: spec-first explicit pane routing.
         var model = makeModel()
         createTab(&model)
         let targetPaneId = selectedTab(in: model)!.focusedPaneId
