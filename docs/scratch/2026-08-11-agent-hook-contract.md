@@ -6,8 +6,9 @@ Status: open scratch document. It records what codex 0.147.0 actually sends to
 a hook, the edits that measurement implies, and a sketch of a test that would
 keep the record honest as the agent CLIs move.
 
-Edits 1 through 6 are implemented. Edits 7 and 8 live in `~/world` and are not
-done. Test layers 2 and 3 are proposals, not decisions.
+All eight edits are implemented, and the chain is verified end to end on the
+real config: a codex pane goes `none` -> `attached` + `working` -> `idle` on
+Stop -> `none` on `/quit`. Test layers 2 and 3 are proposals, not decisions.
 
 ## Why this exists
 
@@ -64,6 +65,23 @@ Four facts worth stating separately, because our script assumes otherwise:
   prompt ended the turn with no `Stop`. The pane's last report stays
   `PermissionRequest`, so it reads as waiting until the next
   `UserPromptSubmit`.
+
+**`SessionStart` is delivered at the first user prompt, not at process launch.**
+A codex TUI sitting at an empty composer has run no hook at all, so the pane
+shows no chip until you submit something. The payload still says
+`source: "startup"`, and `SessionStart` still arrives before that turn's
+`UserPromptSubmit`, so the ordering above holds -- what is deferred is the whole
+batch, not the order within it. Measured by pointing a scratch `CODEX_HOME` at a
+`bash -x` wrapper around the real hook: nothing was logged across three fresh
+sessions, and the first prompt produced `SessionStart` and a successful
+`agent attach` on the same line. Any check of "did the pane attach?" has to type
+a prompt first.
+
+The TUI's `/hooks` screen is the instrument for the rest. It lists every event
+with Installed / Active / Review counts, which separates "not registered" from
+"registered but untrusted" without reading `config.toml`. Note that an approved
+entry is written with only a `trusted_hash`: `enabled` is absent by default and
+adding `enabled = true` by hand changes nothing.
 
 Hook trust is enforced, not advisory. Before approval no hook runs at all --
 `codex exec` completes the session normally with hooks skipped -- and a
