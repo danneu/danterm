@@ -15,6 +15,9 @@ class SplitContainerView: NSView {
     private var leafViews: [PaneId: NSView] = [:]
     private var splitViews: [SplitId: PaneSplitView] = [:]
     private var zoomedPaneId: PaneId?
+    private var zoomedWrapper: PaneWrapperView?
+    private var zoomedWrapperOrigin: (splitId: SplitId, index: Int)?
+    private var zoomConstraints: [NSLayoutConstraint] = []
 
     init(
         rootNode: SplitNodeModel,
@@ -55,6 +58,8 @@ class SplitContainerView: NSView {
     func applyTreePatch(_ patch: ContainerTreePatch, rootNode newRootNode: SplitNodeModel) {
         isApplyingTreePatch = true
         defer { isApplyingTreePatch = false }
+        let presentedZoom = zoomedPaneId
+        removeZoomPresentation()
 
         for splitId in patch.changedSplitIds where splitViews[splitId] == nil {
             guard let spec = patch.desiredSplits[splitId] else { continue }
@@ -63,6 +68,15 @@ class SplitContainerView: NSView {
                 direction: spec.direction,
                 ratio: ratio(for: splitId, in: newRootNode) ?? 0.5
             )
+        }
+
+        // Detach the old root before it can become a child of the desired root.
+        // Removing it after reparenting would remove that live child a second time.
+        if patch.rootChanged {
+            NSLayoutConstraint.deactivate(rootConstraints)
+            rootConstraints.removeAll(keepingCapacity: true)
+            rootView?.removeFromSuperview()
+            rootView = nil
         }
 
         var refsToDetach: Set<ContainerNodeRef> = []
@@ -97,9 +111,6 @@ class SplitContainerView: NSView {
         }
 
         if patch.rootChanged, let desiredRoot = view(for: patch.desiredRoot) {
-            rootView?.removeFromSuperview()
-            NSLayoutConstraint.deactivate(rootConstraints)
-            rootConstraints.removeAll(keepingCapacity: true)
             installRoot(desiredRoot)
         }
 
@@ -116,15 +127,21 @@ class SplitContainerView: NSView {
         }
         pendingRatioIds.formUnion(patch.changedSplitIds)
         hasBeenLaidOut = false
-        applyZoomVisibility()
+        if let presentedZoom {
+            presentZoomedPane(presentedZoom)
+        }
     }
 
     /// Changes zoom presentation while leaving the complete split hierarchy mounted.
     func setZoomedPane(_ paneId: PaneId?) {
         guard zoomedPaneId != paneId else { return }
+        removeZoomPresentation()
         zoomedPaneId = paneId
-        applyZoomVisibility()
-        pendingRatioIds.formUnion(splitViews.keys)
+        if let paneId {
+            presentZoomedPane(paneId)
+        } else {
+            pendingRatioIds.formUnion(splitViews.keys)
+        }
         hasBeenLaidOut = false
     }
 
@@ -133,12 +150,13 @@ class SplitContainerView: NSView {
         guard !hasBeenLaidOut else { return }
         isApplyingTreePatch = true
         defer { isApplyingTreePatch = false }
+        needsLayout = true
         layoutSubtreeIfNeeded()
         applyPendingRatios(for: rootNode)
+        pendingRatioIds.removeAll(keepingCapacity: true)
         for splitView in splitViews.values {
             splitView.isApplyingRatio = false
         }
-        pendingRatioIds.removeAll(keepingCapacity: true)
         hasBeenLaidOut = true
     }
 
@@ -168,6 +186,7 @@ class SplitContainerView: NSView {
         ratio: CGFloat
     ) -> PaneSplitView {
         let splitView = PaneSplitView(splitId: splitId, ratio: ratio)
+        splitView.frame = bounds
         splitView.shouldSuppressRatioFeedback = { [weak self] in
             guard let self else { return true }
             return self.isApplyingTreePatch || !self.hasBeenLaidOut
@@ -183,6 +202,9 @@ class SplitContainerView: NSView {
     }
 
     private func attach(_ view: NSView, to splitView: PaneSplitView) {
+        if view.bounds.isEmpty {
+            view.frame = splitView.bounds
+        }
         view.translatesAutoresizingMaskIntoConstraints = true
         splitView.addArrangedSubview(view)
         let index = splitView.arrangedSubviews.count - 1
@@ -242,41 +264,43 @@ class SplitContainerView: NSView {
     }
 
     private func applyZoomVisibility() {
-        isApplyingTreePatch = true
-        defer { isApplyingTreePatch = false }
-        for splitView in splitViews.values {
-            for child in splitView.arrangedSubviews {
-                child.isHidden = false
-            }
-        }
         guard let zoomedPaneId else { return }
-        _ = hideBranchesOutsidePath(to: zoomedPaneId, in: rootNode)
+        presentZoomedPane(zoomedPaneId)
     }
 
-    private func hideBranchesOutsidePath(to paneId: PaneId, in node: SplitNodeModel) -> Bool {
-        switch node {
-        case .leaf(let pane):
-            return pane.id == paneId
-        case .split(let splitId, _, let first, let second, _):
-            let firstContains = contains(paneId, in: first)
-            let secondContains = contains(paneId, in: second)
-            guard let splitView = splitViews[splitId], splitView.arrangedSubviews.count == 2 else {
-                return firstContains || secondContains
-            }
-            splitView.arrangedSubviews[0].isHidden = !firstContains
-            splitView.arrangedSubviews[1].isHidden = !secondContains
-            if firstContains { _ = hideBranchesOutsidePath(to: paneId, in: first) }
-            if secondContains { _ = hideBranchesOutsidePath(to: paneId, in: second) }
-            return firstContains || secondContains
-        }
+    private func presentZoomedPane(_ paneId: PaneId) {
+        guard zoomedWrapper == nil,
+              let wrapper = leafViews[paneId] as? PaneWrapperView,
+              let splitView = wrapper.superview as? PaneSplitView,
+              let index = splitView.arrangedSubviews.firstIndex(of: wrapper) else { return }
+        zoomedWrapperOrigin = (splitView.splitId, index)
+        splitView.removeArrangedSubview(wrapper)
+        wrapper.removeFromSuperview()
+        rootView?.isHidden = true
+        wrapper.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(wrapper)
+        zoomConstraints = [
+            wrapper.topAnchor.constraint(equalTo: topAnchor),
+            wrapper.bottomAnchor.constraint(equalTo: bottomAnchor),
+            wrapper.leadingAnchor.constraint(equalTo: leadingAnchor),
+            wrapper.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(zoomConstraints)
+        zoomedWrapper = wrapper
     }
 
-    private func contains(_ paneId: PaneId, in node: SplitNodeModel) -> Bool {
-        switch node {
-        case .leaf(let pane):
-            return pane.id == paneId
-        case .split(_, _, let first, let second, _):
-            return contains(paneId, in: first) || contains(paneId, in: second)
-        }
+    private func removeZoomPresentation() {
+        guard let wrapper = zoomedWrapper,
+              let origin = zoomedWrapperOrigin,
+              let splitView = splitViews[origin.splitId] else { return }
+        NSLayoutConstraint.deactivate(zoomConstraints)
+        zoomConstraints.removeAll(keepingCapacity: true)
+        wrapper.removeFromSuperview()
+        wrapper.translatesAutoresizingMaskIntoConstraints = true
+        splitView.insertArrangedSubview(wrapper, at: origin.index)
+        splitView.setHoldingPriority(.defaultLow, forSubviewAt: origin.index)
+        rootView?.isHidden = false
+        zoomedWrapper = nil
+        zoomedWrapperOrigin = nil
     }
 }

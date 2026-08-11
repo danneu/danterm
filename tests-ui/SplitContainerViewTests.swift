@@ -165,6 +165,10 @@ func splitContainerViewTests() {
         container.ensureLaidOut()
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "split replaced the original wrapper")
+        let wrapperB = try requireWrapper(runtime, paneB)
+        try uiExpect(wrapper.isDescendant(of: container), "first split detached the original wrapper")
+        try uiExpect(wrapperB.isDescendant(of: container), "first split did not mount the new wrapper")
+        try uiExpect(wrapper.frame.width > 0 && wrapperB.frame.width > 0, "first split left a pane with zero width")
         try uiExpect(wrapper.searchOverlay === overlay, "split replaced the active search overlay")
         try uiExpect(wrapper.todoButtonView === todoAnchor, "split replaced the TODO popover anchor")
         try uiExpect(paneSplitViews(in: container).count == 1, "split patch should create one split view")
@@ -197,32 +201,49 @@ func splitContainerViewTests() {
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "swap or close layout emitted split-ratio feedback")
     }
 
-    uiTest("zoom presents one pane without removing sibling wrappers") {
-        // Intent: zoom hides branches outside the focused pane and unzoom restores
-        //   them without removing either wrapper from the mounted hierarchy.
-        // Why it exists: zoom used to rebuild a collapsed one-leaf container.
-        // Scenario: the incremental-container reconciliation performance fix.
-        let paneA = PaneId(), paneB = PaneId()
+    uiTest("nested zoom fills the container and unzoom restores every pane") {
+        // Intent: zooming a nested pane expands it through every ancestor split,
+        //   then unzoom restores all three panes with usable geometry.
+        // Why it exists: the first incremental implementation left a stale root
+        //   child detached, then hid another branch without relaying out the tree.
+        // Scenario: the split, split, zoom, unzoom regression reported on 2026-08-11.
+        let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
         let runtime = AppRuntime()
         runtime.sessions[paneA] = TerminalView()
         runtime.sessions[paneB] = TerminalView()
+        runtime.sessions[paneC] = TerminalView()
         let root = SplitNodeModel.split(
-            id: SplitId(), direction: .horizontal,
-            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)), ratio: 0.5)
+            id: SplitId(), direction: .horizontal, first: .leaf(PaneModel(id: paneA)),
+            second: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(PaneModel(id: paneB)), second: .leaf(PaneModel(id: paneC)), ratio: 0.5),
+            ratio: 0.5)
         let container = persistentContainer(root: root, runtime: runtime)
         container.rebuild()
+        container.ensureLaidOut()
         let wrapperA = try requireWrapper(runtime, paneA)
         let wrapperB = try requireWrapper(runtime, paneB)
+        let wrapperC = try requireWrapper(runtime, paneC)
 
-        container.setZoomedPane(paneA)
+        container.setZoomedPane(paneB)
+        container.ensureLaidOut()
 
-        try uiExpect(!wrapperA.isHidden && wrapperB.isHidden, "zoom should present only the focused pane")
-        try uiExpect(wrapperA.isDescendant(of: container), "focused wrapper left the container hierarchy")
-        try uiExpect(wrapperB.isDescendant(of: container), "hidden sibling wrapper left the container hierarchy")
+        try uiExpect(
+            isEffectivelyHidden(wrapperA) && !isEffectivelyHidden(wrapperB) && isEffectivelyHidden(wrapperC),
+            "zoom should present only the focused pane")
+        try uiExpect(wrapperB.frame.width > 790, "zoomed pane should fill the container width, got \(wrapperB.frame.width)")
+        try uiExpect(wrapperB.isDescendant(of: container), "focused wrapper left the container hierarchy")
+        try uiExpect(wrapperA.isDescendant(of: container) && wrapperC.isDescendant(of: container), "zoom removed a sibling wrapper")
 
         container.setZoomedPane(nil)
+        container.ensureLaidOut()
 
-        try uiExpect(!wrapperA.isHidden && !wrapperB.isHidden, "unzoom should restore both wrappers")
+        try uiExpect(
+            !isEffectivelyHidden(wrapperA) && !isEffectivelyHidden(wrapperB) && !isEffectivelyHidden(wrapperC),
+            "unzoom should restore every wrapper")
+        try uiExpect(
+            [wrapperA, wrapperB, wrapperC].allSatisfy { $0.frame.width > 0 },
+            "unzoom should restore nonzero geometry for every pane")
     }
 
     uiTest("cross-tab patches preserve a moved wrapper in either patch order") {
@@ -360,6 +381,15 @@ private func paneSplitViews(in view: NSView) -> [PaneSplitView] {
         result.append(contentsOf: paneSplitViews(in: subview))
     }
     return result
+}
+
+private func isEffectivelyHidden(_ view: NSView) -> Bool {
+    var current: NSView? = view
+    while let candidate = current {
+        if candidate.isHidden { return true }
+        current = candidate.superview
+    }
+    return false
 }
 
 private func firstSubviewRatio(in splitView: PaneSplitView, expectedTotal: CGFloat, expectedRatio: CGFloat) -> Bool {

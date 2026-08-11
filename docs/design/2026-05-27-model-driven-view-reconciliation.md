@@ -104,7 +104,9 @@ session state.
 Container reconciliation reserves whole-tree construction for a tab that has no
 cached shape, including the clean cache after restore. A surviving tab is patched
 by stable pane and split ids. Tree edits reparent existing wrappers, and zoom
-hides branches outside the focused pane without replacing the mounted tree.
+temporarily reparents the focused wrapper into a full-container overlay while
+the unchanged split tree stays mounted, hidden, and laid out at normal geometry.
+Unzoom returns the wrapper to its keyed split position.
 
 Post-reconcile commands target views that reconcile creates.
 `Command.isPostReconcile` must stay an exhaustive switch with no `default`, so
