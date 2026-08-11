@@ -337,7 +337,7 @@ folding and re-projecting.
 ## Commit progress
 
 - [x] 1. Pin the scan's match set with an oracle independent of the scan
-- [ ] 2. Stream the row scan without materializing units or allocating per cell
+- [x] 2. Stream the row scan without materializing units or allocating per cell
 - [ ] 3. Advance the prefix from a carried boundary window instead of re-reading context
 - [ ] 4. Reduce eviction and truncation to arithmetic on the sorted match sequence
 - [ ] 5. Build the index from a single walk of history

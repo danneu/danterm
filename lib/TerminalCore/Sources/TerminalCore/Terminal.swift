@@ -394,6 +394,50 @@ public struct Terminal: Equatable, Sendable {
             }
             return row
         }
+
+        /// Walks a contiguous projection range with one history locate, preserving the seam
+        /// and alternate-screen rules that make this collection the search projection.
+        func forEachRow(
+            in range: Range<Int>,
+            _ body: (Int, GridRow) -> Void
+        ) {
+            precondition(range.lowerBound >= startIndex && range.upperBound <= endIndex)
+
+            let historyEnd = Swift.min(range.upperBound, historyRows)
+            if range.lowerBound < historyEnd {
+                guard var cursor = history.locate(displayRow: range.lowerBound) else {
+                    preconditionFailure("the projection addressed a display row history does not hold")
+                }
+                for position in range.lowerBound..<historyEnd {
+                    var row = history.paintedRow(at: cursor)
+                    if isAlternateScreenActive {
+                        if position == historyRows - 1 { row.isSoftWrapped = false }
+                    } else if position == historyRows - 1,
+                              let spacer = Terminal.seamSpacer(
+                                  inHistory: history,
+                                  row: row,
+                                  live: live,
+                                  columns: columns
+                              )
+                    {
+                        row.cells.append(spacer)
+                    }
+                    body(position, row)
+                    if position + 1 < historyEnd {
+                        guard let next = history.advance(cursor) else {
+                            preconditionFailure("the projection ended before its indexed row count")
+                        }
+                        cursor = next
+                    }
+                }
+            }
+
+            let liveStart = Swift.max(range.lowerBound, historyRows)
+            guard liveStart < range.upperBound else { return }
+            for position in liveStart..<range.upperBound {
+                body(position, live[position - historyRows].withGatedContinuation)
+            }
+        }
     }
 
     /// Tracks cursor coordinates without exposing storage indices.
@@ -4198,32 +4242,22 @@ public struct Terminal: Equatable, Sendable {
         guard scanStart < scanEnd else { return [] }
         ProjectionRowCounter.record(rows: scanEnd - scanStart)
 
-        var units: [ProjectionUnit] = []
-        for absoluteRow in scanStart..<scanEnd {
-            let relativeRow = absoluteRow - evictedRowCount
-            let row = stream[relativeRow]
-            forEachRowTextUnit(
-                in: row,
-                rowIndex: relativeRow,
-                absoluteBase: evictedRowCount
-            ) { units.append($0) }
-            if absoluteRow < lastContentRow, row.isSoftWrapped == false {
-                units.append(ProjectionUnit(
-                    scalars: ["\n"],
-                    start: TextAnchor(row: absoluteRow, column: projectedCellEnd(in: row)),
-                    end: TextAnchor(row: absoluteRow + 1, column: 0),
-                    isHardBoundary: true
-                ))
-            }
-        }
-        guard needleKeys.count <= units.count else { return [] }
         var matches: [TextAnchorRange] = []
         var window = [SearchGraphemeKey?](repeating: nil, count: needleKeys.count)
+        var starts = [TextAnchor](
+            repeating: TextAnchor(row: 0, column: 0),
+            count: needleKeys.count
+        )
+        var unitCount = 0
 
-        for endIndex in units.indices {
-            window[endIndex % needleKeys.count] = searchGraphemeKey(for: units[endIndex].scalars)
-            guard endIndex + 1 >= needleKeys.count else { continue }
-            let startIndex = endIndex - needleKeys.count + 1
+        func consume(_ key: SearchGraphemeKey, start: TextAnchor, end: TextAnchor) {
+            let endIndex = unitCount
+            let slot = endIndex % needleKeys.count
+            window[slot] = key
+            starts[slot] = start
+            unitCount += 1
+            guard unitCount >= needleKeys.count else { return }
+            let startIndex = unitCount - needleKeys.count
             var matchesNeedle = true
             for offset in needleKeys.indices {
                 guard window[(startIndex + offset) % needleKeys.count] == needleKeys[offset] else {
@@ -4231,14 +4265,68 @@ public struct Terminal: Equatable, Sendable {
                     break
                 }
             }
-            guard matchesNeedle else { continue }
+            guard matchesNeedle else { return }
             let match = TextAnchorRange(
-                start: units[startIndex].start,
-                end: units[endIndex].end
+                start: starts[startIndex % needleKeys.count],
+                end: end
             )
             if range(match, intersects: absoluteRows) { matches.append(match) }
         }
+
+        forEachSearchUnit(
+            in: stream,
+            absoluteRows: scanStart..<scanEnd,
+            lastContentRow: lastContentRow,
+            consume
+        )
         return matches
+    }
+
+    /// Streams the painted projection as match keys and anchors without constructing selection
+    /// units or allocating an array for the common single-scalar cell.
+    private func forEachSearchUnit(
+        in stream: ProjectionRows,
+        absoluteRows: Range<Int>,
+        lastContentRow: Int,
+        _ body: (SearchGraphemeKey, TextAnchor, TextAnchor) -> Void
+    ) {
+        let streamStart = evictedRowCount
+        let relativeRows = (absoluteRows.lowerBound - streamStart)..<(
+            absoluteRows.upperBound - streamStart
+        )
+        stream.forEachRow(in: relativeRows) { relativeRow, row in
+            let absoluteRow = evictedRowCount + relativeRow
+            let end = projectedCellEnd(in: row)
+            var column = 0
+            while column < end {
+                let cell = row.cell(at: column)
+                let width = cell.kind == .wideHead ? 2 : 1
+                switch cell.kind {
+                case .narrow, .wideHead:
+                    body(
+                        searchGraphemeKey(for: cell.scalars),
+                        TextAnchor(row: absoluteRow, column: column),
+                        TextAnchor(row: absoluteRow, column: column + width)
+                    )
+                case .padding:
+                    body(
+                        .scalar(0x20),
+                        TextAnchor(row: absoluteRow, column: column),
+                        TextAnchor(row: absoluteRow, column: column + 1)
+                    )
+                case .wideTail, .spacerHead:
+                    break
+                }
+                column += width
+            }
+            if absoluteRow < lastContentRow, row.isSoftWrapped == false {
+                body(
+                    .scalar(0x0A),
+                    TextAnchor(row: absoluteRow, column: end),
+                    TextAnchor(row: absoluteRow + 1, column: 0)
+                )
+            }
+        }
     }
 
     private func lastProjectedContentRow(in absoluteRows: Range<Int>) -> Int? {
@@ -4310,6 +4398,19 @@ public struct Terminal: Equatable, Sendable {
             return .scalar(scalar.value)
         }
         return .scalars(key)
+    }
+
+    /// Reads the common ASCII cell directly from inline scalar storage so search does not
+    /// allocate an array for every painted cell it scans.
+    private func searchGraphemeKey(for scalars: TerminalScalars) -> SearchGraphemeKey {
+        if scalars.count == 1 {
+            let scalar = scalars[0]
+            if scalar.value < 0x80 {
+                let value = scalar.value
+                return .scalar(value >= 0x41 && value <= 0x5A ? value + 0x20 : value)
+            }
+        }
+        return searchGraphemeKey(for: Array(scalars))
     }
 
     private mutating func refreshHasContentInspectionState() {

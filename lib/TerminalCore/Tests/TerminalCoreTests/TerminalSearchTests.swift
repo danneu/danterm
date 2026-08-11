@@ -465,6 +465,29 @@ struct TerminalSearchTests {
         )
     }
 
+    @Test("sequential search scans locate retained history once")
+    func sequentialSearchScansLocateRetainedHistoryOnce() throws {
+        // Intent: a sequential search scan enters retained history once and advances through it.
+        // Why it exists: one display-row lookup per retained row makes a whole-history scan
+        //   quadratic-ish in the number of stored records.
+        // Scenario: a deep pane scans all matches, then a window wholly inside retained history.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        for index in 0..<80 {
+            terminal.feed(Array("row\(index)\r\n".utf8))
+        }
+        _ = terminal.beginSearch("row")
+        let totalRows = terminal.scrollProjection.totalRows
+        let scans = [0..<totalRows, 0..<(totalRows - 3)]
+
+        for rows in scans {
+            let locates = LocateCounter.measure {
+                _ = terminal.scannedSearchMatchRanges(in: rows)
+            }
+
+            #expect(locates == 1)
+        }
+    }
+
     @Test("the retained index equals a full rescan across output tail changes and resize")
     func retainedIndexMatchesFullRescanAcrossStoreMutations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
