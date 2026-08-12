@@ -1158,6 +1158,56 @@ import DanTermProtocol
         }, "CLI tab.close should not show a close-tab confirmation")
     }
 
+    @Test("quit terminates a launcher pool slot whatever the model is holding")
+    func quitTerminatesLauncherPoolSlot() throws {
+        // Intent: a slot instance answers quit with the same terminate effect
+        //   Cmd-Q produces, and answers it while a confirmation is pending.
+        // Why it exists: quit is the agent's only graceful exit, so it must not
+        //   inherit the GUI's confirmation gate or leave one stranded behind it.
+        // Scenario: a slot-3 instance whose model already has a terminate
+        //   confirmation open from an earlier Cmd-Q.
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .terminate
+        let env = makeTestEnv(
+            instanceIdentity: try #require(DanTermInstanceIdentity(developmentSlot: 3))
+        )
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.quit.rawValue, env: env)
+
+        _ = try requireIpcReply(commands)
+        #expect(hasEffect(commands, isTerminate))
+        #expect(model.pendingConfirmation == .terminate)
+    }
+
+    @Test(
+        "quit is refused by every instance outside the launcher pool",
+        arguments: [
+            DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm"),
+            DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm-dev"),
+            DanTermInstanceIdentity(bundleIdentifier: "com.example.harness"),
+        ]
+    )
+    func quitRefusedOutsideLauncherPool(_ identity: DanTermInstanceIdentity) throws {
+        // Intent: production, the canonical dev app, and any identifier outside
+        //   the scheme all refuse quit and emit no terminate effect.
+        // Why it exists: this is the guard that keeps the CLI from ending the
+        //   user's real sessions, and it is never exercised against production
+        //   live -- the run that would find a defect is the run that destroys
+        //   the sessions the guard protects.
+        // Scenario: one dispatch per identity the pool does not admit.
+        var model = makeModel()
+        createTab(&model)
+        let env = makeTestEnv(instanceIdentity: identity)
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.quit.rawValue, env: env)
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "quit is limited to launcher slot instances")
+        #expect(!hasEffect(commands, isTerminate))
+    }
+
     @Test("tab.close refuses last tab without pending confirmation")
     func tabCloseRefusesLastTab() throws {
         // Intent: tab.close refuses to close the only remaining tab.
@@ -2043,7 +2093,8 @@ import DanTermProtocol
             let env = CoreEnv(
                 newId: { UUID() },
                 now: { Date(timeIntervalSince1970: 1_700_000_000) },
-                homeDirectory: { "/home" }
+                homeDirectory: { "/home" },
+                instanceIdentity: { DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm") }
             )
 
             let commands = sendIpc(
@@ -3644,6 +3695,11 @@ private func requireIpcReply(_ commands: [Command]) throws -> JSONValue {
         return nil
     }.first
     return try #require(reply, "expected ipcReply")
+}
+
+private func isTerminate(_ command: Command) -> Bool {
+    if case .terminate = command { return true }
+    return false
 }
 
 private func requireIpcError(_ commands: [Command]) throws -> IpcErrorResult {

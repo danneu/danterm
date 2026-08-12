@@ -43,6 +43,18 @@ struct IpcRequestTests {
         }
     }
 
+    @Test("quit is the only method that ends the instance it reaches")
+    func quitIsTheOnlyInstanceEndingMethod() {
+        // Intent: exactly one catalog method is classified as instance-ending.
+        // Why it exists: the CLI derives two rules from that one fact -- refuse
+        //   ambient targeting, and read a closed connection as success. A second
+        //   method that silently inherited them would make every ordinary verb
+        //   able to hide a dropped connection.
+        let ending = IpcRequestMethod.allCases.filter(\.terminatesInstance)
+
+        #expect(ending == [.quit])
+    }
+
     @Test("todo requests accept either owner and reject ambiguous targeting")
     func todoRequestsRequireExactlyOneOwner() throws {
         let pane = "11111111-1111-4111-8111-111111111111"
@@ -104,6 +116,7 @@ struct IpcRequestTests {
             CLICommand(request: .doctorPermissions, outputMode: .none),
             try parseCLI(["ls"]),
             try parseCLI(["focus"]),
+            try parseCLI(["quit"]),
             try parseCLI(["tab", "new", "--group", group], currentDirectory: "/caller"),
             try parseCLI(["tab", "rename", "--tab", tab, "work"]),
             try parseCLI(["tab", "close", "--tab", tab]),

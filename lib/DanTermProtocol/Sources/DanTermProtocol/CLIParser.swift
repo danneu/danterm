@@ -95,6 +95,14 @@ public func parseCLI(
         }
         return CLICommand(request: .focusInfo, outputMode: .json)
 
+    // No flags by design: the instance is named by `--socket`, and one verb has
+    // one meaning. There is no --force and no --timeout to add later.
+    case "quit":
+        guard args.count == 1 else {
+            throw CLIParseError("usage: danterm quit")
+        }
+        return CLICommand(request: .quit, outputMode: .none)
+
     case "group":
         guard args.count >= 2 else { throw CLIParseError("usage: danterm group <new|rename|close>") }
         switch args[1] {

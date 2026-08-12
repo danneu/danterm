@@ -191,9 +191,10 @@ teaching surface an implementer actually hits (see the next subsection).
 The core's nondeterminism came from three ambient inputs -- home directory,
 fresh ids, and wall-clock time -- which `CoreEnv` now seams behind explicit
 call-site closures (`homeDirectory`, `newId`, `now`), with `static let live`
-binding the real ambient values. `update()` and the restore builders default
-their `env: CoreEnv` parameter to `.live`, so the entire existing pure-test
-corpus and every app call site compile unchanged.
+binding the real ambient values. A fourth input, `instanceIdentity`, joined
+later on a different rationale -- see "The identity seam" below. `update()` and
+the restore builders default their `env: CoreEnv` parameter to `.live`, so the
+entire existing pure-test corpus and every app call site compile unchanged.
 
 - **Ids** are made compiler-forced. The no-arg `TypedId.init()` (which minted a
   fresh `UUID()`) is **removed**, so the only way to mint an id in core is through
@@ -263,6 +264,29 @@ This subsection is the canonical statement that the lint failure message
 (`scripts/core-purity-lint.sh`) and `AGENTS.md` point back to, and that the
 `CoreEnv.homeDirectory`/`abbreviateHome`/`expandTilde` doc comments restate at
 the seam.
+
+### The identity seam (authorization, not determinism)
+
+`CoreEnv` carries a fourth closure, `instanceIdentity`, and it does not belong to
+the save/send/assert rule above. The other three exist so two executions
+reproduce; this one exists so pure dispatch can answer a question about
+privilege: **which instance am I?** The `quit` IPC method ends the answering app
+the way Cmd-Q does, and dispatch admits it only for an identity holding a
+launcher pool slot (`DanTermInstanceIdentity.isLauncherPoolSlot`, slots 1
+through 8). Production, the canonical `DanTerm Dev.app` at slot 0, and any bundle
+identifier the scheme does not recognize are all refused.
+
+Two consequences follow, and they are the reason this seam is called out rather
+than folded into the list:
+
+- **Never re-derived at a leaf.** There is no "SHOWN live and
+  discarded" case for a privilege check, so no `DanTermInstanceIdentity(bundle:)`
+  may appear inside a dispatch arm. The only ambient read is `CoreEnv.live`.
+- **The default fails closed.** `.live` resolves `Bundle.main`, which inside a
+  test harness is the harness bundle -- not a pool slot. A test that forgets to
+  inject an identity therefore gets no privilege, which is the safe direction.
+  This inverts the home seam's rationale, where the ambient default is the
+  *correct* production value.
 
 ### Typed paths: stay `String` until path algebra arrives
 

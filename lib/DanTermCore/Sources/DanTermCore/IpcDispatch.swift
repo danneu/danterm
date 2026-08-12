@@ -43,6 +43,21 @@ private func dispatchIpc(
     case .focusInfo:
         return [.readFocusInfo(reqId: reqId)]
 
+    case .quit:
+        // Allowlist, not denylist: only an instance the launcher pool handed out
+        // may be ended over IPC, so an identity the scheme does not recognize is
+        // refused without anyone having to name it here. Passing that instance's
+        // socket is the authorization, the same way an explicit pane id
+        // authorizes pane.close -- there is no confirmation and no todo check.
+        guard env.instanceIdentity().isLauncherPoolSlot else {
+            throw IpcParamsError("quit is limited to launcher slot instances")
+        }
+        // Reply before the terminate effect so the client can see an honored
+        // quit; the CLI also reads the closed socket as success, because
+        // NSApp.terminate tears the IPC server down behind this.
+        return [.ipcReply(reqId: reqId, result: okResult())]
+            + update(&model, .terminate, env: env)
+
     case .ls:
         let encoder = IpcEntityEncoder(home: env.homeDirectory())
         return [.ipcReply(reqId: reqId, result: encoder.list(model))]
@@ -130,8 +145,8 @@ private func dispatchIpc(
         // Both refusals mirror how tab.close refuses the last tab. `.deleteGroup`
         // returns [] for the last group, and drives emitTerminateConfirmation for a
         // destructive close of the group holding every tab -- which would leave the
-        // group open and strand a pending confirmation. The CLI never quits the app
-        // as a side effect of closing a group.
+        // group open and strand a pending confirmation. Quitting is `quit`'s job,
+        // never a side effect of closing a group.
         guard let group = model.groups.first(where: { $0.id == groupId }) else {
             throw IpcParamsError("group not found")
         }
@@ -165,8 +180,8 @@ private func dispatchIpc(
     case .tabClose(let tabId):
         try requireTab(tabId, in: model)
         // Refuse the last tab: routing it through .closeTab would set a terminate
-        // confirmation, leave the tab open, and strand pendingConfirmation. The CLI
-        // never quits the app as a side effect of closing a tab.
+        // confirmation, leave the tab open, and strand pendingConfirmation.
+        // Quitting is `quit`'s job, never a side effect of closing a tab.
         if wouldQuitFromClose(model) {
             throw IpcParamsError("cannot close the last tab")
         }
