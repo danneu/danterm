@@ -130,7 +130,7 @@ func update(
         if paneCount > 1 || uncompletedTodos > 0 {
             let isLastTab = totalTabCount(model) == 1
             return emitCloseTabConfirmation(
-                &model, tabId: id, tabTitle: tabDisplayTitle(tab, in: model),
+                &model, tabId: id, tabTitle: tabDisplayTitle(tab),
                 paneCount: paneCount, isLastTab: isLastTab,
                 uncompletedTodoCount: uncompletedTodos
             )
@@ -1363,7 +1363,7 @@ func update(
             if rollup.uncompleted > 0 {
                 let isLastTab = totalTabCount(model) == 1
                 return emitCloseTabConfirmation(
-                    &model, tabId: tab.id, tabTitle: tabDisplayTitle(tab, in: model),
+                    &model, tabId: tab.id, tabTitle: tabDisplayTitle(tab),
                     paneCount: 1, isLastTab: isLastTab,
                     uncompletedTodoCount: rollup.uncompleted
                 )

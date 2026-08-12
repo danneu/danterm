@@ -1509,12 +1509,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
         }
         if let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView,
-           let chip = leadingStack.arrangedSubviews.first(where: { $0.identifier == chipId }) as? ChipView,
-           let model = currentModel
+           let chip = leadingStack.arrangedSubviews.first(where: { $0.identifier == chipId }) as? ChipView
         {
             // Outside the skipTitle guard: an inline rename owns the title field,
             // not the chip, and the pane can attach an agent mid-rename.
-            chip.kind = tabChipKind(tab, in: model)
+            chip.kind = tabChipKind(tab)
         }
         if !skipTitle,
            let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView

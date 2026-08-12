@@ -1722,7 +1722,7 @@ import DanTermProtocol
         #expect(reply["tab"]?["rootNode"]?["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
         #expect(reply["panes"]?.asArray?.first?.asObject?.keys.count == 1)
         #expect(tabById(tabId, in: model)?.customTitle == "clock")
-        #expect(tabById(tabId, in: model).map { tabDisplayTitle($0, in: model) } == "clock")
+        #expect(tabById(tabId, in: model).map { tabDisplayTitle($0) } == "clock")
         #expect(model.pane(paneId)?.session?.title == "clock")
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {

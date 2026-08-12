@@ -82,7 +82,7 @@ struct IpcEntityEncoder {
             )),
             "tab": .object([
                 "id": .string(tab.id.rawValue.uuidString),
-                "title": .string(tabDisplayTitle(tab, in: model)),
+                "title": .string(tabDisplayTitle(tab)),
                 "groupId": .string(group.id.rawValue.uuidString),
                 "isZoomed": .bool(tab.isZoomed),
             ]),

@@ -468,8 +468,8 @@ import Testing
 
         let tab = model.groups[0].tabs[0]
         #expect(tab.focusedPaneId == paneA)
-        #expect(tabTitle(tab, in: model) == "pane-a-title")
-        #expect(tabSubtitle(tab, in: model) == "/tmp/pane-a")
+        #expect(tabTitle(tab) == "pane-a-title")
+        #expect(tabSubtitle(tab) == "/tmp/pane-a")
     }
 
     @Test("testClosePaneInCollapsedGroupCloses")
@@ -1129,7 +1129,7 @@ import Testing
 
         let tab = model.groups[0].tabs[0]
         #expect(tab.focusedPaneId == paneA)
-        #expect(tabDisplayTitle(tab, in: model) == "alpha", "swapping focus to pane A should show pane A chrome")
+        #expect(tabDisplayTitle(tab) == "alpha", "swapping focus to pane A should show pane A chrome")
     }
 
     // MARK: - movePaneToTab Tests
@@ -1240,7 +1240,7 @@ import Testing
 
         let sourceTab = tabById(sourceTabId, in: model)!
         #expect(sourceTab.focusedPaneId == paneB)
-        #expect(tabDisplayTitle(sourceTab, in: model) == "beta", "source tab should show the surviving focused pane")
+        #expect(tabDisplayTitle(sourceTab) == "beta", "source tab should show the surviving focused pane")
     }
 
     @Test("testMovePaneToTabSameTabIsNoOp")
@@ -1623,7 +1623,7 @@ import Testing
 
         let sourceTab = tabById(sourceTabId, in: model)!
         #expect(sourceTab.focusedPaneId == paneB)
-        #expect(tabDisplayTitle(sourceTab, in: model) == "beta", "source tab should show the surviving focused pane")
+        #expect(tabDisplayTitle(sourceTab) == "beta", "source tab should show the surviving focused pane")
     }
 
     @Test("testMovePaneToNewTabPathB_ChromeDerived")
@@ -1643,8 +1643,8 @@ import Testing
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         let newTab = model.groups[0].tabs[1]
-        #expect(tabTitle(newTab, in: model) == abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
-        #expect(tabSubtitle(newTab, in: model) == abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
+        #expect(tabTitle(newTab) == abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
+        #expect(tabSubtitle(newTab) == abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
     }
 
     @Test("testMovePaneToNewTabAlertsClearedOnMove")

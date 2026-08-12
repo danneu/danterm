@@ -450,10 +450,10 @@ import Testing
         let tab = model.groups[0].tabs[0]
 
         // The focused pane's session cwd supplies the subtitle.
-        #expect(tabTitle(tab, in: model) == "Editor")
-        #expect(tabSubtitle(tab, in: model) == "~/focused-pane")
+        #expect(tabTitle(tab) == "Editor")
+        #expect(tabSubtitle(tab) == "~/focused-pane")
         // The sibling's cwd never bleeds into the tab chrome.
-        #expect(tabSubtitle(tab, in: model) != "~/sibling", "sibling cwd must not leak into the tab subtitle")
+        #expect(tabSubtitle(tab) != "~/sibling", "sibling cwd must not leak into the tab subtitle")
     }
 
     @Test("graftScrollback embeds scrollback into the matching tree leaves only")

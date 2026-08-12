@@ -48,7 +48,7 @@ func alertPresentation(
         return AlertPresentation(title: title, subtitle: nil)
     }
 
-    var location = tabDisplayTitle(tab, in: model)
+    var location = tabDisplayTitle(tab)
     let paneIds = allPaneIds(tab.rootNode)
     if paneIds.count > 1, let index = paneIds.firstIndex(of: paneId) {
         location += " - pane \(index + 1)"

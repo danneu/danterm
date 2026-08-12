@@ -574,14 +574,11 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
 }
 
 /// Derives tab chrome from the focused pane's current terminal session.
-func tabChrome(_ tab: TabModel, in model: AppModel) -> (title: String, subtitle: String?) {
-  guard let session = model.pane(tab.focusedPaneId)?.session else {
-    return ("Terminal", nil)
-  }
-  return sessionChrome(session)
-}
-
-/// Derives tab chrome directly from its leaf-owned pane tree.
+///
+/// Resolved inside the tab's own tree, never against the whole window. A tab
+/// owns its panes, so a window-wide search could only ever find the same pane
+/// or -- when the focus is stale -- a stranger's, and it costs a full walk of
+/// every group and tab to do it. `desiredSidebar` calls this once per row.
 func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
   guard let session = paneInNode(tab.rootNode, id: tab.focusedPaneId)?.session else {
     return ("Terminal", nil)
@@ -597,24 +594,24 @@ private func sessionChrome(_ session: SessionModel) -> (title: String, subtitle:
 }
 
 /// Returns the terminal-derived title for one tab.
-func tabTitle(_ tab: TabModel, in model: AppModel) -> String {
-  tabChrome(tab, in: model).title
+func tabTitle(_ tab: TabModel) -> String {
+  tabChrome(tab).title
 }
 
 /// Applies a custom title over the terminal-derived title for one tab.
-func tabDisplayTitle(_ tab: TabModel, in model: AppModel) -> String {
-  tab.customTitle ?? tabTitle(tab, in: model)
+func tabDisplayTitle(_ tab: TabModel) -> String {
+  tab.customTitle ?? tabTitle(tab)
 }
 
 /// Returns the focused session's working-directory subtitle for one tab.
-func tabSubtitle(_ tab: TabModel, in model: AppModel) -> String? {
-  tabChrome(tab, in: model).subtitle
+func tabSubtitle(_ tab: TabModel) -> String? {
+  tabChrome(tab).subtitle
 }
 
 /// Returns the chip for one tab's row, taken from the focused pane like the
 /// rest of the row's chrome. An agent in an unfocused split does not show here.
-func tabChipKind(_ tab: TabModel, in model: AppModel) -> ChipKind {
-  ChipKind(agent: model.pane(tab.focusedPaneId)?.session?.agent ?? .none)
+func tabChipKind(_ tab: TabModel) -> ChipKind {
+  ChipKind(agent: paneInNode(tab.rootNode, id: tab.focusedPaneId)?.session?.agent ?? .none)
 }
 
 /// What a pane chip's single state dot says, if anything.

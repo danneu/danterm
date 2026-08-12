@@ -325,7 +325,7 @@ import Testing
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
         #expect(model.pane(paneId)?.session?.title == "vim")
-        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "vim")
+        #expect(tabTitle(model.groups[0].tabs[0]) == "vim")
     }
 
     @Test("testSessionTitleUnfocusedPane")
@@ -342,7 +342,7 @@ import Testing
 
         let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("htop")))
         #expect(model.pane(paneA)?.session?.title == "htop", "pane title should update")
-        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "Terminal", "tab title should not change")
+        #expect(tabTitle(model.groups[0].tabs[0]) == "Terminal", "tab title should not change")
         #expect(commands.isEmpty)
     }
 
@@ -359,7 +359,7 @@ import Testing
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd("/home/dan/projects")))
         #expect(model.pane(paneId)?.session?.cwd == "/home/dan/projects")
-        #expect(tabSubtitle(model.groups[0].tabs[0], in: model) == abbreviateHome("/home/dan/projects"),
+        #expect(tabSubtitle(model.groups[0].tabs[0]) == abbreviateHome("/home/dan/projects"),
             "focused-pane cwd syncs the selected tab's subtitle (the window-chrome input)")
     }
 
@@ -397,7 +397,7 @@ import Testing
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("vim")))
         #expect(model.pane(paneA)?.session?.title == "vim", "pane title should update")
-        #expect(tabTitle(model.groups[0].tabs[0], in: model) == "vim", "background tab title should update")
+        #expect(tabTitle(model.groups[0].tabs[0]) == "vim", "background tab title should update")
     }
 
     @Test("testSessionPwdBackgroundTab")
@@ -416,7 +416,7 @@ import Testing
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .cwd("/tmp")))
         #expect(model.pane(paneA)?.session?.cwd == "/tmp", "pane cwd should update")
-        #expect(tabSubtitle(model.groups[0].tabs[0], in: model) == ("~" == abbreviateHome("/tmp") ? "~" : "/tmp"), "background tab subtitle should update")
+        #expect(tabSubtitle(model.groups[0].tabs[0]) == ("~" == abbreviateHome("/tmp") ? "~" : "/tmp"), "background tab subtitle should update")
     }
 
     @Test("terminal metadata accepts 64 KiB values and rejects larger values")
