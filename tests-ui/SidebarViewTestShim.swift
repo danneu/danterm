@@ -77,13 +77,22 @@ class TerminalView: NSView, TerminalSession {
     var hasSelection = false
     var performedActions: [String] = []
     var hostView: NSView { self }
-    var state = TerminalSessionState(scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil)
+    var state = TerminalSessionState(
+        scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil,
+        background: NSColor.black.cgColor)
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
     var revealCount = 0
+
+    /// Drives the session-state channel the way a real theme swap does, so view
+    /// chrome that reads state can be tested without the terminal engine.
+    func emitState(_ newState: TerminalSessionState) {
+        state = newState
+        stateObserver?.terminalSessionStateDidChange(newState)
+    }
 
     func copySelection() {
         performedActions.append("copySelection")
@@ -124,17 +133,6 @@ class TerminalView: NSView, TerminalSession {
     func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
     func scroll(toRow row: Int) {}
     func requestClose() {}
-    func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
     func fenceForApplicationExit() {}
     func tearDown() {}
-}
-
-class ScrollableTerminalView: NSView {
-    init(terminalSession: any TerminalSession) {
-        super.init(frame: .zero)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not implemented")
-    }
 }

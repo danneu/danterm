@@ -52,6 +52,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TodoPopoverState.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TodoInputCommand.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TodoShortcutCatalog.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ScrollbarMath.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Persistence.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CheckpointCapture.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
@@ -100,6 +101,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TodoToolbarButton.swift" \
         "$SCRIPT_DIR/app/SearchOverlayView.swift" \
         "$SCRIPT_DIR/app/LinkPreviewView.swift" \
+        "$SCRIPT_DIR/app/ScrollableTerminalView.swift" \
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/PaneHost.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
@@ -123,6 +125,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/LinkPreviewViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/ScrollableTerminalViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \

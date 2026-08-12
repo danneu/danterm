@@ -20,6 +20,11 @@ private class TerminalScrollView: NSScrollView {
 // MARK: - ScrollableTerminalView
 
 class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
+    /// One number for two jobs: the width of the focus ring and the width of the
+    /// gutter reserved for it on every side. A `CALayer` border draws inward from
+    /// its bounds, so a narrower gutter would put the ring back on top of glyphs.
+    static let focusRingWidth: CGFloat = 2
+
     private let scrollView: TerminalScrollView
     private let documentView: NSView
     let terminalSession: any TerminalSession
@@ -52,6 +57,12 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         documentView.addSubview(terminalSession.hostView)
 
         super.init(frame: .zero)
+
+        wantsLayer = true
+        // The gutter sits outside the terminal view, so it cannot inherit that
+        // view's theme-colored layer background; it paints the session's current
+        // one from construction rather than from the first theme change.
+        layer?.backgroundColor = terminalSession.state.background
 
         addSubview(scrollView)
 
@@ -119,17 +130,50 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
     override func layout() {
         super.layout()
-        scrollView.frame = bounds
+        scrollView.frame = gutteredBounds()
         terminalSession.hostView.frame.size = scrollView.bounds.size
         documentView.frame.size.width = scrollView.bounds.width
         synchronizeScrollView()
         synchronizeSessionView()
     }
 
+    /// The terminal area: this view's bounds minus the ring gutter on all four
+    /// sides. Reserved whether or not a ring is showing, so focus and alert
+    /// changes never reflow the grid. Built by hand rather than with `insetBy`,
+    /// which returns a null rect when a pane is laid out narrower than the two
+    /// gutters it reserves; this clamps to an empty terminal area instead.
+    private func gutteredBounds() -> CGRect {
+        let inset = Self.focusRingWidth
+        return CGRect(
+            x: inset, y: inset,
+            width: max(0, bounds.width - 2 * inset),
+            height: max(0, bounds.height - 2 * inset)
+        )
+    }
+
+    // MARK: - Focus Ring
+
+    /// Draws or clears the pane's focus/alert ring inside the reserved gutter.
+    /// Focus wins over an alert, and a pane with neither draws no ring.
+    func setFocusRing(focused: Bool, hasBell: Bool) {
+        guard let layer else { return }
+        if focused {
+            layer.borderWidth = Self.focusRingWidth
+            layer.borderColor = NSColor.systemGreen.cgColor
+        } else if hasBell {
+            layer.borderWidth = Self.focusRingWidth
+            layer.borderColor = NSColor.systemRed.cgColor
+        } else {
+            layer.borderWidth = 0
+            layer.borderColor = nil
+        }
+    }
+
     // MARK: - Scroll Delegate
 
     func terminalSessionStateDidChange(_ state: TerminalSessionState) {
         scrollView.hasVerticalScroller = state.scrollbarEnabled
+        layer?.backgroundColor = state.background
         synchronizeScrollView()
     }
 

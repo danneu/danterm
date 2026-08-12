@@ -6,6 +6,9 @@ import Cocoa
 class PaneWrapperView: NSView {
     let paneId: PaneId
     let terminalSession: any TerminalSession
+    /// Owns the terminal area's frame math, the focus-ring gutter, and the ring
+    /// itself. Retained by name because the ring is pushed through this wrapper.
+    let scrollWrapper: ScrollableTerminalView
     private let toolbar: NSView
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
@@ -44,6 +47,8 @@ class PaneWrapperView: NSView {
     init(paneId: PaneId, terminalView: any TerminalSession, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalSession = terminalView
+        // Terminal view wrapped in scroll view for native scrollbar support
+        self.scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         self.toolbar = NSView()
         self.toolbarLabel = NonHitTestingLabel(labelWithString: "")
         self.isZoomed = isZoomed
@@ -214,8 +219,6 @@ class PaneWrapperView: NSView {
         toolbar.addSubview(menuButton)
         toolbar.addSubview(unzoomButton)
 
-        // Terminal view wrapped in scroll view for native scrollbar support
-        let scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
 
@@ -281,6 +284,12 @@ class PaneWrapperView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    /// Pane chrome, so the reconciler reaches it the same way it reaches the
+    /// toolbar and the search overlay: through the persistent wrapper.
+    func setFocusRing(focused: Bool, hasBell: Bool) {
+        scrollWrapper.setFocusRing(focused: focused, hasBell: hasBell)
     }
 
     func updateToolbar(title: String, cwd: String?, command: String? = nil, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, chipKind: ChipKind = .terminal, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0, isZoomed: Bool? = nil, hasSplits: Bool? = nil) {

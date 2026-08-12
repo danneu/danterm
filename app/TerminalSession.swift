@@ -30,6 +30,10 @@ struct TerminalSessionState: Equatable {
     let scrollbarEnabled: Bool
     let cellHeight: CGFloat
     let scrollPosition: TerminalScrollPosition?
+    /// The pane's current terminal default background. It rides this channel because
+    /// the focus-ring gutter lives outside the terminal view and so cannot inherit
+    /// that view's theme-colored layer background.
+    let background: CGColor
 }
 
 /// Retains only the terminal owner needed to disarm one recorder append edge safely.
@@ -166,7 +170,6 @@ protocol TerminalSession: AnyObject {
     func copySelection()
     func pasteClipboard()
     func requestClose()
-    func setFocusBorder(_ focused: Bool, hasBell: Bool)
     /// Fences accepted terminal mutations before the final recovery capture.
     func fenceForApplicationExit()
     func tearDown()

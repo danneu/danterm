@@ -137,7 +137,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 total: UInt64(clamping: projection.totalRows),
                 offset: UInt64(clamping: projection.topRow),
                 length: UInt64(clamping: projection.windowRows)
-            )
+            ),
+            background: Self.cgColor(controller.renderTheme.defaultBackground)
         )
     }
     var hasSelection: Bool { controller.hasSelection }
@@ -1022,20 +1023,6 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         #endif
     }
 
-    func setFocusBorder(_ focused: Bool, hasBell: Bool) {
-        guard let layer else { return }
-        if focused {
-            layer.borderWidth = 2
-            layer.borderColor = NSColor.systemGreen.cgColor
-        } else if hasBell {
-            layer.borderWidth = 2
-            layer.borderColor = NSColor.systemRed.cgColor
-        } else {
-            layer.borderWidth = 0
-            layer.borderColor = nil
-        }
-    }
-
     func tearDown() {
         guard isTornDown == false else { return }
         isTornDown = true
@@ -1159,6 +1146,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         discardSwapchain()
         controller.setTheme(theme)
         if swapchain == nil { rerenderCurrentPlan() }
+        // The pane's focus-ring gutter takes its color off the state channel, so
+        // a theme swap has to publish even though it moves no scrollbar value.
+        emitStateIfNeeded()
     }
 
     private func emitStateIfNeeded() {

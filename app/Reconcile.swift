@@ -19,7 +19,7 @@ import Cocoa
 /// `AppRuntime.tearDownCurrentSession` so a post-restore reconcile is a clean
 /// build, not a stale diff.
 struct ReconcilerCaches {
-    // focusBorders rides the persisted terminal session in `sessions`, which survives
+    // focusBorders rides the runtime-owned PaneHost's wrapper, which survives
     // container edits, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
     // paneConfig also rides the persisted terminal session in `sessions`, so the
@@ -161,15 +161,16 @@ extension AppRuntime {
         return activatedSelected ? model.selectedTabId : nil
     }
 
-    /// Push each pane's (focused, bell) border to its terminal session, diffed against
-    /// the focusBorders cache so unchanged panes are skipped. Replaces the deleted
-    /// `.refreshPaneBorder` effect; the session executor is
-    /// unchanged -- only the computation moved into the pure `desiredFocusBorders`.
-    /// The default no-op `remove` is correct here: a pane's terminal session is torn
+    /// Push each pane's (focused, bell) ring to its pane wrapper, diffed against
+    /// the focusBorders cache so unchanged panes are skipped. The ring is pane
+    /// chrome, so it takes the same route as the toolbar and search overlay:
+    /// `findPaneWrapper(for:)`, which resolves through the persistent `PaneHost`
+    /// rather than whichever container currently parents the wrapper.
+    /// The default no-op `remove` is correct here: a pane's wrapper is torn
     /// down elsewhere, so a key leaving the projection only prunes the cache.
     func reconcileFocusBorders(tally: UnreadAlertTally) {
         applyDiff(desiredFocusBorders(in: model, tally: tally), &caches.focusBorders, apply: { paneId, state in
-            sessions[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
+            findPaneWrapper(for: paneId)?.setFocusRing(focused: state.focused, hasBell: state.bell)
         })
     }
 

@@ -231,10 +231,10 @@ func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
   isFocusedAndVisible(paneId, in: selectedTab(in: model))
 }
 
-/// Per-pane focus-border state the reconciler diffs and pushes to a TerminalView.
-/// `focused` drives the green focus border, `bell` the red unread-alert border --
-/// exactly the two values the old `.refreshPaneBorder` executor computed before
-/// calling `TerminalView.setFocusBorder`. Equatable so the diff can skip unchanged panes.
+/// Per-pane focus-border state the reconciler diffs and pushes to a pane wrapper.
+/// `focused` drives the green focus ring, `bell` the red unread-alert ring --
+/// exactly the two values the old `.refreshPaneBorder` executor computed.
+/// Equatable so the diff can skip unchanged panes.
 struct BorderState: Equatable {
   let focused: Bool
   let bell: Bool

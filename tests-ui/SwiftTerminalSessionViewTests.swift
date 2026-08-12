@@ -61,6 +61,36 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("session state carries the theme background and republishes on a theme change") {
+        // Intent: `state.background` is the pane's current terminal default
+        //   background before any theme is applied, and a theme swap pushes a
+        //   fresh state to the observer carrying the new one.
+        // Why it exists: the focus-ring gutter lives outside this view and takes
+        //   its color off this channel. Without the construction-time value a
+        //   pane shows an unthemed gutter until its first theme change; without
+        //   the emit on `applyTheme`, it never catches up at all.
+        let controller = TerminalPaneSessionController()
+        let themed = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let pane = SwiftTerminalSessionView(
+            controller: controller,
+            resolveTheme: { $0 == "Known" ? themed : nil }
+        )
+        let observer = SwiftPaneStateObserver()
+        pane.stateObserver = observer
+
+        let dark = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        try uiExpect(pane.state.background == dark,
+                     "initial state did not carry the dark default background: \(pane.state.background)")
+
+        pane.applyTheme("Known")
+
+        let expected = CGColor(red: 12 / 255, green: 34 / 255, blue: 56 / 255, alpha: 1)
+        try uiExpect(pane.state.background == expected,
+                     "state did not follow the applied theme: \(pane.state.background)")
+        try uiExpect(observer.states.last?.background == expected,
+                     "theme change published no state to the observer: \(observer.states.count) states")
+    }
+
     uiTest("font size updates live cell metrics and reports the resized PTY grid") {
         let controller = TerminalPaneSessionController()
         let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)

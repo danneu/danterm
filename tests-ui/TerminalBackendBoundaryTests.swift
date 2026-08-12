@@ -14,7 +14,8 @@ func terminalBackendBoundaryTests() {
         let state = TerminalSessionState(
             scrollbarEnabled: false,
             cellHeight: 18,
-            scrollPosition: .init(total: 100, offset: 20, length: 30)
+            scrollPosition: .init(total: 100, offset: 20, length: 30),
+            background: NSColor.black.cgColor
         )
 
         gate.emit(.report(.title("vim")))
@@ -38,7 +39,9 @@ func terminalBackendBoundaryTests() {
 
         gate.tearDown()
         gate.emit(.bell)
-        gate.emit(TerminalSessionState(scrollbarEnabled: true, cellHeight: 16, scrollPosition: nil))
+        gate.emit(TerminalSessionState(
+            scrollbarEnabled: true, cellHeight: 16, scrollPosition: nil,
+            background: NSColor.black.cgColor))
 
         try uiExpect(events.isEmpty, "event escaped after teardown: \(events)")
         try uiExpect(observer.states.isEmpty, "session state escaped after teardown: \(observer.states)")
