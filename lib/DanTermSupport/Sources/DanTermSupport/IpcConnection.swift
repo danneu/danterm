@@ -1,5 +1,10 @@
 // Unix-socket connection lifecycle and JSON-RPC response writing for DanTerm IPC; line framing
 // lives in DanTermProtocol (IpcLineFramer).
+//
+// Writes are queued and their completions are delivered on the main queue, always: the app state
+// a completion feeds lives on the main actor, so the completions are typed `@MainActor` and every
+// exit routes through `deliver`. The uniformity is the point -- an early exit that reported
+// inline would hand one callback two delivery contexts, and re-enter its own caller.
 import Foundation
 import DanTermProtocol
 import Darwin
@@ -82,10 +87,10 @@ final class IpcConnection: @unchecked Sendable {
     func writeSuccess(
         reqId: UUID,
         result: JSONValue,
-        completion: (@Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         guard let rpcId = takeResponseId(reqId) else {
-            completion?(false)
+            if let completion { deliver(completion, false) }
             return
         }
         writeLine(JsonRpcResponse(id: rpcId, result: result), completion: completion)
@@ -114,7 +119,7 @@ final class IpcConnection: @unchecked Sendable {
         method: String,
         params: JSONValue,
         closeAfterWrite: Bool = false,
-        completion: (@Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         writeLine(
             JsonRpcRequest(method: method, params: params),
@@ -140,21 +145,36 @@ final class IpcConnection: @unchecked Sendable {
         return pendingResponseIds.removeValue(forKey: reqId)
     }
 
+    /// The one place a write completion is invoked, so all three exits below report the same
+    /// way: on the main queue, and never before the `write...` call that armed them returns.
+    /// Delivering inline on the early exits would make a caller's own completion re-enter it.
+    private func deliver(
+        _ completion: @escaping @MainActor @Sendable (Bool) -> Void,
+        _ succeeded: Bool
+    ) {
+        DispatchQueue.main.async {
+            // `assumeIsolated` reads back the guarantee the line above just made, rather than
+            // hopping again through `Task { @MainActor }` and giving up FIFO order with the
+            // writes already queued behind it.
+            MainActor.assumeIsolated { completion(succeeded) }
+        }
+    }
+
     private func writeLine<T: Encodable>(
         _ value: T,
         closeAfterWrite: Bool = false,
-        completion: (@Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         lock.lock()
         let shouldWrite = !closed
         lock.unlock()
         guard shouldWrite else {
-            completion?(false)
+            if let completion { deliver(completion, false) }
             return
         }
 
         guard let line = try? encodeIpcLine(value) else {
-            completion?(false)
+            if let completion { deliver(completion, false) }
             return
         }
         writeQueue.async { [self, line] in
@@ -174,7 +194,7 @@ final class IpcConnection: @unchecked Sendable {
                 }
                 return true
             }
-            completion?(succeeded)
+            if let completion { deliver(completion, succeeded) }
             if succeeded == false {
                 close()
             }

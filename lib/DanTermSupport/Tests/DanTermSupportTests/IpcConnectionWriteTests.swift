@@ -106,44 +106,81 @@ struct IpcConnectionWriteTests {
     }
 
     @Test("notification completion reports a fully flushed JSON-RPC line")
-    func notificationCompletionReportsFlush() throws {
+    func notificationCompletionReportsFlush() async throws {
         let descriptors = try socketPair()
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
-        let completion = WriteCompletionProbe()
         defer {
             connection.close()
             Darwin.close(descriptors.peer)
         }
 
-        connection.writeNotification(
-            method: Methods.paneTapeEvent,
-            params: .object(["subscription": .string("S1")]),
-            completion: { succeeded in completion.record(succeeded) }
-        )
+        // Awaiting rather than blocking keeps the main queue free to deliver the completion.
+        // The line waits in the socket buffer meanwhile, so it is still there to read after.
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object(["subscription": .string("S1")]),
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
 
         let line = try readIpcLine(from: descriptors.peer)
         let request = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
         #expect(request.id == nil)
         #expect(request.method == Methods.paneTapeEvent)
         #expect(request.params?["subscription"] == .string("S1"))
-        #expect(completion.wait() == true)
+        #expect(succeeded)
     }
 
     @Test("notification completion reports a failed socket write")
-    func notificationCompletionReportsFailure() throws {
+    func notificationCompletionReportsFailure() async throws {
         let descriptors = try socketPair()
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
-        let completion = WriteCompletionProbe()
         Darwin.close(descriptors.peer)
         defer { connection.close() }
 
-        connection.writeNotification(
-            method: Methods.paneTapeEvent,
-            params: .object([:]),
-            completion: { succeeded in completion.record(succeeded) }
-        )
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([:]),
+                completion: { continuation.resume(returning: $0) }
+            )
+        }
 
-        #expect(completion.wait() == false)
+        #expect(succeeded == false)
+    }
+
+    @Test("a completion on the already-closed path still lands on main, after the call returns")
+    func closedPathCompletionIsAsynchronousAndOnMain() async throws {
+        // Intent: writing to a closed connection reports `false` on the main thread, and only
+        //   after the write call has returned -- the same as every other completion path.
+        // Why it exists: this exit used to call the completion inline, on whatever thread asked
+        //   for the write, while the success path reported from the writer queue. One callback
+        //   with two delivery contexts is the re-entrancy trap: a caller that reads its own
+        //   state after the write call can have that state already mutated by its completion.
+        //   Uniform main delivery is what closes it, and this is the path that proves it.
+        // Scenario: spec-first. The connection is closed before the write is attempted.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+        connection.close()
+        let order = DeliveryOrderProbe()
+
+        let onMainThread: Bool = await withCheckedContinuation { continuation in
+            connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: .object([:]),
+                completion: { _ in
+                    order.record(.completed)
+                    continuation.resume(returning: Thread.isMainThread)
+                }
+            )
+            order.record(.returned)
+        }
+
+        #expect(order.recorded == [.returned, .completed],
+                "the completion must not run before the write call returns")
+        #expect(onMainThread, "every completion path must report on the main thread")
     }
 
     private func socketPair() throws -> (connection: Int32, peer: Int32) {
@@ -195,23 +232,24 @@ struct IpcConnectionWriteTests {
     }
 }
 
-private final class WriteCompletionProbe: @unchecked Sendable {
-    private let lock = NSLock()
-    private let semaphore = DispatchSemaphore(value: 0)
-    private var succeeded: Bool?
+/// Records the order of two events -- the write call returning, and its completion running --
+/// under one lock, so a re-entrancy claim can be made without racing the two observations.
+private final class DeliveryOrderProbe: @unchecked Sendable {
+    enum Event { case returned, completed }
 
-    func record(_ succeeded: Bool) {
+    private let lock = NSLock()
+    private var events: [Event] = []
+
+    func record(_ event: Event) {
         lock.lock()
-        self.succeeded = succeeded
+        events.append(event)
         lock.unlock()
-        semaphore.signal()
     }
 
-    func wait() -> Bool? {
-        guard semaphore.wait(timeout: .now() + 2) == .success else { return nil }
+    var recorded: [Event] {
         lock.lock()
         defer { lock.unlock() }
-        return succeeded
+        return events
     }
 }
 

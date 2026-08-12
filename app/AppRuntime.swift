@@ -93,7 +93,7 @@ private func writePaneTapeFollowRecords(
     _ records: [JSONValue],
     connection: IpcConnection,
     subscriptionId: UUID,
-    completion: @escaping @Sendable (Bool) -> Void
+    completion: @escaping @MainActor @Sendable (Bool) -> Void
 ) {
     precondition(records.isEmpty == false)
     DispatchQueue.global(qos: .utility).async {
@@ -547,18 +547,16 @@ class AppRuntime {
         DispatchQueue.global(qos: .utility).async {
             do {
                 let start = try prepareStart()
-                connection.writeSuccess(reqId: reqId, result: start.record) { succeeded in
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.schedulingLifecycle.run(callbackToken) {
-                            self.finishPaneTapeFollowStart(
-                                succeeded: succeeded,
-                                subscriptionId: subscriptionId,
-                                paneId: paneId,
-                                connection: connection,
-                                start: start
-                            )
-                        }
+                connection.writeSuccess(reqId: reqId, result: start.record) { [weak self] succeeded in
+                    guard let self else { return }
+                    self.schedulingLifecycle.run(callbackToken) {
+                        self.finishPaneTapeFollowStart(
+                            succeeded: succeeded,
+                            subscriptionId: subscriptionId,
+                            paneId: paneId,
+                            connection: connection,
+                            start: start
+                        )
                     }
                 }
             } catch {
@@ -706,21 +704,19 @@ class AppRuntime {
             connection: connection,
             subscriptionId: subscriptionId
         ) { [weak self] succeeded in
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.schedulingLifecycle.run(callbackToken) {
-                    guard succeeded else {
-                        self.discardPaneTapeFollow(
-                            subscriptionId,
-                            closeConnection: false
-                        )
-                        return
-                    }
-                    if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
-                        subscriptionId: subscriptionId
-                    ) {
-                        self.fetchPaneTapeFollow(fetch)
-                    }
+            guard let self else { return }
+            self.schedulingLifecycle.run(callbackToken) {
+                guard succeeded else {
+                    self.discardPaneTapeFollow(
+                        subscriptionId,
+                        closeConnection: false
+                    )
+                    return
+                }
+                if let fetch = self.paneTapeFollowSubscriptions.completeDelivery(
+                    subscriptionId: subscriptionId
+                ) {
+                    self.fetchPaneTapeFollow(fetch)
                 }
             }
         }
