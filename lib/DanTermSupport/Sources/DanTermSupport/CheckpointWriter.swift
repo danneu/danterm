@@ -11,33 +11,34 @@ import Foundation
 /// captured later: one serial queue, one work item per checkpoint, encoding included. Splitting
 /// encode and write across queues would reorder them under load while still producing correct
 /// bytes, which is why the encode is a parameter here rather than something the caller does
-/// first. `completionQueue` is defaulted to the main queue, where the app keeps the recovery
-/// state a completion feeds; tests point it at a queue they can wait on.
+/// first. Completions are delivered on the main queue, unconditionally: the recovery state a
+/// completion feeds lives on the main actor, and no caller has a reason to want them elsewhere.
 final class CheckpointWriter: Sendable {
     private let queue: DispatchQueue
-    private let completionQueue: DispatchQueue
 
     init(
         label: String = "danterm.checkpoint.io",
-        qos: DispatchQoS = .utility,
-        completionQueue: DispatchQueue = .main
+        qos: DispatchQoS = .utility
     ) {
         queue = DispatchQueue(label: label, qos: qos)
-        self.completionQueue = completionQueue
     }
 
     /// Encode and atomically write, as one work item. `async: false` also fences every write
     /// already queued, which is what the quit checkpoint stands on: it must leave nothing in
-    /// flight, because the process exits as soon as it returns. Both closures are `@Sendable`
-    /// because both genuinely change threads: `encode` runs on the writer's queue, and
-    /// `completion` on `completionQueue`, never on the thread that called `write`.
+    /// flight, because the process exits as soon as it returns.
+    ///
+    /// `encode` is `@Sendable` because it genuinely changes threads: it runs on the writer's
+    /// queue, never on the thread that called `write`. `completion` is `@MainActor` for the same
+    /// reason the delivery queue is hard-wired: the guarantee and the code that leans on it are
+    /// stated together, so a completion touches main-actor state directly instead of hopping
+    /// again and re-promising the guarantee per call site. It is `@Sendable` as well, because
+    /// the closure itself travels to the writer's queue before it is called back on the main one.
     func write(
         to url: URL,
         async: Bool,
         encode: @escaping @Sendable () throws -> Data,
-        completion: (@Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
-        let completionQueue = completionQueue
         let work = DispatchWorkItem {
             let succeeded: Bool
             do {
@@ -52,7 +53,12 @@ final class CheckpointWriter: Sendable {
                 succeeded = false
             }
             guard let completion else { return }
-            completionQueue.async { completion(succeeded) }
+            DispatchQueue.main.async {
+                // `assumeIsolated` reads back the guarantee the line above just made, rather
+                // than hopping a second time through `Task { @MainActor }` -- which would also
+                // give up the FIFO order this queue exists to keep.
+                MainActor.assumeIsolated { completion(succeeded) }
+            }
         }
 
         if async {

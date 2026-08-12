@@ -34,12 +34,6 @@ private final class Observations: @unchecked Sendable {
     }
 }
 
-/// Carries a completion's reported outcome back to the test body. Unchecked because the
-/// semaphore the test waits on orders the write against the read.
-private final class Outcome: @unchecked Sendable {
-    var succeeded: Bool?
-}
-
 @Suite struct CheckpointWriterTests {
     @Test("an async write encodes off the calling thread")
     func asyncWriteEncodesOffTheCallingThread() throws {
@@ -118,7 +112,7 @@ private final class Outcome: @unchecked Sendable {
     }
 
     @Test("a failed encode reports failure and leaves no file")
-    func failedEncodeReportsFailure() throws {
+    func failedEncodeReportsFailure() async throws {
         // Intent: an encode that throws yields `succeeded == false` and writes nothing.
         // Why it exists: the completion drives the recovery policy's retry/backoff state, so a
         //   failure reported as success would stall the policy on a checkpoint that never
@@ -129,24 +123,43 @@ private final class Outcome: @unchecked Sendable {
         let dir = makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
-        // Production delivers completions to the main queue, which no test can service; the
-        // defaulted seam lets this one watch the same code path from a queue it can wait on.
-        let writer = CheckpointWriter(
-            label: "danterm.test.checkpoint.failure",
-            completionQueue: DispatchQueue(label: "danterm.test.checkpoint.failure.completion")
-        )
-        let outcome = Outcome()
-        let reported = DispatchSemaphore(value: 0)
+        let writer = CheckpointWriter(label: "danterm.test.checkpoint.failure")
 
-        writer.write(to: url, async: true, encode: {
-            throw EncodeFailure()
-        }, completion: { result in
-            outcome.succeeded = result
-            reported.signal()
-        })
+        // The test awaits rather than blocking, so the main queue keeps running and can deliver
+        // the completion. A semaphore here would deadlock against the writer's own delivery.
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            writer.write(to: url, async: true, encode: {
+                throw EncodeFailure()
+            }, completion: { result in
+                continuation.resume(returning: result)
+            })
+        }
 
-        #expect(reported.wait(timeout: .now() + 5) == .success, "completion should report within 5s")
-        #expect(outcome.succeeded == false)
+        #expect(succeeded == false)
         #expect(FileManager.default.fileExists(atPath: url.path) == false)
+    }
+
+    @Test("a completion is delivered on the main thread")
+    func completionIsDeliveredOnTheMainThread() async throws {
+        // Intent: the writer calls a completion on the main thread, whoever built the writer.
+        // Why it exists: the completion is typed `@MainActor`, and `MainActor.assumeIsolated`
+        //   inside the writer is what lets it be. That trades a compiler check for a runtime
+        //   one: if the delivery queue ever stops being the main queue, the annotation becomes
+        //   a lie and every completion trips an isolation trap instead of failing to build.
+        //   This is the test that would catch that, so it pins the delivery thread by name.
+        // Scenario: spec-first. One successful async write reports which thread called back.
+        let dir = makeTestCheckpointDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let writer = CheckpointWriter(label: "danterm.test.checkpoint.main-delivery")
+
+        let onMainThread: Bool = await withCheckedContinuation { continuation in
+            writer.write(to: dir.appendingPathComponent("checkpoint.json"), async: true, encode: {
+                Data("payload".utf8)
+            }, completion: { _ in
+                continuation.resume(returning: Thread.isMainThread)
+            })
+        }
+
+        #expect(onMainThread, "completions must land on the main thread the @MainActor type claims")
     }
 }
