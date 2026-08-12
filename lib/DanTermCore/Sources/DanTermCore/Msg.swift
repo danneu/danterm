@@ -230,22 +230,16 @@ extension Msg {
     }
 }
 
-/// Which entity was being renamed (used by renameCompletionMessages).
-enum RenameAction {
-    case tab(TabId)
-    case group(GroupId)
-}
-
 /// Pure function: determines what messages doCommandBy should dispatch
 /// for Enter (confirm) vs Esc (cancel).
 func renameCompletionMessages(
     isConfirm: Bool,
-    action: RenameAction?,
+    target: RenameTarget?,
     newName: String
 ) -> [Msg] {
     var msgs: [Msg] = []
     if isConfirm {
-        switch action {
+        switch target {
         case .tab(let tabId):
             let name: String? = newName.isEmpty ? nil : newName
             msgs.append(.renameTab(id: tabId, name: name))

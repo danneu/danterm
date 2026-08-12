@@ -217,16 +217,87 @@ func sidebarRenameRecycleTests() {
         }
         try uiExpect(renameMessages.count == 1,
             "pointer click-away should dispatch exactly one rename message")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
+        try uiExpect(sidebar.activeRenameTarget == nil,
             "pointer click-away should synchronously clear rename ownership")
         try uiExpect(cell.textField?.isEditable == false,
             "pointer click-away should return the title field to display state")
     }
 
+    uiTest("group commit cancel and click-away each end ownership once") {
+        // Intent: group Enter commits, Escape cancels, and click-away commits with
+        //   the same exactly-once ownership rules as tab rename.
+        // Why it exists: group rename skips empty commits and uses a different message,
+        //   so tab coverage cannot prove its delegate paths.
+        // Scenario: three successive edits of one group exercise every user exit.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let groupA = GroupId(); let groupB = GroupId()
+        let tabA = TabId(); let tabB = TabId()
+        let model = renameRecycleModel([
+            (groupA, "A", false, [(tabA, "alpha")]),
+            (groupB, "B", false, [(tabB, "beta")]),
+        ])
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        let field = try renameRecycleCell(for: .group(groupA), in: outline).textField!
+
+        sidebar.beginRenamingGroup(groupA)
+        field.stringValue = "committed"
+        let commitStart = runtime.sentMessages.count
+        let commitEditor = try requireRenameRecycleEditor(field)
+        _ = sidebar.control(
+            field, textView: commitEditor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        let commitMessages = Array(runtime.sentMessages[commitStart...])
+        try uiExpect(commitMessages.count == 2,
+            "group Enter should send rename then rename-ended")
+        guard case .renameGroup(let committedId, let committedName) = commitMessages[0],
+              case .sidebarRenameEnded = commitMessages[1] else {
+            throw UITestFailure(message: "group Enter sent the wrong message order")
+        }
+        try uiExpect(committedId == groupA && committedName == "committed",
+            "group Enter should commit the trimmed draft")
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "group Enter should clear ownership")
+
+        sidebar.beginRenamingGroup(groupA)
+        field.stringValue = "cancelled"
+        let cancelStart = runtime.sentMessages.count
+        let cancelEditor = try requireRenameRecycleEditor(field)
+        _ = sidebar.control(
+            field, textView: cancelEditor,
+            doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        let cancelMessages = Array(runtime.sentMessages[cancelStart...])
+        try uiExpect(cancelMessages.count == 1,
+            "group Escape should send only rename-ended")
+        guard case .sidebarRenameEnded = cancelMessages[0] else {
+            throw UITestFailure(message: "group Escape should not send renameGroup")
+        }
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "group Escape should clear ownership")
+
+        sidebar.beginRenamingGroup(groupA)
+        field.stringValue = "click away"
+        let clickStart = runtime.sentMessages.count
+        sidebar.finishActiveRenameForPointerInteraction()
+        let clickMessages = Array(runtime.sentMessages[clickStart...])
+        try uiExpect(clickMessages.count == 1,
+            "group click-away should dispatch exactly once")
+        guard case .renameGroup(let clickedId, let clickedName) = clickMessages[0] else {
+            throw UITestFailure(message: "group click-away should send renameGroup")
+        }
+        try uiExpect(clickedId == groupA && clickedName == "click away",
+            "group click-away should commit its draft")
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "group click-away should clear ownership")
+        try uiExpect(field.isEditable == false,
+            "every group exit should restore display state")
+    }
+
     uiTest("reconcile cancels a rename whose field editor AppKit discarded") {
-        // Intent: the rename sidecar and editable field are normalized when AppKit has
+        // Intent: rename ownership and the editable field are normalized when AppKit has
         //   removed the field editor, even if sidebar selection already matches.
-        // Why it exists: selection's no-op fast path previously trusted the sidecar and
+        // Why it exists: selection's no-op fast path previously trusted stale ownership and
         //   skipped cleanup, leaving stale editable state able to collapse the title.
         // Scenario: a direct row click changes selection, AppKit discards the editor,
         //   and the following reconcile observes the already-matching selection.
@@ -249,7 +320,7 @@ func sidebarRenameRecycleTests() {
             old: projection, newModel: model,
             to: sidebar, outline: outline, runtime: runtime)
 
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
+        try uiExpect(sidebar.activeRenameTarget == nil,
             "abandoned editor should clear the authoritative rename target")
         try uiExpect(cell.textField?.isEditable == false,
             "abandoned editor should return the title field to display state")
@@ -285,8 +356,8 @@ func sidebarRenameRecycleTests() {
         let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
         try uiExpect(editedCell.textField?.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == .tab(edited),
-            "precondition: rename should mirror into the sidecar")
+        try uiExpect(sidebar.activeRenameTarget == .tab(edited),
+            "precondition: the view should own the tab rename")
 
         // Collapse the edited row's group through the production pipeline
         // (guard -> ops -> executor), exactly as reconcileSidebar drives it.
@@ -319,7 +390,7 @@ func sidebarRenameRecycleTests() {
     uiTest("Cmd-T while a rename is live ends the edit instead of stranding it") {
         // Intent: a reconcile that inserts a tab and moves the sidebar selection
         //   (what Cmd-T produces) while an inline rename is live must end the
-        //   rename cleanly: title field back to non-editable, sidecar cleared.
+        //   rename cleanly: title field back to non-editable, ownership cleared.
         // Why it exists: applyRestoreSelection's selectRowIndexes aborts the live
         //   field editor with NO NSTextFieldDelegate callback, so none of the
         //   rename finish paths run. The cell is left isEditable=true, and an
@@ -357,8 +428,8 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(editedCell.textField?.isEditable == false,
             "selection moving away must end the rename, not strand an editable cell")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
-            "selection moving away must clear the rename sidecar")
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "selection moving away must clear rename ownership")
     }
 
     uiTest("cosmetic sweep with unchanged selection leaves inline rename intact") {
@@ -384,8 +455,8 @@ func sidebarRenameRecycleTests() {
         let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
         try uiExpect(editedCell.textField?.currentEditor() != nil,
             "precondition: rename should attach a live field editor")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == .tab(edited),
-            "precondition: rename should mirror into the sidecar")
+        try uiExpect(sidebar.activeRenameTarget == .tab(edited),
+            "precondition: the view should own the tab rename")
 
         _ = applyRenameRecycleTransition(
             old: projection, newModel: model,
@@ -393,8 +464,8 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(editedCell.textField?.currentEditor() != nil,
             "cosmetic sweep should leave the live field editor attached")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == .tab(edited),
-            "cosmetic sweep should preserve the rename sidecar")
+        try uiExpect(sidebar.activeRenameTarget == .tab(edited),
+            "cosmetic sweep should preserve rename ownership")
     }
 
     uiTest("selection-ending rename resync retains a dropped tab reload") {
@@ -430,8 +501,8 @@ func sidebarRenameRecycleTests() {
 
         try uiExpect(dropped.droppedTabs == Set([edited]),
             "rename resync should report the dropped edited tab")
-        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
-            "selection-moving reconcile should still clear the rename sidecar")
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "selection-moving reconcile should still clear rename ownership")
         try uiExpect(editedCell.textField?.stringValue == "alpha",
             "dropped resync should leave the old edited-row title visible")
 
@@ -445,6 +516,182 @@ func sidebarRenameRecycleTests() {
             "retry should fetch and paint the edited tab row")
         try uiExpect(updatedCell.textField?.stringValue == "alpha updated",
             "retry should repaint the edited row from the live model")
+    }
+
+    uiTest("group structural exits end the exact live rename") {
+        // Intent: removal, a full row rebuild, and selection movement each end a
+        //   live group rename and restore its field from model-backed display state.
+        // Why it exists: group editors cross different outline teardown paths than
+        //   tab editors and must obey the same single-owner exit invariant.
+        // Scenario: three independent reconciles invalidate an edited group row.
+        enum Exit {
+            case removal
+            case rebuild
+            case selection
+        }
+
+        for exit in [Exit.removal, .rebuild, .selection] {
+            let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+            let groupA = GroupId(); let groupB = GroupId(); let groupC = GroupId()
+            let tabA = TabId(); let tabB = TabId(); let tabC = TabId()
+            let initial = renameRecycleModel([
+                (groupA, "A", false, [(tabA, "alpha")]),
+                (groupB, "B", false, [(tabB, "beta")]),
+                (groupC, "C", false, [(tabC, "gamma")]),
+            ], selected: tabA)
+            let projection = applyRenameRecycleModel(
+                initial, to: sidebar, outline: outline, old: nil)
+            sidebar.beginRenamingGroup(groupA)
+            let field = try renameRecycleCell(for: .group(groupA), in: outline).textField!
+            field.stringValue = "stale draft"
+
+            let next: AppModel
+            switch exit {
+            case .removal:
+                next = renameRecycleModel([
+                    (groupB, "B", false, [(tabB, "beta")]),
+                    (groupC, "C", false, [(tabC, "gamma")]),
+                ], selected: tabB)
+            case .rebuild:
+                next = renameRecycleModel([
+                    (groupA, "A", false, [(tabA, "alpha")]),
+                ], selected: tabA)
+            case .selection:
+                next = renameRecycleModel([
+                    (groupA, "A", false, [(tabA, "alpha")]),
+                    (groupB, "B", false, [(tabB, "beta")]),
+                    (groupC, "C", false, [(tabC, "gamma")]),
+                ], selected: tabB)
+            }
+
+            _ = applyRenameRecycleTransition(
+                old: projection, newModel: next,
+                to: sidebar, outline: outline, runtime: runtime)
+
+            try uiExpect(sidebar.activeRenameTarget == nil,
+                "\(exit) should clear the group rename session")
+            try uiExpect(field.isEditable == false,
+                "\(exit) should restore the group field to display state")
+            try uiExpect(field.currentEditor() == nil,
+                "\(exit) should remove the group field editor")
+            try uiExpect(field.stringValue == "A",
+                "\(exit) should restore the model-backed group name")
+            window.close()
+        }
+    }
+
+    uiTest("starting another rename commits the prior field before owning the successor") {
+        // Intent: replacement commits the prior draft once, then transfers ownership
+        //   to the successor field; a stale callback from the prior field is inert.
+        // Why it exists: the old field and runtime sidecar were separate owners, so a
+        //   late callback could clear or complete a newer edit session.
+        // Scenario: the user edits one tab, starts renaming another, and AppKit then
+        //   delivers a delayed end-editing callback for the first field.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let first = TabId(); let second = TabId()
+        let model = renameRecycleModel(
+            [(group, "G", false, [(first, "alpha"), (second, "beta")])],
+            selected: first)
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        sidebar.beginRenamingTab(first)
+        let firstField = try renameRecycleCell(for: .tab(first), in: outline).textField!
+        firstField.stringValue = "first draft"
+        var targetDuringPriorDispatch: RenameTarget?
+        runtime.onSend = { msg in
+            if case .renameTab(let id, _) = msg, id == first {
+                targetDuringPriorDispatch = sidebar.activeRenameTarget
+            }
+        }
+
+        sidebar.beginRenamingTab(second)
+        runtime.onSend = nil
+
+        let firstRenames = runtime.sentMessages.filter {
+            if case .renameTab(let id, let name) = $0 {
+                return id == first && name == "first draft"
+            }
+            return false
+        }
+        try uiExpect(firstRenames.count == 1,
+            "replacement should commit the prior draft exactly once")
+        try uiExpect(targetDuringPriorDispatch == nil,
+            "successor ownership must not exist while the prior rename dispatches")
+        try uiExpect(sidebar.activeRenameTarget == .tab(second),
+            "successor should become active only after the prior commit")
+
+        _ = sidebar.control(firstField, textShouldEndEditing: NSTextView())
+        _ = sidebar.control(NSTextField(), textShouldEndEditing: NSTextView())
+
+        try uiExpect(sidebar.activeRenameTarget == .tab(second),
+            "stale prior-field callback must not clear the successor session")
+        let afterStaleCallback = runtime.sentMessages.filter {
+            if case .renameTab(let id, _) = $0 { return id == first }
+            return false
+        }
+        try uiExpect(afterStaleCallback.count == 1,
+            "stale prior-field callback must not dispatch a second rename")
+    }
+
+    uiTest("reuse reset clears an abandoned session without a reconcile") {
+        // Intent: resetting a reused cell clears the session that owns its field even
+        //   when AppKit discarded the editor without a delegate callback.
+        // Why it exists: cell reuse is the last ownership boundary before stale edit
+        //   state can paint a different row.
+        // Scenario: AppKit aborts a tab editor and immediately returns its cell for reuse.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let tab = TabId()
+        let model = renameRecycleModel([(group, "G", false, [(tab, "alpha")])])
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        sidebar.beginRenamingTab(tab)
+        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.textField?.abortEditing()
+
+        sidebar.testResetRecycledRenameState(cell)
+
+        try uiExpect(sidebar.activeRenameTarget == nil,
+            "reuse reset should clear ownership of the discarded editor")
+        try uiExpect(cell.textField?.isEditable == false,
+            "reuse reset should restore display state")
+    }
+
+    uiTest("a reconfigured group caret acts on its latest typed group") {
+        // Intent: a reused group row's caret expands or collapses the group assigned by
+        //   its latest configuration.
+        // Why it exists: reusable controls must not retain action identity from a prior row.
+        // Scenario: a cell first paints group A, is reconfigured for group B, then its
+        //   caret is invoked.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let groupA = GroupId(); let groupB = GroupId()
+        let tabA = TabId(); let tabB = TabId()
+        let model = renameRecycleModel([
+            (groupA, "A", false, [(tabA, "alpha")]),
+            (groupB, "B", false, [(tabB, "beta")]),
+        ])
+        let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        let cell = try renameRecycleCell(for: .group(groupA), in: outline)
+        let groupBProjection = projection.groups.first { $0.id == groupB }!
+
+        sidebar.testConfigureGroupCell(cell, group: groupBProjection)
+        guard let stack = cell.subviews.first(where: {
+            $0.identifier?.rawValue == "groupAccessoryStack"
+        }) as? NSStackView,
+        let caret = stack.arrangedSubviews.first(where: {
+            $0.identifier?.rawValue == "groupCaretButton"
+        }) as? NSButton else {
+            throw UITestFailure(message: "group cell should contain a caret")
+        }
+        caret.performClick(nil)
+
+        try uiExpect(runtime.sentMessages.contains {
+            if case .toggleGroupCollapse(let id) = $0 { return id == groupB }
+            return false
+        }, "reconfigured caret should act on group B")
     }
 
     uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
@@ -510,7 +757,6 @@ func sidebarRenameRecycleTests() {
             scroll: scroll, label: "recycled tab")
     }
 }
-
 // MARK: - Harness helpers (local: the selection-cache test helpers are file-private)
 
 private func makeRenameRecycleHarness() -> (SidebarView, NSOutlineView, NSWindow, AppRuntime) {
@@ -562,14 +808,13 @@ private func applyRenameRecycleModel(
         computeSidebarRowOps(old: old, new: projection),
         model: model,
         projection: projection,
-        clearActiveRename: false)
+        renameTargetToEnd: nil)
     materializeRenameRecycleRows(sidebar, outline: outline)
     return projection
 }
 
-/// Mirror reconcileSidebar's production pipeline: guard the raw ops with the
-/// runtime's rename sidecar, clear the sidecar when the guard says so, apply,
-/// then advance the cache (returned for the next transition).
+/// Mirrors reconcileSidebar's production pipeline: read the target from the
+/// view-owned session, guard and apply the raw ops, then advance the cache.
 @discardableResult
 private func applyRenameRecycleTransition(
     old oldProjection: SidebarProjection,
@@ -600,18 +845,15 @@ private func applyRenameRecycleTransitionResult(
     let rawOps = computeSidebarRowOps(old: oldProjection, new: newProjection)
     let guarded = guardSidebarRenameOps(
         ops: rawOps,
-        renameTarget: runtime.viewLocalState.sidebarRenameTarget,
+        renameTarget: sidebar.activeRenameTarget,
         new: newProjection)
-    if guarded.clearRename {
-        runtime.viewLocalState.sidebarRenameTarget = nil
-    }
     let dropped = sidebar.applySidebarOps(
         guarded.ops, model: newModel, projection: newProjection,
-        clearActiveRename: guarded.clearRename)
+        renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
     materializeRenameRecycleRows(sidebar, outline: outline)
     let advanced = advanceSidebarCache(
         old: oldProjection, new: newProjection,
-        suppressedRenameTarget: runtime.viewLocalState.sidebarRenameTarget,
+        suppressedRenameTarget: sidebar.activeRenameTarget,
         unappliedTabIds: dropped.tabs,
         unappliedGroupIds: dropped.groups)
     return (advanced, dropped.tabs, dropped.groups)
@@ -664,6 +906,13 @@ private func renameRecycleCell(
         return cell
     }
     throw UITestFailure(message: "missing cell for \(target) (\(file):\(line))")
+}
+
+private func requireRenameRecycleEditor(_ field: NSTextField) throws -> NSTextView {
+    guard let editor = field.currentEditor() as? NSTextView else {
+        throw UITestFailure(message: "rename should install a field editor")
+    }
+    return editor
 }
 
 private func findRenameRecycleOutlineView(in view: NSView) -> NSOutlineView? {

@@ -197,13 +197,13 @@ private func applyProjectionRowModel(
         computeSidebarRowOps(old: nil, new: projection),
         model: model,
         projection: projection,
-        clearActiveRename: false)
+        renameTargetToEnd: nil)
     materializeProjectionRows(sidebar, outline: outline)
     return projection
 }
 
-/// Mirror reconcileSidebar's production pipeline: guard the raw ops with the
-/// runtime's rename sidecar, apply, then advance the cache so a suppressed or
+/// Mirrors reconcileSidebar's production pipeline: guard the raw ops with the
+/// view-owned rename target, apply, then advance the cache so a suppressed or
 /// dropped row keeps its prior projection for the next transition.
 @discardableResult
 private func applyProjectionRowTransition(
@@ -216,18 +216,15 @@ private func applyProjectionRowTransition(
     let newProjection = desiredSidebar(in: newModel)
     let guarded = guardSidebarRenameOps(
         ops: computeSidebarRowOps(old: oldProjection, new: newProjection),
-        renameTarget: runtime.viewLocalState.sidebarRenameTarget,
+        renameTarget: sidebar.activeRenameTarget,
         new: newProjection)
-    if guarded.clearRename {
-        runtime.viewLocalState.sidebarRenameTarget = nil
-    }
     let dropped = sidebar.applySidebarOps(
         guarded.ops, model: newModel, projection: newProjection,
-        clearActiveRename: guarded.clearRename)
+        renameTargetToEnd: guarded.clearRename ? sidebar.activeRenameTarget : nil)
     materializeProjectionRows(sidebar, outline: outline)
     return advanceSidebarCache(
         old: oldProjection, new: newProjection,
-        suppressedRenameTarget: runtime.viewLocalState.sidebarRenameTarget,
+        suppressedRenameTarget: sidebar.activeRenameTarget,
         unappliedTabIds: dropped.tabs,
         unappliedGroupIds: dropped.groups)
 }

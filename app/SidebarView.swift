@@ -178,6 +178,11 @@ class SidebarOutlineView: NSOutlineView {
 override var acceptsFirstResponder: Bool { false }
 }
 
+/// Carries the typed identity assigned by the latest group-cell configuration.
+private final class SidebarGroupCaretButton: NSButton {
+    var groupId: GroupId?
+}
+
 // MARK: - SidebarView
 
 class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -192,12 +197,27 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var rootItems: [SidebarItem] { store.rootItems }
     private var childItems: [GroupId: [SidebarItem]] { store.childItems }
     private var currentModel: AppModel?
+    private var activeRenameSession: (target: RenameTarget, textField: NSTextField)?
+
+    /// Identifies the row whose exact field owns the live inline rename session.
+    var activeRenameTarget: RenameTarget? { activeRenameSession?.target }
 
 #if DANTERM_UI_TEST
     /// UI-harness seam that forces the next in-place update for selected rows down
     /// the visible-but-unmaterialized branch without depending on AppKit timing.
     var testForceNextNilCellTabIds: Set<TabId> = []
     var testForceNextNilCellGroupIds: Set<GroupId> = []
+
+    func testResetRecycledRenameState(_ cell: NSTableCellView) {
+        resetRecycledRenameState(cell)
+    }
+
+    func testConfigureGroupCell(
+        _ cell: NSTableCellView,
+        group: SidebarGroupProjection
+    ) {
+        configureGroupCell(cell, group: group)
+    }
 #endif
 
     /// Row structure of the last applied projection: single-group mode promotes
@@ -273,9 +293,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    @objc private func caretClicked(_ sender: NSButton) {
-        guard let rawId = objc_getAssociatedObject(sender, &AssociatedKeys.groupId) as? UUID else { return }
-        let groupId = GroupId(rawValue: rawId)
+    @objc private func caretClicked(_ sender: SidebarGroupCaretButton) {
+        guard let groupId = sender.groupId else { return }
         guard let item = groupItemCache[groupId] else { return }
         if outlineView.isItemExpanded(item) {
             outlineView.collapseItem(item)
@@ -302,7 +321,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         _ ops: [SidebarRowOp],
         model: AppModel,
         projection: SidebarProjection,
-        clearActiveRename: Bool
+        renameTargetToEnd: RenameTarget?
     ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
         isReloading = true
         defer { isReloading = false }
@@ -312,11 +331,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
 
-        // End an orphaned inline edit before its row is removed/moved (the guard already
-        // cleared the sidecar). Clearing the per-field associated object first makes the
-        // resign-triggered textShouldEndEditing a no-op (no stray rename Msg).
-        if clearActiveRename {
-            cancelActiveInlineRename()
+        // End an orphaned inline edit before its row is removed or moved. The view
+        // clears its session first, so a resign-triggered delegate callback is a no-op.
+        if let renameTargetToEnd {
+            endActiveRename(renameTargetToEnd)
         } else {
             cancelAbandonedInlineRenameIfNeeded()
         }
@@ -455,26 +473,25 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// tab-title incident). Belt-and-braces reset at the reuse boundary.
     private func resetRecycledRenameState(_ cell: NSTableCellView) {
         guard let textField = cell.textField else { return }
+        if activeRenameSession?.textField === textField {
+            activeRenameSession = nil
+        }
         if textField.currentEditor() != nil { textField.abortEditing() }
-        guard textField.isEditable else { return }
         textField.isEditable = false
-        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
     /// Commit a live rename before an outline interaction lets AppKit change selection.
     /// The delegate's click-away path deliberately leaves the clicked destination focused.
     func finishActiveRenameForPointerInteraction() {
-        guard let target = runtime?.viewLocalState.sidebarRenameTarget,
-              let textField = textField(for: target)
-        else { return }
+        guard let session = activeRenameSession else { return }
+        let target = session.target
+        let textField = session.textField
         guard textField.currentEditor() != nil else {
             cancelAbandonedInlineRenameIfNeeded()
             return
         }
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
-        objc_setAssociatedObject(
-            textField, &AssociatedKeys.renameTarget, nil,
-            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        activeRenameSession = nil
         textField.abortEditing()
         finishInlineRename(textField: textField, target: target)
 
@@ -488,48 +505,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    /// Cancel a structurally orphaned rename without dispatching a rename message.
-    private func cancelActiveInlineRename() {
-        for row in 0..<outlineView.numberOfRows {
-            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
-                  let textField = cell.textField,
-                  let target = objc_getAssociatedObject(
-                    textField, &AssociatedKeys.renameTarget) as? RenameTarget
-            else { continue }
-            objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            if textField.currentEditor() != nil { textField.abortEditing() }
-            finishInlineRename(textField: textField, target: target)
-            break
-        }
+    /// Ends the matching view-owned session before a structural operation invalidates it.
+    func endActiveRename(_ target: RenameTarget) {
+        guard let session = activeRenameSession, session.target == target else { return }
+        activeRenameSession = nil
+        if session.textField.currentEditor() != nil { session.textField.abortEditing() }
+        finishInlineRename(textField: session.textField, target: target)
     }
 
-    /// Reconciliation owns the rename sidecar, so it also repairs AppKit silently
-    /// discarding the matching field editor before delegate cleanup can run.
+    /// Repairs AppKit silently discarding the owned field editor before delegate cleanup.
     private func cancelAbandonedInlineRenameIfNeeded() {
-        guard let target = runtime?.viewLocalState.sidebarRenameTarget else { return }
-        guard let textField = textField(for: target), textField.currentEditor() != nil else {
-            runtime?.viewLocalState.sidebarRenameTarget = nil
-            if let textField = textField(for: target) {
-                finishInlineRename(textField: textField, target: target)
-            }
-            return
-        }
-    }
-
-    private func textField(for target: RenameTarget) -> NSTextField? {
-        let item: SidebarItem? = {
-            switch target {
-            case .tab(let id): return tabItemCache[id]
-            case .group(let id): return groupItemCache[id]
-            }
-        }()
-        guard let item else { return nil }
-        let row = outlineView.row(forItem: item)
-        guard row >= 0,
-              let cell = outlineView.view(
-                atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
-        else { return nil }
-        return cell.textField
+        guard let session = activeRenameSession,
+              session.textField.currentEditor() == nil else { return }
+        activeRenameSession = nil
+        finishInlineRename(textField: session.textField, target: session.target)
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -569,14 +558,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // 2026-06-11 blank-tab-title bug; Cmd-T's spawn+select reconcile is exactly
         // this). End the edit through the proper path first, then resync the row
         // from the new model since the guard suppressed its reload while editing.
-        if let target = runtime?.viewLocalState.sidebarRenameTarget {
+        if let target = activeRenameTarget {
             var intended = nonFocusRows
             if let f = focusRow { intended.insert(f) }
             let willChangeSelection = (focusRow != nil || !nonFocusRows.isEmpty || !restoreSet.isEmpty)
                 && intended != outlineView.selectedRowIndexes
             if willChangeSelection {
-                runtime?.viewLocalState.sidebarRenameTarget = nil
-                cancelActiveInlineRename()
+                endActiveRename(target)
                 switch target {
                 case .tab(let id):
                     if updateTabRow(tabId: id, projection: projection) {
@@ -671,30 +659,32 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Inline Rename
 
     func beginRenamingGroup(_ groupId: GroupId) {
-        guard let item = groupItemCache[groupId] else { return }
-        beginRenaming(item: item, target: .group(groupId))
+        beginRenaming(target: .group(groupId))
     }
 
     func beginRenamingTab(_ tabId: TabId) {
-        guard let item = tabItemCache[tabId] else { return }
-        beginRenaming(item: item, target: .tab(tabId))
+        beginRenaming(target: .tab(tabId))
     }
 
-    private func beginRenaming(item: SidebarItem, target: RenameTarget) {
+    private func beginRenaming(target: RenameTarget) {
+        if activeRenameSession != nil {
+            finishActiveRenameForPointerInteraction()
+        }
+        let item: SidebarItem? = {
+            switch target {
+            case .tab(let id): return tabItemCache[id]
+            case .group(let id): return groupItemCache[id]
+            }
+        }()
+        guard let item else { return }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return }
         guard let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
         guard let textField = cellView.textField else { return }
-        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, target, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        activeRenameSession = (target, textField)
         textField.isEditable = true
         textField.selectText(nil)
         window?.makeFirstResponder(textField)
-        // Mirror the rename target into the sidecar -- the reconciler's authoritative
-        // "which row is editing" signal. Set AFTER makeFirstResponder: if that ended a
-        // prior inline edit, the prior field's finish path cleared the (shared) sidecar
-        // synchronously, so setting it here ensures this target wins. Synchronous and
-        // before any send(), so a row never reconciles mid-edit.
-        runtime?.viewLocalState.sidebarRenameTarget = target
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -1303,7 +1293,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let tabCountBadge = NSTextField.makeBadge(color: .systemGray)
         tabCountBadge.identifier = NSUserInterfaceItemIdentifier("groupTabCountBadge")
 
-        let caretButton = NSButton(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Toggle Group")!, target: self, action: #selector(caretClicked(_:)))
+        let caretButton = SidebarGroupCaretButton(
+            image: NSImage(
+                systemSymbolName: "chevron.right",
+                accessibilityDescription: "Toggle Group")!,
+            target: self,
+            action: #selector(caretClicked(_:)))
         caretButton.translatesAutoresizingMaskIntoConstraints = false
         caretButton.bezelStyle = .accessoryBarAction
         caretButton.isBordered = false
@@ -1354,16 +1349,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         if !skipTitle {
             cell.textField?.stringValue = group.name
         }
-        cell.textField?.tag = group.id.rawValue.hashValue
         // Hide separator for the first group
         if let separator = cell.subviews.first(where: { $0.identifier?.rawValue == "groupSeparator" }) {
             separator.isHidden = group.isFirst
         }
         if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
-            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
+            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? SidebarGroupCaretButton {
                 let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
                 caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
-                objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                caretButton.groupId = group.id
             }
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
                 bellBadge.updateBadge(count: group.unreadAlertCount)
@@ -1572,27 +1566,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Inline Rename Cleanup
 
-    /// Shared cleanup for all rename-exit paths: disables editing, clears the
-    /// rename target, and resyncs the row from cached model state. The optional
-    /// target parameter lets doCommandBy pass the saved target (since it clears
-    /// the associated object before calling).
-    private func finishInlineRename(textField: NSTextField, target: RenameTarget? = nil) {
-        // Clear the sidecar first -- this is the common sink for every finish path
-        // (doCommandBy Enter/Esc and textShouldEndEditing click-away). It runs
-        // synchronously before doCommandBy's synchronous sends and before
-        // textShouldEndEditing's deferred send, so the next reconcile sees no rename
-        // target and applies the row's reload normally.
-        runtime?.viewLocalState.sidebarRenameTarget = nil
-        let resolvedTarget = target
-            ?? objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
+    /// Restores one ended rename field from the latest cached model-backed row state.
+    private func finishInlineRename(textField: NSTextField, target: RenameTarget) {
         textField.isEditable = false
-        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         // Resync the row's title from cached model state now that the field editor
         // is gone. During rename, skipTitle prevented title updates; this ensures
         // the cell reflects the current model regardless of whether a rename Msg
         // follows.
-        switch resolvedTarget {
+        switch target {
         case .tab(let tabId):
             guard let item = tabItemCache[tabId] else { return }
             let row = outlineView.row(forItem: item)
@@ -1607,8 +1589,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                   let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
                   case .group(let group) = item.kind else { return }
             configureGroupCell(cell, group: group)
-        case nil:
-            break
         }
     }
 
@@ -1626,36 +1606,18 @@ extension SidebarView: NSTextFieldDelegate {
         let isConfirm = commandSelector == #selector(NSResponder.insertNewline(_:))
         let isCancel  = commandSelector == #selector(NSResponder.cancelOperation(_:))
         guard isConfirm || isCancel,
-              let textField = control as? NSTextField else { return false }
+              let textField = control as? NSTextField,
+              let session = activeRenameSession,
+              session.textField === textField else { return false }
 
-        // 1. Capture rename context before clearing.
-        let target = objc_getAssociatedObject(
-            textField, &AssociatedKeys.renameTarget) as? RenameTarget
+        let target = session.target
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
-
-        // 2. Clear target so textShouldEndEditing (if AppKit fires it
-        //    during makeFirstResponder) is a no-op.
-        objc_setAssociatedObject(
-            textField, &AssociatedKeys.renameTarget, nil,
-            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-
-        // 3. End editing (removes field editor, commits text to stringValue).
+        activeRenameSession = nil
         window?.makeFirstResponder(nil)
-
-        // 4. Resync cell from model (overwrites committed text for cancel;
-        //    for confirm the rename below will update it again immediately).
         finishInlineRename(textField: textField, target: target)
 
-        // 5. Compute and dispatch messages synchronously.
-        let action: RenameAction? = {
-            switch target {
-            case .tab(let tabId): return .tab(tabId)
-            case .group(let groupId): return .group(groupId)
-            case nil: return nil
-            }
-        }()
         for msg in renameCompletionMessages(
-            isConfirm: isConfirm, action: action, newName: newName
+            isConfirm: isConfirm, target: target, newName: newName
         ) {
             runtime?.send(msg)
         }
@@ -1663,13 +1625,15 @@ extension SidebarView: NSTextFieldDelegate {
         return true
     }
 
-    /// Click-away path: commits the rename without restoring focus (user moved
-    /// focus intentionally). When doCommandBy already cleared the target, this
-    /// sees nil and is a no-op — preventing double-dispatch.
+    /// Click-away path: commits the rename without restoring focus because the user
+    /// moved focus intentionally. A callback from any field except the owned one is inert.
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
-        guard let textField = control as? NSTextField else { return true }
-        let target = objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
+        guard let textField = control as? NSTextField,
+              let session = activeRenameSession,
+              session.textField === textField else { return true }
+        let target = session.target
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
+        activeRenameSession = nil
 
         switch target {
         case .tab(let tabId):
@@ -1683,28 +1647,14 @@ extension SidebarView: NSTextFieldDelegate {
                     self?.runtime?.send(.renameGroup(id: groupId, name: newName))
                 }
             }
-        case nil:
-            break
         }
 
-        finishInlineRename(textField: textField)
+        finishInlineRename(textField: textField, target: target)
         return true
     }
 }
 
 // MARK: - Helpers
-
-// `RenameTarget` now lives in Model.swift (hoisted so the reconciler can read the
-// inline-rename target via the ViewLocalState sidecar). The associated-object dance
-// below stays as the field editor's own bookkeeping; the sidecar is the copy the
-// reconciler reads.
-// Nothing reads or writes these bytes; only `&key` is taken, for an address that
-// stays put. `nonisolated(unsafe)` states that -- there is no shared state here
-// to protect, just a stable location.
-private enum AssociatedKeys {
-    nonisolated(unsafe) static var groupId: UInt8 = 0
-    nonisolated(unsafe) static var renameTarget: UInt8 = 0
-}
 
 private class SetTabColorsInfo: NSObject {
     let tabIds: [TabId]

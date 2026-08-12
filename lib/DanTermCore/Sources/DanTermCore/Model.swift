@@ -354,25 +354,14 @@ extension AppModel {
     }
 }
 
-// MARK: - View-Local State (reconciler sidecar)
+// MARK: - View-Owned State Inputs
 
 /// Tracks whether an inline-editing sidebar row is renaming a tab or a group.
-/// Hoisted out of `SidebarView` (where it was a `private enum`) into the model
-/// layer so the reconciler -- which lives in `AppRuntime` and can read neither a
-/// `private` view type nor a per-text-field associated object -- can tell which
-/// row is being edited. Pure data, no AppKit.
+/// Kept in the pure layer so the sidebar rename guard and completion policy share
+/// one typed vocabulary with the runtime-owned view session.
 enum RenameTarget: Equatable {
     case tab(TabId)
     case group(GroupId)
-}
-
-/// Ephemeral view state with no natural AppKit owner that the reconciler reads as a
-/// second input (alongside `AppModel`) and never clobbers. Stored on `AppRuntime`
-/// next to `model`. Deliberately minimal -- just the inline-rename target. The theme
-/// browser owns its own filter/focus, and `NSOutlineView` owns sidebar
-/// multi-selection; mirroring either here would be dead weight no pass reads.
-struct ViewLocalState {
-    var sidebarRenameTarget: RenameTarget?
 }
 
 // MARK: - Init Snapshot Types

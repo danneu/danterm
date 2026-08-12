@@ -75,17 +75,18 @@ changed projections produce the expected delta.
 ## Read-Only Model Rule
 
 The view reconciler is a read-only projection of `AppModel`. Pure projections
-and diff helpers derive desired state from `AppModel` and `ViewLocalState`.
-Thin reconcile executors may also read runtime-owned host/view state needed for
-host presence, visibility, anchors, and open-state. Reconcile passes may write
-AppKit views, session state, runtime-owned view handles, and
+and diff helpers derive desired state from `AppModel` and explicit values that
+thin executors read from runtime-owned view handles. Executors may read host or
+view state needed for host presence, visibility, anchors, open-state, or a pure
+guard, but they pass only the narrow value that helper needs. Reconcile passes
+may write AppKit views, session state, runtime-owned view handles, and
 `ReconcilerCaches`. They must not write `AppModel`.
 
 For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
 covered by behavior tests at the pure layer. If view-sync needs derived model
 state, compute it in `update()` before reconcile runs. If state is genuinely
 view-derived and should not be serialized or owned by the domain model, keep it
-in `ViewLocalState` or a runtime-owned handle rather than writing it back into
+on its natural runtime-owned view handle rather than writing it back into
 `AppModel` from a reconcile pass.
 
 ## Ordering And Host Lifetime
@@ -207,7 +208,7 @@ anchor survive. That duplication is accepted because each half reads the inputs
 its layer owns. Tests keep the behavioral boundary aligned.
 
 The cost of this architecture is occasional extra model helpers, generation
-counters, host-lifetime invalidation, or `ViewLocalState` plumbing. The payoff is
+counters, host-lifetime invalidation, or explicit view-state inputs. The payoff is
 stronger directionality: `update()` owns domain/model transitions, `Command` owns
 true external effects, and `reconcile()` owns rendering the current model into
 AppKit and session state.
