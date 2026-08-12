@@ -16,6 +16,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Keep Swift and xcrun compiler caches inside the writable workspace. Sandboxed agents cannot
+# write Clang's default cache under ~/.cache, and every gate child inherits this boundary.
+export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
+
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
 # the long poles in front keeps the tail from being one slow step finishing alone.
 STEPS=(

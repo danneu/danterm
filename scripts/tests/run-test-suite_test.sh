@@ -30,6 +30,11 @@ rc="$(run_with_steps 'true' 'true' 'true')"
 grep -q 'all 3 steps passed' "$TEST_ROOT/output" \
     || fail "all-passing run did not report success: $(cat "$TEST_ROOT/output")"
 
+# Every worker inherits a writable compiler cache inside the repository, so Swift and
+# xcrun builds do not fall back to a sandbox-blocked cache under the user's home directory.
+rc="$(run_with_steps "test \"\$CLANG_MODULE_CACHE_PATH\" = '$REPO_ROOT/.build/clang-module-cache'")"
+[[ "$rc" == "0" ]] || fail "worker did not inherit the workspace compiler cache"
+
 # A failing step fails the whole run, and its captured stdout is replayed. Without the
 # replay the pool would swallow the only diagnostic a developer has.
 rc="$(run_with_steps 'true' 'echo distinctive-failure-marker; exit 3' 'true')"
