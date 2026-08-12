@@ -86,10 +86,16 @@ struct IpcEntityEncoder {
                 "groupId": .string(group.id.rawValue.uuidString),
                 "isZoomed": .bool(tab.isZoomed),
             ]),
-            "group": .object([
-                "id": .string(group.id.rawValue.uuidString),
-                "name": .string(group.name),
-            ]),
+            "group": groupReference(group),
+        ])
+    }
+
+    /// Names the one group shape every reply that only identifies a group uses,
+    /// so `pane info`, `tab new`, and `group rename` cannot drift apart.
+    func groupReference(_ group: GroupModel) -> JSONValue {
+        .object([
+            "id": .string(group.id.rawValue.uuidString),
+            "name": .string(group.name),
         ])
     }
 
@@ -102,10 +108,7 @@ struct IpcEntityEncoder {
             } ?? []),
         ]
         if let group {
-            object["group"] = .object([
-                "id": .string(group.id.rawValue.uuidString),
-                "name": .string(group.name),
-            ])
+            object["group"] = groupReference(group)
         }
         return .object(object)
     }

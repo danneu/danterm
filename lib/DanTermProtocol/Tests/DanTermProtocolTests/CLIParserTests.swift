@@ -8,6 +8,8 @@ struct CLIParserTests {
         ["tab", "new"],
         ["tab", "rename", "work"],
         ["tab", "close"],
+        ["group", "rename", "notes"],
+        ["group", "close"],
         ["pane", "info"],
         ["pane", "split", "-h"],
         ["pane", "input", "--", "C-c"],
@@ -34,6 +36,8 @@ struct CLIParserTests {
         ["pane", "focus", "not-a-pane"],
         ["tab", "close", "--tab", "not-a-tab"],
         ["tab", "new", "--group", "not-a-group"],
+        ["group", "rename", "--group", "not-a-group", "notes"],
+        ["group", "close", "--group", "not-a-group"],
     ])
     func malformedTargetIdsFailAtParseTime(_ args: [String]) {
         #expect(throws: CLIParseError.self) {
@@ -266,6 +270,60 @@ struct CLIParserTests {
         #expect(clear.params["title"] == .null)
     }
 
+    // A group always has a name, so `group rename` has no `--clear` counterpart to
+    // the `tab rename` form this pairs with.
+    @Test("group rename joins a multi-word name")
+    func groupRenameJoinsMultiWordName() throws {
+        let command = try parseCLI(["group", "rename", "--group", groupId, "work", "logs"])
+        #expect(command.method == IpcRequestMethod.groupRename.rawValue)
+        #expect(command.params["group"] == .string(groupId))
+        #expect(command.params["name"] == .string("work logs"))
+        #expect(command.outputMode == .none)
+    }
+
+    // The background default is CLI policy, not the reducer's: `Msg.createGroup`
+    // selects the new tab, and an agent creating a group must not steal the user's
+    // focus. `--foreground` is the only way to ask for it.
+    @Test("group new defaults to background and inverts only with --foreground")
+    func groupNewDefaultsToBackground() throws {
+        let background = try parseCLI(["group", "new", "--name", "Notes"], currentDirectory: "/caller")
+        #expect(background.method == IpcRequestMethod.groupNew.rawValue)
+        #expect(background.params["name"] == .string("Notes"))
+        #expect(background.params["background"] == .bool(true))
+        #expect(background.outputMode == .json)
+
+        let foreground = try parseCLI(
+            ["group", "new", "--name", "Notes", "--foreground"], currentDirectory: "/caller")
+        #expect(foreground.params["background"] == .bool(false))
+    }
+
+    @Test("group new carries the launch spec and defaults cwd to the caller")
+    func groupNewCarriesLaunchSpec() throws {
+        let command = try parseCLI(
+            ["group", "new", "--name", "Builds", "--cmd", "just test", "--title", "tests"],
+            currentDirectory: "/caller")
+
+        #expect(command.params["launch"]?["cmd"]?.asString == "just test")
+        #expect(command.params["launch"]?["cwd"]?.asString == "/caller")
+        #expect(command.params["launch"]?["title"]?.asString == "tests")
+
+        let explicitCwd = try parseCLI(
+            ["group", "new", "--name", "Builds", "--cwd", "/proj"], currentDirectory: "/caller")
+        #expect(explicitCwd.params["launch"]?["cwd"]?.asString == "/proj")
+    }
+
+    @Test("group close parses the move-tabs flag")
+    func groupCloseParsesMoveTabsFlag() throws {
+        let plain = try parseCLI(["group", "close", "--group", groupId])
+        #expect(plain.method == IpcRequestMethod.groupClose.rawValue)
+        #expect(plain.params["group"] == .string(groupId))
+        #expect(plain.params["moveTabs"] == .bool(false))
+        #expect(plain.outputMode == .none)
+
+        let moved = try parseCLI(["group", "close", "--group", groupId, "--move-tabs"])
+        #expect(moved.params["moveTabs"] == .bool(true))
+    }
+
     @Test("tab close parses explicit tab")
     func tabCloseParsesExplicitTab() throws {
         let command = try parseCLI(["tab", "close", "--tab", tabId])
@@ -303,6 +361,15 @@ struct CLIParserTests {
         }
 
         #expect(error?.message == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|tape>")
+    }
+
+    @Test("group command usage lists every supported subcommand")
+    func groupCommandUsageListsEverySubcommand() {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI(["group"])
+        }
+
+        #expect(error?.message == "usage: danterm group <new|rename|close>")
     }
 
     @Test("todo explicit pane forms parse")
@@ -584,6 +651,21 @@ struct CLIParserTests {
         (["tab", "close", "--tab"], "usage: danterm tab close --tab <tab-id>"),
         (["tab", "close", "bogus"], "usage: danterm tab close --tab <tab-id>"),
         (["tab", "close", "--nope"], "usage: danterm tab close --tab <tab-id>"),
+        (["group", "rename", "--group"], groupRenameUsage),
+        (["group", "rename", "--group", groupId], groupRenameUsage),
+        (["group", "rename", groupId, "notes"], groupRenameUsage),
+        (["group", "rename", "--group", groupId, "--clear"], "unknown flag: --clear"),
+        (["group", "new"], groupNewUsage),
+        (["group", "new", "--name"], groupNewUsage),
+        (["group", "new", "--name", "Notes", "--group", groupId], "unknown flag: --group"),
+        (["group", "new", "--name", "Notes", "--background", "--foreground"],
+         "--background and --foreground are mutually exclusive\n\(groupNewUsage)"),
+        (["group", "new", "Notes"], "unexpected argument: Notes"),
+        (["group", "close"], groupCloseUsage),
+        (["group", "close", "--group"], groupCloseUsage),
+        (["group", "close", groupId], groupCloseUsage),
+        (["group", "close", "--group", groupId, "extra"], "unexpected argument: extra"),
+        (["group", "close", "--group", groupId, "--nope"], "unknown flag: --nope"),
         (["pane", "close", "--pane", paneId, "extra"], "unexpected argument: extra"),
         (["pane", "close", "--nope"], "unknown flag: --nope"),
         (["pane", "split", "--pane"], paneSplitUsageWithFocusFlags),
@@ -604,5 +686,8 @@ struct CLIParserTests {
 private let paneId = "11111111-1111-4111-8111-111111111111"
 private let tabId = "22222222-2222-4222-8222-222222222222"
 private let groupId = "33333333-3333-4333-8333-333333333333"
+private let groupRenameUsage = "usage: danterm group rename --group <group-id> <name>"
+private let groupNewUsage = "usage: danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
+private let groupCloseUsage = "usage: danterm group close --group <group-id> [--move-tabs]"
 private let tabNewUsageWithPositionFlags = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]"
 private let paneSplitUsageWithFocusFlags = "usage: danterm pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"

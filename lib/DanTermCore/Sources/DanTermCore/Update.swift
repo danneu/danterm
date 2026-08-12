@@ -927,11 +927,15 @@ func update(
 
     // MARK: - Group Management
 
-    case .createGroup(let name, let launch):
+    case .createGroup(let name, let launch, let background):
         let groupId = GroupId(rawValue: env.newId())
         let group = GroupModel(id: groupId, name: name)
         model.groups.append(group)
-        return update(&model, .createTab(inGroupId: groupId, launch: launch), env: env)
+        return update(
+            &model,
+            .createTab(inGroupId: groupId, launch: launch, background: background),
+            env: env
+        )
 
     case .deleteGroup(let id, let moveTabs):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }),

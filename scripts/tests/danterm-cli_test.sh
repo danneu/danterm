@@ -101,6 +101,9 @@ grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
 grep -qE '^ *focus +Print the main window' "$err"
 grep -qF 'pane info --pane <pane-id>' "$err"
+grep -qF 'group new --name <name>' "$err"
+grep -qF 'group rename --group <group-id> <name>' "$err"
+grep -qF 'group close --group <group-id> [--move-tabs]' "$err"
 grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$err"
 grep -qF 'tab close --tab <tab-id>' "$err"
 grep -qF 'pane split --pane <pane-id> -h|-v' "$err"
@@ -129,6 +132,9 @@ for help_arg in help --help -h; do
     grep -qF 'ls' "$out"
     grep -qE '^ *focus +Print the main window' "$out"
     grep -qF 'pane info --pane <pane-id>' "$out"
+    grep -qF 'group new --name <name>' "$out"
+    grep -qF 'group rename --group <group-id> <name>' "$out"
+    grep -qF 'group close --group <group-id> [--move-tabs]' "$out"
     grep -qF 'tab new (--group <group-id> | --after-tab <tab-id>)' "$out"
     grep -qF 'tab close --tab <tab-id>' "$out"
     grep -qF 'pane split --pane <pane-id> -h|-v' "$out"
@@ -283,6 +289,40 @@ printf '%s\n' "$info" | jq -e \
     --arg tab "$tab_id" \
     --arg group "$group_id" \
     '.pane.id == $pane and .tab.id == $tab and .group.id == $group' >/dev/null
+
+slot_cli group rename --group "$group_id" smoke group
+slot_cli ls | jq -e \
+    --arg group "$group_id" \
+    '.groups[] | select(.id == $group and .name == "smoke group")' >/dev/null
+
+run_cli --socket "$socket" group rename --group "$group_id" '   '
+[[ $status -ne 0 ]]
+grep -qx 'danterm: invalid name' "$err"
+slot_cli ls | jq -e \
+    --arg group "$group_id" \
+    '.groups[] | select(.id == $group and .name == "smoke group")' >/dev/null
+
+new_group="$(slot_cli group new --name smoke-group --title smoke-group-tab)"
+new_group_id="$(printf '%s\n' "$new_group" | jq -er '.group.id')"
+new_group_tab_id="$(printf '%s\n' "$new_group" | jq -er '.tab.id')"
+slot_cli ls | jq -e \
+    --arg group "$new_group_id" \
+    --arg tab "$new_group_tab_id" \
+    '.groups[] | select(.id == $group and .name == "smoke-group")
+        | ([.tabs[].id] == [$tab])' >/dev/null
+slot_cli ls | jq -e --arg tab "$tab_id" '.selectedTabId == $tab' >/dev/null
+
+slot_cli group close --group "$new_group_id"
+slot_cli ls | jq -e --arg group "$new_group_id" \
+    '[.groups[] | select(.id == $group)] | length == 0' >/dev/null
+slot_cli ls | jq -e --arg tab "$new_group_tab_id" \
+    '[.groups[].tabs[] | select(.id == $tab)] | length == 0' >/dev/null
+
+run_cli --socket "$socket" group close --group "$group_id"
+[[ $status -ne 0 ]]
+grep -qx 'danterm: cannot close the last group' "$err"
+slot_cli ls | jq -e --arg group "$group_id" \
+    '[.groups[] | select(.id == $group)] | length == 1' >/dev/null
 
 slot_cli tab rename --tab "$tab_id" test123
 slot_cli ls | jq -e \

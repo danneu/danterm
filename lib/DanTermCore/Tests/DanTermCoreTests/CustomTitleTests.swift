@@ -476,6 +476,29 @@ import Testing
         #expect(name == nil, "empty name should clear custom title")
     }
 
+    @Test("renameCompletion: Enter with a group name renames that group")
+    func renameCompletionEnterGroupNameRenamesGroup() {
+        // Intent: Enter on a non-empty group name emits renameGroup for that
+        //   group, then sidebarRenameEnded.
+        // Why it exists: this is the branch the sidebar's commit path actually
+        //   takes, and every neighbouring branch was covered while it was not.
+        // Scenario: spec-first group commit.
+        let groupId = GroupId()
+        let msgs = renameCompletionMessages(
+            isConfirm: true, target: .group(groupId), newName: "Release work")
+        #expect(msgs.count == 2)
+        guard case .renameGroup(let id, let name) = msgs[0] else {
+            Issue.record("expected renameGroup")
+            return
+        }
+        #expect(id == groupId)
+        #expect(name == "Release work")
+        guard case .sidebarRenameEnded = msgs[1] else {
+            Issue.record("expected sidebarRenameEnded")
+            return
+        }
+    }
+
     @Test("renameCompletion: Enter with empty group name skips rename")
     func renameCompletionEnterEmptyGroupNameSkipsRename() {
         // Intent: Enter on an empty group name skips renameGroup and

@@ -104,6 +104,59 @@ private func dispatchIpc(
         )
         return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
+    case .groupNew(let requestedName, let launch, let background):
+        let name = try groupName(requestedName)
+        let effectiveLaunch = LaunchSpec(
+            cmd: launch?.cmd,
+            cwd: launch?.cwd ?? env.homeDirectory(),
+            title: launch?.title
+        )
+        let groupsBefore = Set(model.groups.map(\.id))
+        let tabsBefore = liveTabIds(in: model)
+        let commands = update(
+            &model,
+            .createGroup(name: name, launch: effectiveLaunch, background: background),
+            env: env
+        )
+        let group = model.groups.first(where: { groupsBefore.contains($0.id) == false })
+        let tab = newestTabId(excluding: tabsBefore, in: model).flatMap { tabById($0, in: model) }
+        let encoder = IpcEntityEncoder(home: env.homeDirectory())
+        return commands + [.ipcReply(
+            reqId: reqId,
+            result: encoder.tabNew(tab: tab, group: group, in: model)
+        )]
+
+    case .groupClose(let groupId, let moveTabs):
+        // Both refusals mirror how tab.close refuses the last tab. `.deleteGroup`
+        // returns [] for the last group, and drives emitTerminateConfirmation for a
+        // destructive close of the group holding every tab -- which would leave the
+        // group open and strand a pending confirmation. The CLI never quits the app
+        // as a side effect of closing a group.
+        guard let group = model.groups.first(where: { $0.id == groupId }) else {
+            throw IpcParamsError("group not found")
+        }
+        guard model.groups.count > 1 else {
+            throw IpcParamsError("cannot close the last group")
+        }
+        if moveTabs == false, group.tabs.isEmpty == false, totalTabCount(model) == group.tabs.count {
+            throw IpcParamsError("cannot close the last group with tabs")
+        }
+        let commands = update(&model, .deleteGroup(id: groupId, moveTabs: moveTabs), env: env)
+        return commands + [.ipcReply(reqId: reqId, result: .object([
+            "group": .object(["id": .string(groupId.rawValue.uuidString)])
+        ]))]
+
+    case .groupRename(let groupId, let requestedName):
+        try requireGroup(groupId, in: model)
+        let name = try groupName(requestedName)
+        let commands = update(&model, .renameGroup(id: groupId, name: name), env: env)
+        let group = model.groups.first(where: { $0.id == groupId })
+        let encoder = IpcEntityEncoder(home: env.homeDirectory())
+        return commands + [.ipcReply(
+            reqId: reqId,
+            result: .object(["group": group.map(encoder.groupReference) ?? .null])
+        )]
+
     case .tabRename(let tabId, let title):
         try requireTab(tabId, in: model)
         let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
@@ -367,6 +420,14 @@ private func requireGroup(_ groupId: GroupId, in model: AppModel) throws {
     guard model.groups.contains(where: { $0.id == groupId }) else {
         throw IpcParamsError("group not found")
     }
+}
+
+/// Rejects a group name the reducer would silently drop, so a caller never sees
+/// exit 0 for a rename that did not happen. `.renameGroup` returns [] when the
+/// name normalizes away, and `.createGroup` normalizes nothing at all.
+private func groupName(_ requested: String) throws -> String {
+    guard let name = requested.singleLineName else { throw IpcParamsError("invalid name") }
+    return name
 }
 
 private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> TabId? {
