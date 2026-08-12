@@ -23,7 +23,7 @@ enum LaunchActivationPolicy: Equatable {
     case background
 }
 
-/// Parses the app arguments shared by the direct-exec slot launcher and normal launches.
+/// Parses the app arguments shared by the dev-slot launcher and normal launches.
 struct AppLaunchPolicy: Equatable {
     static let freshArgument = "--fresh"
     static let backgroundArgument = "--background"

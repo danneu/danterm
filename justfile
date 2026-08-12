@@ -278,7 +278,7 @@ launch-slot:
 launch-slot-optimized:
     ./scripts/dev-slot-launcher.py --release
 
-# Launch an isolated slot in the foreground to grant notification authorization once
+# Launch an isolated slot that activates, to grant notification authorization once
 launch-slot-prime:
     ./scripts/dev-slot-launcher.py --foreground
 

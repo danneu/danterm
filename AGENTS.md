@@ -213,9 +213,9 @@ prebuild step: no xcframework, no Zig, no nix requirement for a dev build.
   the app's own output goes to the slot log under
   `~/Library/Caches/com.danneu.danterm-dev-slots/logs/`. Suffix `-optimized` for
   a release-configuration build, `-prime` only when a human is granting a slot
-  notification permission (that one stays attached). Drive the slot with an
-  explicit `danterm --socket` argument every time; do not rely on ambient
-  `DANTERM_SOCK`.
+  notification permission (it launches the same way and activates the app).
+  Drive the slot with an explicit `danterm --socket` argument every time; do not
+  rely on ambient `DANTERM_SOCK`.
 - `just build` / `just replace-dev` -- **the user's commands; do not run them
   unless asked.** Both overwrite `~/Applications/DanTerm Dev.app`, and
   `replace-dev` also quits the running instance the user may be working in.

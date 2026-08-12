@@ -104,40 +104,21 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 except ChildProcessError:
                     pass
 
-    def test_exec_inherits_claim_and_kill_makes_slot_immediately_reclaimable(self) -> None:
-        # Intent: the app inherits the claim across exec and the kernel releases it on death.
-        # Why it exists: closing on exec would reopen a launch race, while pidfiles and stale
-        #   markers would strand capacity after SIGKILL.
-        # Scenario: `just launch-slot-prime` becomes DanTerm, then the app is killed uncleanly.
-        with tempfile.TemporaryDirectory() as directory:
-            ready = Path(directory) / "ready"
-            child = os.fork()
-            if child == 0:
-                claim = launcher.claim_development_slot(Path(directory), range(1, 2))
-                ready.write_text(str(claim.slot), encoding="utf-8")
-                os.execve("/bin/sleep", ["sleep", "30"], {})
-            try:
-                deadline = time.monotonic() + 5
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(ready.exists())
-                time.sleep(0.05)
-                with self.assertRaises(launcher.PoolExhaustedError):
-                    launcher.claim_development_slot(Path(directory), range(1, 2))
-                os.kill(child, signal.SIGKILL)
-                os.waitpid(child, 0)
-                reclaimed = launcher.claim_development_slot(Path(directory), range(1, 2))
-                self.addCleanup(reclaimed.close)
-                self.assertEqual(reclaimed.slot, 1)
-            finally:
-                try:
-                    os.kill(child, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                try:
-                    os.waitpid(child, 0)
-                except ChildProcessError:
-                    pass
+    def test_activation_is_the_only_difference_between_launch_requests(self) -> None:
+        # Intent: both launch requests start the app the same way, and --foreground only
+        #   withholds the --background flag.
+        # Why it exists: --foreground once exec'd the app instead of spawning it, so its
+        #   handle promised nothing about readiness and named the launcher's own pid.
+        # Scenario: a human runs `just launch-slot-prime` to grant notification permission.
+        background = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=False)
+        foreground = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=True)
+
+        self.assertEqual(background, foreground + ["--background"])
+        self.assertEqual(foreground, [
+            "/slot/DanTerm Dev (1)",
+            "--fresh",
+            "--development-slot-lock-fd=7",
+        ])
 
     def test_launched_app_releases_the_caller_pipe_and_keeps_the_claim(self) -> None:
         # Intent: the launcher hands the app off instead of becoming it, so a caller's

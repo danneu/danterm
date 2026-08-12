@@ -184,6 +184,24 @@ def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]
     }
 
 
+def app_arguments(executable: Path, lock_descriptor: int, *, foreground: bool) -> list[str]:
+    """Keeps activation as the only difference between the two launch requests.
+
+    Every slot app starts the same way: detached, on an inherited lock descriptor,
+    with no recovery prompt. `--background` withholds activation and the one-time
+    notification prompt, so leaving it off is all `--foreground` means.
+    """
+
+    arguments = [
+        str(executable),
+        "--fresh",
+        f"--development-slot-lock-fd={lock_descriptor}",
+    ]
+    if not foreground:
+        arguments.append("--background")
+    return arguments
+
+
 def slot_log_path(slot_root: Path, slot: int) -> Path:
     """Gives the detached app a stable place to write once stdout is not a pipe.
 
@@ -412,23 +430,9 @@ def main(arguments: list[str]) -> int:
         stage_slot_bundle(source_app, app_path, identity)
 
     executable = app_path / "Contents" / "MacOS" / str(identity["executableName"])
-    app_arguments = [
-        str(executable),
-        "--fresh",
-        f"--development-slot-lock-fd={claim.descriptor}",
-    ]
-    if options.foreground:
-        # A human primes notification authorization here and wants the app
-        # attached to their terminal, so this path keeps replacing the launcher.
-        handle = launch_handle(identity, os.getpid())
-        print(json.dumps(handle, separators=(",", ":")), flush=True)
-        os.execve(executable, app_arguments, environment)
-        return 1
-
-    app_arguments.append("--background")
     pid = spawn_detached(
         executable,
-        app_arguments,
+        app_arguments(executable, claim.descriptor, foreground=options.foreground),
         environment,
         slot_log_path(slot_root, slot),
     )

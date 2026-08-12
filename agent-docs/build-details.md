@@ -27,12 +27,14 @@ CoreText, and UniformTypeIdentifiers.
   replace-dev-optimized` for optimized dev builds. The optimized variants are
   not production releases and do not publish anything.
 - `scripts/dev-slot-launcher.py` -- claims a user-global slot from 1 through 8,
-  runs `dev-build.sh --no-install`, stages and signs the slot clone, emits its
-  JSON handle once the detached app's control socket accepts connections, having
-  started it with fresh/background policy before exiting, so a caller piping the launcher reaches end-of-file at once and the
-  app's own output lands in `<slot cache>/logs/slot-<n>.log`. Wrapped
-  by `just launch-slot`, `just launch-slot-optimized`, and the foreground
-  notification-permission path `just launch-slot-prime`. Slot 0 is never
+  runs `dev-build.sh --no-install`, stages and signs the slot clone, and starts
+  it detached in its own session. It then emits the JSON handle once that app's
+  control socket accepts connections, and exits, so a caller piping the launcher
+  reaches end-of-file at once and the app's own output lands in
+  `<slot cache>/logs/slot-<n>.log`. Wrapped by `just launch-slot`, `just
+  launch-slot-optimized`, and the notification-permission path `just
+  launch-slot-prime`, which differs only in letting the app activate and prompt.
+  Slot 0 is never
   claimed. The build-only `DanTermInstanceIdentityTool` resolves each clone's
   identity and paths through `DanTermProtocol` so the launcher does not
   duplicate the naming scheme.

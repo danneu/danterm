@@ -146,9 +146,10 @@ it and target its `socketPath` explicitly:
 The handle also contains `slot`, `bundleId`, and `pid`; `pid` is the detached
 app. The app writes its own stdout and stderr to
 `~/Library/Caches/com.danneu.danterm-dev-slots/logs/slot-<n>.log`, not to your
-terminal. The default is fresh, background,
-and notification-prompt-free. Use `just launch-slot-prime` only when a human is
-ready to grant one slot's notification permission, and
+terminal. The default is fresh, background, and notification-prompt-free. Use
+`just launch-slot-prime` only when a human is ready to grant one slot's
+notification permission; it launches the same way and prints the same handle,
+and only lets the app activate and prompt. Use
 `just launch-slot-optimized` for an optimized build. Pool exhaustion exits with
 status 75 and starts no process.
 

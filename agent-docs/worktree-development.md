@@ -50,8 +50,9 @@ The app runs in its own session and writes its stdout and stderr to
 are occupied, the launcher exits with status 75 without launching another app.
 
 Use `just launch-slot-optimized` for an optimized isolated build. Use
-`just launch-slot-prime` only when granting a slot notification permission in
-the foreground for the first time.
+`just launch-slot-prime` only when granting a slot notification permission for
+the first time; it launches the same way and only lets the app activate and
+prompt.
 
 ## Pass an allowed environment value
 
