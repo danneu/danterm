@@ -600,12 +600,18 @@ public final class TerminalPaneSessionController {
     /// Every submission here carries an `origin`: when the event that produced these bytes
     /// occurred, on `DispatchTime`'s scale. Nil means the bytes originated at the pane itself
     /// and have no earlier moment to report.
-    public func sendText(_ text: String, origin: UInt64? = nil) {
+    ///
+    /// The parameter takes no default on purpose. Nil is a claim about the bytes, not an
+    /// absence of information, so a call site that forgot to thread its event time would
+    /// otherwise assert that claim silently -- and a tape would under-report the app-owned
+    /// span between the event and the completed write, which is the one thing it exists to
+    /// measure. Stating `origin: nil` is how a caller says it genuinely has no earlier moment.
+    public func sendText(_ text: String, origin: UInt64?) {
         send(Array(text.utf8), origin: origin)
     }
 
     /// Sends already encoded terminal bytes without introducing an ordering-opaque Task.
-    public func send(_ bytes: [UInt8], origin: UInt64? = nil) {
+    public func send(_ bytes: [UInt8], origin: UInt64?) {
         guard isTornDown == false, bytes.isEmpty == false else { return }
         host.send(bytes, origin: origin)
     }
@@ -614,26 +620,26 @@ public final class TerminalPaneSessionController {
     public func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64? = nil
+        origin: UInt64?
     ) {
         guard isTornDown == false else { return }
         host.sendKey(key, modifiers: modifiers, origin: origin)
     }
 
     /// Forwards paste text so sanitizing and bracket-mode lookup occur on the owner queue.
-    public func sendPaste(_ text: String, origin: UInt64? = nil) {
+    public func sendPaste(_ text: String, origin: UInt64?) {
         guard isTornDown == false else { return }
         host.sendPaste(text, origin: origin)
     }
 
     /// Forwards focus state so the owner gates its report against authoritative mode 1004.
-    public func sendFocus(_ focused: Bool, origin: UInt64? = nil) {
+    public func sendFocus(_ focused: Bool, origin: UInt64?) {
         guard isTornDown == false else { return }
         host.sendFocus(focused, origin: origin)
     }
 
     /// Forwards normalized pointer input without mirroring child modes on the main actor.
-    public func sendPointer(_ event: TerminalPointerEvent, origin: UInt64? = nil) {
+    public func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         guard isTornDown == false else { return }
         let deliveryBoundary = deliveryBoundary
         // Resolved at submission rather than at delivery, so the owner is handed no
@@ -691,7 +697,7 @@ public final class TerminalPaneSessionController {
     }
 
     /// Forwards fractional wheel input and gesture boundaries for owner-side routing.
-    public func sendWheel(_ event: TerminalWheelEvent, origin: UInt64? = nil) {
+    public func sendWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
         guard isTornDown == false else { return }
         host.sendWheel(event, origin: origin)
     }

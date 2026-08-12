@@ -493,19 +493,19 @@ final class TerminalPaneSessionController {
         self.currentPlan = currentPlan
     }
 
-    func sendText(_ text: String, origin: UInt64? = nil) {
+    func sendText(_ text: String, origin: UInt64?) {
         textInputs.append(text)
         inputOrigins.append(origin)
     }
     func sendKey(
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers,
-        origin: UInt64? = nil
+        origin: UInt64?
     ) {
         inputBytes.append(encodeTerminalKey(key, modifiers: modifiers, modes: inputModes))
         inputOrigins.append(origin)
     }
-    func sendPaste(_ text: String, origin: UInt64? = nil) {
+    func sendPaste(_ text: String, origin: UInt64?) {
         inputBytes.append(encodeTerminalPaste(text, modes: inputModes))
         inputOrigins.append(origin)
     }
@@ -513,7 +513,7 @@ final class TerminalPaneSessionController {
     func searchNext() { searchNextRequests += 1 }
     func searchPrevious() { searchPreviousRequests += 1 }
     func clearSearch() { clearSearchRequests += 1 }
-    func sendFocus(_ focused: Bool, origin: UInt64? = nil) {
+    func sendFocus(_ focused: Bool, origin: UInt64?) {
         focusChanges.append(focused)
         let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
         if bytes.isEmpty == false {
@@ -523,10 +523,10 @@ final class TerminalPaneSessionController {
     }
     // `origin` is accepted and dropped: this shim records wheel and pointer input as events
     // rather than as bytes, and only the byte-producing paths above assert on their stamps.
-    func sendWheel(_ event: TerminalWheelEvent, origin: UInt64? = nil) {
+    func sendWheel(_ event: TerminalWheelEvent, origin: UInt64?) {
         wheelEvents.append(event)
     }
-    func sendPointer(_ event: TerminalPointerEvent, origin: UInt64? = nil) {
+    func sendPointer(_ event: TerminalPointerEvent, origin: UInt64?) {
         pointerEvents.append(event)
         if allowsPaneMenu, case let .up(.right, column, row, _) = event {
             onPaneMenu?(.init(column: column, row: row))

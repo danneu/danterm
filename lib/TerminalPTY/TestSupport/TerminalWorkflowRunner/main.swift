@@ -114,8 +114,10 @@ private enum TerminalWorkflowRunner {
         do {
             for step in workflow.steps {
                 switch step {
-                case .text(let text): controller.sendText(text)
-                case .key(let key, let modifiers): controller.sendKey(key, modifiers: modifiers)
+                // A scripted step has no originating system event to report.
+                case .text(let text): controller.sendText(text, origin: nil)
+                case .key(let key, let modifiers):
+                    controller.sendKey(key, modifiers: modifiers, origin: nil)
                 case .resize(let columns, let rows):
                     controller.setGridDimensions(.init(columns: columns, rows: rows))
                 case .expect(let marker):
