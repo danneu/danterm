@@ -13,12 +13,20 @@ func themeBrowserViewTests() {
         let catalog = ThemeCatalog(data: fixtureThemeCatalogData())
 
         try uiExpect(catalog.names == ["Fixture"], "runtime names diverged: \(catalog.names)")
-        guard let colors = catalog.colors["Fixture"] else {
+        guard let colors = catalog.swatchColors(named: "Fixture") else {
             throw UITestFailure(message: "missing fixture swatch")
         }
+        guard let background = colors.background.usingColorSpace(.sRGB) else {
+            throw UITestFailure(message: "swatch background is not convertible to sRGB")
+        }
+        let channels = (
+            UInt8((background.redComponent * 255).rounded()),
+            UInt8((background.greenComponent * 255).rounded()),
+            UInt8((background.blueComponent * 255).rounded())
+        )
         try uiExpect(
-            UInt8((colors.background.usingColorSpace(.sRGB)!.redComponent * 255).rounded()) == 4,
-            "swatch did not project the decoded theme background"
+            channels == (4, 5, 6),
+            "swatch did not project the decoded theme background: \(channels)"
         )
         try uiExpect(
             catalog.renderTheme(named: "Fixture")?.defaultBackground

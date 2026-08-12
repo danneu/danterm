@@ -268,7 +268,7 @@ Per-site direction:
 - [x] 1. `build: compile every already-clean target in Swift 6 language
   mode` -- the six root targets that need no code change, closing the gap
   between the nested manifests and the shipping build.
-- [ ] 2. `refactor(theme): make the theme catalog sendable` -- move the
+- [x] 2. `refactor(theme): make the theme catalog sendable` -- move the
   `NSColor` preview projection to the swatch consumer, carrying its
   exact-color assertion with it (PO6).
 - [ ] 3. `fix(ipc): close the control socket exactly once under a race` --
@@ -283,3 +283,21 @@ Per-site direction:
 Commit 1 is a manifest-only change, verified green before this plan was
 written. Commits 2-4 stand alone and stay green with the app target still
 at `.v5`; only 5 flips it.
+
+## Implementation notes
+
+- Commit 2: `ThemeCatalog` declares `Sendable` conformance explicitly. The
+  Decision says the catalog "needs no annotation", which holds for
+  isolation annotations, but a final class never gets implicit `Sendable`
+  the way a struct does, so `static let shared` still needs the stated
+  conformance to satisfy I1. No `@MainActor` and no `nonisolated(unsafe)`
+  were added, so I2 is intact.
+- Commit 2: the moved projection is `ThemeCatalog.swatchColors(named:)`,
+  an extension living in `app/ThemeSwatchViews.swift` beside its only
+  caller. It builds from `theme(named:)` (already `Sendable`) rather than
+  from `renderTheme(named:)`, because `RenderTheme` exposes its palette as
+  a fixed `RenderANSIColors` and the swatch needs the plain 1...6 slice.
+- Commit 2: PO6's assertion moved with the projection and was widened from
+  the background's red channel alone to all three channels. Verified by
+  ablation -- swapping green for blue in the projection fails the test
+  with `(4, 6, 6)`, and restoring it passes.

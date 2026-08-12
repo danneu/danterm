@@ -2,6 +2,37 @@
 // sidebar theme browser and the remote theme picker sheet.
 import Cocoa
 
+/// Resolved preview colors for a single complete theme, ready for swatch rendering.
+struct ThemeColors {
+    let background: NSColor
+    let foreground: NSColor
+    let accent: NSColor
+    let palette: [NSColor]  // ANSI colors 1-6: red, green, yellow, blue, magenta, cyan
+}
+
+extension ThemeCatalog {
+    /// Projects a catalog entry into AppKit preview colors here, at the only consumer,
+    /// so the shared catalog itself holds no non-`Sendable` state.
+    func swatchColors(named name: String) -> ThemeColors? {
+        guard let theme = theme(named: name) else { return nil }
+        return ThemeColors(
+            background: Self.swatchColor(theme.background),
+            foreground: Self.swatchColor(theme.foreground),
+            accent: Self.swatchColor(theme.cursor),
+            palette: theme.ansiPalette[1...6].map(Self.swatchColor)
+        )
+    }
+
+    private static func swatchColor(_ color: ThemeRGBColor) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: 1
+        )
+    }
+}
+
 /// Bold/regular monospaced fonts at the size where "test\u{2588}" just fits a swatch's
 /// text area, plus the rendered size used to center it.
 fileprivate struct SwatchTextFit {
@@ -143,7 +174,7 @@ extension ThemeBrowserCellView {
             cell.textField?.stringValue = themeName
         }
         cell.updateTextColor()
-        if let tc = ThemeCatalog.shared.colors[themeName] {
+        if let tc = ThemeCatalog.shared.swatchColors(named: themeName) {
             cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent, tc.palette)
         } else {
             cell.swatchView?.colors = (.clear, .clear, .clear, [])
