@@ -113,19 +113,18 @@ class SidebarOutlineView: NSOutlineView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
-        let clickedRow = row(at: point)
-        guard clickedRow >= 0 else { return nil }
+        let hitRow = row(at: point)
+        guard hitRow >= 0, let sidebarItem = item(atRow: hitRow) as? SidebarItem else { return nil }
 
-        let item = self.item(atRow: clickedRow)
-        if let sidebarItem = item as? SidebarItem {
-            switch sidebarItem.kind {
-            case .group(let group):
-                return sidebarView?.contextMenu(forGroupId: group.id)
-            case .tab(let tab):
-                return sidebarView?.contextMenu(forTabId: tab.id, clickedRow: clickedRow)
-            }
+        let built: NSMenu?
+        switch sidebarItem.kind {
+        case .group(let group):
+            built = sidebarView?.contextMenu(forGroupId: group.id)
+        case .tab(let tab):
+            built = sidebarView?.contextMenu(forTabId: tab.id, clickedRow: hitRow)
         }
-        return nil
+        guard let built else { return nil }
+        return menuHighlightingClickedRow(built) { super.menu(for: event) }
     }
 
     /// Hide the native disclosure triangle for all rows. Group rows use a

@@ -273,6 +273,26 @@ func themeBrowserViewTests() {
         try uiExpect(table.menu(for: event) == nil, "a click past the last row should yield no menu")
     }
 
+    uiTest("a right-click marks the clicked row so AppKit outlines it") {
+        // Intent: after a right-click, the table knows which row was clicked.
+        // Why it exists: AppKit draws the context-menu outline only from
+        //   NSTableView's own menu(for:), which is also what sets clickedRow. An
+        //   override that builds the menu itself and never delegates leaves
+        //   clickedRow at -1 and the clicked row undrawn, so the user cannot tell
+        //   which theme Copy Name would copy.
+        // Scenario: the user right-clicks the second theme in the list while a
+        //   different theme is selected.
+        let fx = makeThemeBrowserFixture()
+        defer { fx.window.close() }
+
+        _ = try themeContextMenu(rightClickingRow: 1, in: fx)
+
+        try uiExpect(fx.view.tableView.clickedRow == 1,
+            "clickedRow should be the right-clicked row, got \(fx.view.tableView.clickedRow)")
+        try uiExpect(fx.view.tableView.menu == nil,
+            "the table view should hold no menu once menu(for:) returns")
+    }
+
     uiTest("menu keeps the browser alive and Copy Name still fires after teardown") {
         // Intent: a built menu strongly retains the ephemeral theme browser, so
         //   Copy Name still works after the browser's owner releases it.

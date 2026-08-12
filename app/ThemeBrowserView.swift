@@ -26,9 +26,10 @@ class ThemeBrowserTableView: NSTableView {
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let browserView else { return nil }
         let row = row(at: convert(event.locationInWindow, from: nil))
-        let menu = NSMenu()
-        browserView.buildThemeContextMenu(into: menu, forRow: row)
-        return menu.items.isEmpty ? nil : menu
+        let built = NSMenu()
+        browserView.buildThemeContextMenu(into: built, forRow: row)
+        guard !built.items.isEmpty else { return nil }
+        return menuHighlightingClickedRow(built) { super.menu(for: event) }
     }
 }
 
