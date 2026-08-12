@@ -100,10 +100,11 @@ check_case "prompt submit reports working" \
 check_case "request user input reports waiting" \
   '{'"$TURN_COMMON"',"hook_event_name":"PreToolUse","tool_name":"request_user_input","tool_input":{"questions":[]},"tool_use_id":"call_1"}' \
   "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state waiting"
-# PermissionRequest carries no tool_use_id, unlike the tool events around it.
-check_case "permission request reports waiting" \
-  '{'"$TURN_COMMON"',"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls","description":"list files"}}' \
-  "agent activity --pane 11111111-1111-4111-8111-111111111111 --kind codex --id $SESSION --state waiting"
+# PermissionRequest carries no tool_use_id or paired resolution event. Codex
+# also emits it for automatically approved actions, so it cannot establish a
+# durable wait.
+check_case "permission request does not report activity" \
+  '{'"$TURN_COMMON"',"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls","description":"list files"}}'
 check_case "ordinary tool use is ignored" \
   '{'"$TURN_COMMON"',"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_use_id":"call_1"}'
 # AskUserQuestion is Claude's ask-user tool. Codex never sends it, so matching it

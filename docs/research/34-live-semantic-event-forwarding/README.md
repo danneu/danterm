@@ -71,6 +71,8 @@ invoke `SessionEnd`, so pane teardown is not their only honest detach source.
 - [x] Probe a plain nested PTY. Recorded in 34/F4.
 - [x] Audit installed Claude Code and Codex hooks, then capture the available
   activity and end payloads. Recorded in 34/F5.
+- [x] Correct the Codex permission-wait boundary after an automatic approval
+  left a working pane stale. Recorded in 34/F6 and 34/D2.
 - [x] Select the supported forwarding and agent-state contracts. Recorded in
   34/D1 and 34/D2.
 
@@ -106,4 +108,5 @@ Investigation closed. Direct PTYs, nested PTYs, and SSH carry the live envelope.
 Mosh supports only the near-side connection lifetime. tmux supports the envelope
 only through its explicit DCS form with `allow-passthrough` enabled. Both bundled
 agents can report working, waiting, idle, and detach through the exact hook
-mappings in 34/D2.
+mappings in 34/D2; Codex permission checks are excluded because they cannot
+distinguish an automatic approval from a user-blocked wait.

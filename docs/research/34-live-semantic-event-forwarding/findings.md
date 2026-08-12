@@ -129,3 +129,26 @@
   captured in this run. Their availability is supported by the installed hook
   registry and the repository's already-shipped live fixture, not by a new live
   authenticated trace.
+
+### F6 -- Codex permission requests do not establish waiting activity
+
+- Status: settled.
+- Date and investigator: 2026-08-12, Codex.
+- Commands, inputs, or reproduction: inspected pane
+  `F23517E7-2886-48E8-BF55-D74DF487AC04` through `danterm pane info` and
+  `danterm pane read` while its Codex session continued an implementation after
+  an automatically approved command.
+- Measurements or examples: the pane lifecycle reported the running `codex`
+  command and agent activity `waiting`, while the TUI reported `Working` and
+  continued staging, reviewing, and committing. The last activity-changing
+  hook had been `PermissionRequest`; Codex emitted no paired resolution event
+  before resuming work.
+- Observation: `PermissionRequest` can describe an automatically approved
+  action rather than a root agent blocked on the user. Its payload does not
+  distinguish those cases, and the hook vocabulary supplies no event at the
+  point approval resolves.
+- Inference: mapping Codex `PermissionRequest` to waiting can create a stale
+  pane state. Ignoring it is the only mapping that does not invent either a wait
+  or a resume; explicit `request_user_input` remains an authoritative wait.
+- Uncertainty: a future Codex hook that pairs the block with an approval result
+  or work-resumed transition could support permission waits without inference.

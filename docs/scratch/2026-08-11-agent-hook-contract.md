@@ -19,7 +19,6 @@ the record it came from.
 | Gap | Where it bites | Status |
 |---|---|---|
 | Claude's test payloads are hand-written | Its field names are pinned only as far as we guessed them, so a renamed field passes | Needs a capture like the codex one; no trust gate, so it is cheap |
-| A declined codex approval leaves the pane reading `waiting` | Until the next `UserPromptSubmit`, the pane misreports | Not ours to fix; codex emits nothing on abort |
 | Codex subagent behavior is untested | The `agent_id` guard is a placeholder for a contract we have not measured | One subagent turn settles it |
 | `CLAUDE_CONFIG_DIR` isolation is unconfirmed | Decides whether test layer 2 can cover Claude at all | Untested |
 | A fresh codex pane carries no chip until the first prompt | Looks like a broken hook, and cost an hour of debugging once already | Codex's behavior; not fixable in the hook |
@@ -88,9 +87,9 @@ Four facts worth stating separately, because our script assumes otherwise:
   escalation path ran `PreToolUse`, `PostToolUse` (the sandboxed attempt
   failing), then `PreToolUse` again, then `PermissionRequest`.
 - **Declining an approval emits no terminal event.** Pressing Escape at the
-  prompt ended the turn with no `Stop`. The pane's last report stays
-  `PermissionRequest`, so it reads as waiting until the next
-  `UserPromptSubmit`.
+  prompt ended the turn with no `Stop`. This made the old
+  `PermissionRequest`-to-waiting mapping stale until the next
+  `UserPromptSubmit`; the hook now ignores that event for activity.
 
 **`SessionStart` is delivered at the first user prompt, not at process launch.**
 A codex TUI sitting at an empty composer has run no hook at all, so the pane
@@ -128,10 +127,10 @@ triggers its own review.
    `session_id` is untested, so removing the guard is the riskier edit. If
    subagents do report, the correct filter is to ignore work between
    `SubagentStart` and `SubagentStop`.
-4. Leave the declined-approval gap alone and comment it on the `Stop` case.
-   The ideal fix is codex emitting a turn-ended event on abort, which is not
-   ours to make; a timeout in DanTerm would trade a rare wrong state for a
-   routine one.
+4. Ignore `PermissionRequest` for Codex activity. A live automatic approval
+   proved that the event does not establish a user-blocked wait, and Codex emits
+   no paired resolution before resuming work. Keep `request_user_input` as the
+   explicit waiting transition.
 
 ### `integrations/codex/danterm-agent-session.test.sh`
 
@@ -155,11 +154,12 @@ triggers its own review.
 7. `~/world/common/codex.nix` generates `~/.codex/hooks.json` and registers
    only `SessionStart` for `danterm-codex-agent-session`, so codex attaches and
    then never reports activity or detaches. The `hooksJson` attrset needs
-   `UserPromptSubmit`, `PermissionRequest`, `Stop`, and `SessionEnd`, plus
-   optionally `PreToolUse` with a `matcher` so a process is not spawned on
-   every tool call. Note the file's own comment: `config.toml` stays
-   hand-managed because codex writes to it, which is also where the hook trust
-   state lands -- so each added entry needs an interactive approval once.
+   `UserPromptSubmit`, `Stop`, and `SessionEnd`, plus `PreToolUse` with a
+   `matcher` so a process is not spawned on every tool call. `PermissionRequest`
+   is deliberately absent because Codex does not pair it with a resolution
+   event. Note the file's own comment: `config.toml` stays hand-managed because
+   codex writes to it, which is also where the hook trust state lands -- so each
+   added entry needs an interactive approval once.
 
    `~/world/common/claude-code.nix` needs the same fix, and reading it as merely
    "the same shape" is what hid that for a day. Its non-`SessionStart` events

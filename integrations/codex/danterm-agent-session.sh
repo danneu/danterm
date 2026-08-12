@@ -44,14 +44,6 @@ case "$EVENT" in
       danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
     fi
     ;;
-  PermissionRequest)
-    danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state waiting >/dev/null 2>&1 || true
-    ;;
-  # Codex emits nothing when the user declines an approval, so a declined turn
-  # leaves the pane on its last report -- waiting, from the PermissionRequest --
-  # until the next UserPromptSubmit. The fix belongs in codex, as a turn-ended
-  # event on abort; a timeout here would trade a rare wrong state for a routine
-  # one, since a long tool call is not a finished turn.
   Stop)
     danterm agent activity --pane "$DANTERM_PANE" --kind codex --id "$SESSION_ID" --state idle >/dev/null 2>&1 || true
     ;;

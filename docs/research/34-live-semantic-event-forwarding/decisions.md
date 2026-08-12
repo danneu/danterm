@@ -28,9 +28,9 @@
 ### D2 -- map only explicit root-agent lifecycle hooks
 
 - Status: selected.
-- Evidence used: F5 and the existing production notification hook's distinction
-  between a real root stop, a blocking prompt, a subagent stop, and a root parked
-  on background work.
+- Evidence used: F5, F6, and the existing production notification hook's
+  distinction between a real root stop, a blocking prompt, a subagent stop, and
+  a root parked on background work.
 - Candidate solutions: infer activity from terminal output; map every agent
   hook; or select only hooks that directly name a root-session transition.
 - Tradeoffs and correctness risks: screen inference violates the semantic-source
@@ -38,18 +38,24 @@
   the attached root session. The narrow mapping may omit intermediate work that
   neither agent reports, but never claims a state without evidence.
 - Selected direction:
-  - `SessionStart` attaches the session and starts it as working.
+  - `SessionStart` attaches the session without claiming activity.
   - `UserPromptSubmit` reports working.
-  - A root `PreToolUse` for `AskUserQuestion` or `request_user_input`, a blocking
-    `PermissionRequest`, or Claude `Elicitation` reports waiting.
+  - A root `PreToolUse` for `AskUserQuestion` or `request_user_input` reports
+    waiting. Claude's blocking `PermissionRequest` and `Elicitation` hooks also
+    report waiting.
+  - Codex `PermissionRequest` does not report activity. It also describes
+    automatically approved actions and has no paired resolution event, so it
+    cannot establish a durable wait.
   - A genuine root `Stop` reports idle. A stop that the existing Claude fixture
     proves is only parking on live background work does not report idle.
   - `SessionEnd` detaches the matching session.
   - Subagent hooks and events carrying a different agent identity do not mutate
     the attached root session's facet.
 - Behavioral verification: Codex live fixtures captured request-user-input and
-  completion at the exact hooks. Both installed agents invoked `SessionEnd`;
-  the existing Claude live fixture pins its wait-versus-park classification.
+  completion at the exact hooks, and the Codex hook contract test rejects an
+  activity report for its captured permission payload. Both installed agents
+  invoked `SessionEnd`; the existing Claude live fixture pins its
+  wait-versus-park classification.
 - Decision and rationale: these are the smallest activity and lifetime sets
   both integrations can state honestly. Missing transitions remain absent
   rather than inferred.
