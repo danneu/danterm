@@ -1,5 +1,8 @@
 import Cocoa
 
+// The runner calls this from `@MainActor main()`, so the body is main-actor in
+// fact. Saying so lets the closures below reach `visibleAlertBadge(in:)`.
+@MainActor
 func sidebarBadgeTests() {
     print("SidebarBadge")
 

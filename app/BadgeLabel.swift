@@ -31,6 +31,7 @@ extension NSTextField {
 /// Returns the visible alert badge in a tab cell, or nil.
 /// Looks for an NSStackView with identifier "tabAccessoryStack" containing
 /// an unhidden badge with identifier "bellDot".
+@MainActor
 func visibleAlertBadge(in cell: NSView) -> NSView? {
     let stackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
     let badgeId = NSUserInterfaceItemIdentifier("bellDot")

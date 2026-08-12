@@ -2,6 +2,9 @@
 // scroll-reveal behavior.
 import Cocoa
 
+// The runner calls this from `@MainActor main()`, so the body is main-actor in
+// fact. Saying so lets the closures below reach `sidebarBadgeCount`.
+@MainActor
 func sidebarSelectionCacheTests() {
     print("SidebarSelectionCache")
 
@@ -654,6 +657,7 @@ private func sidebarSelectionTab(_ id: TabId) -> TabModel {
     )
 }
 
+@MainActor
 private func sidebarBadgeCount(
     for tabId: TabId,
     in outline: NSOutlineView,

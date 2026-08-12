@@ -9,6 +9,7 @@ private let todoShortcutHelpWidth: CGFloat = 320
 private let todoShortcutKeyColumnWidth: CGFloat = 84
 
 /// Create the secondary hint shown below todo text-entry fields.
+@MainActor
 func makeTodoShortcutHintLabel() -> NSTextField {
     let label = NSTextField(labelWithString: "Shift+Return for newline")
     label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -18,6 +19,7 @@ func makeTodoShortcutHintLabel() -> NSTextField {
 }
 
 /// Configure the shared image-only keyboard shortcut help button.
+@MainActor
 func configureTodoShortcutHelpButton(_ button: NSButton, target: AnyObject?, action: Selector) {
     button.target = target
     button.action = action
