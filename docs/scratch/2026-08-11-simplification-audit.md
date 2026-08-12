@@ -153,7 +153,7 @@ in itself.
 |        | [S11](#s11) | 20    | 4   | 5   | ipc-cli        | medium | Stop compiling the entire app core into the danterm CLI binary                                                          |
 |        | [S12](#s12) | 20    | 4   | 5   | pty            | large  | Move test-only state and fault injection out of the production PTY actor                                                |
 |        | [S13](#s13) | 20    | 4   | 5   | sidebar        | medium | Give sidebar cells typed subviews instead of string-identifier lookups                                                  |
-|        | [S14](#s14) | 20    | 4   | 5   | terminal-core  | medium | Store both screens as ScreenState instead of one boxed and one loose                                                    |
+| a8eefabc | [S14](#s14) | 20    | 4   | 5   | terminal-core  | medium | Store both screens as ScreenState instead of one boxed and one loose                                                  |
 | d3574ddb | [S15](#s15) | 20    | 4   | 5   | terminal-core  | medium | Replace the four hand-branched mode switches with one mode registry                                                   |
 | 9f0742c3 | [S16](#s16) | 20    | 4   | 5   | terminal-core  | large  | Unify the two search matchers and lift search out of Terminal                                                         |
 |        | [S17](#s17) | 16    | 4   | 4   | pty            | medium | Model master-close asynchrony in the reducer instead of deferring a command tail                                        |
