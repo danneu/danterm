@@ -5,6 +5,7 @@
 
 import Cocoa
 
+@MainActor
 class PaneDragCoordinator {
     let sourcePaneId: PaneId
     let overlayView: PaneDragOverlayView
