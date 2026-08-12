@@ -552,7 +552,7 @@ public struct Terminal: Equatable, Sendable {
         var needleKeys: [SearchGraphemeKey]
         var indexedThroughRecord: LogicalLineStore.RecordIdentity?
         var retainedStart: LogicalLineStore.RecordTextPosition?
-        var boundaryWindow: [RecordSearchProjectionUnit]
+        var boundaryWindow: [NeedleWindow<LogicalLineStore.RecordTextPosition>.Unit]
         var prefixMatches: Deque<RecordSearchRange>
     }
 
@@ -560,21 +560,6 @@ public struct Terminal: Equatable, Sendable {
     private struct RecordSearchRange: Equatable, Sendable {
         var start: LogicalLineStore.RecordTextPosition
         var end: LogicalLineStore.RecordTextPosition
-    }
-
-    /// Couples a folded search key to stable boundaries in closed history.
-    private struct RecordSearchProjectionUnit: Equatable, Sendable {
-        var key: SearchGraphemeKey
-        var start: LogicalLineStore.RecordTextPosition
-        var end: LogicalLineStore.RecordTextPosition
-    }
-
-    /// Carries the folded units at the end of closed history so a mutable-suffix match can join
-    /// them without projecting an earlier display row.
-    private struct SearchProjectionUnit: Equatable, Sendable {
-        var key: SearchGraphemeKey
-        var start: TextAnchor
-        var end: TextAnchor
     }
 
     /// Presents record-keyed closed matches and a freshly scanned suffix as one ordered
@@ -618,13 +603,6 @@ public struct Terminal: Equatable, Sendable {
         var rowUnits: [ProjectionUnit]
 
         var unit: ProjectionUnit { rowUnits[indexInRow] }
-    }
-
-    /// Keeps search comparison allocation-free for the common one-scalar key while
-    /// retaining full folded expansions for Unicode graphemes that need them.
-    private enum SearchGraphemeKey: Equatable, Sendable {
-        case scalar(UInt32)
-        case scalars([Unicode.Scalar])
     }
 
     /// Keeps the one DECSC slot independent from live cursor and mode mutation.
@@ -4046,11 +4024,12 @@ public struct Terminal: Equatable, Sendable {
         // The seed's own endpoints are resolved eagerly rather than on demand: there are at most
         // needle-length-minus-one of them, which is the bound the mutable suffix's rescan already
         // carries (`31/AR4`), and a match that starts inside the seed needs them.
-        var seed = search.index.boundaryWindow.compactMap { unit -> SearchProjectionUnit? in
+        var seed = search.index.boundaryWindow.compactMap {
+            unit -> NeedleWindow<TextAnchor>.Unit? in
             guard let start = history.position(of: unit.start),
                   let end = history.position(of: unit.end)
             else { return nil }
-            return SearchProjectionUnit(
+            return NeedleWindow.Unit(
                 key: unit.key,
                 start: TextAnchor(
                     row: evictedRowCount + start.displayRow,
@@ -4068,7 +4047,7 @@ public struct Terminal: Equatable, Sendable {
                scan.isForcedSplit == false,
                let start = history.position(of: recordPosition(endingRecord: scan))
             {
-                seed.append(SearchProjectionUnit(
+                seed.append(NeedleWindow.Unit(
                     key: .scalar(0x0A),
                     start: TextAnchor(
                         row: evictedRowCount + start.displayRow,
@@ -4209,10 +4188,12 @@ public struct Terminal: Equatable, Sendable {
             } else {
                 search.index.prefixMatches.removeAll()
             }
-            search.index.boundaryWindow = recordSearchBoundaryWindow(
+            let boundaryWindow = recordSearchBoundaryWindow(
                 needleKeys: search.index.needleKeys,
                 endingAt: closedCount
             )
+            assert(boundaryWindow.count <= max(0, search.index.needleKeys.count - 1))
+            search.index.boundaryWindow = boundaryWindow
         } else {
             let appendStart: Int
             if let previousThrough,
@@ -4235,14 +4216,19 @@ public struct Terminal: Equatable, Sendable {
                     includesLeadingBoundary: appendStart > 0
                 )
                 search.index.prefixMatches.append(contentsOf: advanced.matches)
+                assert(
+                    advanced.trailingUnits.count <= max(0, search.index.needleKeys.count - 1)
+                )
                 search.index.boundaryWindow = advanced.trailingUnits
             } else if search.index.boundaryWindow.contains(where: {
                 history.position(of: $0.start) == nil || history.position(of: $0.end) == nil
             }) {
-                search.index.boundaryWindow = recordSearchBoundaryWindow(
+                let boundaryWindow = recordSearchBoundaryWindow(
                     needleKeys: search.index.needleKeys,
                     endingAt: closedCount
                 )
+                assert(boundaryWindow.count <= max(0, search.index.needleKeys.count - 1))
+                search.index.boundaryWindow = boundaryWindow
             }
         }
         search.index.retainedStart = retainedStart
@@ -4260,6 +4246,7 @@ public struct Terminal: Equatable, Sendable {
             records: 0..<closedCount,
             includesLeadingBoundary: false
         )
+        assert(prefixScan.trailingUnits.count <= max(0, needleKeys.count - 1))
         return SearchMatchIndex(
             needleKeys: needleKeys,
             indexedThroughRecord: closedCount > 0
@@ -4291,31 +4278,21 @@ public struct Terminal: Equatable, Sendable {
 
     private func scanClosedRecordSearchUnits(
         needleKeys: [SearchGraphemeKey],
-        seededBy seed: [RecordSearchProjectionUnit],
+        seededBy seed: [NeedleWindow<LogicalLineStore.RecordTextPosition>.Unit],
         records: Range<Int>,
         includesLeadingBoundary: Bool
-    ) -> (matches: [RecordSearchRange], trailingUnits: [RecordSearchProjectionUnit]) {
+    ) -> (
+        matches: [RecordSearchRange],
+        trailingUnits: [NeedleWindow<LogicalLineStore.RecordTextPosition>.Unit]
+    ) {
         guard needleKeys.isEmpty == false else { return ([], []) }
         var matches: [RecordSearchRange] = []
-        var window = [RecordSearchProjectionUnit?](repeating: nil, count: needleKeys.count)
-        var unitCount = 0
-
-        func consume(_ unit: RecordSearchProjectionUnit, recordsMatch: Bool) {
-            let slot = unitCount % needleKeys.count
-            window[slot] = unit
-            unitCount += 1
-            guard recordsMatch, unitCount >= needleKeys.count else { return }
-            let startIndex = unitCount - needleKeys.count
-            for offset in needleKeys.indices {
-                guard window[(startIndex + offset) % needleKeys.count]?.key == needleKeys[offset]
-                else { return }
-            }
-            guard let start = window[startIndex % needleKeys.count]?.start else { return }
-            matches.append(RecordSearchRange(start: start, end: unit.end))
-        }
+        var matcher = NeedleWindow<LogicalLineStore.RecordTextPosition>(
+            needleKeys: needleKeys
+        )
 
         for unit in seed.suffix(max(0, needleKeys.count - 1)) {
-            consume(unit, recordsMatch: false)
+            matcher.join(unit)
         }
         // The record before the one being scanned, which the hard boundary between two records
         // needs and the previous turn of the loop already read.
@@ -4328,17 +4305,18 @@ public struct Terminal: Equatable, Sendable {
                 continue
             }
             if let previous, previous.isForcedSplit == false {
-                consume(
-                    RecordSearchProjectionUnit(
+                if let match = matcher.record(
+                    NeedleWindow.Unit(
                         key: .scalar(0x0A),
                         start: recordPosition(endingRecord: previous),
                         end: LogicalLineStore.RecordTextPosition(
                             record: scan.identity,
                             cellOffset: scan.cellOffsetBase
                         )
-                    ),
-                    recordsMatch: true
-                )
+                    )
+                ) {
+                    matches.append(RecordSearchRange(start: match.start, end: match.end))
+                }
             }
             // The record's identity and trim base are constant across its cells and its offsets
             // are the loop's own arithmetic, so the scan states each unit's coordinates instead
@@ -4356,8 +4334,8 @@ public struct Terminal: Equatable, Sendable {
                 guard let key else { return }
                 let base = scan.cellOffsetBase
                 let width = kind == .wideHead ? 2 : 1
-                consume(
-                    RecordSearchProjectionUnit(
+                if let match = matcher.record(
+                    NeedleWindow.Unit(
                         key: key,
                         start: LogicalLineStore.RecordTextPosition(
                             record: scan.identity,
@@ -4367,26 +4345,22 @@ public struct Terminal: Equatable, Sendable {
                             record: scan.identity,
                             cellOffset: base + min(scan.cellCount, cellOffset + width)
                         )
-                    ),
-                    recordsMatch: true
-                )
+                    )
+                ) {
+                    matches.append(RecordSearchRange(start: match.start, end: match.end))
+                }
             }
             previous = scan
         }
 
-        let trailingCount = min(max(0, needleKeys.count - 1), unitCount)
-        let trailingStart = unitCount - trailingCount
-        return (
-            matches,
-            (trailingStart..<unitCount).compactMap { window[$0 % needleKeys.count] }
-        )
+        return (matches, matcher.trailingUnits)
     }
 
     /// Rebuilds only the record units that can join a future mutable-suffix match.
     private func recordSearchBoundaryWindow(
         needleKeys: [SearchGraphemeKey],
         endingAt recordEnd: Int
-    ) -> [RecordSearchProjectionUnit] {
+    ) -> [NeedleWindow<LogicalLineStore.RecordTextPosition>.Unit] {
         let targetCount = max(0, needleKeys.count - 1)
         guard targetCount > 0, recordEnd > 0 else { return [] }
         var start = recordEnd
@@ -4444,58 +4418,41 @@ public struct Terminal: Equatable, Sendable {
 
     private func scanSearchUnits(
         needleKeys: [SearchGraphemeKey],
-        seededBy seed: [SearchProjectionUnit],
+        seededBy seed: [NeedleWindow<TextAnchor>.Unit],
         absoluteRows: Range<Int>,
         lastContentRow: Int,
         matching matchRows: Range<Int>,
         matchingSeedSuffixCount: Int = 0,
         stream suppliedStream: ProjectionRows? = nil
-    ) -> (matches: [TextAnchorRange], trailingUnits: [SearchProjectionUnit]) {
+    ) -> (matches: [TextAnchorRange], trailingUnits: [NeedleWindow<TextAnchor>.Unit]) {
         let stream = suppliedStream ?? activeProjection()
         ProjectionRowCounter.record(rows: absoluteRows.count)
         var matches: [TextAnchorRange] = []
-        var window = [SearchProjectionUnit?](repeating: nil, count: needleKeys.count)
-        var unitCount = 0
-
-        func consume(_ unit: SearchProjectionUnit, recordsMatch: Bool) {
-            let slot = unitCount % needleKeys.count
-            window[slot] = unit
-            unitCount += 1
-            guard recordsMatch, unitCount >= needleKeys.count else { return }
-            let startIndex = unitCount - needleKeys.count
-            for offset in needleKeys.indices {
-                guard window[(startIndex + offset) % needleKeys.count]?.key == needleKeys[offset]
-                else { return }
-            }
-            guard let start = window[startIndex % needleKeys.count]?.start else { return }
-            let match = TextAnchorRange(start: start, end: unit.end)
-            if range(match, intersects: matchRows) { matches.append(match) }
-        }
+        var matcher = NeedleWindow<TextAnchor>(needleKeys: needleKeys)
 
         let retainedSeed = Array(seed.suffix(needleKeys.count - 1 + matchingSeedSuffixCount))
         for (index, unit) in retainedSeed.enumerated() {
-            consume(
-                unit,
-                recordsMatch: index >= retainedSeed.count - matchingSeedSuffixCount
-            )
+            if index >= retainedSeed.count - matchingSeedSuffixCount {
+                if let match = matcher.record(unit) {
+                    let range = TextAnchorRange(start: match.start, end: match.end)
+                    if self.range(range, intersects: matchRows) { matches.append(range) }
+                }
+            } else {
+                matcher.join(unit)
+            }
         }
         forEachSearchUnit(
             in: stream,
             absoluteRows: absoluteRows,
             lastContentRow: lastContentRow
         ) { key, start, end in
-            consume(
-                SearchProjectionUnit(key: key, start: start, end: end),
-                recordsMatch: true
-            )
+            if let match = matcher.record(NeedleWindow.Unit(key: key, start: start, end: end)) {
+                let range = TextAnchorRange(start: match.start, end: match.end)
+                if self.range(range, intersects: matchRows) { matches.append(range) }
+            }
         }
 
-        let trailingCount = min(max(0, needleKeys.count - 1), unitCount)
-        let trailingStart = unitCount - trailingCount
-        let trailingUnits = (trailingStart..<unitCount).compactMap {
-            window[$0 % needleKeys.count]
-        }
-        return (matches, trailingUnits)
+        return (matches, matcher.trailingUnits)
     }
 
     /// Streams the painted projection as match keys and anchors without constructing selection

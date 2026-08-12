@@ -456,6 +456,27 @@ struct TerminalSearchTests {
         }
     }
 
+    @Test("a seam boundary ending at row start belongs to the preceding row")
+    func seamBoundaryEndingAtRowStartIntersectsPrecedingRow() throws {
+        // Intent: a hard boundary synthesized between closed history and the live suffix
+        //   remains visible in the row containing its start, not the row after its end.
+        // Why it exists: the suffix matcher admits this boundary through seed context, and
+        //   moving its intersection filter to the caller must preserve half-open row geometry.
+        // Scenario: a one-row pane scrolls A into a closed record while B remains live, and
+        //   a newline search asks for matches in each side of that seam separately.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("A\r\nB".utf8))
+        _ = terminal.beginSearch("\n")
+
+        let seam = TerminalTextRange(
+            start: TerminalTextPosition(row: 0, column: 1),
+            end: TerminalTextPosition(row: 1, column: 0)
+        )
+        #expect(terminal.searchMatchRanges(in: 0..<1) == [seam])
+        #expect(terminal.searchMatchRanges(in: 1..<2).isEmpty)
+        #expect(terminal.scannedSearchMatchRanges(in: 0..<1) == [seam])
+    }
+
     @Test("the search scan agrees with an independently segmented projection oracle")
     func searchScanMatchesIndependentOracle() throws {
         // Intent: search returns exactly the overlapping grapheme-aligned matches in the
