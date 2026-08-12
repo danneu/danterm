@@ -561,6 +561,7 @@ private func applyRenameRecycleModel(
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: old, new: projection),
         model: model,
+        projection: projection,
         clearActiveRename: false)
     materializeRenameRecycleRows(sidebar, outline: outline)
     return projection
@@ -605,7 +606,8 @@ private func applyRenameRecycleTransitionResult(
         runtime.viewLocalState.sidebarRenameTarget = nil
     }
     let dropped = sidebar.applySidebarOps(
-        guarded.ops, model: newModel, clearActiveRename: guarded.clearRename)
+        guarded.ops, model: newModel, projection: newProjection,
+        clearActiveRename: guarded.clearRename)
     materializeRenameRecycleRows(sidebar, outline: outline)
     let advanced = advanceSidebarCache(
         old: oldProjection, new: newProjection,

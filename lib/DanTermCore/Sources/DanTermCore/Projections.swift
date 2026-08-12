@@ -531,6 +531,20 @@ struct SidebarGroupProjection: Equatable {
 struct SidebarProjection: Equatable {
   var isSingleGroupMode: Bool
   var groups: [SidebarGroupProjection]
+
+  /// The row payload `SidebarItemStore` mounts for an inserted or reloaded group.
+  /// Linear over a list that is one entry per group row on screen.
+  func group(_ id: GroupId) -> SidebarGroupProjection? {
+    groups.first { $0.id == id }
+  }
+
+  /// The row payload `SidebarItemStore` mounts for an inserted or reloaded tab.
+  func tab(_ id: TabId) -> SidebarTabProjection? {
+    for group in groups {
+      if let tab = group.tabs.first(where: { $0.id == id }) { return tab }
+    }
+    return nil
+  }
 }
 
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the

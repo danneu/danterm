@@ -119,6 +119,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarRenameRecycleTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarContextMenuTests.swift" \
+        "$SCRIPT_DIR/tests-ui/SidebarProjectionRowTests.swift" \
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/LinkPreviewViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \

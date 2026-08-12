@@ -407,6 +407,7 @@ private func applyInitialSidebarModel(
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
         model: model,
+        projection: projection,
         clearActiveRename: false)
     materializeSidebarRows(sidebar, outline: outline)
     return projection
@@ -440,6 +441,7 @@ private func applySidebarTransitionResult(
     let dropped = sidebar.applySidebarOps(
         computeSidebarRowOps(old: oldProjection, new: newProjection),
         model: newModel,
+        projection: newProjection,
         clearActiveRename: false)
     if materializeRows {
         materializeSidebarRows(sidebar, outline: outline)

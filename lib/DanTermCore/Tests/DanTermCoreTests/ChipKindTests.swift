@@ -101,7 +101,7 @@ struct ChipKindTests {
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
 
-        #expect(tabPaneChips(tab, alerts: []).isEmpty)
+        #expect(tabPaneChips(tab, unreadByPane: [:]).isEmpty)
     }
 
     @Test("a split tab's strip lists every pane in tree order, focus flagged")
@@ -115,7 +115,7 @@ struct ChipKindTests {
         let thirdPaneId = try #require(selectedTab(in: model)).focusedPaneId
 
         let tab = try #require(selectedTab(in: model))
-        let strip = tabPaneChips(tab, alerts: [])
+        let strip = tabPaneChips(tab, unreadByPane: [:])
 
         #expect(strip.map(\.paneId) == [firstPaneId, secondPaneId, thirdPaneId])
         #expect(strip.map(\.isFocused) == [false, false, true])
@@ -156,7 +156,7 @@ struct ChipKindTests {
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(claude)))
 
         let tab = try #require(selectedTab(in: model))
-        #expect(tabPaneChips(tab, alerts: []).map(\.kind) == [.claude, .terminal])
+        #expect(tabPaneChips(tab, unreadByPane: [:]).map(\.kind) == [.claude, .terminal])
         // The row's own chip still speaks for the focused pane alone.
         #expect(chipKind(of: tab.id, in: desiredSidebar(in: model)) == .terminal)
     }
@@ -236,12 +236,9 @@ struct ChipKindTests {
                 id: AlertId(rawValue: UUID()), kind: .bell, paneId: firstPaneId,
                 title: "bell", body: "", createdAt: Date(timeIntervalSince1970: 0), isUnread: true))
 
-        let strip = tabPaneChips(tab, alerts: model.alerts)
+        let strip = tabPaneChips(tab, unreadByPane: unreadAlertTally(for: model).byPane)
 
         #expect(strip.map(\.state) == [.attention, .quiet])
-        // Both overloads must agree, or the sidebar's hot path and the cell's
-        // cold path would draw different strips for the same model.
-        #expect(tabPaneChips(tab, unreadByPane: unreadAlertTally(for: model).byPane) == strip)
     }
 
     private func chipKind(of tabId: TabId, in projection: SidebarProjection) -> ChipKind? {

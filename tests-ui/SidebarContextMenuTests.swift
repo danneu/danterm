@@ -15,7 +15,7 @@ func sidebarContextMenuTests() {
         //   Delete Group as enabled, but clicking it silently no-oped in update.
         let (sidebar, model) = makeSidebarContextMenuHarness(groupCount: 1)
 
-        let menu = try uiRequire(sidebar.contextMenu(for: model.groups[0]),
+        let menu = try uiRequire(sidebar.contextMenu(forGroupId: model.groups[0].id),
             "expected group context menu")
         menu.update()
 
@@ -27,7 +27,7 @@ func sidebarContextMenuTests() {
     uiTest("multiple groups keep Delete Group enabled after menu update") {
         let (sidebar, model) = makeSidebarContextMenuHarness(groupCount: 2)
 
-        let menu = try uiRequire(sidebar.contextMenu(for: model.groups[0]),
+        let menu = try uiRequire(sidebar.contextMenu(forGroupId: model.groups[0].id),
             "expected group context menu")
         menu.update()
 
@@ -47,6 +47,7 @@ private func makeSidebarContextMenuHarness(groupCount: Int) -> (SidebarView, App
     sidebar.applySidebarOps(
         computeSidebarRowOps(old: nil, new: projection),
         model: model,
+        projection: projection,
         clearActiveRename: false)
     return (sidebar, model)
 }

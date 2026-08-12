@@ -35,35 +35,37 @@ import Testing
         var store = seedSidebarStore(model)
         let before = sidebarStoreSnapshot(store)
 
-        let insertGroupResult = store.apply(.insertGroup(id: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        let projection = desiredSidebar(in: model)
+
+        let insertGroupResult = store.apply(.insertGroup(id: GroupId(), index: 0), projection: projection)
         #expect(!insertGroupResult, "missing group insert should return false")
         #expect(sidebarStoreSnapshot(store) == before, "missing group insert should not mutate")
 
-        let insertTabResult = store.apply(.insertTab(id: TabId(), groupId: groupA, index: 0), model: model, isSingleGroupMode: false)
+        let insertTabResult = store.apply(.insertTab(id: TabId(), groupId: groupA, index: 0), projection: projection)
         #expect(!insertTabResult, "missing tab insert should return false")
         #expect(sidebarStoreSnapshot(store) == before, "missing tab insert should not mutate")
 
-        let insertTabMissingParent = store.apply(.insertTab(id: tabA, groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        let insertTabMissingParent = store.apply(.insertTab(id: tabA, groupId: GroupId(), index: 0), projection: projection)
         #expect(!insertTabMissingParent, "missing parent tab insert should return false")
         #expect(sidebarStoreSnapshot(store) == before, "missing parent insert should not mutate")
 
-        let removeGroupOOR = store.apply(.removeGroup(index: 99), model: model, isSingleGroupMode: false)
+        let removeGroupOOR = store.apply(.removeGroup(index: 99), projection: projection)
         #expect(!removeGroupOOR, "out-of-range group remove should return false")
         #expect(sidebarStoreSnapshot(store) == before, "out-of-range group remove should not mutate")
 
-        let removeTabMissingParent = store.apply(.removeTab(groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        let removeTabMissingParent = store.apply(.removeTab(groupId: GroupId(), index: 0), projection: projection)
         #expect(!removeTabMissingParent, "missing parent tab remove should return false")
         #expect(sidebarStoreSnapshot(store) == before, "missing parent remove should not mutate")
 
-        let removeTabOOR = store.apply(.removeTab(groupId: groupA, index: 99), model: model, isSingleGroupMode: false)
+        let removeTabOOR = store.apply(.removeTab(groupId: groupA, index: 99), projection: projection)
         #expect(!removeTabOOR, "out-of-range tab remove should return false")
         #expect(sidebarStoreSnapshot(store) == before, "out-of-range tab remove should not mutate")
 
-        let reloadGroup = store.apply(.reloadGroup(id: GroupId()), model: model, isSingleGroupMode: false)
+        let reloadGroup = store.apply(.reloadGroup(id: GroupId()), projection: projection)
         #expect(reloadGroup, "reloadGroup should return true")
-        let setCollapsed = store.apply(.setGroupCollapsed(id: GroupId(), collapsed: true), model: model, isSingleGroupMode: false)
+        let setCollapsed = store.apply(.setGroupCollapsed(id: GroupId(), collapsed: true), projection: projection)
         #expect(setCollapsed, "setGroupCollapsed should return true")
-        let reloadTab = store.apply(.reloadTab(id: TabId()), model: model, isSingleGroupMode: false)
+        let reloadTab = store.apply(.reloadTab(id: TabId()), projection: projection)
         #expect(reloadTab, "reloadTab should return true")
         #expect(sidebarStoreSnapshot(store) == before, "non-structural ops should not mutate backing structure")
     }
@@ -310,10 +312,7 @@ private func sidebarStoreSnapshot(_ store: SidebarItemStore) -> SidebarStoreSnap
 private func seedSidebarStore(_ model: AppModel) -> SidebarItemStore {
     var store = SidebarItemStore()
     let projection = desiredSidebar(in: model)
-    store.apply(
-        computeSidebarRowOps(old: nil, new: projection),
-        model: model,
-        isSingleGroupMode: projection.isSingleGroupMode)
+    store.apply(computeSidebarRowOps(old: nil, new: projection), projection: projection)
     return store
 }
 
@@ -326,8 +325,7 @@ private func applySidebarStoreTransition(
     let newProjection = desiredSidebar(in: newModel)
     store.apply(
         computeSidebarRowOps(old: oldProjection, new: newProjection),
-        model: newModel,
-        isSingleGroupMode: newProjection.isSingleGroupMode)
+        projection: newProjection)
     return newProjection
 }
 

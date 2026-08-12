@@ -120,9 +120,9 @@ class SidebarOutlineView: NSOutlineView {
         if let sidebarItem = item as? SidebarItem {
             switch sidebarItem.kind {
             case .group(let group):
-                return sidebarView?.contextMenu(for: group)
+                return sidebarView?.contextMenu(forGroupId: group.id)
             case .tab(let tab):
-                return sidebarView?.contextMenu(forTab: tab, clickedRow: clickedRow)
+                return sidebarView?.contextMenu(forTabId: tab.id, clickedRow: clickedRow)
             }
         }
         return nil
@@ -135,7 +135,7 @@ class SidebarOutlineView: NSOutlineView {
     }
 
     /// Returns the tab whose alert badge contains `point` (in outline-view coords), or nil.
-    func tabForBadgeHit(at point: NSPoint) -> TabModel? {
+    func tabForBadgeHit(at point: NSPoint) -> TabId? {
         let clickedRow = row(at: point)
         guard clickedRow >= 0,
               let sidebarItem = item(atRow: clickedRow) as? SidebarItem,
@@ -144,7 +144,7 @@ class SidebarOutlineView: NSOutlineView {
               let badge = visibleAlertBadge(in: cell)
         else { return nil }
         let badgePoint = badge.convert(point, from: self)
-        return badge.bounds.contains(badgePoint) ? tab : nil
+        return badge.bounds.contains(badgePoint) ? tab.id : nil
     }
 
     // NSResponder: routes alert-badge clicks to .clearAlertsForTabs, and pre-empts
@@ -152,8 +152,8 @@ class SidebarOutlineView: NSOutlineView {
     override func mouseDown(with event: NSEvent) {
         sidebarView?.finishActiveRenameForPointerInteraction()
         let point = convert(event.locationInWindow, from: nil)
-        if let tab = tabForBadgeHit(at: point) {
-            sidebarView?.runtime?.send(.clearAlertsForTabs(tabIds: [tab.id]))
+        if let tabId = tabForBadgeHit(at: point) {
+            sidebarView?.runtime?.send(.clearAlertsForTabs(tabIds: [tabId]))
             return
         }
         let plainClick = event.modifierFlags.intersection([.shift, .command]).isEmpty
@@ -201,9 +201,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     var testForceNextNilCellGroupIds: Set<GroupId> = []
 #endif
 
-    private var isSingleGroupMode: Bool {
-        currentModel?.groups.count == 1
-    }
+    /// Row structure of the last applied projection: single-group mode promotes
+    /// tabs to root rows and shows no group rows. Stored rather than re-derived
+    /// from `currentModel` so the data source and the drop handlers describe the
+    /// rows that are actually mounted, and so this fact has one source.
+    private var isSingleGroupMode = false
 
     // Drag types
     private static let tabDragType = NSPasteboard.PasteboardType("com.danterm.tab")
@@ -285,11 +287,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Reconcile & Reload
 
-    private func reconcile(model: AppModel) {
-        currentModel = model
-        store.apply(.reloadAll, model: model, isSingleGroupMode: isSingleGroupMode)
-    }
-
     /// Entry point for the reconcileSidebar pass: apply an ordered row-op script to the
     /// NSOutlineView, then reapply the view-owned selection. `isReloading` suppresses the
     /// selectionDidChange / collapse feedback loop while we mutate. Mirrors what the old
@@ -297,16 +294,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// mutate -> resolveReloadSelection -> restore), but the mutation is now the granular
     /// op list rather than a full reloadData -- so the field editor and unchanged rows
     /// survive (an empty op list is a pure selection refresh).
+    ///
+    /// `projection` is what the rows are painted from; `model` serves the interaction
+    /// path (context menus, drag and drop, selection) alone. Both come from one
+    /// reconcile instant, so they cannot disagree.
     @discardableResult
     func applySidebarOps(
         _ ops: [SidebarRowOp],
         model: AppModel,
+        projection: SidebarProjection,
         clearActiveRename: Bool
     ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
         isReloading = true
         defer { isReloading = false }
         let priorFocusedTabId = currentModel?.selectedTabId
         currentModel = model
+        isSingleGroupMode = projection.isSingleGroupMode
         var unappliedTabIds = Set<TabId>()
         var unappliedGroupIds = Set<GroupId>()
 
@@ -325,7 +328,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         for op in ops {
             applyRowOp(
                 op,
-                model: model,
+                projection: projection,
                 unappliedTabIds: &unappliedTabIds,
                 unappliedGroupIds: &unappliedGroupIds)
         }
@@ -339,6 +342,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         applyRestoreSelection(
             restoreSet,
             selectedTabId: model.selectedTabId,
+            projection: projection,
             unappliedTabIds: &unappliedTabIds,
             unappliedGroupIds: &unappliedGroupIds)
         // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
@@ -366,42 +370,42 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// multi-group mode they are children of their group item.
     private func applyRowOp(
         _ op: SidebarRowOp,
-        model: AppModel,
+        projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
         unappliedGroupIds: inout Set<GroupId>
     ) {
         switch op {
         case .reloadAll:
-            rebuildAllRows(model: model)
+            rebuildAllRows(projection: projection)
 
         case .insertGroup(let id, let index):
-            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode),
+            guard store.apply(op, projection: projection),
                   let item = groupItemCache[id],
-                  let group = model.groups.first(where: { $0.id == id })
+                  let group = projection.group(id)
             else { return }
             outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
-            // Inserts default expanded; match the model (a setGroupCollapsed op may also
-            // follow for a collapsed insert -- idempotent).
+            // Inserts default expanded; match the projection (a setGroupCollapsed op may
+            // also follow for a collapsed insert -- idempotent).
             if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
 
         case .removeGroup(let index):
-            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
+            guard store.apply(op, projection: projection) else { return }
             outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
 
         case .reloadGroup(let id):
-            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
-            if updateGroupRow(groupId: id, model: model) {
+            _ = store.apply(op, projection: projection)
+            if updateGroupRow(groupId: id, projection: projection) {
                 unappliedGroupIds.insert(id)
             }
 
         case .setGroupCollapsed(let id, let collapsed):
-            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
+            _ = store.apply(op, projection: projection)
             guard let item = groupItemCache[id] else { return }
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
             applyGroupCollapseState(for: item, collapsed: collapsed)
 
         case .insertTab(_, let groupId, let index):
-            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
+            guard store.apply(op, projection: projection) else { return }
             if isSingleGroupMode {
                 outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
             } else {
@@ -410,7 +414,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
 
         case .removeTab(let groupId, let index):
-            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
+            guard store.apply(op, projection: projection) else { return }
             if isSingleGroupMode {
                 outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
             } else {
@@ -419,8 +423,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
 
         case .reloadTab(let id):
-            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
-            if updateTabRow(tabId: id, model: model) {
+            _ = store.apply(op, projection: projection)
+            if updateTabRow(tabId: id, projection: projection) {
                 unappliedTabIds.insert(id)
             }
         }
@@ -428,17 +432,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// reloadAll executor: rebuild the backing item lists and reloadData (first reconcile
     /// and single<->multi group-mode flips). Selection is restored by the caller after.
-    private func rebuildAllRows(model: AppModel) {
-        reconcile(model: model)
+    private func rebuildAllRows(projection: SidebarProjection) {
+        store.apply(.reloadAll, projection: projection)
         outlineView.reloadData()
-        restoreCollapseState(model: model)
+        restoreCollapseState(projection: projection)
     }
 
     /// Re-apply each group's expanded/collapsed state after a full reloadData (which
     /// resets expansion). No-op in single-group mode (tabs are roots, no group rows).
-    private func restoreCollapseState(model: AppModel) {
+    private func restoreCollapseState(projection: SidebarProjection) {
         guard !isSingleGroupMode else { return }
-        for group in model.groups {
+        for group in projection.groups {
             guard let item = groupItemCache[group.id] else { continue }
             if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
         }
@@ -534,6 +538,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private func applyRestoreSelection(
         _ restoreSet: Set<TabId>,
         selectedTabId: TabId?,
+        projection: SidebarProjection,
         unappliedTabIds: inout Set<TabId>,
         unappliedGroupIds: inout Set<GroupId>
     ) {
@@ -570,16 +575,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             if let f = focusRow { intended.insert(f) }
             let willChangeSelection = (focusRow != nil || !nonFocusRows.isEmpty || !restoreSet.isEmpty)
                 && intended != outlineView.selectedRowIndexes
-            if willChangeSelection, let model = currentModel {
+            if willChangeSelection {
                 runtime?.viewLocalState.sidebarRenameTarget = nil
                 cancelActiveInlineRename()
                 switch target {
                 case .tab(let id):
-                    if updateTabRow(tabId: id, model: model) {
+                    if updateTabRow(tabId: id, projection: projection) {
                         unappliedTabIds.insert(id)
                     }
                 case .group(let id):
-                    if updateGroupRow(groupId: id, model: model) {
+                    if updateGroupRow(groupId: id, projection: projection) {
                         unappliedGroupIds.insert(id)
                     }
                 }
@@ -626,9 +631,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Mutate an existing tab cell's subviews in place. Returns true only when an
     /// on-screen row could not fetch its cell, so the caller should retain the old
     /// projection and retry the reload in a later reconcile pass.
-    func updateTabRow(tabId: TabId, model: AppModel) -> Bool {
-        currentModel = model
-        guard let item = store.updateTabItem(tabId: tabId, model: model) else { return false }
+    func updateTabRow(tabId: TabId, projection: SidebarProjection) -> Bool {
+        guard let item = store.updateTabItem(tabId: tabId, projection: projection) else { return false }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
@@ -647,9 +651,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// In-place group row update. Returns true only when an on-screen row could
     /// not fetch its cell, so the caller should retain and retry the reload attrs.
-    func updateGroupRow(groupId: GroupId, model: AppModel) -> Bool {
-        currentModel = model
-        guard let item = store.updateGroupItem(groupId: groupId, model: model) else { return false }
+    func updateGroupRow(groupId: GroupId, projection: SidebarProjection) -> Bool {
+        guard let item = store.updateGroupItem(groupId: groupId, projection: projection) else { return false }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return false }
         let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
@@ -806,12 +809,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
             }
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-                let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-                bellBadge.updateBadge(count: count)
+                bellBadge.updateBadge(count: group.unreadAlertCount)
                 if !collapsed { bellBadge.isHidden = true }
             }
             if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
-                tabCountBadge.stringValue = "\(group.tabs.count)"
+                tabCountBadge.stringValue = "\(group.tabCount)"
                 tabCountBadge.isHidden = !collapsed
             }
         }
@@ -967,25 +969,27 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Context Menus
 
-    func contextMenu(for group: GroupModel) -> NSMenu? {
+    /// Interaction path: takes the row's id and reads enablement off the live
+    /// model, so the menu never depends on what the row last painted.
+    func contextMenu(forGroupId groupId: GroupId) -> NSMenu? {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
         let newTabItem = NSMenuItem(title: "New Tab", action: #selector(contextNewTab(_:)), keyEquivalent: "")
         newTabItem.target = self
-        newTabItem.representedObject = group.id.rawValue
+        newTabItem.representedObject = groupId.rawValue
         menu.addItem(newTabItem)
 
         menu.addItem(NSMenuItem.separator())
 
         let renameItem = NSMenuItem(title: "Rename Group", action: #selector(contextRenameGroup(_:)), keyEquivalent: "")
         renameItem.target = self
-        renameItem.representedObject = group.id.rawValue
+        renameItem.representedObject = groupId.rawValue
         menu.addItem(renameItem)
 
         let deleteItem = NSMenuItem(title: "Delete Group", action: #selector(contextDeleteGroup(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.representedObject = group.id.rawValue
+        deleteItem.representedObject = groupId.rawValue
         deleteItem.isEnabled = (currentModel?.groups.count ?? 0) > 1
         menu.addItem(deleteItem)
 
@@ -1039,7 +1043,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// when N > 1; singular form means "this clicked row only". The
     /// `Rename Tab` action is singular-only and always targets the
     /// clicked row.
-    func contextMenu(forTab tab: TabModel, clickedRow: Int) -> NSMenu? {
+    func contextMenu(forTabId tabId: TabId, clickedRow: Int) -> NSMenu? {
         guard let model = currentModel else { return nil }
 
         let targetIds = contextTargetTabIds(clickedRow: clickedRow)
@@ -1065,7 +1069,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             title: "Rename Tab",
             action: #selector(contextRenameTab(_:)), keyEquivalent: "")
         renameItem.target = self
-        renameItem.representedObject = tab.id.rawValue
+        renameItem.representedObject = tabId.rawValue
         menu.addItem(renameItem)
 
         // Clear Custom Title — show if any selected tab has one.
@@ -1272,7 +1276,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     // MARK: - Cell Factories
 
-    private func makeGroupCell(for group: GroupModel) -> NSView {
+    private func makeGroupCell(for group: SidebarGroupProjection) -> NSView {
         let cellId = NSUserInterfaceItemIdentifier("GroupCell")
 
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -1345,15 +1349,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// Apply current group state to an existing cell's subviews. Shared by
     /// makeGroupCell (initial population) and updateGroupRow (in-place refresh).
     /// skipTitle protects the field editor during inline group rename.
-    private func configureGroupCell(_ cell: NSTableCellView, group: GroupModel, skipTitle: Bool = false) {
+    private func configureGroupCell(
+        _ cell: NSTableCellView, group: SidebarGroupProjection, skipTitle: Bool = false
+    ) {
         if !skipTitle {
             cell.textField?.stringValue = group.name
         }
         cell.textField?.tag = group.id.rawValue.hashValue
         // Hide separator for the first group
-        let isFirstGroup = group.id == currentModel?.groups.first?.id
         if let separator = cell.subviews.first(where: { $0.identifier?.rawValue == "groupSeparator" }) {
-            separator.isHidden = isFirstGroup
+            separator.isHidden = group.isFirst
         }
         if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
             if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
@@ -1362,18 +1367,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             }
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-                let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-                bellBadge.updateBadge(count: count)
+                bellBadge.updateBadge(count: group.unreadAlertCount)
                 if !group.isCollapsed { bellBadge.isHidden = true }
             }
             if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
-                tabCountBadge.stringValue = "\(group.tabs.count)"
+                tabCountBadge.stringValue = "\(group.tabCount)"
                 tabCountBadge.isHidden = !group.isCollapsed
             }
         }
     }
 
-    private func makeTabCell(for tab: TabModel) -> NSView {
+    private func makeTabCell(for tab: SidebarTabProjection) -> NSView {
         let cellId = NSUserInterfaceItemIdentifier("TabCell")
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
@@ -1476,7 +1480,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// makeTabCell (initial population) and updateTabRow (in-place refresh).
     /// When skipTitle is true the text field is left untouched so the field
     /// editor isn't clobbered during inline rename.
-    private func configureTabCell(_ cell: NSTableCellView, tab: TabModel, skipTitle: Bool = false) {
+    private func configureTabCell(
+        _ cell: NSTableCellView, tab: SidebarTabProjection, skipTitle: Bool = false
+    ) {
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
         let jumpBadgeId = NSUserInterfaceItemIdentifier("jumpModeBadge")
@@ -1486,26 +1492,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let chipId = NSUserInterfaceItemIdentifier("tabChip")
         let paneStripId = NSUserInterfaceItemIdentifier("tabPaneStrip")
 
-        let chrome = tabChrome(tab)
-        let displayTitle = tab.customTitle ?? chrome.0
         if !skipTitle {
-            cell.textField?.stringValue = displayTitle
+            cell.textField?.stringValue = tab.displayTitle
         }
         // A multi-pane tab spends its second line enumerating its panes; only a
         // single-pane tab shows a cwd there.
-        let paneChips = tabPaneChips(tab, alerts: currentModel?.alerts ?? [])
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
-            subtitleField.stringValue = chrome.1 ?? ""
-            subtitleField.isHidden = chrome.1 == nil || !paneChips.isEmpty
+            subtitleField.stringValue = tab.subtitle ?? ""
+            subtitleField.isHidden = tab.subtitle == nil || !tab.paneChips.isEmpty
         }
         if let paneStrip = cell.subviews.first(where: { $0.identifier == paneStripId }) as? PaneStripView {
-            paneStrip.chips = paneChips
-            paneStrip.isHidden = paneChips.isEmpty
+            paneStrip.chips = tab.paneChips
+            paneStrip.isHidden = tab.paneChips.isEmpty
         }
         if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView {
             if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
-                let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
-                bellBadge.updateBadge(count: count)
+                bellBadge.updateBadge(count: tab.unreadAlertCount)
             }
         }
         if let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView,
@@ -1513,13 +1515,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         {
             // Outside the skipTitle guard: an inline rename owns the title field,
             // not the chip, and the pane can attach an agent mid-rename.
-            chip.kind = tabChipKind(tab)
+            chip.kind = tab.chipKind
         }
         if !skipTitle,
            let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView
         {
             let existingJumpBadge = leadingStack.arrangedSubviews.first(where: { $0.identifier == jumpBadgeId }) as? NSTextField
-            if let key = currentModel?.jumpMode?.keyMap[tab.id] {
+            if let key = tab.jumpKey {
                 let badge = existingJumpBadge ?? makeJumpModeBadge(identifier: jumpBadgeId)
                 badge.stringValue = String(key).uppercased()
                 badge.isHidden = false

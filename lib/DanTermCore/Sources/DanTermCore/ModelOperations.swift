@@ -661,16 +661,6 @@ func tabPaneChips(_ tab: TabModel, unreadByPane: [PaneId: Int]) -> [TabPaneChip]
   }
 }
 
-/// Cold-path overload for callers holding the raw alert list rather than a
-/// tally, mirroring `desiredSidebar(in:)` beside `desiredSidebar(in:tally:)`.
-func tabPaneChips(_ tab: TabModel, alerts: [AlertModel]) -> [TabPaneChip] {
-  var unreadByPane: [PaneId: Int] = [:]
-  for alert in alerts where alert.isUnread {
-    unreadByPane[alert.paneId, default: 0] += 1
-  }
-  return tabPaneChips(tab, unreadByPane: unreadByPane)
-}
-
 /// Collapses a pane's alert and agent facts into the one thing its dot can say.
 func paneChipState(agent: AgentLifecycle, hasUnreadAlert: Bool) -> PaneChipState {
   if hasUnreadAlert { return .attention }
@@ -855,6 +845,10 @@ func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count
 }
 
+/// Reference implementation only: no render path calls this. `UnreadAlertTally`
+/// rolls the same number up once per reconcile sweep and the sidebar projection
+/// carries it to the group row, so this survives as the per-group definition
+/// `UnreadAlertTallyTests` checks the tally against.
 func groupUnreadAlertCount(for group: GroupModel, alerts: [AlertModel]) -> Int {
   group.tabs.reduce(0) { $0 + unreadAlertCount(for: $1, alerts: alerts) }
 }

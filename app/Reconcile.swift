@@ -257,7 +257,8 @@ extension AppRuntime {
             viewLocalState.sidebarRenameTarget = nil
         }
         let unapplied = sidebarView.applySidebarOps(
-            guarded.ops, model: model, clearActiveRename: guarded.clearRename)
+            guarded.ops, model: model, projection: new,
+            clearActiveRename: guarded.clearRename)
         // Advance the cache. If a reload was suppressed for the still-editing row,
         // or could not paint a visible row, retain its prior projection so the deferred
         // attr update re-fires later.

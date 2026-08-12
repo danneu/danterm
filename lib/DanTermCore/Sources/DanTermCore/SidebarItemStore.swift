@@ -4,13 +4,19 @@ import Foundation
 // MARK: - SidebarItem
 
 /// Reference-type wrapper for NSOutlineView row identity stability.
+///
+/// The payload is the row's *last applied* projection, not a model: the render
+/// path draws a cell straight from it, so a suppressed or dropped row op leaves
+/// the row showing what it last painted instead of silently picking up a newer
+/// model at draw time. The interaction path (context menus, drag and drop,
+/// selection) reads ids off the payload and looks the model up itself.
 class SidebarItem {
     let id: UUID
     var kind: Kind
 
     enum Kind {
-        case group(GroupModel)
-        case tab(TabModel)
+        case group(SidebarGroupProjection)
+        case tab(SidebarTabProjection)
     }
 
     init(id: UUID, kind: Kind) {
@@ -29,24 +35,24 @@ struct SidebarItemStore {
     var childItems: [GroupId: [SidebarItem]] = [:]
 
     /// Test convenience: apply a whole ordered row-op script to the store.
-    mutating func apply(_ ops: [SidebarRowOp], model: AppModel, isSingleGroupMode: Bool) {
+    mutating func apply(_ ops: [SidebarRowOp], projection: SidebarProjection) {
         for op in ops {
-            _ = apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
+            _ = apply(op, projection: projection)
         }
     }
 
     /// Apply one row op to the backing store. The Bool tells the AppKit bridge
     /// whether the matching structural NSOutlineView mutation should run.
     @discardableResult
-    mutating func apply(_ op: SidebarRowOp, model: AppModel, isSingleGroupMode: Bool) -> Bool {
+    mutating func apply(_ op: SidebarRowOp, projection: SidebarProjection) -> Bool {
         switch op {
         case .reloadAll:
-            rebuildAllRows(model: model, isSingleGroupMode: isSingleGroupMode)
+            rebuildAllRows(projection: projection)
             return true
 
         case .insertGroup(let id, let index):
-            guard !isSingleGroupMode,
-                  let group = model.groups.first(where: { $0.id == id }),
+            guard !projection.isSingleGroupMode,
+                  let group = projection.group(id),
                   rootItems.indices.contains(index) || index == rootItems.count
             else { return false }
 
@@ -58,7 +64,7 @@ struct SidebarItemStore {
             return true
 
         case .removeGroup(let index):
-            guard !isSingleGroupMode,
+            guard !projection.isSingleGroupMode,
                   rootItems.indices.contains(index),
                   case .group(let group) = rootItems[index].kind
             else { return false }
@@ -75,17 +81,17 @@ struct SidebarItemStore {
             return true
 
         case .reloadGroup(let id):
-            _ = updateGroupItem(groupId: id, model: model)
+            _ = updateGroupItem(groupId: id, projection: projection)
             return true
 
         case .setGroupCollapsed(let id, _):
-            _ = updateGroupItem(groupId: id, model: model)
+            _ = updateGroupItem(groupId: id, projection: projection)
             return true
 
         case .insertTab(let id, let groupId, let index):
-            guard let tab = tabById(id, in: model) else { return false }
+            guard let tab = projection.tab(id) else { return false }
 
-            if isSingleGroupMode {
+            if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index) || index == rootItems.count else {
                     return false
                 }
@@ -104,7 +110,7 @@ struct SidebarItemStore {
             }
 
         case .removeTab(let groupId, let index):
-            if isSingleGroupMode {
+            if projection.isSingleGroupMode {
                 guard rootItems.indices.contains(index),
                       case .tab = rootItems[index].kind
                 else { return false }
@@ -124,7 +130,7 @@ struct SidebarItemStore {
             }
 
         case .reloadTab(let id):
-            _ = updateTabItem(tabId: id, model: model)
+            _ = updateTabItem(tabId: id, projection: projection)
             return true
         }
     }
@@ -146,20 +152,20 @@ struct SidebarItemStore {
         return nil
     }
 
-    /// Refresh one cached tab's model payload if it still exists.
+    /// Refresh one cached tab's projection payload if it still exists.
     @discardableResult
-    mutating func updateTabItem(tabId: TabId, model: AppModel) -> SidebarItem? {
-        guard let tab = tabById(tabId, in: model),
+    mutating func updateTabItem(tabId: TabId, projection: SidebarProjection) -> SidebarItem? {
+        guard let tab = projection.tab(tabId),
               let item = tabItemCache[tabId]
         else { return nil }
         item.kind = .tab(tab)
         return item
     }
 
-    /// Refresh one cached group's model payload if it still exists.
+    /// Refresh one cached group's projection payload if it still exists.
     @discardableResult
-    mutating func updateGroupItem(groupId: GroupId, model: AppModel) -> SidebarItem? {
-        guard let group = model.groups.first(where: { $0.id == groupId }),
+    mutating func updateGroupItem(groupId: GroupId, projection: SidebarProjection) -> SidebarItem? {
+        guard let group = projection.group(groupId),
               let item = groupItemCache[groupId]
         else { return nil }
         item.kind = .group(group)
@@ -168,7 +174,7 @@ struct SidebarItemStore {
 
     /// Incremental insert helper: always mount a fresh row item and cache it.
     @discardableResult
-    mutating func makeFreshTabItem(for tab: TabModel) -> SidebarItem {
+    mutating func makeFreshTabItem(for tab: SidebarTabProjection) -> SidebarItem {
         let item = SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
         tabItemCache[tab.id] = item
         return item
@@ -185,14 +191,14 @@ struct SidebarItemStore {
 
     /// Full rebuild path: reuse cached row objects for live rows, then prune
     /// entries whose ids are no longer represented by the displayed backing rows.
-    private mutating func rebuildAllRows(model: AppModel, isSingleGroupMode: Bool) {
+    private mutating func rebuildAllRows(projection: SidebarProjection) {
         var newRootItems: [SidebarItem] = []
         var newChildItems: [GroupId: [SidebarItem]] = [:]
         var liveTabIds = Set<TabId>()
         var displayedGroupIds = Set<GroupId>()
 
-        if isSingleGroupMode {
-            for tab in model.groups.first?.tabs ?? [] {
+        if projection.isSingleGroupMode {
+            for tab in projection.groups.first?.tabs ?? [] {
                 let item = tabItemCache[tab.id] ?? SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
                 item.kind = .tab(tab)
                 tabItemCache[tab.id] = item
@@ -200,7 +206,7 @@ struct SidebarItemStore {
                 liveTabIds.insert(tab.id)
             }
         } else {
-            for group in model.groups {
+            for group in projection.groups {
                 let groupItem = groupItemCache[group.id] ?? SidebarItem(id: group.id.rawValue, kind: .group(group))
                 groupItem.kind = .group(group)
                 groupItemCache[group.id] = groupItem

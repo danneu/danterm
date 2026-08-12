@@ -26,6 +26,7 @@ struct UITestRunner {
         sidebarScrollRevealTests()
         sidebarRenameRecycleTests()
         sidebarContextMenuTests()
+        sidebarProjectionRowTests()
         tabTodoPopoverViewTests()
         themeBrowserViewTests()
         remoteThemePickerSheetTests()
