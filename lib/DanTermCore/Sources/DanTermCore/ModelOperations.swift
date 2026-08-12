@@ -684,6 +684,17 @@ func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
   return allTabs[newIdx].id
 }
 
+// MARK: - Todo Operations
+
+/// Adds one normalized pane todo through the shared reducer and IPC mutation path.
+func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {
+  let trimmed = text.trimmingCharacters(in: .whitespaces)
+  guard !trimmed.isEmpty, model.pane(paneId) != nil else { return nil }
+  let item = TodoItem(id: id, text: trimmed, isDone: false)
+  model.updatePane(paneId) { $0.todos.append(item) }
+  return item
+}
+
 // MARK: - Termination Helpers
 
 func totalTabCount(_ model: AppModel) -> Int {
