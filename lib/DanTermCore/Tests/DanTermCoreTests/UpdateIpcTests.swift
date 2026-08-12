@@ -33,6 +33,7 @@ import DanTermProtocol
             (IpcRequestMethod.tabRename.rawValue, ["title": .string("work")], "tab"),
             (IpcRequestMethod.tabClose.rawValue, [:], "tab"),
             (IpcRequestMethod.groupRename.rawValue, ["name": .string("Notes")], "group"),
+            (IpcRequestMethod.groupClose.rawValue, [:], "group"),
             (IpcRequestMethod.paneFocus.rawValue, [:], "pane"),
             (IpcRequestMethod.paneInfo.rawValue, [:], "pane"),
             (IpcRequestMethod.paneSplit.rawValue, ["direction": .string("horizontal")], "pane"),
@@ -686,6 +687,283 @@ import DanTermProtocol
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(tabById(tabId, in: model)?.customTitle == nil)
+    }
+
+    @Test("group.new creates a group holding one tab and replies with both ids")
+    func groupNewCreatesGroupWithOneTab() throws {
+        // Intent: group.new adds a group with exactly one tab, and the reply
+        //   names the new group and that tab.
+        // Why it exists: `.createGroup` creates the first tab too, so a caller
+        //   needs both ids back to keep driving.
+        // Scenario: spec-first creation beside an existing group.
+        var model = makeModel()
+        createTab(&model)
+        let existingGroupId = model.groups[0].id
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("Builds"),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        #expect(model.groups.count == 2)
+        let created = try #require(model.groups.first(where: { $0.id != existingGroupId }))
+        #expect(created.name == "Builds")
+        #expect(created.tabs.count == 1)
+        #expect(reply["group"]?["id"]?.asString == created.id.rawValue.uuidString)
+        #expect(reply["group"]?["name"]?.asString == "Builds")
+        #expect(reply["tab"]?["id"]?.asString == created.tabs[0].id.rawValue.uuidString)
+        let paneId = try requirePaneId(
+            reply["panes"]?.asArray?.first?["id"], "group.new should return pane id")
+        #expect(created.tabs[0].focusedPaneId == paneId)
+    }
+
+    // `Msg.createGroup` forwards to `.createTab` with background: false, so before
+    // the creation background parameter existed every scripted group creation stole
+    // the user's selection.
+    @Test("group.new leaves selection alone by default and takes it with background false")
+    func groupNewBackgroundPolicy() throws {
+        // Intent: the created tab is not selected unless the request asks for
+        //   the foreground.
+        // Why it exists: an agent creating a group must not move the user's focus.
+        // Scenario: spec-first background default, then an explicit foreground.
+        var model = makeModel()
+        createTab(&model)
+        let selectedBefore = model.selectedTabId
+
+        _ = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("Builds"),
+            "background": .bool(true),
+        ]))
+        #expect(model.selectedTabId == selectedBefore)
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("Notes"),
+            "background": .bool(false),
+        ]))
+        let reply = try requireIpcReply(commands)
+        let newTabId = try requireTabId(reply["tab"]?["id"], "group.new should return tab id")
+        #expect(model.selectedTabId == newTabId)
+    }
+
+    @Test("group.new forwards the launch spec to the created tab")
+    func groupNewForwardsLaunchSpec() throws {
+        // Intent: the launch payload reaches the group's first tab.
+        // Why it exists: `.createGroup` creates that tab, so the spec has only
+        //   one place to land and a caller must be able to seed it.
+        // Scenario: spec-first creation with a command, cwd, and title.
+        var model = makeModel()
+        createTab(&model)
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("Builds"),
+            "launch": .object([
+                "cmd": .string("just test"),
+                "cwd": .string("/tmp"),
+                "title": .string("tests"),
+            ]),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        let paneId = try requirePaneId(
+            reply["panes"]?.asArray?.first?["id"], "group.new should return pane id")
+        #expect(hasEffect(commands) {
+            if case .createSession(_, let effectPaneId, let cwd, let command, _) = $0 {
+                return effectPaneId == paneId && cwd == "/tmp" && command == "just test"
+            }
+            return false
+        }, "expected createSession seeded from the launch spec")
+    }
+
+    // `.createGroup` normalizes nothing, so without the dispatch guard this would
+    // create a group whose name is blank or spans several lines.
+    @Test("group.new rejects a whitespace-only name and creates nothing")
+    func groupNewRejectsWhitespaceOnlyName() throws {
+        // Intent: a name that normalizes to nothing is refused with
+        //   `invalid name` and no group is created.
+        // Why it exists: a blank group name would be unreachable in the sidebar.
+        // Scenario: spec-first blank creation.
+        var model = makeModel()
+        createTab(&model)
+        let before = model
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("   "),
+        ]))
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "invalid name")
+        #expect(model == before)
+    }
+
+    @Test("group.new collapses a multiline name to one line")
+    func groupNewCollapsesMultilineName() throws {
+        // Intent: a name carrying newlines is stored as one line, matching what
+        //   rename already enforces.
+        // Why it exists: `.createGroup` applies no normalization of its own.
+        // Scenario: spec-first pasted two-line name.
+        var model = makeModel()
+        createTab(&model)
+        let existingGroupId = model.groups[0].id
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupNew.rawValue, params: .object([
+            "name": .string("work\n  logs"),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["group"]?["name"]?.asString == "work logs")
+        let created = try #require(model.groups.first(where: { $0.id != existingGroupId }))
+        #expect(created.name == "work logs")
+    }
+
+    @Test("group.close removes the group and its tabs")
+    func groupCloseRemovesGroupAndTabs() throws {
+        // Intent: group.close deletes the group with its tabs and replies with
+        //   the closed group id.
+        // Why it exists: pins the default (destructive) branch to the existing
+        //   delete mutation instead of a second removal path.
+        // Scenario: spec-first close of a second group.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Builds"))
+        let closedGroupId = model.groups[1].id
+        let closedTabIds = model.groups[1].tabs.map(\.id)
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(closedGroupId.rawValue.uuidString),
+        ]))
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["group"]?["id"]?.asString == closedGroupId.rawValue.uuidString)
+        #expect(model.groups.contains(where: { $0.id == closedGroupId }) == false)
+        for tabId in closedTabIds {
+            #expect(tabById(tabId, in: model) == nil)
+        }
+    }
+
+    @Test("group.close with moveTabs reparents the tabs into the adjacent group")
+    func groupCloseWithMoveTabsReparentsTabs() throws {
+        // Intent: moveTabs deletes the group but keeps its tabs, in the
+        //   adjacent group.
+        // Why it exists: pins the non-destructive branch of the same mutation.
+        // Scenario: spec-first close that preserves work.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Builds"))
+        let closedGroupId = model.groups[1].id
+        let movedTabIds = model.groups[1].tabs.map(\.id)
+        let survivingGroupId = model.groups[0].id
+
+        _ = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(closedGroupId.rawValue.uuidString),
+            "moveTabs": .bool(true),
+        ]))
+
+        #expect(model.groups.contains(where: { $0.id == closedGroupId }) == false)
+        let surviving = try #require(model.groups.first(where: { $0.id == survivingGroupId }))
+        for tabId in movedTabIds {
+            #expect(surviving.tabs.contains(where: { $0.id == tabId }))
+        }
+    }
+
+    @Test("group.close refuses the last group")
+    func groupCloseRefusesLastGroup() throws {
+        // Intent: closing the only group is refused with
+        //   `cannot close the last group`, either way the tabs are handled.
+        // Why it exists: `.deleteGroup` silently returns [] for the last group,
+        //   so the CLI would otherwise exit 0 for a close that never happened.
+        // Scenario: spec-first single-group model.
+        var model = makeModel()
+        createTab(&model)
+        let onlyGroupId = model.groups[0].id
+
+        for moveTabs in [false, true] {
+            var attempt = model
+            let before = attempt
+            let commands = sendIpc(&attempt, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+                "group": .string(onlyGroupId.rawValue.uuidString),
+                "moveTabs": .bool(moveTabs),
+            ]))
+
+            let error = try requireIpcError(commands)
+            #expect(error.code == -32602)
+            #expect(error.message == "cannot close the last group")
+            #expect(attempt == before)
+        }
+    }
+
+    // This input drives `.deleteGroup` into emitTerminateConfirmation, which leaves
+    // the group open and strands a pending confirmation. The CLI never quits the app
+    // as a side effect.
+    @Test("group.close refuses a group holding every tab and strands no confirmation")
+    func groupCloseRefusesGroupHoldingEveryTab() throws {
+        // Intent: without moveTabs, closing the group that holds every tab is
+        //   refused, and no pending confirmation is left behind.
+        // Why it exists: the alternative is a quit prompt the caller never asked
+        //   for, on a command that reports success.
+        // Scenario: an empty second group makes this group not the last group
+        //   while it still holds every tab.
+        var model = makeModel()
+        createTab(&model)
+        model.groups.append(GroupModel(id: GroupId(), name: "Empty"))
+        let tabsGroupId = model.groups[0].id
+        let before = model
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(tabsGroupId.rawValue.uuidString),
+        ]))
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "cannot close the last group with tabs")
+        #expect(model == before)
+        #expect(model.pendingConfirmation == nil)
+    }
+
+    @Test("group.close with moveTabs accepts a group holding every tab")
+    func groupCloseWithMoveTabsAcceptsGroupHoldingEveryTab() throws {
+        // Intent: the every-tab refusal is about destroying every tab, so
+        //   moveTabs makes the same request legal.
+        // Why it exists: proves the refusal guards the terminate path, not the
+        //   group shape.
+        // Scenario: the same model as the refusal above, plus --move-tabs.
+        var model = makeModel()
+        createTab(&model)
+        model.groups.append(GroupModel(id: GroupId(), name: "Empty"))
+        let tabsGroupId = model.groups[0].id
+        let movedTabIds = model.groups[0].tabs.map(\.id)
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(tabsGroupId.rawValue.uuidString),
+            "moveTabs": .bool(true),
+        ]))
+
+        _ = try requireIpcReply(commands)
+        #expect(model.groups.contains(where: { $0.id == tabsGroupId }) == false)
+        for tabId in movedTabIds {
+            #expect(tabById(tabId, in: model) != nil)
+        }
+        #expect(model.pendingConfirmation == nil)
+    }
+
+    @Test("group.close of an absent group is refused")
+    func groupCloseAbsentGroupIsRefused() throws {
+        // Intent: an unknown group id fails with `group not found`.
+        // Why it exists: pins the existence check ahead of both refusals.
+        // Scenario: spec-first unknown id.
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Builds"))
+        let before = model
+
+        let commands = sendIpc(&model, method: IpcRequestMethod.groupClose.rawValue, params: .object([
+            "group": .string(UUID().uuidString),
+        ]))
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "group not found")
+        #expect(model == before)
     }
 
     @Test("group.rename sets the group name and replies with it")

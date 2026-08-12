@@ -9,8 +9,13 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case ls
     /// Requests the main window's live key focus owner.
     case focusInfo = "focus.info"
+    /// Creates a group and its first tab. Takes no target: there is nothing to
+    /// anchor a group to.
+    case groupNew = "group.new"
     /// Changes one explicitly named group's name.
     case groupRename = "group.rename"
+    /// Closes one explicitly named group.
+    case groupClose = "group.close"
     /// Creates a tab from an explicit group or tab anchor.
     case tabNew = "tab.new"
     /// Changes one explicitly named tab's custom title.
@@ -61,9 +66,9 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Makes target classification exhaustive when a method joins the catalog.
     public var isTargeting: Bool {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo:
+        case .doctorPermissions, .ls, .focusInfo, .groupNew:
             return false
-        case .groupRename,
+        case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
              .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
@@ -169,9 +174,15 @@ public enum IpcRequest: Equatable, Sendable {
     case ls
     /// Requests the main window's live key focus owner without a target.
     case focusInfo
+    /// Creates a group without a target. `.createGroup` also creates the group's
+    /// first tab, so the launch spec and focus policy apply to that tab.
+    case groupNew(name: String, launch: LaunchSpec?, background: Bool)
     /// Renames a structurally required group. A group always has a name, so
     /// unlike `tabRename` there is no clear-to-nil form.
     case groupRename(group: GroupId, name: String)
+    /// Closes a structurally required group, either with its tabs or after
+    /// reparenting them into the adjacent group.
+    case groupClose(group: GroupId, moveTabs: Bool)
     /// Creates a tab from a structurally required anchor.
     case tabNew(target: IpcTabTarget, launch: LaunchSpec?, background: Bool)
     /// Renames or clears the title of a structurally required tab.
@@ -225,7 +236,9 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .groupNew: return .groupNew
         case .groupRename: return .groupRename
+        case .groupClose: return .groupClose
         case .tabNew: return .tabNew
         case .tabRename: return .tabRename
         case .tabClose: return .tabClose
@@ -255,9 +268,9 @@ public enum IpcRequest: Equatable, Sendable {
     /// Names every target key this request can carry.
     public var targetParameterKeys: [String] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo:
+        case .doctorPermissions, .ls, .focusInfo, .groupNew:
             return []
-        case .groupRename:
+        case .groupRename, .groupClose:
             return ["group"]
         case .tabNew(let target, _, _):
             switch target {
@@ -281,8 +294,14 @@ public enum IpcRequest: Equatable, Sendable {
         switch self {
         case .doctorPermissions, .ls, .focusInfo:
             return [:]
+        case .groupNew(let name, let launch, let background):
+            var object = launchParams(launch, background: background)
+            object["name"] = .string(name)
+            return object
         case .groupRename(let group, let name):
             return ["group": idValue(group), "name": .string(name)]
+        case .groupClose(let group, let moveTabs):
+            return ["group": idValue(group), "moveTabs": .bool(moveTabs)]
         case .tabNew(let target, let launch, let background):
             var object = launchParams(launch, background: background)
             switch target {
@@ -357,10 +376,19 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .groupNew:
+            guard case .string(let name)? = object?["name"] else { throw invalid("invalid name") }
+            let launch = try decodedLaunch(object?["launch"])
+            let background = try optionalBool(object?["background"], name: "background")
+            return .groupNew(name: name, launch: launch, background: background)
         case .groupRename:
             let group: GroupId = try target("group", object: object)
             guard case .string(let name)? = object?["name"] else { throw invalid("invalid name") }
             return .groupRename(group: group, name: name)
+        case .groupClose:
+            let group: GroupId = try target("group", object: object)
+            let moveTabs = try optionalBool(object?["moveTabs"], name: "moveTabs")
+            return .groupClose(group: group, moveTabs: moveTabs)
         case .tabNew:
             guard let object else { throw invalid("invalid params") }
             let launch = try decodedLaunch(object["launch"])

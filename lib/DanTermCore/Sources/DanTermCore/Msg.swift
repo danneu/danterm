@@ -42,7 +42,7 @@ enum Msg {
     case splitFocusedPane(direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
-    case createGroup(name: String, launch: LaunchSpec? = nil)
+    case createGroup(name: String, launch: LaunchSpec? = nil, background: Bool = false)
     case deleteGroup(id: GroupId, moveTabs: Bool)
     case renameGroup(id: GroupId, name: String)
     case moveTabs(tabIds: [TabId], toGroupId: GroupId, atIndex: Int)

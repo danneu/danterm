@@ -233,7 +233,7 @@ existing help assertions.
   with the name guard, `usageText` + SKILL.md, and the rename tests.
 - [x] `test(sidebar): cover committing an inline group rename` -- the UI-harness
   test and the `CustomTitleTests` translation case.
-- [ ] `feat(cli): add danterm group new and close` -- the remaining two methods,
+- [x] `feat(cli): add danterm group new and close` -- the remaining two methods,
   the creation background parameter, their refusal contracts, docs, and tests.
 
 ## Implementation notes
@@ -247,6 +247,21 @@ existing help assertions.
   in `IpcDispatch`, shared by `group new` and `group rename`.
 - Verification step 1 in this plan claimed `just test` runs the CLI shell smoke
   test. It does not -- that is `just test-cli`. Corrected above.
+- The plan said `group new` would reuse the `tab new` flag loop. It could not:
+  `parseTabNewArgs` has no `--name`, and adding one would let `tab new --name`
+  through. `group new` also must reject `--group` and the position flags, which
+  that loop accepts. So `group new` got its own `ParsedGroupNew` parser in
+  `GroupNewArgs.swift`, modeled on the tab one. That makes the
+  `--cmd`/`--cwd`/`--title`/`--background`/`--foreground` block a third copy,
+  after `TabNewArgs` and `PaneSplitArgs`. The ideal is one shared parser for that
+  block, called by all three; it was left out here because it rewrites two
+  parsers this change otherwise does not touch. See Follow Up.
+- `group close` resolves the group once and raises its three refusals in the
+  order the plan's table lists them: unknown id, last group, last group with
+  tabs. It does not call `requireGroup`, which would repeat that lookup. Both
+  refusals mirror
+  `.deleteGroup`'s own conditions exactly; if that reducer's guards change, these
+  must change with them.
 
 ## Follow Up
 
@@ -263,6 +278,20 @@ existing help assertions.
   animation and release the old surface", reports "swapped-out surface still in
   use after the swap committed". It reproduces on two consecutive runs and runs
   before any sidebar test in the suite, so it is not caused by the new test.
+- `scripts/tests/danterm-cli_test.sh` has a second pre-existing break, again from
+  not being in the gate: both help blocks assert
+  `grep -qF 'todo clear-completed --pane <pane-id>'`, but `usageText` spells that
+  line `todo clear-completed (--pane <pane-id> | --tab <tab-id>)`, so the
+  substring cannot match. Fix it with the pid assertion above.
 - `shellcheck` reports 11 pre-existing SC2251 findings in
   `scripts/tests/danterm-cli_test.sh` (every `! grep -qF ...` line). They skip
   errexit, so those negative assertions cannot fail the script.
+- Extract the shared `--cmd` / `--cwd` / `--title` / `--background` /
+  `--foreground` flag block now duplicated across `TabNewArgs.swift`,
+  `PaneSplitArgs.swift`, and the new `GroupNewArgs.swift` into one parser the
+  three call. Three copies is the point at which the duplication is the argument.
+- Adding a `.swift` file to `lib/DanTermProtocol` does not invalidate the build
+  plan of the packages that depend on it by path: `swift test --package-path
+  lib/DanTermCore` kept failing with "cannot find type 'ParsedGroupNew' in scope"
+  until `lib/DanTermCore/Package.swift` was touched. Worth a note in
+  agent-docs/build-details.md so the next agent does not read it as a real error.

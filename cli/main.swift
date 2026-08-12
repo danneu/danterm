@@ -29,8 +29,14 @@ struct DanTermCLI {
         Commands:
           ls                          Print the full app snapshot as JSON
           focus                       Print the main window's live focus owner as JSON
+          group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>]
+                    [--background] [--foreground]
+                                      Create a group and its first tab
           group rename --group <group-id> <name>
                                       Rename a group
+          group close --group <group-id> [--move-tabs]
+                                      Close a group, with its tabs or after
+                                      moving them to the adjacent group
           tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>]
                   [--background] [--foreground] [--after-selected | --at-group-end]
                                       Open a new tab, optionally launching a command
@@ -90,6 +96,9 @@ struct DanTermCLI {
           DANTERM_SOCK and identity-derived socket lookup.
           tab new opens in the background at the target group end by default.
           Position flags change placement; --foreground selects the new tab.
+          group new opens in the background too; --foreground selects its tab.
+          group close refuses the last group, and refuses to close the group
+          holding every tab unless --move-tabs keeps those tabs.
           pane split opens in the background by default; --foreground focuses
           the new pane within its tab. App UI shortcuts are unaffected.
 

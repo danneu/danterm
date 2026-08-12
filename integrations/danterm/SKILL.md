@@ -27,7 +27,9 @@ and skips those rows when the app is unavailable.
 
     danterm ls
     danterm focus
+    danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
+    danterm group close --group <group-id> [--move-tabs]
     danterm tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end]
     danterm tab rename --tab <tab-id> <name>|--clear
     danterm tab close --tab <tab-id>
@@ -55,10 +57,11 @@ and skips those rows when the app is unavailable.
     danterm todo clear-completed (--pane <pane-id> | --tab <tab-id>)
 
 CLI defaults are agent-safe: `tab new` opens in the background at the target
-group end, and `pane split` opens in the background. The interactive app UI
-keeps its own defaults. Use `--foreground` only when the user asked for focus:
-for `tab new`, it selects the new tab; for `pane split`, it focuses the new pane
-within its tab without selecting that tab.
+group end, `group new` opens in the background, and `pane split` opens in the
+background. The interactive app UI keeps its own defaults. Use `--foreground`
+only when the user asked for focus: for `tab new` and `group new`, it selects
+the new tab; for `pane split`, it focuses the new pane within its tab without
+selecting that tab.
 
 `tab new` position flags are mutually exclusive:
 
@@ -96,8 +99,13 @@ For agent commands:
   target group end. Pass `--foreground` only when the user asked to switch to
   the new tab. Pass `--after-tab <tab-id>` or `--after-selected` only when the
   user gave that placement anchor.
+- `group new`: `--name <name>` is required and takes no target, because a group
+  anchors to nothing. The default opens in the background. Pass `--foreground`
+  only when the user asked to switch to the new group's tab.
 - `group rename`: always pass `--group <group-id>`. There is no `--clear`: a
   group always has a name. A name that is only whitespace is refused.
+- `group close`: always pass `--group <group-id>`. It closes the group's tabs
+  with it. Pass `--move-tabs` when the user wants those tabs kept.
 - `tab rename`: always pass `--tab <tab-id>`.
 - `tab close`: always pass `--tab <tab-id>`.
 - `pane split`: always pass `--pane <pane-id>`. The default opens in the
@@ -221,7 +229,9 @@ exactly one matching pane, tab, or group before running any mutation command.
 
 | User says | Command |
 |---|---|
+| "make a new group" / "...and run X in it" | `group new --name <name>` with optional `--cmd` |
 | "rename group X to Y" | `group rename --group <group-id>` |
+| "close group X" / "...but keep its tabs" | `group close --group <group-id>` / `... --move-tabs` |
 | "rename this tab to X" / "label this tab" | `tab rename --tab <tab-id>` |
 | "close this tab" / "close tab X" | `tab close --tab <tab-id>` |
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
@@ -243,12 +253,31 @@ exactly one matching pane, tab, or group before running any mutation command.
 
 ## Recipes
 
+### Create a group
+
+    danterm group new --name Scratch
+    danterm group new --name Builds --cmd 'just test' --title tests
+
+A group always contains at least one tab, so `group new` creates that first tab
+too and the launch flags apply to it. The reply names both the new group and the
+new tab. By default the user's current tab stays focused.
+
 ### Rename a group
 
     danterm group rename --group "$GROUP_ID" "release work"
 
 Find the group id in `danterm ls`, which lists every group as
 `{id, name, isCollapsed, tabs}`. There is no `group list`.
+
+### Close a group
+
+    danterm group close --group "$GROUP_ID"
+    danterm group close --group "$GROUP_ID" --move-tabs
+
+The default closes the group's tabs with it. `--move-tabs` moves them into the
+adjacent group first. Two closes are refused so the CLI does not quit DanTerm as
+a side effect: the last group, and the group holding every tab when
+`--move-tabs` is absent.
 
 ### Rename or clear a tab
 
@@ -585,6 +614,7 @@ else prints nothing on success and exits 0.
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd, command, connection, agent, integration}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
+| `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |

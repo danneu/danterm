@@ -96,10 +96,17 @@ public func parseCLI(
         return CLICommand(request: .focusInfo, outputMode: .json)
 
     case "group":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm group <rename>") }
+        guard args.count >= 2 else { throw CLIParseError("usage: danterm group <new|rename|close>") }
         switch args[1] {
+        case "new":
+            return try parseGroupNewCommand(
+                Array(args.dropFirst(2)),
+                currentDirectory: currentDirectory
+            )
         case "rename":
             return try parseGroupRenameCommand(Array(args.dropFirst(2)))
+        case "close":
+            return try parseGroupCloseCommand(Array(args.dropFirst(2)))
         default:
             throw CLIParseError("unknown group command")
         }
@@ -236,6 +243,39 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
     )
 }
 
+// Background by default like `tab new`, because an agent creating a group must not
+// move the user's selection. `Msg.createGroup` selects the new tab on its own, so
+// the CLI has to ask for the background explicitly.
+private func parseGroupNewCommand(_ args: [String], currentDirectory: String) throws -> CLICommand {
+    let usage = "usage: danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
+    let parsed: ParsedGroupNew
+    do {
+        parsed = try parseGroupNewArgs(args)
+    } catch let error as GroupNewParseError {
+        switch error {
+        case .missingValue:
+            throw CLIParseError(usage)
+        case .unknownFlag(let flag):
+            throw CLIParseError("unknown flag: \(flag)")
+        case .unexpectedArgument(let argument):
+            throw CLIParseError("unexpected argument: \(argument)")
+        case .conflictingFocusFlags:
+            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
+        }
+    }
+
+    guard let name = parsed.name, name.isEmpty == false else { throw CLIParseError(usage) }
+    let launch = LaunchSpec(
+        cmd: parsed.launch?.cmd,
+        cwd: parsed.launch?.cwd ?? currentDirectory,
+        title: parsed.launch?.title
+    )
+    return CLICommand(
+        request: .groupNew(name: name, launch: launch, background: parsed.foreground == false),
+        outputMode: .json
+    )
+}
+
 // Sibling of `parseTabRenameCommand` minus `--clear`: a group always has a name,
 // so there is nothing to clear it to.
 private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
@@ -251,6 +291,32 @@ private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
     let name = remaining.joined(separator: " ")
     guard name.isEmpty == false else { throw CLIParseError(usage) }
     return CLICommand(request: .groupRename(group: group, name: name), outputMode: .none)
+}
+
+/// Keeps destructive group closure explicit at parse time, like `pane close`.
+private func parseGroupCloseCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm group close --group <group-id> [--move-tabs]"
+    guard args.count >= 2, args[0] == "--group" else {
+        if let argument = args.first, argument.hasPrefix("--"), argument != "--group" {
+            throw CLIParseError("unknown flag: \(argument)")
+        }
+        throw CLIParseError(usage)
+    }
+    let group = try groupId(args[1])
+    var moveTabs = false
+    for argument in args.dropFirst(2) {
+        guard argument == "--move-tabs" else {
+            if argument.hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(argument)")
+            }
+            throw CLIParseError("unexpected argument: \(argument)")
+        }
+        moveTabs = true
+    }
+    return CLICommand(
+        request: .groupClose(group: group, moveTabs: moveTabs),
+        outputMode: .none
+    )
 }
 
 private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
