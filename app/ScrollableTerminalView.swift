@@ -122,7 +122,9 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         fatalError("init(coder:) not implemented")
     }
 
-    deinit {
+    // `isolated deinit` because the tokens are main-actor state on a main-actor view;
+    // a nonisolated deinit cannot touch them.
+    isolated deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 

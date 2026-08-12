@@ -274,7 +274,7 @@ Per-site direction:
 - [x] 3. `fix(ipc): close the control socket exactly once under a race` --
   `Sendable` listener plus a mutex spanning the whole close, with the
   concurrent-close test from PO3.
-- [ ] 4. `refactor(app): state observer-token and associated-key isolation`
+- [x] 4. `refactor(app): state observer-token and associated-key isolation`
   -- `TodoInputView` token type, `SidebarView` key addresses.
 - [ ] 5. `refactor(app): compile the app target in Swift 6 language mode`
   -- isolated `NSTextInputClient` conformance, `DanTerm` and
@@ -321,6 +321,32 @@ at `.v5`; only 5 flips it.
   what makes `IpcConnection.startReading`'s `@Sendable` callbacks enforce
   sending at the call site. Commit 5 has to fix them to flip the target.
 
+- Commit 4: the Decision's reading of the `TodoInputView` site is wrong on
+  measurement. `Any?` is not what fails, and `app/ScrollableTerminalView.swift`
+  is not a working precedent -- at `.v6` its `[any NSObjectProtocol]` deinit
+  fails with the same "cannot access property ... with a non-Sendable type from
+  nonisolated deinit" error. Retyping the token to `(any NSObjectProtocol)?`
+  leaves the error in place verbatim. The real error is the deinit's isolation,
+  not the property's type, so both sites take `isolated deinit`, which is I2's
+  "stating its real isolation" -- both classes are `NSView` subclasses and so
+  already main-actor, and `app/SwiftTerminalSessionView.swift:245` is the
+  in-repo precedent for the spelling. The token keeps its real type anyway,
+  as the Decision asks.
+- Commit 4: `app/ScrollableTerminalView.swift` was not in the plan's site table
+  or its critical files. It is the same observer-token slice as `TodoInputView`
+  and blocks the commit-5 flip, so it is fixed here rather than deferred.
+- Commit 4: re-measuring the app target at `.v6` after this commit leaves
+  exactly commit 5's work -- the `NSTextInputClient` conformance at
+  `app/SwiftTerminalSessionView.swift:63` and the two `app/IpcServer.swift:59`
+  sending errors recorded under commit 3. No `TodoInputView` or `SidebarView`
+  site remains.
+- Commit 4: the plan's step-3 smoke could not drive a sidebar group rename --
+  the CLI has no `group` command, so no inline rename is reachable over the
+  control socket. PO5's `tests-ui/SidebarRenameRecycleTests.swift` is the
+  coverage that stands. The rest of the smoke ran on a slot: new tab, split
+  pane, `theme set`, `pane input`/`pane read` round trip, and a clean quit that
+  unlinked the control socket.
+
 ## Follow Up
 
 - `lib/TerminalPTY/Tests/TerminalPTYHostTests/TerminalPTYHostTests.swift:781`
@@ -329,3 +355,8 @@ at `.v5`; only 5 flips it.
   `[ESC [ 3;13R, "hi"]`, an unexpected cursor-position report ahead of the
   expected bytes. It passes on re-run and is unrelated to this plan, but
   the test admits a stray device-status reply into its event list.
+- The CLI has no `group` command, so sidebar group rename -- the exact behavior
+  the associated-object keys carry -- cannot be driven or verified over the
+  control socket. `integrations/danterm/SKILL.md:28` lists `tab rename` with no
+  group counterpart. A `danterm group rename --group <id> <name>` would close
+  the gap that made commit 4's prescribed smoke unreachable.

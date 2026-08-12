@@ -1699,9 +1699,12 @@ extension SidebarView: NSTextFieldDelegate {
 // inline-rename target via the ViewLocalState sidecar). The associated-object dance
 // below stays as the field editor's own bookkeeping; the sidecar is the copy the
 // reconciler reads.
+// Nothing reads or writes these bytes; only `&key` is taken, for an address that
+// stays put. `nonisolated(unsafe)` states that -- there is no shared state here
+// to protect, just a stable location.
 private enum AssociatedKeys {
-    static var groupId: UInt8 = 0
-    static var renameTarget: UInt8 = 0
+    nonisolated(unsafe) static var groupId: UInt8 = 0
+    nonisolated(unsafe) static var renameTarget: UInt8 = 0
 }
 
 private class SetTabColorsInfo: NSObject {

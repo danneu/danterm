@@ -36,7 +36,7 @@ class TodoInputView: NSView {
     let textView: NSTextView
     private let scrollView: FocusRingScrollView
     private let placeholderLabel: NSTextField
-    private var textChangeObserver: Any?
+    private var textChangeObserver: (any NSObjectProtocol)?
     private let visibleLineCount: Int
 
     // MARK: - Height constants
@@ -86,7 +86,9 @@ class TodoInputView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    deinit {
+    // `isolated deinit` because the token is main-actor state on a main-actor view;
+    // a nonisolated deinit cannot touch it.
+    isolated deinit {
         if let observer = textChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
