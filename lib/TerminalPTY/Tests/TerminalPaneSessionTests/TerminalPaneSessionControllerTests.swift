@@ -1418,19 +1418,20 @@ struct TerminalPaneSessionControllerTests {
             bootstrapExecutable: bootstrapExecutable(),
             captureTransitions: true
         )
-        let plans = AsyncStream<RenderFramePlan>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        var planIterator = plans.stream.makeAsyncIterator()
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = results.stream.makeAsyncIterator()
-        controller.onFrame = { plans.continuation.yield($0.plan) }
         controller.onSessionEnded = { results.continuation.yield($0) }
         controller.synchronizeState()
-        var readyPlan = controller.currentPlan
-        while readyPlan?.projectedText.contains("__CAPTURE_READY__") != true {
-            readyPlan = await planIterator.next()
-        }
+        // Polls the controller's own plan rather than awaiting one from the frame
+        // stream: that stream buffers the newest element only, so the frame carrying
+        // the marker can be dropped before the test iterates, and the wait then never
+        // ends. One such test process was found spinning 44 minutes after its lane
+        // had been declared dead.
+        #expect(await controller.stateSettles {
+            $0.currentPlan?.projectedText.contains("__CAPTURE_READY__") == true
+        })
 
         controller.setGridDimensions(.init(columns: 96, rows: 28))
         controller.sendText("continue\nprintf '__CAPTURE_FINAL__\\n'\nexit\n")
@@ -1486,10 +1487,9 @@ struct TerminalPaneSessionControllerTests {
         )
         defer { controller.tearDown() }
 
-        while controller.readFullHistoryText().contains("__DIAGNOSTIC__") == false {
-            controller.synchronizeState()
-            await Task.yield()
-        }
+        #expect(await controller.stateSettles {
+            $0.readFullHistoryText().contains("__DIAGNOSTIC__")
+        })
 
         let capture = controller.diagnosticCapture(test: "live-failure")
         #expect(capture.recording.events.isEmpty == false)
@@ -1780,10 +1780,7 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: command)
         )
-        while controller.readFullHistoryText().contains("line-39") == false {
-            await Task.yield()
-            controller.synchronizeState()
-        }
+        #expect(await controller.stateSettles { $0.readFullHistoryText().contains("line-39") })
         var states: [TerminalPaneViewportState] = []
         var plans: [RenderFramePlan] = []
         controller.onViewportStateChange = { states.append($0) }
@@ -1807,9 +1804,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(controller.readViewportText() != host.fencedSnapshot().screenText)
 
         controller.sendText("printf '\\033[?1049h__ALT_STATE__'\n")
-        while host.fencedSnapshot().isAlternateScreenActive == false {
-            await Task.yield()
-        }
+        #expect(await host.waitForSnapshot { $0.fencedSnapshot().isAlternateScreenActive })
         controller.synchronizeState()
         #expect(controller.viewportState.isScrollbarEnabled == false)
         #expect(states.last?.isScrollbarEnabled == false)
@@ -2009,10 +2004,7 @@ struct TerminalPaneSessionControllerTests {
         var iterator = results.stream.makeAsyncIterator()
         controller.onSessionEnded = { results.continuation.yield($0) }
         controller.synchronizeState()
-        while controller.readFullHistoryText().contains("line-39") == false {
-            await Task.yield()
-            controller.synchronizeState()
-        }
+        #expect(await controller.stateSettles { $0.readFullHistoryText().contains("line-39") })
         let lines = controller.readViewportText()
             .split(separator: "\n", omittingEmptySubsequences: false)
         let selectionRow = try #require(lines.firstIndex(where: { $0.contains("line-39") }))
@@ -2212,5 +2204,32 @@ private extension RenderFramePlan {
         textRuns.flatMap(\.cells).flatMap(\.scalars).reduce(into: "") {
             $0.unicodeScalars.append($1)
         }
+    }
+}
+
+@MainActor
+private extension TerminalPaneSessionController {
+    /// Polls synchronized controller state until `predicate` holds, and reports
+    /// whether it did.
+    ///
+    /// Sleeps between samples rather than spinning on `Task.yield()`, and returns
+    /// a Bool rather than looping until the state arrives. A yield loop competes
+    /// with the work it is waiting for, and it cannot be unwound -- a yield does
+    /// not throw on cancellation, so a `.timeLimit` has nothing to interrupt and a
+    /// state that never arrives leaves a process spinning at full CPU for someone
+    /// outside the run to kill. This turns that case into a failed expectation.
+    func stateSettles(
+        within limit: Duration = .seconds(30),
+        _ predicate: (TerminalPaneSessionController) -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while clock.now < deadline {
+            synchronizeState()
+            if predicate(self) { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        synchronizeState()
+        return predicate(self)
     }
 }

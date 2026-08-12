@@ -1631,9 +1631,9 @@ struct TerminalPTYHostTests {
         let host = try makeHost()
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done"
         await host.start(makeLaunchInput(command: command))
-        while host.fencedSnapshot().fullHistoryText.contains("line-39") == false {
-            await Task.yield()
-        }
+        #expect(await host.waitForSnapshot {
+            $0.fencedSnapshot().fullHistoryText.contains("line-39")
+        })
         let down = [UInt8]([0x1B, 0x5B, 0x42])
 
         let enter = Array("printf '\\033[?1049h'\n".utf8)
@@ -1643,9 +1643,7 @@ struct TerminalPTYHostTests {
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
         #expect((await host.transitions()).contains(.scrollByRows(-1)))
-        while host.fencedSnapshot().isAlternateScreenActive == false {
-            await Task.yield()
-        }
+        #expect(await host.waitForSnapshot { $0.fencedSnapshot().isAlternateScreenActive })
 
         let exit = Array("printf '\\033[?1049l'\n".utf8)
         let exitWriteBaseline = await host.inputWrites().count
@@ -1656,9 +1654,7 @@ struct TerminalPTYHostTests {
             exit,
             down + down,
         ])
-        while host.fencedSnapshot().isAlternateScreenActive {
-            await Task.yield()
-        }
+        #expect(await host.waitForSnapshot { $0.fencedSnapshot().isAlternateScreenActive == false })
 
         await host.close()
     }

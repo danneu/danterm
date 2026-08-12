@@ -154,6 +154,32 @@ public extension TerminalPTYHost {
 
     #endif
 
+    /// Polls fenced snapshots until `predicate` holds, and reports whether it did.
+    ///
+    /// For the questions the output waits above cannot answer -- anything about
+    /// parsed terminal state rather than about bytes the child printed.
+    ///
+    /// Sleeps between samples instead of spinning on `Task.yield()`. A yield loop
+    /// competes with the very work it waits for, so on a loaded machine it makes
+    /// its own wait longer, and several such loops running at once is a suite that
+    /// starves itself. Worse, a yield loop cannot be unwound: `Task.yield()` does
+    /// not throw on cancellation, so a test's `.timeLimit` has nothing to interrupt
+    /// and a state that never arrives becomes a process spinning at full CPU that
+    /// something outside the run has to kill. Returning a Bool makes that same
+    /// case an ordinary failed expectation with a name attached.
+    nonisolated func waitForSnapshot(
+        within limit: Duration = .seconds(30),
+        where predicate: @Sendable (TerminalPTYHost) -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while clock.now < deadline {
+            if predicate(self) { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return predicate(self)
+    }
+
     /// Requests shutdown and suspends only test code until the host reports quiescence.
     nonisolated func close() async {
         let completion = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
