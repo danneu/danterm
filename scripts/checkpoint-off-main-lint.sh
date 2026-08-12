@@ -28,4 +28,18 @@ if rg --pcre2 --glob '*.swift' -n "$PATTERN" "$@"; then
     exit 1
 fi
 
+# Handing the encoder to a writer is the whole point; keeping it in a local is how the runtime
+# ends up calling it, which runs the encode on the main thread with the stages still off-site,
+# so the rule above sees nothing wrong. State-export did exactly that. The gate is therefore
+# where the encoder GOES: it must be an argument on the spot, so `.encoder(` and the `encode:`
+# label it feeds have to appear together on one line.
+ENCODER_PATTERN='^(?![[:space:]]*//)(?!.*encode:).*\.encoder\('
+
+if rg --pcre2 --glob '*.swift' -n "$ENCODER_PATTERN" "$@"; then
+    echo "checkpoint-off-main-lint: a checkpoint encoder is bound here instead of handed off" >&2
+    echo "  pass it straight in as 'encode: capture.encoder()' -- a local invites a main-thread" >&2
+    echo "  encode, which is the cost the deferred encoder exists to avoid" >&2
+    exit 1
+fi
+
 echo "checkpoint off-main lint passed"

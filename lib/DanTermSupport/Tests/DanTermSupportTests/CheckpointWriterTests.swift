@@ -113,11 +113,13 @@ private final class Observations: @unchecked Sendable {
 
     @Test("a failed encode reports failure and leaves no file")
     func failedEncodeReportsFailure() async throws {
-        // Intent: an encode that throws yields `succeeded == false` and writes nothing.
+        // Intent: an encode that throws reports a failure carrying the error's text, and
+        //   writes nothing.
         // Why it exists: the completion drives the recovery policy's retry/backoff state, so a
         //   failure reported as success would stall the policy on a checkpoint that never
         //   landed. Moving the encode inside the work item is what made encode failures visible
-        //   to this path at all -- before, encoding threw on the caller's side.
+        //   to this path at all -- before, encoding threw on the caller's side. The description
+        //   matters too: state export puts it in front of the user, who needs the reason.
         // Scenario: spec-first. The encode closure throws.
         struct EncodeFailure: Error {}
         let dir = makeTestCheckpointDir()
@@ -127,7 +129,7 @@ private final class Observations: @unchecked Sendable {
 
         // The test awaits rather than blocking, so the main queue keeps running and can deliver
         // the completion. A semaphore here would deadlock against the writer's own delivery.
-        let succeeded: Bool = await withCheckedContinuation { continuation in
+        let outcome: CheckpointWriteOutcome = await withCheckedContinuation { continuation in
             writer.write(to: url, async: true, encode: {
                 throw EncodeFailure()
             }, completion: { result in
@@ -135,7 +137,12 @@ private final class Observations: @unchecked Sendable {
             })
         }
 
-        #expect(succeeded == false)
+        #expect(outcome.isSucceeded == false)
+        guard case .failed(let description) = outcome else {
+            Issue.record("expected a failure outcome, got \(outcome)")
+            return
+        }
+        #expect(description.isEmpty == false, "a failure must say why, not just that it failed")
         #expect(FileManager.default.fileExists(atPath: url.path) == false)
     }
 

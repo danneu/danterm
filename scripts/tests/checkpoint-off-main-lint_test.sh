@@ -18,11 +18,21 @@ if hasCheckpointableScrollback(text) { note() }
 SWIFT
 "$LINT" "$TMP/allowed" >/dev/null || fail "capture-and-defer should pass"
 
+cat > "$TMP/allowed/MultiLine.swift" <<'SWIFT'
+Self.checkpointWriter.write(
+    to: url,
+    async: async,
+    encode: capture.encoder(prettyPrinted: true)
+)
+SWIFT
+"$LINT" "$TMP/allowed" >/dev/null || fail "an encoder passed as an argument should pass"
+
 for construct in \
     'let enriched = graftScrollback(onto: snapshot, scrollbackByPaneId: reads)' \
     'let kept = truncateScrollback(text, keeping: .checkpoint)' \
     'let initFile = toInitFile(snapshot: enriched)' \
-    'let encoder = JSONEncoder()'
+    'let encoder = JSONEncoder()' \
+    'let encode = capture.encoder(prettyPrinted: true)'
 do
     printf '%s\n' "$construct" > "$TMP/denied/Runtime.swift"
     if "$LINT" "$TMP/denied" >/dev/null 2>&1; then

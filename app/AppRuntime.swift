@@ -181,6 +181,11 @@ class AppRuntime {
     private var coalescedReconcileTimerToken: AppRuntimeSchedulingToken?
     // Serializes checkpoint encode+write work and gives sync flushes one fence for pending I/O.
     private static let checkpointWriter = CheckpointWriter()
+    // Export gets its own queue rather than sharing the checkpoint one. Nothing orders an export
+    // against a checkpoint -- it goes to a path the user just picked -- and sharing would put a
+    // multi-megabyte export inside the fence the quit checkpoint drains, so quitting mid-export
+    // would wait on it.
+    private static let exportWriter = CheckpointWriter(label: "danterm.export.io")
     private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var searchDebouncerTokens: [PaneId: AppRuntimeSchedulingToken] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
@@ -897,23 +902,15 @@ class AppRuntime {
             enqueueNotificationRequest(request)
 
         case .exportState(let snapshot):
-            // Same pipeline as a checkpoint, run here rather than queued: export is a deliberate
-            // user action that blocks on a save panel anyway, and its bytes are human-readable.
+            // Only the capture belongs on the main actor: it fences each pane's scrollback at
+            // the moment the user asked to export, and reads nothing. The projection, the
+            // pretty-printed encode, and the write all ride the export queue, so picking a file
+            // stays responsive no matter how many panes are open.
             let capture = CheckpointCapture(
                 snapshot: snapshot,
-                scrollbackReads: captureScrollbackReads(keeping: .checkpoint)
+                scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
+                retention: .checkpoint
             )
-            let encode = capture.encoder(prettyPrinted: true)
-            let data: Data
-            do {
-                data = try encode()
-            } catch {
-                let alert = NSAlert()
-                alert.messageText = "Export Failed"
-                alert.informativeText = "Failed to encode state: \(error.localizedDescription)"
-                alert.runModal()
-                return
-            }
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "danterm-state.json"
             panel.allowedContentTypes = [.json]
@@ -921,15 +918,18 @@ class AppRuntime {
             guard let window = window else { return }
             panel.beginSheetModal(for: window) { response in
                 guard response == .OK, let url = panel.url else { return }
-                do {
-                    try data.write(to: url)
-                } catch {
-                    DispatchQueue.main.async {
-                        let alert = NSAlert()
-                        alert.messageText = "Save Failed"
-                        alert.informativeText = error.localizedDescription
-                        alert.runModal()
-                    }
+                Self.exportWriter.write(
+                    to: url,
+                    async: true,
+                    encode: capture.encoder(prettyPrinted: true)
+                ) { outcome in
+                    guard case .failed(let description) = outcome else { return }
+                    // The writer's completion already arrives a main-queue turn after the sheet
+                    // dismissed, so this modal cannot open inside the panel's completion.
+                    let alert = NSAlert()
+                    alert.messageText = "Export Failed"
+                    alert.informativeText = description
+                    alert.runModal()
                 }
             }
 
@@ -1402,7 +1402,7 @@ class AppRuntime {
                 .deferredCallback,
                 cancel: {}
             ) else { return }
-            performEnrichedCheckpoint(async: true) { [weak self] succeeded in
+            performEnrichedCheckpoint(async: true) { [weak self] outcome in
                 // The writer delivers this on the main actor, which owns the recovery state, so
                 // the policy update runs in the delivery turn itself -- and the finish time it
                 // reads is the delivery moment, with no hop in between to age it.
@@ -1412,7 +1412,7 @@ class AppRuntime {
                     self.applyRecoveryAction(
                         self.recoveryPolicy.writeCompleted(
                             revision: revision,
-                            succeeded: succeeded,
+                            succeeded: outcome.isSucceeded,
                             at: finishedAt
                         )
                     )
@@ -1489,7 +1489,7 @@ class AppRuntime {
     /// `@Sendable` because the closure reaches the checkpoint queue before it is called back.
     func performEnrichedCheckpoint(
         async: Bool,
-        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (CheckpointWriteOutcome) -> Void)? = nil
     ) {
         guard schedulingLifecycle.isActive else { return }
         let capture = captureEnrichedCheckpoint()

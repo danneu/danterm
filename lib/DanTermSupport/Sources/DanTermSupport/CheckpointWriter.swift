@@ -13,6 +13,20 @@ import Foundation
 /// bytes, which is why the encode is a parameter here rather than something the caller does
 /// first. Completions are delivered on the main queue, unconditionally: the recovery state a
 /// completion feeds lives on the main actor, and no caller has a reason to want them elsewhere.
+/// What one write reported back. It carries the failure text rather than a bare flag because
+/// state export shows the reason to the user, and "it failed" is not something a person can act
+/// on -- a full disk and a read-only folder need different responses. The recovery policy, which
+/// only retries, reads `isSucceeded` and ignores the rest.
+enum CheckpointWriteOutcome: Sendable {
+    case succeeded
+    case failed(description: String)
+
+    var isSucceeded: Bool {
+        if case .succeeded = self { return true }
+        return false
+    }
+}
+
 final class CheckpointWriter: Sendable {
     private let queue: DispatchQueue
 
@@ -37,10 +51,10 @@ final class CheckpointWriter: Sendable {
         to url: URL,
         async: Bool,
         encode: @escaping @Sendable () throws -> Data,
-        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (CheckpointWriteOutcome) -> Void)? = nil
     ) {
         let work = DispatchWorkItem {
-            let succeeded: Bool
+            let outcome: CheckpointWriteOutcome
             do {
                 let data = try encode()
                 try FileManager.default.createDirectory(
@@ -48,16 +62,16 @@ final class CheckpointWriter: Sendable {
                     withIntermediateDirectories: true
                 )
                 try data.write(to: url, options: .atomic)
-                succeeded = true
+                outcome = .succeeded
             } catch {
-                succeeded = false
+                outcome = .failed(description: error.localizedDescription)
             }
             guard let completion else { return }
             DispatchQueue.main.async {
                 // `assumeIsolated` reads back the guarantee the line above just made, rather
                 // than hopping a second time through `Task { @MainActor }` -- which would also
                 // give up the FIFO order this queue exists to keep.
-                MainActor.assumeIsolated { completion(succeeded) }
+                MainActor.assumeIsolated { completion(outcome) }
             }
         }
 
