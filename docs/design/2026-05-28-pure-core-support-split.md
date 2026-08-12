@@ -12,6 +12,31 @@
 > longer fire once no target declared the module. The body is unedited on
 > purpose.
 
+> **2026-08-12: support target and cross-process contracts.** The `danterm`
+> CLI became a real second consumer of portable support when `doctor` needed
+> filesystem, config, and CoreText probes without compiling the app core. The
+> root package now exposes DanTermSupport as an importable target for the CLI;
+> the app still compiles the same sources through `app/DanTermSupport`. The
+> config schema moved to DanTermProtocol because the app and CLI read the same
+> versioned file, widening that leaf from wire protocol to cross-process
+> contracts generally. The current dependency graph is:
+>
+> ```
+> DanTermProtocol  (leaf; wire protocol + CLI parsing + cross-process contracts)
+>       ^                         ^
+>       |                         |
+> DanTermCore (pure)        DanTermSupport (portable effects)
+>       \                         / ^
+>        \                       /  |
+>         app (same-module symlinks) CLI (imports support; no core dependency)
+> ```
+>
+> The earlier "one public-surface addition" claim describes the original split,
+> not the current tree. DanTermProtocol now also publishes the config schema,
+> while the root-package doctor entry point uses `package` access so it does not
+> create a durable external support API. The sibling invariant still holds:
+> support names nothing in core.
+
 ## Context
 
 DanTerm follows an Elm architecture: views dispatch `Msg`, the pure

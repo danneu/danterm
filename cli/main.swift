@@ -1,6 +1,7 @@
 // Local utility commands and the command-line client for DanTerm's JSON-RPC socket.
 import Foundation
 import DanTermProtocol
+import DanTermSupport
 import Darwin
 
 struct CLIError: Error {
@@ -219,7 +220,6 @@ struct DanTermCLI {
         }
 
         let checks = evaluateDoctor(gatherDoctorFacts(
-            configFont: gatherConfigFontFacts(),
             permissions: gatherDoctorPermissions()
         ))
         print(renderDoctorReport(checks), terminator: "")

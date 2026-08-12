@@ -9,6 +9,45 @@ import DanTermProtocol
 @testable import DanTermSupport
 
 @Suite struct DoctorProberTests {
+    @Test("config font probe reports installed and missing families")
+    func configFontProbeReportsInstalledAndMissingFamilies() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeConfig(fontFamily: "Fixture Mono")
+
+        let installed = gatherDoctorFacts(env: fixture.env(
+            resolveInstalledFontFamily: { $0 == "Fixture Mono" ? "Fixture Mono" : nil }
+        ))
+        let missing = gatherDoctorFacts(env: fixture.env(
+            resolveInstalledFontFamily: { _ in nil }
+        ))
+
+        #expect(installed.configFont == .installed)
+        #expect(missing.configFont == .notInstalled(requested: "Fixture Mono"))
+    }
+
+    @Test("config font probe reports unset when the config names no family")
+    func configFontProbeReportsUnset() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeConfig(fontFamily: nil)
+
+        let facts = gatherDoctorFacts(env: fixture.env())
+
+        #expect(facts.configFont == .unset)
+    }
+
+    @Test("config font probe reports unreadable config")
+    func configFontProbeReportsUnreadableConfig() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeFile(fixture.configURL, "not JSON")
+
+        let facts = gatherDoctorFacts(env: fixture.env())
+
+        #expect(facts.configFont == .unreadableConfig)
+    }
+
     @Test("JSON hook sources gather valid dangling and non-executable DanTerm hooks")
     func jsonHookSourcesGatherHookStatuses() throws {
         let fixture = try DoctorFixture()
@@ -272,6 +311,7 @@ private struct DoctorFixture {
     let sourceURL: URL
     let destinationURL: URL
     let bundleURL: URL
+    let configURL: URL
 
     init(bundlePath: String? = nil) throws {
         root = FileManager.default.temporaryDirectory
@@ -282,6 +322,7 @@ private struct DoctorFixture {
         sourceURL = root.appendingPathComponent("DanTerm.app/Contents/Helpers/danterm")
         destinationURL = root.appendingPathComponent("bin/danterm")
         bundleURL = URL(fileURLWithPath: bundlePath ?? root.appendingPathComponent("DanTerm.app").path)
+        configURL = root.appendingPathComponent("config.json")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: pathDir, withIntermediateDirectories: true)
@@ -295,7 +336,10 @@ private struct DoctorFixture {
         try? FileManager.default.removeItem(at: root)
     }
 
-    func env(argv0: String? = nil) -> DoctorProbeEnv {
+    func env(
+        argv0: String? = nil,
+        resolveInstalledFontFamily: @escaping (String) -> String? = { _ in nil }
+    ) -> DoctorProbeEnv {
         DoctorProbeEnv(
             fileManager: .default,
             environment: [
@@ -304,8 +348,15 @@ private struct DoctorFixture {
             ],
             homeDirectory: home,
             argv0: argv0 ?? sourceURL.path,
-            installerDeps: installerDeps
+            installerDeps: installerDeps,
+            configFilePath: configURL.path,
+            resolveInstalledFontFamily: resolveInstalledFontFamily
         )
+    }
+
+    func writeConfig(fontFamily: String?) throws {
+        let font = fontFamily.map { #", "font": {"family": "\#($0)"}"# } ?? ""
+        try writeFile(configURL, #"{"schemaVersion": 1\#(font)}"#)
     }
 
     var installerDeps: CLIPathInstaller.Dependencies {

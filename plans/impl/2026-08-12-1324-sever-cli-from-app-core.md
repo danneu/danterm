@@ -161,14 +161,14 @@ files use FileManager).
 
 ## Verification
 
-1. Build `.build/debug/danterm` from this worktree and capture its
-   `danterm doctor` output + exit code before starting.
+1. Build `.build/debug/DanTermCLI` from this worktree and capture its
+   `DanTermCLI doctor` output + exit code before starting.
 2. `just test` -- all package suites, root-package suite, purity lints
    (including the new protocol step).
-3. Rebuild `.build/debug/danterm` in the same configuration, rerun
-   `danterm doctor`, diff against the capture (smoke check; machine
+3. Rebuild `.build/debug/DanTermCLI` in the same configuration, rerun
+   `DanTermCLI doctor`, diff against the capture (smoke check; machine
    state must be unchanged since step 1).
-4. `ls -la .build/debug/danterm` -- note the size drop.
+4. `ls -la .build/debug/DanTermCLI` -- note the size drop.
 5. `swift test --package-path lib/DanTermSupport` standalone -- the
    sibling-independence proof still compiles.
 
@@ -183,4 +183,4 @@ files use FileManager).
 ## Commit progress
 
 - [x] 1. refactor(protocol): own the shared config contract
-- [ ] 2. refactor(cli): sever the app core dependency
+- [x] 2. refactor(cli): sever the app core dependency

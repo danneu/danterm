@@ -1,6 +1,5 @@
-// Pure evaluator and renderer for `danterm doctor`. This file owns the
-// integration-health decision table and text output, but no probing: filesystem,
-// PATH, and app-bundle facts arrive as DoctorFacts from DanTermSupport.
+// Pure evaluator and renderer for `danterm doctor`. The CLI owns this decision
+// table because it is the only consumer; probing stays in DanTermSupport.
 import DanTermProtocol
 
 /// Stable identifiers for doctor checks so tests and renderers can find rows

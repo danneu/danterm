@@ -22,6 +22,17 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        .target(
+            name: "DanTermSupport",
+            dependencies: ["DanTermProtocol"],
+            path: "lib/DanTermSupport/Sources/DanTermSupport",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ],
+            linkerSettings: [
+                .linkedFramework("CoreText"),
+            ]
+        ),
         .executableTarget(
             name: "DanTerm",
             dependencies: [
@@ -50,15 +61,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTermCLI",
-            dependencies: ["DanTermProtocol"],
+            dependencies: ["DanTermProtocol", "DanTermSupport"],
             path: "cli",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
-            ],
-            linkerSettings: [
-                // The CLI compiles DanTermSupport through its symlink, and the
-                // font-availability probe there imports CoreText.
-                .linkedFramework("CoreText"),
             ]
         ),
         .executableTarget(

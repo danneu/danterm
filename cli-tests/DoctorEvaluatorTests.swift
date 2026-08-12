@@ -6,7 +6,7 @@ import Foundation
 import Testing
 import DanTermProtocol
 
-@testable import DanTermCore
+@testable import DanTermCLI
 
 @Suite struct DoctorEvaluatorTests {
     @Test("Claude hooks status ladder")

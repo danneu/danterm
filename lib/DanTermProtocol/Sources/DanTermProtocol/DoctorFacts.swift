@@ -1,6 +1,5 @@
 // Shared facts for the `danterm doctor` health check. DanTermSupport gathers
-// this DTO from the filesystem and PATH; DanTermCore reads it to evaluate and
-// render the report without importing any side-effecting support code.
+// this DTO from the filesystem and PATH; the CLI evaluates and renders it.
 
 /// Filesystem state for the manual `.app` installer's `danterm` link, separated
 /// from the evaluator so each remedy can match what the installer accepts.
@@ -82,7 +81,7 @@ public struct DoctorFacts: Equatable {
     }
 
     /// One DanTerm hook command discovered in an agent config, with executable
-    /// state already resolved so the core can stay filesystem-free.
+    /// state already resolved so the CLI evaluator stays probe-free.
     public struct HookRef: Equatable {
         public var command: String
         public var exists: Bool
@@ -96,10 +95,8 @@ public struct DoctorFacts: Equatable {
     }
 
     /// Verdict on the config file's `font.family`, already resolved against the
-    /// installed families. It arrives pre-decided because neither module that
-    /// owns half of it can see the other: reading `config.json` needs the core's
-    /// document type, and answering "is it installed?" needs support's CoreText
-    /// probe, so only the CLI composes both.
+    /// installed families. DanTermSupport reads the shared config contract and
+    /// resolves the name through its CoreText probe before returning these facts.
     public enum ConfigFont: Equatable {
         /// No config file, or one with no `font.family`: nothing to check.
         case unset

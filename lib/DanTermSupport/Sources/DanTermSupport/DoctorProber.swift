@@ -1,26 +1,29 @@
-// Portable filesystem and PATH probes for `danterm doctor`. This file gathers
-// integration facts only; the status ladder and user-facing report stay in the
-// pure core so they can be tested without side effects.
+// Portable filesystem, PATH, and config probes for `danterm doctor`. This file
+// gathers integration facts only; the CLI owns the status ladder and report.
 import Foundation
 import DanTermProtocol
 
 /// Injectable environment for doctor probes. Tests point every path at temp
 /// fixtures; production uses live HOME, PATH, argv0, and installer dependencies.
-struct DoctorProbeEnv {
+package struct DoctorProbeEnv {
     var fileManager: FileManager
     var environment: [String: String]
     var homeDirectory: URL
     var argv0: String
     var installerDeps: CLIPathInstaller.Dependencies
+    var configFilePath: String
+    var resolveInstalledFontFamily: (String) -> String?
 
-    static var live: DoctorProbeEnv {
+    package static var live: DoctorProbeEnv {
         let environment = ProcessInfo.processInfo.environment
         return DoctorProbeEnv(
             fileManager: .default,
             environment: environment,
             homeDirectory: liveHomeDirectory(environment: environment),
             argv0: CommandLine.arguments.first ?? "",
-            installerDeps: .default
+            installerDeps: .default,
+            configFilePath: DanTermConfigPaths.configFilePath(),
+            resolveInstalledFontFamily: resolveInstalledFontFamily(named:)
         )
     }
 }
@@ -28,12 +31,8 @@ struct DoctorProbeEnv {
 /// Reads the local machine integration state for `danterm doctor`. It performs
 /// no IPC and does not require the app to be launched.
 ///
-/// `configFont` is passed in rather than probed here: deciding it needs the
-/// core's config document type, which this module must never depend on, so the
-/// CLI composes that one fact and hands it over.
-func gatherDoctorFacts(
+package func gatherDoctorFacts(
     env: DoctorProbeEnv = .live,
-    configFont: DoctorFacts.ConfigFont = .unset,
     permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     let installerDiagnostics = CLIPathInstaller(env.installerDeps).installDiagnostics()
@@ -54,9 +53,22 @@ func gatherDoctorFacts(
         symlinkEntry: installerDiagnostics.entry,
         translocated: installerDiagnostics.translocated,
         jqOnPath: executableOnPath("jq", env: env) != nil,
-        configFont: configFont,
+        configFont: gatherConfigFontFacts(env: env),
         permissions: permissions
     )
+}
+
+/// Resolves the configured font family into the verdict doctor reports. Every
+/// config outcome is a fact so a malformed file does not stop other checks.
+private func gatherConfigFontFacts(env: DoctorProbeEnv) -> DoctorFacts.ConfigFont {
+    guard env.fileManager.fileExists(atPath: env.configFilePath) else { return .unset }
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: env.configFilePath)),
+          let document = DanTermConfigDocument.decode(data)
+    else { return .unreadableConfig }
+    guard let requested = document.config.fontFamily else { return .unset }
+    return env.resolveInstalledFontFamily(requested) == nil
+        ? .notInstalled(requested: requested)
+        : .installed
 }
 
 /// Gathers Claude Code facts from `~/.claude`, plus its agent-specific and

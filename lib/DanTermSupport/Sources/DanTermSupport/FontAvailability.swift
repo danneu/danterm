@@ -4,8 +4,8 @@
 // pure core validates `font.family` as syntax only and is handed the verdict --
 // so it belongs here alongside the other OS-registry probes, not in DanTermCore.
 // It knows nothing about config or the render layer: it takes a string and
-// returns a family name or nil, which is all both callers (the app's
-// resolve-and-apply path and `danterm doctor`) need.
+// returns a family name or nil, which is all the app's resolve-and-apply path
+// and the support-owned doctor probe need.
 import CoreText
 import Foundation
 
