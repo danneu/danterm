@@ -8,6 +8,7 @@
 // DanTermSupport's FontAvailabilityTests; the AppKit picker and the "not
 // installed" warning arrive with the preferences panel.
 import Foundation
+import DanTermProtocol
 import Testing
 
 @testable import DanTermCore

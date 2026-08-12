@@ -6,12 +6,13 @@
 // applies. This is the home the reconciler ADR and Reconcile.swift's "add a pass"
 // template point at, and the unit-test boundary for the reconcile layer: derive view
 // state from `AppModel` here (purely), apply it to Cocoa there. Keep it
-// `import Foundation` only -- no AppKit -- which is what keeps the projection layer
+// free of AppKit, which is what keeps the projection layer
 // testable without Cocoa or the terminal engine. Cross-layer model helpers these call back into
 // (queries, alert counts, container shapes) stay in ModelOperations.swift; this earns
 // its own file as the named pure peer of Reconcile.swift. Pane-owned live
 // lifecycles arrive as explicit immutable inputs; they never enter AppModel.
 import Foundation
+import DanTermProtocol
 
 // MARK: - Theme Browser
 

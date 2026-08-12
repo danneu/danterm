@@ -2,7 +2,7 @@
 import Foundation
 import Testing
 
-@testable import DanTermCore
+@testable import DanTermProtocol
 
 struct DanTermConfigDocumentTests {
     @Test("v1 decodes every shipped setting")

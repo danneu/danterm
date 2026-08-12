@@ -17,6 +17,7 @@
 // the same question is free to drift from the one the panel actually uses.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 

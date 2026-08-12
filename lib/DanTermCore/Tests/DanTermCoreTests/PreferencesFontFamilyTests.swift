@@ -7,6 +7,7 @@
 // values drive lives in the UI harness (PreferencesPanelTests).
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 

@@ -1,5 +1,6 @@
 // DanTerm's single-pane settings window and its native AppKit form controls.
 import Cocoa
+import DanTermProtocol
 
 /// Owns the application-wide settings controls and commits each completed edit.
 class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {

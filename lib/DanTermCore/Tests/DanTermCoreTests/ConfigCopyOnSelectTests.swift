@@ -5,6 +5,7 @@
 // which panes should have copy-on-select armed.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 

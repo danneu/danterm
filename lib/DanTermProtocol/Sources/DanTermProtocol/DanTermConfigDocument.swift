@@ -1,11 +1,11 @@
-// Pure, versioned JSON configuration boundary with lossless unknown-number retention.
+// Cross-process JSON config boundary with lossless unknown-number retention.
 import Foundation
 
 /// Owns one writable v1 config tree so Preferences can mutate known leaves without
 /// dropping future fields or changing untouched number tokens.
-struct DanTermConfigDocument: Equatable {
+public struct DanTermConfigDocument: Equatable {
     /// Canonical writable v1 seed used whenever DanTerm authors a new config file.
-    static let seedData = Data(
+    public static let seedData = Data(
         """
         {
           "schemaVersion": 1
@@ -13,7 +13,8 @@ struct DanTermConfigDocument: Equatable {
         """.utf8
     )
 
-    var config: DanTermConfig { Self.projectConfig(from: root) }
+    /// Projects the modeled settings without exposing the lossless JSON tree.
+    public var config: DanTermConfig { Self.projectConfig(from: root) }
 
     private var root: ConfigJSONValue
     private let originalData: Data
@@ -26,7 +27,7 @@ struct DanTermConfigDocument: Equatable {
     }
 
     /// Accepts only syntactically valid objects carrying the exact integer schemaVersion 1.
-    static func decode(_ data: Data) -> Self? {
+    public static func decode(_ data: Data) -> Self? {
         var parser = ConfigJSONParser(data: data)
         guard let root = parser.parse(),
               case .object(let object) = root,
@@ -36,22 +37,22 @@ struct DanTermConfigDocument: Equatable {
     }
 
     /// Sets or clears the explicit local theme while preserving unmodeled theme siblings.
-    mutating func setDefaultTheme(_ theme: String?) {
+    public mutating func setDefaultTheme(_ theme: String?) {
         setNestedValue(theme.map(ConfigJSONValue.string), parent: "theme", key: "default")
     }
 
     /// Sets the remote theme while preserving unmodeled theme siblings.
-    mutating func setRemoteTheme(_ theme: String) {
+    public mutating func setRemoteTheme(_ theme: String) {
         setNestedValue(.string(theme), parent: "theme", key: "remote")
     }
 
     /// Sets or clears the explicit font family while preserving unmodeled font siblings.
-    mutating func setFontFamily(_ family: String?) {
+    public mutating func setFontFamily(_ family: String?) {
         setNestedValue(family.map(ConfigJSONValue.string), parent: "font", key: "family")
     }
 
     /// Sets or clears the explicit font size without rewriting an equivalent number token.
-    mutating func setFontSize(_ size: Double?) {
+    public mutating func setFontSize(_ size: Double?) {
         if let size {
             guard size.isFinite, size > 0 else { return }
         }
@@ -65,22 +66,22 @@ struct DanTermConfigDocument: Equatable {
     }
 
     /// Sets the alert policy while preserving unmodeled UI siblings.
-    mutating func setAlertClearMode(_ mode: AlertClearMode) {
+    public mutating func setAlertClearMode(_ mode: AlertClearMode) {
         setNestedValue(.string(mode.rawValue), parent: "ui", key: "alertClearMode")
     }
 
     /// Sets copy-on-select while preserving unmodeled UI siblings.
-    mutating func setCopyOnSelect(_ enabled: Bool) {
+    public mutating func setCopyOnSelect(_ enabled: Bool) {
         setNestedValue(.bool(enabled), parent: "ui", key: "copyOnSelect")
     }
 
     /// Sets the local-shell locale fallback while preserving unmodeled shell siblings.
-    mutating func setLocaleFallback(_ enabled: Bool) {
+    public mutating func setLocaleFallback(_ enabled: Bool) {
         setNestedValue(.bool(enabled), parent: "shell", key: "localeFallback")
     }
 
     /// Applies the complete modeled settings set as one document transaction.
-    mutating func apply(_ config: DanTermConfig) {
+    public mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)
         setRemoteTheme(config.remoteTheme)
         setFontFamily(config.fontFamily)
@@ -91,7 +92,7 @@ struct DanTermConfigDocument: Equatable {
     }
 
     /// Returns original bytes until a semantic edit occurs, then stable sorted JSON.
-    func encoded() -> Data {
+    public func encoded() -> Data {
         guard isDirty else { return originalData }
         return Data((ConfigJSONEncoder.encode(root) + "\n").utf8)
     }

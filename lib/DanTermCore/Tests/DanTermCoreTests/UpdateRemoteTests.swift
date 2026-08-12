@@ -2,6 +2,7 @@
 // theme projection derived from session-owned connection state.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 

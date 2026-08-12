@@ -1,8 +1,9 @@
 // App-side filesystem boundary for DanTerm's versioned JSON configuration:
 // launch/reload reads, seeding, and atomic save transactions. These need the
-// core's config type, so they stay in the app; the path itself lives in
+// shared config contract, so they stay in the app; the path itself lives in
 // DanTermSupport (`DanTermConfigPaths`) because the CLI resolves it too.
 import Foundation
+import DanTermProtocol
 
 /// Distinguishes invalid documents from filesystem failures for user-visible reports.
 enum DanTermConfigStoreError: LocalizedError {

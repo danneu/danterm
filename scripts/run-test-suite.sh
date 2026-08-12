@@ -99,6 +99,7 @@ STEPS=(
     './scripts/terminal-scalar-append-lint.sh'
     './scripts/terminal-benchmark-draw-path-lint.sh'
     './scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport'
+    './scripts/core-purity-lint.sh --profile portable lib/DanTermProtocol/Sources/DanTermProtocol'
 )
 
 # Test seam: the self-test substitutes a synthetic step list so it can exercise the

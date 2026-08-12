@@ -7,6 +7,7 @@
 // directly only where the bound itself is the contract.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 

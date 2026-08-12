@@ -50,6 +50,7 @@ let package = Package(
             name: "DanTermCoreTests",
             dependencies: [
                 "DanTermCore",
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "CustomDump", package: "swift-custom-dump"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
                 .product(name: "SnapshotTestingCustomDump", package: "swift-snapshot-testing"),

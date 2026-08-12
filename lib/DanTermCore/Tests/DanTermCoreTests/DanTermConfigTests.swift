@@ -1,21 +1,9 @@
-// Typed-default and Preferences-formatting tests for DanTerm's JSON-backed config.
+// Formatting tests for the core's presentation of shared config values.
 import Testing
 
 @testable import DanTermCore
 
 struct DanTermConfigTests {
-    @Test("defaults name resolvable local and remote themes with a 13 point font")
-    func defaults() {
-        let config = DanTermConfig.default
-
-        #expect(config.resolvedDefaultTheme == "Monokai Remastered")
-        #expect(config.remoteTheme == "Purplepeter")
-        #expect(config.fontFamily == nil)
-        #expect(config.resolvedFontSize == 13)
-        #expect(config.alertClearMode == .focus)
-        #expect(config.copyOnSelect)
-    }
-
     @Test("font size text omits an unnecessary decimal point")
     func fontSizeText() {
         #expect(configFontSizeText(13) == "13")

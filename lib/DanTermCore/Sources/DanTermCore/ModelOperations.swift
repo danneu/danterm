@@ -7,9 +7,10 @@
 // reads back. The pure *view projections* + their diff helpers now live in their own
 // AppKit-free peer, Projections.swift (the counterpart to Reconcile.swift); snapshot /
 // restore / recovery I/O lives in Persistence.swift; the tab-todo row model in
-// TabTodo.swift. Keep this `import Foundation` only -- no AppKit -- so the model core
+// TabTodo.swift. Keep this free of AppKit so the model core
 // stays unit-testable without Cocoa or the terminal engine.
 import Foundation
+import DanTermProtocol
 
 // MARK: - Pane Theme
 
