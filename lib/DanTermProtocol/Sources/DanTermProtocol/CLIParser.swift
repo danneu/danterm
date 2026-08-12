@@ -95,6 +95,14 @@ public func parseCLI(
         }
         return CLICommand(request: .focusInfo, outputMode: .json)
 
+    // No flags by design: the instance is named by `--socket`, and one verb has
+    // one meaning. There is no --force and no --timeout to add later.
+    case "quit":
+        guard args.count == 1 else {
+            throw CLIParseError("usage: danterm quit")
+        }
+        return CLICommand(request: .quit, outputMode: .none)
+
     case "group":
         guard args.count >= 2 else { throw CLIParseError("usage: danterm group <new|rename|close>") }
         switch args[1] {
@@ -197,9 +205,9 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
     let parsed: ParsedTabNew
     do {
         parsed = try parseTabNewArgs(args)
-    } catch let error as TabNewParseError {
+    } catch let error as NewCommandParseError {
         switch error {
-        case .missingValue(_):
+        case .missingValue, .missingDirection:
             throw CLIParseError(usage)
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
@@ -251,9 +259,9 @@ private func parseGroupNewCommand(_ args: [String], currentDirectory: String) th
     let parsed: ParsedGroupNew
     do {
         parsed = try parseGroupNewArgs(args)
-    } catch let error as GroupNewParseError {
+    } catch let error as NewCommandParseError {
         switch error {
-        case .missingValue:
+        case .missingValue, .missingDirection, .conflictingPositionFlags:
             throw CLIParseError(usage)
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
@@ -361,9 +369,9 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     let parsed: ParsedPaneSplit
     do {
         parsed = try parsePaneSplitArgs(args)
-    } catch let error as PaneSplitParseError {
+    } catch let error as NewCommandParseError {
         switch error {
-        case .missingDirection, .missingPaneArg, .missingValue(_):
+        case .missingDirection, .missingValue, .conflictingPositionFlags:
             throw CLIParseError(usage)
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")

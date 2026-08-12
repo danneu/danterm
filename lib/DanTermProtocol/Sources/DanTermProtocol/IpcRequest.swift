@@ -9,6 +9,9 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case ls
     /// Requests the main window's live key focus owner.
     case focusInfo = "focus.info"
+    /// Ends the answering instance the way Cmd-Q does. Takes no target: the
+    /// instance the request reached is the instance that exits.
+    case quit
     /// Creates a group and its first tab. Takes no target: there is nothing to
     /// anchor a group to.
     case groupNew = "group.new"
@@ -63,10 +66,32 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// Removes completed todos from one explicitly named pane.
     case todoClearCompleted = "todo.clearCompleted"
 
+    /// Names the methods whose success ends the instance that answered them.
+    ///
+    /// Two client rules follow from this one fact, and the switch is exhaustive
+    /// so a future method has to decide both: such a method resolves its target
+    /// only from an explicit `--socket`, and reads a closed connection as
+    /// success, because a working quit takes the socket down with it.
+    public var terminatesInstance: Bool {
+        switch self {
+        case .quit:
+            return true
+        case .doctorPermissions, .ls, .focusInfo, .groupNew,
+             .groupRename, .groupClose,
+             .tabNew, .tabRename, .tabClose,
+             .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
+             .paneRead, .paneRows, .paneZoom, .paneTape, .themeSet,
+             .agentAttach, .agentActivity, .agentDetach,
+             .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
+             .todoDelete, .todoClearCompleted:
+            return false
+        }
+    }
+
     /// Makes target classification exhaustive when a method joins the catalog.
     public var isTargeting: Bool {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .groupNew:
+        case .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
             return false
         case .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
@@ -174,6 +199,9 @@ public enum IpcRequest: Equatable, Sendable {
     case ls
     /// Requests the main window's live key focus owner without a target.
     case focusInfo
+    /// Ends the answering instance without a target. Dispatch refuses it unless
+    /// the instance holds a launcher pool slot.
+    case quit
     /// Creates a group without a target. `.createGroup` also creates the group's
     /// first tab, so the launch spec and focus policy apply to that tab.
     case groupNew(name: String, launch: LaunchSpec?, background: Bool)
@@ -236,6 +264,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .quit: return .quit
         case .groupNew: return .groupNew
         case .groupRename: return .groupRename
         case .groupClose: return .groupClose
@@ -268,7 +297,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Names every target key this request can carry.
     public var targetParameterKeys: [String] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo, .groupNew:
+        case .doctorPermissions, .ls, .focusInfo, .quit, .groupNew:
             return []
         case .groupRename, .groupClose:
             return ["group"]
@@ -292,7 +321,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Encodes this typed request into its JSON-RPC parameter object.
     public var params: [String: JSONValue] {
         switch self {
-        case .doctorPermissions, .ls, .focusInfo:
+        case .doctorPermissions, .ls, .focusInfo, .quit:
             return [:]
         case .groupNew(let name, let launch, let background):
             var object = launchParams(launch, background: background)
@@ -376,6 +405,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorPermissions: return .doctorPermissions
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .quit: return .quit
         case .groupNew:
             guard case .string(let name)? = object?["name"] else { throw invalid("invalid name") }
             let launch = try decodedLaunch(object?["launch"])

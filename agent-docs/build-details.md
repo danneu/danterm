@@ -76,6 +76,19 @@ Themes are tracked JSON under `themes/`, refreshed by
 upstream archive is named `ghostty-themes.tgz`, which is an upstream naming
 detail, not a build dependency.
 
+## Stale build plans across the local packages
+
+Adding a new `.swift` file to one local package does not invalidate the build
+plan of a package that depends on it. The new file compiles when you build its
+own package, while the dependent package still fails with `cannot find type X in
+scope` -- so the error names the type you just added and points at the wrong
+cause. `lib/DanTermCore` depends on `lib/DanTermProtocol`, so a new type in
+`DanTermProtocol` is where this comes up.
+
+Force a re-plan by touching the *dependent's* manifest, such as `touch
+lib/DanTermCore/Package.swift`. Touching the manifest of the package that gained
+the file does nothing, because that package's own plan was never stale.
+
 ## Requirements
 
 - Xcode / the Swift 6.2 toolchain. `Package.swift` sets

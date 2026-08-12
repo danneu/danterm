@@ -25,6 +25,17 @@ public struct DanTermInstanceIdentity: Equatable, Sendable {
         return slot
     }
 
+    /// True only for a slot the launcher pool hands out, 1 through 8.
+    ///
+    /// This is the allowlist behind the `quit` IPC method: an agent may end an
+    /// instance it claimed from the pool, and nothing else. Production, the
+    /// canonical `DanTerm Dev.app` (slot 0), and every identifier outside the
+    /// scheme fall outside it without anyone naming them.
+    public var isLauncherPoolSlot: Bool {
+        guard let developmentSlot else { return false }
+        return developmentSlot != 0
+    }
+
     /// The user-visible application name for a fixed development slot.
     public var displayName: String {
         guard let developmentSlot, developmentSlot != 0 else {

@@ -72,6 +72,25 @@ struct CLIParserTests {
         #expect(command.outputMode == .json)
     }
 
+    @Test("quit parses as a target-free command with no output")
+    func quitParsesAsTargetFreeCommand() throws {
+        let command = try parseCLI(["quit"])
+
+        #expect(command.request == .quit)
+        #expect(command.method == IpcRequestMethod.quit.rawValue)
+        #expect(command.params.isEmpty)
+        #expect(command.outputMode == .none)
+    }
+
+    @Test("quit takes no arguments")
+    func quitTakesNoArguments() {
+        let error = #expect(throws: CLIParseError.self) {
+            try parseCLI(["quit", "--force"])
+        }
+
+        #expect(error?.message == "usage: danterm quit")
+    }
+
     @Test("global socket target rejects unusable forms", arguments: [
         (["--socket"], "usage: danterm --socket <path> <command> [args]"),
         (["--socket", "", "ls"], "--socket requires a non-empty path"),

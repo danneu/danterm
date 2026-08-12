@@ -12,6 +12,7 @@
 import Foundation
 import Synchronization
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -29,10 +30,15 @@ func makeModel(env: CoreEnv) -> AppModel {
     )
 }
 
+/// The identity a test gets unless it asks for another: production, so a test
+/// that never thinks about identity cannot accidentally hold a privilege.
 func makeTestEnv(
     now: Date = Date(timeIntervalSince1970: 1_700_000_000),
     idSequence: [UUID] = [],
-    homeDirectory: String = "/Users/testhome"
+    homeDirectory: String = "/Users/testhome",
+    instanceIdentity: DanTermInstanceIdentity = DanTermInstanceIdentity(
+        bundleIdentifier: "com.danneu.danterm"
+    )
 ) -> CoreEnv {
     // CoreEnv's seams are @Sendable, so the cursor into idSequence cannot be a
     // captured `var`. Tests drive it from one thread; the mutex is what lets the
@@ -51,7 +57,8 @@ func makeTestEnv(
             return idSequence[next]
         },
         now: { now },
-        homeDirectory: { homeDirectory }
+        homeDirectory: { homeDirectory },
+        instanceIdentity: { instanceIdentity }
     )
 }
 
