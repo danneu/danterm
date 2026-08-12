@@ -173,7 +173,7 @@ in itself.
 |        | [S31](#s31) | 15    | 3   | 5   | scrollback     | medium | Give the record side tables one owner that maintains its own byte charge                                                |
 |        | [S32](#s32) | 15    | 3   | 5   | scrollback     | small  | Collapse the seven copy-pasted task-local counters and move them out of the store file                                  |
 |        | [S33](#s33) | 15    | 3   | 5   | sidebar        | medium | Give the sidebar reconcile pipeline one implementation the UI tests drive                                               |
-|        | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                              |
+| cfcbb40f | [S34](#s34) | 15    | 3   | 5   | terminal-core  | medium | Give anchored ranges one registry instead of six hand-written enumerations                                            |
 |        | [S35](#s35) | 15    | 3   | 5   | terminal-views | medium | Stop re-implementing grid and cell geometry in the UI-test shim                                                         |
 |        | [S36](#s36) | 15    | 3   | 5   | tests          | small  | Retire the whole-AppModel golden snapshot; it ratchets on behavior-preserving refactors                                 |
 |        | [S37](#s37) | 15    | 3   | 5   | tests          | small  | Move the nine frozen research probes out of the default TerminalCore test target                                        |
