@@ -67,13 +67,19 @@ func reduceSession(_ session: inout SessionModel, report: SessionReport) {
     case .integrationReady:
         session.integration = .ready
 
+    // Progress is owned by the foreground command that reported it, so both
+    // command boundaries end it. Only an explicit `OSC 9;4;0` used to clear it,
+    // which left a pane pinned at the last value a killed or buggy program
+    // reported, with nothing able to reset it.
     case .commandStarted(let command):
         session.command = .running(command)
         session.lastCommand = command
+        session.progress = nil
 
     case .commandEnded:
         guard case .running = session.command else { return }
         session.command = .idle
+        session.progress = nil
 
     case .connectionDeclared(let connection):
         session.connection = connection

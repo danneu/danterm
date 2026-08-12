@@ -80,6 +80,33 @@ struct PaneLifecycleReducerTests {
         #expect(state.agent == .attached(session: session, activity: .waiting))
     }
 
+    // Intent: reported progress belongs to the foreground command that emitted
+    // it, so a command boundary in either direction ends it.
+    // Why it exists: progress was only ever cleared by an explicit `OSC 9;4;0`.
+    // A program that exited without sending one -- killed, crashed, or just
+    // buggy -- pinned the pane's indicator at its last reported value forever,
+    // with no command, menu item, or CLI able to reset it.
+    // Scenario: a Claude pane reported 0% and was interrupted before it could
+    // clear, leaving an idle pane showing an active progress bar.
+    @Test("a command boundary ends the progress that command reported")
+    func commandBoundariesEndReportedProgress() {
+        var state = reduce([
+            .commandStarted("claude"),
+            .progress(.set(percent: 0)),
+            .commandEnded(exitStatus: 130),
+        ])
+
+        #expect(state.progress == nil)
+
+        // A command that dies without a reported end still cannot leak its
+        // progress into the next one.
+        reduceSession(&state, report: .commandStarted("just test"))
+        reduceSession(&state, report: .progress(.indeterminate))
+        reduceSession(&state, report: .commandStarted("just test-ui"))
+
+        #expect(state.progress == nil)
+    }
+
     @Test("connection declarations assign the whole state and identical reports are steady")
     func connectionDeclarationsAreAssignments() {
         let remote = RemoteSession(user: "dan", host: "caja")
