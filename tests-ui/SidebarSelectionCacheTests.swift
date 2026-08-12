@@ -411,7 +411,7 @@ private func applyInitialSidebarModel(
         computeSidebarRowOps(old: nil, new: projection),
         model: model,
         projection: projection,
-        clearActiveRename: false)
+        renameTargetToEnd: nil)
     materializeSidebarRows(sidebar, outline: outline)
     return projection
 }
@@ -445,7 +445,7 @@ private func applySidebarTransitionResult(
         computeSidebarRowOps(old: oldProjection, new: newProjection),
         model: newModel,
         projection: newProjection,
-        clearActiveRename: false)
+        renameTargetToEnd: nil)
     if materializeRows {
         materializeSidebarRows(sidebar, outline: outline)
     }

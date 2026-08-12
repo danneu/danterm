@@ -730,7 +730,7 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
 /// is inline-edited, a `reload` of *that* row is suppressed -- its title/attrs are owned
 /// by the live field editor -- but every structural op still applies: a tab being
 /// renamed can be closed or moved by another `send()`. `clearRename` tells the executor
-/// to end the now-orphaned edit (and clear the sidecar) when the edited row is removed
+/// to end the now-orphaned view-owned edit when the edited row is removed
 /// (absent from `new`), moved (a re-insert op carries its id), hidden by its group
 /// collapsing (collapseItem tears the cell down with no field-editor delegate callback,
 /// which would strand `isEditable = true` into the reuse pool), or caught in a reloadAll

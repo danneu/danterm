@@ -125,10 +125,6 @@ class AppRuntime {
     private let configStore: DanTermConfigStore
     private let notificationAuthorizationPolicy: NotificationAuthorizationPolicy
     private var pendingConfigError: Error?
-    // Ephemeral view state the reconciler reads as a second input (see ViewLocalState).
-    // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
-    // read only by reconcileSidebar's rename guard.
-    var viewLocalState = ViewLocalState()
     let terminalBackend: SwiftTerminalBackend
     var sessions: [PaneId: any TerminalSession] = [:]
     // Runtime lifetime roots for pane chrome. A container only reparents wrappers.
