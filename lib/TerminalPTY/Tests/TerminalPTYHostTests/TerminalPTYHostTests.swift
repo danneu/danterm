@@ -733,8 +733,8 @@ struct TerminalPTYHostTests {
         // Scenario: a megabyte is submitted well after its originating event occurred, to a
         //   child that drains it over many owner turns.
         let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
-        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+        await host.start(makeLaunchInput(command: drainingCommand))
+        #expect(await host.waitForOutput(containing: drainingMarker))
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         let origin = DispatchTime.now().uptimeNanoseconds
@@ -791,8 +791,8 @@ struct TerminalPTYHostTests {
         //   as a measurement rather than as the absence of one.
         // Scenario: a child asks for the cursor position and the user types straight after.
         let host = try makeHost(captureTransitions: false)
-        await host.start(makeLaunchInput(command: "stty raw -echo; printf '__DRAINING__\\n'; exec cat > /dev/null"))
-        #expect(await host.waitForOutput(containing: Array("__DRAINING__".utf8)))
+        await host.start(makeLaunchInput(command: drainingCommand))
+        #expect(await host.waitForOutput(containing: drainingMarker))
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
         host.deliverOutputForTesting(Array("\u{1B}[6n".utf8))
@@ -803,10 +803,16 @@ struct TerminalPTYHostTests {
         let events = host.fencedFlightRecording(from: submission)
             .events
             .filter { writtenBytes($0) != nil }
+        // Row 4 column 13: `stty raw` clears ONLCR, so the newline that ends
+        // the marker line moves the cursor down without returning it to
+        // column 1. The coordinates stay exact because they are what notices
+        // the child printing something this test did not ask for -- and the
+        // screen rides along with a failure, so the next such surprise
+        // explains itself instead of arriving as a byte array.
         #expect(events.compactMap(writtenBytes) == [
-            Array("\u{1B}[2;1R".utf8),
+            Array("\u{1B}[4;13R".utf8),
             Array("hi".utf8),
-        ])
+        ], "screen when the cursor was reported:\n\(occupiedScreenText(host))")
         #expect(events.first?.originElapsedNanoseconds == nil)
         #expect(events.last?.originElapsedNanoseconds != nil)
 
@@ -2211,6 +2217,37 @@ private func expectBytes(
 
 private func hexBytes(_ bytes: some Sequence<UInt8>) -> String {
     bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+}
+
+/// A child that prints one marker line and then drains everything sent to it,
+/// for the flight-recording tests: they need a child that writes nothing of its
+/// own once they start measuring.
+///
+/// `printf` assembles the marker from a format and an argument rather than
+/// carrying it whole, so the marker cannot appear in the command line. The line
+/// discipline echoes that command line before `stty -echo` takes effect, and a
+/// marker spelled out there would be matched in the echo -- so the wait would
+/// return before the child had printed anything, leaving every later step to
+/// race the rest of its startup output.
+private let drainingCommand =
+    "stty raw -echo; printf '__DRAI%s__\\n' NING; exec cat > /dev/null"
+
+/// The line `drainingCommand` prints once its startup output is complete.
+private let drainingMarker = Array("__DRAINING__".utf8)
+
+/// The screen with its blank padding removed, for a failure message that has to
+/// stay readable. A raw `screenText` is 24 rows of 80 columns, which buries the
+/// one or two lines a child actually printed.
+private func occupiedScreenText(_ host: TerminalPTYHost) -> String {
+    let rows = host.fencedSnapshot().screenText
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map { $0.reversed().drop { $0 == " " }.reversed() }
+        .map(String.init)
+    guard let last = rows.lastIndex(where: { !$0.isEmpty }) else { return "(blank screen)" }
+    return rows[...last]
+        .enumerated()
+        .map { "  row \($0.offset + 1): \($0.element)" }
+        .joined(separator: "\n")
 }
 
 /// The transmitted payload of one recorded input-direction transfer; nil for every other event.
