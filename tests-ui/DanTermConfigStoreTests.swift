@@ -1,5 +1,6 @@
 // Filesystem integration coverage for DanTerm's atomic JSON config transaction.
 import Foundation
+import DanTermProtocol
 
 @MainActor
 func danTermConfigStoreTests() {
