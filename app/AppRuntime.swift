@@ -389,18 +389,12 @@ class AppRuntime {
     func send(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
         let commands = update(&model, msg)
-        // Command-phase split: most commands run before reconcile(); the few that
-        // target a view the reconciler creates (Stage 4: only .focusSearchField,
-        // whose search field reconcilePaneChrome builds) run after. See
-        // Command.isPostReconcile.
-        for command in commands where !command.isPostReconcile {
+        for command in commands {
             perform(command)
         }
-        let emitsPostReconcile = commands.contains { $0.isPostReconcile }
         switch reconcileDecision(
             for: msg,
-            coalescedSweepPending: coalescedReconcileTimer != nil,
-            emitsPostReconcile: emitsPostReconcile
+            coalescedSweepPending: coalescedReconcileTimer != nil
         ) {
         case .reconcileNow:
             cancelCoalescedReconcile()
@@ -410,10 +404,6 @@ class AppRuntime {
         case .coalesceIntoPending:
             break
         }
-        for command in commands where command.isPostReconcile {
-            perform(command)
-        }
-
         scheduleLightCheckpointIfNeeded()
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
@@ -500,12 +490,9 @@ class AppRuntime {
         }
     }
 
-    /// Make the pane first responder; AppKit focus is the reparent/display-link
-    /// recovery path for terminal activation.
-    /// See docs/design/2026-05-27-terminal-focus-display-link.md.
+    /// Record pane focus selected from AppKit chrome; reconciliation applies it.
     func focusPaneSession(_ paneId: PaneId) {
-        guard let session = sessions[paneId] else { return }
-        window?.makeFirstResponder(session.hostView)
+        send(.paneBecameFirstResponder(paneId: paneId))
     }
 
     var ipcSocketPath: URL? {
@@ -902,11 +889,6 @@ class AppRuntime {
         case .focusSession(let paneId, let focused):
             sessions[paneId]?.setFocused(focused)
 
-        case .makeFirstResponder(let paneId):
-            if let session = sessions[paneId] {
-                window?.makeFirstResponder(session.hostView)
-            }
-
         case .sendNotification(let alertId, let paneId, let title, let subtitle, let body):
             let content = UNMutableNotificationContent()
             content.title = title
@@ -1137,11 +1119,6 @@ class AppRuntime {
 
         case .sendStartSearch(let paneId):
             sessions[paneId]?.startSearch()
-
-        case .focusSearchField(let paneId):
-            if let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField {
-                window?.makeFirstResponder(field)
-            }
 
         case .sendSearchNeedle(let paneId, let needle):
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
@@ -1683,11 +1660,7 @@ class AppRuntime {
             existing.removeFromSuperview()
             themeBrowserView = nil
             reconcileThemeBrowser()
-            // Restore focus to the focused pane's session.
-            if let tab = selectedTab(in: model),
-               let session = sessions[tab.focusedPaneId] {
-                window?.makeFirstResponder(session.hostView)
-            }
+            reconcilePaneFocus()
             return
         }
         guard let contentArea = contentArea else { return }
@@ -2054,36 +2027,6 @@ class AppRuntime {
     /// Dismisses only a tab-scoped popover when a live tree edit preserves pane anchors.
     func dismissStrandedTabPopover() {
         dismissTabTodoPopoverPair()
-    }
-
-    /// Establish mount-time focus for a just-(re)built or newly-shown selected container.
-    /// The folded `finalizeTabSelection` focus, minus the parts the reconciler now owns:
-    /// the focus-border loop (reconcileFocusBorders), the toolbar refresh, and the
-    /// search-overlay rehydrate (both reconcilePaneChrome).
-    /// reconcile() calls this *after* reconcilePaneChrome so the search field exists when an
-    /// active-search pane needs it. Scoped to the single selected container (never per built
-    /// container) so eager-mounted hidden tabs don't fight for first responder.
-    func applyMountTimeFocus(_ tabId: TabId?) {
-        guard let tabId = tabId,
-              let tab = tabById(tabId, in: model),
-              tabContainers[tabId] != nil else { return }
-        let browserFocus = themeBrowserView?.captureFocusTarget()
-        let focusedId = tab.focusedPaneId
-        // Focus the focused pane's session -- unless the theme browser owns focus or the
-        // pane has an active search (whose field is focused just below instead).
-        if browserFocus == nil, model.searchState[focusedId] == nil,
-           let focusedSession = sessions[focusedId] {
-            window?.makeFirstResponder(focusedSession.hostView)
-        }
-        // Active search on the focused pane: focus its pane-chrome search field.
-        if browserFocus == nil, model.searchState[focusedId] != nil,
-           let field = findPaneWrapper(for: focusedId)?.searchOverlay?.searchField {
-            window?.makeFirstResponder(field)
-        }
-        // The theme browser owns its own filter/focus; content updates via reconcileThemeBrowser.
-        if let browser = themeBrowserView {
-            if let target = browserFocus { browser.restoreFocus(target) }
-        }
     }
 
     // MARK: - Alerts Popover

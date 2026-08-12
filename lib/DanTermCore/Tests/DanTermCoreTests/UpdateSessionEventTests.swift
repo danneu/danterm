@@ -3,7 +3,7 @@
 // alert + sendNotification, with per-kind throttling), sessionCreationFailed
 // cleanup (single + split tab, terminate vs fallback), session metadata
 // updates (title/cwd/progress), and alert/command-event coalescing policy
-// against post-reconcile forcing.
+// across pending and inline scheduling states.
 import Foundation
 import Testing
 
@@ -166,10 +166,9 @@ import Testing
     func reconcileDecisionCoalescesOnlyEligibleMessages() throws {
         // Intent: high-frequency split-ratio, search-count, background alert,
         //   command-event, and connection-declaration messages classify as
-        //   coalesce-eligible while post-reconcile commands still force inline.
+        //   coalesce-eligible while all other messages remain inline.
         // Why it exists: pins reconcile coalescing policy against regressions in
-        //   message classification, pending-state handling, and post-reconcile
-        //   command forcing.
+        //   message classification and pending-state handling.
         // Scenario: divider drags, streaming search scans, bell/notification
         //   storms, and shell-integration command loops emit bursts whose empty
         //   or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
@@ -204,20 +203,12 @@ import Testing
 
         for msg in coalescedMessages {
             #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: false) ==
+                reconcileDecision(for: msg, coalescedSweepPending: false) ==
                 .scheduleCoalesced
             )
             #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: false) ==
+                reconcileDecision(for: msg, coalescedSweepPending: true) ==
                 .coalesceIntoPending
-            )
-            #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: true) ==
-                .reconcileNow
-            )
-            #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: true) ==
-                .reconcileNow
             )
         }
 
@@ -231,13 +222,11 @@ import Testing
         )
         #expect(reconcileDecision(
             for: commandEnd,
-            coalescedSweepPending: false,
-            emitsPostReconcile: false
+            coalescedSweepPending: false
         ) == .scheduleCoalesced)
         #expect(reconcileDecision(
             for: promptDeclaration,
-            coalescedSweepPending: true,
-            emitsPostReconcile: false
+            coalescedSweepPending: true
         ) == .coalesceIntoPending)
 
         let inlineMessages: [Msg] = [
@@ -249,67 +238,13 @@ import Testing
         ]
         for msg in inlineMessages {
             #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: false) ==
+                reconcileDecision(for: msg, coalescedSweepPending: false) ==
                 .reconcileNow
             )
             #expect(
-                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: false) ==
+                reconcileDecision(for: msg, coalescedSweepPending: true) ==
                 .reconcileNow
             )
-        }
-    }
-
-    @Test("coalesce-eligible messages emit no post-reconcile commands")
-    func coalesceEligibleMessagesEmitNoPostReconcileCommands() {
-        // Intent: coalesce-eligible metadata, alert, and command events emit no
-        //   post-reconcile commands so they can ride the coalesced sweep.
-        // Why it exists: pins the "no post-reconcile in coalesced messages" rule
-        //   the coalescer relies on.
-        // Scenario: spec-first coalesce eligibility -- iterate focused and
-        //   unfocused-pane metadata Msgs plus background alert and command Msgs;
-        //   none emit post-reconcile commands.
-        var focusedModel = makeModel()
-        createTab(&focusedModel)
-        let focusedPane = focusedModel.groups[0].tabs[0].focusedPaneId
-
-        var unfocusedModel = makeModel()
-        createTab(&unfocusedModel)
-        let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
-        update(&unfocusedModel, .splitFocusedPane(direction: .horizontal))
-        let unfocusedSessionId = unfocusedModel.pane(unfocusedPane)!.session!.id
-
-        let scenarios: [(Msg, AppModel)] = [
-            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .title("vim")), focusedModel),
-            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .cwd("/tmp")), focusedModel),
-            (.sessionReport(sessionId: sessionId(for: focusedPane, in: focusedModel), report: .progress(.set(percent: 50))), focusedModel),
-            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .title("htop")), unfocusedModel),
-            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .cwd("/var/tmp")), unfocusedModel),
-            (.sessionReport(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel), report: .progress(.indeterminate)), unfocusedModel),
-            (.sessionBell(sessionId: sessionId(for: unfocusedPane, in: unfocusedModel)), unfocusedModel),
-            (.sessionNotification(
-                sessionId: sessionId(for: unfocusedPane, in: unfocusedModel),
-                title: "build",
-                body: "done"
-            ), unfocusedModel),
-            (.sessionReport(
-                sessionId: unfocusedSessionId,
-                report: .commandStarted("make")
-            ), unfocusedModel),
-            (.sessionReport(
-                sessionId: unfocusedSessionId,
-                report: .commandEnded(exitStatus: 0)
-            ), unfocusedModel),
-            (.sessionReport(
-                sessionId: unfocusedSessionId,
-                report: .connectionDeclared(.remote(identity: nil))
-            ), unfocusedModel)
-        ]
-
-        for (msg, seedModel) in scenarios {
-            var model = seedModel
-            let commands = update(&model, msg)
-            #expect(commands.allSatisfy { $0.isPostReconcile == false },
-                "coalesced update should not emit post-reconcile commands")
         }
     }
 

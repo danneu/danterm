@@ -538,46 +538,37 @@ import Testing
 
     // MARK: - sidebarRenameEnded update handler
 
-    @Test("sidebarRenameEnded restores focus to active pane")
-    func sidebarRenameEndedRestoresFocusToActivePane() {
-        // Intent: sidebarRenameEnded emits makeFirstResponder for the
-        //   currently focused pane.
-        // Why it exists: pins the focus-restore handler.
+    @Test("sidebarRenameEnded leaves active pane as desired focus")
+    func sidebarRenameEndedLeavesActivePaneDesired() {
+        // Intent: sidebarRenameEnded leaves the active pane as the model target.
+        // Why it exists: the reconciler restores focus after AppKit ends editing.
         // Scenario: spec-first focus-restore.
         var model = makeModel()
         createTab(&model)
         let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
 
         let commands = update(&model, .sidebarRenameEnded)
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == focusedPaneId {
-                return true
-            }
-            return false
-        }, "should emit makeFirstResponder for focused pane")
+        #expect(commands.isEmpty)
+        #expect(desiredPaneFocus(in: model) == .terminal(focusedPaneId))
     }
 
-    @Test("renameTab does not emit makeFirstResponder")
-    func renameTabDoesNotEmitMakeFirstResponder() {
-        // Intent: renameTab itself does NOT restore focus (the
-        //   sidebar's click-away owns the focus restore).
-        // Why it exists: pins the no-steal rule.
+    @Test("renameTab emits no commands")
+    func renameTabEmitsNoCommands() {
+        // Intent: renameTab changes only model state.
+        // Why it exists: pins the declarative view-sync boundary.
         // Scenario: spec-first no-steal.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
         let commands = update(&model, .renameTab(id: tabId, name: "New"))
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "renameTab should not restore focus (would steal from click-away)")
+        #expect(commands.isEmpty)
     }
 
-    @Test("renameGroup does not emit makeFirstResponder")
-    func renameGroupDoesNotEmitMakeFirstResponder() {
-        // Intent: renameGroup itself does NOT restore focus.
-        // Why it exists: pins the symmetric no-steal rule.
+    @Test("renameGroup emits no commands")
+    func renameGroupEmitsNoCommands() {
+        // Intent: renameGroup changes only model state.
+        // Why it exists: pins the symmetric declarative boundary.
         // Scenario: spec-first no-steal group.
         var model = makeModel()
         createTab(&model)
@@ -585,10 +576,7 @@ import Testing
         let workId = model.groups[1].id
 
         let commands = update(&model, .renameGroup(id: workId, name: "Projects"))
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "renameGroup should not restore focus (would steal from click-away)")
+        #expect(commands.isEmpty)
     }
 
     // MARK: - Snapshot

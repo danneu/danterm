@@ -61,6 +61,7 @@ enum Msg {
     case toggleGroupCollapse(groupId: GroupId)
     case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
+    case searchFieldBecameFirstResponder(paneId: PaneId)
     // nil paneId = act on the selected tab (menubar path); non-nil = act on the
     // pane's own tab, so a stale context menu still targets the pane it was built for.
     case toggleZoomPane(paneId: PaneId?)
@@ -210,13 +211,10 @@ extension Msg {
     /// remote/agent toolbar + per-pane theme a command event clears). update()
     /// still runs immediately, so the model stays current and the final value is
     /// never dropped; only the whole-model view sweep is deferred -- and the
-    /// side-effecting commands these emit (such as .sendNotification) are not
-    /// post-reconcile, so they still run inline. The runtime evaluates this
+    /// side-effecting commands these emit (such as .sendNotification) still run
+    /// inline. The runtime evaluates this
     /// on the pane-scoped message, so command and activity transitions opt in
-    /// here while attach/detach transitions stay inline. Eligibility is
-    /// necessary but not sufficient: reconcileDecision still forces an inline
-    /// reconcile when update() emitted a post-reconcile command, so opting a message
-    /// in here is always safe.
+    /// here while attach/detach transitions stay inline.
     var coalescesReconcile: Bool {
         switch self {
         // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
@@ -232,7 +230,7 @@ extension Msg {
         // Background-pane alert badges. A bell/notify storm (spinner, `printf '\a'`
         // loop, OSC 9 burst) fires one full sweep per event; the alert is inserted
         // into the model inline (badge never lost) and the desktop notification
-        // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
+        // rides an inline .sendNotification, so only the cosmetic badge
         // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
         // reconcilePaneChrome unread-alert counts) defers.
         case .sessionBell, .sessionNotification:

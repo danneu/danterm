@@ -103,10 +103,7 @@ import Testing
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == tabId, "should navigate to alert's tab")
         #expect(model.alerts[0].isUnread == false, "alert should be marked read")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
-            return false
-        }, "should focus alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneId))
         #expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
@@ -192,13 +189,10 @@ import Testing
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let commands = update(&model, .activateAlert(alertId: alertId))
+        _ = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == tabId, "should still navigate to alert's tab")
         #expect(model.alerts[0].isUnread == true, "manual mode: activateAlert should NOT mark alert read")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
-            return false
-        }, "should still focus alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneId))
     }
 
     @Test("testActivateStaleAlertMarksReadButNoNavigation")
@@ -219,10 +213,6 @@ import Testing
 
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.alerts[0].isUnread == false, "should mark read")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "should not navigate")
         #expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -502,12 +492,9 @@ import Testing
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.selectedTabId == tab1Id, "should switch to tab containing alert pane")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus the alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testGoToMostRecentAlertPaneSkipsStaleAlert")
@@ -534,11 +521,8 @@ import Testing
             title: "DanTerm", body: "valid", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should navigate to the first valid alert's pane")
+        _ = update(&model, .goToMostRecentAlertPane)
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
         _ = paneB
     }
 
@@ -576,12 +560,9 @@ import Testing
             title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
 
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
-            return false
-        }, "should focus paneB")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneB))
 
         #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
             "tab's focusedPaneId should be paneB after navigation")
@@ -615,12 +596,9 @@ import Testing
             title: "DanTerm", body: "focused", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
 
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
-            return false
-        }, "should focus paneB")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneB))
 
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == false,
             "focused pane alert should be cleared")
@@ -663,12 +641,9 @@ import Testing
             title: "DanTerm", body: "newer current sibling", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.selectedTabId == tab1Id, "should jump to the other tab")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus paneA, not the newer current-tab sibling")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true,
             "destination alert should remain unread in manual mode")
         #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
@@ -701,12 +676,9 @@ import Testing
 
         createTab(&model)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.selectedTabId == tab2Id, "should navigate to pane's current tab, not original tab")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus the alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testGoToMostRecentAlertPaneSkipsReadAlerts")
@@ -735,12 +707,9 @@ import Testing
             title: "DanTerm", body: "unread", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.selectedTabId == tab1Id, "should navigate to the unread alert's tab, skipping read alert")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus the unread alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testGoToMostRecentAlertPaneAcksCurrentTabFirst")
@@ -768,14 +737,11 @@ import Testing
             title: "DanTerm", body: "tab2 alert", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "current tab's alert should be acked")
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "destination alert should still be unread")
         #expect(model.selectedTabId == tab1Id, "should navigate to tab1")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus paneA")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts")
@@ -796,10 +762,7 @@ import Testing
 
         let commands = update(&model, .goToMostRecentAlertPane)
         #expect(model.alerts[0].isUnread == false, "alert should be acked")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "no unread alerts remained after acking current tab")
+        #expect(commands.isEmpty, "no unread alerts remained after acking current tab")
     }
 
     @Test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs")
@@ -841,10 +804,7 @@ import Testing
 
         let commands = update(&model, .goToMostRecentAlertPane)
         #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "third press should not navigate")
+        #expect(commands.isEmpty, "third press should not navigate")
     }
 
     @Test("testGoToMostRecentAlertPaneAcksAllPanesInSplit")
@@ -878,16 +838,13 @@ import Testing
             title: "DanTerm", body: "split pane C", createdAt: Date(), isUnread: true
         ), at: 2)
 
-        let commands = update(&model, .goToMostRecentAlertPane)
+        _ = update(&model, .goToMostRecentAlertPane)
         #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
             "focused pane's alert should be acked")
         #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
             "non-focused sibling alert should also be acked")
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should navigate to paneA")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     // MARK: - filteredAlerts / alertsEmptyText Tests

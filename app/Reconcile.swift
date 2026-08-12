@@ -67,21 +67,19 @@ struct ReconcilerCaches {
 }
 
 extension AppRuntime {
-    /// Reconcile derived AppKit/session state from the model. Runs after the
-    /// pre-reconcile command phase in send() and at the end of a restore commit.
+    /// Reconcile derived AppKit/session state from the model. Runs after commands
+    /// in send() and at the end of a restore commit.
     /// Ordered containers -> existence -> pane config -> content/chrome -> occlusion:
     /// containers detach removed wrappers before session teardown releases their hosts;
     /// chrome then renders into the stable surviving wrappers, and occlusion stays last.
     func reconcile() {
-        let mountFocusTab = reconcileContainers()  // eager: selected visible, rest mounted+hidden
+        reconcileContainers()               // eager: selected visible, rest mounted+hidden
         reconcileSessionExistence()         // release hosts only after containers detach dead wrappers
         reconcilePaneConfig()
         let alertTally = unreadAlertTally(for: model)
         reconcileFocusBorders(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
-        // Mount-time focus runs after pane chrome so a newly built active-search pane
-        // has its search field before applyMountTimeFocus targets it.
-        applyMountTimeFocus(mountFocusTab)
+        reconcilePaneFocus()                 // after chrome creates any desired search field
         reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
         reconcileSwitcher(tally: alertTally)      // single-optional MRU projection; nil (no mruCycle) -> orderOut
@@ -105,11 +103,10 @@ extension AppRuntime {
     }
 
     /// Container pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
-    /// mounted, the selected one visible, the rest hidden). Returns the tab whose
-    /// container was just built or newly shown -- the sole container that gets
-    /// mount-time focus. Existing containers receive keyed structural patches.
-    func reconcileContainers() -> TabId? {
-        guard contentArea != nil else { return nil }
+    /// mounted, the selected one visible, the rest hidden). Existing containers
+    /// receive keyed structural patches.
+    func reconcileContainers() {
+        guard contentArea != nil else { return }
         let new = desiredContainerShapes(in: model)
         let ops = computeContainerOps(old: caches.containerShape, new: new, selectedTabId: model.selectedTabId)
 
@@ -129,11 +126,7 @@ extension AppRuntime {
             dismissStrandedTabPopover()
         }
 
-        // Apply ops (remove -> build/patch/zoom -> setVisible). Track whether the selected
-        // container was activated (built or shown-from-hidden) so mount-time focus
-        // runs only then -- never per hidden tab, and never on a background-only reconcile
-        // (so a pane click does not refight first responder).
-        var activatedSelected = false
+        // Apply ops (remove -> build/patch/zoom -> setVisible).
         for op in ops {
             switch op {
             case .remove(let tabId):
@@ -142,7 +135,6 @@ extension AppRuntime {
                 if let tab = tabById(tabId, in: model) {
                     _ = buildAndInsertContainer(for: tab)  // visibility set by the following setVisible op
                 }
-                if tabId == model.selectedTabId { activatedSelected = true }
             case .patch(let tabId, let patch):
                 guard let tab = tabById(tabId, in: model),
                       let container = tabContainers[tabId] else { break }
@@ -151,14 +143,11 @@ extension AppRuntime {
                 tabContainers[tabId]?.setZoomedPane(paneId)
             case .setVisible(let tabId, let visible):
                 guard let container = tabContainers[tabId] else { break }
-                let wasHidden = container.isHidden
                 container.isHidden = !visible
                 if visible { container.ensureLaidOut() }
-                if tabId == model.selectedTabId, visible, wasHidden { activatedSelected = true }
             }
         }
         caches.containerShape = new
-        return activatedSelected ? model.selectedTabId : nil
     }
 
     /// Push each pane's (focused, bell) ring to its pane wrapper, diffed against

@@ -1201,10 +1201,9 @@ import DanTermProtocol
         #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    @Test("pane.focus selects target tab and requests first responder")
-    func paneFocusSelectsTabAndRequestsFirstResponder() throws {
-        // Intent: pane.focus selects the target's tab and emits
-        //   makeFirstResponder for the pane.
+    @Test("pane.focus selects target tab and projects its responder")
+    func paneFocusSelectsTabAndProjectsResponder() throws {
+        // Intent: pane.focus selects the target's tab and records the pane target.
         // Why it exists: pins the focus-cross-tab path.
         // Scenario: spec-first cross-tab focus.
         var model = makeModel()
@@ -1223,10 +1222,7 @@ import DanTermProtocol
         let reply = try requireIpcReply(commands)
         #expect(reply["tab"]?["id"]?.asString == targetTabId.rawValue.uuidString)
         #expect(reply["tab"]?["focusedPaneId"]?.asString == targetPaneId.rawValue.uuidString)
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let paneId) = $0 { return paneId == targetPaneId }
-            return false
-        }, "expected focus command")
+        #expect(desiredPaneFocus(in: model) == .terminal(targetPaneId))
     }
 
     @Test("pane.focus replies with same-tab focusedPaneId synchronously")

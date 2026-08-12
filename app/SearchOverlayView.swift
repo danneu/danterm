@@ -181,6 +181,11 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
         runtime?.send(.searchNeedleChanged(paneId: paneId, needle: searchField.stringValue))
     }
 
+    // NSSearchFieldDelegate: record AppKit-initiated ownership changes.
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        runtime?.send(.searchFieldBecameFirstResponder(paneId: paneId))
+    }
+
     // Handle Escape (close) and Enter (navigate next/prev with Shift).
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {

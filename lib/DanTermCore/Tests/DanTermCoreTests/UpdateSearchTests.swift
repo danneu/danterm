@@ -64,11 +64,10 @@ import Testing
         #expect(commands.isEmpty, "expected no commands without search state")
     }
 
-    @Test("searchStarted creates SearchModel and emits focus")
-    func searchStartedCreatesSearchModelEmitsFocus() {
-        // Intent: searchStarted installs searchState for the pane and
-        //   emits focusSearchField.
-        // Why it exists: pins the callback-side wiring.
+    @Test("searchStarted creates field-owned SearchModel")
+    func searchStartedCreatesFieldOwnedSearchModel() {
+        // Intent: searchStarted installs searchState with the field as owner.
+        // Why it exists: pins the model-owned focus policy on activation.
         // Scenario: spec-first backend start.
         var model = makeModel()
         createTab(&model)
@@ -77,10 +76,8 @@ import Testing
         let commands = update(&model, .searchStarted(paneId: paneId, needle: ""))
         #expect(model.searchState[paneId] != nil, "search state should exist")
         #expect(model.searchState[paneId]?.needle == "")
-        #expect(hasEffect(commands) {
-            if case .focusSearchField(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected focusSearchField")
+        #expect(model.searchState[paneId]?.focusOwner == .field)
+        #expect(commands.isEmpty)
     }
 
     @Test("searchStarted with needle sets needle in model")
@@ -95,22 +92,21 @@ import Testing
         #expect(model.searchState[paneId]?.needle == "hello")
     }
 
-    @Test("searchStarted when already active updates needle and re-emits focus")
-    func searchStartedWhileActiveUpdatesNeedleRefocuses() {
+    @Test("searchStarted when already active updates needle and reclaims field ownership")
+    func searchStartedWhileActiveUpdatesNeedleAndOwner() {
         // Intent: re-entering searchStarted on an active pane updates
-        //   the needle and re-emits focusSearchField.
+        //   the needle and restores field ownership.
         // Why it exists: pins the idempotent re-entry path.
         // Scenario: spec-first re-entry update.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "first"))
+        update(&model, .paneBecameFirstResponder(paneId: paneId))
         let commands = update(&model, .searchStarted(paneId: paneId, needle: "second"))
         #expect(model.searchState[paneId]?.needle == "second")
-        #expect(hasEffect(commands) {
-            if case .focusSearchField(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected focusSearchField on re-entry")
+        #expect(model.searchState[paneId]?.focusOwner == .field)
+        #expect(commands.isEmpty)
     }
 
     @Test("searchNeedleChanged updates needle and clears the stale match status")
@@ -152,10 +148,10 @@ import Testing
         }, "expected sendSearchNavigate")
     }
 
-    @Test("endSearch removes state and emits sendEnd + makeFirstResponder")
-    func endSearchRemovesStateEmitsEndAndFirstResponder() {
-        // Intent: endSearch clears searchState and emits sendEndSearch +
-        //   makeFirstResponder.
+    @Test("endSearch removes state and leaves terminal as desired focus")
+    func endSearchRemovesStateAndDesiresTerminal() {
+        // Intent: endSearch clears searchState, emits sendEndSearch, and lets
+        //   the focus projection return to the terminal.
         // Why it exists: pins the cleanup + focus return.
         // Scenario: spec-first end search.
         var model = makeModel()
@@ -168,10 +164,7 @@ import Testing
             if case .sendEndSearch(let pid) = $0 { return pid == paneId }
             return false
         }, "expected sendEndSearch")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected makeFirstResponder")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneId))
     }
 
     @Test("endSearch on non-searching pane is no-op")

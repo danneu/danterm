@@ -153,6 +153,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         createTab(&model)
         let selectedPane = model.groups[0].tabs[1].focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
+        let searchPane = model.groups[0].tabs[1].focusedPaneId
         let baseline = lightProjection(model)
 
         update(&model, .toggleZoomPane(paneId: selectedPane))
@@ -168,7 +169,9 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         update(&model, .clearAlertsForTabs(tabIds: [model.groups[0].tabs[0].id]))
         #expect(lightProjection(model) == baseline, "alert clearing")
 
-        update(&model, .startSearch)
+        update(&model, .searchStarted(paneId: searchPane, needle: "hit"))
+        update(&model, .paneBecameFirstResponder(paneId: searchPane))
+        #expect(model.searchState[searchPane]?.focusOwner == .terminal)
         #expect(lightProjection(model) == baseline, "search")
     }
 

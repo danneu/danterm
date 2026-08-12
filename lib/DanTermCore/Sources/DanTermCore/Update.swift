@@ -358,7 +358,6 @@ func update(
             }
         }
         model.selectedTabId = targetTabId
-        commands.append(.makeFirstResponder(paneId: paneId))
         return commands
 
     case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
@@ -420,7 +419,6 @@ func update(
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        commands.append(.makeFirstResponder(paneId: paneId))
         return commands
 
     case .setTabColors(let tabIds, let color):
@@ -495,8 +493,7 @@ func update(
         return []
 
     case .sidebarRenameEnded:
-        guard let tab = selectedTab(in: model) else { return [] }
-        return [.makeFirstResponder(paneId: tab.focusedPaneId)]
+        return []
 
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
@@ -506,9 +503,11 @@ func update(
         }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
 
-        // Keep focused-pane state changes in paneBecameFirstResponder so
-        // keyboard focus changes and border rendering stay in sync.
-        return [.makeFirstResponder(paneId: target)]
+        if model.config.alertClearMode == .focus {
+            markAlertsReadForPane(target, in: &model)
+        }
+        updateSelectedTab(&model) { $0.focusedPaneId = target }
+        return []
 
     case .paneBecameFirstResponder(let paneId):
         guard let tab = selectedTab(in: model) else { return [] }
@@ -516,13 +515,21 @@ func update(
         // becomeFirstResponder from a hidden/background session must not
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
         guard allPaneIds(tab.rootNode).contains(paneId) else { return [] }
-        let oldFocusedId = tab.focusedPaneId
-        guard paneId != oldFocusedId else { return [] }
-
-        if model.config.alertClearMode == .focus {
-            markAlertsReadForPane(paneId, in: &model)
+        if paneId != tab.focusedPaneId {
+            if model.config.alertClearMode == .focus {
+                markAlertsReadForPane(paneId, in: &model)
+            }
+            updateSelectedTab(&model) { $0.focusedPaneId = paneId }
         }
-        updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
+        model.searchState[paneId]?.focusOwner = .terminal
+
+        return []
+
+    case .searchFieldBecameFirstResponder(let paneId):
+        guard let tab = selectedTab(in: model),
+              tab.focusedPaneId == paneId,
+              model.searchState[paneId] != nil else { return [] }
+        model.searchState[paneId]?.focusOwner = .field
 
         return []
 
@@ -1096,12 +1103,11 @@ func update(
         if model.searchState[paneId] == nil {
             model.searchState[paneId] = SearchModel()
         }
+        model.searchState[paneId]?.focusOwner = .field
         if !needle.isEmpty {
             model.searchState[paneId]?.needle = needle
         }
-        // reconcilePaneChrome renders the overlay from the searchState change above;
-        // only the post-reconcile focus into the (now-built) field stays a command.
-        return [.focusSearchField(paneId: paneId)]
+        return []
 
     case .searchNeedleChanged(let paneId, let needle):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1125,7 +1131,7 @@ func update(
         model.searchState.removeValue(forKey: paneId)
         // Clearing searchState drops the pane's key from the overlay projection, so
         // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
-        return [.sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
+        return [.sendEndSearch(paneId: paneId)]
 
     case .searchTotalReported(let paneId, let total):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1964,7 +1970,7 @@ private func navigateToPane(
     let wasZoomed = currentTab.isZoomed
     let oldFocusedPaneId = currentTab.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
-    var commands = update(&model, .selectTab(id: currentTab.id), env: env)
+    let commands = update(&model, .selectTab(id: currentTab.id), env: env)
     updateTab(currentTab.id, in: &model) { tab in
         tab.focusedPaneId = paneId
     }
@@ -1978,7 +1984,6 @@ private func navigateToPane(
     // container stay intact, so nothing is stranded (consistent with
     // paneBecameFirstResponder). A cross-tab navigate clears via the nested selectTab;
     // an unzoom drifts the shape and clears via update()'s reconcileTodoPopover.
-    commands.append(.makeFirstResponder(paneId: paneId))
     return commands
 }
 

@@ -981,10 +981,9 @@ enum ReconcileDecision: Equatable {
 /// Classify reconcile scheduling separately from the DispatchSourceTimer glue.
 func reconcileDecision(
   for msg: Msg,
-  coalescedSweepPending: Bool,
-  emitsPostReconcile: Bool
+  coalescedSweepPending: Bool
 ) -> ReconcileDecision {
-  guard msg.coalescesReconcile, !emitsPostReconcile else { return .reconcileNow }
+  guard msg.coalescesReconcile else { return .reconcileNow }
   return coalescedSweepPending ? .coalesceIntoPending : .scheduleCoalesced
 }
 

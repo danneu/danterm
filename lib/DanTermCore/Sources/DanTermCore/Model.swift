@@ -64,9 +64,16 @@ enum SearchMatchStatus: Equatable {
     }
 }
 
+/// Records which control owns focus while a pane search remains active.
+enum SearchFocusOwner: Equatable {
+    case terminal
+    case field
+}
+
 struct SearchModel: Equatable {
     var needle: String = ""
     var status: SearchMatchStatus?   // nil = nothing reported yet
+    var focusOwner: SearchFocusOwner = .field
 }
 
 // MARK: - Remote Session

@@ -30,7 +30,6 @@ enum Command {
 
     // Focus
     case focusSession(paneId: PaneId, focused: Bool)
-    case makeFirstResponder(paneId: PaneId)
 
     // View
     // The per-tab SplitContainerViews are derived by reconcileContainers from the model
@@ -69,7 +68,6 @@ enum Command {
 
     // Search
     case sendStartSearch(paneId: PaneId)
-    case focusSearchField(paneId: PaneId)
     case sendSearchNeedle(paneId: PaneId, needle: String)
     case sendSearchNavigate(paneId: PaneId, direction: SearchDirection)
     case sendEndSearch(paneId: PaneId)
@@ -82,34 +80,4 @@ enum Command {
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
     // The MRU tab switcher overlay is derived by reconcileSwitcher from model.mruCycle
     // after every send() (Stage 7); showSwitcherOverlay/hideSwitcherOverlay are gone.
-}
-
-extension Command {
-    /// Whether this command must run *after* `reconcile()` because it targets a view
-    /// the reconciler creates. Exactly `makeFirstResponder` and `focusSearchField`:
-    /// `reconcileContainers` mounts a pane's `TerminalView` during reconcile (Stage 8),
-    /// and `reconcilePaneChrome` builds the search field, so neither exists until after
-    /// reconcile. `focusSession` stays pre-reconcile: it acts on an already-existing
-    /// session, and deferring it is actively wrong -- a foreground createTab create-failure
-    /// re-enters send() and re-focuses the fallback, which a deferred focusSession(old,false)
-    /// would then defocus. (makeFirstResponder/focusSearchField safely no-op in that failure
-    /// path: their pane was removed, so sessions[id] is nil.) Exhaustive with no `default`
-    /// so a new case cannot be added without classifying it.
-    var isPostReconcile: Bool {
-        switch self {
-        case .makeFirstResponder, .focusSearchField:
-            return true
-        case .createSession, .sendText, .sendInputText, .sendInputKey,
-             .focusSession, .exportState, .ipcReply, .ipcError, .readDoctorPermissions,
-             .readPaneText, .readPaneRowStructure, .dumpPaneTape, .followPaneTape,
-             .sendNotification,
-             .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
-             .dismissAlertsPopover,
-             .saveDanTermConfig, .sendStartSearch,
-             .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
-             .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
-             .showClosePaneConfirmation:
-            return false
-        }
-    }
 }

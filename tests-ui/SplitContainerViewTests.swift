@@ -201,6 +201,155 @@ func splitContainerViewTests() {
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty, "swap or close layout emitted split-ratio feedback")
     }
 
+    uiTest("pane focus reconciliation repairs the 2026-08-12 split incident") {
+        // Intent: after an incremental split strands AppKit first responder, the
+        //   model-selected new pane receives focus before the event completes.
+        // Why it exists: this is the AppKit regression from the 2026-08-12 report
+        //   where the first keystroke after splitting reached no pane.
+        // Scenario: pane A owns focus, a foreground split reparents both wrappers
+        //   and chooses pane B, then the focus pass repairs the stranded window.
+        let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
+        let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
+        let newRoot = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5
+        )
+        let oldTab = TabModel(id: tabId, focusedPaneId: paneA, rootNode: oldRoot)
+        let runtime = AppRuntime(model: AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [oldTab])],
+            selectedTabId: tabId
+        ))
+        let terminalA = FocusableTerminalView()
+        let terminalB = FocusableTerminalView()
+        runtime.sessions[paneA] = terminalA
+        runtime.sessions[paneB] = terminalB
+        let container = persistentContainer(root: oldRoot, runtime: runtime)
+        let window = focusTestWindow(content: container)
+        defer { window.close() }
+        runtime.window = window
+        container.rebuild()
+        container.ensureLaidOut()
+        try uiExpect(window.makeFirstResponder(terminalA), "window refused pane A")
+
+        guard let patch = computeContainerTreePatch(
+            old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
+        ) else { throw UITestFailure(message: "missing split patch") }
+        container.applyTreePatch(patch, rootNode: newRoot)
+        container.ensureLaidOut()
+        try uiExpect(runtime.paneFocusClaimant() == .none,
+            "split should expose the stranded AppKit responder mechanism")
+
+        runtime.model.groups[0].tabs[0].rootNode = newRoot
+        runtime.model.groups[0].tabs[0].focusedPaneId = paneB
+        runtime.reconcilePaneFocus()
+
+        try uiExpect(window.firstResponder === terminalB,
+            "declarative focus pass did not repair the new pane")
+    }
+
+    uiTest("pane focus reconciliation repairs a reparented search field") {
+        // Intent: an active search field remains the desired responder across a
+        //   pane-tree patch even though AppKit discards its field editor.
+        // Why it exists: search ownership is the second pane-local focus target;
+        //   treating every active search as field-owned would steal focus from a
+        //   terminal the user deliberately returned to.
+        // Scenario: pane A's field owns focus, pane B is added, and reconciliation
+        //   restores the same field from the model-declared owner.
+        let paneA = PaneId(), paneB = PaneId(), tabId = TabId()
+        let oldRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
+        let newRoot = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5
+        )
+        let tab = TabModel(id: tabId, focusedPaneId: paneA, rootNode: oldRoot)
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.searchState[paneA] = SearchModel(needle: "hit")
+        let runtime = AppRuntime(model: model)
+        runtime.sessions[paneA] = FocusableTerminalView()
+        runtime.sessions[paneB] = FocusableTerminalView()
+        let container = persistentContainer(root: oldRoot, runtime: runtime)
+        let window = focusTestWindow(content: container)
+        defer { window.close() }
+        runtime.window = window
+        container.rebuild()
+        container.ensureLaidOut()
+        let wrapper = try requireWrapper(runtime, paneA)
+        wrapper.showSearchOverlay(search: model.searchState[paneA]!, runtime: runtime)
+        let field = wrapper.searchOverlay!.searchField
+        try uiExpect(window.makeFirstResponder(field), "window refused the search field")
+
+        guard let patch = computeContainerTreePatch(
+            old: containerShapeNode(oldRoot), new: containerShapeNode(newRoot)
+        ) else { throw UITestFailure(message: "missing split patch") }
+        container.applyTreePatch(patch, rootNode: newRoot)
+        container.ensureLaidOut()
+        runtime.model.groups[0].tabs[0].rootNode = newRoot
+        runtime.reconcilePaneFocus()
+
+        try uiExpect(field.currentEditor() === window.firstResponder,
+            "declarative focus pass did not restore the search field editor")
+    }
+
+    uiTest("pane focus claimant distinguishes pane, field editor, window, and non-pane focus") {
+        // Intent: claimant detection resolves pane terminal and search controls,
+        //   treats the window as unclaimed, and preserves deliberate non-pane focus.
+        // Why it exists: AppKit puts a shared field editor in firstResponder, so
+        //   checking only responder classes would misclassify sidebar-like editors.
+        // Scenario: one window cycles through every claimant kind.
+        let paneId = PaneId(), tabId = TabId()
+        let root = SplitNodeModel.leaf(PaneModel(id: paneId))
+        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: root)
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.searchState[paneId] = SearchModel()
+        let runtime = AppRuntime(model: model)
+        let terminal = FocusableTerminalView()
+        runtime.sessions[paneId] = terminal
+        let container = persistentContainer(root: root, runtime: runtime)
+        let nonPaneField = NSTextField(string: "sidebar")
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        content.addSubview(container)
+        content.addSubview(nonPaneField)
+        let window = focusTestWindow(content: content)
+        defer { window.close() }
+        runtime.window = window
+        container.rebuild()
+        container.ensureLaidOut()
+        let wrapper = try requireWrapper(runtime, paneId)
+        wrapper.showSearchOverlay(search: model.searchState[paneId]!, runtime: runtime)
+        let searchField = wrapper.searchOverlay!.searchField
+
+        try uiExpect(window.makeFirstResponder(terminal), "window refused terminal")
+        try uiExpect(runtime.paneFocusClaimant() == .pane(.terminal(paneId)),
+            "terminal claimant was not resolved")
+        runtime.reconcilePaneFocus()
+        try uiExpect(searchField.currentEditor() === window.firstResponder,
+            "reconciliation did not replace the wrong pane-owned claimant")
+
+        try uiExpect(window.makeFirstResponder(searchField), "window refused pane search field")
+        try uiExpect(runtime.paneFocusClaimant() == .pane(.searchField(paneId)),
+            "pane field editor was not resolved to its control")
+
+        window.makeFirstResponder(nil)
+        try uiExpect(runtime.paneFocusClaimant() == .none, "window should mean unclaimed focus")
+
+        try uiExpect(window.makeFirstResponder(nonPaneField), "window refused non-pane field")
+        try uiExpect(runtime.paneFocusClaimant() == .nonPane,
+            "non-pane field editor should remain a deliberate claimant")
+        runtime.model.searchState[paneId]?.focusOwner = .terminal
+        let savedResponder = window.firstResponder
+        runtime.reconcilePaneFocus()
+        try uiExpect(window.firstResponder === savedResponder,
+            "reconciliation stole a deliberate non-pane claimant")
+    }
+
     uiTest("nested zoom fills the container and unzoom restores every pane") {
         // Intent: zooming a nested pane expands it through every ancestor split,
         //   then unzoom restores all three panes with usable geometry.
@@ -317,6 +466,20 @@ private func persistentContainer(root: SplitNodeModel, runtime: AppRuntime) -> S
         runtime: runtime,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
     )
+}
+
+@MainActor
+private func focusTestWindow(content: NSView) -> NSWindow {
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+        styleMask: [.titled], backing: .buffered, defer: false
+    )
+    window.contentView = content
+    return window
+}
+
+private final class FocusableTerminalView: TerminalView {
+    override var acceptsFirstResponder: Bool { true }
 }
 
 /// Unwraps one runtime-owned pane wrapper for identity assertions.

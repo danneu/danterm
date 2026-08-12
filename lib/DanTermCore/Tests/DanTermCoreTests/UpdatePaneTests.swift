@@ -2,7 +2,7 @@
 // suite. Pins the pane-domain Msg paths: splitPane (incl. targeted +
 // background variants and theme inheritance), closePane (sibling promotion,
 // chrome sync, zoom normalization, container/fallback behavior),
-// focusDirection / paneBecameFirstResponder (focus follows callback, alert
+// focusDirection / paneBecameFirstResponder (eager intent, callback ownership, alert
 // clear modes), toggleZoomPane, movePane (split/swap intents, zoom + same-
 // pane guards), movePaneToTab (cross-tab + cross-group, source-emptying,
 // chrome update, defocus, alert clear), and movePaneToNewTab (single-tab
@@ -78,16 +78,12 @@ import Testing
         }
     }
 
-    @Test("testFocusDirectionRequestsFirstResponder")
-    func testFocusDirectionRequestsFirstResponder() {
-        // Intent: focusDirection emits a makeFirstResponder for the
-        //   neighbor; the model's focusedPaneId does NOT change until the
-        //   paneBecameFirstResponder callback arrives.
-        // Why it exists: pins the asynchronous focus-change contract the
-        //   runtime depends on.
-        // Scenario: spec-first focus-request -- right pane focused, focus
-        //   left requests left's first responder; after callback, the
-        //   reverse direction goes back.
+    @Test("focusDirection records the neighboring pane eagerly")
+    func focusDirectionRecordsNeighborEagerly() {
+        // Intent: focusDirection records the neighboring pane before update returns.
+        // Why it exists: the declarative responder pass must see the complete focus
+        //   decision during the same reconciliation cycle.
+        // Scenario: spec-first directional focus -- move left, then right.
         var model = makeModel()
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
@@ -95,22 +91,20 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))
         let rightPaneId = model.groups[0].tabs[0].focusedPaneId
         #expect(rightPaneId != leftPaneId)
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: leftPaneId,
+            title: "DanTerm", body: "waiting", createdAt: Date(), isUnread: true
+        )]
 
         let effectsLeft = update(&model, .focusDirection(direction: .horizontal, side: .first))
-        #expect(model.groups[0].tabs[0].focusedPaneId == rightPaneId, "focusDirection should not change model focus directly")
-        #expect(hasEffect(effectsLeft) {
-            if case .makeFirstResponder(let paneId) = $0, paneId == leftPaneId { return true }
-            return false
-        }, "should request first responder for left pane")
-
-        _ = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
+        #expect(effectsLeft.isEmpty)
+        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
+        #expect(model.alerts[0].isUnread == false,
+            "directional focus should clear the target alert eagerly")
 
         let effectsRight = update(&model, .focusDirection(direction: .horizontal, side: .second))
-        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId, "focusDirection should still not mutate focus")
-        #expect(hasEffect(effectsRight) {
-            if case .makeFirstResponder(let paneId) = $0, paneId == rightPaneId { return true }
-            return false
-        }, "should request first responder for right pane")
+        #expect(effectsRight.isEmpty)
+        #expect(model.groups[0].tabs[0].focusedPaneId == rightPaneId)
     }
 
     @Test("testSplitRatioChangedNoEffects")
@@ -285,16 +279,9 @@ import Testing
         update(&model, .paneBecameFirstResponder(paneId: tl))
         let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
 
-        #expect(
-            hasEffect(effects) {
-                if case .makeFirstResponder(let p) = $0 { return p == tr }
-                return false
-            }, "focus-right from TL must preserve the top row (-> TR), not jump to last-focused BR")
-        #expect(
-            !hasEffect(effects) {
-                if case .makeFirstResponder(let p) = $0 { return p == br }
-                return false
-            }, "focus-right from TL must NOT land on BR")
+        #expect(effects.isEmpty)
+        #expect(selectedTab(in: model)?.focusedPaneId == tr,
+            "focus-right from TL must preserve the top row (-> TR), not jump to BR \(br)")
     }
 
     @Test("testQuadrantFocusRightPreservesBottomRowDespiteLastFocused")
@@ -324,23 +311,15 @@ import Testing
         update(&model, .paneBecameFirstResponder(paneId: bl))
         let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
 
-        #expect(
-            hasEffect(effects) {
-                if case .makeFirstResponder(let p) = $0 { return p == br }
-                return false
-            }, "focus-right from BL must preserve the bottom row (-> BR), not jump to last-focused TR")
-        #expect(
-            !hasEffect(effects) {
-                if case .makeFirstResponder(let p) = $0 { return p == tr }
-                return false
-            }, "focus-right from BL must NOT land on TR")
+        #expect(effects.isEmpty)
+        #expect(selectedTab(in: model)?.focusedPaneId == br,
+            "focus-right from BL must preserve the bottom row (-> BR), not jump to TR \(tr)")
     }
 
     @Test("testPaneBecameFirstResponder")
     func testPaneBecameFirstResponder() {
         // Intent: paneBecameFirstResponder updates focusedPaneId, marks the
-        //   new pane's alerts read (default focus mode), and does NOT
-        //   re-emit makeFirstResponder.
+        //   new pane's alerts read (default focus mode), without a command.
         // Why it exists: pins the AppKit callback path the runtime relies
         //   on to converge on the new pane.
         // Scenario: spec-first callback -- paneB focused, callback hands
@@ -366,10 +345,7 @@ import Testing
         let tab = model.groups[0].tabs[0]
         #expect(tab.focusedPaneId == paneA, "focused pane should change")
         #expect(model.alerts[0].isUnread == false, "alert should be marked read")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "should not request first responder from first responder callback")
+        #expect(commands.isEmpty)
     }
 
     @Test("testPaneBecameFirstResponderSamePane")
@@ -970,7 +946,7 @@ import Testing
     @Test("testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus")
     func testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus() {
         // Intent: background split on the selected tab adds a pane, leaves focus on the
-        //   existing pane, and emits createSession without makeFirstResponder.
+        //   existing pane, and emits only createSession.
         // Why it exists: pins the background-split contract.
         // Scenario: spec-first background-split-selected.
         var model = makeModel()
@@ -998,16 +974,12 @@ import Testing
         }, "should create a session for the new pane")
         #expect(allPaneIds(model.groups[0].tabs[0].rootNode).contains { newPaneIds.contains($0) },
             "new pane lands in the selected tab's tree (rendered on the rebuild)")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "background split should not request first responder")
     }
 
     @Test("testSplitPaneBackgroundOnUnselectedTabEmitsScopedRebuild")
     func testSplitPaneBackgroundOnUnselectedTabEmitsScopedRebuild() {
         // Intent: background split on a non-selected tab adds a pane there
-        //   without changing selection or requesting first responder.
+        //   without changing selection.
         // Why it exists: pins the scoped-rebuild contract for the IPC's
         //   non-foreground splits.
         // Scenario: spec-first background-split-unselected.
@@ -1037,10 +1009,6 @@ import Testing
             }
             return false
         }, "should create a session for the new pane")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "background split should not request first responder")
     }
 
     @Test("testSplitPaneBackgroundInheritsTheme")
@@ -1081,13 +1049,12 @@ import Testing
         #expect(tab.focusedPaneId == newPaneId, "foreground split should focus new pane")
     }
 
-    @Test("testFocusDirectionThenFirstResponderUpdatesFocusAndRefreshesBorders")
-    func testFocusDirectionThenFirstResponderUpdatesFocusAndRefreshesBorders() {
-        // Intent: focusDirection emits the makeFirstResponder; the
-        //   subsequent paneBecameFirstResponder callback updates
-        //   focusedPaneId without re-emitting makeFirstResponder.
-        // Why it exists: pins the full async-focus round-trip.
-        // Scenario: spec-first focus round-trip.
+    @Test("focusDirection and responder callback converge idempotently")
+    func focusDirectionAndResponderCallbackConvergeIdempotently() {
+        // Intent: focusDirection records focus eagerly and the matching AppKit
+        //   callback leaves that model decision unchanged.
+        // Why it exists: pins the declarative focus round-trip.
+        // Scenario: spec-first focus convergence.
         var model = makeModel()
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
@@ -1097,18 +1064,12 @@ import Testing
         #expect(rightPaneId != leftPaneId)
 
         let focusEffects = update(&model, .focusDirection(direction: .horizontal, side: .first))
-        #expect(model.groups[0].tabs[0].focusedPaneId == rightPaneId, "focus should remain on right pane until first responder callback")
-        #expect(hasEffect(focusEffects) {
-            if case .makeFirstResponder(let paneId) = $0, paneId == leftPaneId { return true }
-            return false
-        }, "should request first responder for left pane")
+        #expect(focusEffects.isEmpty)
+        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
 
         let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
-        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId, "focus should update after first responder callback")
-        #expect(!hasEffect(callbackEffects) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "should not request first responder from first responder callback")
+        #expect(model.groups[0].tabs[0].focusedPaneId == leftPaneId)
+        #expect(callbackEffects.isEmpty)
     }
 
     @Test("testMovePaneSwapUpdatesVisibleTabChrome")
@@ -1153,7 +1114,7 @@ import Testing
         let paneB = model.groups[0].tabs[1].focusedPaneId
         let liveBefore = Set(model.allPaneIds)
 
-        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        _ = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         #expect(model.groups[0].tabs.count == 1, "source tab should be removed when empty")
         #expect(model.groups[0].tabs[0].id == tab2Id, "remaining tab should be target")
@@ -1172,10 +1133,7 @@ import Testing
             "a cross-tab move tears down no sessions")
         #expect(tabById(tab1Id, in: model) == nil, "emptied source tab is removed")
 
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should emit makeFirstResponder for moved pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testMovePaneToTabSourceHasMultiplePanes")
@@ -1327,13 +1285,11 @@ import Testing
         }, "should defocus old tab's panes")
     }
 
-    @Test("testMovePaneToTabEmitsMakeFirstResponder")
-    func testMovePaneToTabEmitsMakeFirstResponder() {
-        // Intent: movePaneToTab emits makeFirstResponder for the moved
-        //   pane.
-        // Why it exists: pins the focus-request side effect after the
-        //   reparenting.
-        // Scenario: spec-first first-responder emission.
+    @Test("movePaneToTab projects the moved pane as desired focus")
+    func movePaneToTabProjectsMovedPaneAsDesiredFocus() {
+        // Intent: movePaneToTab selects the moved pane as the declarative target.
+        // Why it exists: pins focus policy across cross-tab reparenting.
+        // Scenario: spec-first focus projection after a move.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -1341,12 +1297,9 @@ import Testing
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
 
-        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        _ = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should emit makeFirstResponder for moved pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testMovePaneToTabTargetZoomCleared")
@@ -1421,7 +1374,7 @@ import Testing
         let paneB = model.groups[0].tabs[0].focusedPaneId
         let groupId = model.groups[0].id
 
-        let commands = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+        _ = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         #expect(model.groups[0].tabs.count == 2, "should have 2 tabs")
         let srcTab = model.groups[0].tabs[0]
@@ -1444,10 +1397,7 @@ import Testing
         #expect(newTab.focusedPaneId == paneA)
         #expect(model.selectedTabId == newTab.id, "new tab should be selected")
 
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should emit makeFirstResponder for moved pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
     }
 
     @Test("testMovePaneToNewTabPathB_ZoomedSourceUnzooms")

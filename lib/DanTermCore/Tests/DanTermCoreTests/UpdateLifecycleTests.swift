@@ -125,7 +125,7 @@ import Testing
     @Test("testActivateAlert")
     func testActivateAlert() {
         // Intent: activateAlert selects the alert's tab, marks the alert
-        //   read, requests first responder, activates the app, and
+        //   read, records pane focus, activates the app, and
         //   dismisses the alerts popover.
         // Why it exists: pins the full notification-click navigation path.
         // Scenario: spec-first activate-alert.
@@ -145,10 +145,7 @@ import Testing
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.selectedTabId == firstTabId, "should select the alert's tab")
         #expect(model.alerts[0].isUnread == false, "alert should be marked read")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == firstPaneId { return true }
-            return false
-        }, "should make pane first responder")
+        #expect(desiredPaneFocus(in: model) == .terminal(firstPaneId))
         #expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
@@ -162,7 +159,7 @@ import Testing
     @Test("testActivateAlertStalePane")
     func testActivateAlertStalePane() {
         // Intent: an alert whose pane is gone is still marked read and
-        //   dismisses the popover, but no first-responder is emitted.
+        //   dismisses the popover, but does not change desired focus.
         // Why it exists: pins fail-closed for stale alert paneIds.
         // Scenario: spec-first stale-pane activation.
         var model = makeModel()
@@ -177,10 +174,6 @@ import Testing
 
         let commands = update(&model, .activateAlert(alertId: alertId))
         #expect(model.alerts[0].isUnread == false, "stale alert should be marked read")
-        #expect(!hasEffect(commands) {
-            if case .makeFirstResponder = $0 { return true }
-            return false
-        }, "should not navigate when pane is gone")
         #expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -209,12 +202,9 @@ import Testing
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let commands = update(&model, .activateAlert(alertId: alertId))
+        _ = update(&model, .activateAlert(alertId: alertId))
         #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should clear when alert targets different pane")
-        #expect(hasEffect(commands) {
-            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should focus alert's pane")
+        #expect(desiredPaneFocus(in: model) == .terminal(paneA))
         _ = paneB
     }
 

@@ -8,8 +8,8 @@ Date: 2026-05-27
 DanTerm uses Elm architecture: user/Ghostty actions become `Msg` values,
 `update(&model, msg)` is the pure model transition and returns `[Command]`, and
 `AppRuntime.perform(command)` runs side effects. The view reconciler is the next
-stage in that pipeline: after update and pre-reconcile commands, `reconcile()`
-derives AppKit and session state from the current model.
+stage in that pipeline: after update and commands, `reconcile()` derives AppKit
+and session state from the current model.
 
 The reconciler migration moved view-sync work out of `update()` and
 `AppRuntime.send()` into ordered `reconcile*` passes. The intended pass shape,
@@ -53,10 +53,10 @@ New reconcile passes should follow the migration template:
   same change.
 
 Commands are for true side effects and transient imperative actions: PTY/session
-creation, IPC replies, notifications, checkpoint/config writes, focus requests,
-export, and popover presentation. Everything the view merely shows should be a
-projection of the model. Some commands run after reconcile when they target
-views the reconciler creates; that classification is explicit and exhaustive.
+creation, session focus signaling, IPC replies, notifications, checkpoint/config
+writes, export, and popover presentation. Everything the view merely shows or
+synchronizes, including AppKit first responder, should be a projection of the
+model.
 
 ## Pass Shapes
 
@@ -96,10 +96,19 @@ invalidate affected host-local caches.
 
 Container reconciliation runs before session teardown so a removed pane leaves
 the mounted tree before teardown releases its runtime-owned `PaneHost`. Pane
-chrome then renders into the surviving persistent wrappers. Mount-time focus
-runs after pane chrome when a new tab build may target a search field the chrome
-pass creates. Occlusion remains last because it reads the final visible/mounted
-session state.
+chrome then renders into the surviving persistent wrappers. Pane-focus
+reconciliation runs after pane chrome because active search may target a field
+that pass creates. Occlusion remains last because it reads the final
+visible/mounted session state.
+
+Pane focus is a single non-cached projection. The selected tab's
+`focusedPaneId` chooses the pane, and active search state records whether that
+pane's terminal or search field owns focus. The AppKit executor compares the
+projection with the live first responder on every sweep so a tree patch that
+temporarily detaches a wrapper can be repaired even when the desired model value
+did not change. A deliberate non-pane claimant in the main window is preserved;
+the window itself is unclaimed. Field-editor-backed controls resolve through
+their live editing control before claimant classification.
 
 Container reconciliation reserves whole-tree construction for a tab that has no
 cached shape, including the clean cache after restore. A surviving tab is patched
@@ -108,9 +117,8 @@ temporarily reparents the focused wrapper into a full-container overlay while
 the unchanged split tree stays mounted, hidden, and laid out at normal geometry.
 Unzoom returns the wrapper to its keyed split position.
 
-Post-reconcile commands target views that reconcile creates.
-`Command.isPostReconcile` must stay an exhaustive switch with no `default`, so
-adding a command requires an explicit phase decision.
+There is no pre/post command phase split. AppKit pane focus is applied by the
+ordered reconciler after its target views exist.
 
 ## Scheduling And External Invalidation
 
@@ -122,7 +130,7 @@ toolbar badge chrome, the pane toolbar, and per-pane theme config; they never
 change `ContainerShape`. Structural/container-affecting messages reconcile
 inline. Any future coalescing of structural messages must first add a behavioral
 popover/session sync test that proves model state, AppKit teardown, and
-post-reconcile commands stay aligned.
+responder reconciliation stay aligned.
 
 If external state changes what a projection should apply while the model value
 looks unchanged, prefer an explicit model event or generation value included in

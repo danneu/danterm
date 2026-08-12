@@ -215,6 +215,27 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
 // to about 75 ms, keeping inline reconciles at human pace. See `Projection Scan
 // Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
+/// The pane-owned AppKit control that should receive the next key event.
+enum PaneFocusTarget: Equatable {
+  case terminal(PaneId)
+  case searchField(PaneId)
+
+  var paneId: PaneId {
+    switch self {
+    case .terminal(let paneId), .searchField(let paneId): return paneId
+    }
+  }
+}
+
+/// Project the selected tab's model-declared pane focus target.
+func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
+  guard let paneId = selectedTab(in: model)?.focusedPaneId else { return nil }
+  if model.searchState[paneId]?.focusOwner == .field {
+    return .searchField(paneId)
+  }
+  return .terminal(paneId)
+}
+
 /// Whether `paneId` draws the green focus border for an already-resolved selected tab.
 /// Centralizes the focused-pane and lone-leaf rule so loops and convenience callers
 /// share one predicate body.

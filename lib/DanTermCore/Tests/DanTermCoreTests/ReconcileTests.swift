@@ -1,6 +1,6 @@
 // Swift Testing migration of the legacy `tests/ReconcileTests.swift` harness
 // suite. Pins the view-reconciler's pure primitives: the generic applyDiff
-// (apply / remove / prune semantics), Command.isPostReconcile classification,
+// (apply / remove / prune semantics), declarative pane-focus projection,
 // the structure-insensitive model-apply gauntlet for computeSidebarRowOps
 // (single<->multi mode flip, tab insert/remove/reorder/cross-group move,
 // reload-on-changed-attrs, group churn, combined structural+attr churn),
@@ -123,29 +123,56 @@ import Testing
         #expect(cache == desired, "cache ends equal to desired -- c was not spuriously pruned")
     }
 
-    // MARK: - Command.isPostReconcile (command-phase split, Stage 4)
+    // MARK: - Pane focus
 
-    @Test("Command.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile")
-    func commandIsPostReconcileExactlyMakeFirstResponderAndFocusSearchField() {
-        // Intent: only makeFirstResponder and focusSearchField are
-        //   classified post-reconcile; every other Command is
-        //   pre-reconcile.
-        // Why it exists: pins the post-reconcile set the runtime defers
-        //   past reconcile().
-        // Scenario: spec-first phase classification.
-        let pane = PaneId()
-        #expect(Command.focusSearchField(paneId: pane).isPostReconcile,
-            "focusSearchField is post-reconcile")
-        #expect(Command.makeFirstResponder(paneId: pane).isPostReconcile,
-            "makeFirstResponder is post-reconcile (Stage 8)")
-        #expect(!Command.focusSession(paneId: pane, focused: true).isPostReconcile,
-            "focusSession is pre-reconcile")
-        #expect(!Command.createSession(sessionId: SessionId(), paneId: pane, cwd: nil, command: nil).isPostReconcile,
-            "createSession is pre-reconcile")
-        #expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
-            "sendEndSearch is pre-reconcile")
-        #expect(!Command.terminate.isPostReconcile,
-            "terminate is pre-reconcile")
+    @Test("desired pane focus follows selected-tab policy and in-pane ownership")
+    func desiredPaneFocusFollowsModelPolicy() {
+        // Intent: the focus projection always names the selected tab's focused pane
+        //   and chooses that pane's terminal or search field from search ownership.
+        // Why it exists: this is the pure contract that lets tree reconciliation
+        //   repair AppKit focus without interpreting the tree operation that ran.
+        // Scenario: the 2026-08-12 split incident, plus the neighboring structural,
+        //   tab-selection, zoom, and search transitions that use the same policy.
+        var model = makeModel()
+        createTab(&model)
+        let firstPane = selectedTab(in: model)!.focusedPaneId
+        #expect(desiredPaneFocus(in: model) == .terminal(firstPane))
+
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        let foregroundSplitPane = selectedTab(in: model)!.focusedPaneId
+        #expect(desiredPaneFocus(in: model) == .terminal(foregroundSplitPane))
+
+        let selectedTabId = model.selectedTabId!
+        update(&model, .createTabInSelectedGroup(background: true))
+        let backgroundTab = model.groups[0].tabs.first { $0.id != selectedTabId }!
+        update(&model, .splitPane(
+            paneId: backgroundTab.focusedPaneId,
+            direction: .vertical,
+            background: false
+        ))
+        #expect(desiredPaneFocus(in: model) == .terminal(foregroundSplitPane),
+            "a foreground split inside a background tab must not change the selected target")
+
+        update(&model, .toggleZoomPane(paneId: nil))
+        #expect(desiredPaneFocus(in: model) == .terminal(foregroundSplitPane))
+        update(&model, .toggleZoomPane(paneId: nil))
+        #expect(desiredPaneFocus(in: model) == .terminal(foregroundSplitPane))
+
+        update(&model, .closePane(paneId: foregroundSplitPane))
+        #expect(desiredPaneFocus(in: model) == .terminal(firstPane))
+
+        update(&model, .selectTab(id: backgroundTab.id))
+        let selectedBackgroundPane = selectedTab(in: model)!.focusedPaneId
+        #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
+
+        update(&model, .searchStarted(paneId: selectedBackgroundPane, needle: "hit"))
+        #expect(desiredPaneFocus(in: model) == .searchField(selectedBackgroundPane))
+        update(&model, .paneBecameFirstResponder(paneId: selectedBackgroundPane))
+        #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
+        update(&model, .searchFieldBecameFirstResponder(paneId: selectedBackgroundPane))
+        #expect(desiredPaneFocus(in: model) == .searchField(selectedBackgroundPane))
+        update(&model, .endSearch(paneId: selectedBackgroundPane))
+        #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
     }
 
     // MARK: - computeSidebarRowOps (model-apply, Stage 5)
