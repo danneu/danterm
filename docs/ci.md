@@ -30,6 +30,10 @@ just release major   # v0.1.0 -> v1.0.0
 just version         # show current version
 ```
 
+The release recipe waits for GitHub to register the tag-triggered workflow,
+then follows that run until it finishes. A failed workflow makes the recipe
+exit with a failure status.
+
 ## GitHub secrets
 
 | Secret | Purpose | How to obtain |

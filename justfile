@@ -315,7 +315,8 @@ release bump:
     git commit -m "release v$new"
     git tag "v$new"
     git push origin HEAD "v$new"
-    echo "Pushed v$new — release workflow will start"
+    echo "Pushed v$new -- release workflow will start"
+    ./scripts/watch-release-workflow.sh "$(git rev-parse HEAD)"
 
 # Build, launch, screenshot the window, kill the app
 screenshot:
