@@ -27,6 +27,26 @@ package struct TerminalFlightRecorderConfiguration: Sendable {
     }
 }
 
+/// Locates one byte-carrying event inside its own direction's lifetime byte stream.
+///
+/// The direction is the event itself: a feed event's offset counts feed bytes only, and a write
+/// event's counts write bytes only. Keeping the two streams apart is what lets a reader turn an
+/// offset back into a position, which a single interleaved counter cannot do.
+public struct TerminalFlightRecordingPayloadSpan: Equatable, Sendable {
+    /// Zero-based count of this direction's bytes recorded before this event.
+    public let byteOffset: Int
+    /// Bytes this event carries; zero is a real, recordable transfer.
+    public let byteLength: Int
+
+    /// Keeps the two coordinates together so neither can be read without the other.
+    public init(byteOffset: Int, byteLength: Int) {
+        precondition(byteOffset >= 0)
+        precondition(byteLength >= 0)
+        self.byteOffset = byteOffset
+        self.byteLength = byteLength
+    }
+}
+
 /// Pairs one neutral transition with capture time relative to pane construction.
 public struct TerminalFlightRecordingEvent: Equatable, Sendable {
     /// Lifetime-monotonic position assigned before retention bounds can evict the event.
@@ -40,36 +60,55 @@ public struct TerminalFlightRecordingEvent: Equatable, Sendable {
     /// no earlier origin -- never zero, which is a real position on the scale. The distance
     /// between the two stamps is time the app held the bytes before they crossed.
     public let originElapsedNanoseconds: UInt64?
+    /// Where these bytes sit in their own direction's stream. Nil for an event that carries
+    /// no bytes at all, such as a resize.
+    public let payload: TerminalFlightRecordingPayloadSpan?
 
-    /// Keeps timing metadata beside, but behaviorally independent from, the replay event.
+    /// Keeps timing and byte-position metadata beside, but behaviorally independent from, the
+    /// replay event.
     public init(
         sequence: UInt64,
         event: NeutralTerminalRecordingEvent,
         elapsedNanoseconds: UInt64,
-        originElapsedNanoseconds: UInt64? = nil
+        originElapsedNanoseconds: UInt64? = nil,
+        payload: TerminalFlightRecordingPayloadSpan? = nil
     ) {
         self.sequence = sequence
         self.event = event
         self.elapsedNanoseconds = elapsedNanoseconds
         self.originElapsedNanoseconds = originElapsedNanoseconds
+        self.payload = payload
     }
 }
 
-/// Resumable position whose payload watermark makes later eviction gaps exactly measurable.
+/// Resumable position whose per-direction watermarks make later eviction gaps exactly measurable.
 public struct TerminalFlightRecordingCursor: Equatable, Sendable {
     /// Sequence that the next snapshot should attempt to return first.
     public let nextSequence: UInt64
-    /// Lifetime payload bytes assigned to every event before `nextSequence`.
-    public let payloadBytesBeforeNextSequence: Int
+    /// Lifetime feed bytes recorded before `nextSequence`.
+    public let feedBytesBeforeNextSequence: Int
+    /// Lifetime write bytes recorded before `nextSequence`.
+    public let writeBytesBeforeNextSequence: Int
 
     /// Starts a backlog read before the recorder's first lifetime event.
-    public static let beginning = Self(nextSequence: 0, payloadBytesBeforeNextSequence: 0)
+    public static let beginning = Self(
+        nextSequence: 0,
+        feedBytesBeforeNextSequence: 0,
+        writeBytesBeforeNextSequence: 0
+    )
 
-    /// Preserves both coordinates needed to distinguish an exact gap from delivered history.
-    public init(nextSequence: UInt64, payloadBytesBeforeNextSequence: Int) {
-        precondition(payloadBytesBeforeNextSequence >= 0)
+    /// Preserves every coordinate needed to distinguish an exact per-direction gap from
+    /// delivered history.
+    public init(
+        nextSequence: UInt64,
+        feedBytesBeforeNextSequence: Int,
+        writeBytesBeforeNextSequence: Int
+    ) {
+        precondition(feedBytesBeforeNextSequence >= 0)
+        precondition(writeBytesBeforeNextSequence >= 0)
         self.nextSequence = nextSequence
-        self.payloadBytesBeforeNextSequence = payloadBytesBeforeNextSequence
+        self.feedBytesBeforeNextSequence = feedBytesBeforeNextSequence
+        self.writeBytesBeforeNextSequence = writeBytesBeforeNextSequence
     }
 }
 
@@ -81,8 +120,10 @@ public struct TerminalFlightRecordingCursorSnapshot: Equatable, Sendable {
     public let events: [TerminalFlightRecordingEvent]
     /// Exact whole-event loss between the requested cursor and retained suffix.
     public let droppedEventCount: UInt64
-    /// Exact payload loss between the requested cursor and retained suffix.
-    public let droppedPayloadBytes: Int
+    /// Exact feed-byte loss between the requested cursor and retained suffix.
+    public let droppedFeedBytes: Int
+    /// Exact write-byte loss between the requested cursor and retained suffix.
+    public let droppedWriteBytes: Int
     /// Cursor immediately after every event returned by this snapshot.
     public let nextCursor: TerminalFlightRecordingCursor
 
@@ -164,7 +205,8 @@ package final class TerminalFlightRecorder {
     private struct Slot {
         let event: TerminalFlightRecordingEvent
         let payloadBytes: Int
-        let payloadBytesBeforeEvent: Int
+        let feedBytesBeforeEvent: Int
+        let writeBytesBeforeEvent: Int
     }
 
     private let initial: NeutralTerminalDimensions
@@ -181,9 +223,13 @@ package final class TerminalFlightRecorder {
     private var slots: Deque<Slot> = []
     private var accountedBytes = 0
     private var droppedEventCount = 0
+    /// Lifetime evicted payload across both directions. Per-direction loss is not accumulated
+    /// here: `cursorSnapshot` measures it exactly, against the caller's own cursor, from the
+    /// retained head's watermarks.
     private var droppedPayloadBytes = 0
     private var nextSequence: UInt64 = 0
-    private var totalPayloadBytes = 0
+    private var totalFeedBytes = 0
+    private var totalWriteBytes = 0
     private var followNotices: [UUID: FollowNotice] = [:]
 
     package init(
@@ -211,19 +257,34 @@ package final class TerminalFlightRecorder {
         let elapsed = max(lastElapsedNanoseconds, measured)
         lastElapsedNanoseconds = elapsed
         let originElapsed = origin.map { $0 >= startedNanoseconds ? $0 - startedNanoseconds : 0 }
-        let payloadBytes = Self.payloadBytes(of: event)
+        let direction = Self.direction(of: event)
+        let payloadBytes = direction?.byteCount ?? 0
+        let payload = direction.map { direction in
+            TerminalFlightRecordingPayloadSpan(
+                byteOffset: direction.isFeed ? totalFeedBytes : totalWriteBytes,
+                byteLength: direction.byteCount
+            )
+        }
         let slot = Slot(
             event: .init(
                 sequence: nextSequence,
                 event: event,
                 elapsedNanoseconds: elapsed,
-                originElapsedNanoseconds: originElapsed
+                originElapsedNanoseconds: originElapsed,
+                payload: payload
             ),
             payloadBytes: payloadBytes,
-            payloadBytesBeforeEvent: totalPayloadBytes
+            feedBytesBeforeEvent: totalFeedBytes,
+            writeBytesBeforeEvent: totalWriteBytes
         )
         nextSequence += 1
-        totalPayloadBytes += payloadBytes
+        if let direction {
+            if direction.isFeed {
+                totalFeedBytes += direction.byteCount
+            } else {
+                totalWriteBytes += direction.byteCount
+            }
+        }
         if case .resize(let columns, let rows) = event {
             currentDimensions = .init(columns: columns, rows: rows)
         }
@@ -287,10 +348,12 @@ package final class TerminalFlightRecorder {
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot {
         precondition(cursor.nextSequence <= nextSequence)
-        precondition(cursor.payloadBytesBeforeNextSequence <= totalPayloadBytes)
+        precondition(cursor.feedBytesBeforeNextSequence <= totalFeedBytes)
+        precondition(cursor.writeBytesBeforeNextSequence <= totalWriteBytes)
 
         let firstRetainedSequence = slots.first?.event.sequence ?? nextSequence
-        let firstRetainedPayloadBytes = slots.first?.payloadBytesBeforeEvent ?? totalPayloadBytes
+        let firstRetainedFeedBytes = slots.first?.feedBytesBeforeEvent ?? totalFeedBytes
+        let firstRetainedWriteBytes = slots.first?.writeBytesBeforeEvent ?? totalWriteBytes
         let firstReturnedSequence = max(cursor.nextSequence, firstRetainedSequence)
         let firstReturnedIndex = Int(firstReturnedSequence - firstRetainedSequence)
         let events = slots[firstReturnedIndex...].map(\.event)
@@ -300,29 +363,31 @@ package final class TerminalFlightRecorder {
             firstRetainedSequence: firstRetainedSequence,
             events: events,
             droppedEventCount: hasGap ? firstRetainedSequence - cursor.nextSequence : 0,
-            droppedPayloadBytes: hasGap
-                ? firstRetainedPayloadBytes - cursor.payloadBytesBeforeNextSequence
+            droppedFeedBytes: hasGap
+                ? firstRetainedFeedBytes - cursor.feedBytesBeforeNextSequence
                 : 0,
-            nextCursor: .init(
-                nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: totalPayloadBytes
-            )
+            droppedWriteBytes: hasGap
+                ? firstRetainedWriteBytes - cursor.writeBytesBeforeNextSequence
+                : 0,
+            nextCursor: liveCursor()
         )
     }
 
     package func fromNowOrigin() -> TerminalFlightRecordingOrigin {
-        TerminalFlightRecordingOrigin(
-            initial: currentDimensions,
-            cursor: .init(
-                nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: totalPayloadBytes
-            )
-        )
+        TerminalFlightRecordingOrigin(initial: currentDimensions, cursor: liveCursor())
     }
 
     /// Pairs recorder birth geometry with the cursor that requests all retained history.
     package func backlogOrigin() -> TerminalFlightRecordingOrigin {
         TerminalFlightRecordingOrigin(initial: initial, cursor: .beginning)
+    }
+
+    private func liveCursor() -> TerminalFlightRecordingCursor {
+        .init(
+            nextSequence: nextSequence,
+            feedBytesBeforeNextSequence: totalFeedBytes,
+            writeBytesBeforeNextSequence: totalWriteBytes
+        )
     }
 
     private func enforceBounds() {
@@ -337,12 +402,23 @@ package final class TerminalFlightRecorder {
         }
     }
 
-    /// Charges every event that carries bytes, in either direction, so the retained suffix
-    /// stays inside the per-pane budget the IPC line ceiling was chosen against.
-    private static func payloadBytes(of event: NeutralTerminalRecordingEvent) -> Int {
+    /// Names the byte-carrying direction of an event, or nil when it carries none. Every event
+    /// that carries bytes is charged to the retention budget, so the retained suffix stays
+    /// inside the per-pane budget the IPC line ceiling was chosen against.
+    private static func direction(
+        of event: NeutralTerminalRecordingEvent
+    ) -> PayloadDirection? {
         switch event {
-        case .feed(let bytes), .write(let bytes): return bytes.count
-        default: return 0
+        case .feed(let bytes): return PayloadDirection(isFeed: true, byteCount: bytes.count)
+        case .write(let bytes): return PayloadDirection(isFeed: false, byteCount: bytes.count)
+        default: return nil
         }
+    }
+
+    /// Pairs the direction an event's bytes travel with how many of them there are, so the
+    /// two facts are read out of the event exactly once.
+    private struct PayloadDirection {
+        let isFeed: Bool
+        let byteCount: Int
     }
 }

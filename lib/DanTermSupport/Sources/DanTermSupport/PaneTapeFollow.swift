@@ -3,12 +3,18 @@
 import Foundation
 import DanTermProtocol
 
-/// Carries both coordinates needed to resume after recorder eviction without estimating loss.
+/// Carries every coordinate needed to resume after recorder eviction without estimating loss.
+/// The two byte watermarks stay apart because the feed and write streams are numbered apart.
 struct PaneTapeFollowCursor: Equatable, Sendable {
     let nextSequence: UInt64
-    let payloadBytesBeforeNextSequence: Int
+    let feedBytesBeforeNextSequence: Int
+    let writeBytesBeforeNextSequence: Int
 
-    static let beginning = Self(nextSequence: 0, payloadBytesBeforeNextSequence: 0)
+    static let beginning = Self(
+        nextSequence: 0,
+        feedBytesBeforeNextSequence: 0,
+        writeBytesBeforeNextSequence: 0
+    )
 }
 
 /// Keeps stream geometry independent from the terminal engine's dimension type.
@@ -31,7 +37,8 @@ struct PaneTapeFollowEvent: Equatable, Sendable {
 struct PaneTapeFollowSnapshot: Equatable, Sendable {
     let events: [PaneTapeFollowEvent]
     let droppedEventCount: UInt64
-    let droppedPayloadBytes: Int
+    let droppedFeedBytes: Int
+    let droppedWriteBytes: Int
     let nextCursor: PaneTapeFollowCursor
 }
 
@@ -92,7 +99,9 @@ func makePaneTapeFollowBatch(from snapshot: PaneTapeFollowSnapshot) -> PaneTapeF
         records.append(.object([
             "kind": .string("gap"),
             "droppedEventCount": .number(Double(snapshot.droppedEventCount)),
-            "droppedPayloadBytes": .number(Double(snapshot.droppedPayloadBytes)),
+            "droppedPayloadBytes": .number(
+                Double(snapshot.droppedFeedBytes + snapshot.droppedWriteBytes)
+            ),
         ]))
     }
     records.append(contentsOf: snapshot.events.map { event in

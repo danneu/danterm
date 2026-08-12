@@ -27,8 +27,13 @@ struct PaneTapeFollowEncodingTests {
                     event: adapted
                 )],
                 droppedEventCount: 0,
-                droppedPayloadBytes: 0,
-                nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2)
+                droppedFeedBytes: 0,
+                droppedWriteBytes: 0,
+                nextCursor: .init(
+                    nextSequence: 2,
+                    feedBytesBeforeNextSequence: 2,
+                    writeBytesBeforeNextSequence: 0
+                )
             ))
 
             #expect(batch.records.first?["event"] == direct)

@@ -26,7 +26,8 @@ struct PaneTapeFollowTests {
 
         let tailCursor = PaneTapeFollowCursor(
             nextSequence: 9,
-            payloadBytesBeforeNextSequence: 42
+            feedBytesBeforeNextSequence: 42,
+            writeBytesBeforeNextSequence: 7
         )
         let fromNow = makePaneTapeFollowStart(
             provenance: .object(["source": .string("danterm-live-capture")]),
@@ -42,11 +43,16 @@ struct PaneTapeFollowTests {
 
     @Test("empty cursor snapshot emits nothing and leaves the cursor unchanged")
     func emptySnapshotLeavesCursorUnchanged() {
-        let cursor = PaneTapeFollowCursor(nextSequence: 4, payloadBytesBeforeNextSequence: 20)
+        let cursor = PaneTapeFollowCursor(
+            nextSequence: 4,
+            feedBytesBeforeNextSequence: 20,
+            writeBytesBeforeNextSequence: 0
+        )
         let batch = makePaneTapeFollowBatch(from: .init(
             events: [],
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
             nextCursor: cursor
         ))
 
@@ -62,14 +68,19 @@ struct PaneTapeFollowTests {
             "columns": .number(100),
             "rows": .number(30),
         ])
-        let nextCursor = PaneTapeFollowCursor(nextSequence: 9, payloadBytesBeforeNextSequence: 99)
+        let nextCursor = PaneTapeFollowCursor(
+            nextSequence: 9,
+            feedBytesBeforeNextSequence: 99,
+            writeBytesBeforeNextSequence: 0
+        )
         let batch = makePaneTapeFollowBatch(from: .init(
             events: [
                 .init(sequence: 7, elapsedNanoseconds: 10, originElapsedNanoseconds: nil, event: feed),
                 .init(sequence: 8, elapsedNanoseconds: 20, originElapsedNanoseconds: nil, event: resize),
             ],
             droppedEventCount: 7,
-            droppedPayloadBytes: 42,
+            droppedFeedBytes: 30,
+            droppedWriteBytes: 12,
             nextCursor: nextCursor
         ))
 
@@ -97,8 +108,13 @@ struct PaneTapeFollowTests {
                 .init(sequence: 1, elapsedNanoseconds: 40, originElapsedNanoseconds: nil, event: feed),
             ],
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
-            nextCursor: .init(nextSequence: 2, payloadBytesBeforeNextSequence: 4)
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
+            nextCursor: .init(
+                nextSequence: 2,
+                feedBytesBeforeNextSequence: 4,
+                writeBytesBeforeNextSequence: 0
+            )
         ))
 
         #expect(batch.records.first == .object([
@@ -237,7 +253,8 @@ struct PaneTapeFollowTests {
         )
         let siblingCursor = PaneTapeFollowCursor(
             nextSequence: 12,
-            payloadBytesBeforeNextSequence: 480
+            feedBytesBeforeNextSequence: 480,
+            writeBytesBeforeNextSequence: 0
         )
         subscriptions.add(
             id: siblingId,
@@ -323,10 +340,12 @@ struct PaneTapeFollowTests {
                 )
             },
             droppedEventCount: 0,
-            droppedPayloadBytes: 0,
+            droppedFeedBytes: 0,
+            droppedWriteBytes: 0,
             nextCursor: .init(
                 nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: Int(nextSequence)
+                feedBytesBeforeNextSequence: Int(nextSequence),
+                writeBytesBeforeNextSequence: 0
             )
         )
     }

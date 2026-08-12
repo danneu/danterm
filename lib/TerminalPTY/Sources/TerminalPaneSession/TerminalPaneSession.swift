@@ -920,11 +920,13 @@ public final class TerminalPaneSessionController {
     /// Keeps app adapters from importing the recorder host module just to construct a cursor.
     public func flightRecordingSnapshot(
         nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int
+        feedBytesBeforeNextSequence: Int,
+        writeBytesBeforeNextSequence: Int
     ) -> TerminalFlightRecordingCursorSnapshot {
         flightRecordingSnapshot(from: .init(
             nextSequence: nextSequence,
-            payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+            feedBytesBeforeNextSequence: feedBytesBeforeNextSequence,
+            writeBytesBeforeNextSequence: writeBytesBeforeNextSequence
         ))
     }
 
@@ -932,14 +934,16 @@ public final class TerminalPaneSessionController {
     public func addFlightRecordingFollowNotice(
         id: UUID,
         nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int,
+        feedBytesBeforeNextSequence: Int,
+        writeBytesBeforeNextSequence: Int,
         notify: @escaping @Sendable () -> Void
     ) {
         host.addFlightRecordingFollowNotice(
             id: id,
             from: .init(
                 nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+                feedBytesBeforeNextSequence: feedBytesBeforeNextSequence,
+                writeBytesBeforeNextSequence: writeBytesBeforeNextSequence
             ),
             notify: notify
         )
@@ -954,13 +958,15 @@ public final class TerminalPaneSessionController {
     public func flightRecordingFollowSnapshot(
         subscriptionId: UUID,
         nextSequence: UInt64,
-        payloadBytesBeforeNextSequence: Int
+        feedBytesBeforeNextSequence: Int,
+        writeBytesBeforeNextSequence: Int
     ) -> TerminalFlightRecordingCursorSnapshot? {
         host.fencedFlightRecordingFollowSnapshot(
             subscriptionId: subscriptionId,
             from: .init(
                 nextSequence: nextSequence,
-                payloadBytesBeforeNextSequence: payloadBytesBeforeNextSequence
+                feedBytesBeforeNextSequence: feedBytesBeforeNextSequence,
+                writeBytesBeforeNextSequence: writeBytesBeforeNextSequence
             )
         )
     }

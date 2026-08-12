@@ -213,6 +213,82 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.droppedPayloadBytes == 1)
     }
 
+    @Test("byte offsets advance independently for the feed and write directions")
+    func byteOffsetsAdvanceIndependentlyPerDirection() {
+        // Intent: every byte-carrying event reports where its bytes sit within its own
+        //   direction's lifetime stream, and an event that carries no bytes reports no span.
+        // Why it exists: a reader locating retained bytes needs one coordinate per direction.
+        //   A single shared counter would report a feed offset that no feed byte occupies, so
+        //   no consumer could turn an offset back into a position in either stream.
+        // Scenario: a pane interleaves child output, an input write, a resize, an empty feed,
+        //   another write, and more output.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 16, eventOverheadBytes: 8),
+            now: { 0 }
+        )
+
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.write([4, 5]))
+        recorder.record(.resize(columns: 90, rows: 25))
+        recorder.record(.feed([]))
+        recorder.record(.write([6]))
+        recorder.record(.feed([7, 8]))
+
+        #expect(recorder.snapshot().events.map(\.payload) == [
+            .init(byteOffset: 0, byteLength: 3),
+            .init(byteOffset: 0, byteLength: 2),
+            nil,
+            .init(byteOffset: 3, byteLength: 0),
+            .init(byteOffset: 2, byteLength: 1),
+            .init(byteOffset: 3, byteLength: 2),
+        ])
+    }
+
+    @Test("a cursor gap reports evicted feed and write bytes separately")
+    func cursorGapReportsPerDirectionLoss() {
+        // Intent: the loss between a requested cursor and the retained suffix is stated per
+        //   direction, and the next cursor carries both watermarks.
+        // Why it exists: a summed loss count cannot be subtracted from either direction's
+        //   offsets, which would leave every byte position after a gap unverifiable. The
+        //   trailing reader below starts from a cursor whose two watermarks differ and whose
+        //   values differ from the retained head's, so each subtraction is pinned to its own
+        //   direction: reading either coordinate from the other stream changes both answers.
+        // Scenario: a slow follower that consumed the first output chunk and the first input
+        //   write asks again after eviction dropped the two events that came next.
+        let recorder = TerminalFlightRecorder(
+            initialDimensions: .init(columns: 80, rows: 24),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 8),
+            now: { 0 }
+        )
+        recorder.record(.feed([1, 2, 3]))
+        recorder.record(.write([4, 5]))
+        recorder.record(.feed([6]))
+        recorder.record(.write([7, 8, 9, 10]))
+        recorder.record(.feed([11, 12]))
+        recorder.record(.write([13]))
+
+        let fromBeginning = recorder.cursorSnapshot(from: .beginning)
+        let fromTrailingReader = recorder.cursorSnapshot(from: .init(
+            nextSequence: 2,
+            feedBytesBeforeNextSequence: 3,
+            writeBytesBeforeNextSequence: 2
+        ))
+
+        #expect(fromBeginning.firstRetainedSequence == 4)
+        #expect(fromBeginning.droppedEventCount == 4)
+        #expect(fromBeginning.droppedFeedBytes == 4)
+        #expect(fromBeginning.droppedWriteBytes == 6)
+        #expect(fromTrailingReader.droppedEventCount == 2)
+        #expect(fromTrailingReader.droppedFeedBytes == 1)
+        #expect(fromTrailingReader.droppedWriteBytes == 4)
+        #expect(fromTrailingReader.nextCursor == .init(
+            nextSequence: 6,
+            feedBytesBeforeNextSequence: 6,
+            writeBytesBeforeNextSequence: 7
+        ))
+    }
+
     @Test("cursor snapshots retain stable lifetime sequences across eviction")
     func cursorSnapshotsRetainStableSequences() {
         let recorder = TerminalFlightRecorder(
@@ -226,7 +302,8 @@ struct TerminalFlightRecorderTests {
         let delivered = recorder.cursorSnapshot(from: .beginning)
         let suffix = recorder.cursorSnapshot(from: .init(
             nextSequence: 1,
-            payloadBytesBeforeNextSequence: 1
+            feedBytesBeforeNextSequence: 1,
+            writeBytesBeforeNextSequence: 0
         ))
         recorder.record(.feed([4, 5, 6, 7]))
         recorder.record(.resize(columns: 100, rows: 30))
@@ -235,14 +312,22 @@ struct TerminalFlightRecorderTests {
         let truncatedBacklog = recorder.cursorSnapshot(from: .beginning)
         #expect(delivered.events.map(\.sequence) == [0, 1])
         #expect(suffix.events.map(\.sequence) == [1])
-        #expect(delivered.nextCursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 3))
+        #expect(delivered.nextCursor == .init(
+            nextSequence: 2,
+            feedBytesBeforeNextSequence: 3,
+            writeBytesBeforeNextSequence: 0
+        ))
         #expect(retained.firstRetainedSequence == 2)
         #expect(retained.events.map(\.sequence) == [2, 3])
         #expect(retained.droppedEventCount == 0)
-        #expect(retained.droppedPayloadBytes == 0)
-        #expect(retained.nextCursor == .init(nextSequence: 4, payloadBytesBeforeNextSequence: 7))
+        #expect(retained.droppedFeedBytes == 0)
+        #expect(retained.nextCursor == .init(
+            nextSequence: 4,
+            feedBytesBeforeNextSequence: 7,
+            writeBytesBeforeNextSequence: 0
+        ))
         #expect(truncatedBacklog.droppedEventCount == 2)
-        #expect(truncatedBacklog.droppedPayloadBytes == 3)
+        #expect(truncatedBacklog.droppedFeedBytes == 3)
         #expect(truncatedBacklog.events.map(\.sequence) == [2, 3])
     }
 
@@ -264,7 +349,7 @@ struct TerminalFlightRecorderTests {
         let snapshot = recorder.cursorSnapshot(from: delivered.nextCursor)
         #expect(snapshot.firstRetainedSequence == 3)
         #expect(snapshot.droppedEventCount == 1)
-        #expect(snapshot.droppedPayloadBytes == 4)
+        #expect(snapshot.droppedFeedBytes == 4)
         #expect(snapshot.events.map(\.sequence) == [3, 4])
         #expect(snapshot.events.map(\.event) == [
             .feed([8, 9, 10, 11, 12]),
@@ -289,13 +374,14 @@ struct TerminalFlightRecorderTests {
 
         let snapshot = recorder.cursorSnapshot(from: .init(
             nextSequence: 3,
-            payloadBytesBeforeNextSequence: 6
+            feedBytesBeforeNextSequence: 6,
+            writeBytesBeforeNextSequence: 0
         ))
 
         #expect(snapshot.firstRetainedSequence == 2)
         #expect(snapshot.events.map(\.sequence) == [3, 4])
         #expect(snapshot.droppedEventCount == 0)
-        #expect(snapshot.droppedPayloadBytes == 0)
+        #expect(snapshot.droppedFeedBytes == 0)
     }
 
     @Test("caught-up cursor remains empty after head eviction")
@@ -313,7 +399,8 @@ struct TerminalFlightRecorderTests {
         }
         let cursor = TerminalFlightRecordingCursor(
             nextSequence: 5,
-            payloadBytesBeforeNextSequence: 15
+            feedBytesBeforeNextSequence: 15,
+            writeBytesBeforeNextSequence: 0
         )
 
         let snapshot = recorder.cursorSnapshot(from: cursor)
@@ -321,7 +408,7 @@ struct TerminalFlightRecorderTests {
         #expect(snapshot.events.isEmpty)
         #expect(snapshot.firstRetainedSequence == 2)
         #expect(snapshot.droppedEventCount == 0)
-        #expect(snapshot.droppedPayloadBytes == 0)
+        #expect(snapshot.droppedFeedBytes == 0)
         #expect(snapshot.nextCursor == cursor)
     }
 
@@ -346,7 +433,7 @@ struct TerminalFlightRecorderTests {
         #expect(cursorSnapshot.events.isEmpty)
         #expect(cursorSnapshot.firstRetainedSequence == cursorSnapshot.nextSequence)
         #expect(cursorSnapshot.droppedEventCount == 2)
-        #expect(cursorSnapshot.droppedPayloadBytes == 5)
+        #expect(cursorSnapshot.droppedFeedBytes == 5)
     }
 
     @Test("production recorder preserves order across repeated ring wraparound")
@@ -370,7 +457,8 @@ struct TerminalFlightRecorderTests {
         let midSequence = firstRetainedSequence + UInt64(eventLimit / 2)
         let suffix = recorder.cursorSnapshot(from: .init(
             nextSequence: midSequence,
-            payloadBytesBeforeNextSequence: Int(midSequence)
+            feedBytesBeforeNextSequence: Int(midSequence),
+            writeBytesBeforeNextSequence: 0
         ))
 
         #expect(dump.events.count == eventLimit)
@@ -387,6 +475,7 @@ struct TerminalFlightRecorderTests {
             now: { 0 }
         )
         recorder.record(.feed([1, 2]))
+        recorder.record(.write([9, 10, 11]))
         recorder.record(.resize(columns: 100, rows: 30))
 
         let origin = recorder.fromNowOrigin()
@@ -394,9 +483,17 @@ struct TerminalFlightRecorderTests {
         let snapshot = recorder.cursorSnapshot(from: origin.cursor)
 
         #expect(origin.initial == .init(columns: 100, rows: 30))
-        #expect(origin.cursor == .init(nextSequence: 2, payloadBytesBeforeNextSequence: 2))
-        #expect(snapshot.events.map(\.sequence) == [2])
+        // Both watermarks ride the origin. A tail-only stream that lost the write watermark
+        // would report every write byte recorded before it began as loss on its first gap.
+        #expect(origin.cursor == .init(
+            nextSequence: 3,
+            feedBytesBeforeNextSequence: 2,
+            writeBytesBeforeNextSequence: 3
+        ))
+        #expect(snapshot.events.map(\.sequence) == [3])
         #expect(snapshot.events.map(\.event) == [.feed([3])])
+        #expect(snapshot.droppedFeedBytes == 0)
+        #expect(snapshot.droppedWriteBytes == 0)
     }
 
     @Test("backlog origin pairs birth geometry with the beginning cursor")

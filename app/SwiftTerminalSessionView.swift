@@ -934,7 +934,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 initial: .init(columns: origin.initial.columns, rows: origin.initial.rows),
                 cursor: .init(
                     nextSequence: origin.cursor.nextSequence,
-                    payloadBytesBeforeNextSequence: origin.cursor.payloadBytesBeforeNextSequence
+                    feedBytesBeforeNextSequence: origin.cursor.feedBytesBeforeNextSequence,
+                    writeBytesBeforeNextSequence: origin.cursor.writeBytesBeforeNextSequence
                 )
             )
         }
@@ -947,7 +948,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         guard let snapshot = controller.flightRecordingFollowSnapshot(
             subscriptionId: subscriptionId,
             nextSequence: cursor.nextSequence,
-            payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence
+            feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
+            writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence
         ) else {
             return nil
         }
@@ -963,11 +965,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             return PaneTapeFollowSnapshot(
                 events: events,
                 droppedEventCount: snapshot.droppedEventCount,
-                droppedPayloadBytes: snapshot.droppedPayloadBytes,
+                droppedFeedBytes: snapshot.droppedFeedBytes,
+                droppedWriteBytes: snapshot.droppedWriteBytes,
                 nextCursor: .init(
                     nextSequence: snapshot.nextCursor.nextSequence,
-                    payloadBytesBeforeNextSequence:
-                        snapshot.nextCursor.payloadBytesBeforeNextSequence
+                    feedBytesBeforeNextSequence:
+                        snapshot.nextCursor.feedBytesBeforeNextSequence,
+                    writeBytesBeforeNextSequence:
+                        snapshot.nextCursor.writeBytesBeforeNextSequence
                 )
             )
         }
@@ -981,7 +986,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.addFlightRecordingFollowNotice(
             id: id,
             nextSequence: cursor.nextSequence,
-            payloadBytesBeforeNextSequence: cursor.payloadBytesBeforeNextSequence,
+            feedBytesBeforeNextSequence: cursor.feedBytesBeforeNextSequence,
+            writeBytesBeforeNextSequence: cursor.writeBytesBeforeNextSequence,
             notify: notify
         )
         let controller = controller
